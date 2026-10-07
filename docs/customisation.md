@@ -1903,7 +1903,7 @@ embedding this replaced ran Python over a folder of four files on every build.
 
 A second customisation is tracked beside the built-in and is not compiled in:
 Katana Standard, `resources/customisation/katana-standard.customisation.json`, an original
-library of 71 linestyles, 113 symbols and 245 survey codes made for Katana
+library of 73 linestyles, 113 symbols and 245 survey codes made for Katana
 (`docs/katana_standard.md`: how to read it, how it is loaded now, and what is
 not done). It loads like any file, with `CUSTOMISE REPLACE` or Settings > Import
 with Replace ticked; naming it in `KATANA_BUILTIN_CUSTOMISATION` for one run

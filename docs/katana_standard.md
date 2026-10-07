@@ -1,12 +1,12 @@
 # Katana Standard
 
-Katana Standard is a survey feature library written for Katana: one Katana customisation file, `resources/customisation/katana-standard.customisation.json`, with 71 linestyles, 113 symbols and 245 survey codes (769 rules) in 12 classes, and a palette of 28 colours. It is original work. Every name, code, colour and stroke was designed for it from a written specification and none was taken from another library ("Originality", below). This document is its catalogue: how to load it, how to read a code, every definition and every code, and what Katana does and does not yet do with what the file says.
+Katana Standard is a survey feature library written for Katana: one Katana customisation file, `resources/customisation/katana-standard.customisation.json`, with 73 linestyles, 113 symbols and 245 survey codes (770 rules) in 12 classes, and a palette of 28 colours. It is original work. Every name, code, colour and stroke was designed for it from a written specification and none was taken from another library ("Originality", below). This document is its catalogue: how to load it, how to read a code, every definition and every code, and what Katana does and does not yet do with what the file says.
 
 Everything below that is a table, a count or a description is generated from the data by `tools/katana_standard/make_katana_standard.py --docs`, so it cannot disagree with the file; the prose around it is written by hand in `tools/katana_standard/catalogue.py`. "How it is made and held" says what keeps the two true.
 
 ![An invented street corner drawn entirely by Katana Standard, in Katana's plan view](images/katana-standard-showcase.png)
 
-*An invented street corner, drawn in Katana's plan view with nothing but the library: 221 of its 245 codes are in it, kerbs and lots, houses, fences, trees, the services under and over the road, a stretch of rail on a bridge, contours and a creek, control marks and the labels. Every mark is the size it is on paper and sits where its code put it (`tools/katana_standard/showcase.py`).*
+*An invented street corner, drawn in Katana's plan view with nothing but the library: 221 of its 245 codes are in it, kerbs and lots, houses, fences, trees, the services under and over the road, a stretch of rail on a bridge, contours and a creek, control marks and the labels. Every mark is the size it is on paper and sits where its code put it (`tools/katana_standard/showcase.py`). Katana does not yet apply a code's pen weight, so every line is drawn at one width here and the weight ladder of "Pen weights" is not shown.*
 
 **Contents.** [At a glance](#at-a-glance) · [Using it](#using-it) · [Reading a code](#reading-a-code) · [The palette](#the-palette) · [Linestyles](#linestyles) · [Symbols](#symbols) · [The codes](#the-codes) · [Alphabetical index](#the-codes-in-alphabetical-order) · [Originality](#originality) · [Decisions](#decisions-and-what-was-rejected) · [How it is made and held](#how-it-is-made-and-held) · [Not done](#not-done)
 
@@ -15,8 +15,8 @@ Everything below that is a table, a count or a description is generated from the
 |  |  |
 |---|---|
 | Name | `Katana Standard`, edition 1, Katana customisation format version 1 |
-| Definitions | 184: 71 linestyles and 113 symbols, in 49 groups, all in paper units, so a mark keeps its size at any zoom and plot scale |
-| Survey codes | 245, each three capital letters, in 12 classes and 49 subgroups; 769 rules |
+| Definitions | 186: 73 linestyles and 113 symbols, in 49 groups, all in paper units, so a mark keeps its size at any zoom and plot scale |
+| Survey codes | 245, each three capital letters, in 12 classes and 49 subgroups; 770 rules |
 | Layers | 130, always three levels (`class/subgroup/family`), lower case |
 | Palette | 28 named colours, each at least 3:1 against the plan view's ground and against white paper |
 | Says nothing of | linework control words and import automation: loading it never resets a colleague's spellings or switches |
@@ -30,28 +30,28 @@ What is true now. Katana Standard is **not** the built-in: the program still sta
 2. **Merging works, with one caution.** `CUSTOMISE <file>`, or Import without the tick, merges by name. The rules here are exact three-letter prefix rules, and the most specific rule wins field by field, so a broader prefix rule already in the session can still supply a field these rules leave unsaid (a symbol, a text). Load it alone when you want its library and nothing else.
 3. **For one run**, name it as the built-in for that run: `KATANA_BUILTIN_CUSTOMISATION=<file>` in the environment of `katana`, `katana_cli` or `katana_mcp` (`docs/headless.md`, "The customisation a run starts with").
 4. **Compiled in**: `-DKATANA_BUILTIN_CUSTOMISATION=<file>` at configure time embeds a different file (`docs/building.md`, "The built-in customisation and the reference folder"). Only the one-run form of this has been run with Katana Standard; no program was built with it embedded.
-5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and `CODE CHECK` read them. `CODE CHECK` reports no problems on the file: 769 rules checked.
+5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and `CODE CHECK` read them. `CODE CHECK` reports no problems on the file: 770 rules checked.
 
 A worked example, run for this document and held by `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code`. The invented field file `tests/data/katana_standard/street_corner.fld` has twenty entered coordinates: a lot boundary coded `CBT` in string 1 and closed by opcode 20, a kerb `KKT`, a paling fence `FFP`, a water main `UWM` and a disused cable `UED`, five single points (a valve `UWV`, a tree `VTB`, a gully pit `KPG`, a control mark `MCC`) and one mistyped code, `UWQ`. With the library loaded by `CUSTOMISE REPLACE`, `SURVEY IMPORT` draws 20 points and 5 lines: 19 points are coded onto 9 layers in 9 styles, and the 20th, `UWQ`, is reported as a code no rule answers, since every code has its own rule and no family rule swallows a typo. The lot boundary is a closed line of 100 m round, 600 square metres; the kerb and the water main are 24 m, the fence 10 m and the cable 20 m. Worked out by hand from the codes below before it was run.
 
 ![The street corner field file after SURVEY IMPORT, in the plan view](images/katana-standard-plan.png)
 
-*After the import, from the top: the closed lot boundary with its control mark and its tree; the paling fence beside it; the kerb with a gully pit; the water main with its valve; the disused cable. The plain cross inside the lot is `UWQ`, the point no rule answers.*
+*After the import, from the top: the closed lot boundary with its control mark and its tree; the paling fence beside it; the kerb with a gully pit; the water main with its valve; the disused cable. The plain cross inside the lot is `UWQ`, the point no rule answers. Pen weights are not yet applied, so the boundary is no heavier than the fence. The words beside each feature are laid on the screenshot afterwards, from the library's own legend labels.*
 
 ## Reading a code
 
 A code is **three capital letters**: the class, the subgroup in that class, and the item. `UWM` is Utilities, Water, Main; `KKT` is Kerbs and Drainage, Kerbs, Top edge. In the field a point's code is the key and a string number, then control words: `UWM1 ST`, `UWM1`, `UWM1 END` is one water main. The grammar, in full:
 
 1. A key is THREE capital letters: class, subgroup, item. `UWM` is Utilities, Water, Main; `KKT` is Kerbs and Drainage, Kerbs, Top edge. The first two letters are in the table of classes below and fix the group and the first two levels of the layer; the third names the item inside its subgroup.
-2. Utility items share their third letter across services, so it is learnt once: M main, B branch or connection, D disused main, V isolation valve, X meter, P pit, H maintenance hole, K marker post or pillar, T tank or transformer, C cable, N duct, O overhead line. Where the plain letter was taken the code uses the next natural one: UWU and USP (pump stations), UEP (power pole), UEJ (electrical pit), UEY (pole guy), UFH (hydrant), UFB (booster), USR and UGR (pressure sewer, regulator), UXM (paint mark). The service letters are those of the one-letter asset types of AS 5488 where one exists (C E F G I P S W); R (recycled water) and X (unknown) are ours.
-3. DIGITS ARE NEVER PART OF A KEY. `UWM`, `UWM1` and `UWM01` are one code; the digits are the STRING NUMBER, which the linework reads: `UWM1` and `UWM2` are two water mains. A key written with a digit before its `*` would match only numbered names.
+2. Utility items share their third letter across services, so it is learnt once: M main, B branch or connection (a fire booster is UFB), D disused main, V isolation valve, X meter, P pit, H maintenance hole, K marker post or pillar, T tank or transformer, C cable, N duct, O overhead line. An item with no plain letter takes the next natural one, and those are this library's own and are learnt with it: U pumping station (UWU), P pumping station and power pole (USP, UEP; the power pit is J, UEJ), Y pole guy (UEY), H hydrant (UFH; a fire main has no maintenance hole), R pressure sewer and gas regulator (USR, UGR), E sewer vent (USE), L loop detector and unknown line (UIL, UXL), and M, free in the unknown services because their line is L, is the surface paint mark (UXM). The service letters are those of the one-letter asset types of AS 5488 where one exists (C E F G I P S W); R (recycled water) and X (unknown) are ours.
+3. DIGITS ARE NEVER PART OF A KEY. `UWM`, `UWM1` and `UWM01` are one code; the digits are the STRING NUMBER, which the linework reads: `UWM1` and `UWM2` are two water mains. A key written with a digit before its `*` would match only numbered names. A key is matched as written, in capitals: `uwm1` matches no rule (`CODE EXPLAIN uwm1` says the key `UWM*` differs only in letter case), so set the data collector to send capitals.
 4. Control words follow the code, after a space: `ST` first point, `END` last point, `CL` last point and close, `BC` and `EC` begin and end a curve (three points fix an arc), `JPN n` also join to point number n, `RECT` the third point of a rectangle. These are Katana's default spellings; the library says nothing about them, so loading it never resets a colleague's own. No key is a control word.
 5. There is no left or right suffix: the rule engine matches a key exactly or by prefix and has nothing else. Handedness is by walking direction. Ticks, barbs, triangles, scallops and chevrons always fall to the LEFT of travel, and each code's field-book line says which way to walk. Symbols are drawn upright and are not turned to a bearing (Katana reads a rule's rotation and does not yet apply it), so a symbol's position is its message.
 6. Every code owns a `KEY*` rule, so a typo (`UWQ`) is reported as "no rule" and is never swallowed by a family rule. All keys are three letters, so no key is a prefix of another; there is no bare `*` rule, and no rule is shadowed or repeated.
 7. What a code sets, in this order. `feature`: layer, colour, draw (line or point), linestyle (lines only), weight, group and comment. `symbol` for points and for lines that carry a symbol at every vertex (`both`: fences, tree rows, leaders). `text` for the six text codes. `pipe` for the nine pipe codes. `attributes`. `surface`, written for EVERY code, true or false: true for ground shots and levels, kerb, carriageway and path edges, banks, ridges, gullies, hard and soft breaklines, water edges, the cliff edge, drain inverts, and ballast and platform edges; false for everything else, including the exclusion boundary.
-8. Attributes. An attribute with an EMPTY value is a PROMPT: the code asks for it. One with a value is applied. Names carry their unit (`Depth (m)`, `Diameter (mm)`). Every buried utility asks Owner, Depth (m) and Condition, and a pipe also Material and Diameter (mm). Every utility code sets `utility.type` to its service word, and a disused code sets `utility.status` to `disused`: those are the keys and words Katana's utility tools read, so a coded string is already typed for UTILITY DRAW. The prompts use the library's own names, not `utility.owner`, so an empty prompt never reads as "recorded".
+8. Attributes. An attribute with an EMPTY value is a PROMPT: the code asks for it. One with a value is applied. Names carry their unit (`Depth (m)`, `Diameter (mm)`). Every buried utility asks Owner, Depth (m) and Condition, and a pipe also Material and Diameter (mm). Every utility code sets `utility.type` to its service word, and a disused code sets `utility.status` to `disused`. So do the stormwater pits and pipes of class K (KP and KC: `utility.type` is `stormwater`), which sit in Kerbs and Drainage because they are drainage, and are services all the same. Those are the keys and words Katana's utility tools read, so a coded string is already typed for UTILITY DRAW. The kerbs, channels and creeks of class K set none. The prompts use the library's own names, not `utility.owner`, so an empty prompt never reads as "recorded".
 9. `comment` is the LEGEND LABEL: a noun phrase in sentence case, 1 to 36 characters, which the plot legend prints in capitals. When several codes share one linestyle the legend takes the linestyle's name instead, unless every coded entity agrees on the label. Longer text is the meaning and the field-book line.
-10. Weights, in millimetres of pen: 0.13 hairline, 0.18 fine, 0.25 light, 0.35 medium, 0.50 strong (0.70 is reserved). Katana stores `weight` and does not yet apply it; the scale is still the documented intent.
+10. Weights, in millimetres of pen: 0.13 hairline, 0.18 fine, 0.25 light, 0.35 medium, 0.50 strong (0.70 is reserved). The hairline is for hatching, joints, hidden detail, tree rows and canopies, flow paths, text and leaders; nothing in the planting or ground classes is lighter than 0.18, since those colours are the faintest on paper. Katana stores `weight` and does not yet apply it; the scale is still the documented intent.
 11. What Katana applies today and what it only stores. `CODE` applies layer, colour, linestyle, symbol name and size, and the string attributes (a value starting with `$` is deferred, not written), and the legend prints the comment. It stores, lists and lints, and does not yet apply: weight, group, hide, surface, text rules, pipe rules (justify, shape, sizes taken from the attributes), rotation, offset and raise. The rules are written for the day it does.
 12. Load the library alone, or with Replace. Merged onto another customisation, a broader prefix rule there can supply a field these rules leave unsaid (a symbol, a text), because the most specific rule wins field by field.
 
@@ -78,20 +78,20 @@ Every code names one of five weights, in millimetres of pen; a sixth is reserved
 
 | Weight | Role | For |
 |---|---|---|
-| 0.13 | hairline | hatching, hidden detail, leaders, text |
-| 0.18 | fine | vegetation, intermediate contours, markings, minor services |
+| 0.13 | hairline | hatching, joints, hidden detail, tree rows, leaders, text |
+| 0.18 | fine | vegetation, ground shots and levels, intermediate contours, markings, minor services |
 | 0.25 | light | everyday detail: fences, paths, branches |
 | 0.35 | medium | primary detail: kerbs, building walls, service mains, index contours |
 | 0.50 | strong | title boundary, bridge decks, limit of survey |
 | 0.70 | bold | reserved; not used by a code in edition 1 |
 
-**What Katana applies today.** `CODE` and a survey import apply layer, colour, linestyle, symbol name and the string attributes, and the plot legend prints the comment. Katana stores, lists and lints, and does not yet apply: `weight`, `group`, `hide`, `surface`, text rules, pipe rules, and a symbol's rotation, offset and raise. So the codes `GPG` and `GPR` (ground points shown by their level) are marked `hide` and still draw their one-millimetre plus, the six text codes draw a plus until text rules are applied, and the four kerb codes, which are plain continuous lines of one weight, look the same on the plan until the weight is applied. The rules are written for the day it does.
+**What Katana applies today.** `CODE` and a survey import apply layer, colour, linestyle, symbol name and the string attributes, and the plot legend prints the comment. Katana stores, lists and lints, and does not yet apply: `weight`, `group`, `hide`, `surface`, text rules, pipe rules, and a symbol's rotation, offset and raise. So the codes `GPG` and `GPR` (ground points shown by their level) are marked `hide` and still draw their one-millimetre plus, the six text codes draw a plus until text rules are applied, and the plain continuous lines of one colour on one layer, such as the two carriageway edges `RCE` and `RCI`, or the kerb top `KKT` and the kerb return `KKR` (one feature, straight and curved), look the same on the plan until the weight is applied. The rules are written for the day it does.
 
 ## The palette
 
-Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it colours, and none can fold onto one of the 27 standard names Katana already knows. Each is at least 3:1 against the plan view's ground (`#1E2329`, a blue-grey that is almost black) and against white paper, since one library is plotted and read on the screen; and no two are closer than 0.05 in OKLab, about where two thin lines of different colour stop being told apart. The six buried-service colours follow the widely published convention for marking buried utilities (water blue, sewer green, gas yellow, electricity red, communications orange, recycled water purple), tuned so the yellow and the orange still read on white.
+Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it colours, and none can fold onto one of the 27 standard names Katana already knows. Each is at least 3:1 against the plan view's ground (`#1E2329`, a blue-grey that is almost black) and against white paper, since one library is plotted and read on the screen; and no two are closer than 0.05 in OKLab, about where two thin lines of different colour stop being told apart. That leaves only a narrow band of lightness, so the six warm classes (kerb, wall, contour, fuel, fence, breakline) were placed by a search, each at least 0.06 from every other colour, and the six classes drawn with the thinnest pens (tree, planting, ground, building, wall, communications) keep at least 3.25 : 1 on both grounds. The six buried-service colours follow the widely published convention for marking buried utilities (water blue, sewer green, gas yellow, electricity red, communications orange, recycled water purple), tuned so the yellow and the orange still read on white. Colour does not carry a class alone: for a reader who confuses red with green some warm pairs stay close whatever their values, so every pipe has its letter and every line class its own pattern.
 
-**The two utility conventions differ.** Katana's own `UTILITY DRAW` uses the AS 5488 plan colours (electricity orange, communications white, sewer cream, stormwater green). A drawing that mixes coded survey strings and `UTILITY DRAW` output has two conventions in it and wants a legend. Aligning one to the other is the owner's decision ("Not done").
+**The two utility conventions differ.** Katana's own `UTILITY DRAW` has colours of its own (electricity orange, communications white, sewer cream, stormwater green; `docs/subsurface_utilities.md`: they are Katana's defaults, and AS 5488 sets none). A drawing that mixes coded survey strings and `UTILITY DRAW` output has two conventions in it and wants a legend. Aligning one to the other is the owner's decision ("Not done").
 
 ![The 28 colours of Katana Standard on the plan ground and on white paper](images/katana-standard-palette.png)
 
@@ -103,10 +103,10 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 | `katana sewer` | `#1DA758` | sewer | 5.06 : 1 | 3.12 : 1 |
 | `katana gas` | `#A68E12` | gas | 4.90 : 1 | 3.23 : 1 |
 | `katana electricity` | `#E24942` | electricity | 3.97 : 1 | 3.99 : 1 |
-| `katana telecom` | `#CA8407` | communications | 5.13 : 1 | 3.08 : 1 |
+| `katana telecom` | `#C57A00` | communications | 4.64 : 1 | 3.41 : 1 |
 | `katana recycled` | `#9565C7` | recycled water | 3.74 : 1 | 4.23 : 1 |
 | `katana fire` | `#DC6995` | fire service | 4.89 : 1 | 3.23 : 1 |
-| `katana fuel` | `#995F2E` | fuel and petroleum | 3.04 : 1 | 5.21 : 1 |
+| `katana fuel` | `#A36215` | fuel and petroleum | 3.25 : 1 | 4.87 : 1 |
 | `katana its` | `#0B9BA8` | traffic systems | 4.72 : 1 | 3.35 : 1 |
 | `katana unknown` | `#C344AE` | unidentified service | 3.58 : 1 | 4.41 : 1 |
 
@@ -114,7 +114,7 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 
 | Colour | Value | Used for | On the ground | On white |
 |---|---|---|---|---|
-| `katana stormwater` | `#44A080` | stormwater pipes and pits | 4.96 : 1 | 3.19 : 1 |
+| `katana stormwater` | `#238463` | stormwater pipes and pits | 3.43 : 1 | 4.61 : 1 |
 | `katana waterway` | `#6399BE` | creeks, open drains and water edges | 5.14 : 1 | 3.07 : 1 |
 
 **Roads, street and rail**
@@ -122,7 +122,7 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 | Colour | Value | Used for | On the ground | On white |
 |---|---|---|---|---|
 | `katana pavement` | `#789295` | road edges, markings and paths | 4.78 : 1 | 3.31 : 1 |
-| `katana kerb` | `#A27B75` | kerbs | 4.24 : 1 | 3.73 : 1 |
+| `katana kerb` | `#907368` | kerbs | 3.64 : 1 | 4.34 : 1 |
 | `katana street` | `#A2759D` | street furniture and signs | 4.19 : 1 | 3.77 : 1 |
 | `katana rail` | `#816FA3` | track, overhead wire and platforms | 3.57 : 1 | 4.43 : 1 |
 
@@ -131,24 +131,24 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 | Colour | Value | Used for | On the ground | On white |
 |---|---|---|---|---|
 | `katana boundary` | `#796EDA` | lot boundaries, easements and boundary marks | 3.81 : 1 | 4.15 : 1 |
-| `katana contour` | `#AB704C` | contours, rock and cliff | 3.88 : 1 | 4.07 : 1 |
-| `katana breakline` | `#C37B83` | breaklines | 4.88 : 1 | 3.24 : 1 |
-| `katana ground` | `#7C9976` | ground shots and levels | 5.03 : 1 | 3.15 : 1 |
+| `katana contour` | `#B9704F` | contours, rock and cliff | 4.14 : 1 | 3.82 : 1 |
+| `katana breakline` | `#BE7D83` | breaklines | 4.86 : 1 | 3.26 : 1 |
+| `katana ground` | `#688F68` | ground shots and levels | 4.31 : 1 | 3.67 : 1 |
 
 **Vegetation**
 
 | Colour | Value | Used for | On the ground | On white |
 |---|---|---|---|---|
-| `katana tree` | `#60812B` | trees | 3.52 : 1 | 4.49 : 1 |
-| `katana planting` | `#859E3A` | shrubs, hedges and ground cover | 5.23 : 1 | 3.02 : 1 |
+| `katana tree` | `#5C8627` | trees | 3.69 : 1 | 4.29 : 1 |
+| `katana planting` | `#779624` | shrubs, hedges and ground cover | 4.65 : 1 | 3.40 : 1 |
 
 **Built form**
 
 | Colour | Value | Used for | On the ground | On white |
 |---|---|---|---|---|
-| `katana building` | `#637482` | buildings and structures | 3.28 : 1 | 4.83 : 1 |
-| `katana fence` | `#A18863` | fences and gates | 4.68 : 1 | 3.38 : 1 |
-| `katana wall` | `#B35A47` | walls | 3.37 : 1 | 4.70 : 1 |
+| `katana building` | `#627B8C` | buildings and structures | 3.56 : 1 | 4.44 : 1 |
+| `katana fence` | `#A18C65` | fences and gates | 4.86 : 1 | 3.25 : 1 |
+| `katana wall` | `#BA5556` | walls | 3.41 : 1 | 4.64 : 1 |
 
 **Control, notes and hazards**
 
@@ -160,9 +160,11 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 
 ## Linestyles
 
-71 linestyles, each a repeating cell. A linestyle named by a rule replaces the line, so the gaps are the library's job; every one is drawn so that it reads at plan scale on screen and on a plotted sheet.
+73 linestyles, each a repeating cell. A linestyle named by a rule replaces the line, so the gaps are the library's job; every one is drawn so that it reads at plan scale on screen and on a plotted sheet.
 
-![All 71 linestyles of Katana Standard, drawn by Katana](images/katana-standard-linestyles.png)
+![All 73 linestyles of Katana Standard, drawn by Katana](images/katana-standard-linestyles.png)
+
+*One sample of each, drawn by a code that uses it. Pen weights are not yet applied, so every line is the same width here.*
 
 **How they are drawn.** The rules the data's own check enforces:
 
@@ -190,7 +192,7 @@ Reading a table: *Period* is the length of one cell in millimetres of paper; *Us
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Easement Boundary` | 6 | Short even dashes, 4 on and 2 off: the edge of an easement or covenant area; the code says what it carries. | `CEA` `CED` `CES` `CEG` `CEV` |
+| `Easement Boundary` | 9 | Paired short dashes, 2.6 on, 0.9 off, 2.6 on, then 2.9 off: the edge of an easement or covenant area; the code says what it carries. | `CEA` `CED` `CES` `CEG` `CEV` |
 
 ### Roads and Pavements/Carriageway
 
@@ -224,6 +226,8 @@ Reading a table: *Period* is the length of one cell in millimetres of paper; *Us
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
+| `Gutter Lip Line` | 9 | Long dashes with a narrow gap, 7.6 on and 1.4 off, like the joints of a concrete gutter: the flow line at the foot of a kerb face. | `KKL` |
+| `Kerb Back Line` | 3.3 | Fine short dashes, 2.2 on and 1.1 off, stitched along the line: the back edge of a kerb, where it meets the verge or the path. | `KKB` |
 | `Mountable Kerb Edge` | 6 | Unbroken line with a rounded hump to the left every 6 mm: a low kerb a vehicle can drive over. | `KKM` |
 | `Dish Drain Edge` | 8 | Unbroken line with a shallow V standing to its left every 8 mm: a V-shaped concrete dish drain. | `KKD` |
 
@@ -350,7 +354,7 @@ Reading a table: *Period* is the length of one cell in millimetres of paper; *Us
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Steps Edge` | 2.5 | Unbroken line crossed by a close row of treads 4 mm long: the nosing of a flight of steps. | `BAS` |
+| `Steps Edge` | 3.5 | Unbroken line crossed by a row of treads 2.4 mm long, one every 3.5 mm: the nosing of a flight of steps. | `BAS` |
 
 ### Fences and Walls/Fences
 
@@ -369,7 +373,7 @@ Reading a table: *Period* is the length of one cell in millimetres of paper; *Us
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
 | `Brick Wall` | 5 | Two parallel lines 1 mm apart with a joint across them every 5 mm: a brick or block wall, shot on its lower face. | `FWB` `FWK` |
-| `Stone Wall` | 2 | A chain of touching rings, 2 mm across, centred on the line: a dry or mortared stone wall. | `FWS` |
+| `Stone Wall` | 2.4 | A chain of separate rings, 1.6 mm across and 0.8 mm apart, centred on the line: a dry or mortared stone wall. | `FWS` |
 | `Earth Retaining Wall` | 4 | Unbroken line with a small triangle to the left every 4 mm: a wall that holds back earth; the barbs point to the lower side. | `FWR` `FWT` |
 
 ### Terrain and Breaklines/Breaklines
@@ -424,13 +428,13 @@ Reading a table: *Period* is the length of one cell in millimetres of paper; *Us
 
 ## Symbols
 
-113 symbols, every one drawn at its vertex, unrotated and centred on it, in paper millimetres.
+113 symbols, every one drawn at its vertex, unrotated, in paper millimetres, with its origin at the centre of its box unless its description says where else.
 
 ![All 113 symbols of Katana Standard, drawn by Katana](images/katana-standard-symbols.png)
 
 **The house style**, which makes each symbol learnt once:
 
-- **Cell.** Three size classes by larger extent: S about 3 mm (small furniture, posts, marks), M about 4.4 mm (most objects), L about 6 mm (canopies, tanks, stations, primary control).  The origin is the centre of the bounding box, so a symbol sits on its vertex without a rule offsetting it.  Where the surveyed point is NOT the box centre (a valve beside its letter, a doorway's wall line, a building corner) the origin is within 1 mm of it and the description says so.
+- **Cell.** Three size classes by larger extent: S about 3 mm (small furniture, posts, marks), M about 4.4 mm (most objects), L about 6 mm (canopies, tanks, stations, primary control).  The origin is the centre of the bounding box, so a symbol sits on its vertex without a rule offsetting it.  Where the surveyed point is NOT the box centre (a valve beside its letter, a doorway's wall line, a building corner, a camera's pole, a station's dot, a north arrow's shaft) the origin is within 0.6 mm of the box centre and the description says where it is; the check holds both.
 - **Weight.** One weight: every symbol is outline.  The renderer applies the entity's own pen, so a symbol never carries a colour or a width.  Gaps are fixed: 0.4 mm between the rings of a double ring, 0.3 mm between a ring and a ray or tick, and a letter is always 2.4 mm high.
 - **Fill.** There are no fills.  A solid centre mark (a very small ring with a dot in it, because Katana draws a `dot` as one pen-width point whatever its radius) means "a physical mark or stem is here and this is its exact point": pegs, pins, pipes, stations, poles, trunks.  A shape WITHOUT one is a cover, a sign or an observation.  Hatching (at most four strokes) means "solid": a borehole's quadrants, a trap's grating.  A dashed ring means a temporary or former state: a dead tree, a pothole.  Rays mean a light (street light, bollard light, signal lamp) or, on a GNSS base, a signal.
 - **Services.** One grammar for every service, learnt once; the service colour comes from the rule and the letter names the service (W water, S sewer, G gas, E electricity, C communications, R recycled, F fire, P fuel, I traffic systems, ? unknown).  Square = pit or box; single ring = round cover or pole; double ring = maintenance hole; bow-tie = valve; diamond = regulator or marker; ring with a bar = meter.  A letter is inside a pit, a ring or a hole, and BELOW a valve.
@@ -496,14 +500,14 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 | `Bench` | 4.0 x 1.6 | Long rectangle with two slat lines. A seat or bench. | `SAB` |
 | `Litter Bin` | 2.3 x 2.6 | Hexagon with a centre dot. A litter or waste bin. | `SAR` |
 | `Drinking Fountain` | 3.4 x 3.4 | Ring holding a teardrop. A drinking fountain or bubbler. | `SAF` |
-| `Bus Stop Shelter` | 5.4 x 3.6 | Rectangle with a seat line and the letter B. A bus shelter; the box is its roof outline. | `SAS` |
+| `Bus Stop Shelter` | 5.4 x 3.6 | Rectangle holding a bench divided into seats. A bus shelter; the large box is its roof outline. | `SAS` |
 
 ### Street Furniture and Signs/Traffic Control
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Signal Pole` | 3.2 x 2.3 | Ring with a dot beside a stack of three small rings. A traffic signal pole and its three lenses. | `STS` |
-| `Roadside Camera` | 3.8 x 2.2 | Ring with a triangular lens pointing +x. A speed, red-light or traffic camera on its pole. | `STC` |
+| `Signal Pole` | 3.5 x 2.8 | Ring with a dot beside a tall box holding three lamp dots. A traffic signal pole and its signal head. | `STS` |
+| `Roadside Camera` | 3.8 x 2.2 | Ring with a triangular lens pointing +x. A speed, red-light or traffic camera; the origin is its pole, the ring's centre. | `STC` |
 | `Signal Controller Cabinet` | 3.2 x 3.2 | Square holding the letter T. The traffic signal controller cabinet. | `STK` |
 
 ### Kerbs and Drainage/Pits and Structures
@@ -517,7 +521,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 | `Gross Pollutant Trap` | 5.4 x 3.2 | Rectangle crossed by four hatch lines. A gross pollutant trap or litter trap. | `KPT` |
 | `Headwall` | 5.3 x 3.8 | Three sides of a box, open to -x, with wings flaring outward. A pipe headwall; the pipe arrives from the open side. | `KPW` |
 | `Culvert End` | 4.0 x 2.0 | T shape with turned-in ends. A culvert end: the bar is its headwall, the stem the pipe running away from it. | `KPC` |
-| `Subsoil Inspection Point` | 2.2 x 2.2 | Small ring with a plus. An inspection point on a subsoil drain. | `KPS` |
+| `Subsoil Inspection Point` | 2.2 x 2.2 | Small ring holding a smaller square, the cap of the riser. An inspection point on a subsoil drain. | `KPS` |
 
 ### Rail and Transit/Track
 
@@ -589,7 +593,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
 | `Fire Hydrant` | 4.6 x 3.0 | Ring with a plus and a nozzle tick each side. A fire hydrant. | `UFH` |
-| `Booster Connection` | 4.0 x 3.2 | Square holding F with two nozzle ticks on its right. A fire booster connection. | `UFB` |
+| `Booster Connection` | 4.0 x 3.2 | Square holding F with two nozzle ticks on its right. A fire booster connection; the origin is the middle of the square. | `UFB` |
 | `Fire Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter F below. A fire service valve; the origin is between valve and letter. | `UFV` |
 
 ### Utilities/Fuel
@@ -643,7 +647,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Building Corner` | 1.2 x 1.2 | Right-angle bracket with its corner on the point. A building corner; it opens to +x and -y. | `BBC` |
+| `Building Corner` | 1.2 x 1.2 | Right-angle bracket with its corner at the origin. A building corner; it opens to +x and -y. | `BBC` |
 | `Doorway` | 4.4 x 2.1 | Wall ends, a door leaf at right angles and its swing arc. A door in a wall; the origin is on the wall centre line. | `BBD` |
 
 ### Buildings and Structures/Structures
@@ -651,7 +655,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
 | `Bridge Column` | 3.2 x 3.2 | Ring crossed by an X. A bridge pier or column. | `BSP` |
-| `Mast` | 3.4 x 2.9 | Triangle holding a ring. A communications or lighting mast. | `BST` |
+| `Mast` | 2.6 x 4.0 | A-frame with a crossbar and a small ring on its apex. A communications or lighting mast. | `BST` |
 | `Storage Tank` | 5.8 x 5.8 | Ring inside a ring. A storage tank or silo seen from above. | `UPT` `BSK` |
 | `Flagpole` | 2.9 x 1.2 | Ring with a pennant flying to +x. A flagpole. | `BSF` |
 | `Monument` | 3.2 x 3.2 | Square holding an eight-spoke star. A monument, memorial or statue base. | `BSM` |
@@ -670,7 +674,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
 | `Ground Shot` | 1.5 x 1.5 | Dot with a small plus. A surveyed ground point. | `GPG` `GPR` |
-| `Spot Level` | 2.0 x 2.0 | Plus through a small ring. A spot level on the ground or a structure. | `GPS` |
+| `Spot Level` | 3.0 x 3.0 | Plus through a ring a millimetre and a half across. A spot level on the ground or a structure. | `GPS` |
 | `High Point` | 3.4 x 2.9 | Triangle, apex up, with a centre dot. The top of a rise. | `GPH` |
 | `Low Point` | 3.4 x 2.9 | Triangle, apex down, with a centre dot. The bottom of a dip. | `GPL` |
 | `Invert Level` | 2.0 x 2.0 | Ring holding a downward triangle. The invert of a pipe or channel. | `GPI` |
@@ -685,7 +689,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Trigonometric Station` | 5.6 x 4.8 | Large triangle holding a ring and a dot. A primary control station. | `MCT` |
+| `Trigonometric Station` | 5.6 x 4.8 | Large triangle holding a ring and a dot. A primary control station; the origin is its dot. | `MCT` |
 | `Control Mark` | 4.6 x 4.6 | Ring with long cross-hairs and a dot. A secondary or traverse control mark. | `MCC` |
 | `Level Benchmark` | 3.2 x 3.2 | Ring with a bar across it and an upward arrow above the bar. A levelling benchmark. | `MCB` |
 | `Fixed Survey Mark` | 3.6 x 3.6 | Diamond with a centre dot. A permanent survey mark. | `MCP` |
@@ -697,8 +701,8 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Borehole` | 3.4 x 3.4 | Ring split into quadrants with two hatched. A borehole. | `MIB` |
-| `Test Pit` | 3.4 x 3.4 | Square with both diagonals and a centre dot. A test pit or trench. | `MIT` |
+| `Borehole` | 3.4 x 3.4 | Ring split into quadrants, two opposite ones evenly hatched. A borehole. | `MIB` |
+| `Test Pit` | 3.4 x 3.4 | Square with a diamond joining the middles of its sides. A test pit or trench. | `MIT` |
 | `Pothole` | 3.6 x 3.6 | Ring of eight dashes holding P. A pothole dug to expose a service. | `MIP` |
 
 ### Survey Control and Annotation/Plan Marks
@@ -706,7 +710,7 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
 | `Leader Dot` | 1.2 x 1.2 | Small ring with a dot. The end of a leader line. | `MML` |
-| `North Arrow` | 3.0 x 6.3 | Arrow with a split, half-shaded head and the letter N at its tail. Points to +y, the plan's north. | `MMN` |
+| `North Arrow` | 3.0 x 6.3 | Arrow with a split, half-shaded head and the letter N at its tail. Points to +y, the plan's north; the origin is midway along the shaft. | `MMN` |
 
 ### Miscellaneous/Hazards and Heritage
 
@@ -880,12 +884,12 @@ Kerb top, gutter, back and return, and the mountable and dish forms.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `KKT` | Kerb Top Edge | `continuous`; `katana kerb` (#A27B75); 0.35 mm | `drainage/kerbs/top` | Top front edge of a kerb, where the face meets the top. Shoot the top front arris with a level at every point: the street's design levels come from this string. Take a point at each change of direction and every 10 m on a curve. Example: `KKT1 ST, KKT1, KKT1 END`. |
-| `KKL` | Gutter Lip | `continuous`; `katana kerb` (#A27B75); 0.25 mm | `drainage/kerbs/gutter` | Flow line of the gutter at the foot of the kerb face. Shoot the line water runs on, where the gutter turns up into the kerb face. Level it carefully: gutter falls are checked against it. Example: `KKL1 ST, KKL1, KKL1 END`. |
-| `KKB` | Kerb Back Edge | `continuous`; `katana kerb` (#A27B75); 0.18 mm | `drainage/kerbs/back` | Back edge of the kerb top. Shoot where the kerb top meets the footpath or the verge. It is needed only when the width of the kerb matters; KKT alone is enough otherwise. Example: `KKB1 ST, KKB1, KKB1 END`. |
-| `KKR` | Kerb Return | `continuous`; `katana kerb` (#A27B75); 0.35 mm | `drainage/kerbs/top` | Kerb round a street corner, shot as a curve. Shoot the straight kerb up to the curve, then BC at its first point, one point near the middle, and EC at its last. Three points fix the arc, so make the middle one a true midpoint. Example: `KKR1 ST, KKR1 BC, KKR1, KKR1 EC, KKR1 END`. |
-| `KKM` | Mountable Kerb | `Mountable Kerb Edge`; `katana kerb` (#A27B75); 0.35 mm | `drainage/kerbs/top` | Low kerb that a vehicle can drive over. Shoot the top front edge. Walk with the carriageway on your left, so the bump in the line falls on the road side. Example: `KKM1 ST, KKM1, KKM1 END`. |
-| `KKD` | Shallow Dish Drain | `Dish Drain Edge`; `katana kerb` (#A27B75); 0.25 mm | `drainage/kerbs/dish-drain` | Shallow V-shaped concrete drain. Shoot the invert, the lowest line of the dish, with a level at each point. The V falls on the left of travel. Example: `KKD1 ST, KKD1, KKD1 END`. |
+| `KKT` | Kerb Top Edge | `continuous`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | Top front edge of a kerb, where the face meets the top. Shoot the top front arris with a level at every point: the street's design levels come from this string. Take a point at each change of direction and every 10 m on a curve. Example: `KKT1 ST, KKT1, KKT1 END`. |
+| `KKL` | Gutter Lip | `Gutter Lip Line`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/gutter` | Flow line of the gutter at the foot of the kerb face. Shoot the line water runs on, where the gutter turns up into the kerb face. Level it carefully: gutter falls are checked against it. Example: `KKL1 ST, KKL1, KKL1 END`. |
+| `KKB` | Kerb Back Edge | `Kerb Back Line`; `katana kerb` (#907368); 0.18 mm | `drainage/kerbs/back` | Back edge of the kerb top. Shoot where the kerb top meets the footpath or the verge. It is needed only when the width of the kerb matters; KKT alone is enough otherwise. Example: `KKB1 ST, KKB1, KKB1 END`. |
+| `KKR` | Kerb Return | `continuous`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | Kerb round a street corner, shot as a curve. Shoot the straight kerb up to the curve, then BC at its first point, one point near the middle, and EC at its last. Three points fix the arc, so make the middle one a true midpoint. Example: `KKR1 ST, KKR1 BC, KKR1, KKR1 EC, KKR1 END`. |
+| `KKM` | Mountable Kerb | `Mountable Kerb Edge`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | Low kerb that a vehicle can drive over. Shoot the top front edge. Walk with the carriageway on your left, so the bump in the line falls on the road side. Example: `KKM1 ST, KKM1, KKM1 END`. |
+| `KKD` | Shallow Dish Drain | `Dish Drain Edge`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/dish-drain` | Shallow V-shaped concrete drain. Shoot the invert, the lowest line of the dish, with a level at each point. The V falls on the left of travel. Example: `KKD1 ST, KKD1, KKD1 END`. |
 
 #### `KP` Pits and Structures
 
@@ -893,14 +897,14 @@ Pits, manholes, traps, headwalls and culvert ends.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `KPG` | Grated Gully Pit | symbol `Gully Pit`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/pit` | Grated pit that takes surface water. Shoot the middle of the grate. Pit Size (mm) is the clear opening of the pit; Depth (m) is from the grate to the invert. Level the invert separately as GPI. |
-| `KPK` | Kerb Inlet Pit | symbol `Kerb Inlet Pit`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/pit` | Pit with its opening in the kerb face. Shoot the middle of the kerb opening on the kerb line. The notch is drawn on the symbol's left and is not turned to follow the kerb. |
-| `KPJ` | Junction Pit | symbol `Junction Pit`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/pit` | Pit where pipes meet, with a solid lid. Shoot the middle of the lid. Depth (m) is from the lid to the lowest invert, which is levelled as GPI. |
-| `KPH` | Stormwater Manhole | symbol `Stormwater Manhole`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/manhole` | Round access cover over a stormwater pipe. Shoot the middle of the cover. Lid Size (mm) is the clear diameter of the opening. Sewer covers are USH, not this. |
-| `KPT` | Gross Pollutant Trap | symbol `Gross Pollutant Trap`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/outlet` | Structure that traps litter and sediment before an outfall. Shoot the middle of the access lid. A trap large enough to need an outline is outlined with a generic line (XGL) and a note. |
-| `KPW` | Headwall | symbol `Headwall`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/outlet` | Concrete wall round the end of a pipe or culvert. Shoot the middle of the top of the wall, on the face where the pipe passes through, then code the pipe itself. The symbol is drawn open to the west and is not turned. |
-| `KPC` | Culvert End | symbol `Culvert End`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/outlet` | Open end of a culvert barrel. Shoot the middle of the mouth at the invert. Shoot both ends of the culvert so its length and fall are known. |
-| `KPS` | Subsoil Inspection Point | symbol `Subsoil Inspection Point`; `katana stormwater` (#44A080); 0.25 mm | `drainage/structures/pit` | Inspection opening on a subsoil drain. Shoot the middle of the cap on the inspection riser. |
+| `KPG` | Grated Gully Pit | symbol `Gully Pit`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Grated pit that takes surface water. Shoot the middle of the grate. Pit Size (mm) is the clear opening of the pit; Depth (m) is from the grate to the invert. Level the invert separately as GPI. |
+| `KPK` | Kerb Inlet Pit | symbol `Kerb Inlet Pit`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Pit with its opening in the kerb face. Shoot the middle of the kerb opening on the kerb line. The notch is drawn on the symbol's left and is not turned to follow the kerb. |
+| `KPJ` | Junction Pit | symbol `Junction Pit`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Pit where pipes meet, with a solid lid. Shoot the middle of the lid. Depth (m) is from the lid to the lowest invert, which is levelled as GPI. |
+| `KPH` | Stormwater Manhole | symbol `Stormwater Manhole`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/manhole` | Round access cover over a stormwater pipe. Shoot the middle of the cover. Lid Size (mm) is the clear diameter of the opening. Sewer covers are USH, not this. |
+| `KPT` | Gross Pollutant Trap | symbol `Gross Pollutant Trap`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/outlet` | Structure that traps litter and sediment before an outfall. Shoot the middle of the access lid. A trap large enough to need an outline is outlined with a generic line (XGL) and a note. |
+| `KPW` | Headwall | symbol `Headwall`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/outlet` | Concrete wall round the end of a pipe or culvert. Shoot the middle of the top of the wall, on the face where the pipe passes through, then code the pipe itself. The symbol is drawn open to the west and is not turned. |
+| `KPC` | Culvert End | symbol `Culvert End`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/outlet` | Open end of a culvert barrel. Shoot the middle of the mouth at the invert. Shoot both ends of the culvert so its length and fall are known. |
+| `KPS` | Subsoil Inspection Point | symbol `Subsoil Inspection Point`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Inspection opening on a subsoil drain. Shoot the middle of the cap on the inspection riser. |
 
 #### `KC` Pipes and Culverts
 
@@ -908,9 +912,9 @@ Stormwater pipes, box culverts and subsoil drains.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `KCP` | Stormwater Pipe | `Stormwater Pipe Line`; `katana stormwater` (#44A080); 0.35 mm | `drainage/pipes/pipe` | Stormwater pipe, shot pit to pit. Shoot the invert at every pit and manhole it passes through: the rule reads the level you shoot as the bottom of the pipe. Give Diameter (mm) and Material. Example: `KCP1 ST, KCP1, KCP1 END`. |
-| `KCB` | Box Culvert | `Culvert Outline`; `katana stormwater` (#44A080); 0.35 mm | `drainage/pipes/culvert` | Rectangular culvert, drawn as a pair of walls. Shoot the invert along the middle of the culvert and at both ends. Width (mm) and Height (mm) are the clear opening, not the outside size. Example: `KCB1 ST, KCB1 END`. |
-| `KCS` | Subsoil Drain | `Subsoil Drain Line`; `katana stormwater` (#44A080); 0.18 mm | `drainage/pipes/subsoil` | Perforated drain buried beside a road or a wall. Shoot along the drain at each inspection point and bend. Depth (m) is to the invert, and Condition says whether it was found blocked. Example: `KCS1 ST, KCS1, KCS1 END`. |
+| `KCP` | Stormwater Pipe | `Stormwater Pipe Line`; `katana stormwater` (#238463); 0.35 mm | `drainage/pipes/pipe` | Stormwater pipe, shot pit to pit. Shoot the invert at every pit and manhole it passes through: the rule reads the level you shoot as the bottom of the pipe. Give Diameter (mm) and Material. Example: `KCP1 ST, KCP1, KCP1 END`. |
+| `KCB` | Box Culvert | `Culvert Outline`; `katana stormwater` (#238463); 0.35 mm | `drainage/pipes/culvert` | Rectangular culvert, drawn as a pair of walls. Shoot the invert along the middle of the culvert and at both ends. Width (mm) and Height (mm) are the clear opening, not the outside size. Example: `KCB1 ST, KCB1 END`. |
+| `KCS` | Subsoil Drain | `Subsoil Drain Line`; `katana stormwater` (#238463); 0.18 mm | `drainage/pipes/subsoil` | Perforated drain buried beside a road or a wall. Shoot along the drain at each inspection point and bend. Depth (m) is to the invert, and Condition says whether it was found blocked. Example: `KCS1 ST, KCS1, KCS1 END`. |
 
 #### `KW` Channels and Waterways
 
@@ -1029,13 +1033,13 @@ Telephone, data and fibre cables, ducts, pits and pillars.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UCC` | Communications Cable | `Communications Cable`; `katana telecom` (#CA8407); 0.35 mm | `utilities/telecommunications/main` | Buried telephone, data or fibre cable. Shoot the centre of the cable, or of the duct it runs in, at each pit and bend. Ducts is the number of ducts. Owner matters most here: several carriers share one route. Example: `UCC1 ST, UCC1, UCC1 END`. |
-| `UCN` | Communications Duct | `Buried Duct`; `katana telecom` (#CA8407); 0.25 mm | `utilities/telecommunications/main` | Duct or conduit that carries communications cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UCN1 ST, UCN1, UCN1 END`. |
-| `UCO` | Overhead Communications Cable | `Overhead Line`; `katana telecom` (#CA8407); 0.18 mm | `utilities/telecommunications/overhead` | Aerial communications cable. Shoot the ground under the cable at each pole. Height (m) is the lowest point of the span above ground. Example: `UCO1 ST, UCO1, UCO1 END`. |
-| `UCD` | Disused Communications Cable | `Disused Service Line`; `katana telecom` (#CA8407); 0.25 mm | `utilities/telecommunications/disused` | Communications cable that is no longer in service. Shoot as a live cable; owners often leave old cable in place. Disused status is set for you. Example: `UCD1 ST, UCD1, UCD1 END`. |
-| `UCP` | Communications Pit | symbol `Communications Pit`; `katana telecom` (#CA8407); 0.25 mm | `utilities/telecommunications/structure` | Pit on a communications route. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UCH` | Communications Maintenance Hole | symbol `Communications Maintenance Hole`; `katana telecom` (#CA8407); 0.25 mm | `utilities/telecommunications/structure` | Man-entry chamber on a communications route. Shoot the middle of the cover. Lid Size (mm) is the clear opening; Depth (m) is from the cover to the floor. |
-| `UCK` | Communications Pillar | symbol `Communications Pillar`; `katana telecom` (#CA8407); 0.25 mm | `utilities/telecommunications/structure` | Street pillar or cabinet of the communications network. Shoot the middle of the pillar's footprint. Owner is the carrier named on the door. |
+| `UCC` | Communications Cable | `Communications Cable`; `katana telecom` (#C57A00); 0.35 mm | `utilities/telecommunications/main` | Buried telephone, data or fibre cable. Shoot the centre of the cable, or of the duct it runs in, at each pit and bend. Ducts is the number of ducts. Owner matters most here: several carriers share one route. Example: `UCC1 ST, UCC1, UCC1 END`. |
+| `UCN` | Communications Duct | `Buried Duct`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/main` | Duct or conduit that carries communications cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UCN1 ST, UCN1, UCN1 END`. |
+| `UCO` | Overhead Communications Cable | `Overhead Line`; `katana telecom` (#C57A00); 0.18 mm | `utilities/telecommunications/overhead` | Aerial communications cable. Shoot the ground under the cable at each pole. Height (m) is the lowest point of the span above ground. Example: `UCO1 ST, UCO1, UCO1 END`. |
+| `UCD` | Disused Communications Cable | `Disused Service Line`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/disused` | Communications cable that is no longer in service. Shoot as a live cable; owners often leave old cable in place. Disused status is set for you. Example: `UCD1 ST, UCD1, UCD1 END`. |
+| `UCP` | Communications Pit | symbol `Communications Pit`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/structure` | Pit on a communications route. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| `UCH` | Communications Maintenance Hole | symbol `Communications Maintenance Hole`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/structure` | Man-entry chamber on a communications route. Shoot the middle of the cover. Lid Size (mm) is the clear opening; Depth (m) is from the cover to the floor. |
+| `UCK` | Communications Pillar | symbol `Communications Pillar`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/structure` | Street pillar or cabinet of the communications network. Shoot the middle of the pillar's footprint. Owner is the carrier named on the door. |
 
 #### `UR` Recycled Water
 
@@ -1066,10 +1070,10 @@ Fuel pipelines, valves, markers and tanks.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UPM` | Fuel Supply Pipe | `Fuel Supply Pipe`; `katana fuel` (#995F2E); 0.35 mm | `utilities/fuel/main` | Pipeline for fuel or oil. Shoot the centre of the pipe at every fitting and bend. Product is what it carries (petrol, diesel, jet fuel, oil). Treat an unlabelled steel line in a fuel precinct as fuel until proved otherwise. Example: `UPM1 ST, UPM1, UPM1 END`. |
-| `UPV` | Fuel Isolation Valve | symbol `Fuel Isolation Valve`; `katana fuel` (#995F2E); 0.25 mm | `utilities/fuel/fitting` | Isolating valve on a fuel pipeline. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the pipe. |
-| `UPK` | Fuel Marker Post | symbol `Marker Post`; `katana fuel` (#995F2E); 0.25 mm | `utilities/fuel/fitting` | Post that marks the route of a fuel pipeline. Shoot the middle of the post at ground level. The pipeline is not necessarily directly beneath it. |
-| `UPT` | Fuel Tank | symbol `Storage Tank`; `katana fuel` (#995F2E); 0.25 mm | `utilities/fuel/structure` | Underground or surface fuel tank. Shoot the middle of the tank, or of the fill point of an underground one. Capacity (kL) and Product from the label or the owner. |
+| `UPM` | Fuel Supply Pipe | `Fuel Supply Pipe`; `katana fuel` (#A36215); 0.35 mm | `utilities/fuel/main` | Pipeline for fuel or oil. Shoot the centre of the pipe at every fitting and bend. Product is what it carries (petrol, diesel, jet fuel, oil). Treat an unlabelled steel line in a fuel precinct as fuel until proved otherwise. Example: `UPM1 ST, UPM1, UPM1 END`. |
+| `UPV` | Fuel Isolation Valve | symbol `Fuel Isolation Valve`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/fitting` | Isolating valve on a fuel pipeline. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the pipe. |
+| `UPK` | Fuel Marker Post | symbol `Marker Post`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/fitting` | Post that marks the route of a fuel pipeline. Shoot the middle of the post at ground level. The pipeline is not necessarily directly beneath it. |
+| `UPT` | Fuel Tank | symbol `Storage Tank`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/structure` | Underground or surface fuel tank. Shoot the middle of the tank, or of the fill point of an underground one. Capacity (kL) and Product from the label or the owner. |
 
 #### `UI` Traffic Systems
 
@@ -1102,14 +1106,14 @@ Trees by kind, stumps, tree rows and canopy outlines.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `VTB` | Broadleaf Tree | symbol `Broadleaf Tree`; `katana tree` (#60812B); 0.18 mm | `vegetation/trees/tree` | Tree with a broad, leafy canopy. Shoot the middle of the trunk at ground level. Species is the common name; Height (m) and Canopy Diameter (m) are estimated to the nearest half metre; Trunk Diameter (mm) is taken 1.4 m above ground. |
-| `VTC` | Conifer Tree | symbol `Conifer Tree`; `katana tree` (#60812B); 0.18 mm | `vegetation/trees/tree` | Pine, cypress or other cone-bearing tree. Shoot the middle of the trunk at ground level. Species, Height (m), Canopy Diameter (m) and Trunk Diameter (mm) as for any tree. |
-| `VTP` | Palm Tree | symbol `Palm Tree`; `katana tree` (#60812B); 0.18 mm | `vegetation/trees/tree` | Palm: a single unbranched trunk with a crown of fronds. Shoot the middle of the trunk at ground level. A palm's canopy is its frond spread, taken as Canopy Diameter (m). |
-| `VTG` | Native Gum Tree | symbol `Native Gum Tree`; `katana tree` (#60812B); 0.18 mm | `vegetation/trees/tree` | Eucalypt or other native gum. Shoot the middle of the trunk at ground level. Gums often fork low: measure Trunk Diameter (mm) below the fork and say so in the species note. |
-| `VTD` | Dead Tree | symbol `Dead Tree`; `katana tree` (#60812B); 0.18 mm | `vegetation/trees/dead` | Standing dead tree: bare, but still a hazard and often a habitat. Shoot the middle of the trunk at ground level. A dead tree with hollows is a habitat: add an XHH point beside it. |
-| `VTS` | Tree Stump | symbol `Tree Stump`; `katana tree` (#60812B); 0.18 mm | `vegetation/trees/dead` | Stump of a felled tree, cut at or near ground level. Shoot the middle of the stump. Trunk Diameter (mm) is taken across the cut face. |
-| `VTR` | Tree Row | `continuous`; symbol `Broadleaf Tree`; `katana tree` (#60812B); 0.13 mm | `vegetation/trees/line` | Line of trees, with a tree symbol at every point. Shoot the middle of each trunk in order. A tree is drawn at every point and the line is drawn through them, so a row of 30 trees is 30 points. Species applies to the whole row. Example: `VTR1 ST, VTR1, VTR1 END`. |
-| `VTK` | Tree Canopy Outline | `continuous`; `katana tree` (#60812B); 0.13 mm | `vegetation/trees/line` | Drip line of a large canopy, drawn as an outline. Shoot the edge of the canopy at a point every 2 m round it, and close with CL. The outline helps where the canopy matters more than the trunk, as in a tree protection zone. Example: `VTK1 ST, VTK1, VTK1, VTK1 CL`. |
+| `VTB` | Broadleaf Tree | symbol `Broadleaf Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Tree with a broad, leafy canopy. Shoot the middle of the trunk at ground level. Species is the common name; Height (m) and Canopy Diameter (m) are estimated to the nearest half metre; Trunk Diameter (mm) is taken 1.4 m above ground. |
+| `VTC` | Conifer Tree | symbol `Conifer Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Pine, cypress or other cone-bearing tree. Shoot the middle of the trunk at ground level. Species, Height (m), Canopy Diameter (m) and Trunk Diameter (mm) as for any tree. |
+| `VTP` | Palm Tree | symbol `Palm Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Palm: a single unbranched trunk with a crown of fronds. Shoot the middle of the trunk at ground level. A palm's canopy is its frond spread, taken as Canopy Diameter (m). |
+| `VTG` | Native Gum Tree | symbol `Native Gum Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Eucalypt or other native gum. Shoot the middle of the trunk at ground level. Gums often fork low: measure Trunk Diameter (mm) below the fork and say so in the species note. |
+| `VTD` | Dead Tree | symbol `Dead Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/dead` | Standing dead tree: bare, but still a hazard and often a habitat. Shoot the middle of the trunk at ground level. A dead tree with hollows is a habitat: add an XHH point beside it. |
+| `VTS` | Tree Stump | symbol `Tree Stump`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/dead` | Stump of a felled tree, cut at or near ground level. Shoot the middle of the stump. Trunk Diameter (mm) is taken across the cut face. |
+| `VTR` | Tree Row | `continuous`; symbol `Broadleaf Tree`; `katana tree` (#5C8627); 0.13 mm | `vegetation/trees/line` | Line of trees, with a tree symbol at every point. Shoot the middle of each trunk in order. A tree is drawn at every point and the line is drawn through them, so a row of 30 trees is 30 points. Species applies to the whole row. Example: `VTR1 ST, VTR1, VTR1 END`. |
+| `VTK` | Tree Canopy Outline | `continuous`; `katana tree` (#5C8627); 0.13 mm | `vegetation/trees/line` | Drip line of a large canopy, drawn as an outline. Shoot the edge of the canopy at a point every 2 m round it, and close with CL. The outline helps where the canopy matters more than the trunk, as in a tree protection zone. Example: `VTK1 ST, VTK1, VTK1, VTK1 CL`. |
 
 #### `VS` Shrubs and Plants
 
@@ -1117,10 +1121,10 @@ Shrubs, clusters, tussocks and hedges.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `VSS` | Shrub | symbol `Shrub`; `katana planting` (#859E3A); 0.18 mm | `vegetation/shrubs/plant` | Single shrub: a woody plant with no main trunk, big enough to matter. Shoot the middle of the plant. Use for shrubs big enough to matter; low planting is a garden bed edge (VGM). |
-| `VSC` | Shrub Cluster | symbol `Shrub Cluster`; `katana planting` (#859E3A); 0.18 mm | `vegetation/shrubs/plant` | Group of shrubs too close together to shoot one by one. Shoot the middle of the group. For a large group, outline it with VGB instead. |
-| `VST` | Tussock | symbol `Tussock`; `katana planting` (#859E3A); 0.18 mm | `vegetation/shrubs/plant` | Tussock or clump of grass. Shoot the middle of the clump. Use it only for tussocks big enough to matter, such as a pampas or lomandra clump; ordinary grass is not coded. |
-| `VSH` | Hedge | `Hedge Line`; `katana planting` (#859E3A); 0.18 mm | `vegetation/shrubs/hedge` | Clipped hedge, shot along its face. Shoot along the face of the hedge nearest you. Walk with the hedge on your left, so the bumps fall on the hedge side. Height (m) and Species apply to the whole length. Example: `VSH1 ST, VSH1, VSH1 END`. |
+| `VSS` | Shrub | symbol `Shrub`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/plant` | Single shrub: a woody plant with no main trunk, big enough to matter. Shoot the middle of the plant. Use for shrubs big enough to matter; low planting is a garden bed edge (VGM). |
+| `VSC` | Shrub Cluster | symbol `Shrub Cluster`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/plant` | Group of shrubs too close together to shoot one by one. Shoot the middle of the group. For a large group, outline it with VGB instead. |
+| `VST` | Tussock | symbol `Tussock`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/plant` | Tussock or clump of grass. Shoot the middle of the clump. Use it only for tussocks big enough to matter, such as a pampas or lomandra clump; ordinary grass is not coded. |
+| `VSH` | Hedge | `Hedge Line`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/hedge` | Clipped hedge, shot along its face. Shoot along the face of the hedge nearest you. Walk with the hedge on your left, so the bumps fall on the hedge side. Height (m) and Species apply to the whole length. Example: `VSH1 ST, VSH1, VSH1 END`. |
 
 #### `VG` Ground Cover
 
@@ -1128,10 +1132,10 @@ The edges of lawn, bush, garden beds and crops.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `VGL` | Lawn Edge | `Grass Edge`; `katana planting` (#859E3A); 0.13 mm | `vegetation/ground/edge` | Edge of mown grass, where lawn meets paving, garden or bush. Shoot where the lawn meets paving, garden or bush. Walk with the lawn on your left so the fan falls on the grass. Example: `VGL1 ST, VGL1, VGL1 END`. |
-| `VGB` | Bush Edge | `Bush Edge Line`; `katana planting` (#859E3A); 0.18 mm | `vegetation/ground/edge` | Edge of scrub or bush: the outer limit of dense growth. Shoot the outer edge of the bush at each change of direction. Walk with the bush on your left so the tufts fall on the bush side. Example: `VGB1 ST, VGB1, VGB1 END`. |
-| `VGM` | Garden Bed Edge | `continuous`; `katana planting` (#859E3A); 0.13 mm | `vegetation/ground/edge` | Edge of a garden bed, where planting meets lawn or paving. Shoot the edge of the bed where it meets lawn or paving. Close with CL for an island bed. Example: `VGM1 ST, VGM1, VGM1, VGM1 CL`. |
-| `VGC` | Crop Edge | `continuous`; `katana planting` (#859E3A); 0.13 mm | `vegetation/ground/edge` | Edge of a cropped paddock. Shoot the edge of the crop at each corner and close with CL. Cropped land changes season by season, so date it in the job notes. Example: `VGC1 ST, VGC1, VGC1, VGC1 CL`. |
+| `VGL` | Lawn Edge | `Grass Edge`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of mown grass, where lawn meets paving, garden or bush. Shoot where the lawn meets paving, garden or bush. Walk with the lawn on your left so the fan falls on the grass. Example: `VGL1 ST, VGL1, VGL1 END`. |
+| `VGB` | Bush Edge | `Bush Edge Line`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of scrub or bush: the outer limit of dense growth. Shoot the outer edge of the bush at each change of direction. Walk with the bush on your left so the tufts fall on the bush side. Example: `VGB1 ST, VGB1, VGB1 END`. |
+| `VGM` | Garden Bed Edge | `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of a garden bed, where planting meets lawn or paving. Shoot the edge of the bed where it meets lawn or paving. Close with CL for an island bed. Example: `VGM1 ST, VGM1, VGM1, VGM1 CL`. |
+| `VGC` | Crop Edge | `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of a cropped paddock. Shoot the edge of the crop at each corner and close with CL. Cropped land changes season by season, so date it in the job notes. Example: `VGC1 ST, VGC1, VGC1, VGC1 CL`. |
 
 ### Class B: Buildings and Structures
 
@@ -1143,13 +1147,13 @@ Walls, eaves, verandahs, hidden edges and doors.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `BBW` | Building Wall Face | `continuous`; `katana building` (#637482); 0.35 mm | `buildings/outline/wall` | Outer face of a building wall at ground level. Shoot the outside face corner to corner. Close with CL, or finish a rectangular building with RECT on its third corner and Katana builds the fourth. Name, Floors and Roof Material go with the string. Example: `BBW1 ST, BBW1, BBW1 RECT`. |
-| `BBE` | Eave Line | `Eave Line`; `katana building` (#637482); 0.18 mm | `buildings/outline/roof` | Edge of the roof overhang, seen from above. Shoot the outer edge of the eave or gutter, as the roof looks on a plan. Close with CL where it goes round the building. Example: `BBE1 ST, BBE1, BBE1, BBE1 CL`. |
-| `BBV` | Verandah Line | `Eave Line`; `katana building` (#637482); 0.18 mm | `buildings/outline/roof` | Edge of a verandah or awning roof. Shoot the outer edge of the verandah roof. The posts that hold it are coded SBB or FGF as they stand. Example: `BBV1 ST, BBV1, BBV1 END`. |
-| `BBH` | Hidden Outline | `Hidden Outline`; `katana building` (#637482); 0.13 mm | `buildings/outline/hidden` | Building edge that shows on a plan but not above ground. Shoot an edge you know is there but cannot see, such as a basement wall from a plan. Say in the drafting note where you took it from. Example: `BBH1 ST, BBH1, BBH1 END`. |
-| `BBU` | Building Under Construction | `Hidden Outline`; `katana building` (#637482); 0.13 mm | `buildings/outline/hidden` | Outline of a building that is not yet finished. Shoot the outline as it stands at the time of survey. Recode as BBW at the next survey once the walls are complete. Example: `BBU1 ST, BBU1, BBU1, BBU1 CL`. |
-| `BBC` | Building Corner | symbol `Building Corner`; `katana building` (#637482); 0.35 mm | `buildings/outline/detail` | Building corner shot where a line cannot be strung. Shoot a corner you can reach but cannot string to its neighbours, for example behind a fence. Join it into the outline later with a JPN control. |
-| `BBD` | Doorway | symbol `Doorway`; `katana building` (#637482); 0.35 mm | `buildings/outline/detail` | Door in a wall, at ground level. Shoot the middle of the threshold. The swing arc in the symbol is for reading only and is not to scale. |
+| `BBW` | Building Wall Face | `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/wall` | Outer face of a building wall at ground level. Shoot the outside face corner to corner. Close with CL, or finish a rectangular building with RECT on its third corner and Katana builds the fourth. Name, Floors and Roof Material go with the string. Example: `BBW1 ST, BBW1, BBW1 RECT`. |
+| `BBE` | Eave Line | `Eave Line`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/roof` | Edge of the roof overhang, seen from above. Shoot the outer edge of the eave or gutter, as the roof looks on a plan. Close with CL where it goes round the building. Example: `BBE1 ST, BBE1, BBE1, BBE1 CL`. |
+| `BBV` | Verandah Line | `Eave Line`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/roof` | Edge of a verandah or awning roof. Shoot the outer edge of the verandah roof. The posts that hold it are coded SBB or FGF as they stand. Example: `BBV1 ST, BBV1, BBV1 END`. |
+| `BBH` | Hidden Outline | `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/hidden` | Building edge that shows on a plan but not above ground. Shoot an edge you know is there but cannot see, such as a basement wall from a plan. Say in the drafting note where you took it from. Example: `BBH1 ST, BBH1, BBH1 END`. |
+| `BBU` | Building Under Construction | `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/hidden` | Outline of a building that is not yet finished. Shoot the outline as it stands at the time of survey. Recode as BBW at the next survey once the walls are complete. Example: `BBU1 ST, BBU1, BBU1, BBU1 CL`. |
+| `BBC` | Building Corner | symbol `Building Corner`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/detail` | Building corner shot where a line cannot be strung. Shoot a corner you can reach but cannot string to its neighbours, for example behind a fence. Join it into the outline later with a JPN control. |
+| `BBD` | Doorway | symbol `Doorway`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/detail` | Door in a wall, at ground level. Shoot the middle of the threshold. The swing arc in the symbol is for reading only and is not to scale. |
 
 #### `BS` Structures
 
@@ -1157,12 +1161,12 @@ Bridges, masts, tanks, flagpoles and monuments.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `BSB` | Bridge Deck Edge | `continuous`; `katana building` (#637482); 0.50 mm | `buildings/structures/bridge` | Edge of a bridge deck, taken at the kerb or the parapet. Shoot the deck edge at the kerb or parapet, at each pier and each change of direction. One string per side. Example: `BSB1 ST, BSB1, BSB1 END`. |
-| `BSP` | Bridge Column | symbol `Bridge Column`; `katana building` (#637482); 0.35 mm | `buildings/structures/bridge` | Pier or column of a bridge. Shoot the middle of the column at ground level. A wide pier is outlined with a generic line (XGL). |
-| `BST` | Mast | symbol `Mast`; `katana building` (#637482); 0.35 mm | `buildings/structures/structure` | Mast, tower or antenna that stands on its own. Shoot the middle of the base. Height (m) is to the top of the structure; Owner is the carrier or authority. |
-| `BSK` | Storage Tank | symbol `Storage Tank`; `katana building` (#637482); 0.35 mm | `buildings/structures/structure` | Tank or silo above ground. Shoot the middle of the base. Contents says what it holds. A large tank is outlined with a generic line (XGL). |
-| `BSF` | Flagpole | symbol `Flagpole`; `katana building` (#637482); 0.35 mm | `buildings/structures/structure` | Flagpole standing alone, as at a school, an office or a park. Shoot the middle of the pole at ground level. The pennant in the symbol is for reading only. |
-| `BSM` | Monument | symbol `Monument`; `katana building` (#637482); 0.35 mm | `buildings/structures/structure` | Monument, statue or memorial. Shoot the middle of the base. Name is the inscription or the common name of the monument. |
+| `BSB` | Bridge Deck Edge | `continuous`; `katana building` (#627B8C); 0.50 mm | `buildings/structures/bridge` | Edge of a bridge deck, taken at the kerb or the parapet. Shoot the deck edge at the kerb or parapet, at each pier and each change of direction. One string per side. Example: `BSB1 ST, BSB1, BSB1 END`. |
+| `BSP` | Bridge Column | symbol `Bridge Column`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` | Pier or column of a bridge. Shoot the middle of the column at ground level. A wide pier is outlined with a generic line (XGL). |
+| `BST` | Mast | symbol `Mast`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Mast, tower or antenna that stands on its own. Shoot the middle of the base. Height (m) is to the top of the structure; Owner is the carrier or authority. |
+| `BSK` | Storage Tank | symbol `Storage Tank`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Tank or silo above ground. Shoot the middle of the base. Contents says what it holds. A large tank is outlined with a generic line (XGL). |
+| `BSF` | Flagpole | symbol `Flagpole`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Flagpole standing alone, as at a school, an office or a park. Shoot the middle of the pole at ground level. The pennant in the symbol is for reading only. |
+| `BSM` | Monument | symbol `Monument`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Monument, statue or memorial. Shoot the middle of the base. Name is the inscription or the common name of the monument. |
 
 #### `BA` Steps and Access
 
@@ -1170,8 +1174,8 @@ Steps and handrails.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `BAS` | Steps | `Steps Edge`; `katana building` (#637482); 0.25 mm | `buildings/access/access` | Flight of steps, shot along the top nosing. Shoot the top nosing of the flight from one side to the other. The treads are drawn across the line for you. Shoot the bottom nosing with a second string. Example: `BAS1 ST, BAS1 END`. |
-| `BAH` | Handrail | `continuous`; `katana building` (#637482); 0.13 mm | `buildings/access/access` | Handrail or balustrade beside steps, a ramp or a drop. Shoot along the top of the rail at each post and at each change of direction. Example: `BAH1 ST, BAH1, BAH1 END`. |
+| `BAS` | Steps | `Steps Edge`; `katana building` (#627B8C); 0.25 mm | `buildings/access/access` | Flight of steps, shot along the top nosing. Shoot the top nosing of the flight from one side to the other. The treads are drawn across the line for you. Shoot the bottom nosing with a second string. Example: `BAS1 ST, BAS1 END`. |
+| `BAH` | Handrail | `continuous`; `katana building` (#627B8C); 0.13 mm | `buildings/access/access` | Handrail or balustrade beside steps, a ramp or a drop. Shoot along the top of the rail at each post and at each change of direction. Example: `BAH1 ST, BAH1, BAH1 END`. |
 
 ### Class F: Fences and Walls
 
@@ -1183,13 +1187,13 @@ Chain mesh, paling, rail, wire, barbed, electric and palisade.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `FFC` | Chain Mesh Fence | `Chain Mesh Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/chain-mesh` | Wire mesh fence on steel posts. Shoot the centre of each post in order. A post is drawn at every point, so shoot posts and corners, never mid-span. Height (m), Material and Condition apply to the string. Example: `FFC1 ST, FFC1, FFC1 END`. |
-| `FFP` | Paling Fence | `Paling Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/timber` | Timber paling fence: upright boards nailed to rails between posts. Shoot each post in order. Height (m) is to the top of the palings. Note a lapped or capped fence in Condition. Example: `FFP1 ST, FFP1, FFP1 END`. |
-| `FFR` | Post and Rail Fence | `Post and Rail Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/timber` | Timber or steel post and rail fence. Shoot each post in order. Height (m) is to the top rail. Example: `FFR1 ST, FFR1, FFR1 END`. |
-| `FFW` | Post and Wire Fence | `Post and Wire Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/wire` | Rural fence of plain wire on posts. Shoot each strainer and corner post, and posts along long runs. Height (m) is to the top wire. Example: `FFW1 ST, FFW1, FFW1 END`. |
-| `FFB` | Barbed Wire Fence | `Barbed Wire Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/wire` | Rural fence with barbed wire. Shoot each strainer and corner post, and posts along long runs. Height (m) is to the top wire; the barbs are drawn on both sides. Example: `FFB1 ST, FFB1, FFB1 END`. |
-| `FFE` | Electric Fence | `Electric Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/wire` | Fence with an electrified wire. Shoot each post in order. Treat it as live until the owner says otherwise, and say so in Condition. Example: `FFE1 ST, FFE1, FFE1 END`. |
-| `FFM` | Metal Palisade Fence | `Metal Palisade Fence`; symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/fence/palisade` | Steel palisade or pool-style fence. Shoot each post in order. Height (m) is to the top of the palings. A pool fence's gate is FGP. Example: `FFM1 ST, FFM1, FFM1 END`. |
+| `FFC` | Chain Mesh Fence | `Chain Mesh Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/chain-mesh` | Wire mesh fence on steel posts. Shoot the centre of each post in order. A post is drawn at every point, so shoot posts and corners, never mid-span. Height (m), Material and Condition apply to the string. Example: `FFC1 ST, FFC1, FFC1 END`. |
+| `FFP` | Paling Fence | `Paling Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/timber` | Timber paling fence: upright boards nailed to rails between posts. Shoot each post in order. Height (m) is to the top of the palings. Note a lapped or capped fence in Condition. Example: `FFP1 ST, FFP1, FFP1 END`. |
+| `FFR` | Post and Rail Fence | `Post and Rail Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/timber` | Timber or steel post and rail fence. Shoot each post in order. Height (m) is to the top rail. Example: `FFR1 ST, FFR1, FFR1 END`. |
+| `FFW` | Post and Wire Fence | `Post and Wire Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/wire` | Rural fence of plain wire on posts. Shoot each strainer and corner post, and posts along long runs. Height (m) is to the top wire. Example: `FFW1 ST, FFW1, FFW1 END`. |
+| `FFB` | Barbed Wire Fence | `Barbed Wire Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/wire` | Rural fence with barbed wire. Shoot each strainer and corner post, and posts along long runs. Height (m) is to the top wire; the barbs are drawn on both sides. Example: `FFB1 ST, FFB1, FFB1 END`. |
+| `FFE` | Electric Fence | `Electric Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/wire` | Fence with an electrified wire. Shoot each post in order. Treat it as live until the owner says otherwise, and say so in Condition. Example: `FFE1 ST, FFE1, FFE1 END`. |
+| `FFM` | Metal Palisade Fence | `Metal Palisade Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/palisade` | Steel palisade or pool-style fence. Shoot each post in order. Height (m) is to the top of the palings. A pool fence's gate is FGP. Example: `FFM1 ST, FFM1, FFM1 END`. |
 
 #### `FW` Walls
 
@@ -1197,12 +1201,12 @@ Masonry, concrete and retaining walls.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `FWB` | Brick Wall | `Brick Wall`; `katana wall` (#B35A47); 0.35 mm | `fences/wall/masonry` | Brick wall, shot along the face on the lower side. Shoot the face on the lower-ground side at its base, then the top with a second string if its height matters. Height (m) is the height from the lower ground. Example: `FWB1 ST, FWB1, FWB1 END`. |
-| `FWK` | Block Wall | `Brick Wall`; `katana wall` (#B35A47); 0.35 mm | `fences/wall/masonry` | Concrete or masonry block wall. Shoot the face on the lower-ground side. Height (m) is from the lower ground. A rendered block wall is still a block wall: note the render in Material. Example: `FWK1 ST, FWK1, FWK1 END`. |
-| `FWS` | Stone Wall | `Stone Wall`; `katana wall` (#B35A47); 0.35 mm | `fences/wall/masonry` | Dry or mortared stone wall. Shoot the face on the lower-ground side. Say dry or mortared in Material; a dry wall is often a heritage item (XHT). Example: `FWS1 ST, FWS1, FWS1 END`. |
-| `FWC` | Concrete Wall | `continuous`; `katana wall` (#B35A47); 0.35 mm | `fences/wall/concrete` | Poured or precast concrete wall. Shoot the face on the lower-ground side. Height (m) is from the lower ground. Example: `FWC1 ST, FWC1, FWC1 END`. |
-| `FWR` | Earth Retaining Wall | `Earth Retaining Wall`; `katana wall` (#B35A47); 0.35 mm | `fences/wall/retaining` | Wall that holds back earth; the triangles point downhill. Shoot the top of the wall face. Walk with the retained, higher ground on your RIGHT, so the triangles fall to the lower side on your left. Height (m) is the greatest retained height. Example: `FWR1 ST, FWR1, FWR1 END`. |
-| `FWT` | Sleeper Retaining Wall | `Earth Retaining Wall`; `katana wall` (#B35A47); 0.25 mm | `fences/wall/retaining` | Retaining wall of sleepers or logs. Shoot the top of the wall face, walking with the retained ground on your right, as for any retaining wall. Material says timber, steel or concrete sleeper. Example: `FWT1 ST, FWT1, FWT1 END`. |
+| `FWB` | Brick Wall | `Brick Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/masonry` | Brick wall, shot along the face on the lower side. Shoot the face on the lower-ground side at its base, then the top with a second string if its height matters. Height (m) is the height from the lower ground. Example: `FWB1 ST, FWB1, FWB1 END`. |
+| `FWK` | Block Wall | `Brick Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/masonry` | Concrete or masonry block wall. Shoot the face on the lower-ground side. Height (m) is from the lower ground. A rendered block wall is still a block wall: note the render in Material. Example: `FWK1 ST, FWK1, FWK1 END`. |
+| `FWS` | Stone Wall | `Stone Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/masonry` | Dry or mortared stone wall. Shoot the face on the lower-ground side. Say dry or mortared in Material; a dry wall is often a heritage item (XHT). Example: `FWS1 ST, FWS1, FWS1 END`. |
+| `FWC` | Concrete Wall | `continuous`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/concrete` | Poured or precast concrete wall. Shoot the face on the lower-ground side. Height (m) is from the lower ground. Example: `FWC1 ST, FWC1, FWC1 END`. |
+| `FWR` | Earth Retaining Wall | `Earth Retaining Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/retaining` | Wall that holds back earth; the triangles point downhill. Shoot the top of the wall face. Walk with the retained, higher ground on your RIGHT, so the triangles fall to the lower side on your left. Height (m) is the greatest retained height. Example: `FWR1 ST, FWR1, FWR1 END`. |
+| `FWT` | Sleeper Retaining Wall | `Earth Retaining Wall`; `katana wall` (#BA5556); 0.25 mm | `fences/wall/retaining` | Retaining wall of sleepers or logs. Shoot the top of the wall face, walking with the retained ground on your right, as for any retaining wall. Material says timber, steel or concrete sleeper. Example: `FWT1 ST, FWT1, FWT1 END`. |
 
 #### `FG` Gates and Posts
 
@@ -1210,10 +1214,10 @@ Gates, strainer posts and lone fence posts.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `FGP` | Pedestrian Gate | symbol `Pedestrian Gate`; `katana fence` (#A18863); 0.25 mm | `fences/gate/gate` | Gate for people: a pedestrian opening in a fence or a wall. Shoot the middle of the opening at the gate's line. The two posts are shot as FGF or FGS. |
-| `FGV` | Vehicle Gate | symbol `Vehicle Gate`; `katana fence` (#A18863); 0.25 mm | `fences/gate/gate` | Gate wide enough for a vehicle. Shoot the middle of the opening at the gate's line. The posts either side are shot as FGS. |
-| `FGS` | Strainer Post | symbol `Strainer Post`; `katana fence` (#A18863); 0.25 mm | `fences/gate/post` | Braced corner or end post. Shoot the middle of the post. Strainers carry the tension of a wire fence and are shot at every corner, end and gate. |
-| `FGF` | Fence Post | symbol `Fence Post`; `katana fence` (#A18863); 0.25 mm | `fences/gate/post` | Single fence post standing alone, not part of a fence string. Shoot the middle of the post. A post that belongs to a fence string is shot as part of it; use this code for a lone post. |
+| `FGP` | Pedestrian Gate | symbol `Pedestrian Gate`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/gate` | Gate for people: a pedestrian opening in a fence or a wall. Shoot the middle of the opening at the gate's line. The two posts are shot as FGF or FGS. |
+| `FGV` | Vehicle Gate | symbol `Vehicle Gate`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/gate` | Gate wide enough for a vehicle. Shoot the middle of the opening at the gate's line. The posts either side are shot as FGS. |
+| `FGS` | Strainer Post | symbol `Strainer Post`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/post` | Braced corner or end post. Shoot the middle of the post. Strainers carry the tension of a wire fence and are shot at every corner, end and gate. |
+| `FGF` | Fence Post | symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/post` | Single fence post standing alone, not part of a fence string. Shoot the middle of the post. A post that belongs to a fence string is shot as part of it; use this code for a lone post. |
 
 ### Class G: Terrain and Breaklines
 
@@ -1225,12 +1229,12 @@ Ground shots and levels, highs, lows and inverts.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `GPG` | Ground Shot | symbol `Ground Shot`; `katana ground` (#7C9976); 0.13 mm | `terrain/points/ground` | Level on natural ground: the height is what matters, the mark is a tiny plus. Use for every ordinary shot on natural ground. The rule marks it hidden, so a surface of ten thousand shots does not bury the plan; Katana does not yet apply hide, so for now a 1 mm plus shows. |
-| `GPS` | Spot Level | symbol `Spot Level`; `katana ground` (#7C9976); 0.13 mm | `terrain/points/spot` | Level on a feature, shown with its mark so it can be checked. Use for a level on something that is not natural ground, such as a step, a slab corner or a floor level. It stays visible so the checker can find it. |
-| `GPH` | High Point | symbol `High Point`; `katana ground` (#7C9976); 0.13 mm | `terrain/points/spot` | Local high point of the ground. Shoot the highest point of a mound, a crest or a hilltop, and only when it is a real feature of the ground. |
-| `GPL` | Low Point | symbol `Low Point`; `katana ground` (#7C9976); 0.13 mm | `terrain/points/spot` | Local low point of the ground. Shoot the lowest point of a sag, a hollow or a sump. A low point that drains to a pit is coded GPI at the pit. |
-| `GPR` | Road Surface Level | symbol `Ground Shot`; `katana ground` (#7C9976); 0.13 mm | `terrain/points/ground` | Level on a paved surface: the height is what matters, the mark is a tiny plus. Use for ordinary shots on a sealed surface, a slab or a car park. The rule marks it hidden like GPG; Katana does not yet apply hide, so for now a 1 mm plus shows. |
-| `GPI` | Invert Level | symbol `Invert Level`; `katana ground` (#7C9976); 0.13 mm | `terrain/points/spot` | Level at the bottom of a pipe, a pit or a drain. Shoot the invert, the lowest inside point of the pipe or pit, with a staff or a depth gauge held on it. Record the pit or pipe with its own code beside it. |
+| `GPG` | Ground Shot | symbol `Ground Shot`; `katana ground` (#688F68); 0.18 mm | `terrain/points/ground` | Level on natural ground: the height is what matters, the mark is a tiny plus. Use for every ordinary shot on natural ground. The rule marks it hidden, so a surface of ten thousand shots does not bury the plan; Katana does not yet apply hide, so for now a 1 mm plus shows. |
+| `GPS` | Spot Level | symbol `Spot Level`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Level on a feature, shown with its mark so it can be checked. Use for a level on something that is not natural ground, such as a step, a slab corner or a floor level. It stays visible so the checker can find it. |
+| `GPH` | High Point | symbol `High Point`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Local high point of the ground. Shoot the highest point of a mound, a crest or a hilltop, and only when it is a real feature of the ground. |
+| `GPL` | Low Point | symbol `Low Point`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Local low point of the ground. Shoot the lowest point of a sag, a hollow or a sump. A low point that drains to a pit is coded GPI at the pit. |
+| `GPR` | Road Surface Level | symbol `Ground Shot`; `katana ground` (#688F68); 0.18 mm | `terrain/points/ground` | Level on a paved surface: the height is what matters, the mark is a tiny plus. Use for ordinary shots on a sealed surface, a slab or a car park. The rule marks it hidden like GPG; Katana does not yet apply hide, so for now a 1 mm plus shows. |
+| `GPI` | Invert Level | symbol `Invert Level`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Level at the bottom of a pipe, a pit or a drain. Shoot the invert, the lowest inside point of the pipe or pit, with a staff or a depth gauge held on it. Record the pit or pipe with its own code beside it. |
 
 #### `GB` Breaklines
 
@@ -1238,15 +1242,15 @@ Banks, ridges, gullies and the hard and soft lines that shape a surface.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `GBT` | Bank Top Edge | `Bank Top Edge`; `katana breakline` (#C37B83); 0.25 mm | `terrain/breaklines/bank` | Top edge of a slope; the ticks point downhill. Shoot along the top of the slope with the slope falling away on your LEFT, so the ticks fall downhill. Take a point at every change of grade. Example: `GBT1 ST, GBT1, GBT1 END`. |
-| `GBB` | Bank Toe Edge | `Bank Toe Edge`; `katana breakline` (#C37B83); 0.25 mm | `terrain/breaklines/bank` | Bottom edge of a slope; the short ticks point downhill. Shoot along the toe of the slope with the slope rising on your RIGHT, so the short ticks fall away from the bank, downhill. Take a point at every change of grade. Example: `GBB1 ST, GBB1, GBB1 END`. |
-| `GBK` | Cutting Top Edge | `Bank Top Edge`; `katana breakline` (#C37B83); 0.25 mm | `terrain/breaklines/bank` | Top edge of an excavated slope. Shoot along the top of the cut with the cutting on your LEFT, so the ticks fall down into it. A natural bank is GBT. Example: `GBK1 ST, GBK1, GBK1 END`. |
-| `GBF` | Fill Toe Edge | `Bank Toe Edge`; `katana breakline` (#C37B83); 0.25 mm | `terrain/breaklines/bank` | Bottom edge of an embankment. Shoot along the toe of the fill with the embankment on your RIGHT, so the short ticks fall away from it, downhill. A natural bank toe is GBB. Example: `GBF1 ST, GBF1, GBF1 END`. |
-| `GBR` | Ridge Line | `Ridge Line`; `katana breakline` (#C37B83); 0.18 mm | `terrain/breaklines/ridge-gully` | Line along a crest, where ground falls away on both sides. Shoot along the crest of the ridge, with a level at each point. The carets point up to say it is a high line. Example: `GBR1 ST, GBR1, GBR1 END`. |
-| `GBG` | Gully Line | `Gully Line`; `katana breakline` (#C37B83); 0.18 mm | `terrain/breaklines/ridge-gully` | Line along the bottom of a gully. Shoot along the lowest line of the gully, with a level at each point. The inverted carets point down to say it is a low line. Example: `GBG1 ST, GBG1, GBG1 END`. |
-| `GBH` | Hard Breakline | `continuous`; `katana breakline` (#C37B83); 0.25 mm | `terrain/breaklines/general` | Sharp change of grade that a surface must not smooth over. Use where grade changes abruptly and a surface must keep the edge, such as the back of a kerb or the lip of a slab. Take a point at every change of direction and level each one. Example: `GBH1 ST, GBH1, GBH1 END`. |
-| `GBS` | Soft Breakline | `Soft Breakline`; `katana breakline` (#C37B83); 0.13 mm | `terrain/breaklines/general` | Gentle change of grade that a surface may soften. Use where grade changes gradually and the surface may round it off. Level each point. When in doubt about hard or soft, choose hard. Example: `GBS1 ST, GBS1, GBS1 END`. |
-| `GBX` | Surface Exclusion Boundary | `Exclusion Boundary`; `katana breakline` (#C37B83); 0.18 mm | `terrain/breaklines/exclusion` | Area that a surface must leave out, such as a building or a lake. Shoot the outline of the area where no ground model should exist and close with CL. The surface builder leaves out everything inside it. It does not take part in the surface itself. Example: `GBX1 ST, GBX1, GBX1, GBX1 CL`. |
+| `GBT` | Bank Top Edge | `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Top edge of a slope; the ticks point downhill. Shoot along the top of the slope with the slope falling away on your LEFT, so the ticks fall downhill. Take a point at every change of grade. Example: `GBT1 ST, GBT1, GBT1 END`. |
+| `GBB` | Bank Toe Edge | `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Bottom edge of a slope; the short ticks point downhill. Shoot along the toe of the slope with the slope rising on your RIGHT, so the short ticks fall away from the bank, downhill. Take a point at every change of grade. Example: `GBB1 ST, GBB1, GBB1 END`. |
+| `GBK` | Cutting Top Edge | `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Top edge of an excavated slope. Shoot along the top of the cut with the cutting on your LEFT, so the ticks fall down into it. A natural bank is GBT. Example: `GBK1 ST, GBK1, GBK1 END`. |
+| `GBF` | Fill Toe Edge | `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Bottom edge of an embankment. Shoot along the toe of the fill with the embankment on your RIGHT, so the short ticks fall away from it, downhill. A natural bank toe is GBB. Example: `GBF1 ST, GBF1, GBF1 END`. |
+| `GBR` | Ridge Line | `Ridge Line`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/ridge-gully` | Line along a crest, where ground falls away on both sides. Shoot along the crest of the ridge, with a level at each point. The carets point up to say it is a high line. Example: `GBR1 ST, GBR1, GBR1 END`. |
+| `GBG` | Gully Line | `Gully Line`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/ridge-gully` | Line along the bottom of a gully. Shoot along the lowest line of the gully, with a level at each point. The inverted carets point down to say it is a low line. Example: `GBG1 ST, GBG1, GBG1 END`. |
+| `GBH` | Hard Breakline | `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/general` | Sharp change of grade that a surface must not smooth over. Use where grade changes abruptly and a surface must keep the edge, such as the back of a kerb or the lip of a slab. Take a point at every change of direction and level each one. Example: `GBH1 ST, GBH1, GBH1 END`. |
+| `GBS` | Soft Breakline | `Soft Breakline`; `katana breakline` (#BE7D83); 0.13 mm | `terrain/breaklines/general` | Gentle change of grade that a surface may soften. Use where grade changes gradually and the surface may round it off. Level each point. When in doubt about hard or soft, choose hard. Example: `GBS1 ST, GBS1, GBS1 END`. |
+| `GBX` | Surface Exclusion Boundary | `Exclusion Boundary`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/exclusion` | Area that a surface must leave out, such as a building or a lake. Shoot the outline of the area where no ground model should exist and close with CL. The surface builder leaves out everything inside it. It does not take part in the surface itself. Example: `GBX1 ST, GBX1, GBX1, GBX1 CL`. |
 
 #### `GC` Contours
 
@@ -1254,9 +1258,9 @@ Index, intermediate and depression contours.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `GCI` | Index Contour | `Index Contour`; `katana contour` (#AB704C); 0.35 mm | `terrain/contours/index` | Every fifth contour, drawn heavier and marked with a bead. Code a contour you were given, such as supplied mapping, and set Level (m) to its height. Contours made from your own surface are drawn from the model and need no code. Example: `GCI1 ST, GCI1, GCI1 END`. |
-| `GCM` | Intermediate Contour | `continuous`; `katana contour` (#AB704C); 0.18 mm | `terrain/contours/intermediate` | Ordinary contour between the index contours. Code a contour you were given and set Level (m) to its height. One string per contour. Example: `GCM1 ST, GCM1, GCM1 END`. |
-| `GCD` | Depression Contour | `Depression Contour`; `katana contour` (#AB704C); 0.18 mm | `terrain/contours/depression` | Contour round a hollow; the ticks point downhill. Follow the contour with the hollow on your LEFT, so the ticks fall downhill into it. Set Level (m) to its height. Example: `GCD1 ST, GCD1, GCD1, GCD1 CL`. |
+| `GCI` | Index Contour | `Index Contour`; `katana contour` (#B9704F); 0.35 mm | `terrain/contours/index` | Every fifth contour, drawn heavier and marked with a bead. Code a contour you were given, such as supplied mapping, and set Level (m) to its height. Contours made from your own surface are drawn from the model and need no code. Example: `GCI1 ST, GCI1, GCI1 END`. |
+| `GCM` | Intermediate Contour | `continuous`; `katana contour` (#B9704F); 0.18 mm | `terrain/contours/intermediate` | Ordinary contour between the index contours. Code a contour you were given and set Level (m) to its height. One string per contour. Example: `GCM1 ST, GCM1, GCM1 END`. |
+| `GCD` | Depression Contour | `Depression Contour`; `katana contour` (#B9704F); 0.18 mm | `terrain/contours/depression` | Contour round a hollow; the ticks point downhill. Follow the contour with the hollow on your LEFT, so the ticks fall downhill into it. Set Level (m) to its height. Example: `GCD1 ST, GCD1, GCD1, GCD1 CL`. |
 
 #### `GW` Water Edges
 
@@ -1273,9 +1277,9 @@ Rock outcrops, cliff edges and boulders.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `GRO` | Rock Outcrop Edge | `Rock Outcrop Edge`; `katana contour` (#AB704C); 0.18 mm | `terrain/rock/edge` | Edge of exposed rock where it meets soil, grass or water. Shoot the edge of the outcrop where the rock meets soil or grass, at each change of direction. Close with CL for an isolated outcrop. Example: `GRO1 ST, GRO1, GRO1, GRO1 CL`. |
-| `GRC` | Cliff Edge | `Cliff Edge`; `katana contour` (#AB704C); 0.25 mm | `terrain/rock/edge` | Top edge of a cliff; the ticks point over the edge. Shoot along the top edge of the cliff with the drop on your LEFT, so the ticks fall over the edge. Stand well back and shoot it reflectorless. Example: `GRC1 ST, GRC1, GRC1 END`. |
-| `GRB` | Boulder | symbol `Boulder`; `katana contour` (#AB704C); 0.18 mm | `terrain/rock/boulder` | Boulder too large to move. Shoot the middle of the top of the boulder. A boulder that is a landmark is recorded as a heritage item as well (XHT). |
+| `GRO` | Rock Outcrop Edge | `Rock Outcrop Edge`; `katana contour` (#B9704F); 0.18 mm | `terrain/rock/edge` | Edge of exposed rock where it meets soil, grass or water. Shoot the edge of the outcrop where the rock meets soil or grass, at each change of direction. Close with CL for an isolated outcrop. Example: `GRO1 ST, GRO1, GRO1, GRO1 CL`. |
+| `GRC` | Cliff Edge | `Cliff Edge`; `katana contour` (#B9704F); 0.25 mm | `terrain/rock/edge` | Top edge of a cliff; the ticks point over the edge. Shoot along the top edge of the cliff with the drop on your LEFT, so the ticks fall over the edge. Stand well back and shoot it reflectorless. Example: `GRC1 ST, GRC1, GRC1 END`. |
+| `GRB` | Boulder | symbol `Boulder`; `katana contour` (#B9704F); 0.18 mm | `terrain/rock/boulder` | Boulder too large to move. Shoot the middle of the top of the boulder. A boulder that is a landmark is recorded as a heritage item as well (XHT). |
 
 ### Class M: Survey Control and Annotation
 
@@ -1342,7 +1346,7 @@ Hazards, heritage items and habitat markers.
 | `XHZ` | Hazard Point | symbol `Hazard Point`; `katana hazard` (#DD5C00); 0.25 mm | `miscellaneous/hazards/hazard` | Point hazard, such as an open hole or exposed wire. Shoot the middle of the hazard. Hazard Type names it and Note says what to do about it. Tell the client at once if it is dangerous. |
 | `XHB` | Hazard Boundary | `Hazard Boundary`; `katana hazard` (#DD5C00); 0.25 mm | `miscellaneous/hazards/hazard` | Outline of a hazardous area. Shoot the outline of the area, such as contaminated ground or a drop, and close with CL. Hazard Type and Note as for a point hazard. Example: `XHB1 ST, XHB1, XHB1, XHB1 CL`. |
 | `XHT` | Heritage Item | symbol `Heritage Item`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` | Item of heritage value: a feature protected by a listing or an overlay. Shoot the middle of the item, or its base. Name is the common name and Listing is the register entry. Do not disturb it. |
-| `XHH` | Habitat Marker | symbol `Habitat Marker`; `katana tree` (#60812B); 0.25 mm | `miscellaneous/hazards/habitat` | Nest, burrow or other habitat feature. Shoot the middle of the nest, the hollow or the burrow mouth. Habitat Type says which. Keep clear of it and leave it as you found it. |
+| `XHH` | Habitat Marker | symbol `Habitat Marker`; `katana tree` (#5C8627); 0.25 mm | `miscellaneous/hazards/habitat` | Nest, burrow or other habitat feature. Shoot the middle of the nest, the hollow or the burrow mouth. Habitat Type says which. Keep clear of it and leave it as you found it. |
 
 #### `XG` General
 
@@ -1617,7 +1621,7 @@ Every code once, for looking one up: the key, its name, where it is catalogued a
 
 ## Originality
 
-The built-in customisation of this repository was converted from a third party's files, and Katana Standard was made so that nothing of them is in it. It was written from a specification that fixes its own taxonomy, its own vocabulary and its own palette, and that forbade its authors to open the built-in; every stroke was drawn from a short written brief and looked at, in Katana's own renderer, before it was kept. Before it was accepted a scan compared every definition name, group path, layer, survey code key and colour name with the built-in's and found no exact match; what overlaps is single generic words that any survey library has to use (a few object names, a few group words, layer words such as `water`), which cannot be avoided without being wrong. The licence of the library is that of the Katana repository, and the repository has none chosen yet, so nothing stronger is claimed for it.
+The built-in customisation of this repository was converted from a third party's files, and Katana Standard was made so that nothing of them is in it. Its authors were given the built-in's structure and its statistics (how many groups, codes and strokes, which kinds of rule it uses and where it is weak) to know what a full survey library covers, and were forbidden to copy or paraphrase any name, group, layer, code key, comment, stroke, text or colour of it. They were not to read its contents, but in one exploratory run some of its names were printed in a terminal; none of them was written to a file of this library. The library was written from a specification that fixes its own taxonomy, its own vocabulary and its own palette; every stroke was drawn from a short written brief and looked at, in Katana's own renderer, before it was kept. Reviewers then compared every definition name, group path, layer, survey code key, comment and colour with the built-in's, and every stroke list by exact, translated and scaled match, and found no exact match of a name, key or colour and no stroke list beyond a single dash; what overlaps is single generic words and names of real objects that any survey library has to use (a bollard, a fire hydrant, a retaining wall, layer words such as `water`), which cannot be avoided without being wrong. The test `KatanaStandard.*` repeats the name, key and colour comparison at run time, by count. The library is licensed with the rest of the repository (`LICENSING.md`).
 
 ## Decisions, and what was rejected
 
@@ -1628,23 +1632,24 @@ The built-in customisation of this repository was converted from a third party's
 - **The library says nothing of linework spellings or automation.** Loading it onto a session must not reset a colleague's control words, so `linework` and `automation` are absent from the file, not written at their defaults.
 - **A dot is a short dash.** Katana draws a `dot` stroke as one pen-width point whatever its radius: a speck a third of the line's weight on a plot and one pixel on screen. Dash-dot lines and the centres of symbols are therefore drawn with 0.6 mm dashes and a very small ring, measured in the renderer, and the definitions say so.
 - **Layers are what one switches on and off together.** One per family, three levels, never one per code and never one per lifecycle: a disused service is an attribute, `utility.status`, and its own layer only in the utility group where the state is itself something one switches off.
-- **Edges that are one hard line stay plain.** 26 of the 123 line codes use Katana's plain continuous line, since a solid line is the right drawing for a hard edge; where pens are applied the weight tells them apart. Until then they differ by layer alone.
+- **Edges that are one hard line stay plain.** 24 of the 123 line codes use Katana's plain continuous line, since a solid line is the right drawing for a hard edge: the carriageway and path edges, the building wall, the kerb top and return (one feature, straight and curved), concrete walls, the bridge deck and the hairline detail. Where pens are applied the weight tells them apart; until then they differ by layer alone. Where two lines of one class are NOT the same thing they have a pattern each: the gutter lip is `Gutter Lip Line` and the back of the kerb `Kerb Back Line`, so a kerb reads as three lines on a plan whether or not the weights are applied.
+- **Stormwater pits and pipes are typed for the utility tools.** The pits and structures (`KP`) and the pipes and culverts (`KC`) of class K set `utility.type` to `stormwater`, though they are catalogued as drainage; the kerbs, channels and creeks do not. Rejected: leaving them untyped, which makes `UTILITY DRAW` read a coded stormwater pipe as an unknown service.
 
 ## How it is made and held
 
 - **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` and `codes.py`, each importing nothing of the outside and each with its own `--check`. `make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, `--docs` this document, `--check` exits 1 when either committed output differs from what the data makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.
 - **The bytes are the writer's.** The generator writes the canonical form `customisationToJson` writes (`docs/customisation.md`, "What the writer writes"): a file loaded by `CUSTOMISE <file>` and written again by `CUSTOMISE EXPORT <out> CODES LINESTYLES SYMBOLS` comes back byte for byte, except for the one line the session adds, its record of what it was loaded from (`make_katana_standard.py --check --round-trip <katana_cli>`). The tests below check the same on the value itself.
 - **A second opinion.** `tools/katana_standard/census.py` counts the committed file with the standard `json` module and no Katana code, and `tools/customisation_census.py` counts the generic figures. The tests pin the figures those scripts gave.
-- **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed file with the strict reader and holds the counts, the grammar, every name resolved, every definition used and catalogued, the weights, the utility words, the geometry bounds of the contract and the byte-for-byte writer round trip. `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code` imports the invented field file; `cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line` strings control words, which no field-file reader carries, into a curve, a rectangle and a closed line.
-- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and `-showcase.png` are drawn by Katana itself from the committed file, headlessly (`tools/katana_standard/render_images.py`; `docs/headless.md`): the symbols are the Symbol Library's own icons, tinted with the colour of the code that uses each and laid out on one sheet; the linestyles are a 300 dpi plot; the plan and the showcase are the plan view at twice the pixels. `-palette.png` is laid out from the palette's values by `palette_preview.py`, since a palette is a table and not a drawing. The images are not byte-reproducible, since fonts differ between machines, so `--check` does not compare them. Each is under 500 KB.
+- **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed file with the strict reader and holds the counts, the grammar, every name resolved, every definition used and catalogued, the weights, the utility words, the geometry bounds of the contract and the byte-for-byte writer round trip. `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code` imports the invented field file; `cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line` strings control words, which no field-file reader carries, into a curve, a rectangle and a closed line. A counts-only test cannot see a swapped colour, weight or linestyle, so `katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each data module's own check; they exist where Python does.
+- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and `-showcase.png` are drawn by Katana itself from the committed file, headlessly (`tools/katana_standard/render_images.py`; `docs/headless.md`): the symbols are the Symbol Library's own icons, tinted with the colour of the code that uses each and laid out on one sheet; the linestyles are a 300 dpi plot; the plan is the plan view at twice the pixels, each feature named beside it by the script; the showcase is the plan view at the plot scale 1:500, in a few screenshots laid side by side. `-palette.png` is laid out from the palette's values by `palette_preview.py`, since a palette is a table and not a drawing. The images are not byte-reproducible, since fonts differ between machines, so `--check` does not compare them. Each is under 500 KB.
 
 ## Not done
 
 - **It is not the built-in.** The default stays the existing built-in, and a second compiled-in customisation with a chooser would touch the window, `katana_cli` and `katana_mcp` alike. Whether Katana Standard becomes the default, or a second built-in with a chooser, is the owner's decision.
 - **The colour convention** of the buried services differs from `UTILITY DRAW`'s. Aligning one to the other is the owner's decision.
-- **No licence is chosen** for the library: it is the repository's, and the repository has none yet.
+- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the project licence does not cover and says the library is covered; the library was written by AI agents under the owner's direction, and what that means for copyright is a question for the owner and a lawyer.
 - **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's rotation, offset and raise. The library carries them for the day it does.
 - **A curve cannot come from a field file.** The readers Katana has strung points by the file's own strings and close one with opcode 20; control words (`BC`, `EC`, `ST`, `END`, `CL`, `RECT`) reach the linework only from a code kept in a point's property, so the curve and the rectangle are tested through `LINEWORK PROPERTY` and not through an import.
 - **Undo leaves the parent layers.** Katana's layer table makes every ancestor of a layer path a layer of its own, and Undo removes the layer a command made and not its ancestors: `LAYER NEW x/y/z` then `UNDO` leaves `x` and `x/y`. The library's layers are three levels deep, so one undo of the street corner's import takes the points, lines and styles and the ten layers they sit on away and leaves 15 empty parent layers. It is the layer table's behaviour, not the library's: the flat layer names of other libraries never showed it. Not changed here.
-- **Two inconsistencies** are known and left as they are, because the names are frozen: `Pit Size (mm)` is text where every other millimetre attribute is an integer, and fifteen linestyles are shared by two to six codes, so the plot legend uses the linestyle's name for them.
-- **Four symbols sit a little off the origin** (Booster Connection, Building Corner, Doorway and North Arrow, by 0.4 to 0.6 mm): the surveyed point is not the middle of their drawing, and each description says so. The Communications Maintenance Hole, a double ring with a C, reads as a copyright sign at small size.
+- **Two inconsistencies** are known and left as they are, because the names are frozen: `Pit Size (mm)` is text where every other millimetre attribute is an integer, and 15 linestyles are shared by two to 6 codes, so the plot legend uses the linestyle's name for them.
+- **Some symbols sit off the centre of their box**: Booster Connection, Building Corner, Doorway and North Arrow by 0.4 to 0.6 mm, and a few others (the valves, the camera, the trigonometric station) by 0.25 to 0.35. The surveyed point is not the middle of their drawing, and each description says where the origin is. The Communications Maintenance Hole, a double ring with a C, reads as a copyright sign at small size.

@@ -92,7 +92,7 @@ def palette_sheet(path, scale=2):
               "The buried-service colours follow the widely published marking convention: water blue, sewer green, gas yellow, "
               "electricity red, communications orange, recycled water purple.", font=f_note, fill=quiet)
     draw.text((margin, foot_y + 58 * s),
-              "Katana's UTILITY DRAW uses the AS 5488 plan colours instead, so a drawing that mixes the two needs a legend.",
+              "Katana's UTILITY DRAW has colours of its own (AS 5488 sets none), so a drawing that mixes the two needs a legend.",
               font=f_note, fill=quiet)
     image.save(path)
     return image.size

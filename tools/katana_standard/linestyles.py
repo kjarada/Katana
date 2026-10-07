@@ -1,4 +1,4 @@
-"""Katana Standard: the 71 linestyles.
+"""Katana Standard: the 73 linestyles.
 
 Every linestyle is plain data in LINESTYLES, a list of dicts with the customisation file's own members
 (`name`, `group`, `units`, `length`, `strokes`) and one extra, `description`: a line saying what it looks
@@ -223,10 +223,11 @@ def _(p):
     p.run(14, 17)
 
 
-@_style("Easement Boundary", G_EASE, 6,
-        "Short even dashes, 4 on and 2 off: the edge of an easement or covenant area; the code says what it carries.")
+@_style("Easement Boundary", G_EASE, 9,
+        "Paired short dashes, 2.6 on, 0.9 off, 2.6 on, then 2.9 off: the edge of an easement or covenant area; the code says what it carries.")
 def _(p):
-    _dash(p, 6, 4)
+    p.run(0, 2.6)
+    p.run(3.5, 6.1)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -290,6 +291,18 @@ def _(p):
 # ---------------------------------------------------------------------------------------------------------
 # Kerbs and Drainage
 # ---------------------------------------------------------------------------------------------------------
+
+@_style("Gutter Lip Line", G_KERB, 9,
+        "Long dashes with a narrow gap, 7.6 on and 1.4 off, like the joints of a concrete gutter: the flow line at the foot of a kerb face.")
+def _(p):
+    _dash(p, 9, 7.6)
+
+
+@_style("Kerb Back Line", G_KERB, 3.3,
+        "Fine short dashes, 2.2 on and 1.1 off, stitched along the line: the back edge of a kerb, where it meets the verge or the path.")
+def _(p):
+    _dash(p, 3.3, 2.2)
+
 
 @_style("Mountable Kerb Edge", G_KERB, 6,
         "Unbroken line with a rounded hump to the left every 6 mm: a low kerb a vehicle can drive over.")
@@ -515,11 +528,11 @@ def _(p):
     _dash(p, 3, 1)
 
 
-@_style("Steps Edge", G_STEPS, 2.5,
-        "Unbroken line crossed by a close row of treads 4 mm long: the nosing of a flight of steps.")
+@_style("Steps Edge", G_STEPS, 3.5,
+        "Unbroken line crossed by a row of treads 2.4 mm long, one every 3.5 mm: the nosing of a flight of steps.")
 def _(p):
-    p.run(0, 2.5)
-    p.tick(1.25, -2, 2)
+    p.run(0, 3.5)
+    p.tick(1.75, -1.2, 1.2)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -589,10 +602,10 @@ def _(p):
     p.tick(2.5, -0.5, 0.5)
 
 
-@_style("Stone Wall", G_WALL, 2,
-        "A chain of touching rings, 2 mm across, centred on the line: a dry or mortared stone wall.")
+@_style("Stone Wall", G_WALL, 2.4,
+        "A chain of separate rings, 1.6 mm across and 0.8 mm apart, centred on the line: a dry or mortared stone wall.")
 def _(p):
-    p.circle(1, 0, 1)
+    p.circle(1.2, 0, 0.8)
 
 
 @_style("Earth Retaining Wall", G_WALL, 4,

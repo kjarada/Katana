@@ -95,6 +95,11 @@ def catalogue(data, root):
             if top[0] == "U" and sub[0] == "X":
                 group_order.append("Utilities/All Services")
     n_ls, n_sy, n_codes, n_rules = len(data.linestyles), len(data.symbols), len(codes), len(data.rules)
+    n_lines = sum(1 for c in codes if c["linestyle"])
+    n_plain = sum(1 for c in codes if c["linestyle"] == "continuous")
+    style_names = {d["name"] for d in data.linestyles}
+    n_shared = sum(1 for name, keys in by_style.items() if len(keys) > 1 and name in style_names)
+    max_shared = max(len(keys) for name, keys in by_style.items() if name in style_names)
     layers = sorted({c["layer"] for c in codes})
     out = []
     w = out.append
@@ -119,7 +124,9 @@ def catalogue(data, root):
     w("*An invented street corner, drawn in Katana's plan view with nothing but the library: %d of its %d codes "
       "are in it, kerbs and lots, houses, fences, trees, the services under and over the road, a stretch of rail "
       "on a bridge, contours and a creek, control marks and the labels. Every mark is the size it is on paper "
-      "and sits where its code put it (`tools/katana_standard/showcase.py`).*" % (len(_showcase_keys()), n_codes))
+      "and sits where its code put it (`tools/katana_standard/showcase.py`). Katana does not yet apply a code's "
+      "pen weight, so every line is drawn at one width here and the weight ladder of \"Pen weights\" is not "
+      "shown.*" % (len(_showcase_keys()), n_codes))
     w("")
 
     w("**Contents.** [At a glance](#at-a-glance) · [Using it](#using-it) · [Reading a code](#reading-a-code) · "
@@ -185,7 +192,9 @@ def catalogue(data, root):
     w("")
     w("*After the import, from the top: the closed lot boundary with its control mark and its tree; the paling "
       "fence beside it; the kerb with a gully pit; the water main with its valve; the disused cable. The plain "
-      "cross inside the lot is `UWQ`, the point no rule answers.*")
+      "cross inside the lot is `UWQ`, the point no rule answers. Pen weights are not yet applied, so the "
+      "boundary is no heavier than the fence. The words beside each feature are laid on the screenshot "
+      "afterwards, from the library's own legend labels.*")
     w("")
 
     # ---- reading a code ---------------------------------------------------------------------------------------
@@ -223,9 +232,10 @@ def catalogue(data, root):
       "the string attributes, and the plot legend prints the comment. Katana stores, lists and lints, and does "
       "not yet apply: `weight`, `group`, `hide`, `surface`, text rules, pipe rules, and a symbol's rotation, "
       "offset and raise. So the codes `GPG` and `GPR` (ground points shown by their level) are marked `hide` and "
-      "still draw their one-millimetre plus, the six text codes draw a plus until text rules are applied, and the "
-      "four kerb codes, which are plain continuous lines of one weight, look the same on the plan until the "
-      "weight is applied. The rules are written for the day it does.")
+      "still draw their one-millimetre plus, the six text codes draw a plus until text rules are applied, and "
+      "the plain continuous lines of one colour on one layer, such as the two carriageway edges `RCE` and `RCI`, "
+      "or the kerb top `KKT` and the kerb return `KKR` (one feature, straight and curved), look the same on "
+      "the plan until the weight is applied. The rules are written for the day it does.")
     w("")
 
     # ---- palette ----------------------------------------------------------------------------------------------
@@ -235,15 +245,21 @@ def catalogue(data, root):
       "fold onto one of the 27 standard names Katana already knows. Each is at least 3:1 against the plan "
       "view's ground (`%s`, a blue-grey that is almost black) and against white paper, since one library is "
       "plotted and read on the screen; and no two are closer than 0.05 in OKLab, about where two thin lines "
-      "of different colour stop being told apart. The six buried-service colours follow the widely published "
-      "convention for marking buried utilities (water blue, sewer green, gas yellow, electricity red, "
-      "communications orange, recycled water purple), tuned so the yellow and the orange still read on white."
-      % colours.GROUND)
+      "of different colour stop being told apart. That leaves only a narrow band of lightness, so the six warm "
+      "classes (kerb, wall, contour, fuel, fence, breakline) were placed by a search, each at least %.2f from "
+      "every other colour, and the six classes drawn with the thinnest pens (tree, planting, ground, building, "
+      "wall, communications) keep at least %.2f : 1 on both grounds. The six buried-service colours follow the "
+      "widely published convention for marking buried utilities (water blue, sewer green, gas yellow, "
+      "electricity red, communications orange, recycled water purple), tuned so the yellow and the orange still "
+      "read on white. Colour does not carry a class alone: for a reader who confuses red with green some warm "
+      "pairs stay close whatever their values, so every pipe has its letter and every line class its own pattern."
+      % (colours.GROUND, colours.WARM_FLOOR, colours.THIN_FLOOR))
     w("")
-    w("**The two utility conventions differ.** Katana's own `UTILITY DRAW` uses the AS 5488 plan colours "
-      "(electricity orange, communications white, sewer cream, stormwater green). A drawing that mixes coded "
-      "survey strings and `UTILITY DRAW` output has two conventions in it and wants a legend. Aligning one to "
-      "the other is the owner's decision (\"Not done\").")
+    w("**The two utility conventions differ.** Katana's own `UTILITY DRAW` has colours of its own "
+      "(electricity orange, communications white, sewer cream, stormwater green; `docs/subsurface_utilities.md`: "
+      "they are Katana's defaults, and AS 5488 sets none). A drawing that mixes coded survey strings and "
+      "`UTILITY DRAW` output has two conventions in it and wants a legend. Aligning one to the other is the "
+      "owner's decision (\"Not done\").")
     w("")
     w("![The 28 colours of Katana Standard on the plan ground and on white paper](" + IMAGES + "palette.png)")
     w("")
@@ -262,7 +278,10 @@ def catalogue(data, root):
     w("%s, each a repeating cell. A linestyle named by a rule replaces the line, so the gaps are the library's "
       "job; every one is drawn so that it reads at plan scale on screen and on a plotted sheet." % plural(n_ls, "linestyle"))
     w("")
-    w("![All 71 linestyles of Katana Standard, drawn by Katana](" + IMAGES + "linestyles.png)")
+    w("![All %d linestyles of Katana Standard, drawn by Katana](" % n_ls + IMAGES + "linestyles.png)")
+    w("")
+    w("*One sample of each, drawn by a code that uses it. Pen weights are not yet applied, so every line is the "
+      "same width here.*")
     w("")
     w("**How they are drawn.** The rules the data's own check enforces:")
     w("")
@@ -287,9 +306,10 @@ def catalogue(data, root):
     # ---- symbols ----------------------------------------------------------------------------------------------
     w("## Symbols")
     w("")
-    w("%s, every one drawn at its vertex, unrotated and centred on it, in paper millimetres." % plural(n_sy, "symbol"))
+    w("%s, every one drawn at its vertex, unrotated, in paper millimetres, with its origin at the centre of "
+      "its box unless its description says where else." % plural(n_sy, "symbol"))
     w("")
-    w("![All 113 symbols of Katana Standard, drawn by Katana](" + IMAGES + "symbols.png)")
+    w("![All %d symbols of Katana Standard, drawn by Katana](" % n_sy + IMAGES + "symbols.png)")
     w("")
     w("**The house style**, which makes each symbol learnt once:")
     w("")
@@ -366,15 +386,21 @@ def catalogue(data, root):
     w("## Originality")
     w("")
     w("The built-in customisation of this repository was converted from a third party's files, and Katana "
-      "Standard was made so that nothing of them is in it. It was written from a specification that fixes "
-      "its own taxonomy, its own vocabulary and its own palette, and that forbade its authors to open the "
-      "built-in; every stroke was drawn from a short written brief and looked at, in Katana's own renderer, "
-      "before it was kept. "
-      "Before it was accepted a scan compared every definition name, group path, layer, survey code key and "
-      "colour name with the built-in's and found no exact match; what overlaps is single generic words that any "
-      "survey library has to use (a few object names, a few group words, layer words such as `water`), which "
-      "cannot be avoided without being wrong. The licence of the library is that of the Katana repository, and "
-      "the repository has none chosen yet, so nothing stronger is claimed for it.")
+      "Standard was made so that nothing of them is in it. Its authors were given the built-in's structure and "
+      "its statistics (how many groups, codes and strokes, which kinds of rule it uses and where it is weak) to "
+      "know what a full survey library covers, and were forbidden to copy or paraphrase any name, group, layer, "
+      "code key, comment, stroke, text or colour of it. They were not to read its contents, but in one "
+      "exploratory run some of its names were printed in a terminal; none of them was written to a file of this "
+      "library. The library was written from a specification that "
+      "fixes its own taxonomy, its own vocabulary and its own palette; every stroke was drawn from a short "
+      "written brief and looked at, in Katana's own renderer, before it was kept. "
+      "Reviewers then compared every definition name, group path, layer, survey code key, comment and colour "
+      "with the built-in's, and every stroke list by exact, translated and scaled match, and found no exact "
+      "match of a name, key or colour and no stroke list beyond a single dash; what overlaps is single generic "
+      "words and names of real objects that any survey library has to use (a bollard, a fire hydrant, a "
+      "retaining wall, layer words such as `water`), which cannot be avoided without being wrong. The test "
+      "`KatanaStandard.*` repeats the name, key and colour comparison at run time, by count. The library is "
+      "licensed with the rest of the repository (`LICENSING.md`).")
     w("")
     w("## Decisions, and what was rejected")
     w("")
@@ -401,9 +427,17 @@ def catalogue(data, root):
     w("- **Layers are what one switches on and off together.** One per family, three levels, never one per "
       "code and never one per lifecycle: a disused service is an attribute, `utility.status`, and its own "
       "layer only in the utility group where the state is itself something one switches off.")
-    w("- **Edges that are one hard line stay plain.** 26 of the 123 line codes use Katana's plain continuous "
-      "line, since a solid line is the right drawing for a hard edge; where pens are applied the weight tells "
-      "them apart. Until then they differ by layer alone.")
+    w("- **Edges that are one hard line stay plain.** %d of the %d line codes use Katana's plain continuous "
+      "line, since a solid line is the right drawing for a hard edge: the carriageway and path edges, the "
+      "building wall, the kerb top and return (one feature, straight and curved), concrete walls, the bridge "
+      "deck and the hairline detail. Where pens are applied the weight tells them apart; until then they differ "
+      "by layer alone. Where two lines of one class are NOT the same thing they have a pattern each: the gutter "
+      "lip is `Gutter Lip Line` and the back of the kerb `Kerb Back Line`, so a kerb reads as three lines on a "
+      "plan whether or not the weights are applied." % (n_plain, n_lines))
+    w("- **Stormwater pits and pipes are typed for the utility tools.** The pits and structures (`KP`) and the "
+      "pipes and culverts (`KC`) of class K set `utility.type` to `stormwater`, though they are catalogued as "
+      "drainage; the kerbs, channels and creeks do not. Rejected: leaving them untyped, which makes `UTILITY "
+      "DRAW` read a coded stormwater pipe as an unknown service.")
     w("")
 
     w("## How it is made and held")
@@ -426,12 +460,17 @@ def catalogue(data, root):
       "used and catalogued, the weights, the utility words, the geometry bounds of the contract and the "
       "byte-for-byte writer round trip. `" + CLI_IMPORT_TEST + "` imports the invented field file; `" +
       CLI_LINEWORK_TEST + "` strings control words, which no field-file reader carries, into a curve, a "
-      "rectangle and a closed line.")
+      "rectangle and a closed line. A counts-only test cannot see a swapped colour, weight or linestyle, so "
+      "`katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document "
+      "are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each "
+      "data module's own check; they exist where Python does.")
     w("- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and "
       "`-showcase.png` are drawn by Katana itself from the committed file, headlessly "
       "(`tools/katana_standard/render_images.py`; `docs/headless.md`): the symbols are the Symbol Library's own "
       "icons, tinted with the colour of the code that uses each and laid out on one sheet; the linestyles are a "
-      "300 dpi plot; the plan and the showcase are the plan view at twice the pixels. `-palette.png` is laid "
+      "300 dpi plot; the plan is the plan view at twice the pixels, each feature named beside it by the "
+      "script; the showcase is the plan view at the plot scale 1:500, in a few screenshots laid side by side. "
+      "`-palette.png` is laid "
       "out from the palette's values by `palette_preview.py`, since a palette is a table and not a drawing. The "
       "images are not byte-reproducible, since fonts differ between machines, so `--check` does not compare "
       "them. Each is under 500 KB.")
@@ -444,7 +483,9 @@ def catalogue(data, root):
       "Standard becomes the default, or a second built-in with a chooser, is the owner's decision.")
     w("- **The colour convention** of the buried services differs from `UTILITY DRAW`'s. Aligning one to the "
       "other is the owner's decision.")
-    w("- **No licence is chosen** for the library: it is the repository's, and the repository has none yet.")
+    w("- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the "
+      "project licence does not cover and says the library is covered; the library was written by AI agents "
+      "under the owner's direction, and what that means for copyright is a question for the owner and a lawyer.")
     w("- **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's "
       "rotation, offset and raise. The library carries them for the day it does.")
     w("- **A curve cannot come from a field file.** The readers Katana has strung points by the file's own "
@@ -458,12 +499,13 @@ def catalogue(data, root):
       "layer table's behaviour, not the library's: the flat layer names of other libraries never showed it. "
       "Not changed here.")
     w("- **Two inconsistencies** are known and left as they are, because the names are frozen: "
-      "`Pit Size (mm)` is text where every other millimetre attribute is an integer, and fifteen linestyles "
-      "are shared by two to six codes, so the plot legend uses the linestyle's name for them.")
-    w("- **Four symbols sit a little off the origin** (Booster Connection, Building Corner, Doorway and North "
-      "Arrow, by 0.4 to 0.6 mm): the surveyed point is not the middle of their drawing, and each description "
-      "says so. The Communications Maintenance Hole, a double ring with a C, reads as a copyright sign at "
-      "small size.")
+      "`Pit Size (mm)` is text where every other millimetre attribute is an integer, and %d linestyles "
+      "are shared by two to %d codes, so the plot legend uses the linestyle's name for them." % (n_shared, max_shared))
+    w("- **Some symbols sit off the centre of their box**: Booster Connection, Building Corner, Doorway and "
+      "North Arrow by 0.4 to 0.6 mm, and a few others (the valves, the camera, the trigonometric station) by "
+      "0.25 to 0.35. The surveyed point is not the middle of their drawing, and each description says where "
+      "the origin is. The Communications Maintenance Hole, a double ring with a C, reads as a copyright sign "
+      "at small size.")
     return "\n".join(out).rstrip("\n") + "\n"
 
 

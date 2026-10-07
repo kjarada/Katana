@@ -321,7 +321,12 @@ def main(argv):
         if os.path.exists(os.path.join(HERE, "catalogue.py")):
             expected[DOCS_PATH] = _module("catalogue").catalogue(data, ROOT).encode("utf-8")
         for path, payload in expected.items():
-            if read_bytes(path) != payload:
+            found = read_bytes(path)
+            if found is not None and path == DOCS_PATH:
+                # A text document: a Windows checkout (core.autocrlf) has CRLF line ends the generator never wrote.
+                # The JSON is exact bytes (.gitattributes: -text), so only the document is read this way.
+                found = found.replace(b"\r\n", b"\n")
+            if found != payload:
                 print("STALE: %s differs from what the data makes; run this script with --json --docs" %
                       os.path.relpath(path, ROOT))
                 status = 1

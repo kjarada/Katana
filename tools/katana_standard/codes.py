@@ -17,15 +17,19 @@ THE GRAMMAR
    Drainage, Kerbs, Top edge. The first two letters are in TAXONOMY and fix the group and the first two levels
    of the layer; the third names the item inside its subgroup.
 2. Utility items share their third letter across services, so it is learnt once: M main, B branch or
-   connection, D disused main, V isolation valve, X meter, P pit, H maintenance hole, K marker post or pillar,
-   T tank or transformer, C cable, N duct, O overhead line. Where the plain letter was taken the code uses the
-   next natural one: UWU and USP (pump stations), UEP (power pole), UEJ (electrical pit), UEY (pole guy), UFH
-   (hydrant), UFB (booster), USR and UGR (pressure sewer, regulator), UXM (paint mark). The service letters are
-   those of the one-letter asset types of AS 5488 where one exists (C E F G I P S W); R (recycled water) and X
-   (unknown) are ours.
+   connection (a fire booster is UFB), D disused main, V isolation valve, X meter, P pit, H maintenance hole,
+   K marker post or pillar, T tank or transformer, C cable, N duct, O overhead line. An item with no plain
+   letter takes the next natural one, and those are this library's own and are learnt with it: U pumping
+   station (UWU), P pumping station and power pole (USP, UEP; the power pit is J, UEJ), Y pole guy (UEY), H
+   hydrant (UFH; a fire main has no maintenance hole), R pressure sewer and gas regulator (USR, UGR), E sewer
+   vent (USE), L loop detector and unknown line (UIL, UXL), and M, free in the unknown services because their
+   line is L, is the surface paint mark (UXM). The service letters are those of the one-letter asset types
+   of AS 5488 where one exists (C E F G I P S W); R (recycled water) and X (unknown) are ours.
 3. DIGITS ARE NEVER PART OF A KEY. `UWM`, `UWM1` and `UWM01` are one code; the digits are the STRING NUMBER,
    which the linework reads: `UWM1` and `UWM2` are two water mains. A key written with a digit before its `*`
-   would match only numbered names.
+   would match only numbered names. A key is matched as written, in capitals: `uwm1` matches no rule
+   (`CODE EXPLAIN uwm1` says the key `UWM*` differs only in letter case), so set the data collector to send
+   capitals.
 4. Control words follow the code, after a space: `ST` first point, `END` last point, `CL` last point and close,
    `BC` and `EC` begin and end a curve (three points fix an arc), `JPN n` also join to point number n, `RECT`
    the third point of a rectangle. These are Katana's default spellings; the library says nothing about them,
@@ -46,14 +50,19 @@ THE GRAMMAR
 8. Attributes. An attribute with an EMPTY value is a PROMPT: the code asks for it. One with a value is applied.
    Names carry their unit (`Depth (m)`, `Diameter (mm)`). Every buried utility asks Owner, Depth (m) and
    Condition, and a pipe also Material and Diameter (mm). Every utility code sets `utility.type` to its
-   service word, and a disused code sets `utility.status` to `disused`: those are the keys and words Katana's
-   utility tools read, so a coded string is already typed for UTILITY DRAW. The prompts use the library's own
-   names, not `utility.owner`, so an empty prompt never reads as "recorded".
+   service word, and a disused code sets `utility.status` to `disused`. So do the stormwater pits and pipes of
+   class K (KP and KC: `utility.type` is `stormwater`), which sit in Kerbs and Drainage because they are
+   drainage, and are services all the same. Those are the keys and words Katana's utility tools read, so a
+   coded string is already typed for UTILITY DRAW. The kerbs, channels and creeks of class K set none. The
+   prompts use the library's own names, not `utility.owner`, so an empty prompt never reads as "recorded".
 9. `comment` is the LEGEND LABEL: a noun phrase in sentence case, 1 to 36 characters, which the plot legend
    prints in capitals. When several codes share one linestyle the legend takes the linestyle's name instead,
    unless every coded entity agrees on the label. Longer text is `meaning` and `how`.
 10. Weights, in millimetres of pen: 0.13 hairline, 0.18 fine, 0.25 light, 0.35 medium, 0.50 strong (0.70 is
-   reserved). Katana stores `weight` and does not yet apply it; the scale is still the documented intent.
+   reserved). The hairline is for hatching, joints, hidden detail, tree rows and canopies, flow paths, text and
+   leaders; nothing in the planting or ground classes is lighter than 0.18, since those colours are the
+   faintest on paper. Katana stores `weight` and does not yet apply it; the scale is still the documented
+   intent.
 11. What Katana applies today and what it only stores. `CODE` applies layer, colour, linestyle, symbol name and
    size, and the string attributes (a value starting with `$` is deferred, not written), and the legend
    prints the comment. It stores, lists and lints, and does not yet apply: weight, group, hide, surface, text
@@ -72,8 +81,8 @@ GRAMMAR = (__doc__ or "").split("THE GRAMMAR", 1)[-1].strip()
 
 # The six pen weights in millimetres: (text, role, what it is for).  Katana's own weight is TEXT.
 WEIGHTS = [
-    ("0.13", "hairline", "hatching, hidden detail, leaders, text"),
-    ("0.18", "fine", "vegetation, intermediate contours, markings, minor services"),
+    ("0.13", "hairline", "hatching, joints, hidden detail, tree rows, leaders, text"),
+    ("0.18", "fine", "vegetation, ground shots and levels, intermediate contours, markings, minor services"),
     ("0.25", "light", "everyday detail: fences, paths, branches"),
     ("0.35", "medium", "primary detail: kerbs, building walls, service mains, index contours"),
     ("0.50", "strong", "title boundary, bridge decks, limit of survey"),
@@ -610,14 +619,14 @@ CODES = [
               "from this string. Take a point at each change of direction and every 10 m on a curve."),
          example="KKT1 ST, KKT1, KKT1 END"),
     code("KKL", "Gutter Lip", "line", "drainage/kerbs/gutter", "kerb", "0.25",
-         style="continuous", surface=True,
+         style="Gutter Lip Line", surface=True,
          label="Gutter lip",
          meaning="Flow line of the gutter at the foot of the kerb face.",
          how=("Shoot the line water runs on, where the gutter turns up into the kerb face. Level it "
               "carefully: gutter falls are checked against it."),
          example="KKL1 ST, KKL1, KKL1 END"),
     code("KKB", "Kerb Back Edge", "line", "drainage/kerbs/back", "kerb", "0.18",
-         style="continuous", surface=True,
+         style="Kerb Back Line", surface=True,
          label="Kerb back edge",
          meaning="Back edge of the kerb top.",
          how=("Shoot where the kerb top meets the footpath or the verge. It is needed only when the "
@@ -649,55 +658,56 @@ CODES = [
 # ---- KP Kerbs and Drainage / Pits and Structures -------------------------------------------------------------
     code("KPG", "Grated Gully Pit", "point", "drainage/structures/pit", "stormwater", "0.25",
          symbol="Gully Pit",
-         attrs=["Pit Size (mm)", "Depth (m)", "Condition"],
+         attrs=["utility.type=stormwater", "Pit Size (mm)", "Depth (m)", "Condition"],
          label="Grated gully pit",
          meaning="Grated pit that takes surface water.",
          how=("Shoot the middle of the grate. Pit Size (mm) is the clear opening of the pit; Depth (m) "
               "is from the grate to the invert. Level the invert separately as GPI.")),
     code("KPK", "Kerb Inlet Pit", "point", "drainage/structures/pit", "stormwater", "0.25",
          symbol="Kerb Inlet Pit",
-         attrs=["Pit Size (mm)", "Depth (m)", "Condition"],
+         attrs=["utility.type=stormwater", "Pit Size (mm)", "Depth (m)", "Condition"],
          label="Kerb inlet pit",
          meaning="Pit with its opening in the kerb face.",
          how=("Shoot the middle of the kerb opening on the kerb line. The notch is drawn on the symbol's "
               "left and is not turned to follow the kerb.")),
     code("KPJ", "Junction Pit", "point", "drainage/structures/pit", "stormwater", "0.25",
          symbol="Junction Pit",
-         attrs=["Pit Size (mm)", "Depth (m)", "Condition"],
+         attrs=["utility.type=stormwater", "Pit Size (mm)", "Depth (m)", "Condition"],
          label="Junction pit",
          meaning="Pit where pipes meet, with a solid lid.",
          how=("Shoot the middle of the lid. Depth (m) is from the lid to the lowest invert, which is "
               "levelled as GPI.")),
     code("KPH", "Stormwater Manhole", "point", "drainage/structures/manhole", "stormwater", "0.25",
          symbol="Stormwater Manhole",
-         attrs=["Lid Size (mm)", "Depth (m)", "Condition"],
+         attrs=["utility.type=stormwater", "Lid Size (mm)", "Depth (m)", "Condition"],
          label="Stormwater manhole",
          meaning="Round access cover over a stormwater pipe.",
          how=("Shoot the middle of the cover. Lid Size (mm) is the clear diameter of the opening. Sewer "
               "covers are USH, not this.")),
     code("KPT", "Gross Pollutant Trap", "point", "drainage/structures/outlet", "stormwater", "0.25",
          symbol="Gross Pollutant Trap",
-         attrs=["Owner", "Condition"],
+         attrs=["utility.type=stormwater", "Owner", "Condition"],
          label="Gross pollutant trap",
          meaning="Structure that traps litter and sediment before an outfall.",
          how=("Shoot the middle of the access lid. A trap large enough to need an outline is outlined "
               "with a generic line (XGL) and a note.")),
     code("KPW", "Headwall", "point", "drainage/structures/outlet", "stormwater", "0.25",
          symbol="Headwall",
-         attrs=["Owner", "Condition"],
+         attrs=["utility.type=stormwater", "Owner", "Condition"],
          label="Headwall",
          meaning="Concrete wall round the end of a pipe or culvert.",
          how=("Shoot the middle of the top of the wall, on the face where the pipe passes through, then "
               "code the pipe itself. The symbol is drawn open to the west and is not turned.")),
     code("KPC", "Culvert End", "point", "drainage/structures/outlet", "stormwater", "0.25",
          symbol="Culvert End",
-         attrs=["Owner", "Condition"],
+         attrs=["utility.type=stormwater", "Owner", "Condition"],
          label="Culvert end",
          meaning="Open end of a culvert barrel.",
          how=("Shoot the middle of the mouth at the invert. Shoot both ends of the culvert so its length "
               "and fall are known.")),
     code("KPS", "Subsoil Inspection Point", "point", "drainage/structures/pit", "stormwater", "0.25",
          symbol="Subsoil Inspection Point",
+         attrs=["utility.type=stormwater"],
          label="Subsoil inspection point",
          meaning="Inspection opening on a subsoil drain.",
          how="Shoot the middle of the cap on the inspection riser."),
@@ -706,7 +716,7 @@ CODES = [
     code("KCP", "Stormwater Pipe", "line", "drainage/pipes/pipe", "stormwater", "0.35",
          style="Stormwater Pipe Line",
          pipe=("Invert", "diameter", "$Diameter (mm)", ""),
-         attrs=["Material", "Diameter (mm)", "Depth (m)", "Owner", "Condition"],
+         attrs=["utility.type=stormwater", "Material", "Diameter (mm)", "Depth (m)", "Owner", "Condition"],
          label="Stormwater pipe",
          meaning="Stormwater pipe, shot pit to pit.",
          how=("Shoot the invert at every pit and manhole it passes through: the rule reads the level you "
@@ -715,7 +725,7 @@ CODES = [
     code("KCB", "Box Culvert", "line", "drainage/pipes/culvert", "stormwater", "0.35",
          style="Culvert Outline",
          pipe=("Invert", "culvert", "$Width (mm)", "$Height (mm)"),
-         attrs=["Material", "Width (mm)", "Height (mm)", "Depth (m)", "Owner", "Condition"],
+         attrs=["utility.type=stormwater", "Material", "Width (mm)", "Height (mm)", "Depth (m)", "Owner", "Condition"],
          label="Box culvert",
          meaning="Rectangular culvert, drawn as a pair of walls.",
          how=("Shoot the invert along the middle of the culvert and at both ends. Width (mm) and Height "
@@ -723,7 +733,7 @@ CODES = [
          example="KCB1 ST, KCB1 END"),
     code("KCS", "Subsoil Drain", "line", "drainage/pipes/subsoil", "stormwater", "0.18",
          style="Subsoil Drain Line",
-         attrs=["Depth (m)", "Condition"],
+         attrs=["utility.type=stormwater", "Depth (m)", "Condition"],
          label="Subsoil drain",
          meaning="Perforated drain buried beside a road or a wall.",
          how=("Shoot along the drain at each inspection point and bend. Depth (m) is to the invert, and "
@@ -1379,7 +1389,7 @@ CODES = [
          example="VSH1 ST, VSH1, VSH1 END"),
 
 # ---- VG Vegetation and Landscape / Ground Cover --------------------------------------------------------------
-    code("VGL", "Lawn Edge", "line", "vegetation/ground/edge", "planting", "0.13",
+    code("VGL", "Lawn Edge", "line", "vegetation/ground/edge", "planting", "0.18",
          style="Grass Edge",
          label="Lawn edge",
          meaning="Edge of mown grass, where lawn meets paving, garden or bush.",
@@ -1393,13 +1403,13 @@ CODES = [
          how=("Shoot the outer edge of the bush at each change of direction. Walk with the bush on your "
               "left so the tufts fall on the bush side."),
          example="VGB1 ST, VGB1, VGB1 END"),
-    code("VGM", "Garden Bed Edge", "line", "vegetation/ground/edge", "planting", "0.13",
+    code("VGM", "Garden Bed Edge", "line", "vegetation/ground/edge", "planting", "0.18",
          style="continuous",
          label="Garden bed edge",
          meaning="Edge of a garden bed, where planting meets lawn or paving.",
          how="Shoot the edge of the bed where it meets lawn or paving. Close with CL for an island bed.",
          example="VGM1 ST, VGM1, VGM1, VGM1 CL"),
-    code("VGC", "Crop Edge", "line", "vegetation/ground/edge", "planting", "0.13",
+    code("VGC", "Crop Edge", "line", "vegetation/ground/edge", "planting", "0.18",
          style="continuous",
          label="Crop edge",
          meaning="Edge of a cropped paddock.",
@@ -1643,38 +1653,38 @@ CODES = [
               "it; use this code for a lone post.")),
 
 # ---- GP Terrain and Breaklines / Ground Points ---------------------------------------------------------------
-    code("GPG", "Ground Shot", "point", "terrain/points/ground", "ground", "0.13",
+    code("GPG", "Ground Shot", "point", "terrain/points/ground", "ground", "0.18",
          symbol="Ground Shot", surface=True, hide=True,
          label="Ground shot",
          meaning="Level on natural ground: the height is what matters, the mark is a tiny plus.",
          how=("Use for every ordinary shot on natural ground. The rule marks it hidden, so a surface of "
               "ten thousand shots does not bury the plan; Katana does not yet apply hide, so for now a 1 "
               "mm plus shows.")),
-    code("GPS", "Spot Level", "point", "terrain/points/spot", "ground", "0.13",
+    code("GPS", "Spot Level", "point", "terrain/points/spot", "ground", "0.18",
          symbol="Spot Level", surface=True,
          label="Spot level",
          meaning="Level on a feature, shown with its mark so it can be checked.",
          how=("Use for a level on something that is not natural ground, such as a step, a slab corner or "
               "a floor level. It stays visible so the checker can find it.")),
-    code("GPH", "High Point", "point", "terrain/points/spot", "ground", "0.13",
+    code("GPH", "High Point", "point", "terrain/points/spot", "ground", "0.18",
          symbol="High Point", surface=True,
          label="High point",
          meaning="Local high point of the ground.",
          how=("Shoot the highest point of a mound, a crest or a hilltop, and only when it is a real "
               "feature of the ground.")),
-    code("GPL", "Low Point", "point", "terrain/points/spot", "ground", "0.13",
+    code("GPL", "Low Point", "point", "terrain/points/spot", "ground", "0.18",
          symbol="Low Point", surface=True,
          label="Low point",
          meaning="Local low point of the ground.",
          how=("Shoot the lowest point of a sag, a hollow or a sump. A low point that drains to a pit is "
               "coded GPI at the pit.")),
-    code("GPR", "Road Surface Level", "point", "terrain/points/ground", "ground", "0.13",
+    code("GPR", "Road Surface Level", "point", "terrain/points/ground", "ground", "0.18",
          symbol="Ground Shot", surface=True, hide=True,
          label="Road surface level",
          meaning="Level on a paved surface: the height is what matters, the mark is a tiny plus.",
          how=("Use for ordinary shots on a sealed surface, a slab or a car park. The rule marks it "
               "hidden like GPG; Katana does not yet apply hide, so for now a 1 mm plus shows.")),
-    code("GPI", "Invert Level", "point", "terrain/points/spot", "ground", "0.13",
+    code("GPI", "Invert Level", "point", "terrain/points/spot", "ground", "0.18",
          symbol="Invert Level", surface=True,
          label="Invert level",
          meaning="Level at the bottom of a pipe, a pit or a drain.",
@@ -2071,6 +2081,8 @@ def expand_rules(c):
 # ---- the self-check ------------------------------------------------------------------------------------------
 
 CONTROL_WORDS = ("ST", "END", "CL", "BC", "EC", "JPN", "RECT")
+# The subgroups of class K whose codes are stormwater services and so set `utility.type` (grammar rule 8).
+STORMWATER_TYPED = ("KP", "KC")
 # The words CLAUDE.md section 9 keeps out of new text, assembled from pieces so this file does not hold them.
 FORBIDDEN = re.compile("|".join(["1" + "2d", "ex" + "ds", "n" + "sw"]), re.I)
 MEMBERS = {"key", "group", "name", "kind", "layer", "colour", "weight", "linestyle", "symbol", "attributes",
@@ -2241,8 +2253,14 @@ def check(contract=None):
             disused = [a["value"] for a in c["attributes"] if a["name"] == "utility.status"]
             if disused != (["disused"] if layer.endswith("/disused") else []):
                 err(f"{where}: utility.status is 'disused' on a disused code and absent elsewhere")
+        elif k[:2] in STORMWATER_TYPED:
+            typed = [a["value"] for a in c["attributes"] if a["name"] == "utility.type"]
+            if typed != ["stormwater"]:
+                err(f"{where}: a stormwater pit or pipe sets utility.type to 'stormwater', it sets {typed}")
+            if any(a["name"] == "utility.status" for a in c["attributes"]):
+                err(f"{where}: utility.status is for the disused utility codes only")
         elif any(a["name"].startswith("utility.") for a in c["attributes"]):
-            err(f"{where}: only utility codes set utility.* attributes")
+            err(f"{where}: only utility codes and the stormwater pits and pipes set utility.* attributes")
 
         # prose
         comment = c["comment"]

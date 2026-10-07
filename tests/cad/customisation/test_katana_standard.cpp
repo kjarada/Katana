@@ -18,9 +18,12 @@
 //   * contrast is the WCAG 2.x formula, a published standard;
 //   * a hand-worked check says why a figure is what it is where it can: 245
 //     codes make 245 feature rules and 245 surface rules; 125 of them draw a
-//     symbol (every code but the 114 plain lines and the 6 text codes); 66
-//     attributes are applied (60 utility codes say their service, 6 disused
-//     ones say so) and every other is a prompt.
+//     symbol (every code but the 114 plain lines and the 6 text codes); 77
+//     attributes are applied (60 utility codes say their service, the 11
+//     stormwater pits and pipes say theirs, 6 disused ones say so) and every
+//     other is a prompt; 140 codes carry attributes (the 245 less 105 with none).
+//   * the palette's two floors are the WCAG contrast formula and the OKLab
+//     distance of Bjorn Ottosson's published matrices, written out below.
 //
 // Nothing here names a definition, a code or a colour of the reference
 // customisation: where the two are compared it is by count, at run time.
@@ -28,6 +31,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -130,6 +134,28 @@ double contrast(const Color& a, const Color& b)
     return (hi + 0.05) / (lo + 0.05);
 }
 
+// Distance in OKLab (Bjorn Ottosson, 2020: the published matrices), the
+// space in which a step of 0.02 is about the least a person sees between two
+// large patches. The palette's own check uses the same published figures.
+double oklabDistance(const Color& a, const Color& b)
+{
+    const auto lab = [](const Color& c) {
+        const double r = linear(c.r);
+        const double g = linear(c.g);
+        const double bl = linear(c.b);
+        const double l = std::cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * bl);
+        const double m = std::cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * bl);
+        const double s = std::cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * bl);
+        return std::array<double, 3>{0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+                                     1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+                                     0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s};
+    };
+    const auto p = lab(a);
+    const auto q = lab(b);
+    return std::sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) +
+                     (p[2] - q[2]) * (p[2] - q[2]));
+}
+
 // Millimetres at most this far from a whole number of thousandths.
 bool atMostThreeDecimals(double value)
 {
@@ -180,20 +206,20 @@ TEST(KatanaStandard, ItHoldsTheCountsOfItsIndependentCensus)
             ++strokes[stroke.op];
         }
     });
-    EXPECT_EQ(file.library.size(), 184u);
-    EXPECT_EQ(linestyles, 71u);
+    EXPECT_EQ(file.library.size(), 186u);
+    EXPECT_EQ(linestyles, 73u);
     EXPECT_EQ(symbols, 113u);
     EXPECT_EQ(atVertices, 113u) << "every symbol is at vertices and no linestyle is";
-    // census.py: arc 91, circle 87, dot 36, draw 1083, move 588, text 44.
-    EXPECT_EQ(strokes[StrokeOp::Arc], 91u);
-    EXPECT_EQ(strokes[StrokeOp::Circle], 87u);
-    EXPECT_EQ(strokes[StrokeOp::Dot], 36u);
-    EXPECT_EQ(strokes[StrokeOp::Draw], 1083u);
-    EXPECT_EQ(strokes[StrokeOp::Move], 588u);
-    EXPECT_EQ(strokes[StrokeOp::Text], 44u);
+    // census.py: arc 84, circle 83, dot 38, draw 1113, move 586, text 43.
+    EXPECT_EQ(strokes[StrokeOp::Arc], 84u);
+    EXPECT_EQ(strokes[StrokeOp::Circle], 83u);
+    EXPECT_EQ(strokes[StrokeOp::Dot], 38u);
+    EXPECT_EQ(strokes[StrokeOp::Draw], 1113u);
+    EXPECT_EQ(strokes[StrokeOp::Move], 586u);
+    EXPECT_EQ(strokes[StrokeOp::Text], 43u);
     EXPECT_EQ(strokes[StrokeOp::Pen], 0u) << "no stroke names a pen: the rule gives the colour";
     EXPECT_EQ(katana::entity::styleGroups(file.library).size(), 49u);
-    EXPECT_EQ(file.map.size(), 769u);
+    EXPECT_EQ(file.map.size(), 770u);
     EXPECT_EQ(file.map.keys().size(), 245u);
     EXPECT_EQ(file.colours.size(), 28u);
 }
@@ -248,7 +274,7 @@ TEST(KatanaStandard, ARuleOfEachKindIsWrittenForTheCodesThatNeedIt)
     EXPECT_EQ(bySection[SurveySection::Tinable], 245u);
     EXPECT_EQ(bySection[SurveySection::Pipe], 9u);
     EXPECT_EQ(bySection[SurveySection::VertexTextStyle], 6u);
-    EXPECT_EQ(bySection[SurveySection::StringAttribute], 139u);
+    EXPECT_EQ(bySection[SurveySection::StringAttribute], 140u);
     EXPECT_EQ(bySection[SurveySection::VertexPipe], 0u);
     EXPECT_EQ(bySection[SurveySection::SegmentPipe], 0u);
     EXPECT_EQ(bySection[SurveySection::VertexAttribute], 0u);
@@ -346,6 +372,65 @@ TEST(KatanaStandard, EveryColourIsReadableOnThePlanGroundAndOnWhitePaper)
     }
 }
 
+TEST(KatanaStandard, NoTwoColoursAreCloserThanFiveHundredthsInOKLabAndTheWarmClassesAreSixHundredthsApart)
+{
+    KS_LOAD();
+    const auto entries = file.colours.entries();
+    // The six warm classes, which sit in the narrow band of lightness that
+    // both grounds leave and were placed by a search: each is at least 0.06
+    // from every other colour, as colours.py holds it.
+    const std::set<std::string> warm{"katana kerb",  "katana wall",  "katana contour",
+                                     "katana fuel",  "katana fence", "katana breakline"};
+    std::size_t warmPairs = 0;
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        for (std::size_t j = i + 1; j < entries.size(); ++j) {
+            const double d = oklabDistance(entries[i].colour, entries[j].colour);
+            EXPECT_GE(d, 0.05) << entries[i].name << " and " << entries[j].name;
+            if (warm.count(entries[i].name) == 1 || warm.count(entries[j].name) == 1) {
+                ++warmPairs;
+                EXPECT_GE(d, 0.06) << entries[i].name << " and " << entries[j].name;
+            }
+        }
+    }
+    // Reaches the cases it claims to: six colours against the other 22, and
+    // among themselves 15 pairs: 6 * 22 + 15.
+    EXPECT_EQ(warmPairs, 147u);
+}
+
+TEST(KatanaStandard, TheClassesDrawnWithTheThinnestPensKeepAFloorOfThreeAndAQuarterOnBothGrounds)
+{
+    KS_LOAD();
+    const Color ground{0x1E, 0x23, 0x29, 255};
+    const Color paper{255, 255, 255, 255};
+    // Tree, planting, ground, building, wall and communications: a 0.13 to
+    // 0.18 mm line of one of these is the faintest thing on a plan.
+    for (const char* name : {"katana tree", "katana planting", "katana ground", "katana building",
+                             "katana wall", "katana telecom"}) {
+        const auto colour = file.colours.find(name);
+        ASSERT_TRUE(colour.has_value()) << name;
+        EXPECT_GE(contrast(*colour, ground), 3.25) << name << " on the ground";
+        EXPECT_GE(contrast(*colour, paper), 3.25) << name << " on paper";
+    }
+}
+
+TEST(KatanaStandard, ThreeKerbLinesAreThreePatternsAndTheReturnIsTheTopEdgeCurved)
+{
+    KS_LOAD();
+    const auto map = rulesOf(file, SurveySection::Map);
+    // The face's top edge and the return round a corner are one feature, so
+    // they share the plain line; the gutter lip and the back edge are other
+    // things and each has a pattern of its own, since no pen is applied yet.
+    EXPECT_EQ(map.at("KKT")->linestyle, "continuous");
+    EXPECT_EQ(map.at("KKR")->linestyle, "continuous");
+    EXPECT_EQ(map.at("KKL")->linestyle, "Gutter Lip Line");
+    EXPECT_EQ(map.at("KKB")->linestyle, "Kerb Back Line");
+    for (const char* name : {"Gutter Lip Line", "Kerb Back Line"}) {
+        const LineStyle* style = file.library.find(name);
+        ASSERT_NE(style, nullptr) << name;
+        EXPECT_FALSE(style->symbol) << name;
+    }
+}
+
 TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundredAndThirty)
 {
     KS_LOAD();
@@ -401,12 +486,21 @@ TEST(KatanaStandard, TheWeightsAreTheFiveOfTheScaleAndTheBoldOneIsUnused)
     for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
         ++weights[rule->weight];
     }
-    // census.py: 0.13 27, 0.18 37, 0.25 137, 0.35 40, 0.50 4 - and 0.70, the
-    // sixth of the scale, reserved.
+    // census.py: 0.13 18, 0.18 46, 0.25 137, 0.35 40, 0.50 4 - and 0.70, the
+    // sixth of the scale, reserved. Nine codes moved from the hairline to the
+    // fine pen when the planting and ground colours were made faintest on
+    // paper (the lawn, bed and crop edges and the six ground readings), so
+    // 27 - 9 = 18 and 37 + 9 = 46.
     const std::map<std::string, std::size_t> expected{
-        {"0.13", 27}, {"0.18", 37}, {"0.25", 137}, {"0.35", 40}, {"0.50", 4}};
+        {"0.13", 18}, {"0.18", 46}, {"0.25", 137}, {"0.35", 40}, {"0.50", 4}};
     EXPECT_EQ(weights, expected);
     EXPECT_EQ(weights.count("0.70"), 0u);
+    // Nothing in the planting or the ground colours is lighter than the fine pen.
+    for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
+        if (rule->colour == "katana planting" || rule->colour == "katana ground") {
+            EXPECT_NE(rule->weight, "0.13") << key;
+        }
+    }
 }
 
 TEST(KatanaStandard, OnlyTheGroundShotAndTheGroundReadingAreHidden)
@@ -499,6 +593,7 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndADisusedCodeSaysSo)
     std::set<std::string> disusedByLayer;
     std::set<std::string> disusedByStatus;
     std::size_t utilities = 0;
+    std::size_t stormwaterTyped = 0;
     const auto attributes = rulesOf(file, SurveySection::StringAttribute);
     for (const auto& [key, feature] : rulesOf(file, SurveySection::Map)) {
         const auto found = attributes.find(key);
@@ -506,7 +601,16 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndADisusedCodeSaysSo)
                           std::any_of(found->second->attributes.begin(), found->second->attributes.end(),
                                       [](const auto& a) { return a.name == "utility.type"; });
         if (key.front() != 'U') {
-            EXPECT_FALSE(says) << key << " is not a utility and must not claim a service";
+            // Class K's stormwater pits and structures (KP) and pipes and
+            // culverts (KC) are services too; its kerbs, channels and creeks
+            // are not.
+            const bool stormwater = key.front() == 'K' && (key[1] == 'P' || key[1] == 'C');
+            EXPECT_EQ(says, stormwater) << key << (stormwater ? " is stormwater and must say so"
+                                                              : " is not a utility and must not claim a service");
+            if (stormwater && says) {
+                EXPECT_TRUE(hasAttribute(*found->second, "utility.type", "stormwater")) << key;
+                ++stormwaterTyped;
+            }
             continue;
         }
         ++utilities;
@@ -524,6 +628,9 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndADisusedCodeSaysSo)
         }
     }
     EXPECT_EQ(utilities, 60u);
+    // KP: gully, kerb inlet, junction, manhole, trap, headwall, culvert end,
+    // subsoil inspection point (8); KC: pipe, box culvert, subsoil drain (3).
+    EXPECT_EQ(stormwaterTyped, 11u);
     EXPECT_EQ(disusedByLayer, disusedByStatus);
     EXPECT_EQ(disusedByStatus,
               (std::set<std::string>{"UWD", "USD", "UGD", "UED", "UCD", "URD"}));
@@ -572,8 +679,9 @@ TEST(KatanaStandard, AnAttributeWithNoValueIsAPromptAndOnlyTheUtilityWordsAreApp
             }
         }
     }
-    // 60 utility codes say their service and 6 disused ones say so.
-    EXPECT_EQ(applied, 66u);
+    // 60 utility codes say their service, 11 stormwater pits and pipes say
+    // theirs and 6 disused ones say so.
+    EXPECT_EQ(applied, 77u);
     EXPECT_EQ(prompts, 395u);
 }
 
@@ -795,6 +903,27 @@ TEST(KatanaStandard, NoNameOfItIsAnyNameInTheCompiledInBuiltIn)
         sharedColours += other.colours.find(entry.name).has_value() ? 1 : 0;
     }
     EXPECT_EQ(sharedColours, 0u) << "colour names in common";
+
+    // Nor is any colour VALUE one of the built-in's, whether from its table
+    // or named by a rule (a name it keeps in the table, or a standard name).
+    std::set<std::string> otherValues;
+    for (const auto& entry : other.colours.entries()) {
+        otherValues.insert(entry.colour.toHex());
+    }
+    for (const auto& rule : other.map.rules()) {
+        for (const std::string& name :
+             {rule.colour, rule.symbol ? rule.symbol->colour : std::string{},
+              rule.textStyle ? rule.textStyle->colour : std::string{}}) {
+            if (const auto colour = katana::entity::resolveColour(other.colours, name)) {
+                otherValues.insert(colour->toHex());
+            }
+        }
+    }
+    std::size_t sharedValues = 0;
+    for (const auto& entry : file.colours.entries()) {
+        sharedValues += otherValues.count(entry.colour.toHex());
+    }
+    EXPECT_EQ(sharedValues, 0u) << "colour values in common";
 
     std::set<std::string> otherLayers;
     for (const auto& rule : other.map.rules()) {

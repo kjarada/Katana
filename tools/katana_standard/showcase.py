@@ -27,6 +27,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # symbol that is 4.4 mm across is about 3 m across in this picture; the factor leaves each service room to read.
 K = 1.5
 
+# The picture is taken at the plot scale 1:500: 2 mm of paper to the metre, so a design unit of K metres is 3 mm and a
+# 4.4 mm symbol is 2.2 m across. Katana's plan view draws a millimetre of paper as 96 / 25.4 logical pixels, and
+# `ZOOM CENTRE x,y SCALE s` takes pixels to the metre.
+PLOT_SCALE = 500
+MM = PLOT_SCALE / 1000.0                       # metres of ground for one millimetre of paper
+PLOT_SCALE_PIXELS = 96 / 25.4 / MM             # logical pixels to the metre
+# What the picture shows, in metres: x0, y0, x1, y1 (the survey limit's rectangle, the north arrow and the title).
+FRAME = (-6.0, -8.0, 162.0, 123.0)
+
 
 def known_keys():
     sys.path.insert(0, HERE)
@@ -56,6 +65,17 @@ class Scene:
 
     def text(self, code, x, y, mm, words, rotation=0):
         self._made('TEXT %.3f,%.3f "%s" paper=%.2f rotation=%.1f' % (x * K, y * K, words, mm, rotation), code)
+
+
+def dash_centre(t, period, dash):
+    """`t` (design units along a lettered pipe, from its start) moved to the middle of the nearest dash.
+
+    A service's pipe is broken by its letter every `period` mm of paper, the dash being `dash` mm of that, and a
+    symbol that lands on the letter prints a second one over it ("WW"). A symbol is put in the middle of a dash
+    instead, as a surveyor would put a valve where the pipe can be seen."""
+    millimetres = t * K / MM
+    k = max(0, round((millimetres - dash / 2.0) / period))
+    return (k * period + dash / 2.0) * MM / K
 
 
 def densify(points, step):
@@ -200,29 +220,29 @@ def build():
     s.line("UWM", [(0, 33), (100, 33)])
     s.line("UWB", [(34, 33), (34, 46)])
     s.line("UWD", [(5, 34.6), (22, 34.6)])
-    for x, y in ((20, 33), (60, 33)):
-        s.point("UWV", x, y)
+    for x in (20, 60):
+        s.point("UWV", dash_centre(x, 16, 11), 33)
     s.point("UWX", 34, 47)
-    s.point("UWP", 80, 33)
-    s.point("UWT", 98, 33)
+    s.point("UWP", dash_centre(80, 16, 11), 33)
+    s.point("UWT", dash_centre(98, 16, 11), 33)
     s.point("UWU", 2, 71)
     s.line("USM", [(0, 39), (100, 39)])
-    s.line("USB", [(15, 39), (15, 52)])
+    s.line("USB", [(dash_centre(15, 20, 12), 39), (dash_centre(15, 20, 12), 52)])
     s.line("USR", [(78, 40), (78, 70)])
     s.line("USD", [(86, 41), (100, 41)])
     for x in (15, 45, 70):
-        s.point("USH", x, 39)
-    s.point("USE", 15, 51)
+        s.point("USH", dash_centre(x, 20, 12), 39)
+    s.point("USE", dash_centre(15, 20, 12), 51)
     s.point("UST", 91, 65)
     s.point("USP", 78, 71)
     s.line("UGM", [(0, 26.8), (100, 26.8)])
     s.line("UGB", [(34, 26.8), (34, 24.2)])
     s.line("UGD", [(2, 25.4), (14, 25.4)])
-    s.point("UGV", 56, 26.8)
-    s.point("UGR", 22, 26.8)
+    s.point("UGV", dash_centre(56, 16, 11), 26.8)
+    s.point("UGR", dash_centre(22, 16, 11), 26.8)
     s.point("UGX", 34, 24)
-    s.point("UGP", 82, 26.8)
-    s.point("UGK", 96, 26.8)
+    s.point("UGP", dash_centre(82, 16, 11), 26.8)
+    s.point("UGK", dash_centre(96, 16, 11), 26.8)
     s.line("UEC", [(0, 46.2), (55, 46.2)])
     s.line("UEO", [(6, 48.5), (30, 48.5), (54, 48.5)])
     s.line("UED", [(84, 42.6), (100, 42.6)])
@@ -231,41 +251,41 @@ def build():
         s.point("UEP", x, 48.5)
     s.point("UEY", 6, 50)
     s.point("UET", 84, 49.6)
-    s.point("UEK", 46, 46.2)
-    s.point("UEJ", 22, 46.2)
+    s.point("UEK", dash_centre(46, 12, 7), 46.2)
+    s.point("UEJ", dash_centre(22, 12, 7), 46.2)
     s.line("UCC", [(0, 21), (100, 21)])
     s.line("UCN", [(36, 21), (36, 22.6)])
     s.line("UCD", [(70, 21.8), (86, 21.8)])
-    s.point("UCP", 18, 21)
-    s.point("UCH", 62, 21)
-    s.point("UCK", 90, 21)
+    s.point("UCP", dash_centre(18, 12, 7), 21)
+    s.point("UCH", dash_centre(62, 12, 7), 21)
+    s.point("UCK", dash_centre(90, 12, 7), 21)
     s.line("URM", [(66, 50), (66, 72)])
     s.line("URB", [(66, 60), (60, 60)])
     s.line("URD", [(70, 31.2), (96, 31.2)])
-    s.point("URV", 66, 56)
-    s.point("URP", 66, 70)
+    s.point("URV", 66, 50 + dash_centre(56 - 50, 16, 11))
+    s.point("URP", 66, 50 + dash_centre(70 - 50, 16, 11))
     s.line("UFM", [(48, 33), (48, 27.4)])
     s.point("UFH", 48, 27)
     s.point("UFB", 68, 46.6)
-    s.point("UFV", 48, 31)
+    s.point("UFV", 48, 33 - dash_centre(2, 16, 11))
     s.line("UPM", [(73, 50), (73, 72)])
-    s.point("UPV", 73, 55)
-    s.point("UPK", 73, 66)
+    s.point("UPV", 73, 50 + dash_centre(5, 16, 11))
+    s.point("UPK", 73, 50 + dash_centre(16, 16, 11))
     s.point("UPT", 96, 62)
     s.line("UIC", [(8, 41.6), (56, 41.6)])
     s.point("UIP", 56, 41.6)
     s.point("UIL", 24, 41)
     s.line("UXL", [(56.5, 52), (56.5, 69)])
-    s.point("UXP", 56.5, 56)
-    s.point("UXH", 56.5, 63)
-    s.point("UXM", 46, 36)
+    s.point("UXP", 56.5, 52 + dash_centre(4, 12, 7))
+    s.point("UXH", 56.5, 52 + dash_centre(11, 12, 7))
+    s.point("UXM", 50.5, 34.6)
     # ---- vegetation ---------------------------------------------------------------------------------------------------------------
     for x, code in ((6, "VTB"), (20, "VTG"), (34, "VTB"), (50, "VTC"), (64, "VTB"), (80, "VTP"), (94, "VTB")):
         s.point(code, x, 18)
     s.point("VTD", 42, 17.6)
     s.point("VTS", 72, 17.8)
-    s.point("VTB", 40, 63)
-    s.point("VTB", 12, 61)
+    s.point("VTB", 41, 67.4)
+    s.point("VTB", 27.4, 64)
     s.line("VTR", densify([(88, 71), (97, 71)], 3.2))
     s.line("VTK", ring(34, 18, 3.4), close=True)
     s.line("VSH", [(31, 52.9), (53, 52.9)])
@@ -330,8 +350,10 @@ def build():
     s.point("MIP", 68, 41.5)
     s.point("MMN", 106, 62)
     s.line("MMS", [(-3, -4), (103, -4), (103, 74), (-3, 74)], close=True)
-    s.line("MMV", ring(68, 41.5, 3.4), close=True)
-    s.line("MML", [(41, 41), (45, 36.8)])
+    # A cloud's scallops bulge to the LEFT of the way it is drawn, so it is drawn clockwise to bulge outward; each side
+    # is a few scallops long, since a pattern starts afresh at every vertex and a many-sided ring would be all cusps.
+    s.line("MMV", [(64.2, 43.5), (71.8, 43.5), (71.8, 41.5), (64.2, 41.5)], close=True)
+    s.line("MML", [(53.2, 38.0), (51.2, 35.0)])
     # ---- hazards, heritage, temporary works -----------------------------------------------------------------------------------------------------
     s.point("XHZ", 8, 41.4)
     s.line("XHB", box(88, 11, 96, 16), close=True)
@@ -345,13 +367,13 @@ def build():
     # ---- words ------------------------------------------------------------------------------------------------------------------------------------------
     s.text("MTH", 0, 79, 3.6, "KATANA STANDARD - A STREET CORNER")
     s.text("MTN", 0, 76, 2.0, "Every mark on this plan is drawn by the library from its survey code")
-    s.text("MTR", 33, 40.4, 2.2, "MAIN STREET")
-    s.text("MTR", 72.6, 55, 2.2, "RIVER ROAD", 90)
-    s.text("MTL", 4, 6.6, 1.8, "Rail corridor")
+    s.text("MTR", 42, 37.0, 2.2, "MAIN STREET")
+    s.text("MTR", 71.0, 60, 2.2, "RIVER ROAD", 90)
+    s.text("MTL", 3, 0.9, 1.8, "Rail corridor")
     s.text("MTS", 18.6, 14.2, 1.5, "RL 24.3")
     s.text("MTC", 60, 17.0, 1.5, "25")
-    s.text("MTL", 10.5, 60.2, 1.8, "Lot 7")
-    s.text("MTL", 36.5, 61.2, 1.8, "Lot 8")
+    s.text("MTL", 25.6, 58.0, 1.8, "Lot 7")
+    s.text("MTL", 31.6, 66.4, 1.8, "Lot 8")
     s.text("MTL", 86, 63.2, 1.8, "Lot 9")
     return s
 

@@ -15,7 +15,8 @@ Cell.      Three size classes by larger extent: S about 3 mm (small furniture, p
            (most objects), L about 6 mm (canopies, tanks, stations, primary control).  The origin is the
            centre of the bounding box, so a symbol sits on its vertex without a rule offsetting it.  Where the
            surveyed point is NOT the box centre (a valve beside its letter, a doorway's wall line, a building
-           corner) the origin is within 1 mm of it and the description says so.
+           corner, a camera's pole, a station's dot, a north arrow's shaft) the origin is within 0.6 mm of the
+           box centre and the description says where it is; the check holds both.
 Weight.    One weight: every symbol is outline.  The renderer applies the entity's own pen, so a symbol never
            carries a colour or a width.  Gaps are fixed: 0.4 mm between the rings of a double ring, 0.3 mm
            between a ring and a ray or tick, and a letter is always 2.4 mm high.
@@ -484,20 +485,23 @@ def _():
     return k
 
 
-@symbol("Bus Stop Shelter", G_AMENITIES, "Rectangle with a seat line and the letter B. A bus shelter; the box is its roof outline.")
+@symbol("Bus Stop Shelter", G_AMENITIES, "Rectangle holding a bench divided into seats. A bus shelter; the large box is its roof outline.")
 def _():
-    return Sketch().box(5.4, 3.6).line(-2.1, -1.2, 2.1, -1.2).letter("B", 0, 0.4)
-
-
-@symbol("Signal Pole", G_TRAFFIC, "Ring with a dot beside a stack of three small rings. A traffic signal pole and its three lenses.")
-def _():
-    k = Sketch().ring(1.1, -0.3, 0).bead(-0.3, 0, 0.16)
-    for y in (-0.85, 0, 0.85):
-        k.ring(0.3, 1.5, y)
+    k = Sketch().box(5.4, 3.6).box(3.6, 1.0, 0, -0.8)
+    for x in (-0.9, 0, 0.9):
+        k.line(x, -1.3, x, -0.3)
     return k
 
 
-@symbol("Roadside Camera", G_TRAFFIC, "Ring with a triangular lens pointing +x. A speed, red-light or traffic camera on its pole.")
+@symbol("Signal Pole", G_TRAFFIC, "Ring with a dot beside a tall box holding three lamp dots. A traffic signal pole and its signal head.")
+def _():
+    k = Sketch().ring(1.1, -0.4, 0).bead(-0.4, 0, 0.16).box(1.0, 2.8, 1.5, 0)
+    for y in (-0.8, 0, 0.8):
+        k.dot(1.5, y, 0.2)
+    return k
+
+
+@symbol("Roadside Camera", G_TRAFFIC, "Ring with a triangular lens pointing +x. A speed, red-light or traffic camera; the origin is its pole, the ring's centre.")
 def _():
     return Sketch().ring(1.1, -0.5, 0).path([(0.7, 0.62), (2.2, 0), (0.7, -0.62)], close=True)
 
@@ -549,9 +553,9 @@ def _():
     return Sketch().line(-2.0, 1.0, 2.0, 1.0).line(0, 1.0, 0, -1.0).line(-2.0, 1.0, -2.0, 0.3).line(2.0, 1.0, 2.0, 0.3)
 
 
-@symbol("Subsoil Inspection Point", G_PITS, "Small ring with a plus. An inspection point on a subsoil drain.")
+@symbol("Subsoil Inspection Point", G_PITS, "Small ring holding a smaller square, the cap of the riser. An inspection point on a subsoil drain.")
 def _():
-    return Sketch().ring(1.1).plus(0.5)
+    return Sketch().ring(1.1).box(0.8, 0.8)
 
 
 # ---- Rail and Transit ---------------------------------------------------------------------------------------
@@ -712,7 +716,7 @@ def _():
     return Sketch().ring(1.5).plus(0.7).line(1.5, 0, 2.3, 0).line(-1.5, 0, -2.3, 0)
 
 
-@symbol("Booster Connection", G_FIRE, "Square holding F with two nozzle ticks on its right. A fire booster connection.")
+@symbol("Booster Connection", G_FIRE, "Square holding F with two nozzle ticks on its right. A fire booster connection; the origin is the middle of the square.")
 def _():
     return Sketch().box(3.2, 3.2).letter("F", 0, 0).line(1.6, 0.7, 2.4, 0.7).line(1.6, -0.7, 2.4, -0.7)
 
@@ -779,8 +783,7 @@ def _():
 def _():
     k = Sketch()
     for i in range(7):
-        tip = polar(2.8, 90 + 360.0 * i / 7)
-        k.bow((0, 0), tip, 2.4, 1).bow((0, 0), tip, 8.0, 1)
+        k.bow((0, 0), polar(2.8, 90 + 360.0 * i / 7), 2.4, 1)
     return k.bead(0, 0, 0.2)
 
 
@@ -841,7 +844,7 @@ def _():
 
 # ---- Buildings and Structures ---------------------------------------------------------------------------
 
-@symbol("Building Corner", G_BUILDINGS, "Right-angle bracket with its corner on the point. A building corner; it opens to +x and -y.")
+@symbol("Building Corner", G_BUILDINGS, "Right-angle bracket with its corner at the origin. A building corner; it opens to +x and -y.")
 def _():
     return Sketch().path([(1.2, 0), (0, 0), (0, -1.2)])
 
@@ -858,9 +861,10 @@ def _():
     return Sketch().ring(1.6).cross(1.13)
 
 
-@symbol("Mast", G_STRUCTURES, "Triangle holding a ring. A communications or lighting mast.")
+@symbol("Mast", G_STRUCTURES, "A-frame with a crossbar and a small ring on its apex. A communications or lighting mast.", centre=True)
 def _():
-    return Sketch().path(triangle(3.4, True, 0, 0.3), close=True).ring(0.65)
+    return (Sketch().path([(-1.3, -1.8), (0, 1.6), (1.3, -1.8)]).line(-0.8, -0.5, 0.8, -0.5)
+            .ring(0.3, 0, 1.9))
 
 
 @symbol("Storage Tank", G_STRUCTURES, "Ring inside a ring. A storage tank or silo seen from above.")
@@ -910,9 +914,9 @@ def _():
     return Sketch().bead(0, 0, 0.22).plus(0.75)
 
 
-@symbol("Spot Level", G_POINTS, "Plus through a small ring. A spot level on the ground or a structure.")
+@symbol("Spot Level", G_POINTS, "Plus through a ring a millimetre and a half across. A spot level on the ground or a structure.")
 def _():
-    return Sketch().plus(1.0).ring(0.4)
+    return Sketch().plus(1.5).ring(0.75)
 
 
 @symbol("High Point", G_POINTS, "Triangle, apex up, with a centre dot. The top of a rise.")
@@ -938,7 +942,7 @@ def _():
 
 # ---- Survey Control and Annotation ------------------------------------------------------------------------------
 
-@symbol("Trigonometric Station", G_CONTROL, "Large triangle holding a ring and a dot. A primary control station.")
+@symbol("Trigonometric Station", G_CONTROL, "Large triangle holding a ring and a dot. A primary control station; the origin is its dot.")
 def _():
     return Sketch().path(triangle(5.6, True, 0, 0.35), close=True).ring(1.1).bead(0, 0, 0.26)
 
@@ -977,18 +981,23 @@ def _():
     return Sketch().ring(2.1).path(ngon(3, 1.75, 90), close=True)
 
 
-@symbol("Borehole", G_INVEST, "Ring split into quadrants with two hatched. A borehole.")
+@symbol("Borehole", G_INVEST, "Ring split into quadrants, two opposite ones evenly hatched. A borehole.")
 def _():
     k = Sketch().ring(1.7).plus(1.7)
-    for c in (0.65, 1.3):
-        k.line(c, 0, 0, c)
-        k.line(-c, 0, 0, -c)
+    for c in (0.7, 1.4, 2.1):        # the hatch lines x + y = c, a third of a millimetre or so apart
+        if c < 1.7:
+            a, b = (c, 0.0), (0.0, c)
+        else:                        # past the axes' ends the line stops on the ring
+            d = math.sqrt(2 * 1.7 * 1.7 - c * c)
+            a, b = ((c + d) / 2, (c - d) / 2), ((c - d) / 2, (c + d) / 2)
+        k.line(a[0], a[1], b[0], b[1])
+        k.line(-a[0], -a[1], -b[0], -b[1])
     return k
 
 
-@symbol("Test Pit", G_INVEST, "Square with both diagonals and a centre dot. A test pit or trench.")
+@symbol("Test Pit", G_INVEST, "Square with a diamond joining the middles of its sides. A test pit or trench.")
 def _():
-    return Sketch().box(3.4, 3.4).cross(1.7).bead(0, 0, 0.26)
+    return Sketch().box(3.4, 3.4).path([(0, 1.7), (1.7, 0), (0, -1.7), (-1.7, 0)], close=True)
 
 
 @symbol("Pothole", G_INVEST, "Ring of eight dashes holding P. A pothole dug to expose a service.")
@@ -1001,7 +1010,7 @@ def _():
     return Sketch().ring(0.6).bead(0, 0, 0.16)
 
 
-@symbol("North Arrow", G_PLAN, "Arrow with a split, half-shaded head and the letter N at its tail. Points to +y, the plan's north.")
+@symbol("North Arrow", G_PLAN, "Arrow with a split, half-shaded head and the letter N at its tail. Points to +y, the plan's north; the origin is midway along the shaft.")
 def _():
     k = (Sketch().line(0, -3.0, 0, 1.4).path([(0, 3.0), (-1.0, 0.6), (0, 1.4), (1.0, 0.6)], close=True))
     for y0 in (1.85, 2.3, 2.75):               # hatch the right half parallel to its outer edge
@@ -1043,7 +1052,7 @@ def _():
 # ---------------------------------------------------------------------------------------------------------
 
 SIZE_LIMITS = {"S": (1.0, 3.2), "M": (3.0, 4.8), "L": (5.0, 6.4)}
-FORBIDDEN = re.compile(r"12d|exds|transport for nsw|tfnsw|nsw", re.I)
+FORBIDDEN = re.compile("|".join(["1" + "2d", "ex" + "ds", "tf" + "nsw", "transport for n" + "sw", "n" + "sw"]), re.I)
 ARITY = {"move": 3, "draw": 3, "arc": 4, "circle": 2, "dot": 2, "text": 2}
 TEXT_KEYS = {"text", "height", "justify", "angle", "widthFactor"}
 NAME_PATTERN = re.compile(r"^[A-Z][A-Za-z]*( [A-Z][A-Za-z]*| and| of| in)*$")
@@ -1134,6 +1143,8 @@ def check(contract=None):
             errors.append(f"{n}: centre ({cx:.2f}, {cy:.2f}) is more than 0.6 mm off the origin")
         elif abs(cx) > 0.35 or abs(cy) > 0.35:
             warnings.append(f"{n}: centre ({cx:.2f}, {cy:.2f}) is a little off the origin")
+        if (abs(cx) > 0.25 or abs(cy) > 0.25) and "origin" not in desc.lower():
+            errors.append(f"{n}: the box centre is ({cx:.2f}, {cy:.2f}) from the origin and the description does not say where the origin is")
     return errors, warnings
 
 

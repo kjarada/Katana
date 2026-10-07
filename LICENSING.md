@@ -105,9 +105,18 @@ decides.
 
 ## What the licence does not cover
 
-The project licence applies to what the owner has the right to license. These
-are in the repository or its packages and are **not** covered by it, or are not
-known to be:
+The project licence applies to what the owner has the right to license. The
+other customisation in `resources/customisation/`, Katana Standard
+(`katana-standard.customisation.json`), is not in the list below. It was written
+for Katana from a specification, by AI agents under the owner's direction, with
+its generator in `tools/katana_standard/` and its catalogue in
+`docs/katana_standard.md`; none of it was converted from a third party's file
+(that document's "Originality" says how it was made and checked), and it is
+covered like the rest of the repository. What copyright means for work made by
+an AI agent is a question for a lawyer, and this page does not settle it.
+
+These are in the repository or its packages and are **not** covered by the
+project licence, or are not known to be:
 
 1. **`resources/customisation/nsw.customisation.json`**, the built-in
    customisation (linestyles, symbols and survey codes). It was converted from
@@ -153,8 +162,13 @@ known to be:
 4. **`resources/` and `docs/images/`.** The icons (`katana.ico`, `katana.png`,
    `icon_sheet.png`) are rendered by the project's own tool
    (`katana_make_icons`, `docs/desktop.md`). The plot frame was, by its commit
-   message (`bbb26aac`), measured from the owner's own application. The pictures in `docs/images/` are screenshots
-   of Katana on sample data. The origin of `resources/screenshot.png` is not
+   message (`bbb26aac`), measured from the owner's own application. Most pictures in `docs/images/` are screenshots
+   of Katana on sample data. Of the five Katana Standard sheets, three are
+   Katana's own output (a plot and two plan-view screenshots of invented data,
+   the smaller of them with words laid on beside each feature by a script);
+   `katana-standard-symbols.png` tiles Katana's Symbol Library icons and
+   `katana-standard-palette.png` is laid out from the palette's values by a
+   script, with Pillow. The origin of `resources/screenshot.png` is not
    recorded.
 5. **`third_party/`**, which is not committed: the build downloads GoogleTest
    and Google Benchmark into `third_party/_cache`. They are used for tests

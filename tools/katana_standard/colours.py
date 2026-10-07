@@ -17,11 +17,23 @@ Why these twenty-eight, and why these values:
   is about where two thin lines of different colour stop being told apart.
 - The six buried-service colours follow the widely published convention for marking buried utilities: water
   blue, sewer green, gas yellow, electricity red, communications orange, recycled water purple. They are tuned
-  so the yellow and the orange still read on white. NOTE: Katana's own `UTILITY DRAW` uses the AS 5488 plan
-  colours instead (electricity orange, communications white, sewer cream, stormwater green), so the two
-  conventions differ and a drawing that mixes them needs a legend.
+  so the yellow and the orange still read on white. NOTE: Katana's own `UTILITY DRAW` has colours of its own
+  (electricity orange, communications white, sewer cream, stormwater green; `docs/subsurface_utilities.md`:
+  AS 5488 classifies information and sets none), so the two differ and a drawing that mixes them needs a
+  legend.
 - Everything above ground is keyed by what it is made of or what it is for, so a plan reads by colour before
-  it reads by symbol: boundaries violet, kerbs rose-brown, vegetation green, walls brick, fences timber.
+  it reads by symbol: boundaries violet, kerbs taupe, vegetation green, walls brick, fences tan.
+- Lightness is not free. A colour needs 3:1 against the dark ground (relative luminance of at least about
+  0.15) and against white (at most 0.30), which leaves OKLab lightness between about 0.54 and 0.67, so
+  only hue and chroma tell the classes apart. The warm classes (kerb, wall, contour, fuel, fence, breakline)
+  are therefore placed by a search, not by eye: each sits at least 0.06 from every other colour and from
+  the other five (`WARM`, checked below), and the classes drawn with the thinnest pens (`THIN`: tree, planting,
+  ground, building, wall, telecom) keep at least 3.25:1 on both grounds so a 0.13 mm line stays visible.
+  Stormwater is the dark green-teal that sits clear of sewer, traffic systems and ground.
+- What colour cannot do is carry a class alone: for a reader who confuses red with green or blue with purple
+  some pairs stay close whatever the values (OKLab distance under simulated colour blindness is as low as
+  0.02 for a few warm pairs). So no class is identified by colour alone: utility pipes carry a letter in
+  their linestyle, and every line class has a pattern of its own.
 
 The palette is frozen by the Katana Standard contract; a change goes through its owner, not into this file.
 """
@@ -37,25 +49,25 @@ COLOURS = {
     "katana sewer": "#1DA758",
     "katana gas": "#A68E12",
     "katana electricity": "#E24942",
-    "katana telecom": "#CA8407",
+    "katana telecom": "#C57A00",
     "katana recycled": "#9565C7",
     "katana fire": "#DC6995",
-    "katana fuel": "#995F2E",
+    "katana fuel": "#A36215",
     "katana its": "#0B9BA8",
     "katana unknown": "#C344AE",
-    "katana stormwater": "#44A080",
+    "katana stormwater": "#238463",
     "katana waterway": "#6399BE",
     "katana pavement": "#789295",
-    "katana kerb": "#A27B75",
+    "katana kerb": "#907368",
     "katana boundary": "#796EDA",
-    "katana contour": "#AB704C",
-    "katana breakline": "#C37B83",
-    "katana ground": "#7C9976",
-    "katana tree": "#60812B",
-    "katana planting": "#859E3A",
-    "katana building": "#637482",
-    "katana fence": "#A18863",
-    "katana wall": "#B35A47",
+    "katana contour": "#B9704F",
+    "katana breakline": "#BE7D83",
+    "katana ground": "#688F68",
+    "katana tree": "#5C8627",
+    "katana planting": "#779624",
+    "katana building": "#627B8C",
+    "katana fence": "#A18C65",
+    "katana wall": "#BA5556",
     "katana rail": "#816FA3",
     "katana street": "#A2759D",
     "katana control": "#0999C9",
@@ -93,6 +105,13 @@ ROLES = {
     "katana note": "text and plan marks",
     "katana hazard": "hazards",
 }
+
+# The warm classes that were re-spaced by search (see the notes above), and the classes drawn with the
+# thinnest pens. `problems()` holds each to the floor the notes give.
+WARM = ("katana kerb", "katana wall", "katana contour", "katana fuel", "katana fence", "katana breakline")
+WARM_FLOOR = 0.06
+THIN = ("katana tree", "katana planting", "katana ground", "katana building", "katana wall", "katana telecom")
+THIN_FLOOR = 3.25
 
 # The colour every text code is drawn in (the MT codes), so notes never compete with the features they label.
 TEXT_COLOUR = "katana note"
@@ -191,9 +210,16 @@ def problems():
                 found.append(f"{name!r} has contrast {ratio:.2f} against {label}; the floor is 3.0")
         if not ROLES.get(name):
             found.append(f"{name!r} has no role")
+    for name in THIN:
+        for ground, label in ((GROUND, "the plan ground"), (PAPER, "white paper")):
+            ratio = contrast(COLOURS[name], ground)
+            if ratio < THIN_FLOOR:
+                found.append(f"{name!r} is a thin-pen class and has contrast {ratio:.2f} against {label}; its floor is {THIN_FLOOR}")
     names = sorted(COLOURS)
     for i, a in enumerate(names):
         for b in names[i + 1:]:
+            if (a in WARM or b in WARM) and COLOURS[a] != COLOURS[b] and distance(COLOURS[a], COLOURS[b]) < WARM_FLOOR:
+                found.append(f"{a!r} and {b!r}: a warm class is only {distance(COLOURS[a], COLOURS[b]):.3f} from the other; its floor is {WARM_FLOOR}")
             if COLOURS[a] == COLOURS[b]:
                 found.append(f"{a!r} and {b!r} are the same colour")
             elif distance(COLOURS[a], COLOURS[b]) < 0.05:

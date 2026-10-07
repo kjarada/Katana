@@ -80,8 +80,10 @@ def save_small(image, name):
     path = os.path.join(OUT, name)
     os.makedirs(OUT, exist_ok=True)
     image = image.convert("RGB")
-    for colours in (128, 96, 64, 48, 32):
-        image.quantize(colors=colours, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).save(
+    # MAXCOVERAGE keeps a thin line's own colour: the median cut splits the palette by how many pixels there are, and
+    # on a sheet that is mostly white and grey it merges a blue line with a green one at 128 colours.
+    for colours in (256, 192, 128, 96, 64, 48, 32):
+        image.quantize(colors=colours, method=Image.Quantize.MAXCOVERAGE, dither=Image.Dither.NONE).save(
             path, optimize=True)
         if os.path.getsize(path) <= LIMIT:
             break
@@ -257,7 +259,9 @@ def draw_linestyles():
             column.append(("heading", g))
             column += [("style", n) for n in sorted(names)]
         columns.append(column)
-    col_w, row_h, name_w, line_w = 122.0, 6.4, 46.0, 66.0
+    # A3 holds the longest column with room to spare: the stamps Katana puts in the sheet's corners (the plan title
+    # bottom left, the scale bar bottom right) sit below the last row, so none of it is cut or hidden.
+    col_w, row_h, name_w, line_w = 122.0, 5.7, 46.0, 66.0
     lines = []
     ident = 0
 
@@ -317,41 +321,119 @@ def crop_plot(image, shrink=0.5):
 
 # ---- plan: the window after the import -----------------------------------------------------------------------
 
+# What the plan sheet labels: the code, the colour's role, and where its words go, as pixels from the anchor (a point of
+# the field file, in metres): "right" and "start" put the words' first letter at the anchor plus the offset, "above"
+# and "below" centre them on it.
+PLAN_LABELS = (
+    ("CBT", (330000.0, 6250030.0), "start", (-4, -38)),
+    ("MCC", (330020.0, 6250030.0), "right", (30, 0)),
+    ("UWQ", (330005.0, 6250020.0), "right", (24, 0)),
+    ("VTB", (330008.0, 6250012.0), "below", (0, 42)),
+    ("FFP", (330030.0, 6250010.0), "right", (24, 0)),
+    ("KPG", (330006.0, 6249991.0), "above", (0, -34)),
+    ("KKT", (330024.0, 6249990.0), "right", (40, 0)),
+    ("UWV", (330012.0, 6249980.0), "below", (0, 54)),
+    ("UWM", (330024.0, 6249980.0), "right", (40, 0)),
+    ("UED", (330020.0, 6249970.0), "right", (40, 0)),
+)
+
+
 def draw_plan():
-    """The plan view alone (`--panel View1`), at twice the pixels, grid off, the street corner filling it."""
-    from PIL import Image
+    """The plan view alone (`--panel View1`), at twice the pixels, grid off, the street corner filling it, and each
+    feature named beside it: the code in its own colour and the code's legend label. Katana draws the plan; the
+    words are laid on afterwards from the library's own data, at the places the field file's points project to."""
+    import re
+    from PIL import Image, ImageDraw
+    codes_module, colours_module, _, _ = modules()
+    by_key = {c["key"]: c for c in codes_module.CODES}
     work = tempfile.mkdtemp(prefix="ksimg_")
     png = os.path.join(work, "plan.png")
-    katana(["--command", 'SURVEY IMPORT "%s"' % FLD.replace("\\", "/"), "--trigger", "viewGrid",
-            "--command", "ZOOM AREA 329990,6249962,330040,6250038", "--panel", "View1", "--screenshot", png],
-           scale=2)
+    result = katana(["--command", 'SURVEY IMPORT "%s"' % FLD.replace("\\", "/"), "--trigger", "viewGrid",
+                     "--command", "ZOOM AREA 329990,6249962,330040,6250038", "--command", "VIEWS LIST",
+                     "--panel", "View1", "--screenshot", png], scale=2)
+    area = re.findall(r"area=([-0-9.e]+),([-0-9.e]+),([-0-9.e]+),([-0-9.e]+)", result.stdout + result.stderr)
+    if not area:
+        sys.exit("the view did not say what area it shows")
+    x0, _, x1, ytop = [float(v) for v in area[-1]]
     shot = Image.open(png).convert("RGB")
-    shot = shot.crop((0, 56, shot.width, shot.height))     # the view's own title bar
+    shot = shot.crop((0, TITLE_BAR, shot.width, shot.height))     # the view's own title bar
+    per_metre = shot.width / (x1 - x0)
     ink = shot.convert("L").point(lambda v: 255 if abs(v - 36) > 14 else 0).getbbox()
-    pad = 90
-    left, right = max(ink[0] - pad, 0), min(ink[2] + pad, shot.width)
+    draw = ImageDraw.Draw(shot)
+    key_face, word_face = font(24, bold=True), font(24)
+    near, far = shot.width, 0
+    for key, (x, y), where, (dx, dy) in PLAN_LABELS:
+        px, py = (x - x0) * per_metre + dx, (ytop - y) * per_metre + dy
+        hexcolour = hex_rgb(colours_module.COLOURS[by_key[key]["colour"]]) if key != "UWQ" else (154, 163, 174)
+        words = by_key[key]["comment"] if key != "UWQ" else "no rule"
+        key_w = draw.textlength(key + "  ", font=key_face)
+        total = key_w + draw.textlength(words, font=word_face)
+        left = px if where in ("right", "start") else px - total / 2
+        draw.text((left, py), key, font=key_face, fill=hexcolour, anchor="lm")
+        draw.text((left + key_w, py), words, font=word_face, fill=(197, 204, 214), anchor="lm")
+        near, far = min(near, left), max(far, left + total)
+    pad = 70
+    left, right = max(int(min(ink[0], near)) - pad, 0), min(max(ink[2], int(far)) + pad, shot.width)
     top, bottom = max(ink[1] - pad, 0), min(ink[3] + pad, shot.height)
     save_small(shot.crop((left, top, right, bottom)), "katana-standard-plan.png")
 
 
-def draw_showcase():
-    """The invented street corner of showcase.py, drawn by the library from its codes, in the plan view."""
+TITLE_BAR = 52       # the pixels of a panel grab above the plan view itself, at twice the pixels
+
+
+def plan_tiles(script, frame, scale):
+    """The plan view of `script` over `frame` (x0, y0, x1, y1 in metres) as one picture, at `scale` logical
+    pixels a metre and twice the pixels. A paper-sized mark has a fixed size in pixels whatever the zoom, so
+    the way to give a crowded scene room is a bigger picture, not a different drawing: the window is one size,
+    so the picture is taken a window at a time, each placed by `ZOOM CENTRE x,y SCALE s` so that the tiles
+    abut to the pixel, and laid side by side. Returns (image, pixels per metre)."""
+    import re
     from PIL import Image
+    work = tempfile.mkdtemp(prefix="ksimg_")
+
+    def grab(cx, cy, name):
+        png = os.path.join(work, name)
+        result = katana(["--script", script, "--trigger", "viewGrid", "--command",
+                         "ZOOM CENTRE %.6f,%.6f SCALE %s" % (cx, cy, scale), "--command", "VIEWS LIST",
+                         "--panel", "View1", "--screenshot", png], timeout=900, scale=2)
+        area = re.findall(r"area=([-0-9.e]+),([-0-9.e]+),([-0-9.e]+),([-0-9.e]+)", result.stdout + result.stderr)
+        if not area:
+            sys.exit("the view did not say what area it shows")
+        shot = Image.open(png).convert("RGB")
+        return shot.crop((0, TITLE_BAR, shot.width, shot.height)), [float(v) for v in area[-1]]
+
+    first, area = grab((frame[0] + frame[2]) / 2, (frame[1] + frame[3]) / 2, "probe.png")
+    width, height = area[2] - area[0], area[3] - area[1]
+    cols = max(1, -(-int(round((frame[2] - frame[0]) * 1000)) // int(round(width * 1000))))
+    rows = max(1, -(-int(round((frame[3] - frame[1]) * 1000)) // int(round(height * 1000))))
+    # The grid is centred on the frame; row 0 is the top (the largest y).
+    left = (frame[0] + frame[2]) / 2 - cols * width / 2
+    top = (frame[1] + frame[3]) / 2 + rows * height / 2
+    sheet = Image.new("RGB", (cols * first.width, rows * first.height), GROUND)
+    for row in range(rows):
+        for col in range(cols):
+            tile, _ = grab(left + (col + 0.5) * width, top - (row + 0.5) * height, "t%d%d.png" % (row, col))
+            sheet.paste(tile, (col * first.width, row * first.height))
+    return sheet, first.width / width
+
+
+def draw_showcase():
+    """The invented street corner of showcase.py, drawn by the library from its codes, in the plan view at the
+    plot scale 1:500, laid out as four screenshots side by side."""
     sys.path.insert(0, HERE)
     import showcase
     lines, _ = showcase.commands()
     work = tempfile.mkdtemp(prefix="ksimg_")
-    script, png = os.path.join(work, "showcase.kcs"), os.path.join(work, "showcase.png")
+    script = os.path.join(work, "showcase.kcs")
     with open(script, "w", encoding="utf-8", newline="\n") as handle:
         handle.write("\n".join(lines) + "\n")
-    katana(["--script", script, "--trigger", "viewGrid", "--command", "ZOOM EXTENTS", "--panel", "View1",
-            "--screenshot", png], timeout=900, scale=2)
-    shot = Image.open(png).convert("RGB")
-    shot = shot.crop((0, 56, shot.width, shot.height))     # the view's own title bar
-    ink = shot.convert("L").point(lambda v: 255 if abs(v - 36) > 14 else 0).getbbox()
-    pad = 36
-    save_small(shot.crop((max(ink[0] - pad, 0), max(ink[1] - pad, 0), min(ink[2] + pad, shot.width),
-                          min(ink[3] + pad, shot.height))), "katana-standard-showcase.png")
+    # 1:500 is 2 mm of paper to the metre, and a logical pixel is 1/96 inch.
+    sheet, _ = plan_tiles(script, showcase.FRAME, showcase.PLOT_SCALE_PIXELS)
+    ink = sheet.convert("L").point(lambda v: 255 if abs(v - 36) > 14 else 0).getbbox()
+    pad = 80
+    sheet = sheet.crop((max(ink[0] - pad, 0), max(ink[1] - pad, 0), min(ink[2] + pad, sheet.width),
+                        min(ink[3] + pad, sheet.height)))
+    save_small(sheet, "katana-standard-showcase.png")
 
 
 if __name__ == "__main__":

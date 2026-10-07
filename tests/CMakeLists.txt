@@ -289,6 +289,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME docs
         COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_docs.py"
                 "${PROJECT_SOURCE_DIR}")
+
+    # Katana Standard is generated from the data modules in tools/katana_standard/, and the committed customisation
+    # file and catalogue are what the generator makes. `katana_standard_current` fails the day either is edited by
+    # hand, or the data changes and they are not regenerated (a counts-only test cannot see a swapped colour, weight
+    # or linestyle); the four others run each data module's own check of its grammar. Python is a convenience, so
+    # without it there are no such tests (docs/katana_standard.md, "How it is made and held").
+    add_test(NAME katana_standard_current
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/katana_standard/make_katana_standard.py" --check)
+    foreach(_ks_module IN ITEMS colours linestyles symbols codes)
+        add_test(NAME katana_standard_${_ks_module}
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/katana_standard/${_ks_module}.py" --check)
+    endforeach()
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only
