@@ -30,6 +30,7 @@
 //   cad, must reach it (tools/check_layering.cmake). The JSON library stays
 //   in the .cpp; everything here is text and core::Result.
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -47,6 +48,32 @@ namespace katana::entity {
 // reads and the one it writes.
 inline constexpr std::string_view kCustomisationFormat = "katana-customisation";
 inline constexpr int kCustomisationVersion = 1;
+
+// The bounds a file is held to by the reader (and the writer, so that what is
+// written reads back). Each is far above anything a drawing needs and far below
+// what exhausts a machine: a customisation is read from a file somebody else
+// wrote, and a number or a length in it is drawn, looped over and copied.
+//
+//   most size of a number     no coordinate, radius, length, size or angle is
+//                             larger in size than a billion: a world
+//                             coordinate in metres is 25 times the Earth's
+//                             circumference at that size
+//   most sweep of an arc      two turns; an arc sweeping more is drawn as one
+//                             that goes round and round, and the number of
+//                             points it is drawn with follows its sweep
+//   most strokes in one       a definition is drawn stroke by stroke at every
+//   definition                place it is laid
+//   most bytes of a name or   every text member, a notice's line and a
+//   text                      colour's name
+//   most rules in a file      the codes list of one file
+//
+// The built-in customisation is read by the reader, so it is within every
+// bound (the census test of it fails when it is compiled in and is not).
+inline constexpr double kCustomisationMostMagnitude = 1.0e9;
+inline constexpr double kCustomisationMostSweepDegrees = 720.0;
+inline constexpr std::size_t kCustomisationMostStrokes = 100000;
+inline constexpr std::size_t kCustomisationMostTextBytes = 1000;
+inline constexpr std::size_t kCustomisationMostRules = 1000000;
 
 // A customisation's name: not empty, valid UTF-8, with no line break, '/' or
 // '\', no control character (U+0000 to U+001F, U+007F) and no blank at either
@@ -148,7 +175,12 @@ struct CustomisationWriteOptions {
 // does not know, a member given twice, a required member missing, a value of
 // the wrong type, a word outside an enumeration, a stroke of the wrong length
 // and a number a double cannot hold - one too large, or one so small it would
-// be read as 0. InvalidArgument, naming the entry, for what is well-formed
+// be read as 0 - and what is past a bound above: a number larger in size than
+// kCustomisationMostMagnitude, an arc sweeping more than
+// kCustomisationMostSweepDegrees, a definition of more than
+// kCustomisationMostStrokes strokes, a name or text of more than
+// kCustomisationMostTextBytes bytes, a file of more than kCustomisationMostRules
+// rules. InvalidArgument, naming the entry, for what is well-formed
 // and still not a customisation: a bad name, two definitions of one name, a
 // colour name the table refuses, and everything entity::validate refuses of
 // a definition, a rule or the linework codes. Indices count from 0, as a JSON
@@ -164,7 +196,9 @@ struct CustomisationWriteOptions {
 // "Layout", says where every byte goes.
 //
 // InvalidArgument, naming the entry, for anything that would not read back as
-// itself: a number that is not finite, text that is not UTF-8, a stroke
+// itself: a number that is not finite or is past the bound above, text that is
+// not UTF-8 or past it, a definition of too many strokes, an arc sweeping too
+// far, a stroke
 // carrying a member its kind does not use, a definition whose `texts` are not
 // exactly its text strokes in order, an attribute whose type is neither "text"
 // nor "integer", and whatever the reader would refuse (a bad name, linework

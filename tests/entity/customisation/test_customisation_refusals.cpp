@@ -1073,13 +1073,22 @@ TEST(CustomisationRefusals, ANumberTooLargeToHoldIsRefusedNamingTheEntryTheMembe
             << refused.describe();
     }
 
-    // The largest double itself, and its negative, are read.
-    const Customisation ends = readCustomisation(customisationWith(
-        R"("linestyles": [{"name": "A", "length": 1.7976931348623157e308,
-                           "origin": [-1.7976931348623157e308, 0]}])"));
-    ASSERT_NE(ends.library.find("A"), nullptr);
-    EXPECT_EQ(ends.library.find("A")->length, std::numeric_limits<double>::max());
-    EXPECT_EQ(ends.library.find("A")->origin.x, -std::numeric_limits<double>::max());
+    // The largest double itself, and its negative, are numbers the JSON library
+    // holds, and so are no number "too large to hold"; they are past the
+    // format's own bound (customisation.hpp, kCustomisationMostMagnitude), and
+    // refused for that, by the member (test_customisation_bounds.cpp tries the
+    // bound from both sides).
+    const Error length = refusalOf(customisationWith(
+        R"("linestyles": [{"name": "A", "length": 1.7976931348623157e308}])"));
+    EXPECT_EQ(length.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(length.message,
+              R"(linestyles[0] "A": "length" is larger than 1000000000 in size, the most any )"
+              "number of a customisation holds");
+    const Error origin = refusalOf(customisationWith(
+        R"("linestyles": [{"name": "A", "origin": [-1.7976931348623157e308, 0]}])"));
+    EXPECT_EQ(origin.message,
+              R"(linestyles[0] "A": "origin" is larger than 1000000000 in size, the most any )"
+              "number of a customisation holds");
 }
 
 // The reading stops AT such a number, so what a file is told depends on what
@@ -1663,13 +1672,13 @@ TEST(CustomisationWriter, WhatItDoesWriteNextToEachRefusalReadsBackEqual)
     Stroke arc = strokeOf(StrokeOp::Arc);
     arc.radius = -1.75;
     arc.startAngle = 720;
-    arc.endAngle = -0.5;
+    arc.endAngle = 0.5; // 719.5 degrees back: within the two turns an arc may sweep
     Stroke dot = strokeOf(StrokeOp::Dot); // radius 0: the smallest drawable
     Stroke pen = strokeOf(StrokeOp::Pen); // an empty pen name is still a pen
     Stroke text = strokeOf(StrokeOp::Text);
     text.text = 0;
     definition.strokes = {arc, dot, pen, text};
-    definition.texts = {StrokeText{"", 0, 0, "", "", 1, {1e-300, -1e300, 0.1}}};
+    definition.texts = {StrokeText{"", 0, 0, "", "", 1, {1e-300, -1e9, 0.1}}};
     ASSERT_TRUE(customisation.library.add(definition).ok());
     SurveyRule rule;
     rule.key = "A*";

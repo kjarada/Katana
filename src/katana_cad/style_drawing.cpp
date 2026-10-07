@@ -5,6 +5,7 @@
 #include <numbers>
 #include <utility>
 
+#include "katana/entity/customisation.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad {
@@ -44,7 +45,20 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
     const double to = toDegrees * kPi / 180.0;
     // Libraries write an arc both ways round (`arc 1.75 0 180` and `arc 1.75 180
     // 0`), so the sweep's sign is taken from the numbers rather than assumed.
-    const double sweep = to - from;
+    //
+    // A customisation file is read with no arc sweeping more than two turns
+    // (entity::kCustomisationMostSweepDegrees), but a definition made in code
+    // is not held to it, and the number of chords follows the sweep: one of a
+    // billion degrees would ask for twenty million points, and a sweep past
+    // what an int holds of chords is undefined behaviour to cast. So the
+    // sweep drawn is cut to the file's own bound, and one that is not a
+    // number draws nothing.
+    const double raw = to - from;
+    if (!std::isfinite(raw)) {
+        return;
+    }
+    constexpr double kMostSweep = katana::entity::kCustomisationMostSweepDegrees * kPi / 180.0;
+    const double sweep = std::clamp(raw, -kMostSweep, kMostSweep);
     const int steps =
         std::max(2, static_cast<int>(std::ceil(std::abs(sweep) / (2.0 * kPi) * kCircleChords)));
     for (int i = 0; i <= steps; ++i) {
