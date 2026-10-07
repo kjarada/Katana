@@ -8,8 +8,8 @@
 // wants the program's customisation hands over a HOST: the built-in (which a
 // build may not have) and the path of the file the user keeps their own in
 // (which a front end may not have: only the desktop has a per-user place).
-// startCustomisation then does what each front end once did for itself, in
-// its own words and with its own omissions.
+// startCustomisation then does, once for every front end, what each would
+// otherwise do in its own words and with its own omissions.
 //
 // THE BUILT-IN is a Katana customisation file compiled into the program
 // (CMake's KATANA_BUILTIN_CUSTOMISATION, #embed). The file is not part of the

@@ -12,8 +12,6 @@
 // first byte that is not. So a name is not handed to it as it comes: "café"
 // from an ANSI console would end the program. These are the one place the
 // conversion is made, in each direction.
-// It was a function private to the sheet verbs, with a second copy in the
-// utility verbs, before the customisation needed a third.
 
 #include <filesystem>
 #include <string>

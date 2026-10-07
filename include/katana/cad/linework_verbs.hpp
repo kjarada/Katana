@@ -2,9 +2,7 @@
 
 // LINEWORK: joining coded points into lines from the text command line
 // (docs/survey_coding.md, "Linework"). The interpreter's, so the window's
-// command line, katana_cli, katana_mcp and an AI agent all run the same verb;
-// until now Process Linework was one tab of the Survey Code Manager and
-// nothing else.
+// command line, katana_cli, katana_mcp and an AI agent all run the same verb.
 //
 //   LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]
 //            [CHORD <length>] [PREVIEW]
@@ -21,10 +19,10 @@
 // chordTolerance, 0.005 unless said. PREVIEW plans and reports, and changes
 // nothing. Each of the verb's own words is given at most once.
 //
-// PROPERTY and CHORD came with the Survey Code Manager's Linework tab, which
-// had both as controls of its own while it ran processLinework itself: it now
-// runs this line (CLAUDE.md section 1, one code path), and a control the line
-// could not say would have had to go. A property is what CODE already takes,
+// PROPERTY and CHORD are the words for the two controls of the Survey Code
+// Manager's Linework tab, which runs this line (CLAUDE.md section 1, one code
+// path): a control the line could not say would have had to go. A property is
+// what CODE already takes,
 // so that points coded under a name of the drawing's own can be strung as
 // they were coded; a chord length is geometry no survey code holds.
 //

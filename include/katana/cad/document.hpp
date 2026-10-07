@@ -373,7 +373,7 @@ class Document {
     // The customisation is not saved, but a RECORD of it is: the names the
     // drawing is drawn with (storage::ProjectMetadata::customisation;
     // customisation_record.hpp has the rules). The Document keeps that record
-    // itself, where each front end once did. A save writes it INTO WHAT IT
+    // itself. A save writes it INTO WHAT IT
     // SAVES, and metadata() reads it back only once the save has succeeded:
     // it never goes through setMetadata, so a save that cannot go ahead
     // leaves an untouched drawing unmodified. open() works out which recorded

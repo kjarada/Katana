@@ -4,10 +4,10 @@
 //
 // A survey code rule, the symbol it gives and a pen inside a definition all
 // name their colour. ONE resolver answers for a Document: its customisation's
-// own table, then the standard names (entity::resolveColour). The standard
-// names were once a table cad could not see, so each front end handed cad a
-// function of its own - and a customisation's names ("sui test water")
-// resolved nowhere at all.
+// own table, then the standard names (entity::resolveColour). It is the
+// Document's own and not a function a front end hands over, because a front
+// end's would not know a customisation's names ("sui test water"), which then
+// resolve nowhere at all.
 
 #include <functional>
 #include <optional>

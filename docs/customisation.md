@@ -6,11 +6,43 @@ mean and how linework is processed. `docs/survey_coding.md` says what each of
 those IS and how a code is applied. This document is about the customisation
 as one thing: the value that holds one and the file that keeps it.
 
-Its first chapter, below, is the file format; its second, "The verbs", the
-commands that load, write, keep and edit a customisation; then "Settings and
+After a short guide to using it, its first chapter, below, is the file format;
+its second, "The verbs", the commands that load, write, keep and edit a customisation; then "Settings and
 the kept customisation"; "The built-in", the customisation compiled into the
 program; and last the converter that makes such a file from the older
 formats.
+
+## Using the customisation
+
+For someone who has Katana and a survey to draw. Five steps; the rest of this
+document is the reasons.
+
+1. **The NSW customisation is built in, and applies at start-up.** Its
+   linestyles, symbols and survey code rules are there the first time the
+   program runs, with nothing to load. (A build made from a clean checkout has
+   no built-in: the NSW file is git-ignored, "Why it is not in the repository",
+   below, and such a build starts with no customisation until a file is loaded.)
+2. **To use another customisation, load its file in File > Settings > Import.**
+   It is merged onto the built-in automatically - a definition of a name takes
+   the place of the one of that name, a code's rules take the place of that
+   code's - and nothing else changes. Replace is the checkbox beside Import:
+   with it ticked the file's definitions become the whole library and its
+   rules the whole of the codes, for each kind the file brings.
+3. **To change it, edit it in Settings.** Survey Codes... opens the Survey
+   Code Manager and Symbol Library... the Symbol Library, where a definition or
+   a rule is made, changed or removed. An edit of a session that was kept is
+   kept as it is made; when Settings says "Not kept", Keep makes what is
+   loaded what the next start gives, and Reset to Built-in goes back.
+4. **To bring survey points in, use Survey > Import Survey Points.** Leave
+   "Apply survey codes to the imported points" and "Draw linework through the
+   imported points" ticked: the points come in coded and strung by the
+   customisation, and one Undo removes all of it.
+5. **For points already drawn, use Survey > Survey Coding > Apply Survey Codes
+   and Process Linework.** Each works on the selection, or on the whole drawing
+   when nothing is selected, and is one Undo.
+
+The same through a command line: `CUSTOMISE "<file>"`, `CODE` and `LINEWORK`
+("The verbs", below).
 
 ## The format
 
@@ -342,6 +374,7 @@ name their first label gave them while showing the new one
 | a required member missing | `ParseFailure` | `codes[4]: has no "key", which it must` |
 | a stroke of the wrong length or kind | `ParseFailure` | `symbols[0] "TEST Valve" strokes[9]: "arc" takes ...` |
 | a number a double cannot hold | `ParseFailure` | `linestyles[0] "A": "length" has a number too large to hold` |
+| a value past a bound ("The reader is bounded", below) | `ParseFailure` | `symbols[0] "S" strokes[0]: "arc" sweeps more than 720 degrees (two turns), the most an arc holds` |
 | a name a project could not record, or one that could not be told from another | `InvalidArgument` | `top level: "name": a customisation name cannot hold ...` |
 | two definitions of one name | `InvalidArgument` | `symbols[1] "A": the file holds two definitions of this name; ...` |
 | two colour names with one fold, or one that is a standard name | `InvalidArgument` | `colours "Red": a standard colour name cannot be given another colour ...` |
@@ -449,8 +482,60 @@ UTF-8 mark over bytes that are not UTF-8, UTF-16 with an odd number of bytes
 or half a surrogate pair - with the decoder's account of what is wrong beside
 it. Malformed JSON gets the same message with the line and column beside it.
 
-A survey code file (`.mapfile`) and a style library (`.4d`) are simply not
-JSON, and get `not a Katana customisation file`.
+A file of another program's format that BEGINS with `<` (markup) or `//` (a
+comment) - what a survey code file (`.mapfile`) and a style library (`.4d`)
+begin with - gets `not a Katana customisation file; the older formats are
+converted with katana_customisation_convert`, with none of the JSON parser's
+account of the character beside it. The program tells them by those two
+characters, after any blanks and a byte order mark, and holds no other mark of
+those formats: their readers are the converter's ("Converting a customisation
+from the legacy formats", below). Text that begins otherwise and is not JSON
+gets the plain `not a Katana customisation file` with the parser's line and
+column beside it. A definition read on its own (`definitionFromJson`) is not a
+file of another program and is not sent to the converter.
+
+### The reader is bounded
+
+A file is somebody else's, and a number or a length in it is drawn, looped
+over and copied. One that asked for an arc sweeping two billion degrees was
+asked for twenty million points (and a sweep past what an `int` holds of
+chords is an undefined cast), a coordinate of 1e29 reached the dash arithmetic,
+and a 50 MB name or three million strokes loaded without complaint. So the
+reader refuses a file past these, naming the entry and the member as it names
+every other refusal, and the writer refuses what the reader would
+(`kCustomisationMost*`, `include/katana/entity/customisation.hpp`):
+
+| Bound | Is | Refusal says |
+|---|---|---|
+| the size of a number: a coordinate, radius, length, factor, size or angle | at most 1,000,000,000 (1e9) | `... is larger than 1000000000 in size, the most any number of a customisation holds` (a stroke: `"move" has a number larger than ...`) |
+| the sweep of an arc, `\|end - start\|` | at most 720 degrees, two turns | `"arc" sweeps more than 720 degrees (two turns), the most an arc holds` |
+| strokes in one definition | at most 100,000 | `a definition holds at most 100000 strokes, and this is one more`, at the stroke that is one too many |
+| a name or text: every text member, a notice's line, a colour's name, a pen | at most 1,000 bytes | `"name" is longer than 1000 bytes, the most a name or text of a customisation holds` |
+| rules in a file | at most 1,000,000 | `top level: "codes" holds more than 1000000 rules, the most a customisation holds` |
+
+Where they come from: a world coordinate in metres is 25 times the Earth's
+circumference at 1e9, so the bound is no limit on a survey; two turns is as far
+as an arc is drawn round, since the chords an arc is drawn with follow its
+sweep; the others are far above any definition, name or file the built-in or a
+person's customisation holds (the NSW built-in is read by this reader, so it
+is within every one, with room to spare; its census, 792 definitions and 1,624
+rules, is pinned by `BuiltInCensus` and would fail if it were not). Each is tried at the bound (accepted) and one
+past it (refused), in `tests/entity/customisation/test_customisation_bounds.cpp`.
+
+- **The check is where the value is read.** A text over the bound is refused
+  by the member that holds it, a number by the member or the stroke, so the
+  refusal can say where. The count of rules is kept as the text is parsed and
+  STOPS the parse at the rule past the bound, so a file of millions holds the
+  bound's worth in memory and no more. A name in a refusal is cut at 240 bytes
+  (`inQuotes`), since the entry's name is in every refusal about it.
+- **`cad::addArc` clamps as well** (`src/katana_cad/style_drawing.cpp`): a
+  definition made in code is not held to the file's bounds, and the arc it
+  draws is cut to the same two turns, and drawn as nothing when a sweep is not
+  a number.
+- **Not bounded**: the number of definitions in a file, the strokes of all of
+  them together, and the rules after files are merged (each file is held to
+  its million, and the merge is not asked again). A file of a million
+  definitions is its size in memory, and no more.
 
 **Strokes are read as the text is parsed**, not from a tree of it. The reader
 takes the JSON library's parse events (its SAX interface) and builds a tree
@@ -547,6 +632,9 @@ would not read back as itself:
   INSIDE its stroke, where a person looks for it. A text no stroke places, one
   placed twice, or two placed in the other order has no form in the file;
 - an attribute whose type is neither `text` nor `integer`;
+- a number larger in size than 1e9, an arc sweeping more than 720 degrees, a
+  definition of more than 100,000 strokes, and a text of more than 1,000 bytes:
+  the bounds of the reader ("The reader is bounded", above);
 - and everything the READER would refuse: a bad name, a bad digest, linework
   codes that `entity::validate` refuses. The reader and the writer call one
   function for these, so the writer cannot write a file the reader will not
@@ -962,7 +1050,7 @@ had come to differ, are gone, and the older files they read no longer load.
 
 | Line | What it does |
 |---|---|
-| `CUSTOMISE` | what is loaded: two count lines, then records, then what this drawing uses of it |
+| `CUSTOMISE` | what is loaded: two count lines, then records, then what this drawing uses of it, then (in a session with a host) a sentence saying whether a kept file exists and where |
 | `CUSTOMISE JSON` | the same as one JSON object (`cad::customisationJson`) |
 | `CUSTOMISE <file>...` | merges Katana customisation files into the session |
 | `CUSTOMISE REPLACE <file>...` | loads them in the place of each KIND they bring |
@@ -974,6 +1062,18 @@ had come to differ, are gone, and the older files they read no longer load.
 | `CUSTOMISE REMOVE <definition>... [FORCE]` | removes definitions; refused while one is in use, unless `FORCE` |
 | `CUSTOMISE REMOVE CODE <key>...` | removes every rule of each key |
 | `CUSTOMISE SET <key>=<value>...` | `auto.codes` and `auto.linework` (`on`, `off`); `linework.start`, `.end`, `.close`, `.arcstart`, `.arcend`, `.join`, `.rectangle` (a spelling; empty switches that control off) |
+
+**What `kept=yes` means.** The record's `kept` says the session is what the
+next start gives. With no kept file at all - a session the program gave none,
+or one whose file has not been written - that is trivially so, since the next
+start gives the built-in, and `kept=yes` then reads as a promise of a file that
+is not there. It is a token about 30 tests pin, so it stays, and the sentence
+at the end of `CUSTOMISE`'s reply says plainly what the file is: `Kept file:
+none. This session keeps no file, so each start gives the built-in ...`, `Kept
+file: <path>, not written yet; CUSTOMISE KEEP writes it.` or `Kept file:
+<path>, which the next start reads.` A `file=` field on the record was
+rejected: it would break every pin of the whole record. The sentence is not
+said by a session given no host, which has no notion of a kept file.
 
 **A keyword is the whole first word**, in any case, and `CUSTOMIZE` is the
 same verb: the interpreter reads the verb as it reads every verb, alias
@@ -1138,13 +1238,13 @@ CUSTOMISE [REPLACE] f...  repeated file=<f>                                     
                           left rules=<n> linework=yes|no automation=yes|no        DEFINITIONS, when it left any of them
                           removed definitions=<n> codes=<n>                       REPLACE, when it removed any
                           removed definition=<name>   removed code=<key>          up to 20 of each
-                          undefined names=<n>                                     names the rules ask for that nothing defines
-                          undefined name=<name>                                   up to 20
+                          undefined names=<n> [in_built_in=<k>]                   names the rules ask for that nothing defines; k of them the built-in's own, when k is not 0
+                          undefined name=<name> [in_built_in=yes]                 up to 20
                           customisation name=...                                  what is loaded now
 CUSTOMISE EXPORT f ...    exported file=<f> name=<n> definitions=<n> codes=<n> rules=<n> replaced=yes|no
 CUSTOMISE RESET           reset name=<n> definitions=<n> codes=<n> rules=<n> kept=yes|no
-CUSTOMISE KEEP            kept file=<f> written=yes name=<n> definitions=<n> codes=<n> rules=<n> backup=<f>.bak|none
-                          kept file=<f> written=no reason=the-session-is-the-built-in backup=<f>.bak|none
+CUSTOMISE KEEP            kept file=<f> written=yes name=<n> definitions=<n> codes=<n> rules=<n> backup=<f>.bak|none [set_aside=<f>.bad]
+                          kept file=<f> written=no reason=the-session-is-the-built-in backup=<f>.bak|none [set_aside=<f>.bad]
 CUSTOMISE REVERT          reverted file=<f> name=<n> definitions=<n> codes=<n> rules=<n>
 CUSTOMISE REMOVE a b      removed definition=<name> rules=<n> styles=<n> layers=<n>   one a name: the rules, styles and layers that still name it
 CUSTOMISE REMOVE CODE k   removed code=<key> rules=<n>                            one a key
@@ -1165,8 +1265,8 @@ the customisation it said was not loaded.
 which is what the merge replaces by. The `automation` and `linework` records
 carry the very keys `SET` takes, so either can be typed back after it.
 
-The bare report had a second, older text (`cad::formatCustomisationSummary`,
-and `cad::customisationReport` over it), which named a source by the kind of
+The bare report had a second, older text (a summary function and a report over
+it), which named a source by the kind of
 file it once was ("a style library"). `katana_cli`'s own `CUSTOMISE`, the
 window's and File > Drawing Summary each printed it until they moved to the
 verb's text, `cad::formatCustomisationReply`; with the last of them gone the
@@ -1223,7 +1323,15 @@ included, through the one function a start with no kept file uses
 
 `KEEP` writes the session, as `entity::customisationToJson` writes it, to a
 file beside the kept one and renames that into its place; the file that was
-there stays beside it as `.bak`. The session says what it was made from
+there stays beside it as `.bak`. The file beside is named for the process
+(`<kept file>.<process id>-<count>.tmp`), so that two Katanas keeping into one
+folder do not write one file, and it is never `<kept file>.tmp`, a name a
+person may have used for a file of their own: written and renamed away, that
+name was consumed. The `.bak` is WRITTEN from the bytes `KEEP` read and
+judged - the very bytes it will replace - and not copied from the file: a
+copy carries the file's attributes, and a read-only kept file made a read-only
+`.bak` that the next `KEEP` could not replace (refused, for good, with "could
+not be kept beside it"). The session says what it was made from
 (`basedOn`: the built-in's name and the digest of its bytes, stamped when the
 built-in was installed), so the kept file says it too, and a later start can
 tell that the built-in has moved on.
@@ -1237,22 +1345,35 @@ It refuses to write over a kept file that
   now, after which it is the one this session saw; `EXPORT` first keeps what
   this session has;
 - **cannot be read at all** - a folder of that name, a file that will not
-  open: what is there is never written over unseen;
-- **does not read** as a customisation: its owner may mean to mend it;
-- **was written by a newer Katana**, which holds what this one cannot write
-  back.
+  open: what is there is never written over unseen.
+
+**A kept file that was read and is not a customisation is set aside as
+`.bad`, and the session is written.** An empty or damaged file, or one written
+by a newer Katana, is what a start found, said (`start.problems`) and
+replaced with the built-in; every `KEEP` after it was refused, nothing in the
+window could move the file, and the record said `kept=yes` meanwhile, so an
+edit made in Settings kept nothing, for good. Now `KEEP` puts the file aside
+whole beside the kept one - `<kept file>.bad`, an earlier `.bad` replaced - and
+writes the session: `kept file=<f> written=yes ... backup=none
+set_aside=<f>.bad`. Nothing is lost: what a newer Katana wrote is in the
+`.bad`, to be read by that Katana, and a damaged file is there to be mended.
+The next start reads the kept file and has nothing to report. A file that
+changed on disk since this session read it is still refused, whatever it holds:
+that is another Katana's write, which this session has not seen.
 
 A session with no name is refused too, saying how it gets one (`EXPORT ...
 NAME`, then `REPLACE`). A write that fails - the folder cannot be made, the
-file that is there cannot be copied beside it as `.bak`, the new text cannot
+file that is there cannot be put beside it as `.bak`, the new text cannot
 be put in its place - is a `FileExportFailure` that leaves the kept file as
 it was and nothing beside it; `EXPORT` writes the same way.
 
 When the session IS the built-in, nothing is written and the kept file is set
-aside as `.bak` (`written=no reason=the-session-is-the-built-in`). "Is the
-built-in" is asked of the install itself - the session is compared with what
-installing the built-in into an empty Document gives - so it cannot drift
-from what `RESET` leaves.
+aside as `.bak` (`written=no reason=the-session-is-the-built-in`; as `.bad`
+when it does not read). It is MOVED, by a rename that replaces an earlier
+`.bak`: that was removed first, and an earlier `.bak` was lost when the rename
+then failed. "Is the built-in" is asked of the install itself - the session is
+compared with what installing the built-in into an empty Document gives - so
+it cannot drift from what `RESET` leaves.
 
 `REVERT` reads the kept file again and installs it.
 
@@ -1398,8 +1519,8 @@ went with it and is an unknown command now. Their replies are unchanged.
 
 **Colours.** The verbs resolve a colour name through the Document
 (`cad::resolveColour`: the customisation's own table, then the standard
-names) and through nothing else. A front end once passed more names with
-`CommandInterpreter::setColourLookup`; none does, and the setter is gone
+names) and through nothing else. A front end once passed more names with a
+colour-lookup setter on the interpreter; none does, and the setter is gone
 (2026-10-07) - and with it the parameter `runSurveyCodeVerb` took for those
 names, which only two tests still reached.
 
@@ -1706,10 +1827,12 @@ each case is the verb's:
 - **Reset to Built-in where nothing is kept** leaves the session the kept
   one already, and nothing follows;
 - **a `KEEP` that is refused** - the kept file changed on disk since this
-  session read it, it does not read, a newer Katana wrote it - is shown as
-  the refusal it is, under the line that was carried out. The session is
-  then edited and not kept, the page says so, and Keep is there to try again
-  once `REVERT` or `EXPORT` has dealt with the file.
+  session read it, or cannot be read at all - is shown as the refusal it is,
+  under the line that was carried out. The session is then edited and not
+  kept, the page says so, and Keep is there to try again once `REVERT` or
+  `EXPORT` has dealt with the file. (A kept file that does not read, or was
+  written by a newer Katana, is no refusal: it is set aside as `.bad` and the
+  session written, "The host: RESET, KEEP and REVERT", above.)
 
 A line typed on the command line, run by a script or sent by an agent
 changes the session and is followed by nothing: Settings then shows "Not

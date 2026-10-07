@@ -34,11 +34,10 @@ namespace katana::cad {
 // its "sources" (entity/customisation.hpp), so the session's load record is
 // written and read back without a second type.
 //
-// Two flags, where there was one `library` bool: a style library brought
-// definitions and a survey code file rules, but one Katana customisation
-// brings both, and a record that could say only one of them would lose the
-// source at the first Replace of the other kind. A source's NAME is its
-// identity: two entries of one name are one source.
+// Two flags, because one Katana customisation brings both definitions and
+// rules, and a record that could say only one of them would lose the source at
+// the first Replace of the other kind. A source's NAME is its identity: two
+// entries of one name are one source.
 using CustomisationSource = katana::entity::CustomisationSourceNote;
 
 // Adds a load to `loaded`, which is in load order. A source loaded again
@@ -146,7 +145,7 @@ customisationNotLoaded(const std::vector<std::string>& recorded,
 // the merge keeps them all. `repeats` holds each later naming, as named, for
 // the front end to say it was read once. Both front ends (the window's CUSTOMISE
 // and File > Settings > Import, the command line's CUSTOMISE) go through this, so
-// they cannot come to differ on the same line again.
+// they cannot differ on the same line.
 struct DistinctFiles {
     // Absolute and lexically normal: what is read.
     std::vector<std::filesystem::path> files{};
@@ -221,9 +220,9 @@ struct RenamedDefinition {
 // A front end writes what it keeps in the metadata - the reference layers -
 // only when this holds: Document::setMetadata marks the drawing modified, and
 // a SAVE that could not go ahead would otherwise leave a drawing nobody
-// touched asking to be saved. The customisation record was written that way
-// too and needs no such guard now: the save itself writes it into what it
-// saves (Document::save), and a save that does not go ahead writes nothing.
+// touched asking to be saved. The customisation record needs no such guard:
+// the save itself writes it into what it saves (Document::save), and a save
+// that does not go ahead writes nothing.
 [[nodiscard]] bool typedSaveHasDestination(std::string_view line, bool hasProject);
 
 } // namespace katana::cad

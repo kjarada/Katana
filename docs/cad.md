@@ -289,7 +289,7 @@ The colour names they need are resolved through the Document
 customisation's own table, then the standard names of
 `include/katana/entity/colour_names.hpp`). The standard names were once a
 table cad could not see, so each front end passed it with
-`CommandInterpreter::setColourLookup`. No front end passes one any more, and
+a colour-lookup setter on the interpreter. No front end passes one any more, and
 the setter went with the last that did (2026-10-07). So did the parameter
 `runSurveyCodeVerb` took for a caller's own names, asked after the Document:
 only its tests reached it, and a second way to resolve a colour that no

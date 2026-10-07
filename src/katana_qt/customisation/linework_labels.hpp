@@ -9,10 +9,10 @@
 // the window: File > Settings lists the seven spellings under it
 // (settings_dialog.cpp), and the controls' one editor, the Survey Code
 // Manager's Linework tab, labels its seven fields from it
-// (code_manager_tabs.cpp, buildLineworkTab). The tab once wrote the words out
-// itself; SettingsDialog.TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem
-// still reads the tab's labels against Settings' page, so a field built
-// without the list fails there.
+// (code_manager_tabs.cpp, buildLineworkTab).
+// SettingsDialog.TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem reads
+// the tab's labels against Settings' page, so a field built without the list
+// fails there.
 //
 // Header only, and nothing of the managers in it: either dialog includes it
 // without the other.

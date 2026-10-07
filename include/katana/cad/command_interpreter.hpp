@@ -69,11 +69,9 @@ class CommandInterpreter {
         sheetContext_ = std::move(provider);
     }
 
-    // (There was a setColourLookup here: the colour names CODE needs, from a
-    // front end, when the standard names were a table cad could not see. The
-    // Document resolves them now - its customisation's own table, then the
-    // standard names (colour_lookup.hpp) - and the setter went on 2026-10-07
-    // with the last front end that called it.)
+    // The colour names CODE needs are the Document's to resolve - its
+    // customisation's own table, then the standard names (colour_lookup.hpp) -
+    // so no front end hands the interpreter a lookup.
 
     // What CUSTOMISE RESET, KEEP and REVERT need that the Document does not
     // hold (customisation_verbs.hpp): the program's built-in customisation

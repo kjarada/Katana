@@ -11,11 +11,6 @@
 // customisationJson is the same as one JSON object, for CUSTOMISE JSON and for
 // a front end that hands a client structured data.
 //
-// There was a second, older text beside it (formatCustomisationSummary, and
-// customisationReport over it): prose that named a source by the kind of file
-// it once was ("Loaded files, in load order: ..."), which each front end's own
-// CUSTOMISE printed. It went with the last of those, 2026-10-07.
-//
 // The form of customisationSummary that takes the sources and the missing
 // names as arguments describes LISTS, so that the numbers can be tested
 // without loading anything; the form that takes the Document alone reads them

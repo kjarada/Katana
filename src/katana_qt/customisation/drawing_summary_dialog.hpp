@@ -64,8 +64,7 @@ class DocumentWatcher;
 struct DrawingSummaryContext {
     // The drawing, and with it the customisation it is looked at through:
     // the Document holds what is loaded and what the open project is missing
-    // (customisationState), which the window once kept in lists of its own
-    // and handed over beside it.
+    // (customisationState), so none is handed over beside it.
     katana::cad::Document* document = nullptr;
     // Runs a line through the window's one executor (Copy as JSON).
     CommandRunner run;

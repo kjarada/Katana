@@ -2,8 +2,7 @@
 
 // CODE: the survey codes on the text command line (docs/survey_coding.md).
 // The interpreter's, so the window's command line, katana_cli, katana_mcp and
-// an AI agent all run the same verb; until 2026-09-26 it was katana_cli's own,
-// and the window refused it.
+// an AI agent all run the same verb.
 //
 //   CODE [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]
 //                               apply the loaded survey codes to the entities
@@ -17,9 +16,6 @@
 //   CODE EXPLAIN <code>         why a code gets what it gets
 //   CODE LIST [<filter>]        the loaded survey codes, one code per line
 //   CODE CHECK                  lint them; refused when a rule has an error
-//
-// LIST and CHECK were a verb of their own, named after the survey code file
-// of another program; that file no longer loads, and its verb went with it.
 //
 // THE SCOPE is the one every verb on drawing data takes (scope_verbs.hpp),
 // read by the one parser. What differs here is the DEFAULT: with no scope
@@ -75,11 +71,9 @@ namespace katana::cad {
 // empty headless. InvalidState when no survey codes are loaded; a refused CODE
 // changes nothing.
 //
-// (It took a colour lookup of a caller's own until 2026-10-07, asked after
-// the Document for a name it did not know. The front ends passed their table
-// of standard names through it while cad could not see that table; since the
-// Document resolves those itself no program passed one, and a parameter only
-// its tests reach is a second way to resolve a colour that nothing uses.)
+// A colour name is resolved by the Document alone (colour_lookup.hpp): a
+// parameter for a caller's own lookup would be a second way to resolve a
+// colour that no program uses.
 [[nodiscard]] katana::core::Result<std::string>
 runSurveyCodeVerb(Document& document, const std::vector<std::string>& args,
                   const ScopeViewProvider& views);

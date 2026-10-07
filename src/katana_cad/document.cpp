@@ -282,7 +282,7 @@ void Document::newDocument()
     rememberTables();
     // The customisation is kept; what the LAST project lacked of its own
     // record is not: a new drawing recorded nothing. Left standing, a bare
-    // CUSTOMISE went on naming the old project's files.
+    // CUSTOMISE would name the old project's files.
     const bool hadMissing = !customisation_.missingAtOpen.empty();
     if (hadMissing) {
         customisation_.missingAtOpen.clear();
