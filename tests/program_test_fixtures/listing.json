@@ -51,6 +51,13 @@
       ]
     },
     {
+      "name": "cli_whose_own_line_takes_it_away_again",
+      "command": ["/b/bin/cmake", "-E", "env", "--unset=KATANA_BUILTIN_CUSTOMISATION", "/b/bin/katana_cli", "-c", "LIST"],
+      "properties": [
+        {"name": "ENVIRONMENT", "value": ["KATANA_BUILTIN_CUSTOMISATION=none"]}
+      ]
+    },
+    {
       "name": "a_unit_suite",
       "command": ["/b/bin/tests/katana_core_tests", "--gtest_filter=Suite.Case"]
     },

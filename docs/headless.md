@@ -210,12 +210,29 @@ test that did not say would be two tests. Two parts, which share nothing:
   they really have - and names every test whose COMMAND names `katana`,
   `katana_cli` or `katana_mcp` and which does not give the variable a value:
   in `ENVIRONMENT`, as `set:` in `ENVIRONMENT_MODIFICATION`, or on its own
-  `cmake -E env` line. An empty value, `unset:` and `reset:` do not say. It
-  goes by the command, not the name, so a program test registered under
-  another name is named and fails the suite until it says.
+  `cmake -E env` line. An empty value, `unset:`, `reset:` and that line's own
+  `--unset=` do not say. It goes by the command, not the name, so a program
+  test registered under another name is named and fails the suite until it
+  says.
   `the_program_test_check_names_a_test_left_to_the_machines_customisation`
   runs the check on a hand-written listing (`tests/program_test_fixtures`)
-  with four tests in it that it must name.
+  with five tests in it that it must name.
+- **The same check for the kept file**
+  (`every_program_test_says_which_kept_customisation_it_starts_with`, since
+  2026-10-07). Until then only the built-in's variable was asked about: the
+  scan's unsetting of `KATANA_CUSTOMISATION` could be dropped with nothing
+  failing, and every program test would have started with whatever file the
+  person running the suite keeps. What "says" is differs, which is why it is
+  a test of its own (`-DUNSET_SAYS=ON`): no kept file is a state a program is
+  the same in on every machine, so `unset:`, an empty value and `--unset=` on
+  a `cmake -E env` line say as much as a file does. `reset:`, which gives the
+  caller's value back, does not, and nor does a test that never names the
+  variable.
+  `the_program_test_check_names_a_test_left_to_the_callers_kept_customisation`
+  runs it on a listing of its own (`listing_kept.json`) with four tests it
+  must name. *Rejected: one run of the script over both variables* - the
+  listing would be read once, but one test would then fail for two reasons
+  and its name could say neither; a run is under five seconds.
 
 The two were one function, which set the variable on its own list of tests
 and then named those of that list without it - so nothing the scan missed
@@ -225,7 +242,7 @@ With an older one `tests/CMakeLists.txt` does what it can and says so (it
 refused to configure at all until 2026-10-07): the scan is deferred to the
 end of `tests/` and reaches that directory's own program tests, the `cli.`
 tests and the window checks of other directories are left to the build and
-the caller's environment, and the check is not registered - it would name
+the caller's environment, and neither check is registered - each would name
 them at every run, for a reason nobody running the suite can mend. One
 `message(STATUS ...)` says all of that as the tree is configured. (The top
 `CMakeLists.txt` and the presets declare 3.24. Raising that also turns on
@@ -260,7 +277,7 @@ every action, field, button and tab gets one. In a test they are one
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
-| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`). A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person |
+| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`). A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 | `--export-options FILE` | `^FILE` | opens File > Export Vector's dialog for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
 | `--wheel "NAME X,Y N"` | `~NAME X,Y N` | turns the mouse wheel N notches - positive away from the person, which zooms in; negative, out - over widget NAME at X,Y in its logical pixels, NAME found as `--report` finds one. Each notch is a wheel event of its own, sent to the widget under that point (a 3D view's GPU child, where it has one) with the event loop run after it, as a person's wheel reaches the view; so a 3D view's zoom is driven in the real window, `~RenderView2 160,330 10|?RenderView2` (`qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless`). A step that is not three words, no such widget, a point outside it or no notches ends the run |

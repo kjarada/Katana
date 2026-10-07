@@ -1,7 +1,6 @@
 #include "katana/cad/survey_code_verbs.hpp"
 
 #include <algorithm>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,19 +66,6 @@ katana::core::Status requireMap(const Document& document)
                          "customisation file");
     }
     return {};
-}
-
-// The Document's own answer first - its customisation's table, then the
-// standard names - and what the front end passed only for a name neither
-// knows. Asked at each call, so it follows a customisation loaded since.
-ColourLookup coloursOf(const Document& document, const ColourLookup& frontEnd)
-{
-    return [&document, frontEnd](std::string_view name) -> std::optional<katana::entity::Color> {
-        if (const auto colour = resolveColour(document, name)) {
-            return colour;
-        }
-        return frontEnd ? frontEnd(name) : std::nullopt;
-    };
 }
 
 // What the words after CODE, or after CODE CENSUS, ask for.
@@ -271,10 +257,12 @@ bool isSurveyCodeVerb(std::string_view verb)
 }
 
 Result<std::string> runSurveyCodeVerb(Document& document, const std::vector<std::string>& args,
-                                      const ColourLookup& colourOf,
                                       const ScopeViewProvider& views)
 {
-    return code(document, args, coloursOf(document, colourOf), views);
+    // The Document's own answer and no other: its customisation's table, then
+    // the standard names, asked at each call so that it follows a
+    // customisation loaded since (colourLookup).
+    return code(document, args, colourLookup(document), views);
 }
 
 Result<std::string> codeCheckReply(const std::vector<LintIssue>& issues, std::size_t rules)

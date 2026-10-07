@@ -5,6 +5,7 @@
 // katana_cli always has; katana_mcp captures both around each line.
 
 #include <cctype>
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -127,6 +128,15 @@ katana::cad::CustomisationHost hostOfThisRun()
     return host;
 }
 
+// `count` and the noun for it. The start-up line gave every count the plural:
+// a customisation of one definition and one rule had "1 linestyles and
+// symbols and 1 survey code rules", where the window, for the same start,
+// says "1 definition" and "1 survey code rule".
+std::string counted(std::size_t count, const char* one, const char* many)
+{
+    return std::to_string(count) + ' ' + (count == 1 ? one : many);
+}
+
 // The customisation a program's session starts with, so that it can draw a
 // survey rather than wait to be told where its linestyles are: the kept one
 // when there is one and it reads, else the built-in, else none - cad's choice
@@ -153,8 +163,11 @@ void startWithTheHostsCustomisation(katana::cad::Document& document,
         return;
     }
     const bool kept = start.installed == katana::cad::CustomisationOrigin::Kept;
-    std::cout << "Customisation: " << start.name << ", " << start.definitions
-              << " linestyles and symbols and " << start.rules << " survey code rules, "
+    // One definition is a linestyle OR a symbol; several are linestyles and
+    // symbols, whichever they are (CustomisationStart::definitions counts both).
+    std::cout << "Customisation: " << start.name << ", "
+              << counted(start.definitions, "linestyle or symbol", "linestyles and symbols")
+              << " and " << counted(start.rules, "survey code rule", "survey code rules") << ", "
               << (kept ? "kept" : "built in") << "\n";
     if (start.keptFromAnotherBuiltIn) {
         // It is the user's, so it is what starts; they may still want to know

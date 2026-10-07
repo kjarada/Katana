@@ -1806,7 +1806,9 @@ if(KATANA_BUILD_TESTS)
     #
     # The customisation: one linestyle, "FIELD Kerb", no symbol, and three
     # rules - KB* a LINE on FIELD KERB in that linestyle, EB* a line, CTRL a
-    # point code - so the session says 1 and 3 as it starts.
+    # point code - so the session says 1 and 3 as it starts, each noun by its
+    # count: ONE definition is "1 linestyle or symbol". (The line said "1
+    # linestyles and symbols", and this expected it, until 2026-10-07.)
     #
     # The file, in the order its points are drawn (cli.survey_import_gnss_
     # field_file): CM1 keyed in with no code at 500000,6200000; then the four
@@ -1831,7 +1833,7 @@ if(KATANA_BUILD_TESTS)
     # as SURVEY READ gives them, and `settings`: docs/survey.md, "The reply".)
     set(_field_codes
         "${PROJECT_SOURCE_DIR}/tests/data/field_codes/test_field_codes.customisation.json")
-    set(_field_start "Customisation: test_field_codes, 1 linestyles and symbols and 3 survey code rules, built in")
+    set(_field_start "Customisation: test_field_codes, 1 linestyle or symbol and 3 survey code rules, built in")
     set(_gnss_onto "SURVEY IMPORT \"${_fld_gnss}\" LAYER fieldwork")
     add_test(NAME cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
         COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION

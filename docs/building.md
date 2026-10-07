@@ -362,7 +362,7 @@ may not see GDAL, PDAL or the archive readers:
 | `INFO <id>` or `INFO #<id>`: an entity, the interpreter's - taken for a file only when a file of that name exists (both took every `INFO` for a file until 2026-09-26) | yes | yes |
 | `COPC <source> <destination.copc.laz>` | yes | yes (since 2026-09-26) |
 | `GDAL VERSION`, `LIST`, `HELP`, and `GDAL <algorithm> ... [FROM ...] [TO ...]`: any of GDAL's algorithms, run by the one geoprocessing executor (`docs/geoprocessing.md`) | yes (with `KATANA_BUILD_IO`) | yes, as a background job |
-| `CUSTOMISE`: the interpreter's family - `[REPLACE] <file>...` loads Katana customisation files, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE`, `SET`, and alone what is loaded, as records (`docs/customisation.md`, "The verbs") | yes (since 2026-10-06; a survey code file or a style library of another program is refused) | not yet: its own `CUSTOMISE [REPLACE] <file>...`, which still reads those older files, and alone a report of what is loaded and from which files |
+| `CUSTOMISE`: the interpreter's family - `[REPLACE] <file>...` loads Katana customisation files, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE`, `SET`, and alone what is loaded, as records (`docs/customisation.md`, "The verbs") | yes (since 2026-10-06; a survey code file or a style library of another program is refused) | yes (since 2026-10-07, and `--customise` runs this line; the window's own `CUSTOMISE [REPLACE] <file>...`, which read those older files and reported in a text of its own, is gone) |
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST`, `CODE CHECK` (the interpreter's since 2026-09-26; the last two were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06; `docs/customisation.md`, "The verbs") | yes | yes |
 | `IMPORT <file.ifc>`, `EXPORT <file.ifc>`, `INFO <file.ifc>`, `IFC RULES` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC, which run these lines |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
@@ -373,19 +373,33 @@ Points are absolute (`12.5,40`), relative (`@3,4`) or polar (`@5<30`).
 
 ## The customisation folder
 
-The linestyles, symbols and survey codes Katana draws with by default are
-compiled INTO the program. `tools/embed_customisation.py` reads the folder
+The linestyles, symbols and survey codes a program starts with are compiled
+INTO it - from ONE file, in the window as in `katana_cli` and `katana_mcp`
+(every front end since 2026-10-07): the Katana customisation file the CMake
+variable `KATANA_BUILTIN_CUSTOMISATION` names, a file of
+`resources/customisation/` by default, embedded in `katana_cad`
+(`docs/survey_coding.md`, "The built-in, and the seam"). Where it is absent
+the program has no built-in and draws plain lines until a customisation is
+loaded; `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes its absence a
+configure error.
+
+The same folder holds the four older files every program started from before.
+`tools/embed_customisation.py` still reads the folder
 `KATANA_CUSTOMISATION_DIR` (by default `resources/customisation/`) at build
 time - the style libraries `linestyles.4d` and `symbols.4d`, then the survey
 code files `survey_codes.mapfile` and `survey_codes_names.mapfile`, the second
 read after the first, whose rules win a field both give - and generates a
-source file in the build tree. Nothing is installed beside the program, and
-nothing is read from that folder at run time.
+source file in the build tree, for `katana_archive12d`. No program reads that
+table any more (`archive12d::builtinCustomisation()`: the archive module's own
+tests and one benchmark do), and it goes when the readers of the older files
+are split off. Nothing is installed beside the program, and nothing is read
+from that folder at run time.
 
 The folder is git-ignored: its files are third-party material under their own
-licence. A checkout without it builds an empty table - Katana then draws plain
-lines - and the tests that read it skip. (No test of the WINDOW depends on it
-any more: each says what customisation the window starts with,
+licence. A checkout without it builds no built-in and an empty table - Katana
+then draws plain lines - and the tests that read it skip. (No test of the
+WINDOW depends on it any more: each says what customisation the window starts
+with,
 `docs/headless.md`, "The customisation a run starts with". Nor does a
 `cli.` test: `katana_cli` starts its session through
 `cad::startCustomisation` and reads the same variable.) Point

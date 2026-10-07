@@ -233,18 +233,25 @@ endif()
 #
 # TWO parts, which share nothing:
 #
-#   the scan    at configure time, GIVES the variable to the tests it knows
+#   the scan    at configure time, GIVES the variables to the tests it knows
 #               for a program's by their names (`cli.` and `..._headless`),
 #               in every directory, as each was left by its own CMakeLists.
 #   the check   at TEST time, reads what ctest will really run and NAMES every
-#               test whose command names a program and which does not have
-#               the variable (tools/check_program_tests.cmake).
+#               test whose command names a program and which does not say
+#               the variable (tools/check_program_tests.cmake) - one test a
+#               variable, since what "says" is differs: the built-in's must
+#               be given a value, and the kept file's is said by unsetting
+#               it too.
 #
 # They were one function once, which set the variable on its list of tests and
 # then named those of that same list without it: nothing the scan missed could
 # be named, so the test could not fail - a program test registered under
 # another name, or in a directory configured after this one (benchmarks is),
-# ran with whatever its machine had, and the test said "none".
+# ran with whatever its machine had, and the test said "none". And until
+# 2026-10-07 the check asked about the built-in's variable alone: the scan's
+# unsetting of KATANA_CUSTOMISATION could be dropped with nothing failing, and
+# every program test then started with whatever file the person running the
+# suite keeps.
 #
 # The scan is deferred to the end of the TOP directory, by when every
 # directory has been configured - not to the end of this one, which a
@@ -258,9 +265,10 @@ endif()
 # directory once REFUSED to configure with one. It degrades instead: the scan
 # is then deferred to the end of THIS directory and gives the variables to
 # the program tests it can reach from here - those of tests/ itself, which are
-# most of the window's checks - and the check is not registered, since it
-# would name every `cli.` test (src/katana_app) and the window checks of the
-# directories below at every run, for a reason nobody running it can mend.
+# most of the window's checks - and neither check is registered, since each
+# would name the `cli.` tests (src/katana_app) and the window checks of the
+# directories below that do not say for themselves, at every run, for a
+# reason nobody running it can mend.
 # Those tests then start with whatever the build compiled in and the caller's
 # environment holds; one STATUS line says so as the tree is configured.
 set(_katana_scan_reaches_every_directory TRUE)
@@ -271,9 +279,9 @@ if(CMAKE_VERSION VERSION_LESS 3.28)
         "another directory: only the program tests of tests/ are given their starting "
         "customisation (KATANA_BUILTIN_CUSTOMISATION=none, KATANA_CUSTOMISATION unset). The "
         "`cli.` tests and the window checks of other directories start with what this build "
-        "compiled in and the caller's environment holds, and the test that names a program "
-        "test left so (every_program_test_says_which_built_in_customisation_it_starts_with) "
-        "is not registered.")
+        "compiled in and the caller's environment holds, and the two tests that name a "
+        "program test left so (every_program_test_says_which_built_in_customisation_it_starts_with "
+        "and ..._which_kept_customisation_it_starts_with) are not registered.")
 endif()
 
 function(katana_directories_below directory out)
@@ -333,10 +341,17 @@ else()
     cmake_language(DEFER CALL katana_say_what_every_program_test_starts_with FALSE)
 endif()
 
-# The check. The programs are handed over in a file - written when the build
-# system is, so it holds each one's real path - and not on the command line,
-# where they would make this test one that names a program. Not registered
-# where the scan could not reach every directory (an older CMake, above).
+# The check, once for each variable. The programs are handed over in a file -
+# written when the build system is, so it holds each one's real path - and not
+# on the command line, where they would make this test one that names a
+# program. Not registered where the scan could not reach every directory (an
+# older CMake, above).
+#
+# The kept file's variable is said by being UNSET too (-DUNSET_SAYS): no kept
+# file is a state a program is the same in on every machine, where an unset
+# built-in variable leaves the choice to the build. What that check holds is
+# the scan's second setting above, and the `--unset=KATANA_CUSTOMISATION` of
+# the cli tests that write it themselves.
 set(_program_files "")
 foreach(_program katana katana_cli katana_mcp)
     if(TARGET ${_program})
@@ -354,20 +369,33 @@ if(_program_files AND _katana_scan_reaches_every_directory)
             "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/program_files_$<CONFIG>.txt"
             "-DVARIABLE=KATANA_BUILTIN_CUSTOMISATION"
             -P "${PROJECT_SOURCE_DIR}/tools/check_program_tests.cmake")
+    add_test(NAME every_program_test_says_which_kept_customisation_it_starts_with
+        COMMAND ${CMAKE_COMMAND}
+            "-DCTEST=${CMAKE_CTEST_COMMAND}"
+            "-DBUILD=${CMAKE_BINARY_DIR}"
+            "-DCONFIGURATION=$<CONFIG>"
+            "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/program_files_$<CONFIG>.txt"
+            "-DVARIABLE=KATANA_CUSTOMISATION"
+            "-DUNSET_SAYS=ON"
+            "-DWHAT=which kept customisation they start with"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_program_tests.cmake")
     set_tests_properties(every_program_test_says_which_built_in_customisation_it_starts_with
+                         every_program_test_says_which_kept_customisation_it_starts_with
         PROPERTIES TIMEOUT 300)
 endif()
 # The check itself, on a listing with tests in it that it must name: a check
 # that cannot see one passes as quietly as one that finds none. The listing is
-# written by hand in ctest's format (tests/program_test_fixtures): ten tests,
-# of which seven name one of three programs - a window that starts with
-# nothing and one that does not say; a cli with a fixture in its ENVIRONMENT,
-# one with the variable on its own `cmake -E env` line, one that does not say
-# and one whose modification unsets what its environment set; an mcp that
-# unsets only the kept file's variable - and three do not: a unit suite, a
-# tool whose name only begins as a program's, and a test with no command.
-# Four of the seven do not say, and are named, in the listing's order. (By
-# hand from Git Bash, set MSYS_NO_PATHCONV=1: the shell rewrites /b/...)
+# written by hand in ctest's format (tests/program_test_fixtures): eleven
+# tests, of which eight name one of three programs - a window that starts
+# with nothing and one that does not say; a cli with a fixture in its
+# ENVIRONMENT, one with the variable on its own `cmake -E env` line, one that
+# does not say, one whose modification unsets what its environment set and one
+# whose own line does (`--unset=`, which is the last word and takes away what
+# the property gave); an mcp that unsets only the kept file's variable - and
+# three do not: a unit suite, a tool whose name only begins as a program's,
+# and a test with no command. Five of the eight do not say, and are named, in
+# the listing's order. (By hand from Git Bash, set MSYS_NO_PATHCONV=1: the
+# shell rewrites /b/...)
 add_test(NAME the_program_test_check_names_a_test_left_to_the_machines_customisation
     COMMAND ${CMAKE_COMMAND}
         "-DLISTING=${CMAKE_CURRENT_SOURCE_DIR}/program_test_fixtures/listing.json"
@@ -376,7 +404,28 @@ add_test(NAME the_program_test_check_names_a_test_left_to_the_machines_customisa
         -P "${PROJECT_SOURCE_DIR}/tools/check_program_tests.cmake")
 set_tests_properties(the_program_test_check_names_a_test_left_to_the_machines_customisation
     PROPERTIES PASS_REGULAR_EXPRESSION
-        "Of 7 tests that run a program, those that do not say which built-in customisation they start with: window_left_to_the_machine, cli_left_to_the_machine, cli_whose_modification_takes_it_away_again, mcp_that_only_unsets_the_kept_file[.]")
+        "Of 8 tests that run a program, those that do not say which built-in customisation they start with: window_left_to_the_machine, cli_left_to_the_machine, cli_whose_modification_takes_it_away_again, mcp_that_only_unsets_the_kept_file, cli_whose_own_line_takes_it_away_again[.]")
+# ... and for the kept file's variable, where taking it away SAYS. A listing
+# of its own (listing_kept.json): eleven tests, of which nine name a program.
+# Five say - a window that unsets it and one with a file of its own; a cli
+# that unsets it on its own `cmake -E env` line and one that names a file
+# there; an mcp given an empty one, which is none. Four do not, and are named,
+# in the listing's order: a window that says only its built-in (what every
+# window check would be without the scan's second setting), a cli likewise, a
+# cli whose modification unsets it and then gives the caller's back
+# (`reset:`), and an mcp that says nothing at all. A unit suite and a test
+# with no command are not program tests.
+add_test(NAME the_program_test_check_names_a_test_left_to_the_callers_kept_customisation
+    COMMAND ${CMAKE_COMMAND}
+        "-DLISTING=${CMAKE_CURRENT_SOURCE_DIR}/program_test_fixtures/listing_kept.json"
+        "-DPROGRAMS=/b/bin/katana|/b/bin/katana_cli|/b/bin/katana_mcp"
+        "-DVARIABLE=KATANA_CUSTOMISATION"
+        "-DUNSET_SAYS=ON"
+        "-DWHAT=which kept customisation they start with"
+        -P "${PROJECT_SOURCE_DIR}/tools/check_program_tests.cmake")
+set_tests_properties(the_program_test_check_names_a_test_left_to_the_callers_kept_customisation
+    PROPERTIES PASS_REGULAR_EXPRESSION
+        "Of 9 tests that run a program, those that do not say which kept customisation they start with: window_left_to_the_callers_shell, cli_left_to_the_callers_shell, cli_whose_modification_gives_the_callers_back, mcp_left_to_the_callers_shell[.]")
 
 # The geoprocessing verbs in the real window, one file per package of the
 # geoprocessing plan (tests/geo/headless/*.cmake), so the lanes add checks
@@ -983,6 +1032,26 @@ if(TARGET katana)
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|#surveyPointManager|filter=CP"
             "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The note under the wizard's Options step says what loads survey codes,
+    # and it is read here in the real window - without walking to the step:
+    # the note is in the dialog whichever page is in front. It named Format >
+    # Load Customisation and "a survey code file" after the menu item had gone
+    # and that kind of file had stopped loading; what loads survey codes is
+    # the CUSTOMISE line, of a Katana customisation file.
+    #
+    # The report holds the "<file>" the note shows. The label's text is plain
+    # (Qt::PlainText), and --report read every label as markup: a word in
+    # angle brackets was on the screen and not in the report, so this
+    # expression could not have been met.
+    add_test(NAME qt_the_import_wizards_options_note_names_the_customise_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|?optionsNote"
+            "-DEXPECT=optionsNote: [^\r\n]*Survey codes need a loaded customisation that has some - CUSTOMISE <file> on the command line loads a Katana customisation file - and are applied to the imported points only"
+            "-DFORBID=Load Customisation|survey code file"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_options_note_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # SURVEY IMPORT typed on the window's command line runs the session's
     # verb (src/katana_app/survey_verbs.hpp): the hand-built field file's 4
@@ -1711,6 +1780,67 @@ if(TARGET katana)
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # An editor's own commit keeps a kept session kept - in the WINDOW. Its
+    # half of that is two lines: MainWindow::buildFormatActions hands the
+    # workbench `hasKeptFile`, and loadDefaultCustomisation sets what that
+    # answers from its host's kept-file path. The workbench's own tests supply
+    # the predicate themselves and the kept checks above TYPE the KEEP line,
+    # so with either of the window's lines deleted every test passed while the
+    # real window kept nothing (found in review, 2026-10-07).
+    #
+    # Both runs start with the symbol fixture as the built-in, through the
+    # seam - a KEPT session, being what the next start gives - and save a new
+    # symbol in the definition editor as a person does: New Symbol, a name,
+    # two strokes, Save. By hand: the fixture's 4 definitions and the new one
+    # are 5, it has no rule, and nothing was kept before, so no backup.
+    #
+    #   a kept file    the Save is followed by the CUSTOMISE KEEP line, through
+    #                  the window's one executor. Its `kept` record - written,
+    #                  the session being no longer the built-in - comes BEFORE
+    #                  the editor's own line: the hook is run after the commit
+    #                  and before the editor says what it saved. An edit makes
+    #                  a session `edited` and not kept (Document::
+    #                  setStyleLibrary), and a KEEP makes it kept again
+    #                  (setCustomisationKept): edited AND kept.
+    #   none           no line is run: neither a `kept` record nor KEEP's
+    #                  refusal, which a window that ran it would log after
+    #                  every Save. The session is edited and no longer kept.
+    #
+    # KATANA_CUSTOMISATION is said by both, set and unset: the second run is
+    # about its absence. The file of the first is this test's own, removed
+    # before it.
+    set(_editor_kept "${CMAKE_CURRENT_BINARY_DIR}/qt_editor_kept_customisation")
+    add_test(NAME qt_editor_kept_customisation_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_editor_kept}")
+    add_test(NAME qt_a_save_in_the_definition_editor_keeps_a_kept_session_in_its_kept_file_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|>CUSTOMISE"
+            "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*kept file=[^\r\n]*qt_editor_kept_customisation/customisation\\.json\"? written=yes name=test_symbols definitions=5 codes=0 rules=0 backup=none[\r\n].*Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n].*customisation name=test_symbols origin=edited kept=yes definitions=5 codes=0 rules=0 colours=0"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_save_kept_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_a_save_in_the_definition_editor_runs_no_keep_where_the_window_has_no_kept_file_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|>CUSTOMISE"
+            "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n].*customisation name=test_symbols origin=edited kept=no definitions=5 codes=0 rules=0 colours=0"
+            "-DFORBID=kept file=|CUSTOMISE KEEP"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_save_not_kept_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_save_in_the_definition_editor_keeps_a_kept_session_in_its_kept_file_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json;KATANA_CUSTOMISATION=set:${_editor_kept}/customisation.json"
+        TIMEOUT 180)
+    set_tests_properties(qt_a_save_in_the_definition_editor_runs_no_keep_where_the_window_has_no_kept_file_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json;KATANA_CUSTOMISATION=unset:"
+        TIMEOUT 180)
+    set_tests_properties(qt_editor_kept_customisation_cleanup
+        PROPERTIES FIXTURES_SETUP qt_editor_kept_clean)
+    set_tests_properties(qt_a_save_in_the_definition_editor_keeps_a_kept_session_in_its_kept_file_headless
+        PROPERTIES FIXTURES_REQUIRED qt_editor_kept_clean)
     # The code manager explaining a fixture code. By hand from test_survey:
     # WM01 is met by the prefix key WM* (rule #0 of the fixture, a feature
     # rule - and rule #0 of the session, which starts with nothing), which
@@ -2313,6 +2443,7 @@ if(TARGET katana)
                          qt_survey_forward_headless qt_survey_angle_headless
                          qt_survey_traverse_headless qt_survey_level_book_headless
                          qt_survey_converter_headless qt_survey_import_headless
+                         qt_the_import_wizards_options_note_names_the_customise_line_headless
                          qt_survey_verb_headless
                          qt_survey_import_uncertain_headless
                          qt_survey_import_role_boxes_swap_headless

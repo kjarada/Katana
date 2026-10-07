@@ -51,9 +51,9 @@
 //
 // Every reply begins with what the scope took (scopeRecord); the rest is
 // code_table.hpp's formatter text, the words the Survey Code Manager shows.
-// Colour names are resolved through the Document (colour_lookup.hpp: the
-// customisation's own table, then the standard names); the lookup a front end
-// passed is asked only for a name neither knows.
+// Colour names are resolved through the Document and nothing else
+// (colour_lookup.hpp: the customisation's own table, then the standard names):
+// a name neither knows leaves the colour alone.
 
 #include <cstddef>
 #include <string>
@@ -71,15 +71,18 @@ namespace katana::cad {
 [[nodiscard]] bool isSurveyCodeVerb(std::string_view verb);
 
 // Runs one CODE line: `args` are the words AFTER the verb, the quotes removed
-// (CommandInterpreter::tokenize). `colourOf` is more colour names from a
-// caller that has some, asked only for a name the Document does not know;
-// it may be empty, and the interpreter passes none (no front end has names of
-// its own since the Document resolves them). `views` answers the scope word
-// VIEW, and is empty headless. InvalidState when no survey codes are loaded;
-// a refused CODE changes nothing.
+// (CommandInterpreter::tokenize). `views` answers the scope word VIEW, and is
+// empty headless. InvalidState when no survey codes are loaded; a refused CODE
+// changes nothing.
+//
+// (It took a colour lookup of a caller's own until 2026-10-07, asked after
+// the Document for a name it did not know. The front ends passed their table
+// of standard names through it while cad could not see that table; since the
+// Document resolves those itself no program passed one, and a parameter only
+// its tests reach is a second way to resolve a colour that nothing uses.)
 [[nodiscard]] katana::core::Result<std::string>
 runSurveyCodeVerb(Document& document, const std::vector<std::string>& args,
-                  const ColourLookup& colourOf, const ScopeViewProvider& views);
+                  const ScopeViewProvider& views);
 
 // CODE CHECK's answer for the lint of a map of `rules` rules: the lint's
 // text, or - when any issue is an error - an InvalidState refusal whose first
