@@ -213,6 +213,10 @@ struct SurveyCodingReport {
 // plain continuous lines - and a person cannot tell them apart by looking. This
 // says which.
 struct CustomisationCoverage {
+    // Whether the session holds linestyle or symbol definitions: with none
+    // loaded, a drawing with no styles is told to import ones that carry
+    // definitions; with some, that its styles are made as data is drawn.
+    bool definitionsLoaded = false;
     std::size_t styles = 0;   // styles the drawing has
     std::size_t named = 0;    // ... that name a linestyle or a symbol
     std::size_t resolved = 0; // ... that the loaded library defines

@@ -19,6 +19,7 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QVBoxLayout>
@@ -255,6 +256,40 @@ katana::core::Result<QString> fileWord(const QString& typed)
     return customisationFileWord(path);
 }
 
+// A load's reply with the names the program's own built-in leaves undefined
+// said once, as a count: a load reports every name the rules ask for that
+// nothing defines, and the built-in's own few (`in_built_in=yes`) would be
+// listed after every load of anything, as though that file had broken them.
+QString withBuiltInUndefinedAsACount(const QString& reply)
+{
+    QStringList kept;
+    for (const QString& line : reply.split(QLatin1Char('\n'))) {
+        if (line.startsWith(QStringLiteral("undefined name=")) &&
+            line.endsWith(QStringLiteral(" in_built_in=yes"))) {
+            continue;
+        }
+        static const QRegularExpression header(
+            QStringLiteral("^undefined names=(\\d+) in_built_in=(\\d+)$"));
+        const QRegularExpressionMatch match = header.match(line);
+        if (!match.hasMatch()) {
+            kept << line;
+            continue;
+        }
+        const qlonglong names = match.captured(1).toLongLong();
+        const qlonglong own = match.captured(2).toLongLong();
+        const auto counted = [](qlonglong count) {
+            return QStringLiteral("%1 %2").arg(count).arg(count == 1 ? QStringLiteral("name")
+                                                                     : QStringLiteral("names"));
+        };
+        kept << (own == names
+                     ? QStringLiteral("%1 undefined (as in the built-in)").arg(counted(names))
+                     : QStringLiteral("%1 undefined, %2 of them as in the built-in")
+                           .arg(counted(names))
+                           .arg(own));
+    }
+    return kept.join(QLatin1Char('\n'));
+}
+
 // A line and what it answered, as the status shows them: the line as the
 // command log echoes it, then the verb's own words - its reply, or what it
 // was refused for.
@@ -262,7 +297,8 @@ QString answered(const QString& line, const VerbOutcome& outcome)
 {
     QString shown = QStringLiteral("> ") + line + QLatin1Char('\n');
     if (outcome.ok) {
-        shown += outcome.reply.isEmpty() ? QStringLiteral("Done.") : outcome.reply;
+        shown += outcome.reply.isEmpty() ? QStringLiteral("Done.")
+                                         : withBuiltInUndefinedAsACount(outcome.reply);
     } else {
         shown += QStringLiteral("Refused: ") +
                  (outcome.error.isEmpty() ? QStringLiteral("the command was refused.")

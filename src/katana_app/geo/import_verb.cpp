@@ -27,6 +27,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -764,10 +765,21 @@ Result<Prepared> prepareImport(Context& context, const Tokens& tokens, std::stri
         case interop::SourceKind::PointCloud:
             kind = Kind::PointCloud;
             break;
-        case interop::SourceKind::Unknown:
+        case interop::SourceKind::Unknown: {
+            // `katana <path>` opens a folder as a project and imports anything
+            // else, so a project folder mistyped arrives here as a file with no
+            // extension that is not there. That is said as what it is; a file
+            // that IS there with no extension keeps the message every unknown
+            // extension has.
+            std::error_code missing;
+            if (file.extension().empty() && !std::filesystem::exists(file, missing)) {
+                return makeError(ErrorCode::NotFound,
+                                 "no such project directory or file: " + pathText(file));
+            }
             return makeError(ErrorCode::Unsupported,
                              "no importer for '" + pathText(file.extension()) + "'",
                              pathText(file));
+        }
         }
     }
     // Refused by name rather than dropped - or, as LOCAL once was, left on

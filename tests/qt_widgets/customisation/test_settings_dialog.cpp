@@ -487,6 +487,78 @@ TEST(SettingsDialog, ImportBuildsTheMergeLineAndWithReplaceTickedTheReplaceLine)
                   "CUSTOMISE REPLACE \"C:/survey data/site codes.customisation.json\"")}));
 }
 
+// A load reports every name the rules ask for that nothing defines, the
+// built-in's own few included, after every load of anything: shown by name each
+// time, they read as though the file just loaded had broken them. The reply
+// marks them (`in_built_in=yes`, and the count on its first line), and the
+// status shows them once, as a count.
+TEST(SettingsDialog, TheNamesTheBuiltInItselfLeavesUndefinedAreShownAsACountAndTheRestByName)
+{
+    SettingsFixture f;
+    f.answer = [](const QString&) {
+        return VerbOutcome{true,
+                           QStringLiteral("loaded file=\"C:/x.json\" name=X definitions_added=0\n"
+                                          "undefined names=3 in_built_in=2\n"
+                                          "undefined name=\"Circle Single\" in_built_in=yes\n"
+                                          "undefined name=\"MINE Gate\"\n"
+                                          "undefined name=SBEND in_built_in=yes\n"
+                                          "customisation name=X origin=loaded kept=no"),
+                           {}};
+    };
+    SettingsDialog dialog(f.context);
+    fill(dialog, "settingsImportPath", QStringLiteral("C:/x.json"));
+    press(dialog, "settingsImport");
+    const QString shownStatus = status(dialog);
+    // Two of the three are the built-in's: said once, as a count; the third is
+    // this load's and is named.
+    EXPECT_TRUE(shownStatus.contains(QStringLiteral("3 names undefined, 2 of them as in the "
+                                                    "built-in\n")))
+        << shownStatus.toStdString();
+    EXPECT_TRUE(shownStatus.contains(QStringLiteral("undefined name=\"MINE Gate\"\n")))
+        << shownStatus.toStdString();
+    EXPECT_FALSE(shownStatus.contains(QStringLiteral("Circle Single"))) << shownStatus.toStdString();
+    EXPECT_FALSE(shownStatus.contains(QStringLiteral("SBEND"))) << shownStatus.toStdString();
+    EXPECT_FALSE(shownStatus.contains(QStringLiteral("in_built_in"))) << shownStatus.toStdString();
+    EXPECT_TRUE(shownStatus.startsWith(QStringLiteral("> CUSTOMISE \"C:/x.json\"\n")))
+        << shownStatus.toStdString();
+
+    // All of them the built-in's: only the count.
+    f.answer = [](const QString&) {
+        return VerbOutcome{true,
+                           QStringLiteral("undefined names=3 in_built_in=3\n"
+                                          "undefined name=A in_built_in=yes\n"
+                                          "undefined name=B in_built_in=yes\n"
+                                          "undefined name=C in_built_in=yes\n"
+                                          "customisation name=X origin=loaded kept=no"),
+                           {}};
+    };
+    press(dialog, "settingsImport");
+    EXPECT_EQ(status(dialog), QStringLiteral("> CUSTOMISE \"C:/x.json\"\n"
+                                             "3 names undefined (as in the built-in)\n"
+                                             "customisation name=X origin=loaded kept=no"));
+    // One name says "name", not "names".
+    f.answer = [](const QString&) {
+        return VerbOutcome{true,
+                           QStringLiteral("undefined names=1 in_built_in=1\n"
+                                          "undefined name=A in_built_in=yes"),
+                           {}};
+    };
+    press(dialog, "settingsImport");
+    EXPECT_TRUE(status(dialog).endsWith(QStringLiteral("1 name undefined (as in the built-in)")))
+        << status(dialog).toStdString();
+
+    // A reply with no mark - a session whose built-in leaves nothing undefined -
+    // is shown as the verb said it.
+    f.answer = [](const QString&) {
+        return VerbOutcome{true,
+                           QStringLiteral("undefined names=1\nundefined name=\"SITE Gate\""), {}};
+    };
+    press(dialog, "settingsImport");
+    EXPECT_TRUE(status(dialog).endsWith(
+        QStringLiteral("undefined names=1\nundefined name=\"SITE Gate\"")))
+        << status(dialog).toStdString();
+}
+
 TEST(SettingsDialog, ExportBuildsTheExportLine)
 {
     SettingsFixture f;

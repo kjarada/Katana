@@ -3,13 +3,21 @@
 #include "katana/cad/customisation_verbs.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <set>
 #include <system_error>
 #include <utility>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "katana/cad/customisation_merge.hpp"
 #include "katana/cad/customisation_part.hpp"
@@ -131,26 +139,86 @@ bool isThere(const fs::path& file)
     return fs::exists(file, unknown) || unknown;
 }
 
-// Writes `text` as the whole of `file`: to a file beside it first, which is
-// then renamed into its place, so a write that fails part way leaves what
-// was there. With `backup`, the file that was there is first COPIED to that
-// name (an earlier one of that name is replaced) - copied, not moved, so
-// that at no moment is there no `file`: a start between the two steps reads
-// the one or the other, never the built-in by accident.
-Status writeWhole(const fs::path& file, std::string_view text, const fs::path* backup)
+// The id of this process, to name a temporary file by.
+long long processId()
 {
-    const auto failure = [&file](const std::string& why, const std::error_code& code = {}) {
+#if defined(_WIN32)
+    return static_cast<long long>(_getpid());
+#else
+    return static_cast<long long>(getpid());
+#endif
+}
+
+// A name beside `file` for the file that is written first and renamed into its
+// place. It holds this process's id and a count, so that two Katanas keeping
+// into one folder do not write one file, and it is never `<file>.tmp`, which is
+// a name a person may have used for a file of their own: the temporary is
+// removed or renamed away, and that name would be consumed.
+fs::path temporaryBeside(const fs::path& file)
+{
+    static std::atomic<std::uint64_t> made{0};
+    const std::string suffix =
+        "." + std::to_string(processId()) + "-" + std::to_string(++made) + ".tmp";
+    return beside(file, suffix.c_str());
+}
+
+// `bytes` as the whole of `file`: written to a file beside it, then renamed into
+// its place, so that a write that fails part way leaves what was there. False,
+// with the reason, when it cannot be written or put in its place.
+Status putFile(const fs::path& file, std::string_view bytes, const std::string& refusal)
+{
+    const auto failure = [&](const std::string& why, const std::error_code& code = {}) {
         return makeError(ErrorCode::FileExportFailure, why,
                          katana::core::pathToUtf8(file) +
                              (code ? ": " + code.message() : std::string{}));
     };
+    const fs::path temporary = temporaryBeside(file);
+    std::error_code ignored;
+    {
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        out.flush();
+        if (!out) {
+            out.close();
+            fs::remove(temporary, ignored);
+            return failure(refusal);
+        }
+    }
+    std::error_code failed;
+    fs::rename(temporary, file, failed);
+    if (failed) {
+        fs::remove(temporary, ignored);
+        return failure(refusal, failed);
+    }
+    return {};
+}
+
+// The file a write replaces, as the caller read it: `bytes` are put in `beside`
+// before the write, so that the earlier edition is kept.
+struct Replaced {
+    fs::path beside{};
+    std::string_view bytes{};
+};
+
+// Writes `text` as the whole of `file`: to a file beside it first, which is
+// then renamed into its place, so a write that fails part way leaves what was
+// there. With `replaced`, the bytes of the file that is there are first put in
+// the name it gives (an earlier file of that name is replaced) - WRITTEN from
+// the bytes the caller read and judged, not copied from the file: a copy
+// carries the file's attributes, and a read-only kept file made a read-only
+// `.bak`, which the next write then could not replace. They are put before the
+// file is replaced, and not by moving it, so that at no moment is there no
+// `file`: a start between the two steps reads the one or the other, never the
+// built-in by accident.
+Status writeWhole(const fs::path& file, std::string_view text, const Replaced* replaced)
+{
     std::error_code ignored;
     if (file.has_parent_path()) {
         // A per-user folder that nothing has written to yet does not exist.
         // If it cannot be made, opening the file says so.
         fs::create_directories(file.parent_path(), ignored);
     }
-    const fs::path temporary = beside(file, ".tmp");
+    const fs::path temporary = temporaryBeside(file);
     {
         std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
         out.write(text.data(), static_cast<std::streamsize>(text.size()));
@@ -158,23 +226,25 @@ Status writeWhole(const fs::path& file, std::string_view text, const fs::path* b
         if (!out) {
             out.close();
             fs::remove(temporary, ignored);
-            return failure("the file cannot be written");
+            return makeError(ErrorCode::FileExportFailure, "the file cannot be written",
+                             katana::core::pathToUtf8(file));
+        }
+    }
+    if (replaced != nullptr) {
+        if (auto kept = putFile(replaced->beside, replaced->bytes,
+                                "the file that is there could not be kept beside it, so nothing "
+                                "was written");
+            !kept) {
+            fs::remove(temporary, ignored);
+            return kept.error();
         }
     }
     std::error_code failed;
-    if (backup != nullptr && isThere(file)) {
-        fs::copy_file(file, *backup, fs::copy_options::overwrite_existing, failed);
-        if (failed) {
-            fs::remove(temporary, ignored);
-            return failure("the file that is there could not be kept beside it, so nothing "
-                           "was written",
-                           failed);
-        }
-    }
     fs::rename(temporary, file, failed);
     if (failed) {
         fs::remove(temporary, ignored);
-        return failure("the file cannot be written", failed);
+        return makeError(ErrorCode::FileExportFailure, "the file cannot be written",
+                         katana::core::pathToUtf8(file) + ": " + failed.message());
     }
     return {};
 }
@@ -196,10 +266,49 @@ std::string trimmedReply(std::string text)
 
 // ---- loading ------------------------------------------------------------------------------
 
+// The names the program's own built-in asks for and defines nowhere, which a
+// load into a session that started from it reports again whatever the load
+// was. Said apart from the load's own (undefinedReply), so that three names
+// the built-in has always left are not mistaken for three the file just broke.
+std::set<std::string> undefinedInBuiltIn(const CustomisationVerbContext& context)
+{
+    if (!context.host || context.host->builtIn.customisation == nullptr) {
+        return {};
+    }
+    Document scratch;
+    if (!installBuiltInCustomisation(scratch, context.host->builtIn, true)) {
+        return {};
+    }
+    const Words names = undefinedRuleNames(scratch);
+    return {names.begin(), names.end()};
+}
+
+// "undefined names=<n>", then a record for each of up to kNamesListed. A name
+// the built-in also leaves undefined says so (`in_built_in=yes`), and the
+// count says how many do (`in_built_in=<k>`, only when k is not 0), so that a
+// front end can show them once, as a count.
+std::string undefinedReply(const Words& undefined, const std::set<std::string>& own)
+{
+    std::size_t inBuiltIn = 0;
+    for (const std::string& name : undefined) {
+        inBuiltIn += own.contains(name) ? 1 : 0;
+    }
+    std::string reply = "undefined names=" + number(undefined.size());
+    if (inBuiltIn != 0) {
+        reply += " in_built_in=" + number(inBuiltIn);
+    }
+    reply += "\n";
+    for (std::size_t i = 0; i < undefined.size() && i < kNamesListed; ++i) {
+        reply += "undefined name=" + recordValue(undefined[i]);
+        reply += own.contains(undefined[i]) ? " in_built_in=yes\n" : "\n";
+    }
+    return reply;
+}
+
 // `definitionsOnly`: the files' definitions and colours alone are loaded
 // (definitionsOfFile), as the Symbol Library's Import Definitions loads them.
-Result<std::string> load(Document& document, const Words& files, LoadMode mode,
-                         bool definitionsOnly = false)
+Result<std::string> load(Document& document, const CustomisationVerbContext& context,
+                         const Words& files, LoadMode mode, bool definitionsOnly = false)
 {
     if (files.empty()) {
         return usage(definitionsOnly ? kDefinitionsUsage : kLoadUsage);
@@ -308,8 +417,7 @@ Result<std::string> load(Document& document, const Words& files, LoadMode mode,
     // Judged against everything now loaded: a file of codes may name what an
     // earlier load defined.
     if (const Words undefined = undefinedRuleNames(document); !undefined.empty()) {
-        reply += "undefined names=" + number(undefined.size()) + "\n";
-        listNames(reply, "undefined", "name", undefined);
+        reply += undefinedReply(undefined, undefinedInBuiltIn(context));
     }
     return reply + stateRecord(document);
 }
@@ -392,9 +500,8 @@ Result<std::string> exportTo(const Document& document, const Words& args)
     // Which kinds are written. A kind word chooses among them; ONLY chooses
     // among the DEFINITIONS, so with it the codes are written only when CODES
     // says so, and both kinds of definition stay open to the names unless
-    // LINESTYLES or SYMBOLS narrows them. (CODES once switched every kind it
-    // did not name off, ONLY or not, so CODES ONLY <definition> - the codes
-    // and one symbol - was refused for the very symbol it asked for.)
+    // LINESTYLES or SYMBOLS narrows them: CODES ONLY <definition> - the codes
+    // and one symbol - must not refuse the very symbol it asks for.
     const bool part = linestyles || symbols || codes || only;
     if (part) {
         options.codes = codes;
@@ -502,6 +609,25 @@ Result<std::string> resetToBuiltIn(Document& document, const CustomisationVerbCo
            countsOf(document) + " kept=" + yesNo(kept);
 }
 
+// Whether a kept file exists, and where, in a sentence: the record's `kept=yes`
+// says only that the session is what the next start gives, which with no kept
+// file is trivially so (the built-in is what it gives), and reads as a promise
+// of a file that is not there.
+std::string keptFileSentence(const CustomisationHost& host)
+{
+    if (host.keptFile.empty()) {
+        return std::string("Kept file: none. This session keeps no file, so each start gives the "
+                           "built-in customisation (kept=yes then means only that nothing is "
+                           "waiting to be kept); the environment variable ") +
+               kKeptCustomisationVariable + " names a file to keep one in.";
+    }
+    // As a sentence says a path: plainly, with '/', not quoted as a record's value is.
+    const std::u8string path = host.keptFile.generic_u8string();
+    return "Kept file: " + std::string(path.begin(), path.end()) +
+           (isThere(host.keptFile) ? ", which the next start reads."
+                                   : ", not written yet; CUSTOMISE KEEP writes it.");
+}
+
 // The path of the kept file, or the refusal that names what is missing.
 Result<fs::path> keptFileOf(const char* verb, const CustomisationVerbContext& context)
 {
@@ -550,12 +676,19 @@ Result<std::string> keep(Document& document, CustomisationVerbContext& context)
     const std::string shown = katana::core::pathToUtf8(*file);
 
     // What is there now is never written over unseen. Another Katana may
-    // have kept its own since this session read the file; a file that does
-    // not read may be one its owner means to mend; one from a newer Katana
-    // holds what this one cannot write back.
+    // have kept its own since this session read the file, and one that
+    // cannot be read at all may be one that cannot be put in its place either.
+    // A file that was read, and is not a customisation - empty, damaged, or
+    // written by a newer Katana - is no loss to put aside: the start that
+    // found it used the built-in in its place and said so, and nothing in the
+    // window could move it, so the session's own is kept and that file is set
+    // aside whole as `.bad` for its owner to mend or to read with the Katana
+    // that wrote it.
     const bool there = isThere(*file);
+    std::string previous;      // the bytes that are there, as they were judged
+    bool unreadable = false;   // there, and not a customisation
     if (there) {
-        const auto bytes = katana::core::readFileBytes(*file);
+        auto bytes = katana::core::readFileBytes(*file);
         if (!bytes) {
             return makeError(ErrorCode::InvalidState,
                              "CUSTOMISE KEEP: the kept customisation file cannot be read, so it "
@@ -569,30 +702,30 @@ Result<std::string> keep(Document& document, CustomisationVerbContext& context)
                              "it (CUSTOMISE EXPORT <file> first keeps what this session has)",
                              shown);
         }
-        if (const auto read = katana::entity::customisationFromJson(*bytes); !read) {
-            const bool newer = read.error().code == ErrorCode::Unsupported;
-            return makeError(ErrorCode::InvalidState,
-                             std::string("CUSTOMISE KEEP: the kept customisation ") +
-                                 (newer ? "was written by a newer Katana"
-                                        : "does not read as a Katana customisation") +
-                                 ", so it is not written over; move the file away to keep this "
-                                 "session's: " + read.error().message,
-                             shown);
-        }
+        unreadable = !katana::entity::customisationFromJson(*bytes).ok();
+        previous = std::move(*bytes);
     }
 
+    // Where what is there goes: the earlier edition of a customisation beside
+    // it as `.bak`, one that is not a customisation aside as `.bad`.
     const fs::path backup = beside(*file, ".bak");
+    const fs::path bad = beside(*file, ".bad");
+    const fs::path& aside = unreadable ? bad : backup;
+    const std::string asideFields =
+        std::string(" backup=") + (there && !unreadable ? pathValue(backup) : std::string("none")) +
+        (unreadable ? " set_aside=" + pathValue(bad) : std::string{});
     const Customisation session = document.customisation();
     if (const auto builtIn = builtInAsInstalled(context.host->builtIn);
         builtIn && session == *builtIn) {
         // Every start gives the built-in when nothing is kept. A copy of it
         // kept all the same would be read in its place at every later start,
         // and so would hide every later edition of the built-in for ever.
+        //
+        // Moved over the file of that name, which the rename replaces: one
+        // that was removed first was lost when the rename then failed.
         std::error_code failed;
         if (there) {
-            std::error_code ignored;
-            fs::remove(backup, ignored);
-            fs::rename(*file, backup, failed);
+            fs::rename(*file, aside, failed);
             if (failed) {
                 return makeError(ErrorCode::FileExportFailure,
                                  "CUSTOMISE KEEP: the kept customisation could not be set aside",
@@ -602,8 +735,7 @@ Result<std::string> keep(Document& document, CustomisationVerbContext& context)
         context.keptDigest.reset();
         document.setCustomisationKept(true);
         return "kept file=" + pathValue(*file) +
-               " written=no reason=the-session-is-the-built-in backup=" +
-               (there ? pathValue(backup) : std::string("none"));
+               " written=no reason=the-session-is-the-built-in" + asideFields;
     }
 
     const auto text = katana::entity::customisationToJson(session);
@@ -612,13 +744,14 @@ Result<std::string> keep(Document& document, CustomisationVerbContext& context)
                          "CUSTOMISE KEEP: the session cannot be written: " + text.error().message,
                          text.error().context);
     }
-    if (auto written = writeWhole(*file, *text, &backup); !written) {
+    const Replaced replaced{aside, previous};
+    if (auto written = writeWhole(*file, *text, there ? &replaced : nullptr); !written) {
         return written.error();
     }
     context.keptDigest = katana::entity::customisationDigest(*text);
     document.setCustomisationKept(true);
     return "kept file=" + pathValue(*file) + " written=yes name=" + recordValue(session.name) +
-           countsOf(document) + " backup=" + (there ? pathValue(backup) : std::string("none"));
+           countsOf(document) + asideFields;
 }
 
 Result<std::string> revert(Document& document, CustomisationVerbContext& context)
@@ -858,7 +991,11 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
                                          CustomisationVerbContext& context)
 {
     if (args.empty()) {
-        return trimmedReply(formatCustomisationReply(customisationSummary(document)));
+        std::string reply = trimmedReply(formatCustomisationReply(customisationSummary(document)));
+        if (context.host) {
+            reply += "\n" + keptFileSentence(*context.host);
+        }
+        return reply;
     }
     const std::string& word = args.front();
     const Words rest(args.begin() + 1, args.end());
@@ -873,10 +1010,10 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
         return customisationJson(document);
     }
     if (is(word, "REPLACE")) {
-        return load(document, rest, LoadMode::Replace);
+        return load(document, context, rest, LoadMode::Replace);
     }
     if (is(word, "DEFINITIONS")) {
-        return load(document, rest, LoadMode::Merge, true);
+        return load(document, context, rest, LoadMode::Merge, true);
     }
     if (is(word, "EXPORT")) {
         return exportTo(document, rest);
@@ -896,7 +1033,7 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
     if (is(word, "SET")) {
         return setValues(document, rest);
     }
-    return load(document, args, LoadMode::Merge);
+    return load(document, context, args, LoadMode::Merge);
 }
 
 std::string customisationVerbHelp()
@@ -912,7 +1049,9 @@ Report    CUSTOMISE   the counts, then: customisation name= origin=none|builtIn|
           definitions=yes|no rules=yes|no, one a source  |  automation auto.codes=
           auto.linework=  |  linework linework.start= ... (both as SET takes them)  |  missing
           name=, one a name the open project recorded that is not loaded; then what this
-          drawing uses of it
+          drawing uses of it; then, in a session given a host, one sentence: Kept file: none |
+          <path>, not written yet | <path>, which the next start reads (kept=yes says only
+          that nothing waits to be kept, which with no kept file is always so)
           CUSTOMISE JSON   the same as one JSON object, with the notices, the colours, what
           is wrong with the rules, and the coverage
 Load      CUSTOMISE <file> [<file>...]   merge the files into what is loaded: a definition
@@ -927,8 +1066,9 @@ Load      CUSTOMISE <file> [<file>...]   merge the files into what is loaded: a 
           loaded file= name= definitions_added= definitions_replaced= codes_added=
           codes_replaced= colours_added= colours_replaced= linework=yes|no automation=yes|no,
           one a file  |  removed definitions= codes= (REPLACE)  |  undefined names= (what the
-          rules ask for and nothing defines), each with up to 20 of the names  |  the
-          customisation record
+          rules ask for and nothing defines), each with up to 20 of the names; names the
+          built-in itself leaves undefined say in_built_in=yes, counted as in_built_in=<k> on
+          the first line when k is not 0  |  the customisation record
           CUSTOMISE DEFINITIONS <file> [<file>...]   merge only the definitions and the colours
           of the files (what the Symbol Library's Import Definitions loads): the rules, the
           linework codes and the automation they hold are left, and the reply says so:
@@ -954,8 +1094,10 @@ Start     CUSTOMISE RESET   the program's built-in customisation in the place of
           kept file= written=yes name= definitions= codes= rules= backup=
           When the session IS the built-in nothing is written and the kept file is set aside
           (written=no reason=the-session-is-the-built-in), so that a later built-in is not
-          hidden by a copy of this one. Refused when the file changed on disk since this
-          session read it, does not read, or was written by a newer Katana
+          hidden by a copy of this one. A kept file that does not read - empty, damaged, or
+          written by a newer Katana - is put aside whole as .bad (one of that name is
+          replaced) and the session written: backup=none set_aside=<the .bad>. Refused when
+          the file changed on disk since this session read it, or cannot be read at all
           CUSTOMISE REVERT   read the kept file again: reverted file= name= definitions= codes=
           rules=
           These three need what the program was started with; a session given no built-in or

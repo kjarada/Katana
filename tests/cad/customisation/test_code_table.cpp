@@ -885,6 +885,31 @@ TEST(FormatCoverage, ADrawingWithNoStylesIsToldTheWaysToGetOneWithoutBeingSentTo
               "customisation take effect.\n");
 }
 
+TEST(FormatCoverage, ADrawingWithNoStylesIsNotSentToImportOnesWhenTheCustomisationHasDefinitions)
+{
+    // With definitions loaded, "import a drawing or survey that carries
+    // styles" points the wrong way: a survey import makes the styles itself,
+    // and so does a rule that draws.
+    katana::cad::CustomisationCoverage coverage;
+    coverage.definitionsLoaded = true;
+    EXPECT_EQ(katana::cad::formatCoverage(coverage),
+              "This drawing has no styles yet; the customisation's styles are made when survey "
+              "data is imported or when a rule draws.\n");
+    // Once the drawing has styles the hint is not said at all.
+    coverage.styles = 1;
+    EXPECT_EQ(katana::cad::formatCoverage(coverage).find("no styles yet"), std::string::npos);
+}
+
+TEST(CustomisationCoverage, SaysWhetherDefinitionsAreLoadedBeforeAnyStyleIs)
+{
+    Document document;
+    EXPECT_FALSE(katana::cad::customisationCoverage(document).definitionsLoaded);
+    document.setStyleLibrary(library());
+    const katana::cad::CustomisationCoverage coverage = katana::cad::customisationCoverage(document);
+    EXPECT_TRUE(coverage.definitionsLoaded);
+    EXPECT_EQ(coverage.styles, 0u);
+}
+
 TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoadedLibrary)
 {
     // The reviewer's case: an archive's `style "TEST Bollard"` on a line, where the
