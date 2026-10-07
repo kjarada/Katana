@@ -1656,11 +1656,12 @@ so a colour the customisation defines was applied by the typed `CODE` and
 not by the menu item. With no codes loaded the item is now refused as the
 line is, in the log - `no survey codes are loaded; CUSTOMISE <file> loads a
 Katana customisation file` - and no box opens
-(`qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless`).
-The import wizard's "Apply survey codes to the
-imported points" triggers this action with the points it made selected, so
-it runs `CODE SELECTION` too
-(`qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless`).
+(`qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless`;
+`qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless`
+has the two lines). The import wizard triggered this action once, as a second
+step, with the points it had just drawn selected for it. It no longer does:
+its import codes and strings its own points inside its one command
+(`docs/survey.md`, "The import wizard").
 
 **`CustomisationWorkbench`** (`src/katana_qt/customisation/customisation_workbench.*`)
 is built like the Survey workbench: `MainWindow::buildFormatActions` makes the
@@ -1670,33 +1671,31 @@ the session is headless (asked each time, since the window learns it after it
 is built), and the window's own Layers action. So the
 workbench never includes `main_window.hpp`, and a widget test builds it and
 drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
-It owns what the managers share: the picture cache (`DefinitionThumbnails`),
-the linework control codes the code manager's Linework tab strings with, and
-the one `CustomisationContext` each manager is built from. It owns the definition
+It owns what the managers share: the picture cache (`DefinitionThumbnails`)
+and the one `CustomisationContext` each manager is built from. It owns the definition
 editor as well ("The definition editor", below), which has no menu item: a
 manager asks for it through the context.
 
-- **The Linework tab strings with the customisation's control codes.** The
-  codes are the Document's (`customisationState().linework`: what a
-  customisation file says and `CUSTOMISE SET linework.*` sets), and the
-  workbench follows them (`CustomisationWorkbench::followLineworkCodes`,
-  from a `DocumentWatcher`, and once more before a code manager is made): a
-  change of them goes into the copy the tab reads and, where the manager
-  exists, into its seven fields and through its own Use These Codes, so a
-  plan the tab made with the old codes is thrown away and the log says
-  "Linework control codes set for this session." The workbench kept a copy
-  that nothing wrote to but the tab's own button, so the tab - the window's
-  only stringing tool - strung with `ST` and `END` whatever customisation
-  was loaded. Only a CHANGE of the Document's codes is taken: what the tab's
-  button set meanwhile stands through any other change of the customisation
-  (a switch, a `KEEP`).
+- **The linework control codes are not the workbench's.** They are the
+  customisation's - the Document's (`customisationState().linework`: what a
+  customisation file says and `CUSTOMISE SET linework.*` sets) - and the code
+  manager's Linework tab reads them there and sets them with that line
+  ("Survey Code Manager", below). Until 2026-10-07 the workbench kept a copy
+  for the tab, handed over in the managers' context, and followed the
+  Document's codes into it from a `DocumentWatcher`
+  (`followLineworkCodes`), filling the tab's seven fields by their object
+  names and pressing its Use These Codes: a second home for one value, with
+  window code keeping the two in step, and a button that changed the copy
+  alone - codes typed there showed in no `CUSTOMISE` reply and reached no
+  `KEEP`. The copy, the follower and the watcher are gone.
   `qt_the_linework_tab_strings_with_the_customisations_control_codes_headless`
   strings four points as one line with the default start code and as two
-  once the customisation's is the token on the third.
-  Rejected: copying the codes in the Document's own listener, at once. The
-  tab's fields and its button are widgets, and a view reacting to a Document
-  listener defers to the event loop (`docs/cad.md`); and the button's line
-  in the log would come before the reply of the line that caused it.
+  once the customisation's is the token on the third, and FORBIDs the line
+  the follower's press of the button logged.
+- **The code manager is handed the views.** Its two action tabs have a View
+  scope, so `showCodeManager` gives the dialog the workspace's open views
+  (`SurveyCodeManagerDialog::views`, read afresh each time, as Global
+  Modify's are).
 
 - **Non-modal, one of each, kept.** A manager is made the first time it is
   asked for and then hidden, not deleted, between uses (`QPointer` slots);
@@ -1725,21 +1724,6 @@ manager asks for it through the context.
 
 What a load does - a merge, or a Replace that is asked for - is
 `docs/customisation.md`, "The verbs".
-
-Not done:
-
-- The Linework tab's own Use These Codes still sets the workbench's copy of
-  the control codes (`CustomisationContext::lineworkCodes`) and not the
-  customisation: the codes typed there do not show in a bare `CUSTOMISE`, do
-  not reach `CUSTOMISE KEEP`, and last until the customisation's own next
-  change. The button is to run `CUSTOMISE SET linework.*` and the tab to read
-  the Document, after which the copy - and the workbench's filling of the
-  tab's fields by their object names - goes.
-- `CustomisationServices` still has the two members that carried the Load
-  and Replace actions. Nothing reads or sets them in the window; they stay
-  only while a widget test of the managers' texts still assigns them.
-- The tip of Survey Code Manager still calls the codes "the loaded survey
-  code files", which was true while the manager imported such files.
 
 ### Styles and Linetypes
 
@@ -2036,11 +2020,83 @@ description keys or feature definitions - in five tabs, each
 over one cad foundation, so the dialog decides nothing the CLI would say
 differently: Code Table (`cad::codeTable` and `cad::explainCode`, with the
 rule form), Codes in Drawing (`cad::codeCensus`), Issues
-(`cad::lintSurveyMap`), Apply Codes (`cad::applySurveyCodes`, previewed before
-it runs) and Linework (`cad::processLinework`, and the session's control
+(`cad::lintSurveyMap`), Apply Codes (the `CODE` line, previewed before it
+runs) and Linework (the `LINEWORK` line, and the customisation's control
 codes). Its edits go to a BUFFER and reach the drawing only on Apply; Revert
 takes the drawing's map back; closing with unapplied edits asks. That, and
 what each tab shows, is `docs/survey_coding.md` ("The Survey Code Manager").
+
+**Apply Codes and Linework build a line and run it** (2026-10-07; the rule
+every dialog follows, "One executor", below, and for the scope the one
+mechanism every tool on drawing data shares, `docs/cad.md`, "Scope and
+filter"):
+
+- **Apply to, and Only those that match.** Each tab has the shared scope and
+  filter controls (`ScopeFilterWidget`, prefixes `apply` and `linework`:
+  `applyScopeDrawing`, `applyScopeSelection`, `applyScopeView`,
+  `applyScopeLayers`, `applyFilterLayer` ..., and the same after `linework`),
+  starting on the whole drawing. They replace two radio buttons - everything,
+  or the selection - that were a scope mechanism of the tabs' own.
+- **Execute hands the line to the window's executor**
+  (`CustomisationContext::run`): `CODE <scope> [PROPERTY p]`, and `LINEWORK
+  <scope> [PROPERTY p] [ORDER entity] [CHORD x]`, echoed in the log, kept in
+  the history, one undo step, answered in the verb's words. The line is
+  shown as the controls change (`applyCommand`, `lineworkCommand`), with the
+  reason in its place where the controls cannot be said on a line (no layer
+  ticked, a double quote in a property's name), and Execute then runs
+  nothing. A manager built without an executor says it cannot run the line
+  and does not do the work some other way. Afterwards the tab shows the
+  verb's own answer: the reply in `applyReport`, and in `lineworkSummary`
+  how many lines the reply's first record says were drawn.
+- **Preview is a plan made in the manager**, read-only and unlogged, because
+  it shows more than a reply does: a row a code with its layer and style,
+  every point in no line with its reason, every note. It is planned by what
+  the verb plans with - `cad::matchEntities` over the same scope and filter,
+  then `cad::applySurveyCodes`, or `cad::planLinework`, which IS the
+  `LINEWORK` verb's planning - and begins with what the scope took ("4
+  matched."). So the Linework preview leaves out what the verb leaves out,
+  and says so: the points their survey job has strung, and lines the drawing
+  already holds. Rejected: previewing by running the line with `PREVIEW`. It
+  would put a line in the log and the history at every press, and the reply
+  counts the points in no line where the tab names each one.
+- **Use These Codes is `CUSTOMISE SET linework.*`.** The seven fields show
+  the customisation's control codes and follow them as they change, whoever
+  changes them; the button runs the line for the codes that differ from the
+  customisation's, and for none when none does. What a person is typing
+  there is not overwritten by a change of anything else.
+- **Controls that went, because no line can say them** and a second, direct
+  path kept for them would be the two code paths this ends:
+  `applyCreateLayers`, `applyCreateStyles` and `applySetAttributes`, which
+  switched parts of the coding off (`CODE` does what the rules say, whole),
+  and `lineworkKeepPoints`, off for deleting the points a line replaces
+  (`LINEWORK` never removes a point: one taken out from under a survey job
+  reads to its next re-adjustment as deleted by hand). The options are still
+  in `cad::SurveyCodingOptions` and `cad::LineworkOptions` for a verb word
+  that wants them.
+- **Controls that stayed, because the verb gained their words**:
+  `lineworkProperty` (`PROPERTY <name>`, as `CODE` has it) and
+  `lineworkChordTolerance` (`CHORD <length>`; millimetres on the form,
+  which divides by 1000 and so assumes a drawing in metres, the line's number
+  being in the drawing's units; said only when it is not the 5 mm the verb
+  starts on). `docs/survey_coding.md`,
+  "`LINEWORK` on the command line".
+
+Tests: `tests/qt_widgets/customisation/test_code_manager.cpp` (and, for the View
+scope the workbench hands the manager, `test_customisation_workbench.cpp`) - each tab
+building exactly its line as each control changes, through a recording
+executor that then runs it
+(`TheApplyCodesTabBuildsExactlyTheCodeLineItsControlsSay`,
+`TheLineworkTabBuildsExactlyTheLineworkLineItsControlsSay`,
+`TheLineworkCodesAreTheCustomisationsAndUseTheseCodesRunsTheSetLine`), a
+preview changing nothing and running no line, Execute as one undo step, a
+second run drawing nothing twice, and a manager with no executor
+(`WithNoExecutorExecuteSaysItCannotRunItsLineAndChangesNothing`).
+
+Not done: the two previews do not mark themselves stale
+when the drawing changes under them (Execute plans again before it runs, so
+what is run is never the stale plan); and the tab's chord length is in
+millimetres, and the line says it in metres (the drawing's unit is assumed to
+be the metre).
 
 Import Codes... (`importCodes`) and Export Codes... (`exportCodes`) read and
 write Katana customisation files, as the Symbol Library does: Import merges a

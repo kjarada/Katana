@@ -44,23 +44,29 @@
 #include <utility>
 #include <vector>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDoubleSpinBox>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QStringList>
 #include <QTabWidget>
 #include <QTreeWidget>
 
+#include "command_runner.hpp"
 #include "customisation/code_manager.hpp"
 #include "customisation/definition_thumbnails.hpp"
 #include "customisation/fixture_customisation.hpp"
 #include "katana/cad/code_edit.hpp"
 #include "katana/cad/code_table.hpp"
 #include "katana/cad/colour_lookup.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/colour_names.hpp"
 #include "katana/entity/customisation.hpp"
@@ -93,8 +99,14 @@ EntityId addPoint(Document& document, double x, const std::string& code,
 struct ManagerFixture {
     Document document;
     DefinitionThumbnails thumbnails;
-    katana::cad::LineworkCodes lineworkCodes;
     std::vector<std::pair<QString, bool>> logged;
+    // The window's one executor, as a manager is handed it: each line
+    // recorded as it is handed over, then run by an interpreter on the same
+    // Document - which is what the window's executor does with it - and what
+    // it replied, or refused with, handed back. So a test sees the exact
+    // line a button built AND what the verb then did.
+    katana::cad::CommandInterpreter interpreter{document};
+    QStringList ran;
     CustomisationContext context;
 
     ManagerFixture()
@@ -105,9 +117,20 @@ struct ManagerFixture {
                                      {"test_linestyles", "test_survey", "test_symbols"});
         context.document = &document;
         context.thumbnails = &thumbnails;
-        context.lineworkCodes = &lineworkCodes;
         context.log = [this](const QString& message, bool isError) {
             logged.emplace_back(message, isError);
+        };
+        context.run = [this](const QString& line) {
+            ran << line;
+            const auto reply = interpreter.run(line.toStdString());
+            katana::qt::VerbOutcome outcome;
+            outcome.ok = reply.ok();
+            if (reply.ok()) {
+                outcome.reply = QString::fromStdString(*reply);
+            } else {
+                outcome.error = QString::fromStdString(reply.error().describe());
+            }
+            return outcome;
         };
     }
 
@@ -553,28 +576,137 @@ TEST(SurveyCodeManager, ApplyCodesPreviewChangesNothingAndExecuteIsOneUndoStep)
     const EntityId first = addPoint(f.document, 0.0, "WM01", "1");
     const EntityId second = addPoint(f.document, 5.0, "WM01", "2");
     const std::size_t undoBefore = f.document.history().undoCount();
+    const std::uint64_t revision = f.document.modelRevision();
     SurveyCodeManagerDialog dialog(f.context);
 
     child<QPushButton>(dialog, "applyPreview")->click();
     EXPECT_EQ(f.document.history().undoCount(), undoBefore) << "Preview executed something";
+    EXPECT_EQ(f.document.modelRevision(), revision);
+    EXPECT_TRUE(f.ran.isEmpty()) << "Preview is a plan made here: it runs no line";
     EXPECT_EQ(f.document.model().entities.find(first)->layer, "0");
     auto* report = child<QPlainTextEdit>(dialog, "applyReport");
     ASSERT_NE(report, nullptr);
     EXPECT_TRUE(report->toPlainText().contains(QStringLiteral("WM01")))
+        << report->toPlainText().toStdString();
+    // What the scope took comes first: the whole drawing's two entities.
+    EXPECT_TRUE(report->toPlainText().startsWith(QStringLiteral("2 matched.")))
         << report->toPlainText().toStdString();
     auto* rows = child<QTreeWidget>(dialog, "applyRows");
     ASSERT_NE(rows, nullptr);
     ASSERT_EQ(rows->topLevelItemCount(), 1);
     EXPECT_EQ(rows->topLevelItem(0)->text(0), QStringLiteral("WM01"));
     EXPECT_EQ(rows->topLevelItem(0)->text(1), QStringLiteral("2"));
+    // ... and the line Execute would run is on show.
+    EXPECT_EQ(child<QLineEdit>(dialog, "applyCommand")->text(), QStringLiteral("CODE DRAWING"));
 
     child<QPushButton>(dialog, "applyExecute")->click();
+    // Execute is that line, through the executor the manager was handed.
+    EXPECT_EQ(f.ran, QStringList{QStringLiteral("CODE DRAWING")});
     EXPECT_EQ(f.document.history().undoCount(), undoBefore + 1);
     EXPECT_EQ(f.document.model().entities.find(first)->layer, "TEST SERVICES");
     EXPECT_EQ(f.document.model().entities.find(second)->layer, "TEST SERVICES");
+    // The pane then holds the verb's own answer: what the scope took first.
+    EXPECT_TRUE(report->toPlainText().startsWith(QStringLiteral("scope=drawing matched=2")))
+        << report->toPlainText().toStdString();
     ASSERT_TRUE(f.document.undo().ok());
     EXPECT_EQ(f.document.model().entities.find(first)->layer, "0");
     EXPECT_EQ(f.document.model().entities.find(second)->layer, "0");
+}
+
+// "Execute builds the verb line": each control of the Apply Codes tab is a
+// word of CODE (cad/survey_code_verbs.hpp; the scope's words are the shared
+// grammar's, cad/scope_verbs.hpp), and the line is rebuilt as a control
+// changes. What cannot be said on a line is not run some other way.
+TEST(SurveyCodeManager, TheApplyCodesTabBuildsExactlyTheCodeLineItsControlsSay)
+{
+    ManagerFixture f;
+    const EntityId first = addPoint(f.document, 0.0, "WM01", "1");
+    const EntityId second = addPoint(f.document, 5.0, "WM01", "2");
+    SurveyCodeManagerDialog dialog(f.context);
+    auto* line = child<QLineEdit>(dialog, "applyCommand");
+    auto* property = child<QComboBox>(dialog, "applyProperty");
+    auto* layers = child<QListWidget>(dialog, "applyLayers");
+    ASSERT_FALSE(line == nullptr || property == nullptr || layers == nullptr);
+
+    // The whole drawing to begin with, and the property found.
+    EXPECT_TRUE(child<QRadioButton>(dialog, "applyScopeDrawing")->isChecked());
+    EXPECT_EQ(line->text(), QStringLiteral("CODE DRAWING"));
+
+    child<QRadioButton>(dialog, "applyScopeSelection")->setChecked(true);
+    EXPECT_EQ(line->text(), QStringLiteral("CODE SELECTION"));
+    property->setEditText(QStringLiteral("feature_code"));
+    EXPECT_EQ(line->text(), QStringLiteral("CODE SELECTION PROPERTY feature_code"));
+    // A name with a blank is one quoted word, as the command line reads it.
+    property->setEditText(QStringLiteral("Field Code"));
+    EXPECT_EQ(line->text(), QStringLiteral("CODE SELECTION PROPERTY \"Field Code\""));
+    property->setEditText(QString());
+
+    // The filter is the scope's WHERE, before the verb's own words.
+    child<QLineEdit>(dialog, "applyFilterLayer")->setText(QStringLiteral("survey/*"));
+    property->setEditText(QStringLiteral("code"));
+    EXPECT_EQ(line->text(), QStringLiteral("CODE SELECTION WHERE LAYER=survey/* PROPERTY code"));
+    child<QLineEdit>(dialog, "applyFilterLayer")->clear();
+    property->setEditText(QString());
+
+    // The checked layers: the drawing has the one layer, "0".
+    child<QRadioButton>(dialog, "applyScopeLayers")->setChecked(true);
+    ASSERT_EQ(layers->count(), 1);
+    ASSERT_EQ(layers->item(0)->text(), QStringLiteral("0"));
+    // None ticked: nothing a line can say, and Execute runs nothing.
+    EXPECT_TRUE(line->text().isEmpty());
+    EXPECT_TRUE(line->placeholderText().contains(QStringLiteral("tick at least one layer")))
+        << line->placeholderText().toStdString();
+    child<QPushButton>(dialog, "applyExecute")->click();
+    EXPECT_TRUE(f.ran.isEmpty());
+    EXPECT_EQ(f.document.model().entities.find(first)->layer, "0");
+    layers->item(0)->setCheckState(Qt::Checked);
+    EXPECT_EQ(line->text(), QStringLiteral("CODE LAYERS 0"));
+    child<QCheckBox>(dialog, "applySublayers")->setChecked(false);
+    EXPECT_EQ(line->text(), QStringLiteral("CODE LAYERS 0 ONLY"));
+
+    // A property name no line can carry is refused where it is typed.
+    property->setEditText(QStringLiteral("co\"de"));
+    EXPECT_TRUE(line->text().isEmpty());
+    EXPECT_TRUE(line->placeholderText().contains(QStringLiteral("double quote")))
+        << line->placeholderText().toStdString();
+    child<QPushButton>(dialog, "applyExecute")->click();
+    EXPECT_TRUE(f.ran.isEmpty());
+    property->setEditText(QString());
+
+    // The selection: only the point selected is coded, by exactly that line.
+    child<QRadioButton>(dialog, "applyScopeSelection")->setChecked(true);
+    f.document.selection().set({second});
+    f.document.notifySelectionChanged();
+    child<QPushButton>(dialog, "applyExecute")->click();
+    EXPECT_EQ(f.ran, QStringList{QStringLiteral("CODE SELECTION")});
+    EXPECT_EQ(f.document.model().entities.find(first)->layer, "0");
+    EXPECT_EQ(f.document.model().entities.find(second)->layer, "TEST SERVICES");
+}
+
+// A manager with no executor does not do the work some other way: Execute
+// says it cannot run the line, naming it, and the drawing is as it was.
+TEST(SurveyCodeManager, WithNoExecutorExecuteSaysItCannotRunItsLineAndChangesNothing)
+{
+    ManagerFixture f;
+    addPoint(f.document, 0.0, "WM01", "1");
+    addPoint(f.document, 5.0, "WM01", "2");
+    f.context.run = {};
+    const std::size_t undoBefore = f.document.history().undoCount();
+    const std::uint64_t revision = f.document.modelRevision();
+    SurveyCodeManagerDialog dialog(f.context);
+
+    child<QPushButton>(dialog, "applyExecute")->click();
+    EXPECT_TRUE(f.loggedContaining(QStringLiteral("cannot run \"CODE DRAWING\"")));
+    child<QPushButton>(dialog, "lineworkExecute")->click();
+    EXPECT_TRUE(f.loggedContaining(QStringLiteral("cannot run \"LINEWORK DRAWING\"")));
+    child<QLineEdit>(dialog, "lineworkStart")->setText(QStringLiteral("BEG"));
+    child<QPushButton>(dialog, "lineworkCodesUse")->click();
+    EXPECT_TRUE(f.loggedContaining(QStringLiteral("cannot run \"CUSTOMISE SET linework.start=BEG\"")));
+
+    EXPECT_EQ(f.document.history().undoCount(), undoBefore);
+    EXPECT_EQ(f.document.modelRevision(), revision);
+    EXPECT_EQ(f.document.model().entities.size(), 2u);
+    EXPECT_EQ(f.document.customisationState().linework.start, "ST");
 }
 
 TEST(SurveyCodeManager, TheCensusClassesTheDrawingsCodesAndMakesARuleForAnUnmatchedOne)
@@ -619,41 +751,207 @@ TEST(SurveyCodeManager, LineworkPreviewChangesNothingAndExecuteIsOneUndoStep)
     addPoint(f.document, 10.0, "WM01", "3");
     const std::size_t undoBefore = f.document.history().undoCount();
     const std::size_t entitiesBefore = f.document.model().entities.size();
+    const std::uint64_t revision = f.document.modelRevision();
     SurveyCodeManagerDialog dialog(f.context);
 
     child<QPushButton>(dialog, "lineworkPreview")->click();
     EXPECT_EQ(f.document.history().undoCount(), undoBefore);
     EXPECT_EQ(f.document.model().entities.size(), entitiesBefore);
+    EXPECT_EQ(f.document.modelRevision(), revision);
+    EXPECT_TRUE(f.ran.isEmpty()) << "Preview is a plan made here: it runs no line";
     auto* strings = child<QTreeWidget>(dialog, "lineworkStrings");
     ASSERT_NE(strings, nullptr);
     ASSERT_EQ(strings->topLevelItemCount(), 1);
     EXPECT_EQ(strings->topLevelItem(0)->text(0), QStringLiteral("WM01"));
     EXPECT_EQ(strings->topLevelItem(0)->text(2), QStringLiteral("3"));
     EXPECT_EQ(strings->topLevelItem(0)->text(5), QStringLiteral("TEST SERVICES"));
+    // What the scope took, then the plan: the drawing's three points.
+    auto* summary = child<QLabel>(dialog, "lineworkSummary");
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->text(),
+              QStringLiteral("3 matched. Preview only: 1 lines from 3 points; 0 points not "
+                             "placed; 0 notes. Execute builds them as one undoable step."));
+    EXPECT_EQ(child<QLineEdit>(dialog, "lineworkCommand")->text(),
+              QStringLiteral("LINEWORK DRAWING"));
 
     child<QPushButton>(dialog, "lineworkExecute")->click();
+    // Execute is that line, through the executor the manager was handed.
+    EXPECT_EQ(f.ran, QStringList{QStringLiteral("LINEWORK DRAWING")});
     EXPECT_EQ(f.document.history().undoCount(), undoBefore + 1);
     EXPECT_EQ(f.document.model().entities.size(), entitiesBefore + 1);
+    // Said from the verb's own first record: the three points, one line.
+    EXPECT_EQ(summary->text(),
+              QStringLiteral("Executed as one undoable step: 1 lines drawn. linework "
+                             "scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0"));
+
+    // Run again, the line the drawing now holds is not drawn a second time,
+    // as LINEWORK typed again does not draw it: the preview says so, and the
+    // run adds no entity and no undo step. (The scope now takes four: the
+    // three points and the line.)
+    child<QPushButton>(dialog, "lineworkPreview")->click();
+    EXPECT_EQ(strings->topLevelItemCount(), 0);
+    EXPECT_EQ(summary->text(),
+              QStringLiteral("4 matched. Nothing to build: 3 points looked at, 0 not placed. 1 "
+                             "lines are in the drawing already and are not drawn again."));
+    child<QPushButton>(dialog, "lineworkExecute")->click();
+    EXPECT_EQ(f.ran.size(), 2);
+    EXPECT_EQ(f.document.history().undoCount(), undoBefore + 1);
+    EXPECT_EQ(f.document.model().entities.size(), entitiesBefore + 1);
+    EXPECT_TRUE(summary->text().startsWith(
+        QStringLiteral("Executed: no line was drawn, so nothing was added to the undo history.")))
+        << summary->text().toStdString();
+
     ASSERT_TRUE(f.document.undo().ok());
     EXPECT_EQ(f.document.model().entities.size(), entitiesBefore);
 }
 
-TEST(SurveyCodeManager, TheLineworkCodesAreTheSessionsAndAnAmbiguousSetIsRefused)
+// Each control of the Linework tab is a word of LINEWORK (cad/
+// linework_verbs.hpp), said only when it is not what the verb does unasked.
+// The chord length is in millimetres on the form and in the drawing's units -
+// metres - on the line: 350 mm is CHORD 0.35.
+TEST(SurveyCodeManager, TheLineworkTabBuildsExactlyTheLineworkLineItsControlsSay)
+{
+    ManagerFixture f;
+    // WM* is a Line code. A half circle of radius 10 about the origin, begun
+    // at (10,0), through (0,10), ended at (-10,0): at a chord length of 0.35
+    // each quarter is three chords of 30 degrees (tests/cad/customisation/
+    // test_linework.cpp works it), so the line has 1 + 3 + 3 = 7 vertices,
+    // where the 5 mm the verb starts on gives 51. The points are coded under
+    // "fcode", which is not among the names a code is looked for under.
+    const std::vector<std::pair<katana::geometry::Point2, const char*>> shots{
+        {{10.0, 0.0}, "WM01 BC"}, {{0.0, 10.0}, "WM01"}, {{-10.0, 0.0}, "WM01 EC"}};
+    for (const auto& [at, code] : shots) {
+        Entity entity;
+        entity.geometry = katana::entity::PointGeometry{at};
+        entity.properties.insert_or_assign("fcode",
+                                           katana::entity::PropertyValue(std::string(code)));
+        ASSERT_TRUE(f.document.execute(katana::commands::createEntities({entity})).ok());
+    }
+    SurveyCodeManagerDialog dialog(f.context);
+    auto* line = child<QLineEdit>(dialog, "lineworkCommand");
+    auto* property = child<QComboBox>(dialog, "lineworkProperty");
+    auto* order = child<QComboBox>(dialog, "lineworkOrder");
+    auto* chord = child<QDoubleSpinBox>(dialog, "lineworkChordTolerance");
+    ASSERT_FALSE(line == nullptr || property == nullptr || order == nullptr || chord == nullptr);
+
+    EXPECT_TRUE(child<QRadioButton>(dialog, "lineworkScopeDrawing")->isChecked());
+    EXPECT_EQ(chord->value(), 5.0) << "the 5 mm the verb starts on";
+    EXPECT_EQ(line->text(), QStringLiteral("LINEWORK DRAWING"));
+
+    // In the order observed: the points were made here and carry no number.
+    order->setCurrentIndex(1);
+    EXPECT_EQ(line->text(), QStringLiteral("LINEWORK DRAWING ORDER entity"));
+    property->setEditText(QStringLiteral("fcode"));
+    EXPECT_EQ(line->text(), QStringLiteral("LINEWORK DRAWING PROPERTY fcode ORDER entity"));
+    chord->setValue(350.0);
+    EXPECT_EQ(line->text(),
+              QStringLiteral("LINEWORK DRAWING PROPERTY fcode ORDER entity CHORD 0.35"));
+    child<QRadioButton>(dialog, "lineworkScopeSelection")->setChecked(true);
+    EXPECT_EQ(line->text(),
+              QStringLiteral("LINEWORK SELECTION PROPERTY fcode ORDER entity CHORD 0.35"));
+    child<QRadioButton>(dialog, "lineworkScopeDrawing")->setChecked(true);
+
+    // The preview is planned with those words - one curve, its three points -
+    // and Execute runs exactly the line shown.
+    child<QPushButton>(dialog, "lineworkPreview")->click();
+    auto* strings = child<QTreeWidget>(dialog, "lineworkStrings");
+    ASSERT_NE(strings, nullptr);
+    ASSERT_EQ(strings->topLevelItemCount(), 1);
+    EXPECT_EQ(strings->topLevelItem(0)->text(0), QStringLiteral("WM01"));
+    EXPECT_EQ(strings->topLevelItem(0)->text(2), QStringLiteral("3"));
+    EXPECT_EQ(strings->topLevelItem(0)->text(4), QStringLiteral("1")) << "one curve";
+    EXPECT_TRUE(f.ran.isEmpty());
+
+    child<QPushButton>(dialog, "lineworkExecute")->click();
+    EXPECT_EQ(f.ran, QStringList{QStringLiteral(
+                         "LINEWORK DRAWING PROPERTY fcode ORDER entity CHORD 0.35")});
+    std::vector<Entity> lines;
+    f.document.model().entities.forEach([&](const Entity& entity) {
+        if (entity.type() == katana::entity::EntityType::Polyline) {
+            lines.push_back(entity);
+        }
+    });
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(std::get<katana::geometry::Polyline2>(lines.front().geometry).vertices.size(), 7u);
+
+    // Back at the verb's own chord length and order, the words go again.
+    ASSERT_TRUE(f.document.undo().ok());
+    chord->setValue(5.0);
+    order->setCurrentIndex(0);
+    EXPECT_EQ(line->text(), QStringLiteral("LINEWORK DRAWING PROPERTY fcode"));
+}
+
+// The control codes are the customisation's - the Document's - and Use These
+// Codes is the line CUSTOMISE SET linework.*: it says the codes that are
+// changing and no others, in the order the controls stand (start, end, close,
+// arcstart, arcend, join, rectangle). The fixture's customisation says
+// nothing of them, so they start as the usual spellings: ST, END, CL ...
+TEST(SurveyCodeManager, TheLineworkCodesAreTheCustomisationsAndUseTheseCodesRunsTheSetLine)
 {
     ManagerFixture f;
     SurveyCodeManagerDialog dialog(f.context);
     auto* start = child<QLineEdit>(dialog, "lineworkStart");
+    auto* end = child<QLineEdit>(dialog, "lineworkEnd");
+    auto* close = child<QLineEdit>(dialog, "lineworkClose");
     auto* use = child<QPushButton>(dialog, "lineworkCodesUse");
-    ASSERT_NE(start, nullptr);
-    ASSERT_NE(use, nullptr);
+    auto* status = child<QLabel>(dialog, "lineworkCodesStatus");
+    ASSERT_FALSE(start == nullptr || end == nullptr || close == nullptr || use == nullptr ||
+                 status == nullptr);
+    const auto held = [&f]() -> const katana::cad::LineworkCodes& {
+        return f.document.customisationState().linework;
+    };
     EXPECT_EQ(start->text(), QStringLiteral("ST"));
-    start->setText(QStringLiteral("BEG"));
+    EXPECT_EQ(end->text(), QStringLiteral("END"));
+    EXPECT_EQ(close->text(), QStringLiteral("CL"));
+
+    // Nothing typed: nothing to set, and no line is run for it.
     use->click();
-    EXPECT_EQ(f.lineworkCodes.start, "BEG");
-    // "END" twice: a token meaning two things means neither.
-    start->setText(QStringLiteral("END"));
+    EXPECT_TRUE(f.ran.isEmpty());
+    EXPECT_TRUE(status->text().contains(QStringLiteral("already"))) << status->text().toStdString();
+
+    start->setText(QStringLiteral("BEG"));
+    EXPECT_EQ(held().start, "ST") << "typed is not set";
+    use->click();
+    EXPECT_EQ(f.ran, QStringList{QStringLiteral("CUSTOMISE SET linework.start=BEG")});
+    EXPECT_EQ(held().start, "BEG");
+    EXPECT_EQ(held().end, "END");
+
+    // Two at once, one of them emptied: an empty spelling switches the
+    // control off, and is written as the key with nothing after its '='.
+    end->setText(QStringLiteral("FIN"));
+    close->setText(QString());
+    use->click();
+    ASSERT_EQ(f.ran.size(), 2);
+    EXPECT_EQ(f.ran.last(), QStringLiteral("CUSTOMISE SET linework.end=FIN linework.close="));
+    EXPECT_EQ(held().start, "BEG");
+    EXPECT_EQ(held().end, "FIN");
+    EXPECT_EQ(held().close, "");
+
+    // "FIN" twice: a token meaning two things means neither. The button is
+    // off, and nothing is set.
+    start->setText(QStringLiteral("FIN"));
     EXPECT_FALSE(use->isEnabled());
-    EXPECT_EQ(f.lineworkCodes.start, "BEG");
+    EXPECT_EQ(f.ran.size(), 2);
+    EXPECT_EQ(held().start, "BEG");
+
+    // What is being typed survives a change of something else - a click in
+    // the drawing - and is replaced when the customisation's codes change:
+    // typed on the command line here, as any line may be.
+    start->setText(QStringLiteral("HALF"));
+    f.document.selection().clear();
+    f.document.notifySelectionChanged();
+    katana::qt::test::processEvents();
+    EXPECT_EQ(start->text(), QStringLiteral("HALF"));
+    ASSERT_TRUE(f.interpreter.run("CUSTOMISE SET linework.start=GO linework.close=SHUT").ok());
+    katana::qt::test::processEvents();
+    EXPECT_EQ(start->text(), QStringLiteral("GO"));
+    EXPECT_EQ(end->text(), QStringLiteral("FIN"));
+    EXPECT_EQ(close->text(), QStringLiteral("SHUT"));
+
+    // A manager opened afterwards shows them from the start.
+    SurveyCodeManagerDialog later(f.context);
+    EXPECT_EQ(child<QLineEdit>(later, "lineworkStart")->text(), QStringLiteral("GO"));
+    EXPECT_EQ(child<QLineEdit>(later, "lineworkClose")->text(), QStringLiteral("SHUT"));
 }
 
 TEST(SurveyCodeManager, ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter)

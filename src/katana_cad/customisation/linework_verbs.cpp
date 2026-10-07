@@ -29,8 +29,8 @@ using Words = std::vector<std::string>;
 
 namespace {
 
-constexpr const char* kUsage =
-    "LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]";
+constexpr const char* kUsage = "LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] "
+                               "[ORDER number|entity] [CHORD <length>] [PREVIEW]";
 
 bool is(const std::string& word, std::string_view name)
 {
@@ -48,7 +48,7 @@ struct LineworkLine {
     // No scope word was given: the selection when there is one, else the
     // drawing.
     bool scopeNamed = false;
-    LineworkOrder order = LineworkOrder::PointNumber;
+    LineworkWords words{};
     bool preview = false;
 };
 
@@ -65,6 +65,7 @@ Result<LineworkLine> parse(const Words& args)
     line.scope = std::move(scope).value();
 
     bool ordered = false;
+    bool named = false;
     for (; at < args.size(); ++at) {
         const std::string& word = args[at];
         if (is(word, "PREVIEW")) {
@@ -80,14 +81,45 @@ Result<LineworkLine> parse(const Words& args)
             }
             const std::string& how = args[++at];
             if (is(how, "number")) {
-                line.order = LineworkOrder::PointNumber;
+                line.words.order = LineworkOrder::PointNumber;
             } else if (is(how, "entity")) {
-                line.order = LineworkOrder::EntityOrder;
+                line.words.order = LineworkOrder::EntityOrder;
             } else {
                 return notAWord(how, "ORDER takes number (by point number) or entity (the "
                                      "order the points were drawn in)");
             }
             ordered = true;
+            continue;
+        }
+        if (is(word, "PROPERTY")) {
+            if (named) {
+                return notAWord(word, "PROPERTY is given twice");
+            }
+            // An empty name ("") is no name: left to mean "find it", it would
+            // read a line that names a property as one that names none.
+            if (at + 1 >= args.size() || args[at + 1].empty()) {
+                return notAWord(word, "PROPERTY needs the property's name after it");
+            }
+            line.words.property = args[++at];
+            named = true;
+            continue;
+        }
+        if (is(word, "CHORD")) {
+            if (line.words.chord) {
+                return notAWord(word, "CHORD is given twice");
+            }
+            if (at + 1 >= args.size()) {
+                return notAWord(word, "CHORD needs a length after it");
+            }
+            const std::string& length = args[++at];
+            const auto value = katana::core::parseFiniteDouble(length);
+            // Refused here, by name, and not left to processLinework: its
+            // refusal names an option of a struct, not a word of this line.
+            if (!value || !(*value > 0.0)) {
+                return notAWord(length, "CHORD takes a length greater than 0, in the "
+                                        "drawing's units");
+            }
+            line.words.chord = *value;
             continue;
         }
         // A scope after the verb's own words would be read by nobody: the
@@ -202,6 +234,48 @@ bool isLineworkVerb(std::string_view verb)
     return katana::core::equalsIgnoringCase(verb, "LINEWORK");
 }
 
+Result<LineworkPlan> planLinework(const Document& document, const std::vector<EntityId>& matched,
+                                  const LineworkWords& words)
+{
+    const auto strung = strungByTheirJob(document, matched);
+    if (!strung) {
+        return strung.error();
+    }
+    LineworkOptions options;
+    options.property = words.property;
+    options.order = words.order;
+    if (words.chord) {
+        options.chordTolerance = *words.chord;
+    }
+    options.keepPoints = true; // the verb never removes a point
+    // The verb is run again and again over the same points - after a rule is
+    // added, after more are surveyed - and a line it finds drawn is not drawn
+    // on top of itself (linework_verbs.hpp, "A LINE THE DRAWING ALREADY HOLDS").
+    options.skipLinesAlreadyDrawn = true;
+    options.codes = document.customisationState().linework;
+    options.coding.colourOf = colourLookup(document);
+    LineworkPlan plan;
+    for (const EntityId id : matched) {
+        if (strung->contains(id)) {
+            plan.strungByTheirJob.push_back(id);
+        } else {
+            options.ids.push_back(id);
+        }
+    }
+
+    // Never with an empty list: to processLinework that is every point in the
+    // drawing, and here it is a scope that took nothing, or only points their
+    // job has strung.
+    if (!options.ids.empty()) {
+        auto result = processLinework(document, options);
+        if (!result) {
+            return result.error();
+        }
+        plan.planned = std::move(result).value();
+    }
+    return plan;
+}
+
 Result<std::string> runLineworkVerb(Document& document, const std::vector<std::string>& tokens,
                                     const ScopeViewProvider& views)
 {
@@ -222,36 +296,12 @@ Result<std::string> runLineworkVerb(Document& document, const std::vector<std::s
         return match.error();
     }
 
-    const auto strung = strungByTheirJob(document, match->matched);
-    if (!strung) {
-        return strung.error();
+    auto plan = planLinework(document, match->matched, line->words);
+    if (!plan) {
+        return plan.error();
     }
-    LineworkOptions options;
-    options.order = line->order;
-    options.keepPoints = true; // the verb never removes a point
-    // The verb is run again and again over the same points - after a rule is
-    // added, after more are surveyed - and a line it finds drawn is not drawn
-    // on top of itself (linework_verbs.hpp, "A LINE THE DRAWING ALREADY HOLDS").
-    options.skipLinesAlreadyDrawn = true;
-    options.codes = document.customisationState().linework;
-    options.coding.colourOf = colourLookup(document);
-    for (const EntityId id : match->matched) {
-        if (!strung->contains(id)) {
-            options.ids.push_back(id);
-        }
-    }
-
-    // Never with an empty list: to processLinework that is every point in the
-    // drawing, and here it is a scope that took nothing, or only points their
-    // job has strung.
-    LineworkResult planned;
-    if (!options.ids.empty()) {
-        auto result = processLinework(document, options);
-        if (!result) {
-            return result.error();
-        }
-        planned = std::move(result).value();
-    }
+    LineworkResult& planned = plan->planned;
+    const std::vector<EntityId>& strung = plan->strungByTheirJob;
     const LineworkReport& report = planned.report;
 
     std::vector<EntityId> created;
@@ -270,8 +320,8 @@ Result<std::string> runLineworkVerb(Document& document, const std::vector<std::s
     if (line->preview) {
         reply += " preview=yes";
     }
-    if (!strung->empty()) {
-        reply += "\nleft_out=" + count(strung->size()) + " reason=strung-by-their-job";
+    if (!strung.empty()) {
+        reply += "\nleft_out=" + count(strung.size()) + " reason=strung-by-their-job";
     }
     if (!report.alreadyDrawn.empty()) {
         // Points, as the record above counts: those the lines not drawn again
@@ -326,7 +376,8 @@ Result<std::string> runLineworkVerb(Document& document, const std::vector<std::s
 
 std::string lineworkVerbHelp()
 {
-    return R"(LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]
+    return R"(LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]
+         [CHORD <length>] [PREVIEW]
 
 Joins coded survey points into lines (docs/survey_coding.md, "Linework"): the points of
 one string name - a point's code, its control codes left out, followed by its string
@@ -337,9 +388,14 @@ removed. The lines drawn are ONE undo step.
   <scope>   SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b
             [ONLY], then [WHERE key=value ...] (HELP: "Scope"). It comes first. With no
             scope word: the selection when anything is selected, else the whole drawing.
+  PROPERTY  the property the codes are read from, as CODE's PROPERTY: for points whose
+            code is kept under a name of the drawing's own. Without it the property is
+            found (code, then the other names a code is usually kept under).
   ORDER     number: by point number, 9 before 10 (the default; a point with none is not
             placed).  entity: the order the points were drawn in, which for an import is
             the order the file listed them.
+  CHORD     how far, in the drawing's units, the straight segments drawn for a curve
+            (BC ... EC) may stray from it: 0.005 unless said. Greater than 0.
   PREVIEW   plans and reports; nothing is drawn.
 
 Control codes after the code: ST start, END end, CL close, BC and EC a curve, JPN <n> a

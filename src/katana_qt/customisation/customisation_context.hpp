@@ -28,13 +28,6 @@ namespace katana::cad {
 class Document;
 } // namespace katana::cad
 
-// The type cad::LineworkCodes names. It is declared where it is defined, in
-// the entity layer: an alias cannot be declared ahead of the header that makes
-// it.
-namespace katana::entity {
-struct LineworkCodes;
-} // namespace katana::entity
-
 namespace katana::qt {
 
 class DefinitionThumbnails;
@@ -79,19 +72,10 @@ struct CustomisationContext {
     // must do.
     std::function<void(const std::vector<katana::entity::EntityId>& ids)> selectAndShow{};
 
-    // The session's survey control codes (start, end, close, arc...) that
-    // linework processing reads - configurable, and not survey code rules
-    // (cad/linework.hpp). Owned by the maker, which keeps them for the
-    // session. May be null: a dialog then shows the defaults and cannot
-    // change them. (The window's maker keeps this in step with the
-    // customisation's own control codes - the Document's
-    // customisationState().linework, what a customisation file says and
-    // CUSTOMISE SET linework.* sets - as they change
-    // (CustomisationWorkbench::followLineworkCodes). A dialog that writes
-    // here changes the maker's copy alone, not the customisation: the
-    // dialogs are still to read and set the Document's; docs/desktop.md,
-    // "The Format menu", Not done.)
-    katana::entity::LineworkCodes* lineworkCodes = nullptr;
+    // (The linework control codes were handed over here, as a copy the maker
+    // kept for the session. They are the customisation's - the Document's
+    // customisationState().linework - and a dialog reads them there and sets
+    // them with the line CUSTOMISE SET linework.*, through `run` below.)
 
     // The window's one executor (command_runner.hpp): a dialog that changes
     // the drawing builds the verb line a person would type and runs it here,

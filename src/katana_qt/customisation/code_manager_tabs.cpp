@@ -1,18 +1,21 @@
 // The survey code manager's other four tabs: the codes a drawing carries,
 // what is wrong with the rules being edited, applying the codes, and turning
-// coded points into lines. Each shows a cad report; Preview never executes,
-// and Execute runs the one command a preview planned - one undo step.
+// coded points into lines. Each shows a cad report. On the two that change
+// the drawing, Preview plans and never executes, and Execute hands the line
+// the tab shows - CODE ..., LINEWORK ... - to the window's executor: one undo
+// step, logged and undone as a typed line (code_manager.hpp).
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <optional>
 #include <utility>
 
-#include <QButtonGroup>
-#include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
-#include <QGridLayout>
+#include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -20,19 +23,25 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QRadioButton>
+#include <QScrollArea>
 #include <QStyle>
 #include <QTabWidget>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "command_word.hpp"
 #include "customisation/code_manager.hpp"
 #include "customisation/filter_bar.hpp"
 #include "customisation/name_picker.hpp"
+#include "customisation/scope_filter_widget.hpp"
 #include "katana/cad/colour_lookup.hpp"
+#include "katana/cad/global_modify.hpp"
+#include "katana/cad/linework_verbs.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/linework_codes.hpp"
 #include "katana/entity/tables.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -373,69 +382,183 @@ void SurveyCodeManagerDialog::rebuildIssues()
     }
 }
 
+// ---- the two action tabs: what they share ------------------------------------------------
+
+namespace {
+
+// A read-only field showing the line a tab's Execute runs, as the utilities
+// dialog shows its own: what is run is never a surprise, and it can be copied
+// to a script or handed to an agent.
+QLineEdit* commandField(QWidget* parent, const char* name)
+{
+    auto* field = new QLineEdit(parent);
+    field->setObjectName(QString::fromLatin1(name));
+    field->setReadOnly(true);
+    field->setFont(katana::qt::theme::monospaceFont());
+    field->setToolTip(QObject::tr("The line Execute hands to the command line - typed there, or "
+                                  "given to a script or an agent, it does the same"));
+    return field;
+}
+
+// The scope and filter controls are taller than a tab on a small screen, so
+// they scroll in a pane of their own beside what the tab reports.
+QScrollArea* scrolled(ScopeFilterWidget* scope, QWidget* parent)
+{
+    auto* area = new QScrollArea(parent);
+    area->setWidgetResizable(true);
+    area->setFrameShape(QFrame::NoFrame);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    area->setWidget(scope);
+    return area;
+}
+
+// The line in its field, or - where the controls cannot be said on a line -
+// why not, as the field's placeholder.
+void showLine(QLineEdit* field, const katana::core::Result<QString>& line)
+{
+    field->setText(line ? *line : QString());
+    field->setPlaceholderText(line ? QString()
+                                   : QObject::tr("nothing to run yet: %1")
+                                         .arg(text(line.error().describe())));
+}
+
+// The chord length the Linework tab starts on, in millimetres: the one
+// processLinework itself starts on (LineworkOptions, 0.005 of a drawing in
+// metres), so the tab adds CHORD to its line only for a length a person set.
+[[nodiscard]] double defaultChordMillimetres()
+{
+    return katana::cad::LineworkOptions{}.chordTolerance * 1000.0;
+}
+
+} // namespace
+
+ScopeFilterWidget* SurveyCodeManagerDialog::makeScope(const char* prefix, QWidget* parent)
+{
+    auto* scope = new ScopeFilterWidget(QString::fromLatin1(prefix), parent);
+    // The dialog's own views function, read afresh each time it is needed.
+    scope->views = [this] { return views ? views() : ScopeFilterWidget::noWorkspaceViews(); };
+    // The whole drawing to begin with, as both tabs began before they had
+    // these controls: codes are applied, and a survey strung, to all of it
+    // far more often than to what happens to be selected.
+    scope->setChoice(ScopeChoice::Drawing);
+    scope->onChanged = [this] { showLines(); };
+    return scope;
+}
+
+void SurveyCodeManagerDialog::reloadScopes()
+{
+    const katana::cad::Document* doc = document();
+    for (ScopeFilterWidget* scope : {applyScope_, lineworkScope_}) {
+        if (scope == nullptr) {
+            continue;
+        }
+        if (doc != nullptr) {
+            scope->reload(doc->model());
+        } else {
+            scope->reloadViews();
+        }
+    }
+}
+
+katana::core::Result<std::vector<katana::entity::EntityId>>
+SurveyCodeManagerDialog::scopeTakes(const ScopeFilterWidget& scope) const
+{
+    const katana::cad::Document* doc = document();
+    if (doc == nullptr) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidState,
+                                       "the drawing this manager edits is closed");
+    }
+    auto where = scope.scope();
+    if (!where) {
+        return where.error();
+    }
+    auto which = scope.filter();
+    if (!which) {
+        return which.error();
+    }
+    return katana::cad::matchEntities(*doc, *where, *which);
+}
+
+void SurveyCodeManagerDialog::showLines()
+{
+    // A scope is set up - and signals - before the fields exist.
+    if (applyCommand_ == nullptr || lineworkCommand_ == nullptr) {
+        return;
+    }
+    showLine(applyCommand_, codesLine());
+    showLine(lineworkCommand_, lineworkLine());
+}
+
+bool SurveyCodeManagerDialog::runLine(const QString& line, VerbOutcome& outcome,
+                                      QString& said) const
+{
+    if (!context_.run) {
+        // Said, and nothing done: the work is the line's, and a manager with
+        // no command line to hand it to does not do it some other way.
+        said = tr("This manager was opened without the window's command line, so it cannot run "
+                  "\"%1\". Type it on a command line instead.")
+                   .arg(line);
+        return false;
+    }
+    outcome = context_.run(line);
+    if (!outcome.ok) {
+        said = outcome.error.isEmpty() ? tr("\"%1\" was refused.").arg(line) : outcome.error;
+        return false;
+    }
+    return true;
+}
+
 // ---- apply codes -------------------------------------------------------------------------
 
 QWidget* SurveyCodeManagerDialog::buildApplyTab()
 {
     auto* page = new QWidget(this);
     page->setObjectName(QStringLiteral("applyCodesTab"));
-    auto* layout = new QVBoxLayout(page);
+    auto* columns = new QHBoxLayout(page);
 
-    auto* options = new QGroupBox(tr("Apply the drawing's survey map to"), page);
-    auto* grid = new QGridLayout(options);
-    applySelection_ = new QRadioButton(tr("Selection"), options);
-    applySelection_->setObjectName(QStringLiteral("applyScopeSelection"));
-    applyAll_ = new QRadioButton(tr("Every coded entity"), options);
-    applyAll_->setObjectName(QStringLiteral("applyScopeAll"));
-    applyAll_->setChecked(true);
-    auto* scope = new QButtonGroup(options);
-    scope->addButton(applySelection_);
-    scope->addButton(applyAll_);
+    applyScope_ = makeScope("apply", page);
+    columns->addWidget(scrolled(applyScope_, page), 2);
+
+    auto* right = new QWidget(page);
+    auto* layout = new QVBoxLayout(right);
+    layout->setContentsMargins(0, 0, 0, 0);
+    columns->addWidget(right, 3);
+
+    auto* options = new QGroupBox(tr("Apply the drawing's survey map"), right);
+    auto* form = new QFormLayout(options);
     applyProperty_ = propertyChooser(options, "applyProperty");
-    applyCreateLayers_ = new QCheckBox(tr("Create layers"), options);
-    applyCreateLayers_->setObjectName(QStringLiteral("applyCreateLayers"));
-    applyCreateStyles_ = new QCheckBox(tr("Create styles"), options);
-    applyCreateStyles_->setObjectName(QStringLiteral("applyCreateStyles"));
-    applySetAttributes_ = new QCheckBox(tr("Set attributes"), options);
-    applySetAttributes_->setObjectName(QStringLiteral("applySetAttributes"));
-    for (QCheckBox* box : {applyCreateLayers_, applyCreateStyles_, applySetAttributes_}) {
-        box->setChecked(true);
-    }
-    grid->addWidget(applyAll_, 0, 0);
-    grid->addWidget(applySelection_, 0, 1);
-    grid->addWidget(new QLabel(tr("Code property"), options), 1, 0);
-    grid->addWidget(applyProperty_, 1, 1, 1, 2);
-    grid->addWidget(applyCreateLayers_, 2, 0);
-    grid->addWidget(applyCreateStyles_, 2, 1);
-    grid->addWidget(applySetAttributes_, 2, 2);
+    form->addRow(tr("Code property"), applyProperty_);
     layout->addWidget(options);
 
     applyDirtyNote_ = new QLabel(tr("The rules being edited are not applied yet: codes are "
                                     "applied with the drawing's survey map. Apply the edits "
                                     "first to use them."),
-                                 page);
+                                 right);
     applyDirtyNote_->setObjectName(QStringLiteral("applyDirtyNote"));
     applyDirtyNote_->setWordWrap(true);
     applyDirtyNote_->setStyleSheet(QStringLiteral("color: %1;").arg(kUndefinedNameColour.name()));
     layout->addWidget(applyDirtyNote_);
 
+    applyCommand_ = commandField(right, "applyCommand");
+    layout->addWidget(applyCommand_);
+
     auto* buttons = new QHBoxLayout;
-    auto* preview = new QPushButton(tr("Preview"), page);
+    auto* preview = new QPushButton(tr("Preview"), right);
     preview->setObjectName(QStringLiteral("applyPreview"));
     preview->setToolTip(tr("Work out what applying the codes would do, changing nothing"));
-    auto* execute = new QPushButton(tr("Execute"), page);
+    auto* execute = new QPushButton(tr("Execute"), right);
     execute->setObjectName(QStringLiteral("applyExecute"));
-    execute->setToolTip(tr("Apply the codes as one undoable step"));
+    execute->setToolTip(tr("Run the line above: the codes applied as one undoable step"));
     buttons->addWidget(preview);
     buttons->addWidget(execute);
     buttons->addStretch(1);
     layout->addLayout(buttons);
 
-    applyRows_ = reportTree(page, "applyRows",
+    applyRows_ = reportTree(right, "applyRows",
                             {tr("Code"), tr("Entities"), tr("Class"), tr("Layer"), tr("Style"),
                              tr("Changed")});
     layout->addWidget(applyRows_, 2);
-    applyReport_ = new QPlainTextEdit(page);
+    applyReport_ = new QPlainTextEdit(right);
     applyReport_->setObjectName(QStringLiteral("applyReport"));
     applyReport_->setReadOnly(true);
     applyReport_->setLineWrapMode(QPlainTextEdit::NoWrap);
@@ -443,13 +566,7 @@ QWidget* SurveyCodeManagerDialog::buildApplyTab()
 
     connect(preview, &QPushButton::clicked, this, [this] { previewCodes(); });
     connect(execute, &QPushButton::clicked, this, [this] { executeCodes(); });
-    // A changed option makes the preview a plan for something else.
-    for (QAbstractButton* button : std::initializer_list<QAbstractButton*>{
-             applySelection_, applyAll_, applyCreateLayers_, applyCreateStyles_,
-             applySetAttributes_}) {
-        connect(button, &QAbstractButton::toggled, this, [this] { invalidatePlans(); });
-    }
-    connect(applyProperty_, &QComboBox::currentTextChanged, this, [this] { invalidatePlans(); });
+    connect(applyProperty_, &QComboBox::currentTextChanged, this, [this] { showLines(); });
     return page;
 }
 
@@ -457,68 +574,66 @@ katana::cad::SurveyCodingOptions SurveyCodeManagerDialog::codingOptions() const
 {
     katana::cad::SurveyCodingOptions options;
     options.property = std::string(katana::core::trimmed(text(applyProperty_->currentText())));
-    const katana::cad::Document* doc = document();
-    if (applySelection_->isChecked() && doc != nullptr) {
-        options.ids = doc->selection().ids();
-    }
     // The drawing's own resolver: its customisation's colours, then the
-    // standard names. It asks the Document it was made from, which is the
-    // one the planned command then runs on.
-    if (doc != nullptr) {
+    // standard names - what the CODE line resolves a colour name by, so the
+    // preview shows the style the line will make.
+    if (const katana::cad::Document* doc = document()) {
         options.colourOf = katana::cad::colourLookup(*doc);
     }
-    options.createLayers = applyCreateLayers_->isChecked();
-    options.createStyles = applyCreateStyles_->isChecked();
-    options.setAttributes = applySetAttributes_->isChecked();
     return options;
 }
 
-SurveyCodeManagerDialog::PlanStamp SurveyCodeManagerDialog::stamp() const
+katana::core::Result<QString> SurveyCodeManagerDialog::codesLine() const
 {
-    PlanStamp mark;
-    if (const katana::cad::Document* doc = document()) {
-        mark.undo = doc->history().undoCount();
-        mark.redo = doc->history().redoCount();
-        mark.entities = doc->model().entities.size();
-        mark.library = doc->libraryGeneration();
-        mark.surveyMap = doc->surveyMapGeneration();
-        mark.selection = doc->selection().ids();
+    auto scope = applyScope_->verbWords();
+    if (!scope) {
+        return scope.error();
     }
-    return mark;
+    QString line = QStringLiteral("CODE ") + *scope;
+    const QString property = applyProperty_->currentText().trimmed();
+    if (!property.isEmpty()) {
+        auto word = commandWord(property, tr("Code property"));
+        if (!word) {
+            return word.error();
+        }
+        line += QStringLiteral(" PROPERTY ") + *word;
+    }
+    return line;
 }
 
-void SurveyCodeManagerDialog::invalidatePlans()
+bool SurveyCodeManagerDialog::previewCodes()
 {
-    plannedCodes_.reset();
-    codesStamp_.reset();
-    plannedLinework_.reset();
-    lineworkStamp_.reset();
-}
-
-void SurveyCodeManagerDialog::previewCodes()
-{
-    plannedCodes_.reset();
-    codesStamp_.reset();
     applyRows_->clear();
     const katana::cad::Document* doc = document();
     if (doc == nullptr) {
         applyReport_->setPlainText(tr("The drawing is closed."));
-        return;
+        return false;
     }
-    const katana::cad::SurveyCodingOptions options = codingOptions();
-    if (applySelection_->isChecked() && options.ids.empty()) {
-        applyReport_->setPlainText(tr("Nothing is selected."));
-        return;
+    const auto taken = scopeTakes(*applyScope_);
+    if (!taken) {
+        applyReport_->setPlainText(text(taken.error().describe()));
+        log(text(taken.error().describe()), true);
+        return false;
     }
+    katana::cad::SurveyCodingOptions options = codingOptions();
     katana::cad::SurveyCodingReport report;
-    auto command = katana::cad::applySurveyCodes(*doc, options, &report);
-    if (!command) {
-        applyReport_->setPlainText(text(command.error().describe()));
-        log(text(command.error().describe()), true);
-        return;
+    bool something = false;
+    if (taken->empty()) {
+        // A scope that took nothing is said, and is NOT handed on: to
+        // applySurveyCodes an empty list is every entity in the drawing.
+        report.property = options.property.empty()
+                              ? katana::cad::findCodeProperty(doc->model(), {})
+                              : options.property;
+    } else {
+        options.ids = *taken;
+        auto command = katana::cad::applySurveyCodes(*doc, options, &report);
+        if (!command) {
+            applyReport_->setPlainText(text(command.error().describe()));
+            log(text(command.error().describe()), true);
+            return false;
+        }
+        something = *command != nullptr;
     }
-    plannedCodes_ = std::move(*command);
-    codesStamp_ = stamp();
     for (const katana::cad::SurveyCodeRow& row : report.codes) {
         auto* item = new QTreeWidgetItem(applyRows_);
         item->setText(0, text(row.code));
@@ -530,10 +645,8 @@ void SurveyCodeManagerDialog::previewCodes()
             from << text(layer);
         }
         item->setText(3, row.layer.empty() ? tr("(stays)")
-                         : row.layerKept == row.entities
-                             ? tr("%1 (kept: layer not created)").arg(from.join(QStringLiteral(", ")))
-                             : QStringLiteral("%1 -> %2").arg(from.join(QStringLiteral(", ")),
-                                                             text(row.layer)));
+                         : QStringLiteral("%1 -> %2").arg(from.join(QStringLiteral(", ")),
+                                                         text(row.layer)));
         item->setText(4, row.style.empty()
                              ? QString()
                              : QStringLiteral("%1 (%2)").arg(
@@ -545,37 +658,48 @@ void SurveyCodeManagerDialog::previewCodes()
         }
     }
     resizeColumns(applyRows_);
-    QString shown = text(katana::cad::formatCodingReport(report));
-    shown += plannedCodes_ == nullptr ? tr("\nNothing to change.")
-                                      : tr("\nPreview only: nothing has changed. Execute applies "
-                                           "this as one undoable step.");
+    // What the scope took first, as the line's own reply begins.
+    QString shown = tr("%1 matched.\n").arg(taken->size());
+    shown += text(katana::cad::formatCodingReport(report));
+    shown += something ? tr("\nPreview only: nothing has changed. Execute runs the line above "
+                            "as one undoable step.")
+                       : tr("\nNothing to change.");
     applyReport_->setPlainText(shown);
+    return true;
 }
 
 void SurveyCodeManagerDialog::executeCodes()
 {
-    katana::cad::Document* doc = document();
-    if (doc == nullptr) {
+    if (document() == nullptr) {
         return;
     }
-    // A plan made against another state of the drawing is yesterday's
-    // answer: plan again, and show what is being done.
-    if (plannedCodes_ == nullptr || !codesStamp_ || !(*codesStamp_ == stamp())) {
-        previewCodes();
-    }
-    if (plannedCodes_ == nullptr) {
-        log(tr("Apply Codes: nothing to change."));
+    const auto line = codesLine();
+    if (!line) {
+        applyReport_->setPlainText(text(line.error().describe()));
+        log(text(line.error().describe()), true);
         return;
     }
-    katana::commands::CommandPtr command = std::move(plannedCodes_);
-    invalidatePlans();
-    if (const auto status = doc->execute(std::move(command)); !status) {
-        applyReport_->appendPlainText(text(status.error().describe()));
-        log(text(status.error().describe()), true);
+    // What is about to be done, row by row: the line's reply has the totals,
+    // not which code went where. A preview that could not plan has said why,
+    // in the pane and the log; the line would be refused for the same reason,
+    // so it is not run to say it twice.
+    if (!previewCodes()) {
         return;
     }
-    applyReport_->appendPlainText(tr("Executed as one undoable step."));
-    log(tr("Survey codes applied. Undo puts it all back."));
+    VerbOutcome outcome;
+    QString said;
+    if (!runLine(*line, outcome, said)) {
+        applyReport_->setPlainText(said);
+        // A refused line is in the log already, where the executor ran it;
+        // only a manager with no executor has yet to say so.
+        if (!context_.run) {
+            log(said, true);
+        }
+        return;
+    }
+    // In the verb's own words, which are in the command log as well: what
+    // the scope took, the report, and whether anything was applied.
+    applyReport_->setPlainText(outcome.reply);
 }
 
 // ---- linework ----------------------------------------------------------------------------
@@ -584,10 +708,18 @@ QWidget* SurveyCodeManagerDialog::buildLineworkTab()
 {
     auto* page = new QWidget(this);
     page->setObjectName(QStringLiteral("lineworkTab"));
-    auto* layout = new QVBoxLayout(page);
+    auto* columns = new QHBoxLayout(page);
+
+    lineworkScope_ = makeScope("linework", page);
+    columns->addWidget(scrolled(lineworkScope_, page), 2);
+
+    auto* right = new QWidget(page);
+    auto* layout = new QVBoxLayout(right);
+    layout->setContentsMargins(0, 0, 0, 0);
+    columns->addWidget(right, 3);
     auto* top = new QHBoxLayout;
 
-    auto* codes = new QGroupBox(tr("Control codes"), page);
+    auto* codes = new QGroupBox(tr("Control codes"), right);
     auto* codesForm = new QFormLayout(codes);
     const std::array<std::pair<const char*, QString>, 7> fields{{
         {"lineworkStart", tr("Start")},
@@ -612,70 +744,64 @@ QWidget* SurveyCodeManagerDialog::buildLineworkTab()
     auto* codeButtons = new QHBoxLayout;
     lineworkCodesUse_ = new QPushButton(tr("Use These Codes"), codes);
     lineworkCodesUse_->setObjectName(QStringLiteral("lineworkCodesUse"));
+    lineworkCodesUse_->setToolTip(tr("Make these the customisation's control codes (the line "
+                                     "CUSTOMISE SET linework...): every import and every "
+                                     "LINEWORK then reads them"));
     auto* defaults = new QPushButton(tr("Defaults"), codes);
     defaults->setObjectName(QStringLiteral("lineworkCodesDefaults"));
+    defaults->setToolTip(tr("Fill in the usual spellings; Use These Codes then sets them"));
     codeButtons->addWidget(lineworkCodesUse_);
     codeButtons->addWidget(defaults);
     codesForm->addRow(codeButtons);
     top->addWidget(codes);
 
-    auto* options = new QGroupBox(tr("Options"), page);
+    auto* options = new QGroupBox(tr("Options"), right);
     auto* optionsForm = new QFormLayout(options);
-    auto* scopeRow = new QHBoxLayout;
-    auto* all = new QRadioButton(tr("Every point"), options);
-    all->setObjectName(QStringLiteral("lineworkScopeAll"));
-    all->setChecked(true);
-    lineworkSelection_ = new QRadioButton(tr("Selection"), options);
-    lineworkSelection_->setObjectName(QStringLiteral("lineworkScopeSelection"));
-    auto* scope = new QButtonGroup(options);
-    scope->addButton(all);
-    scope->addButton(lineworkSelection_);
-    scopeRow->addWidget(all);
-    scopeRow->addWidget(lineworkSelection_);
-    optionsForm->addRow(tr("Points"), scopeRow);
     lineworkProperty_ = propertyChooser(options, "lineworkProperty");
     optionsForm->addRow(tr("Code property"), lineworkProperty_);
     lineworkOrder_ = new QComboBox(options);
     lineworkOrder_->setObjectName(QStringLiteral("lineworkOrder"));
     lineworkOrder_->addItems({tr("By point number"), tr("In the order observed")});
     optionsForm->addRow(tr("Join in order"), lineworkOrder_);
-    lineworkKeepPoints_ = new QCheckBox(tr("Keep the points a line replaces"), options);
-    lineworkKeepPoints_->setObjectName(QStringLiteral("lineworkKeepPoints"));
-    lineworkKeepPoints_->setChecked(true);
-    optionsForm->addRow(QString(), lineworkKeepPoints_);
     lineworkChord_ = new QDoubleSpinBox(options);
     lineworkChord_->setObjectName(QStringLiteral("lineworkChordTolerance"));
     lineworkChord_->setSuffix(tr(" mm"));
     lineworkChord_->setDecimals(1);
     lineworkChord_->setRange(0.1, 1000.0);
-    lineworkChord_->setValue(5.0);
-    lineworkChord_->setToolTip(tr("How far a curve's chords may stray from the arc"));
+    lineworkChord_->setValue(defaultChordMillimetres());
+    lineworkChord_->setToolTip(tr("How far a curve's chords may stray from the arc, for a "
+                                  "drawing in metres"));
     optionsForm->addRow(tr("Chord tolerance"), lineworkChord_);
     top->addWidget(options, 1);
     layout->addLayout(top);
 
     lineworkDirtyNote_ = new QLabel(tr("The rules being edited are not applied yet: lines are "
                                        "made with the drawing's survey map."),
-                                    page);
+                                    right);
     lineworkDirtyNote_->setObjectName(QStringLiteral("lineworkDirtyNote"));
     lineworkDirtyNote_->setStyleSheet(
         QStringLiteral("color: %1;").arg(kUndefinedNameColour.name()));
     layout->addWidget(lineworkDirtyNote_);
 
+    lineworkCommand_ = commandField(right, "lineworkCommand");
+    layout->addWidget(lineworkCommand_);
+
     auto* buttons = new QHBoxLayout;
-    auto* preview = new QPushButton(tr("Preview"), page);
+    auto* preview = new QPushButton(tr("Preview"), right);
     preview->setObjectName(QStringLiteral("lineworkPreview"));
-    auto* execute = new QPushButton(tr("Execute"), page);
+    preview->setToolTip(tr("Work out the lines, changing nothing"));
+    auto* execute = new QPushButton(tr("Execute"), right);
     execute->setObjectName(QStringLiteral("lineworkExecute"));
+    execute->setToolTip(tr("Run the line above: the lines drawn as one undoable step"));
     buttons->addWidget(preview);
     buttons->addWidget(execute);
-    lineworkSummary_ = new QLabel(page);
+    lineworkSummary_ = new QLabel(right);
     lineworkSummary_->setObjectName(QStringLiteral("lineworkSummary"));
     lineworkSummary_->setWordWrap(true);
     buttons->addWidget(lineworkSummary_, 1);
     layout->addLayout(buttons);
 
-    auto* report = new QTabWidget(page);
+    auto* report = new QTabWidget(right);
     report->setObjectName(QStringLiteral("lineworkReport"));
     lineworkStrings_ = reportTree(report, "lineworkStrings",
                                   {tr("String"), tr("Key"), tr("Points"), tr("Closed"),
@@ -690,15 +816,7 @@ QWidget* SurveyCodeManagerDialog::buildLineworkTab()
 
     for (QLineEdit* field : lineworkCodeFields_) {
         connect(field, &QLineEdit::textChanged, this, [this] {
-            katana::cad::LineworkCodes typed;
-            std::array<std::string*, 7> targets{&typed.start,    &typed.end,  &typed.close,
-                                                &typed.arcStart, &typed.arcEnd, &typed.join,
-                                                &typed.rectangle};
-            for (std::size_t i = 0; i < targets.size(); ++i) {
-                *targets[i] = std::string(
-                    katana::core::trimmed(text(lineworkCodeFields_[i]->text())));
-            }
-            const auto valid = katana::cad::validate(typed);
+            const auto valid = katana::cad::validate(typedLineworkCodes());
             lineworkCodesStatus_->setText(valid ? tr("Valid.") : text(valid.error().describe()));
             lineworkCodesStatus_->setStyleSheet(valid ? QString()
                                                       : QStringLiteral("color: #d9534f;"));
@@ -708,103 +826,172 @@ QWidget* SurveyCodeManagerDialog::buildLineworkTab()
     connect(lineworkCodesUse_, &QPushButton::clicked, this, [this] { useLineworkCodes(); });
     connect(defaults, &QPushButton::clicked, this, [this] {
         const katana::cad::LineworkCodes standard;
-        const std::array<const std::string*, 7> values{&standard.start,    &standard.end,
-                                                       &standard.close,    &standard.arcStart,
-                                                       &standard.arcEnd,   &standard.join,
-                                                       &standard.rectangle};
-        for (std::size_t i = 0; i < values.size(); ++i) {
-            lineworkCodeFields_[i]->setText(text(*values[i]));
+        const auto members = katana::entity::lineworkCodeMembers();
+        for (std::size_t i = 0; i < members.size() && i < lineworkCodeFields_.size(); ++i) {
+            lineworkCodeFields_[i]->setText(text(standard.*members[i].spelling));
         }
     });
     connect(preview, &QPushButton::clicked, this, [this] { previewLinework(); });
     connect(execute, &QPushButton::clicked, this, [this] { executeLinework(); });
-    for (QAbstractButton* button :
-         std::initializer_list<QAbstractButton*>{all, lineworkSelection_, lineworkKeepPoints_}) {
-        connect(button, &QAbstractButton::toggled, this, [this] { invalidatePlans(); });
-    }
-    connect(lineworkOrder_, &QComboBox::currentIndexChanged, this, [this] { invalidatePlans(); });
-    connect(lineworkProperty_, &QComboBox::currentTextChanged, this,
-            [this] { invalidatePlans(); });
-    connect(lineworkChord_, &QDoubleSpinBox::valueChanged, this, [this] { invalidatePlans(); });
+    connect(lineworkOrder_, &QComboBox::currentIndexChanged, this, [this] { showLines(); });
+    connect(lineworkProperty_, &QComboBox::currentTextChanged, this, [this] { showLines(); });
+    connect(lineworkChord_, &QDoubleSpinBox::valueChanged, this, [this] { showLines(); });
     return page;
 }
 
 void SurveyCodeManagerDialog::loadLineworkCodes()
 {
-    const katana::cad::LineworkCodes& codes = lineworkCodes();
-    const std::array<const std::string*, 7> values{&codes.start,  &codes.end,    &codes.close,
-                                                   &codes.arcStart, &codes.arcEnd, &codes.join,
-                                                   &codes.rectangle};
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        lineworkCodeFields_[i]->setText(text(*values[i]));
+    // The customisation's, which are the Document's; the usual spellings for
+    // a manager whose drawing has gone.
+    const katana::cad::Document* doc = document();
+    shownLinework_ = doc != nullptr ? doc->customisationState().linework
+                                    : katana::cad::LineworkCodes{};
+    const auto members = katana::entity::lineworkCodeMembers();
+    for (std::size_t i = 0; i < members.size() && i < lineworkCodeFields_.size(); ++i) {
+        lineworkCodeFields_[i]->setText(text(shownLinework_.*members[i].spelling));
     }
+}
+
+katana::cad::LineworkCodes SurveyCodeManagerDialog::typedLineworkCodes() const
+{
+    // The fields stand in the order the controls are declared in
+    // (entity::lineworkCodeMembers), which is the order they were built in.
+    katana::cad::LineworkCodes typed;
+    const auto members = katana::entity::lineworkCodeMembers();
+    for (std::size_t i = 0; i < members.size() && i < lineworkCodeFields_.size(); ++i) {
+        typed.*members[i].spelling =
+            std::string(katana::core::trimmed(text(lineworkCodeFields_[i]->text())));
+    }
+    return typed;
+}
+
+katana::core::Result<QString> SurveyCodeManagerDialog::lineworkCodesLine() const
+{
+    const katana::cad::Document* doc = document();
+    if (doc == nullptr) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidState,
+                                       "the drawing this manager edits is closed");
+    }
+    const katana::cad::LineworkCodes typed = typedLineworkCodes();
+    if (const auto valid = katana::cad::validate(typed); !valid) {
+        return valid.error();
+    }
+    const katana::cad::LineworkCodes& held = doc->customisationState().linework;
+    QString line;
+    for (const katana::entity::LineworkCodeMember& member : katana::entity::lineworkCodeMembers()) {
+        const std::string& spelling = typed.*member.spelling;
+        if (spelling == held.*member.spelling) {
+            continue; // only what changes: the line then says what was changed
+        }
+        // A blank is refused above; a double quote cannot be written on a
+        // line at all, and SET would read the word cut short at it.
+        if (spelling.find('"') != std::string::npos) {
+            return katana::core::makeError(
+                katana::core::ErrorCode::InvalidArgument,
+                "a control code cannot hold a double quote: a command line has no way to say one",
+                spelling);
+        }
+        // An empty spelling is "linework.start=": it switches the control off.
+        line += QStringLiteral(" linework.%1=%2")
+                    .arg(text(katana::core::lowered(member.name)), text(spelling));
+    }
+    return line.isEmpty() ? QString() : QStringLiteral("CUSTOMISE SET") + line;
 }
 
 void SurveyCodeManagerDialog::useLineworkCodes()
 {
-    katana::cad::LineworkCodes typed;
-    std::array<std::string*, 7> targets{&typed.start,  &typed.end,    &typed.close,
-                                        &typed.arcStart, &typed.arcEnd, &typed.join,
-                                        &typed.rectangle};
-    for (std::size_t i = 0; i < targets.size(); ++i) {
-        *targets[i] = std::string(katana::core::trimmed(text(lineworkCodeFields_[i]->text())));
-    }
-    if (const auto valid = katana::cad::validate(typed); !valid) {
-        log(text(valid.error().describe()), true);
+    const auto line = lineworkCodesLine();
+    if (!line) {
+        lineworkCodesStatus_->setText(text(line.error().describe()));
+        log(text(line.error().describe()), true);
         return;
     }
-    (context_.lineworkCodes != nullptr ? *context_.lineworkCodes : localCodes_) = typed;
-    invalidatePlans();
-    log(context_.lineworkCodes != nullptr
-            ? tr("Linework control codes set for this session.")
-            : tr("Linework control codes set for this manager (the session keeps none)."));
+    if (line->isEmpty()) {
+        lineworkCodesStatus_->setText(tr("These are the customisation's control codes already."));
+        return;
+    }
+    VerbOutcome outcome;
+    QString said;
+    if (!runLine(*line, outcome, said)) {
+        lineworkCodesStatus_->setText(said);
+        if (!context_.run) {
+            log(said, true);
+        }
+        return;
+    }
+    // The Document holds them now, and the fields are its: taken at once,
+    // rather than when the watcher next delivers, so the tab never shows
+    // codes between the two.
+    loadLineworkCodes();
+    lineworkCodesStatus_->setText(tr("Set: these are the customisation's control codes now."));
 }
 
-katana::cad::LineworkOptions SurveyCodeManagerDialog::lineworkOptions() const
+katana::cad::LineworkWords SurveyCodeManagerDialog::lineworkWords() const
 {
-    katana::cad::LineworkOptions options;
-    options.property = std::string(katana::core::trimmed(text(lineworkProperty_->currentText())));
-    const katana::cad::Document* doc = document();
-    if (lineworkSelection_->isChecked() && doc != nullptr) {
-        options.ids = doc->selection().ids();
+    katana::cad::LineworkWords words;
+    words.property = std::string(katana::core::trimmed(text(lineworkProperty_->currentText())));
+    words.order = lineworkOrder_->currentIndex() == 1 ? katana::cad::LineworkOrder::EntityOrder
+                                                      : katana::cad::LineworkOrder::PointNumber;
+    // Millimetres on the form, the drawing's units - metres - on the line.
+    // Said only when it is not the length the verb starts on, to a tenth of a
+    // millimetre, which is as fine as the box is set.
+    if (std::abs(lineworkChord_->value() - defaultChordMillimetres()) >= 0.05) {
+        words.chord = lineworkChord_->value() / 1000.0;
     }
-    options.order = lineworkOrder_->currentIndex() == 1 ? katana::cad::LineworkOrder::EntityOrder
-                                                        : katana::cad::LineworkOrder::PointNumber;
-    options.keepPoints = lineworkKeepPoints_->isChecked();
-    options.codes = lineworkCodes();
-    options.chordTolerance = lineworkChord_->value() / 1000.0; // mm on the form, metres here
-    if (doc != nullptr) {
-        options.coding.colourOf = katana::cad::colourLookup(*doc);
-    }
-    return options;
+    return words;
 }
 
-void SurveyCodeManagerDialog::previewLinework()
+katana::core::Result<QString> SurveyCodeManagerDialog::lineworkLine() const
 {
-    plannedLinework_.reset();
-    lineworkStamp_.reset();
+    auto scope = lineworkScope_->verbWords();
+    if (!scope) {
+        return scope.error();
+    }
+    const katana::cad::LineworkWords words = lineworkWords();
+    QString line = QStringLiteral("LINEWORK ") + *scope;
+    if (!words.property.empty()) {
+        auto word = commandWord(text(words.property), tr("Code property"));
+        if (!word) {
+            return word.error();
+        }
+        line += QStringLiteral(" PROPERTY ") + *word;
+    }
+    if (words.order == katana::cad::LineworkOrder::EntityOrder) {
+        line += QStringLiteral(" ORDER entity");
+    }
+    if (words.chord) {
+        line += QStringLiteral(" CHORD ") + exactNumber(*words.chord);
+    }
+    return line;
+}
+
+bool SurveyCodeManagerDialog::previewLinework()
+{
     lineworkStrings_->clear();
     lineworkUnplaced_->clear();
     lineworkNotes_->clear();
     const katana::cad::Document* doc = document();
     if (doc == nullptr) {
         lineworkSummary_->setText(tr("The drawing is closed."));
-        return;
+        return false;
     }
-    const katana::cad::LineworkOptions options = lineworkOptions();
-    if (lineworkSelection_->isChecked() && options.ids.empty()) {
-        lineworkSummary_->setText(tr("Nothing is selected."));
-        return;
+    const auto taken = scopeTakes(*lineworkScope_);
+    if (!taken) {
+        lineworkSummary_->setText(text(taken.error().describe()));
+        log(text(taken.error().describe()), true);
+        return false;
     }
-    auto result = katana::cad::processLinework(*doc, options);
-    if (!result) {
-        lineworkSummary_->setText(text(result.error().describe()));
-        log(text(result.error().describe()), true);
-        return;
+    // The verb's own plan (cad::planLinework), so what is listed here is
+    // what the line then draws: the customisation's control codes and
+    // colours, no point removed, the points their survey job has strung left
+    // out, and a line the drawing already holds not drawn again.
+    const auto plan = katana::cad::planLinework(*doc, *taken, lineworkWords());
+    if (!plan) {
+        lineworkSummary_->setText(text(plan.error().describe()));
+        log(text(plan.error().describe()), true);
+        return false;
     }
-    plannedLinework_ = std::move(result->command);
-    lineworkStamp_ = stamp();
-    const katana::cad::LineworkReport& report = result->report;
+    const katana::cad::LineworkReport& report = plan->planned.report;
     for (const katana::cad::LineworkString& line : report.strings) {
         auto* item = new QTreeWidgetItem(lineworkStrings_);
         item->setText(0, text(line.name) + (line.join ? tr(" (join)") : QString()));
@@ -829,41 +1016,73 @@ void SurveyCodeManagerDialog::previewLinework()
     for (QTreeWidget* tree : {lineworkStrings_, lineworkUnplaced_, lineworkNotes_}) {
         resizeColumns(tree);
     }
-    lineworkSummary_->setText(
-        plannedLinework_ == nullptr
-            ? tr("Nothing to build: %1 points looked at, %2 not placed.")
-                  .arg(report.considered)
-                  .arg(report.unplaced.size())
-            : tr("Preview only: %1 lines from %2 points; %3 points not placed; %4 notes. "
-                 "Execute builds them as one undoable step.")
-                  .arg(report.strings.size())
-                  .arg(report.considered)
-                  .arg(report.unplaced.size())
-                  .arg(report.notes.size()));
+    // What the scope took first, as the line's own reply begins; then what
+    // was left out, each only when there is something to say.
+    QString summary = tr("%1 matched. ").arg(taken->size());
+    summary += plan->planned.command == nullptr
+                   ? tr("Nothing to build: %1 points looked at, %2 not placed.")
+                         .arg(report.considered)
+                         .arg(report.unplaced.size())
+                   : tr("Preview only: %1 lines from %2 points; %3 points not placed; %4 notes. "
+                        "Execute builds them as one undoable step.")
+                         .arg(report.strings.size())
+                         .arg(report.considered)
+                         .arg(report.unplaced.size())
+                         .arg(report.notes.size());
+    if (!plan->strungByTheirJob.empty()) {
+        summary += tr(" %1 points are left to the lines their survey job drew.")
+                       .arg(plan->strungByTheirJob.size());
+    }
+    if (!report.alreadyDrawn.empty()) {
+        summary += tr(" %1 lines are in the drawing already and are not drawn again.")
+                       .arg(report.alreadyDrawn.size());
+    }
+    lineworkSummary_->setText(summary);
+    return true;
 }
 
 void SurveyCodeManagerDialog::executeLinework()
 {
-    katana::cad::Document* doc = document();
-    if (doc == nullptr) {
+    if (document() == nullptr) {
         return;
     }
-    if (plannedLinework_ == nullptr || !lineworkStamp_ || !(*lineworkStamp_ == stamp())) {
-        previewLinework();
-    }
-    if (plannedLinework_ == nullptr) {
-        log(tr("Linework: nothing to build."));
+    const auto line = lineworkLine();
+    if (!line) {
+        lineworkSummary_->setText(text(line.error().describe()));
+        log(text(line.error().describe()), true);
         return;
     }
-    katana::commands::CommandPtr command = std::move(plannedLinework_);
-    invalidatePlans();
-    if (const auto status = doc->execute(std::move(command)); !status) {
-        lineworkSummary_->setText(text(status.error().describe()));
-        log(text(status.error().describe()), true);
+    // The lines about to be drawn, point by point: the reply counts them. A
+    // preview that could not plan has said why; the line is not run to say it
+    // twice.
+    if (!previewLinework()) {
         return;
     }
-    lineworkSummary_->setText(lineworkSummary_->text() + tr(" Executed as one undoable step."));
-    log(tr("Linework built. Undo puts it all back."));
+    VerbOutcome outcome;
+    QString said;
+    if (!runLine(*line, outcome, said)) {
+        lineworkSummary_->setText(said);
+        if (!context_.run) {
+            log(said, true);
+        }
+        return;
+    }
+    // From the verb's own first record - "linework scope=... lines=<n> ..." -
+    // and never from the plan above alone: what is said to have been drawn is
+    // what the line says it drew.
+    const QString first = outcome.reply.section(QLatin1Char('\n'), 0, 0);
+    const auto record = katana::core::readReplyRecord(text(first));
+    const std::optional<std::string> lines = record ? record->value("lines") : std::nullopt;
+    if (!lines) {
+        lineworkSummary_->setText(tr("Executed. %1").arg(first));
+    } else if (*lines == "0") {
+        lineworkSummary_->setText(tr("Executed: no line was drawn, so nothing was added to the "
+                                     "undo history. %1")
+                                      .arg(first));
+    } else {
+        lineworkSummary_->setText(
+            tr("Executed as one undoable step: %1 lines drawn. %2").arg(text(*lines), first));
+    }
 }
 
 } // namespace katana::qt

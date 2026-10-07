@@ -31,8 +31,7 @@
 // (cad/customisation_verbs.hpp); no menu item stands for it here.
 //
 // The workbench owns what the managers share: the picture cache
-// (DefinitionThumbnails), the linework control codes the code manager's
-// Linework tab strings with, and the one CustomisationContext they are built
+// (DefinitionThumbnails) and the one CustomisationContext they are built
 // from. Each manager is NON-MODAL, made the first time it is asked for and
 // kept - hidden, not deleted - between uses, so the code manager's unapplied
 // edits survive closing it; asking again shows and raises the same one.
@@ -44,11 +43,11 @@
 // editor whichever manager asked, and a headless run reaches it as
 // `%definitionEditorDialog` once a step has opened it.
 //
-// Those control codes are the CUSTOMISATION'S (the Document's
-// customisationState().linework: what a customisation file says and CUSTOMISE
-// SET linework.* sets), followed as they change - followLineworkCodes. The
-// tab kept a copy that nothing ever wrote to but its own button, and strung
-// with the defaults whatever was loaded.
+// The linework control codes are NOT among what it owns. It kept a copy of
+// them for the code manager's Linework tab, and followed the customisation's
+// (the Document's customisationState().linework) into it as they changed;
+// the tab now reads the Document and sets them with CUSTOMISE SET
+// linework.*, so the copy, its follower and the watcher that drove it went.
 
 #include <functional>
 #include <memory>
@@ -61,7 +60,6 @@
 
 #include "command_runner.hpp"
 #include "icons.hpp"
-#include "katana/cad/linework.hpp"
 #include "katana/entity/entity.hpp"
 
 class QAction;
@@ -77,7 +75,6 @@ namespace katana::qt {
 
 class DefinitionEditorDialog;
 class DefinitionThumbnails;
-class DocumentWatcher;
 class GlobalModifyDialog;
 class StyleManagerDialog;
 class SurveyCodeManagerDialog;
@@ -191,34 +188,16 @@ class CustomisationWorkbench {
     // own (the window's --style-manager grab).
     [[nodiscard]] CustomisationContext context();
     [[nodiscard]] DefinitionThumbnails& thumbnails() { return *thumbnails_; }
-    // The control codes the Linework tab strings with: the customisation's,
-    // as last followed, or what the tab's own Use These Codes put here since.
-    [[nodiscard]] katana::cad::LineworkCodes& lineworkCodes() { return lineworkCodes_; }
 
   private:
     [[nodiscard]] bool headless() const;
     // Select `ids` and frame them in the active plan view.
     void selectAndShow(const std::vector<katana::entity::EntityId>& ids);
     void log(const QString& text, bool isError) const;
-    // Takes the Document's linework control codes when they are not the ones
-    // last taken: into the copy the Linework tab reads and, where a code
-    // manager exists, into its seven fields and through its own Use These
-    // Codes - the tab's door, so a plan it made with the old codes is thrown
-    // away and it says in the log that the codes are set. Called from the
-    // event loop after any change of the Document, and before a code manager
-    // is made, which may be in the same turn as the change.
-    //
-    // Only a CHANGE of the Document's codes: what the tab's own button set
-    // meanwhile stands until then, since any other change of the
-    // customisation - a switch, a KEEP - is no reason to take it back.
-    void followLineworkCodes();
 
     QWidget& window_;
     CustomisationServices services_;
     std::unique_ptr<DefinitionThumbnails> thumbnails_;
-    katana::cad::LineworkCodes lineworkCodes_{};
-    // The Document's own, as they were when last followed.
-    katana::cad::LineworkCodes followedLinework_{};
     QAction* stylesAction_ = nullptr;
     QAction* symbolsAction_ = nullptr;
     QAction* codesAction_ = nullptr;
@@ -229,9 +208,6 @@ class CustomisationWorkbench {
     QPointer<SurveyCodeManagerDialog> codes_;
     QPointer<GlobalModifyDialog> globalModify_;
     QPointer<DefinitionEditorDialog> definitions_;
-    // Last, so it is destroyed first: no delivery reaches a half-destroyed
-    // workbench.
-    std::unique_ptr<DocumentWatcher> watcher_;
 };
 
 } // namespace katana::qt
