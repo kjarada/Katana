@@ -369,7 +369,7 @@ member of a text stroke's object, a member given twice there, a number in its
 `colours` is an object, and the members of a JSON object have no order: the
 reader goes through its names in the order of their BYTES, whatever order the
 file has them in. So of two names with one fold it is the later in that order
-which is the entry refused - `colours "sui_gas"` for `SUI Gas` and `sui_gas`,
+which is the entry refused - `colours "sui_test_gas"` for `SUI Test Gas` and `sui_test_gas`,
 either way round - with both spellings beside it, the earlier first. The same
 holds for which of two unknown members is the one named.
 
@@ -693,7 +693,7 @@ The order matters at the ends. The fold came from the archive import, which
 trimmed FIRST and so left `red_` as `red ` - a "folded" name with a blank at
 its end, which folded again was `red`. Two answers from one fold is not a
 form to compare names in: a table could hold `red_` beside the standard `red`
-it is another spelling of, and `sui gas_` beside `sui gas`. Since 2026-10-06
+it is another spelling of, and `sui test gas_` beside `sui test gas`. Since 2026-10-06
 the separators become blanks before the ends are trimmed, so a separator at
 an end goes as a blank there does, and folding a folded name changes nothing
 (`FoldingAFoldedNameChangesNothing`). The one thing this changes for what
@@ -702,7 +702,7 @@ where that name used to match no standard colour and leave the colour alone.
 
 **One resolver.** `entity::resolveColour` asks the table and then the standard
 names, and gives nothing for a name neither knows - which leaves a colour
-alone rather than guessing (`pen 035` is such a name, and a pen that does not
+alone rather than guessing (`pen 901` is such a name, and a pen that does not
 resolve draws in the entity's own colour).
 
 ### Linework codes
@@ -1714,7 +1714,7 @@ katana_mcp start with"; `docs/desktop.md`, "How the window starts").
 
 ### Where it comes from
 
-Two CMake variables and one environment variable say what it is:
+Three CMake variables and one environment variable say what it is:
 
 | | What it is | Default |
 |---|---|---|
@@ -1789,7 +1789,7 @@ The Katana customisation format is the ONE format a customisation is read
 in. No front end reads the older ones: `CUSTOMISE` refuses a survey code file
 or a style library as `not a Katana customisation file` ("The verbs", above),
 and their readers are in the converter's library, which no program links (see
-"The built-in", below, for how that is held). A customisation
+"What holds the product to it", above, for how that is held). A customisation
 kept in the older formats - style libraries (`.4d`) and survey code files
 (`.mapfile`) - is turned into the Katana format once, by a developer, with
 `katana_customisation_convert`:
@@ -1867,13 +1867,13 @@ reading of the same text would be a second opinion of what a file means.
 - **`--colours <table>`** gives a colour to every name a rule uses - its own,
   its symbol's, its text's - that the standard names lack. The table is text,
   a colour a line: `R G B <index> "name"`, whatever follows the name ignored.
-  A name is matched by `entity::foldColourName`, so `sui_gas` in the table is
-  the `sui gas` of a rule, and is written into `colours` as the rules first
+  A name is matched by `entity::foldColourName`, so `sui_test_gas` in the table is
+  the `sui test gas` of a rule, and is written into `colours` as the rules first
   spell it. A name the table gives two colours is refused, but only when a
   rule uses it: a table of nine hundred colours need not be sound where
   nothing reads it.
 - **A plot pen is never given a colour**: a name that is `pen`, digits and at
-  most one letter (`pen 035`, `pen 12a`), though the table has one. Such a
+  most one letter (`pen 901`, `pen 90a`), though the table has one. Such a
   name is a pen of the plotter the files were written for, not a colour of
   the drawing. Unresolved, it leaves the entity's own colour alone
   (`entity::resolveColour`), which is how these codes have always been drawn;
@@ -2294,7 +2294,7 @@ has no customisation to ask, and would draw the same name in another colour.
 rewrote what the rules say would no longer be one.
 
 **A colour is written under the rules' spelling, not the table's.** The table
-says `sui_gas` and the rules `sui gas`; they are one name by the fold, and
+says `sui_test_gas` and the rules `sui test gas`; they are one name by the fold, and
 the file is read by the people who read its rules.
 
 **Only the rules' colours are looked up, not the pens inside definitions.** A
@@ -2311,9 +2311,6 @@ converter fills the table for all three.
 
 ### Not done by the converter
 
-- **The converter's readers are still the product's.** `katana_archive12d`
-  holds them, and the three programs link that library, until the work that
-  moves them into `src/katana_archive12d/legacy/` beside the converter.
 - **A name both libraries define keeps one definition.** The order of the
   reference libraries is settled ("The reference customisation"), and what it
   costs is recorded there: the symbol library's definitions of three names
