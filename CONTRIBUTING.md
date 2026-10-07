@@ -43,8 +43,8 @@ not.
       survey code files or schemas that came under someone else's licence. Test
       fixtures use invented names. One tracked file is an exception, the
       built-in customisation `resources/customisation/nsw.customisation.json`,
-      kept on the owner's decision of 2026-10-08 with no permission recorded,
-      which is why a build that contains it cannot be passed on under the GPL
+      kept and shipped on the owner's decision of 2026-10-08, who states the
+      information in it is public; it is outside the project licence
       (README, [Licence](README.md#licence)). It is not a precedent.
 - [ ] Do not use the names that `CLAUDE.md` section 9 lists (the "Names" rule)
       in new identifiers, UI text, docs or commit messages.

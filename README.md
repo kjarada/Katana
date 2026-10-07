@@ -498,15 +498,15 @@ commit (`git commit -s`; [CONTRIBUTING.md](CONTRIBUTING.md)).
 | `LICENSING.md` | the licence in plain words, what it does not cover, what is still to do, how to contribute |
 | `THIRD_PARTY_NOTICES.md` | the libraries Katana is built with and their licences |
 
-Not everything in the repository is covered, and one file stops a release:
+Not everything in the repository is covered by the project licence:
 
 - `resources/customisation/nsw.customisation.json`, the customisation compiled
   into a default build, was converted from style and survey-code libraries that
-  came under someone else's licence. The owner decided on 2026-10-08 to commit
-  it. Nothing in the repository records a permission from the libraries' owner,
-  and none is claimed. The GPL wants a whole program licensed under it, so a
-  build that contains this file cannot be passed on under the GPL until the
-  libraries' owner agrees; a build without it can
+  came under someone else's licence. The owner states that the information in
+  it is public and decided on 2026-10-08 to commit it and ship it in releases.
+  The owner does not claim to have written it, nothing in the repository
+  records a permission from the libraries' authors, and none is claimed. Anyone
+  who cannot rely on the owner's statement can build without it
   (`LICENSING.md`, "What the licence does not cover"). It is the one exception
   to the rule that third-party reference data stays out of the repository, and
   it is not a precedent: do not add another.

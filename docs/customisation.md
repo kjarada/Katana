@@ -1930,11 +1930,13 @@ the committed file by hand, on the same day, so two rows of dashes are all its
 writes (definitions, rules and colours are the same). Converting again gives
 the longer file; the committed one is the owner's edit of it and no program
 writes it. The decision to commit the file and to remove the notice is the
-owner's; nothing in the repository records that anyone granted a permission,
-and none is claimed here. The libraries' notice still exists in the reference
-files, and anyone who redistributes a build, or a copy of the repository, should
-read it first. Committed, the file stays in the history even if a later commit
-removes it.
+owner's. The owner states that the information in the file is public and has
+decided that releases ship it; nothing in the repository records that anyone
+granted a permission, and none is claimed here. The libraries' notice still
+exists in the reference files, and anyone who relies on this file in a build
+they pass on should make their own assessment first (a build without it is
+possible: `-DKATANA_BUILTIN_CUSTOMISATION=<a path with no file>`). Committed,
+the file stays in the history even if a later commit removes it.
 
 What was rejected, and why it was dropped. *Rejected: the file ignored, with
 `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` for a release that must not do without

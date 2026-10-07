@@ -112,21 +112,22 @@ known to be:
 1. **`resources/customisation/nsw.customisation.json`**, the built-in
    customisation (linestyles, symbols and survey codes). It was converted from
    third-party library files that came with a notice saying they may not be
-   copied or used without their authors' authorisation. The owner decided to
-   include the converted file and removed that notice from it, but cannot grant
-   rights over material that belongs to someone else. No permission from the
-   authors is recorded in this repository, and none is claimed.
-   **This blocks a public release.**
+   copied or used without their authors' authorisation. The owner states that
+   the information in the file is public, decided on 2026-10-08 to include the
+   converted file in the repository and in releases, and removed that notice
+   from it. The owner does not claim to have written it, so the project licence
+   does not extend to it. No document from the authors is recorded in this
+   repository, and no permission is claimed.
    * The file is compiled into `katana_cad`, so into every program, and the
-     release workflow passes nothing to leave it out.
-   * The GPL (section 5(c)) requires the whole work, as passed on, to be
-     licensed under it. A program with this file inside cannot be passed on
-     under the GPL while its authors have not agreed.
+     release workflow ships it.
+   * The GPL (section 5(c)) wants the whole work, as passed on, licensed under
+     it. Whether that is satisfied for a program containing this file rests on
+     the owner's statement that the information is public; this repository
+     cannot settle it, and a lawyer's confirmation is advised.
    * Making the repository public also publishes the file.
-   * Either the authors' written permission, on terms the GPL accepts, or a
-     release built without the file is needed. A configure option whose path
-     names no file makes a program with no built-in
-     (`-DKATANA_BUILTIN_CUSTOMISATION=<a path with no file>`;
+   * Anyone who cannot rely on that statement can build without the file: a
+     configure option whose path names no file makes a program with no
+     built-in (`-DKATANA_BUILTIN_CUSTOMISATION=<a path with no file>`;
      `src/katana_cad/CMakeLists.txt`, `docs/building.md`).
 2. **`samples/`**, installed in every package (`cmake/KatanaPackaging.cmake`).
    Where each file came from is not recorded in this repository, so no licence
