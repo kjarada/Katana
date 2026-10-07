@@ -69,6 +69,7 @@
 #include "customisation/code_manager.hpp"
 #include "customisation/customisation_context.hpp"
 #include "customisation/fixture_customisation.hpp"
+#include "customisation/linework_labels.hpp"
 #include "customisation/settings_dialog.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_host.hpp"
@@ -1199,6 +1200,99 @@ TEST(SettingsDialog, TheLabelsFollowTheDocument)
     EXPECT_TRUE(f.ran.isEmpty());
 }
 
+TEST(SettingsDialog, WhatTheStartOfTheSessionFoundIsShownAndTheRowIsHiddenWhenItFoundNothing)
+{
+    // The Document keeps what its start found (Document::setCustomisationStart,
+    // which cad::startCustomisation calls): the problems, a sentence each, and
+    // whether the kept customisation was made from another built-in. The page
+    // shows the sentences as they are, one a line, and after them its own
+    // sentence for the second - written out here from the dialog's source,
+    // which words it after the window's start-up line.
+    SettingsFixture f;
+    SettingsDialog dialog(f.context);
+    dialog.show();
+    auto* row = child<QLabel>(dialog, "settingsActiveProblems");
+    EXPECT_TRUE(row->isHidden()) << "a session whose start found nothing";
+    const QString fromAnother =
+        QStringLiteral("The kept customisation was made from another built-in customisation "
+                       "than this program has; Reset to Built-in gives this program's.");
+
+    f.document.setCustomisationStart({"the kept file was not read", "the built-in did not parse"},
+                                     false);
+    EXPECT_TRUE(row->isHidden()) << "read again from the event loop, not inside the change";
+    processEvents();
+    EXPECT_FALSE(row->isHidden());
+    EXPECT_TRUE(row->isVisibleTo(&dialog));
+    EXPECT_EQ(row->text(),
+              QStringLiteral("the kept file was not read\nthe built-in did not parse"));
+    EXPECT_TRUE(row->styleSheet().contains(katana::qt::theme::error().name()))
+        << "in the colour of an error";
+
+    // Nothing went wrong, and the kept customisation is from another built-in.
+    f.document.setCustomisationStart({}, true);
+    processEvents();
+    EXPECT_FALSE(row->isHidden());
+    EXPECT_EQ(row->text(), fromAnother);
+
+    // Both: the problems first.
+    f.document.setCustomisationStart({"the built-in did not parse"}, true);
+    processEvents();
+    EXPECT_EQ(row->text(), QStringLiteral("the built-in did not parse\n") + fromAnother);
+
+    // It is of the START: an edit of the session since does not take it away.
+    f.install(CustomisationOrigin::Loaded, false);
+    processEvents();
+    EXPECT_EQ(row->text(), QStringLiteral("the built-in did not parse\n") + fromAnother);
+
+    f.document.setCustomisationStart({}, false);
+    processEvents();
+    EXPECT_TRUE(row->isHidden());
+    EXPECT_TRUE(row->text().isEmpty());
+    EXPECT_TRUE(f.ran.isEmpty()) << "showing it runs no line";
+}
+
+TEST(SettingsDialog, AKeptFileThatDidNotReadWhenTheSessionStartedIsSaidOnThePage)
+{
+    // The start itself, as a front end makes it: kSite is the program's
+    // built-in, and the kept file holds JSON of another format, which the
+    // reader refuses as not a Katana customisation file. The built-in then
+    // stands in (cad::startCustomisation), and the sentence saying so is the
+    // one the page shows - the very words the start reported.
+    QTemporaryDir scratch;
+    ASSERT_TRUE(scratch.isValid());
+    const QString keptFile = scratch.filePath(QStringLiteral("customisation.json"));
+    QFile file(keptFile);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write("{\"format\": \"another-format\", \"version\": 1, \"name\": \"x\"}\n");
+    file.close();
+
+    SettingsFixture f;
+    katana::cad::CustomisationHost host;
+    host.builtIn.customisation =
+        std::make_shared<const katana::entity::Customisation>(customisationFromText(kSite));
+    host.builtIn.digest = katana::entity::customisationDigest(kSite);
+    host.keptFile = katana::core::pathFromUtf8(keptFile.toStdString());
+    const katana::cad::CustomisationStart started =
+        katana::cad::startCustomisation(f.document, host);
+    ASSERT_EQ(started.installed, CustomisationOrigin::BuiltIn);
+    ASSERT_EQ(started.problems.size(), 1u);
+    const QString problem = QString::fromStdString(started.problems.front());
+    ASSERT_TRUE(problem.startsWith(QStringLiteral(
+        "the kept customisation is not read, so the built-in customisation is used: ")))
+        << problem.toStdString();
+    ASSERT_TRUE(problem.contains(QStringLiteral("not a Katana customisation file")))
+        << problem.toStdString();
+
+    f.context.keptFile = keptFile;
+    SettingsDialog dialog(f.context);
+    dialog.show();
+    const auto* row = child<QLabel>(dialog, "settingsActiveProblems");
+    EXPECT_FALSE(row->isHidden());
+    EXPECT_EQ(row->text(), problem);
+    EXPECT_EQ(shown(dialog, "settingsActiveName"), QStringLiteral("Site"));
+    EXPECT_EQ(shown(dialog, "settingsActiveOrigin"), QStringLiteral("Built in"));
+}
+
 TEST(SettingsDialog, ASessionEditedBeforeAnythingWasInstalledIsShownAsNotNamed)
 {
     SettingsFixture f;
@@ -1326,13 +1420,35 @@ TEST(SettingsDialog, TheLineworkCodesAreShownAsTheDocumentSpellsThemAndEditedInO
     EXPECT_TRUE(f.ran.isEmpty());
 }
 
+TEST(SettingsDialog, TheOneListOfLineworkLabelsNamesEveryControlInTheOrderTheFormatListsThem)
+{
+    // The list Settings reads (linework_labels.hpp) against the list of the
+    // controls themselves (entity::lineworkCodeMembers): one label for each,
+    // in that order. A control added to the format and not given a label
+    // fails here, where the page would have shown it by its file name.
+    const auto members = katana::entity::lineworkCodeMembers();
+    ASSERT_EQ(members.size(), katana::qt::kLineworkControlLabels.size());
+    for (std::size_t i = 0; i < members.size(); ++i) {
+        EXPECT_EQ(members[i].name, katana::qt::kLineworkControlLabels[i].member) << i;
+        EXPECT_FALSE(katana::qt::lineworkControlLabel(members[i].name).isEmpty()) << i;
+        EXPECT_NE(katana::qt::lineworkControlLabel(members[i].name).toStdString(),
+                  std::string(members[i].name))
+            << "a word for a person, not the format's";
+    }
+    // By hand, the two a file's name says least about.
+    EXPECT_EQ(katana::qt::lineworkControlLabel("arcStart"), QStringLiteral("Begin curve"));
+    EXPECT_EQ(katana::qt::lineworkControlLabel("join"), QStringLiteral("Join to point"));
+    // One the list does not know is shown by the name a file gives it.
+    EXPECT_EQ(katana::qt::lineworkControlLabel("spiral"), QStringLiteral("spiral"));
+}
+
 TEST(SettingsDialog, TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem)
 {
     // The editor itself: the Survey Code Manager, whose Linework tab labels
     // its seven fields in a form. The words are read from it, not written
     // out again here, because this is the test that holds the two lists
-    // together - the tab's own and the one in settings_dialog.cpp - until
-    // both read one.
+    // together - the tab's own and the one Settings reads
+    // (linework_labels.hpp) - until the tab reads that one too.
     Document managed;
     katana::qt::CustomisationContext managerContext;
     managerContext.document = &managed;
@@ -1368,8 +1484,9 @@ TEST(SettingsDialog, TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem)
     SettingsFixture f;
     SettingsDialog dialog(f.context);
     EXPECT_EQ(shown(dialog, "settingsLinework"), words.join(QStringLiteral(", ")))
-        << "Settings and the Linework tab call a control by different words: give "
-           "kLineworkLabels in settings_dialog.cpp the tab's, or both one list";
+        << "Settings and the Linework tab call a control by different words: make the tab "
+           "label its fields from kLineworkControlLabels (linework_labels.hpp), the list "
+           "Settings reads";
 }
 
 TEST(SettingsDialog, AContextThatFillsNothingGivesADialogThatRunsNothing)

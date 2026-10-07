@@ -1,6 +1,5 @@
 #include "settings_dialog.hpp"
 
-#include <array>
 #include <cstddef>
 #include <initializer_list>
 #include <string>
@@ -33,6 +32,7 @@
 #include "katana/core/error.hpp"
 #include "katana/entity/linework_codes.hpp"
 #include "katana/entity/style_library.hpp"
+#include "linework_labels.hpp"
 #include "theme.hpp"
 
 namespace katana::qt {
@@ -75,16 +75,31 @@ QString originWords(CustomisationOrigin origin)
     return {};
 }
 
-// THE ONE PLACE THE SESSION'S START PROBLEMS ARE READ, AND IT READS NONE YET.
-// What went wrong when the session started - a kept file that did not read, a
-// built-in that did not parse (cad::CustomisationStart::problems) - is told to
-// the front end that started it and is not on the Document in this tree. When
-// cad::CustomisationState carries it (`startProblems`), this returns those
-// sentences and the row under "What is active" shows them; nothing else here
-// changes.
-QStringList startProblemsOf([[maybe_unused]] const CustomisationState& state)
+// What the START of this session found, for the row under "What is active":
+// each thing that went wrong, a sentence as cad::startCustomisation wrote it -
+// a kept file that did not read and what started in its place, a built-in
+// that did not parse - and, last, that the kept customisation was made from
+// another built-in than this program has. The Document keeps both
+// (CustomisationState::startProblems, keptFromAnotherBuiltIn), because the
+// window says them once, in a log that has scrolled away by the time a person
+// opens Settings to ask why their own customisation is not the one loaded.
+//
+// They are of the start and nothing since changes them: a session reset, or
+// loaded over, still says what its start found.
+QStringList startProblemsOf(const CustomisationState& state)
 {
-    return {};
+    QStringList problems;
+    for (const std::string& problem : state.startProblems) {
+        problems << text(problem);
+    }
+    if (state.keptFromAnotherBuiltIn) {
+        // The window's own start-up words (MainWindow::loadDefaultCustomisation),
+        // with the button a person has here in the place of the line to type.
+        problems << QStringLiteral("The kept customisation was made from another built-in "
+                                   "customisation than this program has; Reset to Built-in gives "
+                                   "this program's.");
+    }
+    return problems;
 }
 
 // The author's notice a person is shown: the customisation's own, then that of
@@ -106,51 +121,18 @@ QString noticeOf(const CustomisationState& state)
     return parts.join(QStringLiteral("\n\n"));
 }
 
-// What a person reads each linework control by. THESE ARE THE WORDS OF THE
-// CONTROLS' ONE EDITOR, the Linework tab of the Survey Code Manager, which the
-// button beside them opens (code_manager_tabs.cpp, buildLineworkTab): the same
-// control under another word here would be two names for one thing. What a
-// file and CUSTOMISE SET call a control (`arcStart`) is for a script to read.
-//
-// The tab keeps its seven labels in a list of its own, in a file that is not
-// this dialog's, so there are two lists until the tab shares one; the test
-// TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem reads the tab's and
-// fails when either list changes alone.
-struct LineworkLabel {
-    std::string_view member; // entity::LineworkCodeMember::name
-    const char* label;
-};
-constexpr std::array<LineworkLabel, 7> kLineworkLabels{{
-    {"start", "Start"},
-    {"end", "End"},
-    {"close", "Close"},
-    {"arcStart", "Begin curve"},
-    {"arcEnd", "End curve"},
-    {"join", "Join to point"},
-    {"rectangle", "Rectangle"},
-}};
-
-QString lineworkLabel(std::string_view member)
-{
-    for (const LineworkLabel& each : kLineworkLabels) {
-        if (each.member == member) {
-            return QString::fromLatin1(each.label);
-        }
-    }
-    // A control the list above does not know yet is shown by the name a file
-    // gives it, rather than left out.
-    return text(member);
-}
-
 // The seven control codes as the session spells them, in the order of
-// entity::lineworkCodeMembers. An empty spelling is a control switched off.
+// entity::lineworkCodeMembers, each under the word a person reads its control
+// by - the ONE list of those words (linework_labels.hpp), which is the
+// controls' one editor's too: the same control under another word here would
+// be two names for one thing. An empty spelling is a control switched off.
 QString lineworkWords(const katana::entity::LineworkCodes& codes)
 {
     QStringList words;
     for (const katana::entity::LineworkCodeMember& member :
          katana::entity::lineworkCodeMembers()) {
         const std::string& spelling = codes.*member.spelling;
-        words << lineworkLabel(member.name) + QStringLiteral(": ") +
+        words << lineworkControlLabel(member.name) + QStringLiteral(": ") +
                      (spelling.empty() ? QStringLiteral("(off)") : text(spelling));
     }
     return words.join(QStringLiteral(", "));

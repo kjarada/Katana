@@ -635,7 +635,8 @@ both, because the vector path models only points, lines and polygons.
 ## The GIS menu: every GDAL and PDAL capability, reachable
 
 Until 2026-09-23 the desktop application reached GDAL and PDAL through two
-items - File > Import (any file, default options) and File > Export Vector -
+items - File > Import (any file, default options) and File > Export Vector,
+as Export Drawing was then called -
 and several things the libraries and `katana_interop` could already do had no
 way in: writing a point cloud, converting to COPC and reading COPC at a level
 of detail, choosing a GeoPackage's layer, a point budget or a class filter,
@@ -649,7 +650,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | Section | Item | What it calls |
 |---|---|---|
 | Vector - GDAL | Import Vector Data... | a file dialog, `describeSource` for the dialog it routes to, then the Import Vector Data dialog, whose layers, where, fields, scope, target and placement are the `IMPORT` line it runs through the window's one executor ("Import options") |
-| | Export Vector... | File's own action: after the file dialog, the Export Vector dialog (`vectorExportDialog`), whose scope and options are the `EXPORT` line it runs ("Export options") |
+| | Export Drawing... | File's own action (`fileExportVector`, called Export Vector until it was said to write DXF, archives and IFC too): after the file dialog, the Export Drawing dialog (`vectorExportDialog`, titled as the item is), whose scope and options are the `EXPORT` line it runs ("Export options") |
 | Raster - GDAL | Import Raster... | the same, to the Import Raster dialog: band, subdataset, resolution and name as the `IMPORT` line it runs |
 | | Export Surface as DEM... | the `SURFACE EXPORT` line: `exportSurfaceRaster` through GDAL's `raster convert` - a tiled, compressed Float32 GeoTIFF, a COG, an Esri ASCII grid or IMG (`docs/terrain.md`) |
 | Point Cloud - PDAL | Import Point Cloud... | the same, to the Import Point Cloud dialog: budget, class and a COPC resolution when the file is COPC, as the `IMPORT` line it runs |
@@ -659,14 +660,26 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
 | Processing - GDAL | Formats... | the `FORMATS` verb: every format this GDAL reads and writes, and a driver's options ("Formats", above) |
 
+**File lists them too.** Every import and every export of this menu is also
+under File > Import or File > Export, in a section named GIS - Import Vector
+Data, Import Raster, Import Point Cloud and Online Data; Export Surface as
+DEM and Export Point Cloud - beside File's own and Survey's
+(`docs/desktop.md`, "The File menu"). They are the same `QAction` objects,
+put there by object name, so the two menus cannot differ; this menu is as it
+was, and Convert Point Cloud to COPC and Dataset Information, which neither
+bring anything into the drawing nor take it out, are here alone. The three
+imports and Dataset Information open a file dialog first: in a headless run
+each is refused, naming the `IMPORT` or `INFO` line that does the same
+(`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`).
+
 Decisions, and what was rejected:
 
-* **File > Import stays the quick way in** for GIS files - any file, the
+* **File > Import > Import Any File stays the quick way in** for GIS files - any file, the
   default options, no questions - and a command-line argument and the `IMPORT`
   verb take the same path; it runs the `IMPORT "<file>"` line through the
   window's one executor, so the log shows it. The GIS imports are the
   considered way: they describe the file and offer its options before
-  anything is read. Putting a dialog on File > Import for every file was
+  anything is read. Putting a dialog on Import Any File for every file was
   rejected: a single-layer shapefile would then cost a click for nothing,
   every time. A DXF or a .12da archive is the exception (below, "Placing an
   import"): where it lands is its one choice, and no GIS dialog offers it.
@@ -1232,8 +1245,9 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
   written), `crs=` (the system written), `texts=` with `text=points` and
   `append=yes` with `append`, after its old fields.
 
-**The window.** File > Export Vector (and the GIS menu's same action) asks
-for the file, then opens the Export Vector dialog
+**The window.** File > Export > Export Drawing (`fileExportVector`; the GIS
+menu shows the same action) asks for the file, then opens the Export Drawing
+dialog
 (`src/katana_qt/gis_export_dialog.hpp`), built on the GIS dialog frame: the
 shared "Apply to" and "Only those that match" controls (`vectorExportScope`,
 starting at the selection when there is one, else the whole drawing), the

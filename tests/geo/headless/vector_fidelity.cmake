@@ -2,7 +2,7 @@
 # headlessly through tools/check_screenshot.cmake. Included from
 # tests/CMakeLists.txt when the window is built.
 #
-# The window's EXPORT - typed, or the Export Vector dialog's - passes the
+# The window's EXPORT - typed, or the Export Drawing dialog's - passes the
 # project's coordinate system as the session's does: a KML of a drawing in
 # MGA zone 56 is written in longitude and latitude and read back there,
 # beside the point it came from.

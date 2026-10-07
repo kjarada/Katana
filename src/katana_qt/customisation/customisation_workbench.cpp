@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStringList>
+#include <QTabWidget>
 #include <QToolBar>
 #include <QWidget>
 
@@ -18,6 +19,7 @@
 #include "customisation/definition_thumbnails.hpp"
 #include "customisation/document_watcher.hpp"
 #include "customisation/global_modify_dialog.hpp"
+#include "customisation/settings_dialog.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/purge.hpp"
@@ -36,6 +38,8 @@ constexpr const char* kStyleManagerName = "styleManagerDialog";
 constexpr const char* kSymbolLibraryName = "symbolLibraryDialog";
 constexpr const char* kCodeManagerName = "surveyCodeManagerDialog";
 constexpr const char* kGlobalModifyName = "globalModifyDialog";
+// The Settings dialog names itself this (settings_dialog.cpp).
+constexpr const char* kSettingsName = "settingsDialog";
 
 QString counted(std::size_t count, const char* one, const char* many)
 {
@@ -99,6 +103,17 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
                         "Delete the styles, linetypes and hatch patterns nothing uses, as one "
                         "undo step",
                         "formatPurge", nullptr);
+    // File's, not Format's: made here because its dialog is this object's
+    // (customisation_workbench.hpp). The role is for macOS, where Qt moves an
+    // item of it into the application menu - the place that platform keeps
+    // its Settings, whatever menu the program put the item in.
+    settingsAction_ =
+        make(Icon::Settings, "Settin&gs...",
+             "The session's customisation - its linestyles, symbols and survey codes: load a "
+             "file into it, write it to one, reset it to the built-in, keep it for the next "
+             "start, and what is done to survey data as it comes in",
+             "fileSettings", kSettingsName);
+    settingsAction_->setMenuRole(QAction::PreferencesRole);
 
     QObject::connect(stylesAction_, &QAction::triggered, &window_, [this] { showStyleManager(); });
     QObject::connect(symbolsAction_, &QAction::triggered, &window_,
@@ -107,6 +122,7 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
     QObject::connect(purgeAction_, &QAction::triggered, &window_, [this] { purgeUnused(); });
     QObject::connect(globalModifyAction_, &QAction::triggered, &window_,
                      [this] { showGlobalModify(); });
+    QObject::connect(settingsAction_, &QAction::triggered, &window_, [this] { showSettings(); });
 
     // Titled sections: a style that draws titles (theme.cpp) shows what each
     // group is for, and one that does not shows the separators these were.
@@ -137,8 +153,10 @@ CustomisationWorkbench::~CustomisationWorkbench()
 {
     // Here, not left to the window's children: the dialogs paint from the
     // cache and read the linework codes this object owns, which go as soon
-    // as this body ends - and the Document goes after that. The editor
-    // first: the managers ask for it through this object.
+    // as this body ends - and the Document goes after that. Settings
+    // first: its callbacks ask this object for the managers. Then the editor:
+    // the managers ask for it through this object.
+    delete settings_.data();
     delete definitions_.data();
     delete globalModify_.data();
     delete codes_.data();
@@ -191,6 +209,7 @@ DefinitionEditorDialog* CustomisationWorkbench::definitionEditor() const
 {
     return definitions_.data();
 }
+SettingsDialog* CustomisationWorkbench::settings() const { return settings_.data(); }
 
 bool CustomisationWorkbench::headless() const
 {
@@ -343,6 +362,50 @@ DefinitionEditorDialog& CustomisationWorkbench::showDefinitionEditor()
     }
     raise(*definitions_);
     return *definitions_;
+}
+
+SettingsDialog& CustomisationWorkbench::showSettings()
+{
+    if (settings_.isNull()) {
+        SettingsContext context;
+        context.document = services_.document;
+        context.run = services_.run;
+        context.log = [this](const QString& text, bool isError) { log(text, isError); };
+        context.headless = [this] { return headless(); };
+        // Asked at each press: the manager that is not made yet holds no
+        // edits, and one made since is asked itself.
+        context.codeManagerDirty = [this] { return !codes_.isNull() && codes_->dirty(); };
+        context.openCodeManager = [this] { showCodeManager(); };
+        context.openLinework = [this] { showLinework(); };
+        context.openSymbolLibrary = [this] { showSymbolLibrary(); };
+        // The host's two facts, as they are now: the window made its host
+        // before anything could open this (CustomisationServices).
+        context.hasBuiltIn = services_.hasBuiltIn && services_.hasBuiltIn();
+        context.keptFile = services_.keptFile ? services_.keptFile() : QString();
+        settings_ = new SettingsDialog(std::move(context), &window_);
+    }
+    raise(*settings_);
+    return *settings_;
+}
+
+SurveyCodeManagerDialog& CustomisationWorkbench::showLinework()
+{
+    SurveyCodeManagerDialog& codes = showCodeManager();
+    // The manager has no call for this, so the tab is reached as a person -
+    // and the headless driver's codeManagerTabs=Linework - reaches it: by the
+    // names code_manager.hpp gives its tabs and that page.
+    auto* tabs = codes.findChild<QTabWidget*>(QStringLiteral("codeManagerTabs"));
+    auto* page = codes.findChild<QWidget*>(QStringLiteral("lineworkTab"));
+    if (tabs == nullptr || page == nullptr || tabs->indexOf(page) < 0) {
+        // Said, not left as a manager open on whichever tab it was last on
+        // with nothing to tell a person that it is the wrong one.
+        log("The Survey Code Manager is open, but its Linework tab was not found to bring "
+            "forward: choose it there.",
+            true);
+        return codes;
+    }
+    tabs->setCurrentWidget(page);
+    return codes;
 }
 
 bool CustomisationWorkbench::editDefinition(DefinitionEdit what, const std::string& name)

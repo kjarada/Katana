@@ -1821,8 +1821,8 @@ option key may not be a WHERE key; the DXF scope goes through a pruned copy
 of the drawing rather than the DXF writer's entity list (the copy is already
 made for the worker, and the archive writer takes the same route); GeoJSON's
 default is longitude and latitude (RFC 7946), `crs=native` keeping the
-project's. The Export Vector dialog is the GIS frame's (`vectorExport`),
-opened by File > Export Vector after its file dialog, so `--dialog` does not
+project's. The Export Drawing dialog is the GIS frame's (`vectorExport`),
+opened by File > Export > Export Drawing after its file dialog, so `--dialog` does not
 reach it headless - the widget tests drive it by object name, and the
 `EXPORT` line is the headless path. Tests:
 `tests/geo/test_export_options.cpp`,

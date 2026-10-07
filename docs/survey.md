@@ -2874,11 +2874,15 @@ Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, Parcel
 Report, the Angle and Bearing Calculator), Traverse and Levelling (Traverse,
 Level Book) and Coordinates (the Coordinate Converter) - plus a Survey Coding
 section that shows actions the window and the Format workbench own: the
-Survey Code Manager and Apply Survey Codes
+Survey Code Manager, Apply Survey Codes and Process Linework
 (`docs/survey_coding.md`). The first is the same `QAction` object as
 on the Format menu (`SurveyServices::codeManager`), so the two menus cannot
 drift; Apply Survey Codes (`applySurveyCodes`), which runs the `CODE` line on
-the selection or the drawing, is on this menu and the Survey toolbar only.
+the selection or the drawing, is on this menu and the Survey toolbar only,
+and Process Linework (`surveyLinework`), which runs the `LINEWORK` line the
+same way, on this menu only (`docs/desktop.md`, "The Format menu"). Import
+Survey Points and Export Survey Points are also listed under File > Import
+and File > Export, the same objects ("The File menu" there).
 (Load Customisation and Replace Loaded Customisation were here too until
 2026-10-06: `docs/desktop.md`, "The Format menu".) The menu
 ends with Subsurface Utilities (AS 5488), added by a workbench of its own

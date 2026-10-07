@@ -139,6 +139,9 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     if (services_.applySurveyCodes != nullptr) {
         menu.addAction(services_.applySurveyCodes);
     }
+    if (services_.surveyLinework != nullptr) {
+        menu.addAction(services_.surveyLinework);
+    }
 
     toolBar.addActions({importPoints, surveyJobs, exportPoints, pointManagerAction_});
     toolBar.addSeparator();

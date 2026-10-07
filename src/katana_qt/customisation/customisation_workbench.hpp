@@ -44,6 +44,16 @@
 // editor whichever manager asked, and a headless run reaches it as
 // `%definitionEditorDialog` once a step has opened it.
 //
+// And it makes File > Settings (settings_dialog.hpp) and owns its dialog:
+//     Settings...                  fileSettings       -> settingsDialog
+// The item is File's - the window puts the action there, above Quit - but the
+// dialog is this object's for the reason the managers are: Settings shows the
+// session's customisation, must know whether the Survey Code Manager holds
+// unapplied edits (its Import, Reset and Revert are refused while it does),
+// and opens the managers this object keeps. Made here, a widget test builds
+// and drives it without a window. Nothing of it is in Format or on its
+// toolbar.
+//
 // Those control codes are the CUSTOMISATION'S (the Document's
 // customisationState().linework: what a customisation file says and CUSTOMISE
 // SET linework.* sets), followed as they change - followLineworkCodes. The
@@ -79,6 +89,7 @@ class DefinitionEditorDialog;
 class DefinitionThumbnails;
 class DocumentWatcher;
 class GlobalModifyDialog;
+class SettingsDialog;
 class StyleManagerDialog;
 class SurveyCodeManagerDialog;
 class SymbolLibraryDialog;
@@ -116,6 +127,15 @@ struct CustomisationServices {
     // the window makes its host after it is built. Unset, or false: no line is
     // ever run, so a session with no kept file never logs KEEP's refusal.
     std::function<bool()> hasKeptFile;
+    // What the session's host offers, for File > Settings to show and to
+    // enable its buttons by (SettingsContext::hasBuiltIn, keptFile): whether
+    // there is a built-in customisation to reset to, and the kept file's path
+    // as text - the path hasKeptFile answers for; empty when the session
+    // keeps none. Asked ONCE, when the Settings dialog is first opened, by
+    // when the window has made its host (a host does not change while a
+    // session runs). Unset: no built-in, no kept file.
+    std::function<bool()> hasBuiltIn;
+    std::function<QString()> keptFile;
 };
 
 class CustomisationWorkbench {
@@ -139,6 +159,9 @@ class CustomisationWorkbench {
     [[nodiscard]] QAction* codeManagerAction() const { return codesAction_; }
     [[nodiscard]] QAction* purgeAction() const { return purgeAction_; }
     [[nodiscard]] QAction* globalModifyAction() const { return globalModifyAction_; }
+    // File > Settings (fileSettings; its data names settingsDialog). In no
+    // menu until the window puts it in File's.
+    [[nodiscard]] QAction* settingsAction() const { return settingsAction_; }
 
     // Shows the manager, making it the first time, and raises it. What each
     // action does.
@@ -151,6 +174,16 @@ class CustomisationWorkbench {
     GlobalModifyDialog& showGlobalModify();
     // The one definition editor, shown and raised - made the first time.
     DefinitionEditorDialog& showDefinitionEditor();
+    // File > Settings: the one Settings dialog, shown and raised - made the
+    // first time, from the services (the Document, the executor, the log, the
+    // host's built-in and kept file) and from what this object knows: whether
+    // the code manager's buffer is dirty, and how to open the editors.
+    SettingsDialog& showSettings();
+    // The Survey Code Manager at its Linework tab, the one editor of the
+    // linework control codes: what Settings' Edit Linework Codes opens. The
+    // tab is brought forward as a person brings it, by the object names the
+    // manager gives its tabs and that page (codeManagerTabs, lineworkTab).
+    SurveyCodeManagerDialog& showLinework();
     // A manager's request of it (CustomisationContext::editDefinition): the
     // editor is shown, then asked. False when it refused, which it has said
     // in its own message area and in the log.
@@ -161,6 +194,7 @@ class CustomisationWorkbench {
     [[nodiscard]] SurveyCodeManagerDialog* codeManager() const;
     [[nodiscard]] GlobalModifyDialog* globalModify() const;
     [[nodiscard]] DefinitionEditorDialog* definitionEditor() const;
+    [[nodiscard]] SettingsDialog* settings() const;
 
     // Format > Purge Unused: every style, linetype and hatch pattern nothing
     // uses (cad::purgeCommand), keeping the current style, deleted as ONE
@@ -224,11 +258,13 @@ class CustomisationWorkbench {
     QAction* codesAction_ = nullptr;
     QAction* purgeAction_ = nullptr;
     QAction* globalModifyAction_ = nullptr;
+    QAction* settingsAction_ = nullptr;
     QPointer<StyleManagerDialog> styles_;
     QPointer<SymbolLibraryDialog> symbols_;
     QPointer<SurveyCodeManagerDialog> codes_;
     QPointer<GlobalModifyDialog> globalModify_;
     QPointer<DefinitionEditorDialog> definitions_;
+    QPointer<SettingsDialog> settings_;
     // Last, so it is destroyed first: no delivery reaches a half-destroyed
     // workbench.
     std::unique_ptr<DocumentWatcher> watcher_;
