@@ -6,7 +6,7 @@
 // so that a file exported here looks to 12d like one of its own. Nothing of
 // any customisation's CONTENT is copied: the element names are the format.
 
-#include "katana/archive12d/map_file.hpp"
+#include "map_file.hpp"
 
 #include <algorithm>
 #include <array>

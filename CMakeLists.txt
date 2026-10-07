@@ -4,9 +4,11 @@ project(Katana VERSION 0.2.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Python is used at build time to embed the built-in customisation into the binary
-# (tools/embed_customisation.py). Optional: without it the generated table is
-# empty and Katana draws plain lines.
+# Python is a convenience, never a requirement of the build: the docs test
+# (tools/check_docs.py), the IFC and utility-schema checks and the customisation
+# censuses run when it is found and are not registered when it is not. The
+# built-in customisation is compiled in with #embed (src/katana_cad/CMakeLists.txt)
+# and needs none.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     set(KATANA_PYTHON "${Python3_EXECUTABLE}")
@@ -68,11 +70,13 @@ set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs,
 # the folder is git-ignored - it is on the owner's machine and in no clone -
 # and nothing committed needs it. Only the converter of those formats
 # (src/katana_archive12d/legacy; docs/customisation.md, "Converting a
-# customisation from the legacy formats") is run on it, and only the test of
-# what the converter makes of it reads it: that test skips when the folder is
-# absent or holds no file in those formats, and FAILS when it holds some and
-# they are not the four. Defined here, above the modules and the tests,
-# because both the converter's module and its test suite are to see one value.
+# customisation from the legacy formats") is run on it, and only the tests of
+# the legacy readers and writers and of what the converter makes of it read
+# it (tests/archive12d): they skip when the folder is absent or holds no file
+# in those formats, and the conversion test FAILS when it holds some and they
+# are not the four. The program reads none of it. Defined here, above the
+# modules and the tests, because both the converter's module and its test
+# suite are to see one value.
 # The owner's folder is named for the program its files came from; the name is
 # assembled so that no tracked file spells it (CLAUDE.md, section 9).
 string(CONCAT _katana_reference_folder "1" "2d Refrence Files")

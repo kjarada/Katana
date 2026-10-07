@@ -213,7 +213,7 @@ struct ConvertRequest {
 
 // The report as key=value lines, one fact a line, a text value quoted as
 // core::replyQuoted does. A list is its count (`colours_unresolved=1`) and
-// then a line an entry (`colour_unresolved="pen 018"`); an entry of more than
+// then a line an entry (`colour_unresolved="pen 011"`); an entry of more than
 // one fact is a record of them on its line:
 //
 //   definition_replaced="Gate" kept="site_symbols.4d" kept_as=symbol dropped="site_lines.4d" dropped_as=linestyle differs=yes linestyle_rules=2 symbol_rules=0

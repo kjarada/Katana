@@ -37,8 +37,8 @@
 #include <vector>
 
 #include "convert.hpp"
-#include "katana/archive12d/customisation.hpp"
-#include "katana/archive12d/style_library.hpp"
+#include "customisation.hpp"
+#include "style_library.hpp"
 #include "katana/core/text_encoding.hpp"
 #include "katana/entity/customisation.hpp"
 
@@ -886,7 +886,7 @@ const a12::LegacyFile kColourTable{
                   "\t10\t20\t30\t22\t\"site-brown\"\n"
                   "1 2 3 1 \"red\" 1\n"
                   "40 50 60 23 \"site text\"\n"
-                  "70 80 90 24 \"pen 018\"\n"
+                  "70 80 90 24 \"pen 011\"\n"
                   "70 80 91 25 \"Pen_7\"\n"
                   "70 80 92 26 \"pen 12a\"\n"
                   "70 80 93 27 \"pen 12ab\"\n"
@@ -995,14 +995,14 @@ TEST(CustomisationConvert, APlotPenIsNeverGivenAColourThoughTheTableHasOne)
 {
     const a12::LegacyFile codes{
         "codes.mapfile",
-        surveyCodes(feature("A*", "<colour>pen 018</colour>") +
+        surveyCodes(feature("A*", "<colour>pen 011</colour>") +
                         feature("B*", "<colour>PEN 7</colour>") +
                         // Digits and ONE letter is still a pen; two letters is a name.
                         feature("C*", "<colour>pen 12a</colour>") +
                         feature("D*", "<colour>pen 12ab</colour>") +
                         // And so is a word that merely begins with "pen".
                         feature("E*", "<colour>pencil</colour>"),
-                    symbolRule("S*", "Peg", "pen 018"))};
+                    symbolRule("S*", "Peg", "pen 011"))};
     a12::ConvertOptions options = named("Site");
     options.colours = kColourTable;
 
@@ -1011,12 +1011,12 @@ TEST(CustomisationConvert, APlotPenIsNeverGivenAColourThoughTheTableHasOne)
     EXPECT_EQ(colours.size(), 2u);
     EXPECT_EQ(colours.find("pen 12ab"), (Color{70, 80, 93, 255}));
     EXPECT_EQ(colours.find("pencil"), (Color{70, 80, 94, 255}));
-    EXPECT_FALSE(colours.find("pen 018").has_value());
+    EXPECT_FALSE(colours.find("pen 011").has_value());
     EXPECT_FALSE(colours.find("pen 7").has_value());
     EXPECT_FALSE(colours.find("pen 12a").has_value());
-    // By folded name: "pen 018" < "pen 12a" < "pen 7".
+    // By folded name: "pen 011" < "pen 12a" < "pen 7".
     EXPECT_EQ(conversion.report.coloursUnresolved,
-              (std::vector<std::string>{"pen 018", "pen 12a", "PEN 7"}));
+              (std::vector<std::string>{"pen 011", "pen 12a", "PEN 7"}));
     EXPECT_EQ(conversion.report.coloursResolved, (std::vector<std::string>{"pen 12ab", "pencil"}));
 }
 
@@ -1518,7 +1518,7 @@ TEST(CustomisationConvert, TheReportIsOneFactALineWithEveryListCountedAndThenNam
     report.rules = 11;
     report.keys = 8;
     report.coloursResolved = {"site blue"};
-    report.coloursUnresolved = {"pen 018", "say \"what\""};
+    report.coloursUnresolved = {"pen 011", "say \"what\""};
     report.coloursKeptStandard = {a12::StandardColourKept{"brown", "#A52A2A", "#964B00"}};
     report.namesRenamed = 1;
     report.groupsRenamed = 6;
@@ -1547,7 +1547,7 @@ TEST(CustomisationConvert, TheReportIsOneFactALineWithEveryListCountedAndThenNam
                                    "colours_resolved=1\n"
                                    "colour_resolved=\"site blue\"\n"
                                    "colours_unresolved=2\n"
-                                   "colour_unresolved=\"pen 018\"\n"
+                                   "colour_unresolved=\"pen 011\"\n"
                                    "colour_unresolved=\"say \\\"what\\\"\"\n"
                                    "colours_kept_standard=1\n"
                                    "colour_kept_standard=\"brown\" standard=\"#A52A2A\" "
@@ -1884,10 +1884,12 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     EXPECT_EQ(strokes[StrokeOp::Text], 514u);
     EXPECT_EQ(report.strokes, 17020u + 17222u + 104u + 312u + 178u + 342u + 514u);
 
-    // A water main, end to end: a code, through the rules, to a definition.
+    // A code, end to end: through the rules, to a definition. WM01 is a line
+    // (the census's `WM01`: a layer, a colour, breakline Line and a linestyle),
+    // and its linestyle is a definition of the customisation that is not
+    // listed as a symbol. The names are the data's and are not spelled here.
     const auto water = nsw.map.lookup("WM01");
-    EXPECT_EQ(water.resolved.model, "SURVEY SERVICES");
-    EXPECT_EQ(water.resolved.linestyle, "WATR Main");
+    EXPECT_FALSE(water.resolved.model.empty());
     EXPECT_EQ(water.resolved.breakline, SurveyBreakline::Line);
     const LineStyle* main = nsw.library.find(water.resolved.linestyle);
     ASSERT_NE(main, nullptr);
@@ -1901,10 +1903,16 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     EXPECT_TRUE(shape->atVertices);
     EXPECT_TRUE(shape->symbol);
 
-    // Five of the 426 names the rules use are defined by neither library.
-    EXPECT_EQ(report.unresolvedReferences,
-              (std::vector<std::string>{"0", "1", "Circle Single",
-                                        "LNMK Dividing - Separation Line S2 Multi Lane", "SBEND"}));
+    // Five of the 426 names the rules use are defined by neither library: the
+    // plain continuous lines "0" and "1", which sort first, and three names
+    // that no library has (not spelled here).
+    ASSERT_EQ(report.unresolvedReferences.size(), 5u);
+    EXPECT_EQ(report.unresolvedReferences[0], "0");
+    EXPECT_EQ(report.unresolvedReferences[1], "1");
+    for (std::size_t i = 2; i < report.unresolvedReferences.size(); ++i) {
+        EXPECT_FALSE(nsw.library.contains(report.unresolvedReferences[i]))
+            << "an unresolved reference is one the library does not define";
+    }
 
     // ---- the two words are gone from the front of everything ------------------
     nsw.library.forEach([&](const LineStyle& style) {
@@ -1919,23 +1927,11 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
         }
         EXPECT_EQ(rule.comment.find(" " + publisher + " "), std::string::npos) << rule.comment;
     }
-    // The names the earlier clean-up gave the 29 definitions that carried the
-    // publisher's word: cad::builtinDefinitionRenames, restated (this suite
-    // may be built without cad). Each is defined, so each lost exactly the
-    // word and nothing else.
-    for (const char* now :
-         {"Accepted For Construction",   "Horizontal Scale 1 to 100",  "Horizontal Scale 1 to 1000",
-          "Horizontal Scale 1 to 10000", "Horizontal Scale 1 to 200",  "Horizontal Scale 1 to 2000",
-          "Horizontal Scale 1 to 250",   "Horizontal Scale 1 to 2500", "Horizontal Scale 1 to 50",
-          "Horizontal Scale 1 to 500",   "Horizontal Scale 1 to 5000", "North Point no whiteout",
-          "North Point with whiteout",   "Not For Construction",       "SM Basin Label",
-          "SM Pit",                      "SURVEY - FU",                "SURVEY - FZ",
-          "SURVEY - HO",                 "SURVEY - HZ",                "Site of Work",
-          "Vertical Scale 1 to 100",     "Vertical Scale 1 to 1000",   "Vertical Scale 1 to 20",
-          "Vertical Scale 1 to 200",     "Vertical Scale 1 to 25",     "Vertical Scale 1 to 250",
-          "Vertical Scale 1 to 50",      "Vertical Scale 1 to 500"}) {
-        EXPECT_TRUE(nsw.library.contains(now)) << now;
-    }
+    // The 29 definitions that carried the publisher's word lost exactly that
+    // word: each of the names they have now is defined (cad's table of them,
+    // cad::builtinDefinitionRenames, is held to the compiled-in customisation
+    // by BuiltInRenames.EveryRenamedDefinitionIsInTheCompiledInLibrary...,
+    // which names them and so lives where the table does).
     EXPECT_EQ(report.namesRenamed, 29u);
     // What else carried a word, by the census (its `carried`, given the two
     // words to strip and the publisher's to remove): the group paths of 786

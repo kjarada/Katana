@@ -1,15 +1,13 @@
-#include "katana/archive12d/customisation.hpp"
+#include "customisation.hpp"
 
-#include <algorithm>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <utility>
 
-#include "katana/archive12d/map_file.hpp"
-#include "katana/archive12d/style_library.hpp"
+#include "map_file.hpp"
+#include "style_library.hpp"
 #include "katana/core/text_encoding.hpp"
-#include "builtin_customisation.hpp"
 
 namespace katana::archive12d {
 
@@ -60,87 +58,6 @@ std::vector<std::string> Customisation::unresolvedStyles() const
         }
     }
     return {missing.begin(), missing.end()};
-}
-
-const Customisation& builtinCustomisation()
-{
-    // Parsed once, on first use. A function-local static so the cost is paid
-    // by whoever first needs a linestyle and never by a session that does
-    // not, and so that nothing depends on static initialisation order.
-    static const Customisation built = [] {
-        std::vector<CustomisationBytes> files;
-        for (const detail::EmbeddedFile& file : detail::builtinCustomisationFiles()) {
-            files.push_back(CustomisationBytes{std::string(file.name), file.bytes});
-        }
-        return readEachCustomisationFile(files);
-    }();
-    return built;
-}
-
-Customisation readEachCustomisationFile(const std::vector<CustomisationBytes>& files)
-{
-    Customisation customisation;
-    for (const CustomisationBytes& file : files) {
-        // Read into a COPY. The readers take the library and map by value, so
-        // reading into the one being built would leave it moved-from - empty
-        // - when a file fails, which is exactly how one bad file used to wipe
-        // every file before it (A12-06). A copy per file is cheap next to the
-        // parse, and this runs once a session.
-        auto next = readCustomisationBytes(customisation, file.name, file.bytes);
-        if (!next) {
-            customisation.errors.push_back(next.error().describe());
-            continue;
-        }
-        customisation = std::move(*next);
-    }
-    return customisation;
-}
-
-std::vector<std::filesystem::path>
-customisationSearchPath(const std::filesystem::path& executable)
-{
-    std::vector<std::filesystem::path> places;
-    std::error_code ignored;
-    const std::filesystem::path bin =
-        executable.has_parent_path() ? executable.parent_path() : std::filesystem::current_path(ignored);
-    places.push_back(bin.parent_path() / "share" / "katana" / "customisation");
-    // A development tree: bin is <source>/build/<config>/bin, and the source
-    // keeps its customisation where the build compiles it in from by default.
-    places.push_back(bin.parent_path().parent_path().parent_path() / "resources" / "customisation");
-    return places;
-}
-
-std::vector<std::filesystem::path> findCustomisation(const std::filesystem::path& executable)
-{
-    std::error_code ignored;
-    for (const std::filesystem::path& directory : customisationSearchPath(executable)) {
-        if (!std::filesystem::is_directory(directory, ignored)) {
-            continue;
-        }
-        std::vector<std::filesystem::path> found;
-        for (const auto& entry : std::filesystem::directory_iterator(directory, ignored)) {
-            if (!entry.is_regular_file(ignored)) {
-                continue;
-            }
-            // Ask the file what it is rather than trusting its name: `.4d` is
-            // the extension of both a style library and a mapfile.
-            std::ifstream file(entry.path(), std::ios::binary);
-            if (!file) {
-                continue;
-            }
-            std::ostringstream buffer;
-            buffer << file.rdbuf();
-            const auto decoded = katana::core::decodeText(buffer.str());
-            if (decoded && customisationKind(decoded->text)) {
-                found.push_back(entry.path());
-            }
-        }
-        if (!found.empty()) {
-            std::sort(found.begin(), found.end());
-            return found;
-        }
-    }
-    return {};
 }
 
 katana::core::Result<Customisation> readCustomisationInto(Customisation into,

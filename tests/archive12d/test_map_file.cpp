@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-#include "katana/archive12d/map_file.hpp"
+#include "map_file.hpp"
 #include "katana/core/text_encoding.hpp"
 
 #include "reference_files.hpp"
@@ -133,10 +133,10 @@ TEST(MapFile, TheSymbolSectionMarkedV9IsReadAsTheSymbolSection)
     // AC* in each form, and TR* under the v9 name alone.
     const auto map = read(R"(
       <vertex_symbol_data>
-        <item><key>AC*</key><symbol_data><style>CULT Bollard</style><size>1.5</size></symbol_data></item>
+        <item><key>AC*</key><symbol_data><style>TEST Bollard</style><size>1.5</size></symbol_data></item>
       </vertex_symbol_data>
       <vertex_symbol_data_v9>
-        <item><key>AC*</key><symbol_data><style>CULT Bollard</style><size>1.5</size></symbol_data></item>
+        <item><key>AC*</key><symbol_data><style>TEST Bollard</style><size>1.5</size></symbol_data></item>
         <item>
           <key>TR*</key>
           <symbol_data><style>VEGE Tree</style><size>3</size></symbol_data>

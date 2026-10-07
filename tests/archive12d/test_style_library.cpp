@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-#include "katana/archive12d/style_library.hpp"
+#include "style_library.hpp"
 #include "katana/core/text_encoding.hpp"
 
 #include "reference_files.hpp"

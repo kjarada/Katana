@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#include "katana/archive12d/map_file.hpp"
-#include "katana/archive12d/style_library.hpp"
+#include "map_file.hpp"
+#include "style_library.hpp"
 #include "katana/core/text_encoding.hpp"
 
 #include "../reference_files.hpp"

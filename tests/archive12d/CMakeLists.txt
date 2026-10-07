@@ -2,8 +2,11 @@
 # authors can add a file at once without editing this list.
 file(GLOB _archive12d_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
 
+# The suite links the older customisation formats' library as well
+# (src/katana_archive12d/legacy): the readers and writers of the style library
+# and the survey code file are tested here, and nothing that ships links them.
 katana_add_test_suite(archive12d
-    LIBS katana_archive12d
+    LIBS katana_archive12d katana_legacy_customisation
     SOURCES
         test_reader.cpp
         test_elements.cpp
@@ -25,19 +28,6 @@ katana_add_test_suite(archive12d
 # format was learned from are real project data and are not in the repository.
 target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_ARCHIVE12D_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
-# The customisation the build compiles in (KATANA_CUSTOMISATION_DIR, set by
-# src/katana_archive12d): the one the survey coding work was measured against
-# (PLAN.MD 20.3). It is real third-party material under its own licence and is
-# NOT part of this repository, so the tests that use it SKIP when it is not
-# there rather than fail: the suite must stay green without it.
-target_compile_definitions(katana_archive12d_tests PRIVATE
-    KATANA_CUSTOMISATION_FILES="${KATANA_CUSTOMISATION_DIR}")
-# The converter of the older customisation formats (src/katana_archive12d/legacy):
-# customisation/test_convert.cpp calls its functions, so the suite links its
-# library - which nothing that ships does.
-if(TARGET katana_legacy_customisation)
-    target_link_libraries(katana_archive12d_tests PRIVATE katana_legacy_customisation)
-endif()
 # What the converter is held to: the three small customisations in the Katana
 # format, written by hand as the twins of the three fixtures under data/
 # customisation. They are in a directory of no one module because the window,
@@ -45,9 +35,10 @@ endif()
 target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_CUSTOMISATION_TEST_DATA="${PROJECT_SOURCE_DIR}/tests/data/customisation")
 # The reference customisation in the legacy formats (the top-level
-# CMakeLists.txt says what it is and why it is in no clone): the conversion
-# test reads it, SKIPS when the folder is absent or holds no such file, and
-# fails when it holds some that are not the four.
+# CMakeLists.txt says what it is and why it is in no clone): the readers' and
+# writers' reference tests and the conversion test read it and SKIP when the
+# folder is absent or holds no such file; the conversion test fails when it
+# holds some that are not the four.
 target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_REFERENCE_CUSTOMISATION_FILES="${KATANA_REFERENCE_CUSTOMISATION_DIR}")
 # The program itself: that its command line reaches the functions the suite
@@ -75,11 +66,4 @@ if(TARGET katana_customisation_convert)
         set_tests_properties(customisation_convert.${_case_name}
             PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
     endforeach()
-endif()
-# The renames the drawing side knows (cad's customisation record) checked
-# against the built-in customisation itself. Only where cad is configured too,
-# which a module filter can leave out.
-if(TARGET katana_cad)
-    target_sources(katana_archive12d_tests PRIVATE test_builtin_renames.cpp)
-    target_link_libraries(katana_archive12d_tests PRIVATE katana_cad)
 endif()

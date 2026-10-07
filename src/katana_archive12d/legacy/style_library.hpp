@@ -5,10 +5,10 @@
 // One grammar covers both files, because in 12d a symbol is a linestyle drawn
 // at a vertex. A definition is a block:
 //
-//   worldstyle "CULT Bollard" {
+//   worldstyle "TEST Bollard" {
 //       xorigin 0   yorigin 0
 //       mode   vertex                 // this one is a symbol
-//       group  "Survey/CULT"
+//       group  "Test/Bollards"
 //       move 0 0
 //       arc 1.75 0 180
 //       draw 1.2 -0.4
@@ -44,9 +44,10 @@ struct StyleLibraryRead {
     // was kept counts in both; a keyword with no member counts only in `read`.
     std::vector<ElementTally> tally{};
     std::vector<std::string> warnings{};
-    // Definitions that replaced one of the same name. Four of the Transport
-    // for NSW definitions appear in both library files, so this is expected
-    // and is reported rather than treated as an error.
+    // Definitions that replaced one of the same name. Four of the reference
+    // customisation's definitions are given twice - three in both library
+    // files and one twice in one - so this is expected and is reported rather
+    // than treated as an error.
     std::size_t replaced = 0;
     // Each definition that count stands for, AS IT WAS before the one of this
     // text took its place, in the order they were replaced. A count says that
