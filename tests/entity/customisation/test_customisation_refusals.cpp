@@ -42,7 +42,7 @@ constexpr const char* kNotACustomisation = "not a Katana customisation file";
 // beside that, with nothing of the JSON parser's account of the character.
 constexpr const char* kOlderFormat =
     "not a Katana customisation file; the older formats are converted with "
-    "katana_customisation_convert";
+    "katana_customisation_convert (a developer's tool, not installed; see docs/customisation.md)";
 
 // What a refusal is checked against: the code, the entry and the member.
 struct Refused {

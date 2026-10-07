@@ -623,9 +623,21 @@ std::string keptFileSentence(const CustomisationHost& host)
     }
     // As a sentence says a path: plainly, with '/', not quoted as a record's value is.
     const std::u8string path = host.keptFile.generic_u8string();
-    return "Kept file: " + std::string(path.begin(), path.end()) +
-           (isThere(host.keptFile) ? ", which the next start reads."
-                                   : ", not written yet; CUSTOMISE KEEP writes it.");
+    const std::string where = "Kept file: " + std::string(path.begin(), path.end());
+    if (!isThere(host.keptFile)) {
+        return where + ", not written yet; CUSTOMISE KEEP writes it.";
+    }
+    // A file the next start cannot use is not "read" by it: say which kind of
+    // trouble it is, because only one of them is something KEEP can move.
+    const auto bytes = katana::core::readFileBytes(host.keptFile);
+    if (!bytes) {
+        return where + ", which cannot be read, so the next start does not use it.";
+    }
+    if (!katana::entity::customisationFromJson(*bytes).ok()) {
+        return where + ", which is not a customisation that reads, so the next start does not use "
+                       "it; CUSTOMISE KEEP sets it aside as .bad.";
+    }
+    return where + ", which the next start reads.";
 }
 
 // The path of the kept file, or the refusal that names what is missing.
@@ -721,8 +733,8 @@ Result<std::string> keep(Document& document, CustomisationVerbContext& context)
         // kept all the same would be read in its place at every later start,
         // and so would hide every later edition of the built-in for ever.
         //
-        // Moved over the file of that name, which the rename replaces: one
-        // that was removed first was lost when the rename then failed.
+        // Moved over the file of that name, which the rename replaces, so the
+        // earlier backup is never absent: a failed rename leaves both files.
         std::error_code failed;
         if (there) {
             fs::rename(*file, aside, failed);
@@ -1050,8 +1062,9 @@ Report    CUSTOMISE   the counts, then: customisation name= origin=none|builtIn|
           auto.linework=  |  linework linework.start= ... (both as SET takes them)  |  missing
           name=, one a name the open project recorded that is not loaded; then what this
           drawing uses of it; then, in a session given a host, one sentence: Kept file: none |
-          <path>, not written yet | <path>, which the next start reads (kept=yes says only
-          that nothing waits to be kept, which with no kept file is always so)
+          <path>, not written yet | <path>, which the next start reads | <path>, which does not
+          read (kept=yes says only that nothing waits to be kept, which with no kept file
+          is always so)
           CUSTOMISE JSON   the same as one JSON object, with the notices, the colours, what
           is wrong with the rules, and the coverage
 Load      CUSTOMISE <file> [<file>...]   merge the files into what is loaded: a definition

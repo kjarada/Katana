@@ -171,7 +171,8 @@ struct CustomisationWriteOptions {
 // that break it included. Text that begins - after blanks - with '<' or "//",
 // which is how a survey code file (.mapfile) and a style library (.4d) begin,
 // is told so and where to take it, "...; the older formats are converted with
-// katana_customisation_convert", with none of the parser's account of the
+// katana_customisation_convert (a developer's tool, not installed; see
+// docs/customisation.md)", with none of the parser's account of the
 // character; the program knows those formats by those two characters and
 // nothing more. Unsupported for a "version" newer than
 // kCustomisationVersion. ParseFailure, naming the entry and the member

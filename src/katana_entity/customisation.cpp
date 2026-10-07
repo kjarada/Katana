@@ -1726,7 +1726,8 @@ class TreeBuilder {
         if (!first.empty() && (first.front() == '<' || first.starts_with("//"))) {
             throw Refusal{ErrorCode::ParseFailure,
                           std::string(notThis) +
-                              "; the older formats are converted with katana_customisation_convert",
+                              "; the older formats are converted with katana_customisation_convert"
+                              " (a developer's tool, not installed; see docs/customisation.md)",
                           {}};
         }
     }
