@@ -410,6 +410,40 @@ set_tests_properties(packaging_check_on_fixture_a_build_tree_that_carries_the_re
 set_tests_properties(packaging_check_on_fixture_no_cpack_configuration PROPERTIES
     PASS_REGULAR_EXPRESSION "CPackConfig[.]cmake was not found")
 
+# The Unix deploy script names the programs it scans for libraries in one foreach line, and
+# the check holds that line to the installed programs (tools/check_install_rules.cmake, 5).
+# Three scripts written here stand for it - one that scans all four, one that leaves the
+# updater out, one with its list in two lines - against the otherwise correct fixture, so each
+# failure is the deploy script's alone. The real script is checked by
+# packaging_installs_only_present_first_party_files.
+set(_deploy_fixture_root "${CMAKE_CURRENT_BINARY_DIR}/deploy_script_fixtures")
+file(MAKE_DIRECTORY "${_deploy_fixture_root}")
+file(WRITE "${_deploy_fixture_root}/scans_all_four.in"
+    "# A deploy script's scan list.\nforeach(_program katana katana_cli katana_mcp katana_updater)\nendforeach()\n")
+file(WRITE "${_deploy_fixture_root}/leaves_the_updater_out.in"
+    "# A deploy script's scan list.\nforeach(_program katana katana_cli katana_mcp)\nendforeach()\n")
+file(WRITE "${_deploy_fixture_root}/lists_in_two_lines.in"
+    "foreach(_program katana katana_cli katana_mcp)\nendforeach()\nforeach(_program katana_updater)\nendforeach()\n")
+foreach(_deploy IN ITEMS scans_all_four leaves_the_updater_out lists_in_two_lines no_such_script)
+    add_test(NAME packaging_check_on_deploy_script_${_deploy}
+        COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
+                -DKATANA_BINARY=${_install_fixture_root}/the_programs_and_the_updater
+                -DKATANA_REQUIRE_CPACK=ON
+                -DKATANA_DEPLOY_UNIX_SCRIPT=${_deploy_fixture_root}/${_deploy}.in
+                -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
+endforeach()
+set_tests_properties(packaging_check_on_deploy_script_scans_all_four PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "Unix deploy script scans: katana, katana_cli, katana_mcp, katana_updater[.]"
+    FAIL_REGULAR_EXPRESSION "Install rule problems")
+set_tests_properties(packaging_check_on_deploy_script_leaves_the_updater_out PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "the Unix deploy script does not scan katana_updater for libraries [(]it scans: katana, katana_cli, katana_mcp[)]")
+set_tests_properties(packaging_check_on_deploy_script_lists_in_two_lines PROPERTIES
+    PASS_REGULAR_EXPRESSION "has 2 foreach[(]_program [.][.][.][)] lines where exactly one is expected")
+set_tests_properties(packaging_check_on_deploy_script_no_such_script PROPERTIES
+    PASS_REGULAR_EXPRESSION "no_such_script[.]in does not exist: the check of the programs it scans would pass with nothing to check")
+
 # What the documents cite exists - repository paths, Class::member names,
 # test names - no document cites the removed root plan or instructions, and
 # docs/index.md lists every document (docs/testing.md, "The docs test").

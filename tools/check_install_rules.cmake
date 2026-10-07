@@ -39,6 +39,15 @@
 #    the record script before the signing script; that script exists and
 #    writes install.json; and no tree this build makes (<build>/share/katana,
 #    <build>/dist/Katana/share/katana) holds one.
+# 5. The Linux and macOS deploy script (cmake/KatanaDeployUnix.cmake.in, or the file
+#    named by -DKATANA_DEPLOY_UNIX_SCRIPT) scans the programs it names for the
+#    libraries to copy into lib/, in ONE `foreach(_program ...)` line, and must
+#    name every program that is installed. A program missing there is installed
+#    with its libraries not copied: it starts on the machine that built it and
+#    fails on the user's. The script is configured only on Linux and macOS, so a
+#    Windows build never runs it and nothing else would notice. (The macOS signing
+#    loop is a different list: macOS installs no katana_updater, so that list
+#    is not held to this one.)
 #
 # Reads <build dir>/cmake_install.cmake, where each rule is one
 # `file(INSTALL ... FILES "<path>" ...)` line, and the scripts it includes
@@ -166,6 +175,31 @@ elseif(KATANA_REQUIRE_CPACK)
     list(APPEND _violations
         "${_cpack} was not found: the check of CPack's install.json would pass with nothing to check")
 endif()
+# 5. The Unix deploy script scans every program that is installed.
+if(NOT KATANA_DEPLOY_UNIX_SCRIPT)
+    set(KATANA_DEPLOY_UNIX_SCRIPT "${_root}/cmake/KatanaDeployUnix.cmake.in")
+endif()
+if(NOT EXISTS "${KATANA_DEPLOY_UNIX_SCRIPT}")
+    list(APPEND _violations "${KATANA_DEPLOY_UNIX_SCRIPT} does not exist: the check of the programs it scans would pass with nothing to check")
+else()
+    file(STRINGS "${KATANA_DEPLOY_UNIX_SCRIPT}" _scan_lines REGEX "^foreach[(]_program ")
+    list(LENGTH _scan_lines _scan_count)
+    if(NOT _scan_count EQUAL 1)
+        list(APPEND _violations
+            "${KATANA_DEPLOY_UNIX_SCRIPT} has ${_scan_count} foreach(_program ...) lines where exactly one is expected: the list of programs it scans for libraries could not be read")
+    else()
+        string(REGEX REPLACE "^foreach[(]_program +| *[)] *$" "" _scan_names "${_scan_lines}")
+        string(REGEX REPLACE " +" ";" _scan_names "${_scan_names}")
+        list(JOIN _scan_names ", " _scan_text)
+        foreach(_program IN LISTS KATANA_INSTALLED_PROGRAMS)
+            if(NOT _program IN_LIST _scan_names)
+                list(APPEND _violations
+                    "the Unix deploy script does not scan ${_program} for libraries (it scans: ${_scan_text}): a Linux or macOS package would install it without the libraries it loads")
+            endif()
+        endforeach()
+    endif()
+endif()
+
 # Trees this build makes that are development trees by definition.
 foreach(_tree IN ITEMS "share/katana/install.json" "dist/Katana/share/katana/install.json")
     if(EXISTS "${KATANA_BINARY}/${_tree}")
@@ -182,4 +216,5 @@ list(REMOVE_DUPLICATES _programs)
 list(JOIN _programs ", " _program_names)
 message(STATUS "Install rules checked: ${_checked} source paths, all present, none third-party. "
                "Programs installed: ${_program_names}. "
-               "Install record: no plain install writes install.json (${_cpack_checked}).")
+               "Install record: no plain install writes install.json (${_cpack_checked}). "
+               "Unix deploy script scans: ${_scan_text}.")

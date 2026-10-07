@@ -686,7 +686,8 @@ folder. Nothing in `katana`, `katana_cli` or `katana_mcp` links the readers of
 the older formats, and two checks say so: the test
 `the_programs_link_none_of_the_legacy_customisation_readers` walks the link
 closure of the three programs at configure time, and the install rules
-(`tools/check_install_rules.cmake`) allow those three programs and no other.
+(`tools/check_install_rules.cmake`) allow those three programs, and the update
+helper `katana_updater`, and no other.
 Each is proved on a fixture, the first on a library two targets down linked
 PRIVATELY and the second on an install script that installs the converter.
 `benchmarks/qt/bench_plan_paint.cpp` takes the compiled-in customisation's

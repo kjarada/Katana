@@ -9,7 +9,8 @@
 # The tree MIRRORS the toolchain prefix, which is what makes it work with
 # nothing rewritten:
 #
-#   bin/katana, katana_cli, katana_mcp   RPATH $ORIGIN/../lib (@loader_path on macOS)
+#   bin/katana, katana_cli, katana_mcp   RPATH $ORIGIN/../lib (@loader_path on macOS);
+#       katana_updater (Linux only)      the same RPATH, from CMAKE_INSTALL_RPATH
 #   bin/qt.conf                          Qt's plugins, relative to bin/
 #   lib/*.so* or *.dylib                 as in the prefix, where each library's
 #                                        own RPATH ($ORIGIN, @loader_path)
@@ -109,7 +110,11 @@ endif()
 # them resolves everything through DIRECTORIES instead, with a warning for
 # each of a hundred libraries.
 set(_executables "")
-foreach(_program katana katana_cli katana_mcp)
+# katana_updater is the fourth: installed on Linux only (macOS updating is check-and-notify,
+# cmake/KatanaPackaging.cmake), so on macOS the EXISTS test below skips it. A program named
+# nowhere in this list is installed with its libraries not copied;
+# tools/check_install_rules.cmake holds this one line to the programs that are installed.
+foreach(_program katana katana_cli katana_mcp katana_updater)
     if(EXISTS "${_bin}/${_program}" AND EXISTS "@CMAKE_BINARY_DIR@/bin/${_program}")
         list(APPEND _executables "@CMAKE_BINARY_DIR@/bin/${_program}")
     endif()

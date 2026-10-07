@@ -66,11 +66,13 @@ endforeach()
 # Katana.app breaks its seal): a helper that could not be used would only be one
 # more thing signed and notarised.
 #
-# Linux: cmake/KatanaDeployUnix.cmake.in names the programs it gives an RPATH and scans for
-# libraries (katana, katana_cli, katana_mcp, at two places) and does not name katana_updater,
-# so until task T18 adds it there the Linux copy installed here is the stub, with no RPATH. A
-# Linux helper cannot be static as the Windows one is (glibc), so it will need $ORIGIN/../lib
-# and, since it runs from a copy in a state folder, a way to find lib/ from there.
+# Linux: cmake/KatanaDeployUnix.cmake.in scans this program for libraries with the other
+# three (tools/check_install_rules.cmake fails if an installed program is missing from that
+# list, and nothing else would notice: a Windows build never runs the script), and the install gives it
+# CMAKE_INSTALL_RPATH, $ORIGIN/../lib, as it gives the others. Not yet settled, and task
+# T18's to settle: a Linux helper cannot be static as the Windows one is (glibc), and it runs
+# from a copy in a state folder, where $ORIGIN/../lib is not the install's lib/, so it needs
+# a way to find that lib/ from there. Nothing here has been built or run on Linux.
 if(TARGET katana_updater AND NOT APPLE)
     install(TARGETS katana_updater RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
 endif()
