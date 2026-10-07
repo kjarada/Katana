@@ -11,8 +11,32 @@
 //                     selected key or a typed code, and the rule form
 //   Codes in Drawing  cad::codeCensus, classed against the buffer
 //   Issues            cad::lintSurveyMap on the buffer
-//   Apply Codes       cad::applySurveyCodes, previewed without executing
-//   Linework          cad::processLinework, and the session's control codes
+//   Apply Codes       the CODE line, previewed by cad::applySurveyCodes
+//   Linework          the LINEWORK line, previewed by cad::planLinework, and
+//                     the customisation's control codes (CUSTOMISE SET)
+//
+// THE TWO ACTION TABS RUN LINES. Each has the "Apply to" and "Only those that
+// match" controls every tool on drawing data has (scope_filter_widget.hpp,
+// CLAUDE.md section 1.1), and its Execute builds the line a person would type
+// - CODE <scope> [PROPERTY p], LINEWORK <scope> [PROPERTY p] [ORDER entity]
+// [CHORD x] - and hands it to the window's executor (CustomisationContext::
+// run): echoed, kept in the history, one undo step, answered in the verb's
+// words. The line is shown as the controls change (applyCommand,
+// lineworkCommand). Preview stays a plan made here, read-only and unlogged,
+// because it shows more than a reply does - a row a code, every point in no
+// line, every note - but it is planned by what the verb plans with. The
+// Linework tab's Use These Codes is the line CUSTOMISE SET linework.*: the
+// control codes are the customisation's, the Document's, and the tab shows
+// them as they are and follows them as they change.
+//
+// Until 2026-10-07 the two tabs took the selection or everything, executed
+// commands of their own, and kept a copy of the control codes that only the
+// window's own bookkeeping tied to the customisation. What went with that:
+// three boxes that switched parts of the coding off (create layers, create
+// styles, set attributes) and "keep the points a line replaces", none of
+// which a line can say - CODE always does what the rules say, and LINEWORK
+// never removes a point (linework_verbs.hpp) - and a second, direct path kept
+// for them would have been the two code paths this is here to end.
 //
 // EDITING HAPPENS IN A BUFFER (decision D1). The survey map is session data on
 // the Document, not undoable, so edits go to a copy of document->surveyMap()
@@ -21,9 +45,9 @@
 // from outside while the buffer is unedited is taken up; with edits pending it
 // is not, and the log says so - Apply then replaces it, Revert takes it.
 //
-// Apply Codes and Linework run against the DOCUMENT'S map: applySurveyCodes
-// reads the Document, which cannot be handed a buffer. The tabs say so while
-// the buffer has unapplied edits.
+// Apply Codes and Linework run against the DOCUMENT'S map: the verbs read the
+// Document, which cannot be handed a buffer. The tabs say so while the buffer
+// has unapplied edits.
 //
 // Every widget a test or the headless driver needs has an objectName; the
 // tabs are codeTableTab, codesInDrawingTab, codeIssuesTab, applyCodesTab and
@@ -42,11 +66,12 @@
 #include <QDialog>
 
 #include "customisation/customisation_context.hpp"
+#include "customisation/scope_filter_widget.hpp"
 #include "katana/cad/code_table.hpp"
 #include "katana/cad/customisation_merge.hpp"
 #include "katana/cad/linework.hpp"
+#include "katana/cad/linework_verbs.hpp"
 #include "katana/cad/survey_coding.hpp"
-#include "katana/commands/command_stack.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/survey_map.hpp"
 
@@ -57,7 +82,7 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
-class QRadioButton;
+class QShowEvent;
 class QStackedWidget;
 class QTabWidget;
 class QTreeWidget;
@@ -150,14 +175,22 @@ class SurveyCodeManagerDialog : public QDialog {
     void setInteractive(bool interactive) { interactive_ = interactive; }
     [[nodiscard]] bool interactive() const { return interactive_; }
 
-    // The control codes linework reads: the context's, or the defaults when
-    // the context has none.
-    [[nodiscard]] const katana::cad::LineworkCodes& lineworkCodes() const;
+    // The workspace's open views, for the View scope of the two action tabs:
+    // asked whenever a view list or a View scope is needed, as Global
+    // Modify's is. Unset (a test, a manager built on its own): the View scope
+    // offers one "Whole drawing view", which a preview reads and no line can
+    // name (ScopeFilterWidget::noWorkspaceViews).
+    std::function<std::vector<ScopeFilterView>()> views{};
 
     // Closing (Escape, Close, the window's close button): with unapplied
     // edits an interactive session is asked Apply / Discard / Cancel; a
     // headless one closes and keeps the buffer, and says so in the log.
     void reject() override;
+
+  protected:
+    // The layers and views the two action tabs offer are the drawing's and
+    // the window's as they are when the manager is shown.
+    void showEvent(QShowEvent* event) override;
 
   private:
     // ---- building
@@ -196,32 +229,53 @@ class SurveyCodeManagerDialog : public QDialog {
     [[nodiscard]] std::string selectedCensusCode() const;
     void selectEntitiesWithCode();
     void rebuildIssues();
+    // The scope widget of each action tab, set up alike: its views are the
+    // dialog's, and an edit of it rewrites the line shown.
+    [[nodiscard]] ScopeFilterWidget* makeScope(const char* prefix, QWidget* parent);
+    // The layer and view lists of both, refilled; what is ticked is kept.
+    void reloadScopes();
+    // What a tab's scope and filter take NOW: cad::matchEntities over the
+    // shared widget's reading of its controls, as Global Modify's preview
+    // resolves them. Fails as the widget does (no layer ticked, a view that
+    // has closed), and with NotFound for a layer the drawing lacks.
+    [[nodiscard]] katana::core::Result<std::vector<katana::entity::EntityId>>
+    scopeTakes(const ScopeFilterWidget& scope) const;
+    // The lines the two Execute buttons run, as the controls stand; an error
+    // names the control that cannot be said on a line.
+    [[nodiscard]] katana::core::Result<QString> codesLine() const;
+    [[nodiscard]] katana::core::Result<QString> lineworkLine() const;
+    // CUSTOMISE SET with the control codes typed that are not the
+    // customisation's already; an empty line when all seven are.
+    [[nodiscard]] katana::core::Result<QString> lineworkCodesLine() const;
+    // The two lines shown again (applyCommand, lineworkCommand).
+    void showLines();
+    // A line through the window's executor. False, with `said` why, when the
+    // manager was given none: it then does NOT do the work itself.
+    [[nodiscard]] bool runLine(const QString& line, VerbOutcome& outcome, QString& said) const;
     [[nodiscard]] katana::cad::SurveyCodingOptions codingOptions() const;
-    void previewCodes();
+    // The previews fill the panes and say, with the log, why they could not;
+    // true when they planned.
+    bool previewCodes();
     void executeCodes();
-    void invalidatePlans();
+    // The seven fields from the customisation's control codes.
     void loadLineworkCodes();
+    [[nodiscard]] katana::cad::LineworkCodes typedLineworkCodes() const;
     void useLineworkCodes();
-    [[nodiscard]] katana::cad::LineworkOptions lineworkOptions() const;
-    void previewLinework();
+    // What the Linework line says beyond its scope: the property, the order
+    // and the chord length, each only when it is not the verb's default.
+    [[nodiscard]] katana::cad::LineworkWords lineworkWords() const;
+    bool previewLinework();
     void executeLinework();
-
-    // What a plan was made against: executing it on anything else would
-    // apply yesterday's answer, so Execute plans again when this moved.
-    struct PlanStamp {
-        std::size_t undo = 0, redo = 0, entities = 0;
-        std::uint64_t library = 0, surveyMap = 0;
-        std::vector<katana::entity::EntityId> selection{};
-        friend bool operator==(const PlanStamp&, const PlanStamp&) = default;
-    };
-    [[nodiscard]] PlanStamp stamp() const;
 
     CustomisationContext context_{};
     katana::entity::SurveyMap buffer_{};
     // The drawing's map as the manager last saw it - taken, applied, or
     // changed elsewhere: what dirty() is measured against.
     katana::entity::SurveyMap baseline_{};
-    katana::cad::LineworkCodes localCodes_{};
+    // The customisation's control codes as the seven fields were last filled
+    // from them: a change of the Document's is taken up, and what a person is
+    // typing is not overwritten by a change of anything else.
+    katana::cad::LineworkCodes shownLinework_{};
     bool interactive_ = true;
     std::optional<std::size_t> formIndex_{};
     std::string explained_{};
@@ -234,11 +288,6 @@ class SurveyCodeManagerDialog : public QDialog {
     std::string formLinestyle_{};
     std::string formSymbol_{};
     bool pickersLoaded_ = true;
-
-    katana::commands::CommandPtr plannedCodes_{};
-    std::optional<PlanStamp> codesStamp_{};
-    katana::commands::CommandPtr plannedLinework_{};
-    std::optional<PlanStamp> lineworkStamp_{};
 
     struct CensusRow {
         std::string code{};
@@ -316,25 +365,22 @@ class SurveyCodeManagerDialog : public QDialog {
     QTreeWidget* issuesTree_ = nullptr;
     QLabel* issuesSummary_ = nullptr;
     // apply codes
-    QRadioButton* applySelection_ = nullptr;
-    QRadioButton* applyAll_ = nullptr;
+    ScopeFilterWidget* applyScope_ = nullptr;
     QComboBox* applyProperty_ = nullptr;
-    QCheckBox* applyCreateLayers_ = nullptr;
-    QCheckBox* applyCreateStyles_ = nullptr;
-    QCheckBox* applySetAttributes_ = nullptr;
     QLabel* applyDirtyNote_ = nullptr;
+    QLineEdit* applyCommand_ = nullptr;
     QPlainTextEdit* applyReport_ = nullptr;
     QTreeWidget* applyRows_ = nullptr;
     // linework
+    ScopeFilterWidget* lineworkScope_ = nullptr;
     std::vector<QLineEdit*> lineworkCodeFields_{};
     QLabel* lineworkCodesStatus_ = nullptr;
     QPushButton* lineworkCodesUse_ = nullptr;
     QComboBox* lineworkOrder_ = nullptr;
-    QCheckBox* lineworkKeepPoints_ = nullptr;
     QDoubleSpinBox* lineworkChord_ = nullptr;
     QComboBox* lineworkProperty_ = nullptr;
-    QRadioButton* lineworkSelection_ = nullptr;
     QLabel* lineworkDirtyNote_ = nullptr;
+    QLineEdit* lineworkCommand_ = nullptr;
     QLabel* lineworkSummary_ = nullptr;
     QTreeWidget* lineworkStrings_ = nullptr;
     QTreeWidget* lineworkUnplaced_ = nullptr;

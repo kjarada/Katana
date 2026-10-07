@@ -78,8 +78,8 @@ struct SurveyServices {
     std::function<void(const QString& text, bool isError)> log;
     // The window's Apply Survey Codes, which runs the CODE line on the
     // selection, or on the drawing when nothing is selected. Shown under
-    // Survey Coding and on the toolbar, and what the import wizard triggers
-    // for the points it made. May be null (a test).
+    // Survey Coding and on the toolbar. May be null (a test). (The import
+    // wizard no longer triggers it: its import codes its own points.)
     QAction* applySurveyCodes = nullptr;
     // The Format menu's Survey Code Manager (CustomisationWorkbench), shown
     // under Survey Coding as well: where a surveyor looks for the code

@@ -1880,4 +1880,51 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework none reason=off${_eol}(.*[\r\n])?linework scope=drawing matched=5 considered=5 lines=1 unplaced=1 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=4 vertices=4 closed=no layer=\"FIELD KERB\" entity=7${_eol}unplaced reason=\"no code\" points=1${_eol}linework scope=drawing matched=6 considered=5 lines=0 unplaced=1 notes=0${_eol}left_out=4 reason=already-drawn lines=1${_eol}unplaced reason=\"no code\" points=1${_eol}6 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=4 +open +length=42[.]3606[0-9]*${_eol}.*Entities: 5 "
         FAIL_REGULAR_EXPRESSION "error")
+
+    # LINEWORK's PROPERTY word, with no survey codes (seam none): two points
+    # ten metres apart, coded "KB ST" and "KB END" and numbered 1 and 2, but
+    # under the property "fcode", which is not among the names a code is
+    # looked for under. Asked with no property the verb finds no code on
+    # either point: 2 unplaced, "no code", no line. Asked PROPERTY fcode it
+    # reads them: one line of two points, noted as unstyled, and the run draws
+    # entity 3, a polyline 10 long.
+    add_test(NAME cli.linework_property_reads_the_codes_a_drawing_keeps_under_its_own_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0" -c "POINT 10,0"
+                -c "SELECT 1" -c "PROP SET fcode \"KB ST\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET fcode \"KB END\" text" -c "PROP SET point 2 text"
+                -c "SELECT NONE" -c "LINEWORK PREVIEW" -c "LINEWORK PROPERTY fcode PREVIEW"
+                -c "LINEWORK PROPERTY fcode" -c "LIST")
+    set_tests_properties(cli.linework_property_reads_the_codes_a_drawing_keeps_under_its_own_name
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=2 considered=2 lines=0 unplaced=2 notes=0 preview=yes${_eol}unplaced reason=\"no code\" points=2${_eol}linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1 preview=yes${_eol}string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0${_eol}note kind=\"no rule for its code: nothing styles the line\" count=1${_eol}linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1${_eol}string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3${_eol}note kind=\"no rule for its code: nothing styles the line\" count=1${_eol}3 entities${_eol}[^\r\n]*Point +layer=0 +at 0,0${_eol}[^\r\n]*Point +layer=0 +at 10,0${_eol}[^\r\n]*Polyline +layer=0 +vertices=2 +open +length=10"
+        FAIL_REGULAR_EXPRESSION "error")
+    # LINEWORK's CHORD word, on the fixture customisation (KB* is a line
+    # rule on FIELD KERB). A half circle of radius 10 about the origin: BC at
+    # (10,0), a point on it at (0,10), EC at (-10,0), coded under "fcode".
+    # At the verb's own 0.005 each quarter turn takes 25 chords (a chord of
+    # angle a strays 10 (1 - cos(a/2)) from the arc, 5 mm at 3.62 degrees, and
+    # 90 / 3.62 = 24.9), so the line has 1 + 25 + 25 = 51 vertices. At CHORD
+    # 0.35 a quarter takes 3 chords of 30 degrees (the sagitta is 0.341; two
+    # chords of 45 degrees stray 0.761), so 1 + 3 + 3 = 7 vertices, six
+    # chords of 2 * 10 * sin(15 degrees) = 5.17638 each: length 31.0582854.
+    # PREVIEW says both and draws nothing; the run draws entity 4.
+    add_test(NAME cli.linework_chord_sets_how_finely_a_curve_is_drawn
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "POINT 10,0" -c "POINT 0,10" -c "POINT -10,0"
+                -c "SELECT 1" -c "PROP SET fcode \"KB1 BC\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET fcode \"KB1\" text" -c "PROP SET point 2 text"
+                -c "SELECT 3" -c "PROP SET fcode \"KB1 EC\" text" -c "PROP SET point 3 text"
+                -c "SELECT NONE" -c "LINEWORK PROPERTY fcode PREVIEW"
+                -c "LINEWORK PROPERTY fcode CHORD 0.35 PREVIEW"
+                -c "LINEWORK PROPERTY fcode CHORD 0.35" -c "LIST")
+    set_tests_properties(cli.linework_chord_sets_how_finely_a_curve_is_drawn
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 preview=yes${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=51 closed=no layer=\"FIELD KERB\"${_eol}linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 preview=yes${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=7 closed=no layer=\"FIELD KERB\"${_eol}linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=7 closed=no layer=\"FIELD KERB\" entity=4${_eol}4 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=7 +open +length=31[.]05828[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()

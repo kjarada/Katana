@@ -79,8 +79,9 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
 
     QObject::connect(importPoints, &QAction::triggered, &window_, [this] {
         open(import_, [this] {
-            SurveyImportContext context{services_.document, services_.views, services_.log,
-                                        services_.applySurveyCodes};
+            // No action of the window's: the wizard codes and strings what it
+            // imports inside its own command (cad::surveyImportFinish).
+            SurveyImportContext context{services_.document, services_.views, services_.log};
             return new SurveyImportWizard(std::move(context), &window_);
         });
     });
