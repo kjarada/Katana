@@ -1,0 +1,2903 @@
+
+
+
+
+44 12d Field File Format
+The detailed definition of the .12dfield and .fld files will now be given.
+The .fld file is the original 12d Solutions text field file format and many raw files from survey instruments or data collector are converted to a .fld file before reduced by 12d Model.
+However, the limitations in the structure of the .fld file made it incapable of supporting all the functionality required for 12d Field and consequently a new, and more easily extendable, field file format was required. The new file format is the .12dfield file and it is an XML file.
+This documentation consists of some definitions used in describing the two file formats, followed by the complete description of the .12dfield. and .fld file formats.
+Note:
+Unless a distinction is required, both .12dfield or .fld files will be referred to as 12d Field Files.
+
+
+See
+44.1  Structure of the .12dfield File
+44.2  Structure of the .fld File
+44.3  Point Description
+44.4  Measurements and Named Measurements
+44.5  Searching for Special Coordinates
+44.6  Definitions in the .12dfield File
+44.7  Keyword Blocks in the .12dfield File
+44.8  Full Description of 12d Survey Opcodes
+44.9  12d Survey Opcode Summary
+
+44.1 Structure of the .12dfield File
+The .12dfield file is an XML file and is made up of blocks that can extend over many lines but the information within each block has identifiable starts and ends.
+Having identifiable starts and ends has the advantage that XML readers can jump over information they do not understand and can keep reading data the XML file.
+Square brackets [  ] around an item means that the item is optional.
+Most .12dfield files consist of the data for one visit to the field, but to allow for larger jobs that may take many days and/or involve a number of surveyors, the SDR Function can reduce any number of separate .12dfield files as the one job. Hence a .12dfield file can be written out from the
+SDR Function that maintains the integrity of each individual .12dfield file that is included in the
+SDR Function.
+So there are two possibilities for the structure of the .12dfield file:
+(a) the .12dfield file - all the data is in the one file (44.1.1 One .12dfield file) or
+(b) internally the .12d field file consists of a number of separate .12d field files (44.1.2 More Than One .12dfield File).
+
+44.1.1 One .12dfield file
+The structure of the .12dfield file is:
+
+<?xml version= xml_version_number>
+<xml12d xmlns = ...>
+[ <meta_data_block>]
+<field12>
+[<version> 12dfield_file_version_number </version>]
+ <opcode_text_block>
+ <opcode_text_block>
+...
+....
+...
+ <opcode_text_block>
+</field12d>
+</xml12d>
+
+44.1.2 More Than One .12dfield File
+When the .12dfield file is an amalgamation of more than one .12dfield file, the data for each separate .12dfield file is enclosed in a <field file block>.
+The structure of the .12dfield file is:
+
+<?xml version= xml_version_number>
+<xml12d xmlns = ...>
+[ <meta_data_block>]
+<field12>
+[<version> 12dfield_file_version_number </version>]
+ <field_file_block>
+ <field_file_block>
+...
+....
+...
+ <field_file_block>
+</field12d>
+</xml12d>
+Continue to 44.3 Point Description.
+
+44.2 Structure of the .fld File
+Each line in the .fld file is called a record and consists of a numeric operation code (or opcode for short) followed by zero or more tabs and pieces of information.
+What actually follows the opcode depends on the opcode. Hence the .fld file record is:
+
+
+or
+
+opcodetabvalue...tabvalue02abcSfred
+Continue to 44.3 Point Description.
+
+44.3 Point Description
+See
+
+ feature code string number point ID point name point comment point description other Information
+
+feature code
+A feature code is one or more text characters entered by the surveyor to differentiate surveyed items. For example, EB for edge of bitumen and SPOT for a spot height.
+A feature code must be a valid 12d Model string name as during survey data reduction, the feature code often becomes the name of a created string. See 3.9.1.1.1 String Name and Model.
+string number
+A string number is a positive integer entered by the surveyor to differentiate between different items that have the same  feature code.
+The  feature code and  string number are used for stringing points together as described in 42.3.1 Stringing in the Field.
+point ID
+The point id is the EDM tacheometry measurement point id which is not normally entered by the user but is written into the 12d Field File either by 12d Field, or in the raw data file, by the data collector. The point id is alphanumeric and is normally unique in a particular survey
+During reduction, the measure point is converted to a vertex of a super string and the point id is stored as the point id for that vertex.
+point name
+During a survey, a user can give points a special name called a point name so that they are easily identified and referred to. For example, STN01 to represent a setup station or BS01 for a backsite.
+The point name must be a valid 12d Model string name as during survey data reduction, the point name often becomes the name of a created string. See 3.9.1.1.1 String Name and Model.
+For some operations, a point name becomes a named point and can be searched for by other operations. See 44.4 Measurements and Named Measurements.
+point comment
+During a survey, a user can add a text comment to a surveyed point. This is called the point comment.
+The point comment (or point text) is stored as the vertex text for the vertex of the super string.
+point description
+In most records of a 12d Field File, a  feature code,  string number,  point ID,  point name and  point comment are present and are stored together as sequential lines in the .12dfield file, or on the same line separated by tabs in the .fld file. For simplicity, these five pieces of information are referred to as the point description.
+In the 12dfield file, the  point description is denoted by the  <point_description> block, and is up to five separate lines of information:
+<feature_code>abc</feature_code>
+<string_number>01</string_number>
+<point_id>1002</point_id>
+<point_name>STN 4</point_name>	// not written out if point_name is blank.
+
+
+<point_comment>freddie</point_comment>	// not written out if point_comment is blank
+If <point_name> is blank then it will not be written out and if <point_comment> is blank, then it will not be written out so there may only be three items in the  <point_description> block.
+The order of the items in the  <point_description> block is not important as each item is easily identified.
+In the fld file, the  feature code,  string number,  point ID,  point nameand  point comment MUST be given in that order and the values are separated by tabs. Each value can be up to sixty-three characters in length. If a value is missing then a tab is still needed so there may be two or more sequential tabs.
+In the .fld file, the point description is denoted by  Point_description and is five items of information separated by tabs
+Point_description
+
+feature code string numberpoint idpoint name  point commentabc011002STN 4freddie
+
+other Information
+ Other information can also be entered by the surveyor using 12d Survey Opcodes. See 44.8 Full Description of 12d Survey Opcodes.
+For 12d Field this is entered in a well defined way.
+but the extra information must be entered in such a way that it can to be used by 12d Model.
+
+However for non-12d Field users, how this extra information must be entered depends on:
+(a) the data recorder and
+(b) the coding convention used.
+To enable 12d Model to work with different data recorders and coding conventions, users can set up Data Collector Definitions that specify how the stored information is converted into a 12d Field File so that it can then be used by 12d Model See 43.1 Data Collector Definitions.
+Continue to 44.4 Measurements and Named Measurements or return to 44 12d Field File Format.
+
+44.4 Measurements and Named Measurements
+measurement point
+The 12d Field File allows for six types of measurements or entered coordinates, that create points (vertices) in super strings. They are
+(a) EDM measurement (HA,VA,SD, +  point description) - opcode 7
+ 7	edm_tachy_measurement	Measurement - HA, VA, SD
+(b) EDM measurement HT (HA,HD,HT, +  point description) - opcode 11
+ 11	edm_tachy_measurement_ht	Measurement - HA, HD, Height
+(c) EDM measurement VD (HA,HD,VD +  point description) - opcode 12
+12	edm_tachy_measurement_vd	Measurement - HA, HD, Height difference (VD)
+(d) three hair stadia measurement - opcode 10
+ 10	stadia_measurement	Three hair stadia measurement
+(e) directly entered coordinate - opcode 2
+2	coordinate	Directly entered coordinate measurement (DEC)
+(f) GNSS coordinate - opcode 140
+ 140	gps_coordinate	GNSS coordinate measurement
+For convenience, the six types will all be referred to as measurements.
+Each of the above measurements creates a new point which in the reduction, is appended to previous points with the same feature code and string number.
+
+
+current measurement point
+When collecting the data, the measurement that is currently being done is referred to as the current measurement point or current point, and the string it is appended to is the current string.
+
+current string
+The string that the current measurement point is appended to is called the current string.
+
+
+named measurement
+If a point name exists in the point description for a measurement point, then it is called a named measurement and a named point is created.
+An ordinary measurement point is also created for a named measurement if Used named points as measurements is ticked on the Others tab of the 12d Model SDR Function (14.4.2 Creating a SDR Function from a 12d Field File).
+
+named point
+For a named measurement a one vertex super string with the name point name is created and mapped using the Map file. given on the Map File tab of the 12d Model SDR Function (14.4.2 Creating a SDR Function from a 12d Field File).
+The vertex text for the one vertex super string is the station prefix followed by point name. The point name is added to an internal list of named points.
+
+internal list of named points
+When a named point is created, its name added to an internal list of named points. This list is used during the survey reduction when searching for a known point to get (x,y,z) coordinates from.
+Continue to 44.5 Searching for Special Coordinates or return to 44 12d Field File Format.
+
+44.5 Searching for Special Coordinates
+When
+• setting up the instrument on a point
+• measuring to a backsight
+• doing a check measurement
+• manually entering a bearing to use as the bearing datum difference
+a point name and/or point ID in the point description of the Opcode record is used to find a point
+whose coordinates are then used for the reduction of further measurements.
+
+Given the point name and/or point ID, the search for a known point is done in the following order and the search stops once a point is found:
+
+
+First search the Control model (if it exists) in 12d Model:
+1. point name amongst Vertex ids in the Control model
+A search in 12d Model is made of the Control model for a vertex of a string whose point id
+is the same as point name. If a vertex is found its (x,y,z) coordinates and details are used.
+1. point ID amongst Vertex ids in the Control model
+A search in 12d Model is made of the Control model for a vertex of a string whose point id
+is the same as point ID. If a vertex is found its (x,y,z) coordinates and details are used.
+1. point name amongst String names in the Control model
+A search in 12d Model is made of the Control model for a string whose name is the same as point name. If a string is found, the first vertex of the string is used for the (x,y,z) coordinates and details.
+
+Next search the Network model (if it exists) in 12d Model:
+2. point name amongst Vertex ids in the Network model
+A search in 12d Model is made of the Network model for a vertex of a string whose point id
+is the same as point name. If a vertex is found its (x,y,z) coordinates and details are used.
+3. point ID amongst Vertex ids in the Network model
+A search in12d Model is made of the Network model for a vertex of a string whose point id
+is the same as point ID. If a vertex is found its (x,y,z) coordinates and details are used.
+
+
+If Use field coordinates is ticked in the SDR Function in 12d Model ??, then next search the already entered Directly Entered Coordinates (DECs) in the 12d Field File. A DEC has its own point name and a point ID.
+4. point name amongst point names of the directly entered coordinates
+A search is made of previously entered directly entered coordinates in the field file for a DEC point name that is the same as point name. If a DEC is found, its (x,y,z) coordinates are used.
+5. point name amongst point ids of the directly entered coordinates
+A search is made of previously entered directly entered coordinates in the field file for a DEC
+whose point id is the same as point name. If a DEC is found, its (x,y,z) coordinates are used.
+6. point ID amongst point ids of the directly entered coordinates
+A search is made of previously entered directly entered coordinates in the field file for a DEC
+whose point id is the same as point ID. If a DEC is found, its (x,y,z) coordinates are used.
+
+
+
+
+Next search the previous measurements in the field file (a measurement has a point name and a
+point id).
+7. point name amongst the point names of the previous measurements
+A search is made of previous measurements in the field file for a measurement whose point name is the same as point name. If a measurement is found, its (x,y,z) coordinates are used.
+8. point name amongst the point ids of the previous measurements
+A search is made of previous measurements in the field file for a measurement whose point id is the same as point name. If a measurement is found, its (x,y,z) coordinates are used.
+9. point ID amongst the point ids of the previous measurements
+A search is made of previous measurements in the field file for a measurement whose
+point id is the same as point ID. If a measurement is found, its (x,y,z) coordinates are used.
+
+Finally
+10. If no match is found, then in12d Model, the user will be prompted for the details of the unfound point.
+The user is asked to type in the (x,y,z) coordinates in the Define Station Coordinate panel. See Define Station Coordinate for Unknown Points.
+If a model is specified in the Add to model field of the panel, then a new one point super string is created with the string name point name, and for the vertex text, the Station label prefix field value followed by point name.
+
+
+For a summary of the 12d Field File Opcodes, see 44.9 12d Survey Opcode Summary
+For the full description of the 12d Field File Opcodes, see 44.8 Full Description of 12d Survey Opcodes.
+Note
+The difference between a point name and a point ID is that:
+a point name is usually given by the user and should be an unique identifier for an easily recognised physical point that may be reused by other measurements.
+Whilst for that same physical point, a number of measurements may be made to that physical point and each measurement will be assigned a different point ID by 12d Field or the data collector.
+For example, measurements to control stations are made to a fixed control point identified by its
+control point name, but each measurement to the control station point is given a different point ID.
+In most instances, each measurement to the same point has a different point ID and 12d Model automatically gives the measurement the same point name as it is rare to measure a non-control point more than once, However the point name can be over ridden by the user.
+Continue to 44.6 Definitions in the .12dfield File or return to 44 12d Field File Format
+
+44.6 Definitions in the .12dfield File
+There are definitions used in the 12dfield file that will be documented here so that they can be referenced throughout the document.
+comment_text
+comment_text is a string of characters.
+feature_code_value
+feature_code_value is used to represent a particular value of a  feature code.
+string_number_value
+string_number_value is used to represent a particular value of a  string number.
+point_id_value
+point_id_value is used to represent a particular value of a  point ID.
+point_name_value
+point_name_value is used to represent a particular value of a  point name.
+point_comment_value
+point_comment_value is used to represent a particular value of a  point comment.
+time_text
+time_text is a string of characters in the W3C time format.
+YYYY-MM-DDThh:mm:ssZ	see 38.3.8 W3C Time Format.
+
+For example, 2015-09-28T06:42:45Z
+Continue to 44.7 Keyword Blocks in the .12dfield File or return to 44 12d Field File Format
+
+44.7 Keyword Blocks in the .12dfield File
+There are many regularly used blocks of information in .12dfield file that will be identified and documented as keywords.
+The keyword and its block consist of a starting <keyword>, followed by the information in the keyword block, and ending in </keyword>
+That is
+<keyword> information in the keyword block </keyword>
+Square brackets [ ] around an item means that the item is optional. The keyword blocks used in the .12dfield file are:
+ <meta_data_block>
+ <units_block>
+ <application_block>
+ <field_file_block>
+ <opcode_text_block>
+ <time_created>
+ <time_updated>
+ <time_surveyed>
+ <id>
+ <comment>
+ <State>
+ <original>
+
+Finally there are  <point_description>and  [<op_code_properties>] which are not actual keyword blocks but are shorthand for a collection of keyword blocks
+
+<meta_data_block>
+This is optional header data for the .12dfield file.
+The format of the meta_data_block keyword block is:
+<meta_data>
+ <units_block>
+ <application_block>
+</meta_data>
+
+<units_block>
+This is the units used in the .12dfield file.
+Import note: the .12dfield file currently only supports the one set of units as given below. The units_block is currently optional as only one set of units is currently used.
+The format of the units_block keyword block is:
+<units>
+<linear> metres </linear>
+
+<area> square metres </area>
+<volume> cubic metres </volume>
+<temperature> celsius </temperature>
+<pressure> millibars </pressure>
+<angular> decimal degrees </angular>
+<direction> decimal degrees </direction>
+</units>
+
+<application_block>
+This is an option block containing information about the application (software) that created the
+ .12dfield file, plus some information about the 12d Model setups used. The application_block is optional.
+The format of the application_block keyword block is:
+<application>
+<name> name of software creating the 12dfield file </name>
+<manufacturer> name of company creating the software </manufacturer>
+<manufacturer_url> url of the manufacturer </manufacturer_url>
+<application> full name including version of the software </application>
+<application_build> build number of the software </application_build>
+<application_path> path to the software </application_path>
+<application_date_gmt>  time_text (gmt time when was application created)
+</application_date_gmt>
+<application_date>  time_text (local time when application was created)
+</application_date>
+<project_name> 12d Model project that created the 12dfield file </project_name>
+<project_guid> guid 12d Model project that created the 12dfield file </project_guid>
+<project_folder> folder the 12d Model project is in </project_folder>
+<client> name of client using 12d Model </client>
+<dongle> hardware lock being used for 12d Model </dongle>
+<maintenance> maintenance_status </maintenance>
+<environment/
+<env4d> path of the env file being used by 12d Model </env4d>
+<user> computer name of the user using 12d Model </user>
+<export_file_name> name of the 12dfield file </export_file_name>
+<export_date_gmt>  time_text (gmt time when file was created) </export_date_gmt>
+<export_date>  time_text (local time when file was created) </export_date>
+
+</application>
+
+
+<field_file_block>
+This contains the opcodes for a field file within the .12dfield file. The format of the field_file_block keyword block is:
+<field_file>
+<name>field_file_name</name>
+<time> time_text</time>
+<time_created> time_text </time_created>
+<time_updated> time_text </time_updated>
+ <id>
+ <comment>
+<state>state_text </state
+<children>
+ <opcode_text_block>
+ <opcode_text_block>
+...
+...
+...
+ <opcode_text_block>
+</children>
+</field_file>
+
+<opcode_text_block>
+The <opcode_text_block> block consists of the opcode_text for the particular opcode as the header and footer of the block which enclose the zero or more lines of information that is required for the particular opcode.
+<opcode_text>
+...
+...
+...
+</opcode_text>
+
+What follows the <opcode_text> depends on the particular opcode.
+For the list of opcode_texts, see 44.8 Full Description of 12d Survey Opcodes.
+
+For those familiar with the .fld format which uses numeric opcodes, when 12d Model writes out an
+ .12dfield opcode record, it often precedes the record by a comment that gives the equivalent numeric opcode. But it is only a comment and is not required in the .12dfield file.
+As an example, for the opcode_text arc_fitting_next_3_points, the opcode_text_block is
+
+<!-- opcode number 60 -->
+
+<arc_fitting_next_3_points>
+<feature_code/>
+<string_number/>
+<point_id/>
+<point_name/>
+<point_comment/>
+<time_created>2021-12-27T06:14:59Z</time_created>
+<time_updated>2021-12-27T06:14:59Z</time_updated>
+<id>516</id>
+<comment/>
+<state>Unknown</state>
+</arc_fitting_next_3_points>
+
+
+<time_created>
+This is the time that the opcode was first created. The format of the time_created keyword block is:
+<time_created> time_text</time_created>
+Note that the time format for 12da is different from the one of 12dxml.
+
+
+<time_updated>
+This is the time that the opcode was last modified. The format of the time_updated keyword block is:
+<time_updated> time_text</time_updated>
+Note that the time format for 12da is different from the one of 12dxml.
+
+
+<time_surveyed>
+The format of the time_surveyed keyword block is:
+<time_surveyed> time_text</time_surveyed>
+Note that the time format for 12da is different from the one for 12dxml.
+
+
+<id>
+The id is an internal session identifier. The format of the id keyword block is:
+<id>id_value</id>
+
+<comment>
+A comment can be included with an opcode. The format of the comment keyword block is:
+<comment> comment_text</comment>
+
+<State>
+The format of the state keyword block is:
+<state>state_value</state>
+where state_value is one of: Unknown
+Field Deleted Changed Added Auto added
+Change deleted Add deleted
+
+<original>
+Some 12d Model options can edit the opcodes and when such edits occur, an <original> block is created inside the <opcode> block, and the original information inside the <op_code> block is copied to the <original> block.
+Important Note
+if subsequent edits occur to the opcode block, only the final data and the original data is maintained and none of the in between edits.
+As an example of an <original> block, if a <coordinate> opcode was edited, the entry in the 12dfield
+file would be:
+<coordinate>
+<x>100</x>
+<y>100</y>
+<z>100</z>
+<feature_code/>
+<string_number/>
+<point_id/>
+<point_name/>
+<point_comment/>
+<time_created>2021-12-27T06:14:59Z</time_created>
+<time_updated>2021-12-27T06:14:59Z</time_updated>
+<id>468</id>
+<comment/>
+<state>Changed</state>
+<original>
+<x>-42.0</x>
+<y>42.0</y>
+<z>4.24242</z>
+<feature_code>OC</feature_code>
+<string_number/>
+
+<point_id/>
+<point_name/>
+<point_comment/>
+<time_created>2021-12-27T06:14:59Z</time_created>
+<time_updated>2021-12-27T06:14:59Z</time_updated>
+<id>468</id>
+<comment/>
+<state>Field</state>
+</original>
+</coordinate>
+
+
+<point_description>
+ point description has been previously documented and is shorthand for five pieces of information. See 44.3 Point Description.
+For a .12dField file, <point_description> consists of the five items:
+<feature_code> feature_code_value</feature_code>
+<string_number> string_number_value</string_number>
+<point_id> point_id_value</point_id>
+<point_name> point_name_value </point_name>
+<point_comment> point_comment_value</point_comment>
+
+
+<XYZ>
+The XYZ block is shorthand for a number of properties that go with most opcodes. That is, <XYZ> is shorthand for the three items:
+<x>x_value</x>
+<y>y_value</y>
+<z>z_value</z>
+
+
+[<op_code_properties>]
+The op_code_properties block is shorthand for a number of properties that go with most opcodes. That is, <op_code_properties> is shorthand for the six items:
+ <time_created>
+ <time_updated>
+ <time_surveyed>
+ <id>
+ <comment>
+ <State>
+
+<resection_measurement>
+The resection_measurment block is shorthand for the coordinates of a known point, a target height used at the known point and a measurement from the instrument setup point (coordinates unknown) to the known point.
+
+
+This is used in the options 15.10.4.3 Station Setup: Helmert Resection - TPS and 15.10.4.4 Station Setup: Least Squares Resection - TPS.
+There are extra optional comments with a logical_value for each of use_level and use_coord. These carry the values for the Use Coord? and Use Height? fields in the  Measurements tab of the
+12d Field options 15.10.4.3 Station Setup: Helmert Resection - TPS and 15.10.4.4 Station Setup: Least Squares Resection - TPS.
+That is, <resection_measurement> is shorthand for the items:
+<coordinate>	// coordinates of the known point
+ <XYZ>
+ <point_description>
+ [<op_code_properties>]
+</coordinate>
+<target_height>	// target height at the known point
+<height>Target_height</height>
+ [<op_code_properties>]
+</target_height>
+<edm_tachy_measurement>	// measurement from the unknown point to the known point
+<horizontal_angle>horizontal_circle</horizontal_angle>
+<vertical_angle><vertical_circle</vertical_angle>
+<splope_distance><splope_distance_value</splope_distance>
+ <point_description>
+ [<op_code_properties>]
+,<children>
+<comment>
+,<data>use_level logical_valuel</data>	// Use height true or false
+ [<op_code_properties>]
+</comment>
+<comment>
+,<data>use_coord logical_value</data>	// Use coord true or false
+ [<op_code_properties>]
+</comment>
+,</children>
+</edm_tachy_measurement>
+
+
+Continue to 44.8 Full Description of 12d Survey Opcodes or return to 44 12d Field File Format.
+
+44.8 Full Description of 12d Survey Opcodes
+The record for each opcode will now be described in detail for both versions of the 12d Field Files,12dfield and fld.
+For each opcode record, the following information is given:
+• The first line consists of the numeric opcode, the text opcode and a short description of the opcode.
+• The next block gives the full syntax for the opcode in the 12dfield file.
+• The next line gives the full syntax for the opcode in the fld file.
+• The next paragraph gives a detailed description of the opcode record.
+• If it exists, the final line gives a link to the 12d Model Reference Manual to the panel for the field data command for the opcode.
+
+Optional information is enclosed in square brackets [ ].
+The op_code_properties block only exists in the 12dfield file and is optional. All angles in the 12d Field File are given in decimal degrees.
+
+For a summary of the 12d Field File Opcodes, see 44.9 12d Survey Opcode Summary.
+
+
+Numeric	Text	Short Description of Opcode Opcode	 Opcode
+-3	group	Group
+.12dfield file syntax
+<group>
+<name>Group_name</name>
+ [<op_code_properties>]
+</group>
+.fld file syntax
+-3 Group_name
+The field data command panel in the SDR Editor is documented in  42.4.2.26 Group (opcode -3)
+
+-2	comment	Insert a comment
+.12dfield file syntax
+<comment>
+<data> comment_text</data>
+ [<op_code_properties>]
+</comment>
+.fld file syntax
+-2 Comment_text
+The field data command panel in the SDR Editor is documented in  42.4.2.13 Comment (opcode -2).
+
+-1	error	Add text to information for an error
+.12dfield file syntax
+<error>
+<data>Error_value</data>
+
+
+ [<op_code_properties>]
+</error>
+.fld file syntax
+-1 Error_value
+The field data command panel in the SDR Editor is documented in  42.4.2.19 Error (opcode -1).
+1 job_data	Job Information
+.12dfield file syntax
+<job_data>
+<description>description_text</description>
+ [<op_code_properties>]
+</job_data>
+.fld file syntax
+01 block1  block2 block3  block4	where each block can be up to 10 characters.
+description
+Job header information.
+The field data command panel in the SDR Editor is documented in  42.4.2.16 Job Data (opcode 1)
+
+2 coordinate	Directly entered coordinate measurement (DEC)
+.12dfield file syntax
+<coordinate>
+ <XYZ>
+ <point_description>
+ [<op_code_properties>]
+</coordinate>
+.fld file syntax
+02  Point_description  X  Y  Z
+description
+A  measurement point is created with the  feature code and  string number from the  point description and given the supplied (x, y,z) coordinates. No reduction is needed.
+The  point ID and  point comment from the  point description are recorded as the point id and vertex text for that vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d point string of name  point name (or  feature code ??) is created and mapped using the Map File. The 4d text is the station prefix followed by  point name. The  point name is added to the  internal list of named points for searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.14 Coordinate (opcode 2)
+
+3 station	New instrument setup on a point
+.12dfield file syntax
+<station>
+<height>instrument_height</height>
+ <point_description>
+ [<op_code_properties>]
+</station>
+.fld file syntax
+03  Point_description  instrument_height
+
+description
+Setting up an instrument at the point with name given in the  point name section of the  point description. The (x,y,z) coordinates for  point name are found by first searching the control model, then the list of previously named points in the reduction, point ids of previous measurements and finally if  point name is still not found, the user is asked to type in the (x,y,z) coordinates. A record is written to the report file.
+The field data command panel in the SDR Editor is documented in  42.4.2.37 New Instrument Setup - Station (opcode 3)
+4 backsight	Measurement to backsight
+.12dfield file syntax
+<backsight>
+<horizontal_angle>horizontal_circle</horizontal_angle>
+<vertical_angle><vertical_circle</vertical_angle>
+<slope_distance><splope_distance_value</slope_distance>
+<azimuth><azimuth_value</azimuth>
+ <point_description>
+ [<op_code_properties>]
+</backsight>
+.fld file syntax
+04  Point_description  horizontal_circle  vertical_circle  slope_distance_value  azimuth_value
+description
+Measurement to a backsight whose name is given in the  point name section of the  point description.
+If the Backsight prompt mode in the  Others tab of the Survey Data Reduction Function panel is Prompt then the Survey Data Bearing Datum Difference panel shows the bearing datum difference and the horizontal distance difference. A record is written to the report file.
+The units for horizontal_circle and vertical_circle are decimal degrees.
+The azimuth_value, in decimal degrees, may be specified when no coordinate for the backsight point exists.
+The field data command panel in the SDR Editor is documented in  42.4.2.6 Backsight (opcode 4)
+
+5 target_height	New target height
+.12dfield file syntax
+<target_height>
+<height>Target_height</height>
+ <point_description>
+ [<op_code_properties>]
+</target_height>
+.fld file syntax
+05 Target_height
+description
+Set a new target height. This applies to the Opcodes 4, 6, 7 and 140.
+The field data command panel in the SDR Editor is documented in  42.4.2.60 Target Height (opcode 5)
+
+6 check_measurement	Check measurement
+.12dfield file syntax
+<check_measurement>
+<horizontal_angle>horizontal_circle</horizontal_angle>
+
+
+<vertical_angle><vertical_circle</vertical_angle>
+<splope_distance><splope_distance_value</splope_distance>
+<azimuth><azimuth_value</azimuth>
+ <point_description>
+ [<op_code_properties>]
+</check_measurement>
+.fld file syntax
+06  Point_description  horizontal_circle  vertical_circle  slope_distance_value
+description
+A check measurement is made to the station given in the  point name section of the  point description. A one vertex super string (with string name  point name) is created at the measured point in the default model for the check measurement.
+The instrument point name, the station name and the differences between the measurement point coordinates and the station coordinates are written to the report file as well as the differences between the measurement and the known point.
+The units for horizontal_circle and vertical_circle are decimal degrees.
+The field data command panel in the SDR Editor is documented in  42.4.2.10 Check Measurement (opcode 6)
+
+7 edm_tachy_measurement	Measurement - HA, VA, SD
+.12dfield file syntax
+<edm_tachy_measurement>
+<horizontal_angle>horizontal_circle</horizontal_angle>
+<vertical_angle><vertical_circle</vertical_angle>
+<splope_distance><splope_distance_value</splope_distance>
+ <point_description>
+ [<op_code_properties>]
+</edm_tachy_measurement>
+.fld file syntax
+07  Point_description  horizontal_circle  vertical_circle  slope_distance_value
+description
+Measurement made by the instrument. A measurement point is created with the  feature code and  string number from the  point description. The units for horizontal_circle and vertical_circle are decimal degrees.
+The  point ID and  point comment from the  point description are recorded as the point id and text for that vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d point string of string name  point name is created and mapped using the Map File. The 4d text is the station prefix followed by  point name. The  point name is added to the  internal list of named points for searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.30 EDM Measurement (opcode 7)
+
+8 not yet used
+9 scale_factor	Slope distance scale factor for subsequent distances
+.12dfield file syntax
+<scale_factor>
+<factor>Scale_factor</factor>
+ [<op_code_properties>]
+</scale_factor>
+.fld file syntax
+
+09 Scale_factor
+description
+Scale factor to apply to subsequent slope distances.
+The field data command panel in the SDR Editor is documented in  42.4.2.49 Slope Distance Scale Factor (opcode 9)
+10 stadia_measurement	Three hair stadia measurement
+.12dfield file syntax
+<stadia_measurement>
+<horizontal_angle>horizontal_circle</horizontal_angle>
+<vertical_angle><vertical_circle</vertical_angle>
+<bottom><bottom_value</bottom>
+<middle><middle_value</middle>
+<top><top_value</top>
+ <point_description>
+ [<op_code_properties>]
+</stadia_measurement>
+.fld file syntax
+10  Point_description  horizontal_circle  vertical_circle  bottom_value  bottom_value  top_value
+description
+Manual measurement. A  measurement point is created with the  feature code and  string number from the 
+point description. The units for horizontal_circle and vertical_circle are decimal degrees.
+The  point ID and  point comment from the  point description are recorded as the point id and text for that vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d point string of name  point name is created and mapped using the Map File. The 4d text is the station prefix followed by  point name. The  point name is added to the  internal list of named pointsfor searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.33 Stadia Measurement (opcode 10)
+11 edm_tachy_measurement_ht	Measurement - HA, HD, Height
+.12dfield file syntax
+<edm_tachy_measurement_ht>
+<horizontal_angle>horizontal_circle</horizontal_angle>
+<horizontal_distance>horizontal_distance_value</horizontal_distance>
+<height><height_value</height>
+ <point_description>
+ [<op_code_properties>]
+</edm_tachy_measurement_ht>
+.fld file syntax
+11  Point_description	horizontal_circle	horizontal_distance_value	height_value
+description
+Measurement made by the instrument. A  measurement point is created with the  feature code and  string number from the  point description. The unit for horizontal_circle is decimal degrees.
+The  point ID and  point comment from the  point description are recorded as the point id and text for that
+vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d super string of
+
+
+string name  point name is created and mapped using the Map File. The 4d text is the station prefix followed by  point name. The  point name is added to the internal list of named points for searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.31 EDM Measurement (HA,HD,HT) (opcode 11)
+12 edm_tachy_measurement_vd	Measurement - HA, HD, Height difference (VD)
+.12dfield file syntax
+<edm_tachy_measurement_vd>
+<horizontal_angle>horizontal_angle_value</horizontal_angle>
+<horizontal_distance>horizontal_distance_value</horizontal_distance>
+<vertial_distance>height_difference</vertical_distance>
+ <point_description>
+ [<op_code_properties>]
+</edm_tachy_measurement_vd>
+.fld file syntax
+12  Point_description	horizontal_circle	horizontal_distance	height_difference
+description
+Measurement made by the instrument. A  measurement point is created with the  feature code and  string number from the  point description. The unit for horizontal_circle is decimal degrees.
+The  point ID and  point comment from the  point description are recorded as the point id and text for that
+vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d super string of string name  point name is created and mapped using the Map File. The 4d text for the vertex is the station prefix followed by  point name. The  point name is added to the  internal list of named points for searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.32 EDM Measurement (HA,HD,Diff HT) (opcode 12).
+13 not yet used
+
+14 check_coordinate	Check Coordinates
+.12dfield file syntax
+<check_coordinate>
+ <XYZ>
+ <point_description>
+ [<op_code_properties>]
+</check_coordinate>
+.fld file syntax
+14  Point_description	X	Y	Z
+description
+Measurement to a coordinate whose name is given in the  point name section of the  point description.
+If the Display panel for backsights field in the Survey Data Reduce panel is ticked, then the Survey Data Check Coordinate panel shows the differences in the coordinates. A record is written to the report file.
+The field data command panel in the SDR Editor is documented in  42.4.2.9 Check Coordinate (opcode 14)
+
+15 vertical_circle	Vertical circle correction
+.12dfield file syntax
+<vertical_circle>
+
+<correction>vertical_circle_in_decimal_degrees</correction>
+ [<op_code_properties>]
+</vertical_circle>
+.fld file syntax
+09 Vertical_circle_in_decimal_degrees
+The vertical_circle_in_decimal_degrees is subtracted from the vertical circle value in any measurements.
+description
+The units for vertical_circle_in_decimal_degrees is decimal degrees.
+The field data command panel in the SDR Editor is documented in  42.4.2.64 Vertical Circle Correction (opcode 15)
+16 multiple_coding	Multiply coded point
+.12dfield file syntax
+<multiple_coding>
+ <point_description>
+ [<op_code_properties>]
+</multiple_coding>
+.fld file syntax
+16  Point_description
+description
+Additional coding for the  current measurement point created by opcodes 02, 07, 10, 11, 12, or 140.
+A new  measurement point is created at the same position as the  current measurement point but with the 
+feature code and  string number from the  point description for this opcode.
+The  point ID and  point comment from the  point description are recorded as the point id and text for that vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d super string of string name  point name is created and mapped using the Map File. The 4d text is the station prefix followed by  point name. The  point name is added to the  internal list of named points for searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.36 Multiple Coding (opcode 16)
+17 arc_fitting_last_3_points	Arc through previous three points
+.12dfield file syntax
+<arc_fitting_last_3_points>
+[ <point_description>]
+ [<op_code_properties>]
+</arc_fitting_last_3_points>
+.fld file syntax
+17 [ Point_description]
+description
+If no  point description is given, then the  current measurement point and the two previous points with the same  feature code and  string number as the  current measurement point, are joined by an arc. If there is less than three such points, no arc is fitted.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number from the  point description exist, the last three previous measurement points of the same  string number and string number are joined by an arc. If the  current measurement point has that  feature code and  string number, then it is the third of the three points used. If there is less than three
+
+
+points, no arc is fitted.
+If  point ID exists, then the  feature code and  string number are taken from the previous measurement point with that  point ID. That point and the two measurement points previous to the predefined point of the same  feature code and  string number, are joined by an arc. If there is less than three points, no arc is fitted
+See 42.3.10 Arcs Through Points.
+The field data command panel in the SDR Editor is documented in  42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+18 feature	Circle Feature
+.12dfield file syntax
+<feature>
+<radius>Radius_value</radius>
+ [<op_code_properties>]
+</feature>
+.fld file syntax
+18 Radius_value
+description
+Creates a Feature string with the given Radius_value and centred on the  current measurement point. See 42.3.8 Feature String
+The field data command panel in the SDR Editor is documented in  42.4.2.11 Circle Feature (opcode 18)
+19 reverse_string	Reverse string
+.12dfield file syntax
+<reverse_string>
+[ <point_description>]
+ [<op_code_properties>]
+</reverse_string>
+.fld file syntax
+19 [ Point_description]
+description
+If no  point description is given, the  current string is reversed.
+If a  point description exists, then either the feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number from the  point description exist, the last previous string with that 
+feature code and  string number is reversed.
+If the point ID from the  point description exists, then the string containing that point id will be reversed. The field data command panel in the SDR Editor is documented in  42.4.2.54 String Reverse (opcode 19)
+20 close_string	Close string
+.12dfield file syntax
+<close_string>
+[ <point_description>]
+ [<op_code_properties>]
+</close_string>
+.fld file syntax
+20 [ Point_description]
+description
+
+
+If no  point description is given, the  current string is closed.
+If a  point description exists, then either the  feature code and  string number, or the point ID section of the 
+point description can be used.
+If the  feature code and  string number from the  point description exist, the last previous string with that 
+feature code and  string number is closed.
+Otherwise if the  point ID from the  point description exists, then the string containing that  point ID will be closed.
+See 42.3.5 Close String
+The field data command panel in the SDR Editor is documented in  42.4.2.50 String Close (opcode 20)
+
+21 join_strings_last_to_last	Join last points of strings
+.12dfield file syntax
+<join_strings_last_to_last>
+<feature_code> feature_code_value</feature_code>
+<string_number_1> string_number_value</string_number_1>
+<string_number_2> string_number_value</string_number_2>
+ [<op_code_properties>]
+</join_strings_last_to_last>
+.fld file syntax
+21  feature code  string number_1  string number_2
+description
+In the final reduction, the last point of the string with the given  feature code and  string number_1 is joined to the last point of the string with given  feature code and  string number_2. The created string has the given  feature code (no  string number is needed since it is the final phase of reduction when the string numbers are dropped).
+See 42.3.9 Joining Strings
+The field data command panel in the SDR Editor is documented in  42.4.2.29 Strings Join (opcodes 21 to 24)
+22 join_strings_first_to_last	Join first to last point of strings
+.12dfield file syntax
+<join_strings_first_to_last>
+<feature_code> feature_code_value</feature_code>
+<string_number_1> string_number_value</string_number_1>
+<string_number_2> string_number_value</string_number_2>
+ [<op_code_properties>]
+</join_strings_first_to_last>
+.fld file syntax
+22  feature code  string number_1  string number_2
+description
+In the final reduction, the first point of the string with the given  feature code and  string number_1 is joined to the last point of the string with given  feature code and  string number_2. The created string has the given  feature code (no string number is needed since it is the final phase of reduction when the string numbers are dropped).
+See 42.3.9 Joining Strings
+The field data command panel in the SDR Editor is documented in  42.4.2.29 Strings Join (opcodes 21 to 24)
+
+
+23 join_strings_first_to_first	Join first points of strings
+.12dfield file syntax
+<join_strings_first_to_first>
+<feature_code> feature_code_value</feature_code>
+<string_number_1> string_number_value</string_number_1>
+<string_number_2> string_number_value</string_number_2>
+ [<op_code_properties>]
+</join_strings_first_to_first>
+.fld file syntax
+23  feature code  string number_1  string number_2
+description
+In the final reduction, the first point of the string with the given  feature code and  string number_1 is joined to the first point of the string with given  feature code and  string number_2. The created string has the given  feature code (no string number is needed since it is the final reduction when the string numbers are then dropped).
+See 42.3.9 Joining Strings
+The field data command panel in the SDR Editor is documented in  42.4.2.29 Strings Join (opcodes 21 to 24)
+
+24 join_strings_last_to_first	Join last to first point of strings
+.12dfield file syntax
+<join_strings_last_to_first>
+<feature_code> feature_code_value</feature_code>
+<string_number_1> string_number_value</string_number_1>
+<string_number_2> string_number_value</string_number_2>
+ [<op_code_properties>]
+</join_strings_last_to_first>
+.fld file syntax
+24  feature code  string number_1  string number_2
+description
+In the final reduction, the last point of the string with the given  feature code and string number_1 is joined to the first point of the string with given  feature code and  string number_2. The created string has the given  feature code (no string number is needed since it is the final reduction when the string numbers are then dropped).
+See 42.3.9 Joining Strings
+The field data command panel in the SDR Editor is documented in  42.4.2.29 Strings Join (opcodes 21 to 24)
+
+25 not yet used
+
+26 not yet used
+
+27 not yet used
+28 height_or_depth	Add text to the string name - for delta height
+.12dfield file syntax
+<height_or_depth>
+<value>Text</value>
+[ <point_description>]
+ [<op_code_properties>]
+</height_or_depth>
+
+.fld file syntax
+28 [ Point_description]  Text
+description
+A space (" ") followed by Text is appended to the string name. For example, if 1.200 is entered, " 1.200" is appended to the string name.
+If no  point description is given, Text is appended to the string name of the  current string.
+If a  point description exists, then either the  feature code and  string number, or the point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last previous string with that  feature code and  string number has Text appended to the string name.
+If the  point ID exists, then the string containing that  point ID has Text appended to the string name.
+The field data command panel in the SDR Editor is documented in  42.4.2.15 Height Or Depth Comment (opcode 28)
+29 memo	Note or memo
+.12dfield file syntax
+<memo>
+<data>Text</data>
+ [<op_code_properties>]
+</memo>
+.fld file syntax
+29 Text
+description
+Any Text may be entered and will be added to the check measurements model at the position of the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.39 Note (opcode 29)
+30 remove_height	Remove height from a point - that is make it a null height
+.12dfield file syntax
+<remove_height>
+[ <point_description>]
+ [<op_code_properties>]
+</remove_height>
+.fld file syntax
+30 [ Point_description]
+description
+If no  point description is given, the height of the  current measurement point is set to null.
+If a  point description exists, then either the  feature code and  string number, or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the height of the last point of the previous string with that 
+feature code and  string number is set to null.
+Otherwise, if the  point ID exists, then the height of the point with that  point ID is set to null.
+The field data command panel in the SDR Editor is documented in  42.4.2.43 Remove Height (opcode 30)
+
+31 remove_point	Delete point
+.12dfield file syntax
+<remove_point>
+
+[ <point_description>]
+ [<op_code_properties>]
+</remove_point>
+.fld file syntax
+31 [ Point_description]
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.44 Remove (Delete) Point (opcode 31).
+32 not yet used
+
+33 not yet used
+34 not yet used
+
+35 not yet used
+
+36 not yet used
+37 rectangle_2	Rectangle by two points
+.12dfield file syntax
+<rectangle_2>
+<offset>offset_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</rectangle_2>
+.fld file syntax
+37 [ Point_description]  offset_in_metres
+description
+The rectangle is defined by two points (reference side) and an offset.
+If a positive offset value is given, two points will be created to the right of the reference side. If a negative offset value is given, two points will be created to the left of the reference side.
+If no  point description is given, the two new points will be joined to the given points in a closed rectangular string, and will have the same feature code as the points given.
+If the  feature code and  string number exist, then a search is made for the last occurrence of two points with the same  feature code and  string number. If found, then these points are used to define the reference side of the rectangle.
+Otherwise, if the  point ID exists, then a search is made for the last occurrence of two points with the same  feature code and  string number as the point given by the  point ID. If found, then these points are used to define the reference side of the rectangle.
+Two consecutive rectangles are unable to be defined side by side. In other words if the two points given are part of string of greater than two vertices, the command will only work for sets of two points that are exclusively defined. i.e. For a 5 point string, a rectangle can be defined by points 1 and 2, and 4 and 5.
+See 42.3.7 Rectangle by 2 Points
+The field data command panel in the SDR Editor is documented in  42.4.2.53 String Rectangle by 2 Points (opcode 37)
+38 non_tinable_next_segment	Make the next segment non-tinable
+.12dfield file syntax
+<non_tinable_next_segment>
+
+[ <point_description>]
+ [<op_code_properties>]
+</non_tinable_next_segment>
+.fld file syntax
+38 [ Point_description]
+description
+If no  point description is given, the next segment containing the  current measurement point as a starting point is set to non-tinable. That is, it will not be treated as a breakline in triangulations.
+If a  point description exists, then either the  feature code and  string number, or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the segment that is created in the future from the last point of the previous string with that  feature code and  string number is set to non-tinable.
+If the  point ID exists, then the segment containing the point with that  point ID as a start point, is set to non-tinable.
+The field data command panel in the SDR Editor is documented in  42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+39 non_tinable_previous_segment	Make the previous segment non-tinable
+.12dfield file syntax
+<non_tinable_previous_segment>
+[ <point_description>]
+ [<op_code_properties>]
+</non_tinable_previous_segment>
+.fld file syntax
+39 [ Point_description]
+description
+If no  point description is given, the previous segment containing the  current measurement point is set to non-tinable. That is, it will not be treated as a breakline in triangulations.
+If a  point description exists, then either the  feature code and  string number, or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last segment of the previous string with that  feature code and  string number is set to non-tinable.
+If the  point ID exists, then the segment containing the point with that  point ID as an end point, is set to non-tinable.
+The field data command panel in the SDR Editor is documented in  42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+40 non_tinable_vertex	Make a point non-tinable
+.12dfield file syntax
+<non_tinable_vertex>
+[ <point_description>]
+ [<op_code_properties>]
+</non_tinable_vertex>
+.fld file syntax
+40 [ Point_description]
+description
+If no  point description is given, the  current measurement point is set to non-tinable. That is, it will not be
+
+
+included in triangulations.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is set to non-tinable.
+If the  point ID exists, then the point with that  point ID is set to non-tinable.
+The field data command panel in the SDR Editor is documented in  42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+41 additional_text	Add additional text to the current measurement point
+.12dfield file syntax
+<additional_text>
+<text>Text</text>
+ <point_description>
+ [<op_code_properties>]
+</additional_text>
+.fld file syntax
+41 Text
+description
+The given Text is appended to the vertex text for the  current measurement point. In the fld file, any spaces from column four onwards will be part of the text.
+The field data command panel in the SDR Editor is documented in  42.4.2.62 Additional Text For Point (opcode 41)
+42 offset_measurement_radial	Add a radial offset
+.12dfield file syntax
+<offset_measurement_radial>
+<offset>Radial_offset_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</offset_measurement_radial>
+.fld file syntax
+42 [ Point_description]  Radial_offset_in_metres
+description
+The Radial_offset_in_metres is used to adjust the position of the specified point by a plan distance from the specified points original position, along the plan line joining the current station to the specified point. A positive offset is away from the station, negative is toward the station.
+If no  point description is given, the offset is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.2 Offsets
+The field data command panel in the SDR Editor is documented in  42.4.2.40 Offset Measurement (opcodes 42, 43, 44)
+
+43 offset_measurement_tangential	Add a tangential offset
+.12dfield file syntax
+<offset_measurement_tangential>
+<offset>Tangential_offset_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</offset_measurement_tangential>
+.fld file syntax
+43 [ Point_description]  Tangential_offset_in_metres
+description
+The tangential_offset_in_metres is used to adjust the position of the specified point by a plan distance from the specified points original position, at rights angles to the plan line joining the current station to the specified point. A negative offset is to the left (looking from the station), and positive is to the right (looking from the station).
+If no  point description is given, the offset is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.2 Offsets
+The field data command panel in the SDR Editor is documented in  42.4.2.40 Offset Measurement (opcodes 42, 43, 44)
+44 offset_measurement_height	Add a height offset
+.12dfield file syntax
+<offset_measurement_height>
+<offset>Height_offset_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</offset_measurement_height>
+.fld file syntax
+44 [ Point_description]  Height_offset_in_metres
+description
+If the height of the specified point is not null, then the height_offset_in_metres adjusts the height of the point. A positive offset adds to the height, a negative offset reduces the height.
+If no  point description is given, the offset is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.2 Offsets
+The field data command panel in the SDR Editor is documented in  42.4.2.40 Offset Measurement (opcodes 42, 43, 44)
+
+
+45 rectangle	Make a parallelogram from the last three measurement points
+.12dfield file syntax
+<rectangle>
+[ <point_description>]
+ [<op_code_properties>]
+</rectangle>
+.fld file syntax
+45 [ Point_description]
+description
+If no  point description is given, the  current measurement point and the two previous points from the  current string are used and a fourth point is created to form a parallelogram (squashed rectangle) and the height of the fourth point is set to null. The string is then closed.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last three points with that  feature code and  string number are used and a fourth point is created to form a parallelogram (squashed rectangle) and the height of the fourth point is set to null. The string is then closed.
+If the  point ID exists, then the  feature code and  string number of the point with that  point ID are used and processed as above. Note that the point with the  point ID is not necessarily used.
+See 42.3.6 Squashed Rectangle - Parallelogram
+The field data command panel in the SDR Editor is documented in  42.4.2.52 String (Squashed) Rectangle (opcode 45)
+46 breakline	Make the string a breakline or not
+.12dfield file syntax
+<breakline> [<mode>mode_value</mode>] [ <point_description>]
+ [<op_code_properties>]
+</breakline>
+.fld file syntax
+46 [ Point_description]	[mode_value]
+description
+The  point description is used to select a string and the mode_value is used specify if the string is a breakline or not.
+point_description:
+If no  point description is given, the current string is selected.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last string with that  feature code and  string number is selected.
+If the  point ID exists, then the string containing the point with that  point ID is selected.
+mode_value:
+If no mode_value is given, the selected string is set as a point string (that is, not a breakline).
+If mode_value is given, then
+if mode_value is 0, the selected string is set to a point string and hence is not a breakline. if mode_value is 1, the selected string is set to a line string and is therefore a breakline
+
+The field data command panel in the SDR Editor is documented in  42.4.2.56 String Tinable - Breakline String (opcode 46)
+47 new_string	Start a new string
+.12dfield file syntax
+<new_string>
+[ <point_description>]
+ [<op_code_properties>]
+</new_string>
+.fld file syntax
+47 [ Point_description]
+description
+If no  point description is given, the  current string is terminated (without including the  current measurement point) and the  current measurement point becomes the first point of a new string with the same  feature code and  string number.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number becomes the first point of a new string with the same  feature code and  string number.
+If the  point ID exists, then the previous string containing the point with that  point ID is terminated before the  point ID point, and the point becomes the first point of a new string with the same  feature code and  string number.
+See 42.3.4 Start New String
+The field data command panel in the SDR Editor is documented in  42.4.2.55 String Start (opcode 47)
+48 end_string	End a string
+.12dfield file syntax
+<end_string>
+[ <point_description>]
+ [<op_code_properties>]
+</end_string>
+.fld file syntax
+48 [ Point_description]
+description
+If no  point description exists, the  current string is terminated (the terminated string includes the  current measurement point).
+If  feature code and  string number exist, then the last point of the previous string with that  feature code and 
+string number becomes the last point of that string.
+If  point ID exists, then the previous string containing the point with that  point ID is terminated after the 
+point ID point
+The field data command panel in the SDR Editor is documented in  42.4.2.51 String End (opcode 48)
+
+49 distances	Distances
+.12dfield file syntax
+<distances>
+<data>distance_value</data>
+ <point_description>
+ [<op_code_properties>]
+
+
+</distances>
+.fld file syntax
+49 ?????
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.18 Distances (opcode 49)
+
+50 backsight_reference Specify bearing to correct for true north - used as bearing datum difference
+.12dfield file syntax
+<backsight_reference>
+<angle_difference>bearing_in_decimal_degrees</angle_difference>
+ <point_description>
+ [<op_code_properties>]
+</backsight_reference>
+.fld file syntax
+50  Point_description  bearing_in_decimal_degrees
+description
+The bearing_in_decimal_degrees is used as the bearing datum difference for the current instrument set up for all measurements from the current instrument set up that follow the Backsight Reference record.
+The  point name in the  point description and the bearing_in_decimal_degrees are written to the report file. The field data command panel in the SDR Editor is documented in  42.4.2.7 Backsight Reference (opcode 50)
+51 template_start	Start using an existing field template
+.12dfield file syntax
+<template_start>
+<name>Template_name</name>
+<zigzag_mode>zig_zag_mode</zigzag_mode>
+ [<op_code_properties>]
+</template_start>
+.fld file syntax
+51 Template_name	zig_zag_mode
+description
+Start using the field template Template_name. If Template_name is blank, the default field template is used.
+If mode is "for", then the field template is used as a forward template. "rev", then the field template is used as a reverse template.
+         "zig", then the field template is used as a zig_zag template and is used in the forward definition direction first (that is starts on a zig).
+         "zag", then the template is used as a zig_zag template and is used in the reverse direction first (that is, starts on a zag).
+If mode is blank, or anything other than "for", "rev", or "zag" then the field template is used as a zig-zag template starting on a zig.
+See 42.3.11 Field Templates
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+
+52 template_end	Finish using a field template or finish recording a field template
+.12dfield file syntax
+<template_end>
+ [<op_code_properties>]
+
+</template_end>
+.fld file syntax
+52
+description
+Stops using the current field template or stops recording a field template. See 42.3.11 Field Templates
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+
+53 template_pause	Pause the current field template until opcode 54 or finish template 52
+.12dfield file syntax
+<template_pause>
+ [<op_code_properties>]
+</template_pause>
+.fld file syntax
+53
+description
+Pause using the current field template or defining a field template, until a continue field template (54) or a finish field template (52) code is given.
+See 42.3.11 Field Templates
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+54 template_continue	Continue the current field template
+.12dfield file syntax
+<template_continue>
+ [<op_code_properties>]
+</template_continue>
+.fld file syntax
+54
+description
+Continue using or defining the current field template, which has been stopped by a Pause field template command (53). The Continue command only needs to be given once and applies to all following measurements until another Pause or Finish command is given.
+See 42.3.11 Field Templates
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+
+55 template_record	Start recording a field template
+.12dfield file syntax
+<template_record>
+[<name>Template_name</name>]
+ [<op_code_properties>]
+</template_record>
+.fld file syntax
+55 [Template_name]
+description
+Start recording a field template with the name Template_name. If Template_name is blank, then it is the default field template that is defined. The  feature code and  string number of the following measurements
+
+
+until a Finish code (52) are stored as the field template. There is no limit to the number of points in a field template.
+See 42.3.11 Field Templates
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+
+56 template_skip	Skip picking up one or more points from a field template
+.12dfield file syntax
+<template_skip> [<point_count>num_skipped_points</point_count>] [<op_code_properties>]
+</template_skip>
+.fld file syntax
+56 [num_skipped_points]
+description
+Allows the user to skip picking up one or more points from the field template currently being used. The next measurement takes the feature code and  string number from the next point of the field template definition. If num_skipped_points is missing, then only one point is skipped otherwise num_skipped_points are skipped.
+See 42.3.11.4 Skipping Field Template Points
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+57 template_delete	Delete points from a field template - after the measurement of last point
+.12dfield file syntax
+<template_delete>
+[<point_count>num_points_to_delete</point_count>]
+ [<op_code_properties>]
+</template_delete>
+.fld file syntax
+57 [num_points_to_delete]
+description
+Allows the user to delete one or more points from the field template currently being used. The next measurement takes the  feature code and  string number from the next point of the field template definition.
+See 42.3.11 Field Templates
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+
+58 template_insert	Insert points when using a field template - after the measurement of last point
+.12dfield file syntax
+<template_insert>
+<feature_code>Feature_code</feature_code>
+<string_number>String_number</string_number>
+<multiple_code>Multiple_code_flag</multiple_code>
+<insert_special>Insert_special_flag</insert_special>
+ [<op_code_properties>]
+</template_insert>
+.fld file syntax
+58  Feature_code  String_number  Multiple_code_flag  Insert_special_flag
+description
+
+Allows the user to insert points into the field template currently being used, or give an existing point a multiple code.
+If the Multiple_code_flag = 1, then the  feature code will be added to the previous defined template point else if Multiple_code_flag = 0 (default), it will be added to the template as a separate point.
+If the insert is done at the end of a section and the Insert_special_flag = 1 the point will be added to the end of the current template section else it will be at the start of the next section.
+The next measurement takes the  feature code and  string number from the next point of the field template definition.
+See  42.3.11.5 Insert Template Points or Insert Multiple Codes
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+
+59 template_change	Change points in a field template
+.12dfield file syntax
+<template_change [<feature_code>Feature_code</feature_code>] [<string_number>String_number</string_number>]
+<point>Point_value</point>
+<count>Count_value</count>
+ [<op_code_properties>]
+</template_change>
+.fld file syntax
+59 [ Point_description]  String_number  Point_value  Count_value
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.61 Templating (opcodes 51 to 59)
+60 arc_fitting_next_3_points	Arc through next three points
+.12dfield file syntax
+<arc_fitting_next_3_points>
+[ <point_description>]
+ [<op_code_properties>]
+</arc_fitting_next_3_points>
+.fld file syntax
+60 [ Point_description]
+description
+If no  point description is given, an arc is inserted through the  current measurement point and the next two measured points with the same  feature code and  string number as the  current measurement point. If there is less than three points, no arc is fitted.
+If a  point description exists, then either the  feature code and/or  string number and/or the  point ID section of the  point description can be used.
+If the  feature code or  string number from the  point description exist, a search is made for a previously defined measurement with the same  feature code or  string number. An arc is inserted through this previous measurement and the next two measured points following this previous measurement with the same  feature code and  string number, as given in  point description. If the current point has that  feature code and  string number, then it is the first of the three points. If there is less than three points, no arc fitted.
+If the  point ID exists, then the  feature code and  string number are taken from the previous measurement point with that  point ID, and an arc is inserted through that point and the next two measurement points with the same  feature code and  string number. If there is less than three points, no arc is fitted
+See 42.3.10 Arcs Through Points
+
+
+The field data command panel in the SDR Editor is documented in  42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+61 arc_fitting_start	Start of arc through sets of three points until end of string, or a 62 occurs
+.12dfield file syntax
+<arc_fitting_start>
+[ <point_description>]
+ [<op_code_properties>]
+</arc_fitting_start>
+.fld file syntax
+61 [ Point_description]
+description
+If no  point description is given, arcs are inserted through the following sets of measurement points with the same  feature code and  string number as the  current measurement point. The  current measurement point is the first of the points.
+The arcs are fitted as follows - the first arc is fitted through points one, two and three, the next arc through points three, four and five etc. If the current point has that  feature code and  string number, then it is the first of the points. If there is less than three points, then no arc is fitted.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, a search is made for a previously defined measurement with the same  feature code or  string number. An arc is inserted through the following measured points with the same  feature code and  string number as given in  point description. If the current point has that  feature code and  string number, then it is the first of the points.
+If the  point ID exists, then the  feature code and  string number are taken from the previous measurement point with that  point ID, and arcs are inserted through that point and the following measured points with the same  feature code and  string number.
+See 42.3.10 Arcs Through Points
+The field data command panel in the SDR Editor is documented in  42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+62 arc_fitting_end	End the arcs begun by a 61 command
+.12dfield file syntax
+<arc_fitting_end>
+[ <point_description>]
+ [<op_code_properties>]
+</arc_fitting_end>
+.fld file syntax
+62 [ Point_description]
+description
+If no  point description is given, then the fitting of arcs through the points of the  current string is stopped. The  current measurement point is the last of the points used in the arc fitting.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number from the  point description exist, then the fitting of arcs through the points of the previous string with the same  feature code and  string number is stopped. If the  current measurement point has that  feature code and  string number, then it is the last point used in the arc fitting.
+ If the  point ID from the  point description exists, then the point with that  point ID is the last point used in the arc fitting.
+
+If 12d Model encounters an End Arcs (62) but no Start Arcs through sets of three points (61) command for the string, then a Start Arcs through sets of three points (61) is assumed to apply at the beginning of the string and hence arc fitting will be applied to the entire string.
+See 42.3.10 Arcs Through Points
+The field data command panel in the SDR Editor is documented in  42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+63 not yet used
+
+64 not yet used
+65 not yet used
+
+66 not yet used
+
+67 not yet used
+
+
+There are opcodes for adding user defined attributes to:
+(a) the current string being measured (i.e. the string containing the current measurement point)
+(b) the current measurement point
+(c) the next segment from the current measurement point (i.e. the segment joining thecurrent measurement point and the next measured point of the same  feature code and  string number)
+or
+(d) the previous segment to the current measurement point (i.e. the segment joining the current measurement point to the previous measured point of the same  feature code and  string number).
+If there is no name for the attribute (name is just spaces or a tab), then the attribute is unnamed. The attributes are coded in the following way:
+68 integer_attribute_string	Add a user defined integer attribute to the current string
+.12dfield file syntax
+<integer_attribute_string>
+<name>Name</name>
+<value>Integer</value>
+ [<op_code_properties>]
+</integer_attribute_string>
+.fld file syntax
+68 Name  Integer
+description
+Add an user defined integer attribute to the  current string.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+
+69 real_attribute_string	Add a user defined real attribute to the current string
+.12dfield file syntax
+<real_attribute_string>
+<name>Name</name>
+<value>Real</value>
+ [<op_code_properties>]
+</real_attribute_string>
+
+
+.fld file syntax
+69 Name  Real
+description
+Add a real user defined attribute to the  current string.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+
+70 text_attribute_string	Add a user defined text attribute to the current string
+.12dfield file syntax
+<text_attribute_string>
+<name>Name</name>
+<value>Text</value>
+ [<op_code_properties>]
+</text_attribute_string>
+.fld file syntax
+70 Name  Text
+description
+Add a text user defined attribute to the  current string.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+71 integer_attribute_vertex	Add a user defined integer attribute to the current point
+.12dfield file syntax
+<integer_attribute_vertex>
+<name>Name</name>
+<value>Integer</value>
+ [<op_code_properties>]
+</integer_attribute_vertex>
+.fld file syntax
+71 Name  Integer
+description
+Add an integer user defined attribute to the  current measurement point.
+The field data command panel in the SDR Editor is documented in 42.4.2.4 Attributes (opcodes 68 to79)
+
+72 real_attribute_vertex	Add a user defined real attribute to the current point
+.12dfield file syntax
+<real_attribute_vertex>
+<name>Name</name>
+<value>Real</value>
+ [<op_code_properties>]
+</real_attribute_vertex>
+.fld file syntax
+72 Name  Real
+description
+Add a real (floating point) user defined attribute to the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+73 text_attribute_vertex	Add a user defined text attribute to the current point
+.12dfield file syntax
+
+<text_attribute_vertex>
+<name>Name</name>
+<value>Text</value>
+ [<op_code_properties>]
+</text_attribute_vertex>
+.fld file syntax
+73 Name  Text
+description
+Add a text user defined attribute to the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+
+74 integer_attribute_next_segment	Add a user defined integer attribute to the next segment
+.12dfield file syntax
+<integer_attribute_next_segment>
+<name>Name</name>
+<value>Integer</value>
+ [<op_code_properties>]
+</integer_attribute_next_segment>
+.fld file syntax
+74 Name  Integer
+description
+Add an integer user defined attribute to the next segment from the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+75 real_attribute_next_segment	Add a user defined real attribute to the next segment
+.12dfield file syntax
+<real_attribute_next_segment>
+<name>Name</name>
+<value>Real</value>
+ [<op_code_properties>]
+</real_attribute_next_segment>
+.fld file syntax
+75 Name  Real
+description
+Add a real (floating point) user defined attribute to the next segment from the  current measurement point. The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+76 text_attribute_next_segment	Add a user defined text attribute to the next segment
+.12dfield file syntax
+<text_attribute_next_segment>
+<name>Name</name>
+<value>Text</value>
+ [<op_code_properties>]
+</text_attribute_next_segment>
+.fld file syntax
+76 Name  Text
+
+
+description
+Add a text user defined attribute to the next segment from the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+
+77 integer_attribute_previous_segment	Add a user defined integer attribute to the previous segment
+.12dfield file syntax
+<integer_attribute_previous_segment>
+<name>Name</name>
+<value>Integer</value>
+ [<op_code_properties>]
+</integer_attribute_previous_segment>
+.fld file syntax
+77 Name  Integer
+description
+Add an integer user defined attribute to the previous segment for the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+78 real_attribute_previous_segment	Add a user defined real attribute for the previous segment
+.12dfield file syntax
+<real_attribute_previous_segment>
+<name>Name</name>
+<value>Real</value>
+ [<op_code_properties>]
+</real_attribute_previous_segment>
+.fld file syntax
+78 Name  Real
+description
+Add a real (floating point) user defined attribute to the previous segment for the  current measurement point. The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+79 text_attribute_previous_segment	Add a user defined text attribute to the previous segment
+.12dfield file syntax
+<text_attribute_previous_segment>
+<name>Name</name>
+<value>Text</value>
+ [<op_code_properties>]
+</text_attribute_previous_segment>
+.fld file syntax
+79 Name  Text
+description
+Add a text user defined attribute to the previous segment for the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.4 Attributes (opcodes 68 to79)
+
+
+In addition, extra codes allow 12d Model super pipe strings to be coded in the field
+
+80 pipe_justification_invert	Pipe or culvert invert point (bottom of the pipe or culvert)
+.12dfield file syntax
+<pipe_justification_invert>
+[ <point_description>]
+ [<op_code_properties>]
+</pipe_justification_invert>
+.fld file syntax
+80 [ Point_description]
+description
+If no  point description is given, the  current measurement point is on the invert (bottom) of a pipe. This is the default for measurements to points on pipe strings. If the point is not part of a pipe string, it is ignored.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last point of the previous string with the same  feature code and  string number as given in  point description is on the invert (bottom) of a pipe. If the point is not part of a pipe string, it is ignored.
+If the  point ID exists, then the point with that  point ID is on the invert (bottom) of a pipe. If the point is not part of a pipe string, it is ignored.
+The field data command panel in the SDR Editor is documented in  42.4.2.42 Pipe Justification (opcodes 80, 81, 82)
+81 pipe_justification_axial	Pipe or culvert axial point (centre of the pipe or culvert)
+.12dfield file syntax
+<pipe_justification_axial>
+[ <point_description>]
+ [<op_code_properties>]
+</pipe_justification_axial>
+.fld file syntax
+81 [ Point_description]
+description
+If no  point description is given, the  current measurement point is on the axis (centre) of a pipe. If the point is not part of a pipe string, it is ignored.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last point of the previous string with the same  feature code and  string number as given in  point description is on the axis (centre) of a pipe. If the point is not part of a pipe string, it is ignored.
+If the  point ID exists, then the point with that  point ID is on the axis (centre) of a pipe. If the point is not part of a pipe string, it is ignored.
+The field data command panel in the SDR Editor is documented in  42.4.2.42 Pipe Justification (opcodes 80, 81, 82)
+82 pipe_justification_obvert	Pipe or culvert obvert point (top of the pipe or culvert)
+.12dfield file syntax
+<pipe_justification_obvert>
+[ <point_description>]
+ [<op_code_properties>]
+</pipe_justification_obvert>
+
+
+.fld file syntax
+82 [ Point_description]
+description
+If no  point description is given, the  current measurement point is on the obvert (top) of a pipe. If the point is not part of a pipe string, it is ignored.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last point of the previous string with the same  feature code and  string number as given in  point description is on the obvert (top) of a pipe. If the point is not part of a pipe string, it is ignored.
+If the  point ID exists, then the point with that  point ID is on the obvert (top) of a pipe. If the point is not part of a pipe string, it is ignored.
+The field data command panel in the SDR Editor is documented in  42.4.2.42 Pipe Justification (opcodes 80, 81, 82)
+83 shape_record	Start recording a shape - before the measurement
+.12dfield file syntax
+<shape_record>
+[<name>Shape_name</name>]
+<mirror_x>Mirror_x_status</mirror_x>
+<mirror_y>Mirror_y_status</mirror_y>
+<offset>Offset_value</offset>
+<height>Height_value</height>
+ [<op_code_properties>]
+</shape_record>
+.fld file syntax
+83 [Shape_name] Mirror_x_status Mirror_y_status Offset_value Height_value
+description
+Start recording a shape with the name Shape_name. If Shape_name is not blank, then the default field Shape is defined by the  feature code and  string number of the following measurements until a Finish code
+(84) are stored as the shape. There is no limit to the number of points in a shape. See 42.3.12 Shape Field Coding
+The field data command panel in the SDR Editor is documented in  42.4.2.48 Shaping (opcodes 83 to 86)
+84 shape_end	Finish using a shape definition or finish recording a shape - after the measurement
+.12dfield file syntax
+<shape_end>
+[<name>Shape_name</name>]
+<mirror_x>Mirror_x_status</mirror_x>
+<mirror_y>Mirror_y_status</mirror_y>
+<offset>Offset_value</offset>
+<height>Height_value</height>
+ [<op_code_properties>]
+</shape_end>
+.fld file syntax
+84 [Shape_name] Mirror_x_status Mirror_y_status Offset_value Height_value
+description
+
+Stops using the current shape or stops recording a shape. See 42.3.12 Shape Field Coding
+The field data command panel in the SDR Editor is documented in  42.4.2.48 Shaping (opcodes 83 to 86)
+
+85 shape_parallel	Parallel an existing shape
+.12dfield file syntax
+<shape_parallel>
+[<name>Shape_name</name>]
+<mirror_x>Mirror_x_status</mirror_x>
+<mirror_y>Mirror_y_status</mirror_y>
+<offset>Offset_value</offset>
+<height>Height_value</height>
+ [<op_code_properties>]
+</shape_parallel>
+.fld file syntax
+85 [Shape_name] Mirror_x_status Mirror_y_status Offset_value Height_value
+description
+Takes all the points on the defined shape of Shape_name and parallels them the entire length of the
+current string. Once paralleled, a number of strings are created. See 42.3.12 Shape Field Coding
+The field data command panel in the SDR Editor is documented in  42.4.2.48 Shaping (opcodes 83 to 86)
+
+86 shape_extrude	Extrude an existing shape
+.12dfield file syntax
+<shape_extrude>
+[<name>Shape_name</name>]
+<mirror_x>Mirror_x_status</mirror_x>
+<mirror_y>Mirror_y_status</mirror_y>
+<offset>Offset_value</offset>
+<height>Height_value</height>
+ [<op_code_properties>]
+</shape_extrude>
+.fld file syntax
+86 [Shape_name] Mirror_x_status Mirror_y_status Offset_value Height_value
+description
+Takes the defined shape of Shape_name and extrudes it along the entire length of the current string.Once extruded, only one strings is created.
+See 42.3.12 Shape Field Coding
+The field data command panel in the SDR Editor is documented in  42.4.2.48 Shaping (opcodes 83 to 86)
+
+
+87 shape_parallel_start	not yet implemented
+
+88 shape_extrude_start	not yet implemented
+89 not yet used
+
+90 not yet used
+
+91 not yet used
+
+92 string_type_2d	Remove all z-values for a string (i.e. make all z-values null)
+.12dfield file syntax
+<string_type_2d>
+[ <point_description>]
+ [<op_code_properties>]
+</string_type_2d>
+.fld file syntax
+92 [ Point_description]
+description
+If no  point description is given, all z-values for the  current string are removed.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last string with the same  feature code and  string number has all its z-values removed.
+A point-line type can be embedding as a 0 or 1 in the point name part of the point description field. A zero value specifies a point string, and a non-zero value specifies a line string. If the field was omitted, a line string is assumed.
+The point-line type may be overridden by the Map File.
+The field data command panel in the SDR Editor is documented in  42.4.2.57 String Type (opcodes 92, 93, 94)
+
+93 string_type_3d	The string can have different z-values for each vertex
+.12dfield file syntax
+<string_type_3d>
+[ <point_description>]
+ [<op_code_properties>]
+</string_type_3d>
+.fld file syntax
+93 [ Point_description]
+description
+A point-line type can be embedding as a 0 or 1 in the point name part of the point description field. A zero value specifies a point string, and a non-zero value specifies a line string. If the field was omitted, a line string is assumed.
+If no  point description is given, the point-line type for the  current string is set to line.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the point-line type is set for the last previous string with the same  feature code and  string number.
+If the  point ID exists, then the point-line type is set for the string containing that  point ID. The point-line type may be overridden by the Map File.
+
+The field data command panel in the SDR Editor is documented in  42.4.2.57 String Type (opcodes 92, 93, 94)
+
+94 string_type_4d	Use name library file/ Map File for vertex text on the string - name mapping
+.12dfield file syntax
+<string_type_4d>
+ <point_description>
+ [<op_code_properties>]
+</string_type_4d>
+.fld file syntax
+94 [ Point_description]
+description
+If this opcode exists then during reduction, vertex text is creating using either the name library, or if the name library doesn't exist, the map file. If neither exist then the opcode is ignored.
+if a name library is used and the  feature code of the string is found in the first column of the name library, then the entry from the second column of that row will be used as text for all vertices of the string that don't already have vertex text. As a default, the string is set as a point string.
+if the map file is used and the  feature code of the string is found in the first column of the map file, then the string name field of the map file is used as vertex text for all vertices that don't already have text. As a default, the string is set as a point string.
+If no  point description is given, then name mapping is applied to the  current string.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then name mapping is applied to the last previous string with the same  feature code and  string number.
+If the  point ID from the  point description exists, then name mapping is applied to the string containing that 
+point ID.
+A point-line type can be embedding as a 0 or 1 in the point name part of the point description field. A zero value specifies a point string, and a non-zero value specifies a line string. If the field was omitted, a line string is assumed.
+The point-line type may be overridden by the mapping file.
+The field data command panel in the SDR Editor is documented in  42.4.2.57 String Type (opcodes 92, 93, 94)
+
+95 pipe_diameter	Diameter for a super string pipe
+.12dfield file syntax
+<pipe_diameter>
+<diameter>pipe_diameter</diameter>
+[ <point_description>]
+ [<op_code_properties>]
+</pipe_diameter>
+.fld file syntax
+95 [ Point_description]  diameter
+description
+Pipe strings are always line strings and are stored with the justification of the majority of the string points. Individual pipe points are picked up either top (obvert), centre (axial) or bottom (invert) of the pipe using opcodes 80, 81 and 82.
+If no  point description is given, the  current string is created as a pipe string with the given pipe_diameter. If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+
+
+point description can be used.
+If the  feature code and  string number exist, the last string with the same  feature code and  string number is created as a pipe with the given pipe_diameter.
+If the  point ID exists, then the string containing that  point ID is created as a pipe string with the given
+pipe_diameter.
+The field data command panel in the SDR Editor is documented in  42.4.2.59 Pipe Diameter (opcode 95)
+
+96 culvert	width and height for a culvert super string
+.12dfield file syntax
+<culvert>
+<width>culvert_width</width>
+<height>culvert_height</height>
+ <point_description>50
+ [<op_code_properties>]
+</culvert>
+.fld file syntax
+96 [ Point_description]  width	height
+description
+Culvert strings are always line strings and are stored with the justification of the majority of the string points. Individual culvert points are picked up either top (obvert), centre (axial) or bottom (invert) of the culvert using opcodes 80, 81 and 82.
+If no  point description is given, the  current string is created as a culvert string with the given culvert_width
+and culvert_height.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last string with the same  feature code and  string number is created as a culvert with the given culvert_width and culvert_height.
+If the  point ID exists, then the string containing that  point ID is created as a culvert string with the given
+culvert_width and culvert_height.
+The field data command panel in the SDR Editor is documented in  42.4.2.58 Culvert (opcode 96)
+97 not yet used
+
+98 not yet used
+
+99 file_end	Terminate processing
+.12dfield file syntax
+<file_end>
+ [<op_code_properties>]
+</file_end>
+.fld file syntax
+99
+description
+Stop processing the 12d Field File at this line. Useful for debugging errors.
+The field data command panel in the SDR Editor is documented in  42.4.2.21 End File (opcode 99)
+100 units	Units used in the 12d Field File
+.12dfield file syntax
+<units>
+
+<angle>angle_unit</angle>
+<distance>metres</distance>
+<pressure>millimetres</pressure>
+<temperature>celcius</temperature>
+ [<op_code_properties>]
+</units>
+.fld file syntax
+100 angle_unit distance_unit	pressure_unit	temperature_unit
+description
+The units being used in the 12d Field File.
+Currently there is only one choice for each unit and the choice for each unit is: angle_unit is degrees which is decimal degrees.
+distance_unit is metres pressure_unit is millimetres temperature_unit is celsius
+The field data command panel in the SDR Editor is documented in  42.4.2.63 Units (opcode 100)
+101 auto_order	Order strings automatically
+.12dfield file syntax
+<auto_order>
+[ <point_description>]
+ [<op_code_properties>]
+</auto_order>
+.fld file syntax
+101 [ Point_description]
+description
+Takes the string and applies the 14.5.5.3 Auto Order option to it.
+If no  point description is given, the  current string has Auto Order applied to it.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, the last string with the same  feature code and  string number has Auto Order applied to it.
+If the  point ID exists, then the string containing that  point ID has Auto Order applied to it.
+The field data command panel in the SDR Editor is documented in  42.4.2.41 Order String Automatically (opcode 101).
+102 not yet used
+
+103 not yet used
+104 not yet used
+
+105 not yet used
+
+106 not yet used
+107 invisible_previous_segmet	Make the previous segment invisible - after the measurement
+.12dfield file syntax
+<invisible_previous_segment>
+
+[ <point_description>]
+ [<op_code_properties>]
+</invisible_previous_segment>
+.fld file syntax
+107 [ Point_description]
+description
+If no  point description exists, the previous segment containing the  current measurement point is set to invisible.
+If the  feature code and  string number exist, then the last segment of the previous string with that  feature code and  string number is set to invisible.
+If Point_number exists, then the segment containing the point with that  point ID as an end point, is set to invisible.
+The field data command panel in the SDR Editor is documented in  42.4.2.28 Invisibility (opcodes 107, 108, 109)
+108 invisible_next_segment Make next segment invisible - after measurement for first point of segment
+.12dfield file syntax
+<invisible_next_segment>
+[ <point_description>]
+ [<op_code_properties>]
+</invisible_next_segment>
+.fld file syntax
+108 [ Point_description]
+description
+If no  point description exists, the next segment containing the  current measurement point as a starting point is set to invisible.
+If the  feature code and  string number exist, then the segment that is created in the future from the last point of the previous string with that  feature code and  string number is set to invisible.
+If  point ID exists, then the segment containing the point with that  point ID as a start point, is set to invisible.
+The field data command panel in the SDR Editor is documented in  42.4.2.28 Invisibility (opcodes 107, 108, 109)
+109 invisible_vertex	Make a point invisible - after the measurement
+.12dfield file syntax
+<invisible_vertex>
+[ <point_description>]
+ [<op_code_properties>]
+</invisible_vertex>
+.fld file syntax
+109 [ Point_description]
+description
+If no  point description exists, the  current measurement point is set to invisible.
+If  feature code and  string number exist, then the last point of the previous string with that  feature code and 
+string number is set to invisible.
+If  point ID exists, then the point with that  point ID is set to invisible.
+
+The field data command panel in the SDR Editor is documented in  42.4.2.28 Invisibility (opcodes 107, 108, 109)
+110 building_face	Start recording buildings face observations - before the measurements
+.12dfield file syntax
+<building_face>
+[<name>Building_name</name>]
+ [<op_code_properties>]
+</building_face>
+.fld file syntax
+110 [Building_name]
+description
+Start recording a field template with the name Building_name.
+If Building_name is not blank, then the default building face is defined. The  feature code and  string number of the following measurements until a Finish code (111) are stored as the building face. There is no limit to the number of points in a building face.
+The field data command panel in the SDR Editor is documented in  42.4.2.8 Buildings (opcodes 110, 111)
+111 building_face_end	End recording building face observations
+.12dfield file syntax
+<building_face_end>
+[<name>Building_name</name>]
+ [<op_code_properties>]
+</building_face_end>
+.fld file syntax
+111 [Building_name]
+description
+If no Building_name exists, the current building face observation set is finished (including the  current measurement point).
+The field data command panel in the SDR Editor is documented in  42.4.2.8 Buildings (opcodes 110, 111)
+
+112 set_collection	Start set collection observations - before the measurements
+.12dfield file syntax
+<set_collection>
+ [<op_code_properties>]
+</set_collection>
+.fld file syntax
+112
+description
+Set collection opcode 112 has not been implemented and if its number is typed into the editor it will give an error.
+113 set_collection_end	End set collection observations
+.12dfield file syntax
+<set_collection_end>
+ [<op_code_properties>]
+</set_collection_end>
+.fld file syntax
+
+
+113
+description
+Set collection end opcode 113 has not been implemented and if its number is typed into the editor it will give an error.
+114 not yet used
+115 not yet used
+
+116 not yet used
+
+117 not yet used
+118 not yet used
+
+119 code_file	Name of this 12d Field File
+.12dfield file syntax
+<code_file>
+<name>file_name</name>
+ [<op_code_properties>]
+</code_file>
+.fld file syntax
+119	file_name
+description
+file_name is the name of this 12d Field File.
+The field data command panel in the SDR Editor is documented in  42.4.2.12 Code File (opcode 119)
+120 measure_attribute_string	Attribute for string (measurement)
+.12dfield file syntax
+<measure_attribute_string>
+<name>Attribute_name>
+<horizontal_angle>horizontal_angle_value</horizontal_angle>
+<vertical_angle><vertical_angle_value</vertical_angle>
+<slope_distance><splope_distance_value</slope_distance>
+<target_height><splope_distance_value</target_height>
+ [<op_code_properties>]
+</measure_attribute_string>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+The measure_attribute_string opcode uses the given horizontal angle, vertical angle, slope distance and target height and calculates the coordinates of the point resulting from these values.
+No point is created by this but the following information is stored as attributes of the  current string. x, y and z coordinates of the instrument
+instrument height
+x, y and z coordinates of the calculated point
+horizontal angle, vertical angle, slope distance and target height.
+The Attribute_ name plus a space (" ") is used to prefix the names for each of the attributes.
+For the panel in the Insert command and the names for each of the attributes, see 42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+
+121 measure_attribute_vertex	Attribute for vertex (measurement)
+.12dfield file syntax
+<measure_attribute_vertex>
+<name>Attribute_name>
+<horizontal_angle>horizontal_angle_value</horizontal_angle>
+<vertical_angle><vertical_angle_value</vertical_angle>
+<slope_distance><splope_distance_value</slope_distance>
+<target_height><splope_distance_value</target_height>
+ [<op_code_properties>]
+</measure_attribute_vertex>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+The measure_attribute_vertex opcode uses the given horizontal angle, vertical angle, slope distance and target height and calculates the coordinates of the point resulting from these values.
+No point is created by this but the following information is stored as attributes of the current measurement. x, y and z coordinates of the instrument
+instrument height
+x, y and z coordinates of the calculated point
+horizontal angle, vertical angle, slope distance and target height.
+The Attribute_ name plus a space (" ") is used to prefix the names for each of the attributes.
+For the panel in the Insert command and the names for each of the attributes, see 42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+122 measure_attribute_next_segment	Attribute for next segment (measurement)
+.12dfield file syntax
+<measure_attribute_next_segment>
+<name>Attribute_name>
+<horizontal_angle>horizontal_angle_value</horizontal_angle>
+<vertical_angle><vertical_angle_value</vertical_angle>
+<slope_distance><splope_distance_value</slope_distance>
+<target_height><splope_distance_value</target_height>
+ [<op_code_properties>]
+</measure_attribute_next_segment>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+The measure_attribute_vertex opcode uses the given horizontal angle, vertical angle, slope distance and target height and calculates the coordinates of the point resulting from these values.
+No point is created by this but the following information is stored as attributes of the next segment from the  current measurement point.
+x, y and z coordinates of the instrument instrument height
+x, y and z coordinates of the calculated point
+horizontal angle, vertical angle, slope distance and target height.
+The Attribute_ name plus a space (" ") is used to prefix the names for each of the attributes.
+For the panel in the Insert command and the names for each of the attributes, see 42.4.2.3 Measurement
+
+
+Attributes (opcodes 120 to 123)
+
+123 measure_attribute_previous_segment  Attribute for previous segment (measurement)
+.12dfield file syntax
+<measure_attribute_previous_segment>
+<name>Attribute_name>
+<horizontal_angle>horizontal_angle_value</horizontal_angle>
+<vertical_angle><vertical_angle_value</vertical_angle>
+<slope_distance><splope_distance_value</slope_distance>
+<target_height><splope_distance_value</target_height>
+ [<op_code_properties>]
+</measure_attribute_previous_segment>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+The measure_attribute_vertex opcode uses the given horizontal angle, vertical angle, slope distance and target height and calculates the coordinates of the point resulting from these values.
+No point is created by this but the following information is stored as attributes of the previous segment to the  current measurement point.
+x, y and z coordinates of the instrument instrument height
+x, y and z coordinates of the calculated point
+horizontal angle, vertical angle, slope distance and target height.
+The Attribute_ name plus a space (" ") is used to prefix the names for each of the attributes.
+For the panel in the Insert command and the names for each of the attributes, see 42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+124 attribute_set	Start an attribute group
+.12dfield file syntax
+<attribute_set>
+<name>Attribute_group_name</name>
+<level>Attribute_group_level</level>
+ [<op_code_properties>]
+</attribute_set>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+Starts an attribute group with the name Attribute_group_name.
+All the following attributes are then under the Attribute_group_name unit and attribute_set_end (125).
+The field data command panel in the SDR Editor is documented in  42.4.2.5 Attribute Set (opcodes 124 and 125)
+125 attribute_set_end	End the current attribute group
+.12dfield file syntax
+<attribute_set_end>
+ [<op_code_properties>]
+</attribute_set_end>
+.fld file syntax
+
+This opcode does not exist in the fld file.
+description
+End the current attribute group.
+The field data command panel in the SDR Editor is documented in  42.4.2.5 Attribute Set (opcodes 124 and 125)
+126 attachment	Attach a file
+.12dfield file syntax
+<attachment>
+<name>file_name</name>
+ [<op_code_properties>]
+</attachment>
+.fld file syntax
+126 file_name
+description
+The file file_name is attached to the  current measurement point.
+The field data command panel in the SDR Editor is documented in  42.4.2.2 Attachment (opcode 126)
+
+127 measurement_offset	Distance correction
+.12dfield file syntax
+<measurement_offset>
+<correction>correction_vaue</correction>
+ [<op_code_properties>]
+</measurement_offset>
+.fld file syntax
+127 correction_vaue
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.17 Distance Correction (opcode 127)
+128 resection	Start a least squares resection
+.12dfield file syntax
+<resection>
+<height>instrument_height_value</height>	// instrument height at the unknown point
+ <point_description>	// feature code etc for the created resection point
+ [<op_code_properties>]
+<children>
+ <resection_measurement>	// measurement from the unknown point to a known point
+ <resection_measurement>	// measurement from the unknown point to a known point
+. . . 
+ <resection_measurement>	// measurement from the unknown point to a known point
+</children>
+</resection>
+
+
+.fld file syntax
+128 instrument_height_value
+description
+
+
+A Least Squares Resection is used to calculate the coordinates of an instrument set up on an unknown point by taking measurements from the instrument setup on the unknown point to two or more known points. The theory is given in  15.10.4.4.1 Theory for Least Squares Resection.
+The field data command panel in the SDR Editor is documented in  42.4.2.46 Resection Start (opcode 128)
+
+129 resection_end	End the least squares resection
+.12dfield file syntax
+<resection_end>
+ [<op_code_properties>]
+</resection_end>
+.fld file syntax
+129
+description
+Denotes the end of a Resection block. In some cases this is not necessary as the Resection block is automatically terminated. See  42.4.2.47 Resection End (opcode 129).
+The field data command panel in the SDR Editor is documented in  42.4.2.47 Resection End (opcode 129)
+130 field_file	12d Model internal use only
+.12dfield file syntax
+<field_file>
+<name>file_name</name>
+ [<op_code_properties>]
+</field_file>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+file_name is the name of an internal 12d Field File. This option is for 12d Model internal use only.
+131 ppm_correction	PPM correction
+.12dfield file syntax
+<ppm_correction>
+<value>PPM_correction</value>
+ [<op_code_properties>]
+</ppm_correction>
+.fld file syntax
+131 PPM_correction
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.27 PPM Correction (opcode 131)
+
+132 not yet used
+
+133 not yet used
+
+134 not yet used
+135 not yet used
+
+136 not yet used
+
+137 not yet used
+138 helmert	Helmert start
+.12dfield file syntax
+<helmert>
+<height>instrument_height_value</height>	// instrument height at the unknown point
+ <point_description>	// feature code etc for the created resection point
+ [<op_code_properties>]
+<children>
+ <resection_measurement>	// measurement from the unknown point to a known point
+ <resection_measurement>	// measurement from the unknown point to a known point
+. . . 
+ <resection_measurement>	// measurement from the unknown point to a known point
+</children>
+</helmert>
+.fld file syntax
+138	height_value
+description
+A Helmert Resection is used to calculate the coordinates of an instrument set up on an unknown point by taking measurements from the instrument setup on the unknown point to two or more known points. The theory is given in  15.10.4.3.1 Theory for Helmert Resection.
+The field data command panel in the SDR Editor is documented in  42.4.2.24 Helmert Start (opcode 138)
+
+139 helmert_end	End the Helmert
+.12dfield file syntax
+<helmert_end>
+ [<op_code_properties>]
+</helmert_end>
+.fld file syntax
+139 ?????
+description
+Denotes the end of a Helmert Resection block. In some cases this is not necessary as the Helmert Resection block is automatically terminated. See  42.4.2.25 Helmert End (opcode 139).
+The field data command panel in the SDR Editor is documented in  42.4.2.25 Helmert End (opcode 139)
+
+140 gps_coordinate	GNSS coordinate measurement
+.12dfield file syntax
+<gps_coordinate>
+ <XYZ>
+ <point_description>
+
+
+ [<op_code_properties>]
+</gps_coordinate>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+A  measurement point is created with the  feature code and  string number from the  point description and given GNSS (x, y,z) coordinates. The reduced X,Y,Z is affected by any current GNSS Offset Correction opcode, and the current target height.
+So the entered GNSS Z coordinate does not have the antenna height subtracted!
+The  point ID and  point comment from the  point description are recorded as the point id and text for that
+vertex of the super string.
+If a  point name exists in the  point description, then it is a  named measurement and a 4d point string of name  point name is created and mapped using the Map File. The 4d text is the station prefix followed by  point name. The  point name is added to the internal list of named points for searching for coordinates.
+The field data command panel in the SDR Editor is documented in  42.4.2.22 GNSS Coordinate (opcode 140)
+
+141 non_tinable_string	Make a string non-tinable
+.12dfield file syntax
+<non_tinable_string>
+ <point_description>
+ [<op_code_properties>]
+</non_tinable_string>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+If no  point description is given, the  current string is made non-tinable.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number from the  point description exist, the last previous string with that 
+feature code and  string number is made non-tinable.
+If the  point ID from the  point description exists, then the string containing that  point ID will be made non-tinable.
+The field data command panel in the SDR Editor is documented in  42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141).
+142 extend_measurement_next_segment	Extend next segment by 2D distance
+.12dfield file syntax
+<extend_measurement_next_segment>
+<offset>Extend_2D_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</extend_measurement_next_segment>
+.fld file syntax- THIS OPTION DOES NOT EXIST IN A .fld FILE
+This opcode does not exist in the fld file.
+description
+The Extend_2D_in_metres is used to adjust the position of the specified point by a plan distance from the specified point's original position, along the next segment that the point is the point is on.
+
+The z-value of the point does not change.
+A positive extend is along the direction of the next segment and a negative extend is against the direction of the next segment that the point is on.
+The option will fail if it is applied to the last point of a string or to a one point string.
+If no  point description is given, the extend is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.3 Extend
+The field data command panel in the SDR Editor is documented in  42.4.2.20 Extend Measurement (opcodes 142, 143, 172, 173)
+143 extend_measurement_previous_segment Extend previous segment by 2D distance
+.12dfield file syntax
+<extend_measurement_previous_segment>
+<offset>Extend_2D_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</extend_measurement_previous_segment>
+.fld file syntax- THIS OPTION DOES NOT EXIST IN A .fld FILE
+This opcode does not exist in the fld file.
+description
+The Extend_2D_in_metres is used to adjust the position of the specified point by a plan distance from the specified point's original position, along the previous segment that the point is the point is on.
+The z-value of the point does not change.
+A positive extend is along the direction of the previous segment and a negative extend is against the direction of the previous segment that the point is on.
+The option will fail if it is applied to the first point of a string or to a one point string.
+If no  point description is given, the extend is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.3 Extend
+The field data command panel in the SDR Editor is documented in  42.4.2.20 Extend Measurement (opcodes 142, 143, 172, 173)
+144 remove_string	Delete a string
+.12dfield file syntax
+<remove_string>
+ <point_description>
+ [<op_code_properties>]
+</remove_string>
+
+
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+If no  point description is given, the  current string is deleted.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number from the  point description exist, the last previous string with that 
+feature code and  string number is deleted.
+If the  point ID from the  point description exists, then the string containing that  point ID is deleted.
+The field data command panel in the SDR Editor is documented in  42.4.2.45 Remove (Delete) String (opcode 144)
+145 gps_offset	GNSS Offset correction
+.12dfield file syntax
+<gps_offset>
+<xofffset>Xoffset_vaue</xofffset>
+<yofffset>Yoffset_vaue</yofffset>
+<zofffset>Zoffset_vaue</zofffset>
+ <point_description>
+ [<op_code_properties>]
+</gps_offset>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+The Xoffset_vaue,Yoffset_vaue,Zoffset_vaue is added to GNSS (x, y,z) coordinate in the following140 opcodes.
+This applies to subsequent GNSS coordinate measurements until another 145 is encountered. A 145	0 0 0 is used to stop the effect of GNSS Offsets.
+Opcode 5 is applied after this correction to subtract the antenna pole height.
+The field data command panel in the SDR Editor is documented in  42.4.2.23 GNSS Offset Correction (opcode 145)
+146 midpoint_2	Create midpoint of two points
+.12dfield file syntax
+<midpoint_2>
+<keep_points>keep_point_value</keep_points>
+<coding>
+ <point_description>
+</coding>
+ <point_description>
+ [<op_code_properties>]
+</midpoint_2>
+.fld file syntax
+This opcode does not exist in the fld file.
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.34 Midpoint of Two Points (opcode 146)
+
+147 midpoint_3	Create centre of arc that goes through three points
+.12dfield file syntax
+<midpoint_3>
+<keep_points>keep_point_value</keep_points>
+<coding>
+ <point_description>
+</coding>
+ <point_description>
+ [<op_code_properties>]
+</midpoint_3>
+.fld file syntax - THIS OPTION DOES NOT EXIST IN A .fld FILE
+This opcode does not exist in the fld file.
+description
+The field data command panel in the SDR Editor is documented in  42.4.2.35 Centre of Arc Through Three Points (opcode 147)
+172 extend_measurement_next_segment_3d  Extend next segment by 3D distance
+.12dfield file syntax
+<extend_measurement_next_segment_3d>
+<offset>Extend_3D_in_metres</offset>
+[ <point_description>]
+ [<op_code_properties>]
+</extend_measurement_next_segment_3d>
+.fld file syntax - THIS OPTION DOES NOT EXIST IN A .fld FILE
+This opcode does not exist in the fld file.
+description
+The Extend_3D_in_metres is used to adjust the position of the specified point by a 3D distance from the specified point's original position, along the next segment that the point is the point is on.
+The z-value of the point is extrapolated using the grade of the next segment.
+A positive extend is along the direction of the next segment and a negative extend is against the direction of the next segment that the point is on.
+The option will fail if it is applied to the last point of a string or to a one point string.
+If no  point description is given, the extend is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.3 Extend
+The field data command panel in the SDR Editor is documented in  42.4.2.20 Extend Measurement (opcodes 142, 143, 172, 173)
+173 extend_measurement_previous_segment_3d Extend previous segment by 3D distance
+.12dfield file syntax
+<extend_measurement_previous_segment_3d>
+<offset>Extend_3D_in_metres</offset>
+
+[ <point_description>]
+ [<op_code_properties>]
+</extend_measurement_precious_segment_3d>
+.fld file syntax- THIS OPTION DOES NOT EXIST IN A .fld FILE
+This opcode does not exist in the fld file.
+description
+The Extend_3D_in_metres is used to adjust the position of the specified point by a 3D distance from the specified point's original position, along the previous segment that the point is the point is on.
+The z-value of the point is extrapolated using the grade of the previous segment.
+A positive extend is along the direction of the previous segment and a negative extend is against the direction of the previous segment that the point is on.
+The option will fail if it is applied to the first point of a string or to a one point string.
+If no  point description is given, the extend is used to adjust the position of the current measured point.
+If a  point description exists, then either the  feature code and  string number or the  point ID section of the 
+point description can be used.
+If the  feature code and  string number exist, then the last point of the previous string with that  feature code
+and  string number is adjusted.
+If the  point ID exists, then the point with that  point ID is adjusted. See 42.3.3 Extend
+The field data command panel in the SDR Editor is documented in  42.4.2.20 Extend Measurement (opcodes 142, 143, 172, 173)
+
+Notes
+1. Arc fitting is applied after the Joins are processed. Hence the new joined strings are created and then curve fitting is applied according to the arc codes (start arc, end arc, fit arcs, stop fitting arcs etc.) on any vertex of the string.
+2. The point description has several pieces of information embedded in it and has been described in the previous section. For some opcodes, the point name section of the point description is used to hold other information. See  <point_description>
+For a summary of the 12d Field File Opcodes, go to the section 44.9 12d Survey Opcode Summary.
+Continue to 44.9 12d Survey Opcode Summary or return to 44 12d Field File Format.
+
+44.9 12d Survey Opcode Summary
+When 12d Field is run and a 12dfield file created, or a raw data collector file is converted into a
+12dfield or fld file, the survey information is recorded as a series of opcodes.
+In the 12dfield file, the opcodes are text opcodes and in the fld file, the opcodes are numeric opcodes.
+Typed entry can also be used in the Survey Data Editor and for typed entry, the numeric opcodes are used to call up the survey data Insert panels.
+The 12d survey opcodes are:
+Line 1: Numeric	Text	Description of Opcode Opcode		Opcode
+Line 2: Link to Insert panel that creates the opcode
+
+
+ -3	group	Group
+
+ -2	comment	Insert a comment
+
+
+42.4.2.26 Group (opcode -3)
+
+42.4.2.13  Comment (opcode -2)
+
+ -1	error	Add text to information for an error
+42.4.2.19 Error (opcode -1)
+ 1	job_data	Job Information
+42.4.2.16 Job Data (opcode 1)
+2	coordinate	Directly entered coordinate measurement (DEC)
+42.4.2.14  Coordinate (opcode 2)
+ 3	station	New instrument setup on a point
+42.4.2.37 New Instrument Setup - Station (opcode 3)
+ 4	backsight	Measurement to backsight
+42.4.2.6 Backsight (opcode 4)
+
+ 5	target_height	New target height
+
+6	check_measurement	Check measurement
+
+
+42.4.2.60 Target Height (opcode 5)
+
+42.4.2.10 Check Measurement (opcode 6)
+
+ 7	edm_tachy_measurement	Measurement - HA, VA, SD
+42.4.2.30 EDM Measurement (opcode 7)
+ 8	not yet used
+9	scale_factor	Slope distance scale factor for subsequent distances
+42.4.2.49 Slope Distance Scale Factor (opcode 9)
+ 10	stadia_measurement	Three hair stadia measurement
+42.4.2.33 Stadia Measurement (opcode 10)
+ 11	edm_tachy_measurement_ht	Measurement - HA, HD, Height
+42.4.2.31 EDM Measurement (HA,HD,HT) (opcode 11)
+12	edm_tachy_measurement_vd	Measurement - HA, HD, Height difference (VD)
+ 42.4.2.32 EDM Measurement (HA,HD,Diff HT) (opcode 12)
+ 13	not yet used
+ 14	check_coordinate	Check Coordinates
+42.4.2.9 Check Coordinate (opcode 14)
+ 15	vertical_circle	Vertical circle correction
+42.4.2.64 Vertical Circle Correction (opcode 15)
+16	multiple_coding	Multiply coded point
+42.4.2.36 Multiple Coding (opcode 16)
+ 17	arc_fitting_last_3_points	Arc through previous three points
+42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+
+ 18	feature	Circle Feature
+
+ 19	reverse_string	Reverse string
+
+
+42.4.2.11 Circle Feature (opcode 18)
+
+
+
+
+ 20	close_string	Close string
+
+42.4.2.54 String Reverse (opcode 19)
+
+42.4.2.50 String Close (opcode 20)
+
+21	join_strings_last_to_last	Join last points of strings
+42.4.2.29 Strings Join (opcodes 21 to 24)
+ 22	join_strings_first_to_last	Join first to last point of strings
+42.4.2.29 Strings Join (opcodes 21 to 24)
+23	join_strings_first_to_first	Join first points of strings
+42.4.2.29 Strings Join (opcodes 21 to 24)
+ 24	join_strings_last_to_first	Join last to first point of strings
+42.4.2.29 Strings Join (opcodes 21 to 24)
+ 25	not yet used
+ 26	not yet used
+ 25	not yet used
+28	height_or_depth	Add text to the string name - for delta height
+42.4.2.15  Height Or Depth Comment (opcode 28)
+ 29	memo	Note or memo
+42.4.2.39 Note (opcode 29)
+30	remove_height	Remove height from a point - that is make it a null height
+42.4.2.43 Remove Height (opcode 30)
+
+ 31	remove_point	Delete point
+
+ 32	not yet used
+ 33	not yet used
+ 34	not yet used
+ 35	not yet used
+ 36	not yet used
+
+
+42.4.2.44 Remove (Delete) Point (opcode 31)
+
+37	rectangle_2	Rectangle by two points
+42.4.2.53 String Rectangle by 2 Points (opcode 37)
+ 38	non_tinable_next_segment	Make the next segment non-tinable
+42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+ 39	non_tinable_previous_segment	Make the previous segment non-tinable
+42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+40 non_tinable_vertex	Make a point non-tinable
+42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+41 additional_text	Add additional text to the current measurement point
+42.4.2.62 Additional Text For Point (opcode 41)
+ 42	offset_measurement_radial	Add a radial offset
+42.4.2.40 Offset Measurement (opcodes 42, 43, 44)
+43	offset_measurement_tangential	Add a tangential offset
+42.4.2.40 Offset Measurement (opcodes 42, 43, 44)
+ 44	offset_measurement_height	Add a height offset
+42.4.2.40 Offset Measurement (opcodes 42, 43, 44)
+45	rectangle	Make a parallelogram from the last three measurement points
+42.4.2.52 String (Squashed) Rectangle (opcode 45)
+ 46	breakline	Make the string a breakline or not
+42.4.2.56 String Tinable - Breakline String (opcode 46)
+
+ 47	new_string	Start a new string
+
+ 48	end_string	End a string
+
+ 49	distances	Distances
+
+
+42.4.2.55 String Start (opcode 47)
+
+42.4.2.51 String End (opcode 48)
+
+42.4.2.18 Distances (opcode 49)
+
+ 50	backsight_reference Specify bearing to correct for true north - used as bearing datum difference
+42.4.2.7 Backsight Reference (opcode 50)
+ 51	template_start	Start using an existing field template
+42.4.2.61 Templating (opcodes 51 to 59)
+52 template_end	Finish using a field template or finish recording a field template
+
+
+42.4.2.61 Templating (opcodes 51 to 59)
+53 template_pause	Pause the current field template until opcode 54 or finish template 52
+42.4.2.61 Templating (opcodes 51 to 59)
+ 54	template_continue	Continue the current field template
+42.4.2.61 Templating (opcodes 51 to 59)
+ 55	template_record	Start recording a field template
+42.4.2.61 Templating (opcodes 51 to 59)
+56 template_skip	Skip picking up one or more points from a field template
+42.4.2.61 Templating (opcodes 51 to 59)
+57 template_delete	Delete points from a field template - after the measurement of last point
+42.4.2.61 Templating (opcodes 51 to 59)
+58 template_insert	Insert points when using a field template - after the measurement of last point
+42.4.2.61 Templating (opcodes 51 to 59)
+ 59	template_change	Change points in a field template
+42.4.2.61 Templating (opcodes 51 to 59)
+60 arc_fitting_next_3_points	Arc through next three points
+42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+61 arc_fitting_start	Start of arc through sets of three points until end of string, or a 62 occurs
+42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+ 62	arc_fitting_end	End the arcs begun by a 61 command
+42.4.2.1 Arc Fitting (opcodes 17, 60, 61, 62)
+ 63	not yet used
+ 64	not yet used
+ 65	not yet used
+ 66	not yet used
+ 67	not yet used
+68 integer_attribute_string	Add a user defined integer attribute to the current string
+42.4.2.4 Attributes (opcodes 68 to79)
+69 real_attribute_string	Add a user defined real attribute to the current string
+42.4.2.4 Attributes (opcodes 68 to79)
+70 text_attribute_string	Add a user defined text attribute to the current string
+42.4.2.4 Attributes (opcodes 68 to79)
+71 integer_attribute_vertex	Add a user defined integer attribute to the current point
+42.4.2.4 Attributes (opcodes 68 to79)
+72 real_attribute_vertex	Add a user defined real attribute to the current point
+42.4.2.4 Attributes (opcodes 68 to79)
+73 text_attribute_vertex	Add a user defined text attribute to the current point
+42.4.2.4 Attributes (opcodes 68 to79)
+74 integer_attribute_next_segment	Add a user defined integer attribute to the next segment
+42.4.2.4 Attributes (opcodes 68 to79)
+75 real_attribute_next_segment	Add a user defined real attribute to the next segment
+42.4.2.4 Attributes (opcodes 68 to79)
+76 text_attribute_next_segment	Add a user defined text attribute to the next segment
+42.4.2.4 Attributes (opcodes 68 to79)
+ 77	integer_attribute_previous_segment	Add a user defined integer attribute to the previous segment
+42.4.2.4 Attributes (opcodes 68 to79)
+78 real_attribute_previous_segment	Add a user defined real attribute for the previous segment
+42.4.2.4 Attributes (opcodes 68 to79)
+79 text_attribute_previous_segment	Add a user defined text attribute to the previous segment
+42.4.2.4 Attributes (opcodes 68 to79)
+80 pipe_justification_invert	Pipe or culvert invert point (bottom of the pipe or culvert)
+42.4.2.42 Pipe Justification (opcodes 80, 81, 82)
+81 pipe_justification_axial	Pipe or culvert axial point (centre of the pipe or culvert)
+42.4.2.42 Pipe Justification (opcodes 80, 81, 82)
+82 pipe_justification_obvert	Pipe or culvert obvert point (top of the pipe or culvert)
+42.4.2.42 Pipe Justification (opcodes 80, 81, 82)
+83 shape_record	Start recording a shape - before the measurement
+42.4.2.48 Shaping (opcodes 83 to 86)
+
+
+84 shape_end	Finish using a shape definition or finish recording a shape - after the measurement
+42.4.2.48 Shaping (opcodes 83 to 86)
+
+ 85	shape_parallel	Parallel an existing shape
+
+ 86	shape_extrude	Extrude an existing shape
+
+ 87	shape_parallel_start	not yet implemented
+ 88	shape_extrude_start	not yet implemented
+ 89	not yet used
+ 90	not yet used
+ 91	not yet used
+
+
+42.4.2.48 Shaping (opcodes 83 to 86)
+
+42.4.2.48 Shaping (opcodes 83 to 86)
+
+92 string_type_2d	Remove all z-values for a string (i.e. make all z-values null)
+42.4.2.57 String Type (opcodes 92, 93, 94)
+93 string_type_3d	The string can have different z-values for each vertex
+42.4.2.57 String Type (opcodes 92, 93, 94)
+94 string_type_4d	Use name library file/ Map File for vertex text on the string - name mapping
+42.4.2.57 String Type (opcodes 92, 93, 94)
+ 95	pipe_diameter	Diameter for a super string pipe
+42.4.2.59 Pipe Diameter (opcode 95)
+ 96	culvert	width and height for a culvert super string
+42.4.2.58 Culvert (opcode 96)
+ 97	not yet used
+ 98	not yet used
+ 99	file_end	Terminate processing
+42.4.2.21 End File (opcode 99)
+ 100	units	Units used in the 12d Field File
+42.4.2.63 Units (opcode 100)
+
+ 101	auto_order	Order strings automatically
+
+ 102	not yet used
+ 103	not yet used
+ 104	not yet used
+ 105	not yet used
+ 106	not yet used
+
+
+42.4.2.41 Order String Automatically (opcode 101)
+
+107	invisible_previous_segmet	Make the previous segment invisible - after the measurement
+42.4.2.28 Invisibility (opcodes 107, 108, 109)
+ 108	invisible_next_segment Make next segment invisible - after measurement for first point of segment
+42.4.2.28 Invisibility (opcodes 107, 108, 109)
+ 109	invisible_vertex	Make a point invisible - after the measurement
+42.4.2.28 Invisibility (opcodes 107, 108, 109)
+110	building_face	Start recording buildings face observations - before the measurements
+42.4.2.8 Buildings (opcodes 110, 111)
+ 111	building_face_end	End recording building face observations
+42.4.2.8 Buildings (opcodes 110, 111)
+112	set_collection	Start set collection observations - before the measurements
+
+ 113	set_collection_end	End set collection observations
+
+ 114	not yet used
+ 115	not yet used
+ 116	not yet used
+ 117	not yet used
+ 118	not yet used
+119	code_file	Name of this 12d Field File
+42.4.2.12 Code File (opcode 119)
+ 120	measure_attribute_string	Attribute for string (measurement)
+42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+ 121	measure_attribute_vertex	Attribute for vertex (measurement)
+
+
+42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+122	measure_attribute_next_segment	Attribute for next segment (measurement)
+42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+ 123	measure_attribute_previous_segment Attribute for previous segment (measurement)
+42.4.2.3 Measurement Attributes (opcodes 120 to 123)
+ 124	attribute_set	Start an attribute group
+42.4.2.5 Attribute Set (opcodes 124 and 125)
+125	attribute_set_end	End the current attribute group
+42.4.2.5 Attribute Set (opcodes 124 and 125)
+
+ 126	attachment	Attach a file
+
+ 127	measurement_offset	Distance correction
+
+
+42.4.2.2 Attachment (opcode 126)
+
+42.4.2.17 Distance Correction (opcode 127)
+
+128	resection	Start a least squares resection
+42.4.2.46 Resection Start (opcode 128)
+ 129	resection_end	End the least squares resection
+42.4.2.47 Resection End (opcode 129)
+ 130	field_file	12d Model internal use only
+
+
+ 131	ppm_correction	PPM correction
+
+ 132	not yet used
+ 133	not yet used
+ 134	not yet used
+ 135	not yet used
+ 136	not yet used
+ 137	not yet used
+ 138	helmert	Helmert start
+
+
+42.4.2.27 PPM Correction (opcode 131)
+
+
+ 139	helmert_end	End the Helmert
+
+ 140	gps_coordinate	GNSS coordinate measurement
+42.4.2.22 GNSS Coordinate (opcode 140)
+ 141	non_tinable_string	Make a string non-tinable
+42.4.2.38 Non Tinability (opcodes 38, 39, 40, 141)
+ 142	extend_measurement_next_segment	Extend next segment by 2D distance
+42.4.2.20 Extend Measurement (opcodes 142, 143,
+172, 173)
+ 143	extend_measurement_previous_segment Extend previous segment by 2D distance
+42.4.2.20 Extend Measurement (opcodes 142, 143,
+
+172, 173)
+ 144	remove_string	Delete a string
+
+ 145	gps_offset	GNSS Offset correction
+
+
+
+42.4.2.45 Remove (Delete) String (opcode 144)
+
+42.4.2.23 GNSS Offset Correction (opcode 145)
+
+ 146	midpoint_2	Create midpoint of two points
+42.4.2.34 Midpoint of Two Points (opcode 146)
+147	midpoint_3	Create centre of arc that goes through three points
+	42.4.2.35 Centre of Arc Through Three Points (opcode 147)
+ 172	extend_measurement_next_segment_3d Extend next segment by 3D distance
+	42.4.2.20 Extend Measurement (opcodes 142, 143, 172, 173)
+ 173	extend_measurement_previous_segment_3d Extend previous segment by 3D distance
+	42.4.2.20 Extend Measurement (opcodes 142, 143, 172, 173)
+
+For the full description of the 12d Field File Opcodes, see 44.8 Full Description of 12d Survey Opcodes
+Return to 44 12d Field File Format.
+
+
+
+
+
+
+TO BE MOVED
+
+Users can enter text for each measurement (observation 09 record or position 08 record) which is appended to the end of the record and this is used as the text of blocks that are interpreted according to the descriptions given in the earlier section 43.2 Field Coding for Non Leica Instruments.
+The 13 record can also be used after a measurement record to add additional information to the preceding blocks using the extra coding control code at the end of the previous line (see  Extra Coding in the section 43.2.4 Control Code Blocks
+Strictly speaking the Sokkia SDR20/33 formats use fixed length lines and if the lengths are incorrect, an error message will be written to the 3.6.9 Output Window. For example,
+'Line 248 line incorrect length. required length is 58. received length is 50.'
+These messages often appear after a raw file has been manually edited because most editors remove space padding at the end of a line.
+
+
+45 BIM and Digital Engineering
+
+
+There is no universally excepted definition for Digital Engineering but mostly it refers to the use of digital data rather than paper plans and reports. 12d Model is a parametric 3D surveying and civil engineering software and fully supports digital engineering. 12d Model has numerous options for reading and writing digital data, and supports as many published open standards as it can. See 45.1 12d Model and Digital Engineering
+Building Information Modelling or BIM, is not as vague as digital engineering and usually refers to Industry Foundation Classes (IFC's). See 45.2 What is BIM?.
+12d Solutions is actively involved in the development of IFC's, in particular for linear infrastructure, and is:
+(a) a founding member of the Open BIM Alliance of Australia which supports the transferring of BIM data using the ISO Standard for IFCs.
+(b) a coauthor if the buildingSMART International publication Model Setup Information Delivery Manual.
+(c) developing methods of passing Civil objects such as road surfaces, pavement layers, kerb and gutters etc to BIM systems even though there may be no currently IFC standards for such data.
+For example using current IFC objects in IFC 2x3 and IFC 4x3 for writing out alignments, super strings, water strings, trimeshes and tins.
+(d) working with buildingSMART on extending existing IFCs (IFC 4x1, IFC 4x3, IFC 4x4 etc) to cover alignments, roads, railways and tunnels.
+Some of this work was released in 2025 as IFC 4x3 which is the first IFC standard for infrastructure (Civil BIM). See https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3.
+For more information on BIM, see
+45.2  What is BIM?
+45.3  12d Model and IFC's
+45.4  Structure of IFC
+45.5  Some More IFC Entity Definitions
+45.6  Common Terms in BIM
+
+Continue to 45.1 12d Model and Digital Engineering.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
