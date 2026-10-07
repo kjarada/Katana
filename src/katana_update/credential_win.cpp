@@ -12,17 +12,22 @@
 //
 // The token is never logged and never in an error. The blob this file builds and the one the
 // system hands back are zeroed before they are released.
+//
+// read() can fail in four ways, which credential_env.cpp lists for the callers that look a token
+// up quietly: NotFound (none stored), InvalidState (stored, cannot be used), Unsupported (the
+// Credential Manager cannot be used in this session) and Internal (any other system fault).
 
 #include "katana/update/credential.hpp"
 
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "katana/core/path_text.hpp"
+#include "katana/core/text.hpp"
 #include "katana/core/text_encoding.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -40,12 +45,12 @@ namespace katana::update {
 namespace detail {
 
 // credential_env.cpp has the one rule for what a token may be. Declared here by hand because the
-// header that would carry them is not this file's to change; the linker is what holds the two
-// signatures to each other.
-[[nodiscard]] std::string_view trimmedToken(std::string_view raw);
+// header that would carry it is not this file's to change; the linker holds the PARAMETER types
+// of the two sides to each other, and nothing holds the return type (it is not in an Itanium
+// function's linker name), so a change to this is a change to credential_env.cpp in the same
+// commit.
 [[nodiscard]] core::Result<std::string_view> usableToken(std::string_view token,
                                                          std::string_view source);
-void secureZero(std::string& text);
 
 // The same store under another target name, so that a test never touches the one a person's
 // token is in. Not in the header: nothing but a test has a reason to name another target. `target`
@@ -53,16 +58,29 @@ void secureZero(std::string& text);
 // wincred.h) - a precondition, std::invalid_argument when broken.
 [[nodiscard]] std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target);
 
-} // namespace detail
-
-namespace {
-
-// Error codes that mean "the Credential Manager cannot be used in this session", as opposed to a
-// fault in what was asked: a service or batch logon with no profile loaded, a locked-down or
+// What the Win32 error `code` of a Credential Manager call means to a caller, as an Error that
+// names `action` ("read", "store", "remove") and carries `target` as its context. The codes that
+// mean "the Credential Manager cannot be used in this session", as opposed to a fault in what was
+// asked, are Unsupported: a service or batch logon with no profile loaded, a locked-down or
 // stripped Windows image. A caller (the update window) says so in a sentence, and a test skips.
 // The numbers are from Microsoft's "System Error Codes" list:
 //   5 ERROR_ACCESS_DENIED, 50 ERROR_NOT_SUPPORTED, 120 ERROR_CALL_NOT_IMPLEMENTED,
 //   1312 ERROR_NO_SUCH_LOGON_SESSION, 1355 ERROR_NO_SUCH_DOMAIN.
+// Every other code is Internal. The number is in the message, so access denied is not hidden by
+// being called "not available". Not in the header: it is a seam for a test, which cannot make a
+// session without a Credential Manager.
+[[nodiscard]] core::Error credentialError(DWORD code, std::string_view action,
+                                          const std::string& target);
+
+// The wide target name `store` passes to the system, or empty when `store` is not a Credential
+// Manager store. A seam for a test, which checks the name a person's `cmdkey` command has to use
+// without reading or writing the credential under it.
+[[nodiscard]] std::wstring credentialTargetOf(const CredentialStore& store);
+
+} // namespace detail
+
+namespace {
+
 [[nodiscard]] bool isUnavailable(DWORD code)
 {
     switch (code) {
@@ -77,19 +95,32 @@ namespace {
     }
 }
 
-[[nodiscard]] core::Error failure(DWORD code, std::string_view action, const std::string& target)
+// UTF-8 `text` as the UTF-16 the system takes: the characters it names, converted directly (a
+// credential target is a name, not a path). Empty when `text` is empty, is not well-formed UTF-8
+// or is too long to convert.
+[[nodiscard]] std::wstring wideFromUtf8(std::string_view text)
 {
-    const std::string number = std::to_string(static_cast<unsigned long>(code));
-    if (isUnavailable(code)) {
-        return core::makeError(core::ErrorCode::Unsupported,
-                               "the Windows Credential Manager is not available in this session "
-                               "(Windows error " + number + ")",
-                               target);
+    if (text.empty() || text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
     }
-    return core::makeError(core::ErrorCode::Internal,
-                           "the Windows Credential Manager could not " + std::string(action) +
-                               " the token (Windows error " + number + ")",
-                           target);
+    const int size = static_cast<int>(text.size());
+    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), size,
+                                           nullptr, 0);
+    if (length <= 0) {
+        return {};
+    }
+    std::wstring wide(static_cast<std::size_t>(length), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), size, wide.data(),
+                            length) != length) {
+        return {};
+    }
+    return wide;
+}
+
+// The text of `text` overwritten with zeros, for a std::string a token was held in.
+void secureZero(std::string& text)
+{
+    SecureZeroMemory(text.data(), text.size());
 }
 
 // What CredReadW allocated, zeroed and freed with CredFree.
@@ -105,7 +136,10 @@ struct CredentialFree {
 
 // The text a blob holds, still unchecked. UTF-8 is what write() stores. A NUL is no part of UTF-8
 // text, so a blob that has one inside it is UTF-16LE (cmdkey's form) and is decoded; NULs at the
-// END only are the terminator of a C string and are dropped.
+// END only are the terminator of a C string and are dropped. A known limit: UTF-16 text in which
+// no code unit has a zero byte (two CJK characters, U+65E5 U+672C, are E5 65 2C 67) shows no NUL,
+// is read as UTF-8, which it is not, and is refused as InvalidState. A GitHub token is ASCII, whose
+// UTF-16 always has NULs, so the guess is not worth a heuristic.
 [[nodiscard]] core::Result<std::string> blobText(const BYTE* bytes, std::size_t size)
 {
     std::string_view blob(reinterpret_cast<const char*>(bytes), size);
@@ -137,7 +171,7 @@ struct CredentialFree {
 class CredentialManagerStore final : public CredentialStore {
   public:
     explicit CredentialManagerStore(std::string_view target)
-        : targetUtf8_(target), target_(core::pathFromUtf8(target).wstring())
+        : targetUtf8_(target), target_(wideFromUtf8(target))
     {
         if (target.empty() || target_.empty() ||
             target_.size() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH || !core::isValidUtf8(target)) {
@@ -155,7 +189,7 @@ class CredentialManagerStore final : public CredentialStore {
                 return core::makeError(core::ErrorCode::NotFound, "no token is stored",
                                        targetUtf8_);
             }
-            return failure(code, "read", targetUtf8_);
+            return detail::credentialError(code, "read", targetUtf8_);
         }
         const std::unique_ptr<CREDENTIALW, CredentialFree> credential(found);
         if (credential->CredentialBlobSize == 0) {
@@ -169,9 +203,9 @@ class CredentialManagerStore final : public CredentialStore {
             error.context = targetUtf8_;
             return error;
         }
-        const std::string_view trimmed = detail::trimmedToken(*text);
+        const std::string_view trimmed = core::trimmed(*text);
         if (trimmed.empty()) {
-            detail::secureZero(*text);
+            secureZero(*text);
             return core::makeError(core::ErrorCode::NotFound,
                                    "no token is stored: the credential is empty", targetUtf8_);
         }
@@ -180,18 +214,18 @@ class CredentialManagerStore final : public CredentialStore {
             core::Error error = usable.error();
             error.code = core::ErrorCode::InvalidState;
             error.message = "the stored token is not usable: " + error.message;
-            detail::secureZero(*text);
+            secureZero(*text);
             return error;
         }
         std::string token(*usable);
-        detail::secureZero(*text);
+        secureZero(*text);
         return token;
     }
 
     [[nodiscard]] core::Status write(std::string_view token) override
     {
         const core::Result<std::string_view> usable =
-            detail::usableToken(detail::trimmedToken(token), targetUtf8_);
+            detail::usableToken(core::trimmed(token), targetUtf8_);
         if (!usable) {
             return usable.error();
         }
@@ -212,7 +246,7 @@ class CredentialManagerStore final : public CredentialStore {
         const DWORD code = stored != FALSE ? 0 : GetLastError();
         SecureZeroMemory(blob.data(), blob.size());
         if (stored == FALSE) {
-            return failure(code, "store", targetUtf8_);
+            return detail::credentialError(code, "store", targetUtf8_);
         }
         return {};
     }
@@ -224,12 +258,15 @@ class CredentialManagerStore final : public CredentialStore {
             if (code == ERROR_NOT_FOUND) {
                 return {}; // nothing was stored: the state asked for
             }
-            return failure(code, "remove", targetUtf8_);
+            return detail::credentialError(code, "remove", targetUtf8_);
         }
         return {};
     }
 
     [[nodiscard]] std::string_view where() const override { return "credential manager"; }
+
+    // The name passed to the system (detail::credentialTargetOf).
+    [[nodiscard]] const std::wstring& target() const { return target_; }
 
   private:
     std::string targetUtf8_;
@@ -243,6 +280,27 @@ namespace detail {
 std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target)
 {
     return std::make_unique<CredentialManagerStore>(target);
+}
+
+core::Error credentialError(DWORD code, std::string_view action, const std::string& target)
+{
+    const std::string number = std::to_string(static_cast<unsigned long>(code));
+    if (isUnavailable(code)) {
+        return core::makeError(core::ErrorCode::Unsupported,
+                               "the Windows Credential Manager is not available in this session "
+                               "(Windows error " + number + ")",
+                               target);
+    }
+    return core::makeError(core::ErrorCode::Internal,
+                           "the Windows Credential Manager could not " + std::string(action) +
+                               " the token (Windows error " + number + ")",
+                           target);
+}
+
+std::wstring credentialTargetOf(const CredentialStore& store)
+{
+    const auto* manager = dynamic_cast<const CredentialManagerStore*>(&store);
+    return manager != nullptr ? manager->target() : std::wstring();
 }
 
 } // namespace detail

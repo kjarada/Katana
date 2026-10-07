@@ -6,6 +6,14 @@
 // token as "token" and gives its LENGTH at most. The buffers this file owns are zeroed before
 // they are freed (the standard library may keep a copy a caller's string made; that is the
 // interface's cost, a std::string).
+//
+// What read() can return, for a caller that looks a token up quietly (the automatic check, the
+// `UPDATE TOKEN STATUS` verb): NotFound is the normal "none"; InvalidState is a value that is
+// there and cannot be used (a line break in it, too long, a space inside); on Windows the
+// Credential Manager adds Unsupported (not usable in this session) and Internal (a system
+// fault). Every one of them means "no token to send" to such a caller; whether to say so, and
+// whether an unusable variable falls back to the Credential Manager, is the caller's to decide.
+// The header promises NotFound only; this is the whole set.
 
 #include "katana/update/credential.hpp"
 
@@ -16,9 +24,25 @@
 #include <vector>
 
 #include "katana/core/path_text.hpp"
+#include "katana/core/text.hpp"
 #include "katana/core/text_encoding.hpp"
 
 namespace katana::update {
+
+namespace {
+
+// Overwrites the text of `text` with zeros in a way the compiler may not remove as a dead store (a
+// write through a volatile pointer is an observable side effect). Local to this file: the Windows
+// store zeroes its own buffers with SecureZeroMemory.
+void secureZero(std::string& text)
+{
+    volatile char* byte = text.data();
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        byte[i] = '\0';
+    }
+}
+
+} // namespace
 
 namespace detail {
 
@@ -30,42 +54,16 @@ namespace detail {
 // 2021 note on the new token formats), far inside this.
 inline constexpr std::size_t kMaxTokenBytes = 2560;
 
-// Overwrites `size` bytes at `data` with zeros in a way the compiler may not remove as a dead
-// store (a write through a volatile pointer is an observable side effect).
-void secureZero(void* data, std::size_t size)
-{
-    volatile unsigned char* byte = static_cast<volatile unsigned char*>(data);
-    for (std::size_t i = 0; i < size; ++i) {
-        byte[i] = 0;
-    }
-}
-
-void secureZero(std::string& text)
-{
-    secureZero(text.data(), text.size());
-}
-
-// `raw` without the white space around it: a token pasted into a field or exported from
-// `$(cat file)` arrives with a newline, and none of those characters can be part of one. A view
-// into `raw`; nothing is copied.
-[[nodiscard]] std::string_view trimmedToken(std::string_view raw)
-{
-    const auto isSpace = [](char c) { return c == ' ' || (c >= '\t' && c <= '\r'); };
-    while (!raw.empty() && isSpace(raw.front())) {
-        raw.remove_prefix(1);
-    }
-    while (!raw.empty() && isSpace(raw.back())) {
-        raw.remove_suffix(1);
-    }
-    return raw;
-}
-
-// `token` itself when it can be used as a token, else why not. A token goes into an HTTP header
-// (`Authorization: Bearer <token>`), so a control character - above all a carriage return or a
-// line feed, which would end the header and begin another - is refused wherever the token comes
-// from. Non-ASCII text is allowed: the store keeps whatever valid UTF-8 it is given, and the
-// server is the judge of what it accepts. `source` goes into the error's context and must not be
-// the token.
+// `token` itself when it can be used as a token, else why not. The caller trims it first
+// (core::trimmed: a token pasted into a field or exported from `$(cat file)` arrives with a
+// newline, and none of those characters can be part of one). A token goes into an HTTP header
+// (`Authorization: Bearer <token>`), so a control character - 0x00 to 0x1F and 0x7F, above all a
+// carriage return or a line feed, which would end the header and begin another - is refused
+// wherever the token comes from. So is a space inside it: a token is one word, and a person who
+// pastes "Bearer ghp_..." would otherwise send "Authorization: Bearer Bearer ghp_..." and meet a
+// 401 that says nothing of the cause. Non-ASCII text is allowed: the store keeps whatever valid
+// UTF-8 it is given, and the server is the judge of what it accepts. `source` goes into the
+// error's context and must not be the token.
 [[nodiscard]] core::Result<std::string_view> usableToken(std::string_view token,
                                                          std::string_view source)
 {
@@ -89,6 +87,12 @@ void secureZero(std::string& text)
                                    std::string(source));
         }
     }
+    if (token.find(' ') != std::string_view::npos) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "the token holds a space: give the token alone, without \"Bearer\" "
+                               "or any other word before it",
+                               std::string(source));
+    }
     if (!core::isValidUtf8(token)) {
         return core::makeError(core::ErrorCode::InvalidArgument,
                                "the token is not valid UTF-8 text", std::string(source));
@@ -106,10 +110,10 @@ class EnvironmentCredentialStore final : public CredentialStore {
     {
         const std::string name(kTokenEnvironmentVariable);
         std::string raw = core::environmentVariable(name.c_str());
-        const std::string_view trimmed = detail::trimmedToken(raw);
+        const std::string_view trimmed = core::trimmed(raw);
         if (trimmed.empty()) {
             // Unset, empty, or only white space: the normal state, not a fault.
-            detail::secureZero(raw);
+            secureZero(raw);
             return core::makeError(core::ErrorCode::NotFound,
                                    "no token: " + name + " is not set", name);
         }
@@ -121,11 +125,11 @@ class EnvironmentCredentialStore final : public CredentialStore {
             core::Error error = usable.error();
             error.code = core::ErrorCode::InvalidState;
             error.message = name + " is set but is not a usable token: " + error.message;
-            detail::secureZero(raw);
+            secureZero(raw);
             return error;
         }
         std::string token(*usable);
-        detail::secureZero(raw);
+        secureZero(raw);
         return token;
     }
 
