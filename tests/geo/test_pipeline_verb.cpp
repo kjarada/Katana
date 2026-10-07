@@ -31,8 +31,14 @@ const std::string kPlane = std::string(KATANA_GEO_TEST_DATA) + "/plane.asc";
 class PipelineVerb : public ::testing::Test {
   protected:
     // Emptied before and after: a raster an earlier run left there would
-    // take the name a test expects.
-    std::filesystem::path scratch = std::filesystem::temp_directory_path() / "katana-pipeline-verb";
+    // take the name a test expects. One directory for each test: ctest runs
+    // every test as its own process, in parallel, and one directory shared by
+    // them let a test's TearDown delete the raster another was writing (a
+    // spurious "No such file or directory" under a parallel run).
+    std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() /
+        (std::string("katana-pipeline-verb-") +
+         ::testing::UnitTest::GetInstance()->current_test_info()->name());
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
