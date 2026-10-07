@@ -1901,6 +1901,15 @@ reference folder", has how a build is pointed at another file.
 There is no script: the build needs nothing but the compiler, where the
 embedding this replaced ran Python over a folder of four files on every build.
 
+A second customisation is tracked beside the built-in and is not compiled in:
+Katana Standard, `resources/customisation/katana-standard.customisation.json`, an original
+library of 71 linestyles, 113 symbols and 245 survey codes made for Katana
+(`docs/katana_standard.md`: how to read it, how it is loaded now, and what is
+not done). It loads like any file, with `CUSTOMISE REPLACE` or Settings > Import
+with Replace ticked; naming it in `KATANA_BUILTIN_CUSTOMISATION` for one run
+makes it the built-in of that run. Making it the compiled-in default, or
+offering a choice of two compiled-in libraries, is the owner's decision.
+
 ### The seam
 
 The environment variable `KATANA_BUILTIN_CUSTOMISATION` (the same name, read by

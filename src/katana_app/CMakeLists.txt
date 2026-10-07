@@ -1925,3 +1925,130 @@ if(KATANA_BUILD_TESTS)
         "linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 preview=yes${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=51 closed=no layer=\"FIELD KERB\"${_eol}linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 preview=yes${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=7 closed=no layer=\"FIELD KERB\"${_eol}linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=7 closed=no layer=\"FIELD KERB\" entity=4${_eol}4 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=7 +open +length=31[.]05828[0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
 endif()
+
+# Katana Standard (docs/katana_standard.md), the original customisation under
+# resources/customisation, loaded by CUSTOMISE REPLACE into a session whose
+# built-in is none, so the run is the same on every machine.
+#
+# The first test imports the invented field file
+# tests/data/katana_standard/street_corner.fld. Every value is worked out by
+# hand from the file and from the library's codes (docs/katana_standard.md),
+# before the program was asked.
+#
+# The file has twenty entered coordinates, P01 to P20, in ten features:
+#   CBT string 1, P01 to P04, then opcode 20 closing the string - a lot
+#       boundary, the rectangle (330000,6250000) to (330020,6250030): 20 by
+#       30, so 100 round and 600 square;
+#   KKT string 1, P05 to P07, along y = 6249990 from 330000 to 330024: a kerb
+#       24 long;
+#   FFP string 1, P08 to P10, along x = 330030 from 6250005 to 6250015: a
+#       paling fence 10 long (a line with a post at every vertex);
+#   UWM string 1, P11 to P13, along y = 6249980 from 330000 to 330024: a water
+#       main, 24 long;
+#   UED string 1, P14 and P15, 20 long: a disused cable;
+#   and five single points: UWV (a valve), VTB (a tree), KPG (a gully pit),
+#   MCC (a control mark) and UWQ, which no code answers.
+# So the import draws 20 points and 5 lines. 19 points are coded, 1 is not (UWQ:
+# every code owns its own rule, so a typo is nobody's). The coded points make
+# 9 layers - one for each code but the unmatched - and 9 styles, one for each
+# code: the style of a line is named by its linestyle, of a point by its
+# symbol, and the plain kerb line is "Plain". 5 points are in no line: UWQ for
+# having no rule, and the valve, the tree, the pit and the mark, which are point
+# codes. The entities are 2 to 21 (the job takes number 1) and the lines 22 to
+# 26, in the order of the strings.
+#
+# A prompt is an attribute with no value, so entity 12, the first point of the
+# main, carries its five prompts and the service word `utility.type=water`;
+# entity 15, the cable's first point, adds `utility.status=disused`; entity 22,
+# the boundary, asks for the plan reference and carries the four heights of its
+# points. One undo takes the import back.
+if(KATANA_BUILD_TESTS)
+    set(_ks_json "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")
+    set(_ks_fld "${PROJECT_SOURCE_DIR}/tests/data/katana_standard/street_corner.fld")
+    set(_ks_points
+        "cadastre/lots/title 330000,6250000" "cadastre/lots/title 330020,6250000"
+        "cadastre/lots/title 330020,6250030" "cadastre/lots/title 330000,6250030"
+        "drainage/kerbs/top 330000,6249990" "drainage/kerbs/top 330012,6249990"
+        "drainage/kerbs/top 330024,6249990"
+        "fences/fence/timber 330030,6250005" "fences/fence/timber 330030,6250010"
+        "fences/fence/timber 330030,6250015"
+        "utilities/water/main 330000,6249980" "utilities/water/main 330012,6249980"
+        "utilities/water/main 330024,6249980"
+        "utilities/electricity/disused 330000,6249970" "utilities/electricity/disused 330020,6249970"
+        "utilities/water/fitting 330012,6249980" "vegetation/trees/tree 330008,6250012"
+        "drainage/structures/pit 330006,6249991" "control/marks/control 330020,6250030"
+        "survey/points 330005,6250020")
+    set(_ks_points_regex "")
+    foreach(_item IN LISTS _ks_points)
+        string(REPLACE " " ";" _item "${_item}")
+        list(GET _item 0 _layer)
+        list(GET _item 1 _at)
+        string(APPEND _ks_points_regex "[^\r\n]*Point +layer=${_layer} +at ${_at}${_eol}")
+    endforeach()
+    set(_ks_lines_regex
+        "[^\r\n]*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=fences/fence/timber +vertices=3 +open +length=10${_eol}[^\r\n]*Polyline +layer=utilities/water/main +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=utilities/electricity/disused +vertices=2 +open +length=20${_eol}")
+    set(_ks_styles_regex
+        " *Broadleaf Tree +linetype=continuous +weight=0\\.25 +colour=#60812B +symbol=Broadleaf Tree[^\r\n]*${_eol} *Control Mark +linetype=continuous +weight=0\\.25 +colour=#0999C9 +symbol=Control Mark[^\r\n]*${_eol} *Disused Service Line +linetype=Disused Service Line +weight=0\\.25 +colour=#E24942[^\r\n]*${_eol} *Gully Pit +linetype=continuous +weight=0\\.25 +colour=#44A080 +symbol=Gully Pit[^\r\n]*${_eol} *Paling Fence +linetype=Paling Fence +weight=0\\.25 +colour=#A18863 +symbol=Fence Post[^\r\n]*${_eol} *Plain +linetype=continuous +weight=0\\.25 +colour=#A27B75[^\r\n]*${_eol} *Title Boundary +linetype=Title Boundary +weight=0\\.25 +colour=#796EDA[^\r\n]*${_eol} *Water Isolation Valve +linetype=continuous +weight=0\\.25 +colour=#3986E4 +symbol=Water Isolation Valve[^\r\n]*${_eol} *Water Supply Pipe +linetype=Water Supply Pipe +weight=0\\.25 +colour=#3986E4[^\r\n]*${_eol}")
+    # A ';' in a regex would make two regexes either of which passes the test, so the reduction
+    # warning's own semicolon is written '.' below.
+    add_test(NAME cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE REPLACE \"${_ks_json}\""
+                -c "SURVEY IMPORT \"${_ks_fld}\"" -c "LIST"
+                -c "SELECT 12" -c "PROP" -c "SELECT 15" -c "PROP" -c "SELECT 22" -c "PROP"
+                -c "SELECT NONE" -c "STYLE LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "loaded file=[^\r\n]*katana-standard\\.customisation\\.json\"? name=\"Katana Standard\" definitions_added=184 definitions_replaced=0 codes_added=769 codes_replaced=0 colours_added=28 colours_replaced=0[^\r\n]*${_eol}customisation name=\"Katana Standard\" origin=loaded kept=no definitions=184 codes=245 rules=769 colours=28${_eol}survey file=street_corner\\.fld format=opcode-field-file parser=1\\.2 read=23 skipped=0 warnings=0${_eol}content setups=0 observations=0 points=20 unpositioned=0 features=10 control=0${_eol}declared crs=\"Local grid A\" epsg=none${_eol}.*imported job=job-1 entities=20 layer=survey/points reduction_warnings=2${_eol}.*reduction_warning text=\"No rule for the code\\(s\\): UWQ\\.\"${_eol}reduction_warning text=\"5 point\\(s\\) are in no line \\(no rule for its code and no control code: 1. its code is a point code: 4\\)\\.\"${_eol}coded points=20 matched=19 unmatched_codes=1 layers=9 styles=9${_eol}unmatched_code text=UWQ${_eol}linework lines=5 unplaced=5 layers=0 styles=0${_eol}25 entities${_eol}${_ks_points_regex}${_ks_lines_regex}1 selected${_eol} *12: Condition= \\(text\\) Depth \\(m\\)= \\(text\\) Diameter \\(mm\\)= \\(text\\) Material= \\(text\\) Owner= \\(text\\) code=UWM \\(text\\) [^\r\n]*utility\\.type=water \\(text\\)${_eol}1 selected${_eol} *15: Condition= \\(text\\) Depth \\(m\\)= \\(text\\) Ducts= \\(text\\) Owner= \\(text\\) code=UED \\(text\\) [^\r\n]*utility\\.status=disused \\(text\\) utility\\.type=electricity \\(text\\)${_eol}1 selected${_eol} *22: Plan Reference= \\(text\\) code=CBT \\(text\\) elevations=24\\.1 24\\.35 25\\.02 24\\.88 \\(text\\) string=1 \\(text\\)${_eol}0 selected${_eol}${_ks_styles_regex}1 undone${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # CONTROL WORDS. No field-file reader Katana has carries `ST`, `BC`, `CL`
+    # or `RECT` (the file strings by its own number and opcode 20), so these
+    # reach the linework as a code kept in a point's property - here "fcode",
+    # named by LINEWORK PROPERTY - as in cli.linework_chord_sets_how_finely_a_
+    # curve_is_drawn. Ten points, three strings, worked out by hand:
+    #   KKT2, points 1 to 3 at (10,0), (0,10), (-10,0), coded "KKT2 BC",
+    #       "KKT2", "KKT2 EC": a half circle of radius 10 about the origin. At
+    #       CHORD 0.35 a quarter turn takes 3 chords of 30 degrees (the sagitta
+    #       of a chord of angle a is 10 (1 - cos(a/2)): 0.341 for 30 degrees,
+    #       under 0.35; for two chords of 45 degrees, 0.761, over it), so the
+    #       line has 1 + 3 + 3 = 7 vertices and six chords of 2 * 10 *
+    #       sin(15 degrees) = 5.17638 each, a length of 31.0582854;
+    #   BBW3, points 4 to 6 at (100,0), (110,0), (110,5), the third coded
+    #       "BBW3 RECT": the rectangle with the side from the first to the
+    #       second, 10 long, reaching the third point, 5 from that side: 10 by 5,
+    #       so 4 vertices, closed, 30 round and 50 square;
+    #   CBT4, points 7 to 10 at (0,50), (20,50), (20,80), (0,80), coded
+    #       "CBT4 ST", "CBT4", "CBT4", "CBT4 CL": the 20 by 30 rectangle closed
+    #       by CL, 4 vertices, 100 round and 600 square.
+    # The strings are in name order, so the lines are entities 11, 12 and 13.
+    # The layers are those of the codes: the walls, the lots and the kerbs.
+    set(_ks_controls "")
+    set(_ks_serial 0)
+    foreach(_spec IN ITEMS "10,0|KKT2 BC" "0,10|KKT2" "-10,0|KKT2 EC"
+                           "100,0|BBW3" "110,0|BBW3" "110,5|BBW3 RECT"
+                           "0,50|CBT4 ST" "20,50|CBT4" "20,80|CBT4" "0,80|CBT4 CL")
+        math(EXPR _ks_serial "${_ks_serial} + 1")
+        string(REPLACE "|" ";" _spec "${_spec}")
+        list(GET _spec 0 _at)
+        list(GET _spec 1 _code)
+        list(APPEND _ks_controls
+            -c "POINT ${_at}" -c "SELECT ${_ks_serial}"
+            -c "PROP SET fcode \"${_code}\" text" -c "PROP SET point ${_ks_serial} text")
+    endforeach()
+    add_test(NAME cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE REPLACE \"${_ks_json}\"" ${_ks_controls}
+                -c "SELECT NONE" -c "LINEWORK PROPERTY fcode CHORD 0.35 PREVIEW"
+                -c "LINEWORK PROPERTY fcode CHORD 0.35" -c "LIST")
+    set_tests_properties(cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0 preview=yes${_eol}string name=BBW3 key=BBW\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"?${_eol}string name=CBT4 key=CBT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"?${_eol}string name=KKT2 key=KKT\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"?${_eol}linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0${_eol}string name=BBW3 key=BBW\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"? entity=11${_eol}string name=CBT4 key=CBT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"? entity=12${_eol}string name=KKT2 key=KKT\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"? entity=13${_eol}13 entities${_eol}.*Polyline +layer=buildings/outline/wall +vertices=4 +closed +length=30 +area=50${_eol}[^\r\n]*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=7 +open +length=31[.]05828[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()

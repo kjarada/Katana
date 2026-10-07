@@ -398,6 +398,11 @@ Three things configure it, and none needs Python or a script:
 | `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | make its absence a configure error | `OFF`; `ON` for a release job, to catch the tracked file having been deleted or a path being wrong before a program that draws plain lines ships |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | where the reference customisation is kept in the legacy formats | the git-ignored folder under `docs/` |
 
+Another file in `resources/customisation`, Katana Standard
+(`docs/katana_standard.md`), is tracked beside the built-in and is not compiled
+in: pointing `KATANA_BUILTIN_CUSTOMISATION` at it at configure time would embed it
+instead, which no build has been made with.
+
 The built-in is tracked and the reference folder is not: its files are
 third-party material under their own licence, kept on disk and never committed
 (why the converted file may be, `docs/customisation.md`, "Why the built-in is
