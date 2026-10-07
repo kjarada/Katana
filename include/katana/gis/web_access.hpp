@@ -120,8 +120,9 @@ struct HttpFailure {
 // literally.
 [[nodiscard]] std::string percentEncode(std::string_view text);
 
-// The lower-case hexadecimal SHA-256 of `bytes` (FIPS 180-4). The disk
-// cache names its files with it, so two different requests cannot share a
+// The lower-case hexadecimal SHA-256 of `bytes` (FIPS 180-4); it forwards to
+// core::sha256Hex (core/sha256.hpp), which holds the one implementation. The
+// disk cache names its files with it, so two different requests cannot share a
 // file and a key in a URL never becomes part of a file name.
 [[nodiscard]] std::string sha256Hex(std::string_view bytes);
 

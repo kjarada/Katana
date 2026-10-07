@@ -10,13 +10,15 @@
 //
 // Streaming because the update engine hashes files of tens of megabytes and
 // must not hold them: the installed tree is hashed fresh, file by file, every
-// time a plan is made and again before a swap.
+// time a plan is made and again before a swap. Nothing here copies or holds
+// the input; the object is a 64-byte block and eight words however long the
+// message.
 //
-// STATE OF THIS HEADER: the declaration is final - later tasks code against
-// it - and src/katana_core/sha256.cpp is a stub that the task which owns the
-// move (T2) replaces. Until then update() and finish() throw
-// std::logic_error rather than return a digest of nothing: a hash that is
-// silently wrong would be the one failure this module cannot afford.
+// The implementation, src/katana_core/sha256.cpp, is portable scalar code
+// with no hardware path: SHA-NI or ARM crypto would be one more thing that
+// could disagree with the standard on a machine the tests do not run on, for
+// a speed the update does not need (a file is hashed far faster than it is
+// downloaded).
 
 #include <array>
 #include <cstddef>
