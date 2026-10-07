@@ -1,9 +1,12 @@
 // The customisation compiled into the program, when it is the reference one.
 //
 // The reference customisation is third-party material under its author's own
-// licence and is not in the repository, so a build from a clean checkout has
-// none compiled in and every test here SKIPS: the suite must stay green
-// without it. Where it is compiled in - cad::compiledInCustomisation() holds a
+// licence, tracked as resources/customisation/nsw.customisation.json on the
+// owner's decision (docs/customisation.md, "Why the built-in is in the
+// repository"), so a build from a clean checkout has it compiled in and these
+// tests run. A build whose KATANA_BUILTIN_CUSTOMISATION names no file has none
+// compiled in and every test here SKIPS: the suite must stay green without it.
+// Where it is compiled in - cad::compiledInCustomisation() holds a
 // customisation named "NSW" - these are the figures it must hold.
 //
 // Where the figures come from: not from this program. They were counted by

@@ -3857,7 +3857,7 @@ QString countOf(std::size_t count, const char* one, const char* many)
 
 // What the session starts with (cad/customisation_host.hpp): the
 // customisation the user kept, else the one built into the program, else
-// nothing - a build from a clean checkout has none, and then draws plain
+// nothing - a build with no built-in has none, and then draws plain
 // lines until a customisation is loaded. cad chooses and installs; the window
 // builds the host and says what was installed.
 //

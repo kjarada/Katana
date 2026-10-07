@@ -59,17 +59,19 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/plotting/frame.cpp" PRO
     COMPILE_OPTIONS "--embed-dir=${PROJECT_SOURCE_DIR}/resources/plot_frames")
 # The built-in customisation: one Katana customisation file compiled in with
 # #embed (customisation/builtin_customisation.cpp), as the plot frame is. The
-# difference is that the file is NOT in the repository - it is third-party
-# material, git-ignored, and a clean checkout and every CI build have none - so
-# its absence is the normal case and compiles a program with no built-in rather
-# than failing the build.
+# file is in the repository - third-party material, tracked on the owner's
+# decision of 2026-10-08 (docs/customisation.md, "Why the built-in is in the
+# repository") - so a clean checkout and every CI build have it. Unlike the
+# plot frame's, its absence is still no build error: a path that names no file
+# compiles a program with no built-in, which is how a build is made without it.
 set(KATANA_BUILTIN_CUSTOMISATION
     "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json"
     CACHE FILEPATH "The Katana customisation file compiled into the program; none when it does not exist")
-# For a build that must not ship without one (a release job): its absence is
-# then a configure error and not a program that draws plain lines.
+# For a release job: the file is tracked, so its absence means it was deleted
+# or the path is wrong, and is then a configure error and not a program that
+# draws plain lines.
 option(KATANA_REQUIRE_BUILTIN_CUSTOMISATION
-    "Fail the configure when KATANA_BUILTIN_CUSTOMISATION does not exist" OFF)
+    "Fail the configure when KATANA_BUILTIN_CUSTOMISATION does not exist, to guard a release job against the tracked file being deleted or a wrong path" OFF)
 # WHETHER it is there is asked of the file itself. A glob is no judge of that:
 # the path is a PATTERN to it, so a checkout under "work [2026]" matched
 # nothing though the file was there - no built-in, without a word, and

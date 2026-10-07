@@ -12,9 +12,10 @@
 // otherwise do in its own words and with its own omissions.
 //
 // THE BUILT-IN is a Katana customisation file compiled into the program
-// (CMake's KATANA_BUILTIN_CUSTOMISATION, #embed). The file is not part of the
-// repository, so a build made from a clean checkout has none, and that is a
-// state the program runs in, not a fault.
+// (CMake's KATANA_BUILTIN_CUSTOMISATION, #embed). The file is tracked in the
+// repository (resources/customisation/nsw.customisation.json), so a build made
+// from a clean checkout has it; a build whose path names no file has none, and
+// that is a state the program runs in, not a fault.
 //
 // THE SEAM. The environment variable KATANA_BUILTIN_CUSTOMISATION says what
 // "the built-in" is for one run, whatever was compiled in:

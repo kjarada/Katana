@@ -160,7 +160,7 @@ reopen in a SECOND process and query, so a round trip through the project
 file is tested as a user would make it; `WILL_FAIL` cases show bad input
 fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
 steps and clean up. The survey-code cases write their own small Katana
-customisation file rather than depend on the git-ignored one. The cases that
+customisation file rather than depend on the compiled-in one. The cases that
 pin what a session STARTS with say so on their own command line, through
 `cmake -E env`: `KATANA_BUILTIN_CUSTOMISATION` naming a committed fixture of
 `tests/data/customisation` as the built-in of the run (or `none`), and
@@ -219,8 +219,8 @@ and the one of `tests/data/field_codes/`, which the survey import's tests load;
 script that draws it and a few GIS files. The owner's large real archives are
 kept outside the repository and used for measuring and looking, never
 committed and never needed by a test. A test that reads the git-ignored
-customisation must pass without it (`docs/building.md`, "The built-in
-customisation and the reference folder").
+reference customisation, or the compiled-in one, must pass without it
+(`docs/building.md`, "The built-in customisation and the reference folder").
 
 **The suites that read third-party data** are three: the legacy readers' and
 writers' reference tests and the converter's (`tests/archive12d`), which read
@@ -228,13 +228,15 @@ the reference folder `KATANA_REFERENCE_CUSTOMISATION_DIR` names, and
 `BuiltInCensus.*` and the compiled-in half of `BuiltInRenames.*`
 (`tests/cad/customisation`), which read the customisation compiled in. Each
 skips, saying why, where its data is absent - the reference folder is on the
-owner's machine and in no clone, and no clone has a built-in unless it is given
-the file - and none is ever changed to match what the program gave: the
-census's figures are counted by `tools/customisation_census.py` and
-`tools/reference_census.py`, which use none of the program's code, and no
-tracked file holds a name from the data, only counts. A clone with neither was
-built and run (`-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not
-exist; the cad and app suites): it configures, builds and passes.
+owner's machine and in no clone, and a build has a built-in unless its path
+names no file, the file being tracked - and none is ever changed to match what
+the program gave: the census's figures are counted by
+`tools/customisation_census.py` and `tools/reference_census.py`, which use none
+of the program's code, and no tracked test or document holds a name from the
+data, only counts (the converted file, being the data, holds them). A build
+with neither was built and run on 2026-10-07, when the file was not tracked
+(`-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not exist; the cad
+and app suites): it configures, builds and passes.
 
 **What the programs hold** is proved twice, and each proof is itself proved on
 a fixture, since a check that cannot see a violation passes as quietly as one

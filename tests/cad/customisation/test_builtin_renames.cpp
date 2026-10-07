@@ -6,8 +6,9 @@
 // Two built-ins are held to it. A small fixture handed over as a host hands
 // one over - always, whatever this build compiled in - and the customisation
 // compiled into the program, when there is one; that one is third-party
-// material that is not in the repository, so the half of each test that needs
-// it SKIPS in a build made from a clean checkout.
+// material, tracked as resources/customisation/nsw.customisation.json, so the
+// half of each test that needs it runs in a build made from a clean checkout
+// and SKIPS in a build whose KATANA_BUILTIN_CUSTOMISATION names no file.
 
 #include <gtest/gtest.h>
 

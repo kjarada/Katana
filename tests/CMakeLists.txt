@@ -455,10 +455,11 @@ endif()
 # Every test that runs one of the programs - a `qt_..._headless` check of the
 # window, a `cli.` line through katana_cli - says what customisation the
 # program starts with, so that it is the same test on a machine whose build
-# has a customisation compiled in and on one whose build has none (the
-# owner's has the third-party reference one; a clean checkout and every
-# release build have nothing). A program reads two environment variables
-# where it starts (cad/customisation_host.hpp):
+# has a customisation compiled in and on one whose build has none (a default
+# build has the tracked NSW one, resources/customisation/nsw.customisation.json;
+# a build whose KATANA_BUILTIN_CUSTOMISATION names no file has nothing, and the
+# program's tests must not depend on which). A program reads two environment
+# variables where it starts (cad/customisation_host.hpp):
 #
 #   KATANA_BUILTIN_CUSTOMISATION   the seam: `none` for no built-in, or a
 #                                  file that IS the built-in for this run

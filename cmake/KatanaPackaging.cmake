@@ -68,11 +68,13 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
 # files at run time.
 #
 # Its SOURCES are a different matter and must never be installed. The file it
-# is compiled from (resources/customisation) and the reference files it was
-# converted from (under docs/) are third-party material kept untracked on the
-# owner's machine: they are inputs to the build, not part of the product, and a
-# bundle is something that gets handed to other people. No install rule here
-# takes anything from resources/ or docs/; the test
+# is compiled from (resources/customisation) is tracked, on the owner's
+# decision of 2026-10-08, and the reference files it was converted from (under
+# docs/) are third-party material kept untracked on the owner's machine: both
+# are inputs to the build, not part of the product, and a bundle is something
+# that gets handed to other people. The file is already in the executable; a
+# second copy beside it would add nothing but a file made from another author's
+# libraries. No install rule here takes anything from resources/ or docs/; the test
 # packaging_installs_only_present_first_party_files
 # (tools/check_install_rules.cmake) fails if one ever does.
 #
