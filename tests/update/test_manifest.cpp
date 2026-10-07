@@ -7,6 +7,9 @@
 //   - every missing or mistyped member; schema other than 1; unsorted or duplicate files;
 //     a bad hash
 //   - unknown members ignored
+//   - where each file's bytes are: csize 0 and 1 refused (the shortest deflate stream is two
+//     bytes), offset + csize == payload.size accepted and one more refused, an offset near
+//     2^64 refused without wrapping, a size above kMaxInstallBytes refused
 //
 // Skipped, not passed: the file is in the suite so that task T4 only fills it, and
 // a skipped case is visible in every run until it does.

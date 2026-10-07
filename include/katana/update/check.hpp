@@ -17,6 +17,9 @@
 // "placeholder_keys", "partial_downloads", "cancelled", "disabled_build",
 // "development_tree", "root_not_writable", "headless", "skipped",
 // "blocked_before".
+//
+// Before the answer is known the engine asks `checkIsDue` (state.hpp) whether an
+// AUTOMATIC check is due; a typed `UPDATE CHECK` asks the feed regardless.
 
 #include <cstdint>
 #include <optional>
@@ -51,6 +54,10 @@ struct CheckResult {
     std::string notesUrl;
     std::string reason;
     std::optional<Manifest> manifest;    // verified; set for Available and Current
+    // The route the answer came by (feed.hpp, "THE PRIVATE-REPOSITORY ROUTE"). The
+    // caller copies it into FeedConfig::route before stage(), so the payload is fetched
+    // the same way the manifest was.
+    FeedRoute route = FeedRoute::Download;
 };
 
 // `install` says what is installed and which target to ask for; `trust` is

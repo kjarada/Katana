@@ -19,10 +19,12 @@
 //   U/run-<tx>/       the preflighted helper copy (and its self-test output)
 //   U/healthy-<tx>    the marker the new version writes after its first idle turn
 //   U/cleanup.list    leftovers a locked file kept from being deleted; the next start removes them
+//                     (appendCleanup, processCleanupList below)
 //
 // Headless runs read and write no per-user place (docs/headless.md): the
 // callers that are headless do not call these.
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -30,6 +32,7 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/update/fsops.hpp"
 
 namespace katana::update {
 
@@ -41,7 +44,10 @@ struct UpdateState {
 };
 
 struct LastResult {
-    std::string status;  // "committed" | "rolled_back" | "blocked" | "refused"
+    // "committed" | "rolled_back" | "blocked" | "refused" | "rollback_incomplete"
+    // (toString(ApplyOutcome), apply.hpp). The last is the half-swapped tree: the next start
+    // names `katana_updater --recover <R>` and runs it.
+    std::string status;
     std::string reason;  // machine-readable token
     std::string holder;  // "katana_mcp.exe (4412)" for blocked; else empty
     std::string version; // the version the apply was for
@@ -71,5 +77,44 @@ readLastResult(const std::filesystem::path& stateDir);
 [[nodiscard]] core::Status writeLastResult(const std::filesystem::path& stateDir,
                                            const LastResult& result);
 [[nodiscard]] core::Status clearLastResult(const std::filesystem::path& stateDir);
+
+// ---- the automatic check's clock -----------------------------------------------------------
+
+// An automatic check is due every 24 hours plus a jitter of 0 to 2 hours, so that a
+// release does not meet every copy at the same minute. The jitter is drawn ONCE per
+// process by the caller (uniformly in [0, kCheckJitterMax]) and passed in, which keeps
+// checkIsDue a function of its arguments.
+inline constexpr std::chrono::seconds kCheckInterval{24 * 3600};
+inline constexpr std::chrono::seconds kCheckJitterMax{2 * 3600};
+
+// Whether the window's automatic check is due at `nowEpoch` (UTC seconds):
+//   - never when the person turned the check off (state.automatic == false);
+//   - always when there was none yet (lastCheckEpoch <= 0), and when the last one lies in
+//     the FUTURE (the clock was set back: a stored time that cannot be right must not
+//     silence the check until the real time catches up);
+//   - otherwise when nowEpoch - lastCheckEpoch >= kCheckInterval + jitter, `jitter` being
+//     clamped to [0, kCheckJitterMax].
+// A typed `UPDATE CHECK` does not ask: it checks. FINISHED, with tests, in
+// src/katana_update/contract.cpp: task T6 keeps it.
+[[nodiscard]] bool checkIsDue(const UpdateState& state, std::int64_t nowEpoch,
+                              std::chrono::seconds jitter);
+
+// ---- U/cleanup.list --------------------------------------------------------------------------
+
+// Appends `leftover` (an absolute path) to U/cleanup.list, one path per line, UTF-8: what a
+// held lock kept the helper from deleting (the helper copy it runs from, a locked file under
+// R/.update/<tx>). Written through `fs` so the fault loops see it.
+[[nodiscard]] core::Status appendCleanup(const std::filesystem::path& stateDir,
+                                         const std::filesystem::path& leftover, FsOps& fs);
+
+// Deletes what the list names and rewrites it with what could still not be deleted (a file
+// still locked stays listed). Called first thing at the next start of the window, and by the
+// helper after a healthy update. U is user-writable, so the list is NOT trusted: a line is
+// acted on only when its path, resolved (FsOps::resolve), lies strictly under `stateDir`, or
+// under <root>/.update, and no parent of it between that folder and the path is a reparse
+// point; every other line is dropped without being touched. `root` may be empty (no install
+// known: only `stateDir` is then a place the list may name). OK when the list is absent.
+[[nodiscard]] core::Status processCleanupList(const std::filesystem::path& stateDir,
+                                              const std::filesystem::path& root, FsOps& fs);
 
 } // namespace katana::update

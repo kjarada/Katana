@@ -6,6 +6,10 @@
 //   - a journal in each of Planned, Committing and RollingBack is rolled back; HEALTHY and
 //     ROLLED_BACK are left alone
 //   - a live lock holder is waited for and not touched; nothing to do costs one directory listing
+//   - a forged journal (a path that fails checkJournalPath, a folder name that fails
+//     isValidTransactionId) makes recovery do less - the record is skipped and reported - and
+//     touches nothing outside bin, share, etc and lib of the root
+//   - a recovery that cannot finish returns an Error naming `katana_updater --recover <R>`
 //
 // Skipped, not passed: the file is in the suite so that task T7 only fills it, and
 // a skipped case is visible in every run until it does.

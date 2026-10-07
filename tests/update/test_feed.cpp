@@ -3,8 +3,11 @@
 // this program (an RFC, `openssl`, Python's zipfile, a hand calculation) and never read
 // off the code under test (CLAUDE.md, section 4):
 //
-//   - the three URLs for GitHub and for a feed base, the fixed names, the tag in the payload URL
 //   - the defaults (kjarada/Katana, no feed); both empty is no auto-update
+//   - parseReleaseAssets: assets[] with name, id and size; an absent assets[] is empty; an asset
+//     without a name or an id, and JSON that is not an object, are ParseFailure
+//   - (the addresses themselves, the Api route's included, are finished and tested in
+//     test_contract.cpp; keep them there)
 //
 // Skipped, not passed: the file is in the suite so that task T8 only fills it, and
 // a skipped case is visible in every run until it does.
@@ -13,7 +16,7 @@
 
 #include "katana/update/feed.hpp"
 
-TEST(Feed, TheFeedAddressesAreTestedByTaskT8)
+TEST(Feed, TheFeedDefaultsAndTheReleaseListAreTestedByTaskT8)
 {
     GTEST_SKIP() << "placeholder: task T8 replaces this file";
 }

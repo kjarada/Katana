@@ -88,11 +88,20 @@ struct Manifest {
 };
 
 // Parses and validates a manifest: well-formed JSON of the shape above; schema
-// 1; every file passing checkManifestPaths; sizes, offsets and hashes of the
-// right form (64 lower-case hex); the version parsing; payload present unless
-// notifyOnly; files sorted and unique. ParseFailure for malformed JSON or a
-// missing or mistyped member; InvalidArgument for a value that breaks a rule.
-// The context names the member.
+// 1; every file passing checkManifestPaths; hashes of the right form (64 lower-case
+// hex); the version parsing; payload present unless notifyOnly; files sorted and
+// unique. And, for every file, where its bytes are in the payload, so that nothing
+// that is signed can send a request outside the zip or make a range the length of
+// the whole disk:
+//   - csize >= 2: a deflate stream is never empty, even for an empty file (the
+//     shortest, an empty final block, is the two bytes 03 00; Python's zipfile
+//     writes exactly that, measured);
+//   - offset + csize <= payload.size, computed so that it cannot wrap (offset <=
+//     payload.size and csize <= payload.size - offset); a notify-only manifest has
+//     no files, so there is nothing to place;
+//   - size <= kMaxInstallBytes for each file (the sum is checkManifestPaths's).
+// ParseFailure for malformed JSON or a missing or mistyped member; InvalidArgument
+// for a value that breaks a rule. The context names the member.
 [[nodiscard]] core::Result<Manifest> parseManifest(std::string_view json);
 
 } // namespace katana::update

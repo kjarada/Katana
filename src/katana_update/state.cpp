@@ -1,7 +1,9 @@
 // STUB. Task T6 writes the install records (install.hpp) and the per-user state
 // (state.hpp): readInstall, installRootOfRunningProgram, the path helpers,
-// state.json and last.json. They share this file because they are all small
-// JSON records read and written the same way.
+// state.json and last.json, and the cleanup list. They share this file because they are
+// all small JSON or text records read and written the same way. Not here, because already
+// finished and tested (contract.cpp): installRootOfExecutable and checkIsDue - T6 keeps them
+// and writes installRootOfRunningProgram (the executable's path, then that function).
 
 #include "katana/update/install.hpp"
 #include "katana/update/state.hpp"
@@ -82,6 +84,17 @@ core::Status writeLastResult(const std::filesystem::path&, const LastResult&)
 core::Status clearLastResult(const std::filesystem::path&)
 {
     return detail::notImplemented("clearLastResult", "T6");
+}
+
+core::Status appendCleanup(const std::filesystem::path&, const std::filesystem::path&, FsOps&)
+{
+    return detail::notImplemented("appendCleanup", "T6");
+}
+
+core::Status processCleanupList(const std::filesystem::path&, const std::filesystem::path&,
+                                FsOps&)
+{
+    return detail::notImplemented("processCleanupList", "T6");
 }
 
 } // namespace katana::update

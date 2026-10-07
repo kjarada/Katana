@@ -16,6 +16,11 @@ core::Status checkManifestPaths(std::span<const std::string>, std::span<const st
     return detail::notImplemented("checkManifestPaths", "T4");
 }
 
+core::Status checkJournalPath(std::string_view)
+{
+    return detail::notImplemented("checkJournalPath", "T4");
+}
+
 bool isReservedName(std::string_view)
 {
     detail::notYet("isReservedName", "T4");

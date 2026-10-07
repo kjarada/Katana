@@ -5,7 +5,7 @@
 //
 //   - verifyManifest in the order trust.hpp lists; the spare key verifies; an unknown key id
 //   - a placeholder Trust refuses to verify; wrong product, target and channel
-//   - isNewerThan: a higher version, the same version with a higher sequence, neither
+//   - (isNewerThan is finished and tested in test_contract.cpp; verifyManifest does not call it)
 //
 // Skipped, not passed: the file is in the suite so that task T5 only fills it, and
 // a skipped case is visible in every run until it does.

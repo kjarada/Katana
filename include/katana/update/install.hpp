@@ -16,8 +16,13 @@
 //   R/share/katana/installed.json            written by the helper at commit:
 //        {"schema":1,"product":"katana","version":"0.3.0","sequence":N,"tag":"v0.3.0",
 //         "target":"win64"}
-//        Absent on a fresh install: the installed pair is then
-//        (programVersion(), sequence 0).
+//        Absent on a fresh install: the installed version is then programVersion(),
+//        the sequence is 0 and `hasInstalledRecord` is false. A fresh install is
+//        NOT offered the release it came from: isNewerThan (trust.hpp) ignores the
+//        sequence while there is no record, because the zip carries no sequence to
+//        compare with the manifest's (one is written when the release is built, the
+//        other when its manifest is). Only a record the helper wrote says "this is
+//        the build with sequence N".
 //   R/share/katana/installed.manifest.json   the signed manifest of the
 //   R/share/katana/installed.manifest.json.sig   installed version, kept so
 //        that a later update removes only files that version put there.
@@ -28,6 +33,18 @@
 //
 // The names installed*.json, install.json and the folder .update are reserved
 // (paths.hpp): a manifest can never carry them.
+//
+// WHERE R IS, by platform:
+//   Windows, Linux   R is the folder that holds bin/ and share/: the programs are
+//                    in R/bin, the records in R/share/katana.
+//   macOS            the bundle is Katana.app; its programs are in Contents/MacOS and
+//                    everything that is not code - including share/katana/install.json,
+//                    see KATANA_INSTALL_DATADIR in cmake/KatanaPackaging.cmake - in
+//                    Contents/Resources. R is Katana.app/Contents/Resources: it holds
+//                    share/ but not bin/. That is enough, because the macOS manifest is
+//                    notify-only (manifest.hpp): R is read for install.json, which says
+//                    what to ask the feed for, and nothing is ever applied there.
+// installRootOfExecutable below is the one function that knows both layouts.
 
 #include <cstdint>
 #include <filesystem>
@@ -55,6 +72,9 @@ struct Install {
     std::string product = "katana";
     Version version;             // installed.json's, else programVersion()
     std::uint64_t sequence = 0;  // installed.json's, else 0
+    // installed.json was present: `version` and `sequence` are what the helper recorded.
+    // False on a fresh install, where `sequence` is a placeholder (see above and isNewerThan).
+    bool hasInstalledRecord = false;
     bool hasInstalledManifest = false;
 };
 
@@ -69,8 +89,22 @@ struct Install {
 [[nodiscard]] core::Result<Install> readInstall(const std::filesystem::path& root,
                                                 const RegistryOps& registry);
 
-// The root of the running program: the parent of the directory that holds its
-// executable, when that has bin/ beside share/. NotFound otherwise.
+// The install root R for a program whose executable is at `executable` (an absolute
+// path, as the operating system gives it). Looks at the disk, never writes:
+//   - the executable's folder is named bin (any case) and the folder above it has a
+//     directory share: R is the folder above (Windows, Linux, and a build tree, which
+//     then has no install.json and so reads as Development);
+//   - or the folder is Contents/MacOS of a bundle whose Contents/Resources has a
+//     directory share: R is Contents/Resources (macOS, see above);
+//   - otherwise NotFound.
+// Matching of the names bin, MacOS, Contents and Resources ignores ASCII case, because
+// a path typed or stored in another case still names the same folder on the file
+// systems Windows and macOS use.
+[[nodiscard]] core::Result<std::filesystem::path>
+installRootOfExecutable(const std::filesystem::path& executable);
+
+// installRootOfExecutable of the running program's own executable path
+// (GetModuleFileNameW; /proc/self/exe; _NSGetExecutablePath on macOS).
 [[nodiscard]] core::Result<std::filesystem::path> installRootOfRunningProgram();
 
 } // namespace katana::update

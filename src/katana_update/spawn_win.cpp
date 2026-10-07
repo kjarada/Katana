@@ -3,6 +3,13 @@
 // shell; run() waits with a timeout and merges the child's output;
 // startDetached() leaves the child outside this process's job and console.
 // CMake compiles this file on Windows only.
+//
+// CREATE_NO_WINDOW, in BOTH run() and startDetached(): katana_updater is a console program,
+// and started from the window (a GUI program, no console of its own) Windows would open a
+// black console for the length of the swap - and again for the preflight's --selftest. Task T9
+// writes the helper and relies on this, but the file is T7's: T7 puts the flag in. The relaunch
+// of katana.exe, a GUI program, needs no flag; DETACHED_PROCESS and CREATE_BREAKAWAY_FROM_JOB
+// (when the job allows it) are what let the helper outlive the window.
 
 #include "katana/update/process.hpp"
 

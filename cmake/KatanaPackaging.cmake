@@ -65,6 +65,12 @@ endforeach()
 # Not on macOS, where updating is check-and-notify only (a file edited inside
 # Katana.app breaks its seal): a helper that could not be used would only be one
 # more thing signed and notarised.
+#
+# Linux: cmake/KatanaDeployUnix.cmake.in names the programs it gives an RPATH and scans for
+# libraries (katana, katana_cli, katana_mcp, at two places) and does not name katana_updater,
+# so until task T18 adds it there the Linux copy installed here is the stub, with no RPATH. A
+# Linux helper cannot be static as the Windows one is (glibc), so it will need $ORIGIN/../lib
+# and, since it runs from a copy in a state folder, a way to find lib/ from there.
 if(TARGET katana_updater AND NOT APPLE)
     install(TARGETS katana_updater RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
 endif()

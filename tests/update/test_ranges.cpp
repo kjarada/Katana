@@ -5,7 +5,8 @@
 //
 //   - adjacent members merge; a gap of exactly the limit merges and one byte more does not
 //   - no range exceeds the cap; a member over the cap is a range of its own
-//   - overlap, zero length, unsorted input; every member is in exactly one range
+//   - overlap, unsorted input; every member with length > 0 is in exactly one range, and a
+//     member of length 0 is dropped and in none (the contract says both)
 //
 // Skipped, not passed: the file is in the suite so that task T6 only fills it, and
 // a skipped case is visible in every run until it does.

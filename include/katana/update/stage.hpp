@@ -12,6 +12,21 @@
 // ("staged_hash"); nothing unverified is ever left in the folder. Needs
 // plan.requiredFreeBytes free on the stage volume, checked first.
 //
+// WHAT stage() LEAVES BESIDE THE FILES. Last of all - after every member is staged and
+// verified, so that their presence means "complete" - it writes the manifest it was given
+// and its signature into the stage folder, through a temporary name and a rename:
+//
+//   <stageDir>/manifest.json        the exact signed bytes (Manifest::signedJson)
+//   <stageDir>/manifest.json.sig    the signature line (Manifest::signatureLine)
+//
+// (kStagedManifestName, kStagedSignatureName: top-level names that no manifest path can
+// have, because a path starts with bin, share, etc or lib - paths.hpp). The helper reads
+// them to know WHAT it is applying and verifies them again with its own keys, not
+// trusting that the engine did (apply.hpp, step 1); `UPDATE STATUS staged=` reads them
+// back through verifyManifest to name the staged version. A stage folder without both
+// is not a ready stage: it is resumed (stage() skips what is already verified), never
+// applied.
+//
 // preflight(): copies the helper (the staged one when its manifest `applier`
 // is newer than the installed helper speaks, else R/bin/katana_updater) into
 // <U>/run-<tx>/ and runs `--selftest` there with the Launcher. The copy is
@@ -22,6 +37,7 @@
 #include <filesystem>
 #include <stop_token>
 #include <string>
+#include <string_view>
 
 #include "katana/core/error.hpp"
 #include "katana/update/apply.hpp"
@@ -33,7 +49,22 @@
 
 namespace katana::update {
 
-// Fetches and stages every changed file of `plan` into `stageDir`.
+inline constexpr std::string_view kStagedManifestName = "manifest.json";
+inline constexpr std::string_view kStagedSignatureName = "manifest.json.sig";
+
+[[nodiscard]] inline std::filesystem::path
+stagedManifestPath(const std::filesystem::path& stageDir)
+{
+    return stageDir / kStagedManifestName;
+}
+[[nodiscard]] inline std::filesystem::path
+stagedSignaturePath(const std::filesystem::path& stageDir)
+{
+    return stageDir / kStagedSignatureName;
+}
+
+// Fetches and stages every changed file of `plan` into `stageDir`, then writes the staged
+// manifest and signature (see above).
 // InvalidState "cancelled"; the transport's errors; InvalidArgument for a
 // member that fails its hash or its size; FileExportFailure when the disk
 // refuses. Progress is bytes of the compressed payload fetched over the total

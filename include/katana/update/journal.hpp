@@ -39,6 +39,15 @@
 //
 // Paths are root-relative with '/', as in the manifest.
 //
+// THE JOURNAL IS NOT AUTHENTICATED. It sits in R/.update, which a process running as the
+// same user can write, and its crc detects a torn write, not a forged line. So what rollback
+// and recovery READ from it is never trusted as a place to act on: every path of an ADD,
+// REPLACE, REMOVE or MKDIR record is checked with checkJournalPath (paths.hpp: the manifest
+// rules, plus the helper's own three records) before any file is touched, and a record that
+// fails is skipped and reported, not followed; the transaction id in the folder name is
+// checked with isValidTransactionId (apply.hpp). A forged journal can therefore at worst
+// make rollback do less, never reach outside R's bin, share, etc and lib.
+//
 // Rollback does NOT replay the journal backwards. It decides from the disk
 // (apply.hpp), so it is idempotent after any crash, including a crash inside
 // itself; the journal says which transaction state to resume (state) and

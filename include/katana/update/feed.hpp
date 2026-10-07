@@ -22,6 +22,29 @@
 // of the owner's own host replaces the first part: <base>/<fixed name>, and
 // <base>/<payload.name> for the payload; it must honour `Range`.
 //
+// THE PRIVATE-REPOSITORY ROUTE (FeedRoute::Api), for a person who holds a read-only
+// token while the repository is private. A github.com release URL does not take a
+// token and answers an anonymous read of a private repository with 404, so the only
+// door is the REST API, and the token goes there and nowhere else:
+//
+//   GET https://api.github.com/repos/<repo>/releases/latest            (releaseLookupUrl)
+//   GET https://api.github.com/repos/<repo>/releases/tags/<tag>        (releaseByTagUrl)
+//        Accept: application/vnd.github+json. The body is JSON; its assets[] give each
+//        asset's name, numeric id and size (parseReleaseAssets).
+//   GET https://api.github.com/repos/<repo>/releases/assets/<id>       (assetApiUrl)
+//        Accept: application/octet-stream. The API answers 302 to the storage host;
+//        the transport follows it, re-sends `Range` and drops `Authorization` there.
+//
+// check() starts on the Download route. Only when the signature answers NotFound, the
+// config has a token and no feedBase, it retries ONCE on the Api route (releases/latest,
+// then the two assets by id) and reports the route that worked in CheckResult::route;
+// the caller copies it to FeedConfig::route for stage(). stage() on the Api route finds
+// the payload's id through releaseByTagUrl(manifest.tag) - the release that is `latest`
+// may have moved on since the check. The Api route costs REST quota (60 an hour
+// anonymously, 5000 with a token), which is why it is the fallback and not the default.
+// Not measured against real GitHub (redirect headers, Range through the 302): the first
+// release's rehearsal does that (docs/update.md, "To verify on first release").
+//
 // Build-time defaults, set at configure (src/katana_update/CMakeLists.txt):
 //   KATANA_UPDATE_REPO   "kjarada/Katana"
 //   KATANA_UPDATE_FEED   ""  (empty: GitHub, from the repo; set: that base URL)
@@ -32,11 +55,19 @@
 #include <functional>
 #include <stop_token>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "katana/core/error.hpp"
 #include "katana/update/manifest.hpp"
 
 namespace katana::update {
+
+// Which door the engine is using; see "THE PRIVATE-REPOSITORY ROUTE".
+enum class FeedRoute {
+    Download, // github.com/<repo>/releases/... or the owner's feedBase: no token is ever sent
+    Api,      // api.github.com: needs a token; asset ids from the release lookup
+};
 
 struct FeedConfig {
     std::string repo;        // "owner/name"
@@ -45,15 +76,54 @@ struct FeedConfig {
     std::string target;      // "win64" ... (from install.json)
     std::string userAgent;   // "Katana/<version> (<target>)": the only thing a check sends
     std::string token;       // optional read-only token; see credential.hpp. Empty: none
+    FeedRoute route = FeedRoute::Download; // check() sets it; stage() reads it
 };
 
 // The configure-time defaults, with `target` and the user agent filled in.
 [[nodiscard]] FeedConfig defaultFeedConfig(const std::string& target);
 
-// The three URLs above.
+// The three Download-route URLs above, whatever `route` says. payloadUrl is empty
+// for a manifest without a payload (notify-only). Names taken from the manifest
+// (the tag, the payload name) are percent-encoded, every byte outside RFC 3986's
+// unreserved set (A-Z a-z 0-9 - . _ ~), so a signed value cannot add a path segment
+// or a query.
 [[nodiscard]] std::string manifestUrl(const FeedConfig& feed);
 [[nodiscard]] std::string signatureUrl(const FeedConfig& feed);
 [[nodiscard]] std::string payloadUrl(const FeedConfig& feed, const Manifest& manifest);
+
+// The fixed asset names of one target: "Katana-update-<target>.json" and the same
+// with ".sig". What the Api route looks for among a release's assets.
+[[nodiscard]] std::string manifestAssetName(const std::string& target);
+[[nodiscard]] std::string signatureAssetName(const std::string& target);
+
+// The Api-route URLs (the private-repository route). They name api.github.com
+// whatever `feedBase` says: the route is only taken for GitHub.
+[[nodiscard]] std::string releaseLookupUrl(const FeedConfig& feed);
+[[nodiscard]] std::string releaseByTagUrl(const FeedConfig& feed, std::string_view tag);
+[[nodiscard]] std::string assetApiUrl(const FeedConfig& feed, std::uint64_t assetId);
+
+// One asset of a release, as the API lists it.
+struct ReleaseAsset {
+    std::string name;
+    std::uint64_t id = 0;
+    std::uint64_t size = 0;
+};
+
+// The assets[] of a release's JSON (releaseLookupUrl / releaseByTagUrl). The JSON is
+// NOT signed, so nothing in it is believed beyond locating an asset: the bytes fetched
+// by id are verified like any others. ParseFailure when it is not a release object or
+// an asset lacks a name or an id; an absent assets[] is an empty list.
+[[nodiscard]] core::Result<std::vector<ReleaseAsset>> parseReleaseAssets(std::string_view json);
+
+// What may be fetched before anything is verified, and so must be bounded by the
+// engine and not by the server. A Fetch is never given maxBytes 0 (it answers
+// InvalidArgument if it is): check() passes kMaxSignatureBytes for the signature,
+// kMaxManifestBytes for the manifest and kMaxReleaseJsonBytes for a release lookup.
+// kMaxManifestBytes holds kMaxFiles (paths.hpp) entries of about 400 bytes with room
+// to spare; the signature line is `ed25519 <16> <88 base64>` plus a line break (115).
+inline constexpr std::uint64_t kMaxSignatureBytes = 1024;
+inline constexpr std::uint64_t kMaxManifestBytes = 8ull * 1024 * 1024;
+inline constexpr std::uint64_t kMaxReleaseJsonBytes = 2ull * 1024 * 1024;
 
 // One request. `Fetch` returns the body or an error.
 struct FetchRequest {
@@ -67,7 +137,13 @@ struct FetchRequest {
     // The most bytes to accept; the transfer is abandoned the moment it is
     // exceeded. For a range this equals rangeLength, so a server that ignores
     // `Range` and starts the whole payload cannot flood the disk or memory.
+    // NEVER 0: the whole-body requests before verification use the kMax...Bytes
+    // constants above. A Fetch given 0 answers InvalidArgument.
     std::uint64_t maxBytes = 0;
+    // The Accept header; empty: the transport's default. The Api route sets
+    // "application/vnd.github+json" for a release lookup and
+    // "application/octet-stream" for an asset.
+    std::string accept;
     // Added as `Authorization: Bearer <token>` ONLY when the transport is
     // about to talk https to exactly api.github.com, and NEVER on a redirect
     // hop: the transport follows redirects itself and drops the header there.

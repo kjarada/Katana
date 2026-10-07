@@ -16,7 +16,10 @@
 //               recovery run) or starts it detached (the helper copy that
 //               outlives the window, the relaunch of Katana). Real
 //               implementations: src/katana_update/spawn_win.cpp and
-//               spawn_posix.cpp.
+//               spawn_posix.cpp. On Windows the child is started with
+//               CREATE_NO_WINDOW, for the helper is a console program and its
+//               parent is a GUI program: without the flag a black console opens
+//               for the length of every swap and every self-test.
 //
 // A program's file path is a std::filesystem::path; arguments are UTF-8 and
 // reach the child as given (Windows: quoted by the CreateProcessW rules; never
@@ -27,6 +30,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/core/error.hpp"
@@ -82,6 +86,26 @@ class Launcher {
     // started it). `timeout` is ignored.
     [[nodiscard]] virtual core::Status startDetached(const SpawnRequest& request) = 0;
 };
+
+// The program's own command line as UTF-8, argv[0] first. EVERY main() of the update
+// system (katana_updater, katana_update_e2e, katana_updater_test) reads its arguments
+// through this and not through argv: on Windows argv holds the ANSI code page's version of
+// the command line, so a profile folder with an accented letter in its name reaches the
+// helper as '?' or mojibake, and the helper is exactly the program started with such paths
+// (--root, --stage, --state). Windows: CommandLineToArgvW(GetCommandLineW()) converted to
+// UTF-8 (argc and argv are ignored); elsewhere argv as given, which is UTF-8 or raw bytes
+// by the file system's own rule. A path is made of one with core::pathFromUtf8
+// (core/path_text.hpp), never by handing the string to std::filesystem::path, which on
+// Windows throws at the first byte that is not UTF-8. Finished, with tests:
+// src/katana_update/arguments.cpp.
+[[nodiscard]] std::vector<std::string> utf8Arguments(int argc, char** argv);
+
+#ifdef _WIN32
+// UTF-16 to UTF-8 (the conversion above, exposed so that it can be tested with text no
+// command line is needed to carry). A well-formed surrogate pair becomes one 4-byte
+// sequence; an unpaired surrogate becomes U+FFFD (EF BF BD).
+[[nodiscard]] std::string utf8FromWide(std::wstring_view wide);
+#endif
 
 [[nodiscard]] std::unique_ptr<ProcessOps> makeSystemProcessOps();
 [[nodiscard]] std::unique_ptr<Launcher> makeSystemLauncher();

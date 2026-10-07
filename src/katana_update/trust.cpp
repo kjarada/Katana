@@ -1,5 +1,5 @@
-// STUB. Task T5 writes productionTrust(), verifyManifest() and isNewerThan()
-// against include/katana/update/trust.hpp.
+// STUB. Task T5 writes productionTrust() and verifyManifest() against
+// include/katana/update/trust.hpp. (isNewerThan is finished: contract.cpp.)
 //
 // The pinned keys reach THIS FILE ALONE as compile definitions
 // (src/katana_update/CMakeLists.txt, from cmake/KatanaUpdateKeys.cmake), so a
@@ -45,11 +45,6 @@ core::Result<Manifest> verifyManifest(std::string_view, std::string_view, const 
                                       const Install&)
 {
     return detail::notImplemented("verifyManifest", "T5");
-}
-
-bool isNewerThan(const Manifest&, const Install&)
-{
-    detail::notYet("isNewerThan", "T5");
 }
 
 } // namespace katana::update

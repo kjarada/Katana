@@ -45,8 +45,10 @@ struct MergedRange {
 // Sorts by offset, then merges neighbours whose gap is at most `maxGap`, never
 // letting a range exceed `maxLength` (a single member larger than `maxLength`
 // is a range of its own, unsplit). Overlapping members (a malformed manifest)
-// are merged, not duplicated. A member with length 0 is dropped. Total: every
-// member is in exactly one range.
+// are merged, not duplicated. A member with length 0 is DROPPED - it has no bytes to
+// ask for, and parseManifest (csize >= 2) never lets one through. Total over what
+// remains: every member with length > 0 is in exactly one range, and a dropped member
+// is in none.
 [[nodiscard]] std::vector<MergedRange> mergeRanges(std::vector<RangeMember> members,
                                                    std::uint64_t maxGap = kRangeMergeGap,
                                                    std::uint64_t maxLength = kRangeMaxLength);

@@ -7,6 +7,16 @@
 //     development tree
 //   - state.json and last.json round trips; absent, malformed and newer-schema files
 //   - the state directory by platform and by KATANA_UPDATE_STATE_DIR
+//   - Install::hasInstalledRecord is true exactly when installed.json is present, and a fresh
+//     install then reads as (programVersion(), 0); last.json round trip with status
+//     "rollback_incomplete"
+//   - installRootOfRunningProgram: the running executable's path through
+//     installRootOfExecutable (already finished and tested, contract.cpp); the whole state
+//     directory contract
+//   - appendCleanup and processCleanupList: the list is NOT trusted - a line outside the state
+//     directory and <root>/.update is dropped untouched, one that resolves outside through a
+//     reparse point or a symlink is not followed, a locked file stays listed, an absent list
+//     is OK
 //
 // Skipped, not passed: the file is in the suite so that task T6 only fills it, and
 // a skipped case is visible in every run until it does.

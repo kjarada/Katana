@@ -12,6 +12,10 @@ katana_add_test_suite(update
         # What the skeleton promises (T1): the version reaches the library, the test keys,
         # the seams a fake can implement.
         test_skeleton.cpp
+        # The pure functions of the contract the skeleton finished itself (src/katana_update/
+        # contract.cpp, feed.cpp's addresses, arguments.cpp), and the constants of the headers.
+        # No later task replaces this file.
+        test_contract.cpp
         # The test trust root (RFC 8032 vectors 1 and 2). In three executables, never installed.
         test_key.cpp
         # T4: versions, the manifest, the path rules.
@@ -163,6 +167,99 @@ if(WIN32 AND CMAKE_OBJDUMP)
         endif()
     endforeach()
 endif()
+
+# ---- the link, proved (tests/update/link_probe.cpp) --------------------------------------
+#
+# While katana_updater is a stub it uses neither OpenSSL nor zlib, so the import check above
+# passes on ANY link line. This executable uses what the engine will - Ed25519 through EVP,
+# raw inflate, crc32 - through the same third-party target and the same link options as the
+# helper, so the import check on IT is a check of the link line (a static OpenSSL and zlib,
+# nothing of the toolchain's DLLs), and running it is a check that the static libraries work.
+# Never installed.
+add_executable(katana_update_link_probe link_probe.cpp)
+katana_target_defaults(katana_update_link_probe)
+target_link_libraries(katana_update_link_probe PRIVATE katana_update_third_party)
+if(_katana_updater_link_options)
+    target_link_options(katana_update_link_probe PRIVATE ${_katana_updater_link_options})
+endif()
+set_target_properties(katana_update_link_probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
+add_test(NAME update_link_probe_verifies_ed25519_inflates_and_checksums
+    COMMAND katana_update_link_probe)
+if(WIN32 AND CMAKE_OBJDUMP)
+    add_test(NAME katana_update_link_probe_imports_only_os_dlls
+        COMMAND ${CMAKE_COMMAND} "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                "-DPROGRAM=$<TARGET_FILE:katana_update_link_probe>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
+    set_tests_properties(katana_update_link_probe_imports_only_os_dlls PROPERTIES
+        PASS_REGULAR_EXPRESSION "all of them the operating system's"
+        FAIL_REGULAR_EXPRESSION "CMake Error")
+endif()
+
+# ---- no shipped program carries a test key (tests/update/check_no_test_keys.cmake) ---------
+#
+# trust.hpp promises that the trust root is a parameter and only the test executables pass a
+# test key. This looks at the bytes: the four programs that ship must contain none of the
+# RFC 8032 keys of test_key.hpp, and the two test executables that DO link them are the
+# controls, which fail the check unless it sees the keys - so "absent" is not a scan that
+# cannot see. The key list is read from test_key.hpp, so there is one.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/test_key.hpp" _katana_test_key_header)
+string(REGEX MATCHALL "\"[0-9a-f]+\"" _katana_quoted_hex "${_katana_test_key_header}")
+set(_katana_test_keys "")
+foreach(_quoted IN LISTS _katana_quoted_hex)
+    string(REGEX REPLACE "\"" "" _hex "${_quoted}")
+    string(LENGTH "${_hex}" _length)
+    if(_length EQUAL 64)
+        list(APPEND _katana_test_keys "${_hex}")
+    endif()
+endforeach()
+list(LENGTH _katana_test_keys _katana_test_key_count)
+if(NOT _katana_test_key_count EQUAL 4)
+    message(FATAL_ERROR "tests/update/test_key.hpp should hold four 64-digit keys (two seeds, "
+        "two public keys); found ${_katana_test_key_count}. check_no_test_keys.cmake reads them from there.")
+endif()
+list(JOIN _katana_test_keys "," _katana_test_keys_argument)
+# The four programs that ship, as a file a path a line, so that the test's command names none
+# of them: a test whose command names katana, katana_cli or katana_mcp is judged to RUN it, and
+# this one only reads bytes (tools/check_program_tests.cmake explains).
+set(_katana_shipped_programs "")
+foreach(_program IN ITEMS katana katana_cli katana_mcp katana_updater)
+    if(TARGET ${_program})
+        string(APPEND _katana_shipped_programs "$<TARGET_FILE:${_program}>\n")
+    endif()
+endforeach()
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/shipped_programs_$<CONFIG>.txt"
+    CONTENT "${_katana_shipped_programs}")
+add_test(NAME update_test_keys_are_in_no_shipped_program
+    COMMAND ${CMAKE_COMMAND}
+            "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/shipped_programs_$<CONFIG>.txt"
+            "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=absent
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
+set_tests_properties(update_test_keys_are_in_no_shipped_program PROPERTIES
+    PASS_REGULAR_EXPRESSION "No test key in" FAIL_REGULAR_EXPRESSION "CMake Error")
+# And the check on a list that DOES hold a program with the keys: it must refuse, naming it.
+if(TARGET katana_updater_test)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/a_program_with_test_keys_$<CONFIG>.txt"
+        CONTENT "$<TARGET_FILE:katana_updater_test>\n")
+    add_test(NAME update_test_keys_check_refuses_a_list_holding_a_program_that_has_them
+        COMMAND ${CMAKE_COMMAND}
+                "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/a_program_with_test_keys_$<CONFIG>.txt"
+                "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=absent
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
+    katana_phrase(_phrase "A shipped program contains a test key")
+    set_tests_properties(update_test_keys_check_refuses_a_list_holding_a_program_that_has_them
+        PROPERTIES PASS_REGULAR_EXPRESSION "${_phrase}")
+endif()
+foreach(_control IN ITEMS katana_update_e2e katana_updater_test)
+    if(TARGET ${_control})
+        add_test(NAME update_test_keys_control_is_found_in_${_control}
+            COMMAND ${CMAKE_COMMAND} "-DPROGRAM=$<TARGET_FILE:${_control}>"
+                    "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=present
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
+        set_tests_properties(update_test_keys_control_is_found_in_${_control} PROPERTIES
+            PASS_REGULAR_EXPRESSION "Control: [0-9]+ of 8 forms found" FAIL_REGULAR_EXPRESSION "CMake Error")
+    endif()
+endforeach()
 
 # ---- the end-to-end tests, and the loopback fake feed (T12) --------------------------------
 #

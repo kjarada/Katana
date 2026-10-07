@@ -11,10 +11,11 @@
 
 # ---- what a release is built against ---------------------------------------------
 
-# Where releases are fetched from. kjarada/Katana is public (or will be: the owner's
-# decision, docs/update.md "Before the repository is made public"), so no token is
-# needed. -DKATANA_UPDATE_FEED=https://host/dir replaces GitHub with the owner's own
-# host; both empty is a build with no auto-update.
+# Where releases are fetched from: kjarada/Katana, which the owner will make public, and
+# which needs no token then. Until then a person who holds a read-only token reaches it
+# through the REST API (include/katana/update/feed.hpp, FeedRoute::Api).
+# -DKATANA_UPDATE_FEED=https://host/dir replaces GitHub with the owner's own host; both
+# empty is a build with no auto-update.
 set(KATANA_UPDATE_REPO "kjarada/Katana" CACHE STRING
     "owner/name of the GitHub repository releases are fetched from (empty with an empty KATANA_UPDATE_FEED: no auto-update)")
 set(KATANA_UPDATE_FEED "" CACHE STRING
@@ -40,6 +41,10 @@ set(_katana_update_sources
     check.cpp
     stage.cpp
     credential_env.cpp
+    # FINISHED, with tests (tests/update/test_contract.cpp): the pure functions of the contract
+    # that the skeleton settles itself - see the top of each file.
+    contract.cpp
+    arguments.cpp
     not_implemented.hpp
 )
 # One implementation of each seam per platform. The process scan and the registry
@@ -70,16 +75,21 @@ katana_target_defaults(katana_update)
 # must import nothing but the operating system's DLLs (it runs from a copy in a
 # temporary folder, with no bin/ beside it), and a static library cannot hand it a
 # DLL it did not ask for. libcrypto.a and libz.a are in MSYS2 UCRT64; libcrypto needs
-# ws2_32 and crypt32 after it (measured when this was written: the resulting
-# executable imports ADVAPI32, CRYPT32, KERNEL32, USER32, WS2_32 and the api-ms-win-crt
-# set, nothing else).
+# ws2_32 and crypt32 after it. The resulting imports are MEASURED on tests/update's
+# katana_update_link_probe, which uses Ed25519 through EVP, raw inflate and crc32 through
+# this target with the helper's link options: ADVAPI32, CRYPT32, KERNEL32, USER32, WS2_32
+# and the api-ms-win-crt set, nothing else (test katana_update_link_probe_imports_only_os_dlls).
+# The helper itself, while it is a stub, references neither library and so says nothing about
+# the link line; the probe does. (The helper adds SHELL32, for CommandLineToArgvW.)
 #
 # The static libraries are looked for BY NAME here, not through find_package(OpenSSL)
 # with OPENSSL_USE_STATIC_LIBS: FindOpenSSL caches what it first found, and GDAL's and
 # libcurl's own configuration files ask for OpenSSL too, so which of the DLL's import
 # library and the static one the cache held would depend on who asked first. The
-# helper's import test (tests/update, katana_updater_imports_only_os_dlls) is what would
-# have caught the wrong one. Elsewhere the toolchain's own libraries are used.
+# probe's import test (tests/update, katana_update_link_probe_imports_only_os_dlls; and the
+# helper's own once it uses them) is what would catch the wrong one - shown by linking the probe
+# against the DLLs by hand, which that check refuses, naming libcrypto-3-x64.dll and zlib1.dll.
+# Elsewhere the toolchain's own libraries are used.
 if(WIN32 AND NOT MSVC)
     find_library(KATANA_UPDATE_CRYPTO_STATIC NAMES libcrypto.a)
     find_library(KATANA_UPDATE_ZLIB_STATIC NAMES libz.a)

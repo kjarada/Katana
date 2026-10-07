@@ -13,6 +13,12 @@
 // So no test key exists in a shipped helper, and nothing in the environment
 // moves the trust root.
 //
+// ARGUMENTS. main() reads them with update::utf8Arguments and never from argv: on Windows
+// argv is the ANSI code page's version of the command line, and this program is the one
+// started with paths (--root, --stage, --state) under a user profile that may hold a letter
+// that code page cannot carry. A path is then made with core::pathFromUtf8. Everything the
+// command line says is untrusted: parseHelperArguments checks `tx` with isValidTransactionId.
+//
 // The program is static (-static on Windows, src/katana_updater/CMakeLists.txt)
 // and never runs from bin/: the engine copies it to <U>/run-<tx>/ first
 // (stage.hpp, preflight), so at commit nothing under the install root is
@@ -20,6 +26,7 @@
 
 #include <iostream>
 
+#include "katana/update/process.hpp"
 #include "katana/update/trust.hpp"
 
 #ifdef KATANA_UPDATER_TEST_BUILD
@@ -42,8 +49,10 @@ namespace {
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    [[maybe_unused]] const std::vector<std::string> arguments =
+        katana::update::utf8Arguments(argc, argv);
     std::cerr << "katana_updater: not implemented (update skeleton; task T9)\n";
     return 2;
 }

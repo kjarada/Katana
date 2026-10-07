@@ -15,6 +15,10 @@
 //   - Otherwise nothing: a cheap check (one directory listing) that costs a
 //     start no measurable time when there is nothing to do.
 //
+// A recovery that fails does not end in silence: the Error's message names the command to
+// run by hand, `katana_updater --recover <R>`, and the apply's last.json says
+// "rollback_incomplete" (state.hpp) so the next start of the window shows it.
+//
 // recoverInProcess is the work itself, rolling every interrupted transaction
 // back from the disk (apply.hpp, step 6); the helper's --recover mode calls it
 // and the fault loops call it with a clean FsOps after a simulated crash, and

@@ -69,9 +69,13 @@ struct Trust {
 [[nodiscard]] core::Result<Manifest> verifyManifest(std::string_view json, std::string_view sig,
                                                     const Trust& trust, const Install& install);
 
-// True when (version, sequence) is above the installed pair: a higher version,
-// or the same version with a higher sequence. The one place the order is
-// written (check() and the helper both call it).
+// True when the manifest is above what is installed: a higher version; or the same
+// version with a higher sequence, but only when the install has a record of its own
+// sequence (Install::hasInstalledRecord). A fresh install has none - the zip carries
+// no sequence to compare with - so the same version is NOT newer: otherwise every
+// fresh install would be offered the very release it was made from. A lower version
+// is never newer. The one place the order is written (check() and the helper both
+// call it). FINISHED, with tests, in src/katana_update/contract.cpp: task T5 keeps it.
 [[nodiscard]] bool isNewerThan(const Manifest& manifest, const Install& install);
 
 } // namespace katana::update

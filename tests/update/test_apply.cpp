@@ -7,6 +7,13 @@
 //   - every refusal of step 1 and 3; a holder under the root (Blocked); a locked file; the
 //     health outcomes
 //   - what is removed: only a file of the installed manifest, unchanged, absent from the new one
+//   - the staged manifest and signature (stagedManifestPath, stagedSignaturePath) are read and
+//     verified with the helper's own keys; missing or unverified is Refused "staged_manifest"
+//   - a rollback that itself fails (an injected error at the first restoring rename) is
+//     RollbackIncomplete with reason "rollback_failed", never RolledBack
+//   - parseHelperArguments: a tx that fails isValidTransactionId, a missing, an unknown and a
+//     repeated option are refused; helperArguments and parseHelperArguments round-trip a root
+//     with a space and a non-ASCII letter in it
 //
 // Skipped, not passed: the file is in the suite so that task T7 only fills it, and
 // a skipped case is visible in every run until it does.
