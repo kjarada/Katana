@@ -24,7 +24,10 @@ For every Katana-update-<token>.json in the directory:
     compressed size and at least 2; `offset` is where the raw deflate data starts, and inflating exactly
     those bytes alone gives the same hash; no two ranges overlap and none leaves the zip;
   - the manifests of one release agree on product, channel, version, tag and sequence, and each target
-    appears once; with --previous, (version, sequence) is above the previous release's.
+    appears once; with --previous, (version, sequence) is above the previous release's. The previous
+    manifests are read as given, and their signatures are NOT checked (the report says so): take them from
+    the release you trust. A single manifest given as --previous is the one of its own target, and is
+    compared with that target only.
 A notify-only manifest (macos-arm64) has no files and no payload and is checked as such.
 
 Trust is explicit: --keys-cmake cmake/KatanaUpdateKeys.cmake (refused while the keys are placeholders, or if a
@@ -53,7 +56,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 TOKENS = ("win64", "win-arm64", "linux-x86_64", "linux-aarch64", "macos-arm64")
 CLASSES = ("program", "lib", "data", "seed")
@@ -64,6 +67,7 @@ MAX_BYTES = 2 * 1024 ** 3
 MAX_MANIFEST_BYTES = 8 * 1024 ** 2
 EXPIRY_DAYS = 180
 SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+OPENSSL_CLEARED_VARIABLES = ("OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES")  # compared in upper case: Windows ignores case
 TEST_TRUST = {
     "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a": "RFC 8032 TEST 1",
     "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c": "RFC 8032 TEST 2",
@@ -239,9 +243,15 @@ def openssl_verifies(openssl: str, public_key_hex: str, message: bytes, signatur
         done = subprocess.run(
             [openssl, "pkeyutl", "-verify", "-pubin", "-inkey", str(key_file), "-rawin",
              "-in", str(message_file), "-sigfile", str(sig_file)],
-            capture_output=True, check=False,
+            capture_output=True, check=False, env=openssl_environment(),
         )
     return done.returncode == 0
+
+
+def openssl_environment() -> dict[str, str]:
+    """This process's environment without the settings that change what the openssl command line loads
+    (a configuration file, provider modules, engines), and so what it accepts as a signature."""
+    return {name: value for name, value in os.environ.items() if name.upper() not in OPENSSL_CLEARED_VARIABLES}
 
 
 # ---- one manifest -------------------------------------------------------------------------------
@@ -396,9 +406,13 @@ def check_payload(report: Report, where: str, directory: Path, m: dict) -> None:
         report.error(where, f"{payload['name']} is not a zip: {error}")
         return
     with archive, open(zip_path, "rb") as raw:
-        bad = archive.testzip()
-        if bad is not None:
-            report.error(where, f"{payload['name']}: the member {bad} fails its CRC")
+        try:
+            bad = archive.testzip()
+        except (RuntimeError, NotImplementedError, zlib.error, EOFError) as error:  # an encrypted member, say
+            report.error(where, f"{payload['name']}: zipfile cannot test the members: {error}")
+        else:
+            if bad is not None:
+                report.error(where, f"{payload['name']}: the member {bad} fails its CRC")
         infos = archive.infolist()
         names = [i.filename for i in infos]
         name_set = set(names)
@@ -487,7 +501,11 @@ def verify_release(
     previous: Optional[Path] = None,
     targets: Optional[list[str]] = None,
     openssl: Optional[str] = None,
+    manifest_bytes: Optional[Mapping[str, bytes]] = None,
 ) -> Report:
+    """Recheck `directory`. `manifest_bytes` (file name -> bytes) names manifests a caller has already read and
+    wants judged exactly as read: the offline signer signs those very bytes, so it must check those, and not
+    whatever the file holds a moment later. A manifest not named there is read from the directory."""
     report = Report()
     if trust is None and not allow_unsigned:
         raise UsageError("give trusted keys (--keys-cmake, --pubkey or --test-keys), or --allow-unsigned")
@@ -503,7 +521,7 @@ def verify_release(
         if token not in TOKENS:
             report.error(where, f"'{token}' is not a target token ({' '.join(TOKENS)})")
             continue
-        data = manifest_path.read_bytes()
+        data = manifest_bytes[manifest_path.name] if manifest_bytes and manifest_path.name in manifest_bytes else manifest_path.read_bytes()
         sig_path = manifest_path.with_name(manifest_path.name + ".sig")
         if sig_path.exists():
             try:
@@ -558,22 +576,57 @@ def check_release_consistency(report: Report, targets: Optional[list[str]]) -> N
             report.error("release", f"manifests for {', '.join(extra)}, which were not asked for")
 
 
+def previous_path(previous: Path, token: str) -> Path:
+    """Where the previous release's manifest for `token` is: in the directory given, or the one file given."""
+    return previous if previous.is_file() else previous / f"Katana-update-{token}.json"
+
+
+def previous_manifest(previous: Path, token: str) -> Optional[dict]:
+    """The previous release's manifest for `token`, parsed; None when there is none. A single file given as
+    --previous is the manifest of ONE target, and is compared with that target only. ValueError: unreadable."""
+    path = previous_path(previous, token)
+    if not path.is_file():
+        return None
+    old = parse_manifest_bytes(path.read_bytes())
+    if previous.is_file() and old.get("target") != token:
+        return None
+    return old
+
+
+def _order_key(m: dict) -> tuple:
+    """(version as numbers, sequence): the pair a release is offered by. ValueError when either is malformed."""
+    if not isinstance(m.get("version"), str):
+        raise ValueError(f"version {m.get('version')!r} is not a string")
+    if not _is_int(m.get("sequence")) or m["sequence"] <= 0:
+        raise ValueError(f"sequence {m.get('sequence')!r} is not a positive integer")
+    return version_key(m["version"]), m["sequence"]
+
+
 def check_against_previous(report: Report, previous: Path) -> None:
-    for token, m in report.manifests.items():
-        old_path = previous if previous.is_file() else previous / f"Katana-update-{token}.json"
-        if not old_path.is_file():
-            report.notes.append(f"{token}: no previous manifest at {old_path}")
-            continue
+    compared = unreadable = 0
+    for token, m in sorted(report.manifests.items()):
+        path = previous_path(previous, token)
         try:
-            old = parse_manifest_bytes(old_path.read_bytes())
-            old_key = (version_key(old["version"]), old["sequence"])
+            old = previous_manifest(previous, token)
+            if old is None:
+                report.notes.append(f"{token}: no previous manifest for this target at {path}")
+                continue
+            old_key = _order_key(old)
+            new_key = _order_key(m)
         except (ValueError, KeyError, TypeError) as error:
-            report.error(token, f"the previous manifest {old_path} cannot be read: {error}")
+            report.error(token, f"the previous manifest {path} cannot be read: {error}")
+            unreadable += 1
             continue
-        new_key = (version_key(m["version"]), m["sequence"])
+        compared += 1
         if new_key <= old_key:
             report.error(token, f"(version {m['version']}, sequence {m['sequence']}) is not above the previous release's "
                                 f"(version {old['version']}, sequence {old['sequence']})")
+    if previous.is_file() and report.manifests and not compared and not unreadable:
+        report.error("release", f"the previous manifest {previous} is for another target than any here "
+                                f"({', '.join(sorted(report.manifests))}): nothing was compared")
+    if compared:
+        report.warnings.append("the previous release's manifests are read as given and their signatures are not checked: "
+                               "take them from the release you trust")
 
 
 # ---- the command line ---------------------------------------------------------------------------

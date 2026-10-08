@@ -13,12 +13,14 @@ import json
 import re
 import shutil
 import unittest
+import urllib.parse
 import zipfile
 from pathlib import Path
 
 from support import (
     FIXTURES,
     OPENSSL,
+    PATH_CASES,
     REPO,
     RFC_PUBLIC,
     RFC_SEED,
@@ -42,8 +44,8 @@ INSTALL_RECORD = "share/katana/install.json"
 V1_ZIP, V2_ZIP = "Katana-0.9.0-win64.update.zip", "Katana-0.10.0-win64.update.zip"
 
 # What differs between the two trees: worked out by hand from the design of the fixtures.
-ADDED = ["bin/libnew-2.dll", "share/katana/news.txt"]
-REMOVED = ["bin/libold-1.dll"]
+ADDED = ["bin/libnew-2.dll", "share/katana/help/index.txt", "share/katana/news.txt"]
+REMOVED = ["bin/libold-1.dll", "share/katana/legacy/old.txt"]
 CHANGED = ["bin/katana.exe", "etc/katana/settings.ini", "share/katana/readme.txt"]
 UNCHANGED = ["bin/katana_cli.exe", "bin/libcore-1.dll", "share/katana/empty.txt", "share/katana/random.bin"]
 
@@ -105,8 +107,54 @@ class TheTestKeys(ToolTest):
                 self.assertNotIn(b"\r", data, relative)
 
 
+class ThePathRulesTable(ToolTest):
+    """fixtures/path_rules.txt: the one table of path cases that every implementation of paths.hpp is held to."""
+
+    TABLE = FIXTURES / "path_rules.txt"
+
+    def lines(self) -> list[list[str]]:
+        raw = self.TABLE.read_bytes()
+        self.assertNotIn(b"\r", raw)
+        self.assertTrue(all(b < 0x80 for b in raw), "the table is plain ASCII")
+        return [line.split("\t") for line in raw.decode("ascii").split("\n") if line and not line.startswith("#")]
+
+    @staticmethod
+    def escaped(path: str) -> str:
+        """The spelling the header of the file defines: %XX per UTF-8 byte outside 0x21..0x7E, and for '%'."""
+        return "".join(chr(b) if 0x21 <= b <= 0x7E and b != 0x25 else "%%%02X" % b for b in path.encode("utf-8"))
+
+    def test_every_line_is_a_verdict_a_path_and_a_reason_with_the_path_spelled_the_one_way(self) -> None:
+        rows = self.lines()
+        self.assertGreaterEqual(len(rows), 50)
+        for row in rows:
+            with self.subTest(row=row):
+                self.assertEqual(len(row), 3)
+                verdict, field, reason = row
+                self.assertIn(verdict, ("ok", "no"))
+                self.assertNotEqual(reason.strip(), "")
+                decoded = urllib.parse.unquote(field, encoding="utf-8", errors="strict")
+                self.assertEqual(self.escaped(decoded), field)
+
+    def test_the_cases_that_need_an_escape_decode_to_what_they_say(self) -> None:
+        cases = dict(PATH_CASES)
+        self.assertEqual(len(cases), len(PATH_CASES), "a path is listed once")
+        self.assertIs(cases["share/caf" + chr(0xE9) + ".txt"], False)    # a letter outside ASCII
+        self.assertIs(cases["bin/a\tb"], False)                           # a control character
+        self.assertIs(cases["bin/a" + chr(0x7F) + "b"], False)           # DEL
+        self.assertIs(cases["bin/a b.txt"], True)                         # a space inside is allowed
+        self.assertIs(cases["bin/a "], False)                             # at the end it is not
+        self.assertIs(cases[""], False)                                   # the empty path
+        self.assertIs(cases["bin" + chr(0x5C) + "a.dll"], False)          # a backslash
+        self.assertIs(cases["bin/katana.exe"], True)
+        self.assertEqual({True, False}, set(cases.values()))
+
+    def test_the_header_tells_the_cpp_test_to_read_the_same_file(self) -> None:
+        header = [line for line in self.TABLE.read_text(encoding="ascii").split("\n") if line.startswith("#")]
+        self.assertTrue(any("test_paths.cpp" in line for line in header))
+
+
 class TheTrees(ToolTest):
-    def test_between_the_trees_two_files_arrive_one_goes_three_change_four_stay(self) -> None:
+    def test_between_the_trees_three_files_arrive_two_go_three_change_four_stay(self) -> None:
         v1, v2 = tree_files(INSTALL / "v1"), tree_files(INSTALL / "v2")
         for tree in (v1, v2):
             tree.pop(INSTALL_RECORD)
@@ -114,6 +162,30 @@ class TheTrees(ToolTest):
         self.assertEqual(sorted(set(v1) - set(v2)), REMOVED)
         self.assertEqual(sorted(p for p in set(v1) & set(v2) if v1[p] != v2[p]), CHANGED)
         self.assertEqual(sorted(p for p in set(v1) & set(v2) if v1[p] == v2[p]), UNCHANGED)
+        # Counted by hand from the lists above: v1 = 2 removed + 3 changed + 4 unchanged = 9 files, and
+        # v2 = 3 added + 3 changed + 4 unchanged = 10 (the install record is not counted).
+        self.assertEqual((len(v1), len(v2)), (9, 10))
+
+    @staticmethod
+    def folders(files: dict[str, bytes]) -> set[str]:
+        """Every folder that holds a file, directly or below: the parents of each path, up to but not including the root."""
+        found = set()
+        for path in files:
+            parts = path.split("/")
+            found.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
+        return found
+
+    def test_an_update_has_a_folder_to_create_and_a_folder_that_empties(self) -> None:
+        v1, v2 = tree_files(INSTALL / "v1"), tree_files(INSTALL / "v2")
+        for tree in (v1, v2):
+            tree.pop(INSTALL_RECORD)
+        # share/katana/help exists only in v2: its first file arrives, so the update must create the folder.
+        self.assertEqual(self.folders(v2) - self.folders(v1), {"share/katana/help"})
+        # share/katana/legacy exists only in v1 and its only file goes: the folder must go with it. Its parent,
+        # share/katana, still holds files and stays.
+        self.assertEqual(self.folders(v1) - self.folders(v2), {"share/katana/legacy"})
+        self.assertEqual([p for p in v1 if p.startswith("share/katana/legacy/")], ["share/katana/legacy/old.txt"])
+        self.assertIn("share/katana", self.folders(v2))
 
     def test_each_tree_has_the_install_record_the_cpack_install_writes(self) -> None:
         for name in ("v1", "v2"):
@@ -163,7 +235,8 @@ class TheGoodReleases(ToolTest):
             "bin/katana.exe": ("program", True), "bin/katana_cli.exe": ("program", True),
             "bin/libcore-1.dll": ("lib", False), "bin/libnew-2.dll": ("lib", False),
             "etc/katana/settings.ini": ("seed", False),
-            "share/katana/empty.txt": ("data", False), "share/katana/news.txt": ("data", False),
+            "share/katana/empty.txt": ("data", False), "share/katana/help/index.txt": ("data", False),
+            "share/katana/news.txt": ("data", False),
             "share/katana/random.bin": ("data", False), "share/katana/readme.txt": ("data", False),
         })
 

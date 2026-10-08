@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import time
 import unittest
 import zipfile
@@ -35,6 +36,7 @@ from support import (
     needs_openssl,
     noise,
     openssl_verify,
+    private_pem,
     raw_member,
     run_tool,
     sha256_hex,
@@ -709,6 +711,236 @@ class TheStrictRules(ToolTest):
         with self.assertRaises(producer.ToolError):
             producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "١٧٩٠٠٠٠٠٠٠"})
         self.assertEqual(producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "1790000000"}), 1790000000)
+
+
+class TheOrderOfTheFiles(Produced):
+    """The manifest lists its files sorted by path (parseManifest refuses anything else), and os.walk does not."""
+
+    def test_files_are_sorted_by_path_even_where_a_folder_sorts_among_the_files_of_its_parent(self) -> None:
+        # os.walk lists the files of a folder before its sub-folders, so it meets bin/z.dll before bin/a/x.dll and
+        # share/z.txt before share/a/b.txt. By path it is the other way round: 'a' (0x61) is before 'z' (0x7a),
+        # and in "share/a.txt" against "share/a/b.txt" the '.' (0x2e) is before the '/' (0x2f).
+        files = {
+            "bin/z.dll": b"z", "bin/a/x.dll": b"x", "bin/katana.exe": b"k",
+            "share/z.txt": b"z", "share/a.txt": b"a", "share/a/b.txt": b"b",
+        }
+        out = self.tmp / "out"
+        self.assert_tool_ok(self.produce(self.build(files, "order-tree"), out))
+        manifest = json.loads((out / "Katana-update-win64.json").read_bytes())
+        self.assertEqual([f["path"] for f in manifest["files"]],
+                         ["bin/a/x.dll", "bin/katana.exe", "bin/z.dll", "share/a.txt", "share/a/b.txt", "share/z.txt"])
+        # The zip is in the other order: program, lib, data, each by path.
+        with zipfile.ZipFile(out / "Katana-0.9.0-win64.update.zip") as archive:
+            self.assertEqual(archive.namelist(),
+                             ["bin/katana.exe", "bin/a/x.dll", "bin/z.dll", "share/a.txt", "share/a/b.txt", "share/z.txt"])
+
+    def test_the_scan_itself_returns_the_files_in_the_order_the_manifest_needs(self) -> None:
+        root = make_tree(self.tmp / "tree", {"bin/z.dll": b"z", "bin/a/x.dll": b"x", "share/a.txt": b"a", "share/a/b.txt": b"b"})
+        ordered = producer.prepare_files(producer.scan_tree(root), producer.DEFAULT_PROGRAMS, [])
+        self.assertEqual([f.path for f in ordered], ["bin/a/x.dll", "bin/z.dll", "share/a.txt", "share/a/b.txt"])
+
+
+class _Reparse:
+    """A stat result that also has the Windows reparse-point attribute, on whatever platform the test runs."""
+
+    def __init__(self, real: os.stat_result, attributes: int):
+        self._real = real
+        self.st_file_attributes = attributes
+
+    def __getattr__(self, name: str):
+        return getattr(self._real, name)
+
+
+# FILE_ATTRIBUTE_DIRECTORY (0x10) with FILE_ATTRIBUTE_REPARSE_POINT (0x400): what lstat reports for a junction
+# (checked on Windows 11 with `mklink /J`); 0x420 is a file (ARCHIVE, 0x20) with the reparse bit.
+JUNCTION_ATTRIBUTES = 0x410
+REPARSE_FILE_ATTRIBUTES = 0x420
+
+
+class TheLinks(Produced):
+    """A manifest cannot say a link, and a junction is a link that os.path.islink does not recognise."""
+
+    def test_the_reparse_attribute_makes_a_link_whatever_the_mode_says(self) -> None:
+        directory = os.stat_result((0o040755, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+        self.assertFalse(producer.is_link_like(directory))
+        self.assertFalse(producer.is_link_like(_Reparse(directory, 0x10)))              # a plain folder
+        self.assertTrue(producer.is_link_like(_Reparse(directory, JUNCTION_ATTRIBUTES)))
+        self.assertTrue(producer.is_link_like(_Reparse(directory, REPARSE_FILE_ATTRIBUTES)))
+        self.assertTrue(producer.is_link_like(os.stat_result((0o120777, 0, 0, 1, 0, 0, 0, 0, 0, 0))))  # a POSIX symlink
+
+    def scan_with(self, tree: Path, marked: str, attributes: int):
+        real = os.lstat
+
+        def lstat(path, *args, **kwargs):
+            info = real(path, *args, **kwargs)
+            if os.fspath(path).replace("\\", "/").endswith(marked):
+                return _Reparse(info, attributes)
+            return info
+
+        with mock.patch.object(os, "lstat", lstat):
+            return producer.scan_tree(tree)
+
+    def test_a_folder_with_the_reparse_attribute_is_refused_and_never_walked_into(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k", "share/jct/leak.txt": b"outside the tree", "share/ok/a.txt": b"a"})
+        scan = self.scan_with(tree, "share/jct", JUNCTION_ATTRIBUTES)
+        self.assertEqual(len(scan.problems), 1, scan.problems)
+        self.assertIn("share/jct", scan.problems[0])
+        self.assertIn("junction", scan.problems[0])
+        self.assertEqual([f.path for f in scan.files], ["bin/katana.exe", "share/ok/a.txt"])
+
+    def test_a_file_with_the_reparse_attribute_is_refused(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k", "share/odd.txt": b"o"})
+        scan = self.scan_with(tree, "share/odd.txt", REPARSE_FILE_ATTRIBUTES)
+        self.assertEqual(len(scan.problems), 1, scan.problems)
+        self.assertIn("share/odd.txt", scan.problems[0])
+        self.assertIn("reparse point", scan.problems[0])
+        self.assertEqual([f.path for f in scan.files], ["bin/katana.exe"])
+
+    def test_the_tool_refuses_a_tree_with_such_a_folder_and_writes_nothing(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k", "share/jct/leak.txt": b"x"})
+        real = os.lstat
+
+        def lstat(path, *args, **kwargs):
+            info = real(path, *args, **kwargs)
+            return _Reparse(info, JUNCTION_ATTRIBUTES) if os.fspath(path).replace("\\", "/").endswith("share/jct") else info
+
+        err = io.StringIO()
+        out = self.tmp / "out"
+        with mock.patch.object(os, "lstat", lstat), contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = producer.main(["--tree", str(tree), "--out", str(out), "--version", "0.9.0", "--target", "win64",
+                                  "--sequence", "1790000000"])
+        self.assertEqual(code, 1)
+        self.assertIn("share/jct", err.getvalue())
+        self.assertIn("nothing was written", err.getvalue())
+        self.assertFalse(out.exists())
+
+    @unittest.skipUnless(os.name == "nt", "directory junctions are a Windows thing")
+    def test_a_real_directory_junction_is_refused(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k"})
+        outside = make_tree(self.tmp / "outside", {"leak.txt": b"this is not part of the install"})
+        # cmd reads a '/' in a path as a switch (and the MinGW Python keeps '/' as its separator), so the paths
+        # are given with backslashes.
+        made = subprocess.run(["cmd", "/c", "mklink", "/J", str(tree / "share-link").replace("/", "\\"),
+                               str(outside).replace("/", "\\")], capture_output=True, text=True, check=False)
+        if made.returncode != 0:
+            self.skipTest("mklink /J is not available here: " + made.stderr.strip())
+        self.addCleanup(lambda: os.rmdir(tree / "share-link"))   # removes the junction, not what it points at
+        out = self.tmp / "out"
+        done = self.produce(tree, out)
+        self.assert_tool_failed(done, "share-link", "junction")
+        self.assertFalse(out.exists())
+        self.assertTrue((outside / "leak.txt").exists())
+
+
+class TheSequenceBound(Produced):
+    def test_the_last_second_of_the_accepted_range_is_the_year_2100_and_one_more_is_refused(self) -> None:
+        # 2100-01-01T00:00:00Z is 130 years after 1970 with 32 leap days (1972, 1976 ... 2096; 2100 itself is not
+        # reached), so (130 * 365 + 32) days = 47482 days = 47482 * 86400 = 4102444800 seconds. Adding 180 days:
+        # January 1 + 180 days is the 181st day of a year that has 181 days to the end of June (31+28+31+30+31+30),
+        # so the 30th of June.
+        out = self.tmp / "last"
+        self.assert_tool_ok(self.produce(self.build(), out, sequence="4102444800"))
+        manifest = json.loads((out / "Katana-update-win64.json").read_bytes())
+        self.assertEqual((manifest["published"], manifest["expires"]), ("2100-01-01T00:00:00Z", "2100-06-30T00:00:00Z"))
+        done = self.produce(self.build(), self.tmp / "past", sequence="4102444801")
+        self.assert_tool_failed(done, "sequence", "4102444800")
+        self.assertNotIn("Traceback", done.stderr)
+        self.assertFalse((self.tmp / "past").exists())
+
+    def test_a_sequence_far_beyond_what_a_date_can_hold_is_a_message_not_a_traceback(self) -> None:
+        for value in ("400000000000", "1099511627775", str(10 ** 30)):
+            with self.subTest(sequence=value):
+                done = self.produce(self.build(), self.tmp / ("o" + value), sequence=value)
+                self.assert_tool_failed(done, "sequence")
+                self.assertNotIn("Errno", done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
+
+    def test_source_date_epoch_is_held_to_the_same_range(self) -> None:
+        with self.assertRaises(producer.ToolError):
+            producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "4102444801"})
+        with self.assertRaises(producer.ToolError):
+            producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "0"})
+        self.assertEqual(producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "4102444800"}), 4102444800)
+        self.assertEqual(producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "1"}), 1)
+
+
+class TheManifestSizeCap(ToolTest):
+    CAP = 8 * 1024 * 1024  # kMaxManifestBytes of include/katana/update/feed.hpp: the engine refuses a larger manifest
+
+    def encoded_size_with_padding(self, padding: int) -> int:
+        # {"a":"<padding x's>"} in the producer's layout is "{\n" + '"a":"' + padding + '"' + "\n}\n" = padding + 11 bytes.
+        return len(producer.encode_manifest({"a": "x" * padding}))
+
+    def test_a_manifest_of_exactly_eight_mebibytes_is_made_and_one_byte_more_is_refused(self) -> None:
+        self.assertEqual(self.encoded_size_with_padding(1000), 1011)   # the layout, worked out above
+        self.assertEqual(self.encoded_size_with_padding(self.CAP - 11), self.CAP)
+        with self.assertRaises(producer.ToolError) as raised:
+            self.encoded_size_with_padding(self.CAP - 10)
+        self.assertIn("8388608", str(raised.exception))
+
+
+class TheOpensslEnvironment(ToolTest):
+    def test_the_settings_that_change_what_openssl_loads_are_removed_whatever_their_case(self) -> None:
+        kept = producer.openssl_environment({
+            "OPENSSL_CONF": "a", "openssl_modules": "b", "OpenSSL_Engines": "c", "PATH": "p", "OPENSSL_CONF_X": "d",
+        })
+        self.assertEqual(kept, {"PATH": "p", "OPENSSL_CONF_X": "d"})
+
+    def test_the_current_environment_is_the_default(self) -> None:
+        with mock.patch.dict(os.environ, {"OPENSSL_CONF": "somewhere", "KATANA_TEST_MARK": "m"}):
+            kept = producer.openssl_environment()
+        self.assertNotIn("OPENSSL_CONF", kept)
+        self.assertEqual(kept["KATANA_TEST_MARK"], "m")
+
+    @needs_openssl
+    def test_a_configuration_that_loads_no_signature_algorithm_cannot_stop_a_signing(self) -> None:
+        # A configuration that activates only the base provider: openssl run with it cannot sign or verify at all
+        # (the check of that claim is the plain run below). The tool must not be affected by it.
+        conf = self.tmp / "base-only.cnf"
+        conf.write_text("openssl_conf = openssl_init\n[openssl_init]\nproviders = provider_sect\n"
+                        "[provider_sect]\nbase = base_sect\n[base_sect]\nactivate = 1\n", newline="\n")
+        message = self.tmp / "message"
+        message.write_bytes(bytes.fromhex("72"))   # RFC 8032 section 7.1, TEST 2
+        key = self.rfc_pem(2)
+        with mock.patch.dict(os.environ, {"OPENSSL_CONF": str(conf)}):
+            plain = subprocess.run([OPENSSL, "pkeyutl", "-sign", "-rawin", "-inkey", str(key), "-in", str(message)],
+                                   capture_output=True, check=False)
+            self.assertNotEqual(plain.returncode, 0, "the configuration is meant to break a plain openssl run")
+            signature = producer.sign_file(OPENSSL, key, message)
+            public = producer.public_key_of(OPENSSL, key)
+            self.assertTrue(producer.verify_file(OPENSSL, public, message, signature))
+        self.assertEqual(signature.hex(), RFC_VECTOR[2][1])
+
+
+class TheCodePageHint(ToolTest):
+    def test_a_character_outside_the_code_page_is_found_by_encoding_the_path_in_it(self) -> None:
+        japanese = "".join(chr(code) for code in (0x65E5, 0x672C))   # two Japanese letters
+        accent = "caf" + chr(0xE9)                                   # e with an acute accent
+        self.assertTrue(producer.outside_code_page("C:/keys/" + japanese + "/k.pem", "cp1252"))
+        self.assertFalse(producer.outside_code_page("C:/keys/" + accent + "/k.pem", "cp1252"))
+        self.assertFalse(producer.outside_code_page("C:/keys/" + japanese + "/k.pem", "cp932"))
+        self.assertFalse(producer.outside_code_page("C:/keys/plain/k.pem", "cp1252"))
+
+    @needs_openssl
+    @unittest.skipUnless(os.name == "nt", "the ANSI code page limits the openssl command line on Windows only")
+    def test_a_key_in_a_folder_the_code_page_cannot_name_gets_the_real_reason(self) -> None:
+        folder = self.tmp / "".join(chr(code) for code in (0x65E5, 0x672C))
+        if not producer.outside_code_page(str(folder), "mbcs"):
+            self.skipTest("this machine's ANSI code page can hold the letters")
+        folder.mkdir()
+        key = folder / "k.pem"
+        key.write_text(private_pem(RFC_SEED[1]), newline="\n")
+        with self.assertRaises(producer.ToolError) as raised:
+            producer.public_key_of(OPENSSL, key)
+        self.assertIn("ANSI code page", str(raised.exception))
+
+    @needs_openssl
+    def test_an_unreadable_key_in_a_plain_path_gets_no_such_hint(self) -> None:
+        bad = self.tmp / "bad.pem"
+        bad.write_text("not a key\n")
+        with self.assertRaises(producer.ToolError) as raised:
+            producer.public_key_of(OPENSSL, bad)
+        self.assertNotIn("code page", str(raised.exception))
 
 
 class FixtureTrees(Produced):

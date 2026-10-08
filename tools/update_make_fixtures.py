@@ -14,9 +14,13 @@ What it writes under --out (it replaces install/ and release/, and leaves keys/ 
   install/v1, install/v2          small install trees of Katana 0.9.0 and 0.10.0 (0.10 > 0.9 as numbers
                                   and not as text, which the version comparison must get right). Between
                                   them: katana.exe, readme.txt and settings.ini change; libcore-1.dll,
-                                  katana_cli.exe, empty.txt and random.bin do not; libold-1.dll goes;
-                                  libnew-2.dll and news.txt arrive. Each holds share/katana/install.json,
-                                  which the producer leaves out of the update.
+                                  katana_cli.exe, empty.txt and random.bin do not; libold-1.dll and
+                                  legacy/old.txt go (the second is the last file of share/katana/legacy,
+                                  so that folder must go with it); libnew-2.dll, news.txt and help/index.txt
+                                  arrive (the third is the first file of share/katana/help, a folder 0.9.0
+                                  does not have, so the update must create it). So v1 lists 9 files and v2
+                                  10. Each holds share/katana/install.json, which the producer leaves out
+                                  of the update.
   release/v1, release/v2          Katana-update-win64.json, .json.sig, Katana-<ver>-win64.update.zip
   release/v2-spare-signed         v2 signed by the spare key (TEST 2): a good release
   release/v2-macos-notify         a signed notify-only manifest for macos-arm64 (no zip)
@@ -92,6 +96,7 @@ def _tree_v1() -> dict[str, bytes]:
         "etc/katana/settings.ini": text("; a seed: written only when absent", "units=metric", "theme=light"),
         "share/katana/empty.txt": b"",
         "share/katana/install.json": b'{"schema":1,"target":"win64"}',
+        "share/katana/legacy/old.txt": text("The only file of share/katana/legacy.", "0.10.0 removes it, and with it the folder."),
         "share/katana/random.bin": noise("katana-fixture-random", 2048),
         "share/katana/readme.txt": text("Katana test tree 0.9.0", "This file changes in 0.10.0."),
     }
@@ -101,6 +106,8 @@ def _tree_v2() -> dict[str, bytes]:
     tree = _tree_v1()
     tree["bin/katana.exe"] = text("KATANA TEST PROGRAM", "release 0.10.0", *[f"code line {n}" for n in range(14)])
     del tree["bin/libold-1.dll"]
+    del tree["share/katana/legacy/old.txt"]   # the folder holds nothing else: it goes with its last file
+    tree["share/katana/help/index.txt"] = text("The first file of share/katana/help.", "0.9.0 had no such folder: 0.10.0 creates it.")
     tree["bin/libnew-2.dll"] = text("TEST LIBRARY new (arrives in 0.10.0)", *[f"symbol {n}" for n in range(9)])
     tree["etc/katana/settings.ini"] = text("; a seed: written only when absent", "units=metric", "theme=dark")
     tree["share/katana/news.txt"] = text("What is new in 0.10.0", "A file that 0.9.0 did not have.")

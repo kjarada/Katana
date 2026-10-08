@@ -8,9 +8,10 @@ PATH, and must never run.
 
 from __future__ import annotations
 
-import ast
 import base64
+import contextlib
 import hashlib
+import io
 import os
 import json
 import shlex
@@ -22,6 +23,7 @@ import threading
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from support import (
     FIXTURES,
@@ -37,6 +39,7 @@ from support import (
 )
 
 import update_make_manifest as producer  # noqa: E402  (support puts tools/ on sys.path)
+import update_release_sign as signer  # noqa: E402
 
 MANIFEST = "Katana-update-win64.json"
 SIG = MANIFEST + ".sig"
@@ -86,7 +89,8 @@ class Signing(ToolTest):
         changed = sorted(p for p in set(v1) & set(v2) if v1[p] != v2[p])
         unchanged = sorted(p for p in set(v1) & set(v2) if v1[p] == v2[p])
         self.assertEqual((added, removed, changed),
-                         (["bin/libnew-2.dll", "share/katana/news.txt"], ["bin/libold-1.dll"],
+                         (["bin/libnew-2.dll", "share/katana/help/index.txt", "share/katana/news.txt"],
+                          ["bin/libold-1.dll", "share/katana/legacy/old.txt"],
                           ["bin/katana.exe", "etc/katana/settings.ini", "share/katana/readme.txt"]))
         with zipfile.ZipFile(self.draft / "Katana-0.10.0-win64.update.zip") as archive:
             download = sum(archive.getinfo(p).compress_size for p in added + changed)
@@ -224,12 +228,68 @@ class Signing(ToolTest):
         self.assertNotIn("Traceback", done.stderr)
         self.assert_nothing_signed()
 
-    def test_the_tool_itself_imports_no_way_to_start_a_program(self) -> None:
-        tree = ast.parse((TOOLS / "update_release_sign.py").read_text(encoding="utf-8"))
-        imported = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-        imported |= {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
-        self.assertNotIn("subprocess", imported)
-        self.assertNotIn("os", imported)
+    def run_in_this_process(self, *arguments: object, answer: str = "0.10.0\n") -> tuple[int, str, list[str]]:
+        """Run the tool's main() here, with its stdin and stdout replaced, and record the program of every process
+        it starts. Returns (exit status, what it printed, the programs started)."""
+        started: list[str] = []
+        real_popen = subprocess.Popen
+
+        class Recording(real_popen):  # type: ignore[misc, valid-type]
+            def __init__(self, args, *a, **k):
+                started.append(args[0] if not isinstance(args, str) else args.split()[0])
+                super().__init__(args, *a, **k)
+
+        printed = io.StringIO()
+        with mock.patch.object(subprocess, "Popen", Recording), mock.patch.object(sys, "stdin", io.StringIO(answer)), \
+                mock.patch.dict(os.environ, self.environment), contextlib.redirect_stdout(printed), \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = signer.main([str(a) for a in arguments])
+        return code, printed.getvalue(), started
+
+    def test_the_only_program_the_tool_starts_is_openssl_and_gh_is_never_among_them(self) -> None:
+        # The module reaches subprocess through the producer and the verifier, so its own imports prove nothing:
+        # this records what a complete signing run (the fake gh is first on PATH) actually starts.
+        code, printed, started = self.run_in_this_process(
+            "--dir", self.draft, "--tag", "v0.10.0", "--key", self.key, "--previous", self.previous, "--test-key")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("Step 6", printed)
+        self.assertTrue(started, "the run started nothing at all: the recording is not working")
+        self.assertEqual({Path(program).stem.lower() for program in started}, {Path(OPENSSL).stem.lower()}, started)
+        self.assertFalse(self.ran.exists(), "the fake gh ran")
+
+    def test_manifest_bytes_that_are_swapped_while_they_are_checked_are_not_signed(self) -> None:
+        # The draft's manifest is BAD (channel beta: the engine would never offer it). While the tool rechecks the
+        # draft, a GOOD manifest (the fixture's) is put on disk, and the bad one is put back when the check is over.
+        # The first snapshot, the check and the second snapshot would all be consistent with a signer that checks the
+        # file as it stands; the signer must judge the very bytes it will sign.
+        good = (FIXTURES / "release" / "v2" / MANIFEST).read_bytes()
+        manifest = json.loads(good)
+        manifest["channel"] = "beta"
+        bad = producer.encode_manifest(manifest)
+        (self.draft / MANIFEST).write_bytes(bad)
+        real = signer.verifier.verify_release
+        calls = []
+
+        def swapping(directory, **kwargs):
+            calls.append(kwargs)
+            if len(calls) > 1:
+                return real(directory, **kwargs)
+            (directory / MANIFEST).write_bytes(good)
+            try:
+                return real(directory, **kwargs)
+            finally:
+                (directory / MANIFEST).write_bytes(bad)
+
+        with mock.patch.object(signer.verifier, "verify_release", swapping):
+            code, printed, _ = self.run_in_this_process(
+                "--dir", self.draft, "--tag", "v0.10.0", "--key", self.key, "--previous", self.previous, "--test-key")
+        self.assertEqual(code, 1, printed)
+        self.assertIn("channel is 'beta'", printed)
+        self.assertIn("nothing was signed", printed)
+        self.assertNotIn("Type the version", printed, "the owner must not be asked to confirm a release that failed its check")
+        self.assertEqual(len(calls), 1, "the tool went on to sign")
+        self.assertEqual((self.draft / MANIFEST).read_bytes(), bad)
+        self.assert_nothing_signed()
 
     def test_every_target_of_the_draft_is_signed_and_listed_in_one_upload_command(self) -> None:
         draft = self.tmp / "two-targets"
