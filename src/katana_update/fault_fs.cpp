@@ -1,110 +1,156 @@
-// STUB. Task T7 writes the fault-injecting FsOps of
-// include/katana/update/fault_fs.hpp. Every operation is refused until then:
-// a wrapper that passed straight through while ignoring crashBefore() would
-// make a fault loop that injects nothing and passes.
+// The fault-injecting FsOps of include/katana/update/fault_fs.hpp. It is in the library, not
+// in a test, because katana_updater_test (--die-at N) and katana_update_e2e build one too;
+// the linker takes this object only where something names FaultFs, so katana_updater, which
+// does not, carries none of it.
 
 #include "katana/update/fault_fs.hpp"
 
-#include "not_implemented.hpp"
+#include <utility>
+
+#include "katana/core/path_text.hpp"
 
 namespace katana::update {
 
-FaultFs::FaultFs(FsOps& inner) : inner_(inner) {}
+namespace {
 
-void FaultFs::crashBefore(std::uint64_t)
+using Path = std::filesystem::path;
+
+std::string text(const Path& path)
 {
-    detail::notYet("FaultFs::crashBefore", "T7");
+    return core::pathToUtf8(path);
 }
 
-void FaultFs::failRenameWith(std::uint64_t, int)
+} // namespace
+
+FaultFs::FaultFs(FsOps& inner) : inner_(inner) {}
+
+void FaultFs::crashBefore(std::uint64_t operation)
 {
-    detail::notYet("FaultFs::failRenameWith", "T7");
+    crashBefore_ = operation;
+}
+
+void FaultFs::failRenameWith(std::uint64_t renameIndex, int osError)
+{
+    failRename_ = renameIndex;
+    failRenameError_ = osError;
 }
 
 void FaultFs::reset()
 {
-    detail::notYet("FaultFs::reset", "T7");
+    crashBefore_ = 0;
+    failRename_ = 0;
+    failRenameError_ = 0;
+    operations_ = 0;
+    renames_ = 0;
 }
 
 std::uint64_t FaultFs::mutatingOperations() const
 {
-    detail::notYet("FaultFs::mutatingOperations", "T7");
+    return operations_;
 }
 
-core::Result<EntryInfo> FaultFs::stat(const std::filesystem::path&) const
+// Every changing operation goes through here first: the k-th is the one a crash replaces.
+// The description is only built when the crash happens.
+#define KATANA_FAULT_POINT(description)                                              \
+    do {                                                                              \
+        if (crashBefore_ != 0 && operations_ + 1 == crashBefore_) {                   \
+            throw SimulatedCrash{operations_ + 1, (description)};                     \
+        }                                                                             \
+        ++operations_;                                                                \
+    } while (false)
+
+core::Result<EntryInfo> FaultFs::stat(const Path& path) const
 {
-    return detail::notImplemented("FaultFs::stat", "T7");
+    return inner_.stat(path);
 }
 
-core::Result<std::vector<std::filesystem::path>>
-FaultFs::listDirectory(const std::filesystem::path&) const
+core::Result<std::vector<Path>> FaultFs::listDirectory(const Path& directory) const
 {
-    return detail::notImplemented("FaultFs::listDirectory", "T7");
+    return inner_.listDirectory(directory);
 }
 
-core::Result<std::string> FaultFs::readFile(const std::filesystem::path&) const
+core::Result<std::string> FaultFs::readFile(const Path& path) const
 {
-    return detail::notImplemented("FaultFs::readFile", "T7");
+    return inner_.readFile(path);
 }
 
-core::Result<std::filesystem::path> FaultFs::resolve(const std::filesystem::path&) const
+core::Result<Path> FaultFs::resolve(const Path& path) const
 {
-    return detail::notImplemented("FaultFs::resolve", "T7");
+    return inner_.resolve(path);
 }
 
-core::Result<std::uint64_t> FaultFs::freeSpace(const std::filesystem::path&) const
+core::Result<std::uint64_t> FaultFs::freeSpace(const Path& path) const
 {
-    return detail::notImplemented("FaultFs::freeSpace", "T7");
+    return inner_.freeSpace(path);
 }
 
-core::Status FaultFs::makeDirectories(const std::filesystem::path&)
+core::Status FaultFs::makeDirectories(const Path& directory)
 {
-    return detail::notImplemented("FaultFs::makeDirectories", "T7");
+    KATANA_FAULT_POINT("makeDirectories " + text(directory));
+    return inner_.makeDirectories(directory);
 }
 
-core::Status FaultFs::copyFile(const std::filesystem::path&, const std::filesystem::path&)
+core::Status FaultFs::copyFile(const Path& from, const Path& to)
 {
-    return detail::notImplemented("FaultFs::copyFile", "T7");
+    KATANA_FAULT_POINT("copyFile " + text(from) + " -> " + text(to));
+    return inner_.copyFile(from, to);
 }
 
-core::Status FaultFs::renameFile(const std::filesystem::path&, const std::filesystem::path&)
+core::Status FaultFs::renameFile(const Path& from, const Path& to)
 {
-    return detail::notImplemented("FaultFs::renameFile", "T7");
+    KATANA_FAULT_POINT("renameFile " + text(from) + " -> " + text(to));
+    ++renames_;
+    if (failRename_ != 0 && renames_ == failRename_) {
+        // What the real implementation reports once its retries have run out: the file was
+        // not moved.
+        return core::makeError(core::ErrorCode::FileExportFailure,
+                               "the file could not be moved (injected)",
+                               "os_error=" + std::to_string(failRenameError_) + " " + text(from) +
+                                   " -> " + text(to));
+    }
+    return inner_.renameFile(from, to);
 }
 
-core::Status FaultFs::removeFile(const std::filesystem::path&)
+core::Status FaultFs::removeFile(const Path& path)
 {
-    return detail::notImplemented("FaultFs::removeFile", "T7");
+    KATANA_FAULT_POINT("removeFile " + text(path));
+    return inner_.removeFile(path);
 }
 
-core::Status FaultFs::removeEmptyDirectory(const std::filesystem::path&)
+core::Status FaultFs::removeEmptyDirectory(const Path& path)
 {
-    return detail::notImplemented("FaultFs::removeEmptyDirectory", "T7");
+    KATANA_FAULT_POINT("removeEmptyDirectory " + text(path));
+    return inner_.removeEmptyDirectory(path);
 }
 
-core::Status FaultFs::appendDurable(const std::filesystem::path&, std::string_view)
+core::Status FaultFs::appendDurable(const Path& path, std::string_view bytes)
 {
-    return detail::notImplemented("FaultFs::appendDurable", "T7");
+    KATANA_FAULT_POINT("appendDurable " + text(path));
+    return inner_.appendDurable(path, bytes);
 }
 
-core::Status FaultFs::writeDurable(const std::filesystem::path&, std::string_view)
+core::Status FaultFs::writeDurable(const Path& path, std::string_view bytes)
 {
-    return detail::notImplemented("FaultFs::writeDurable", "T7");
+    KATANA_FAULT_POINT("writeDurable " + text(path));
+    return inner_.writeDurable(path, bytes);
 }
 
-core::Status FaultFs::setExecutable(const std::filesystem::path&)
+core::Status FaultFs::setExecutable(const Path& path)
 {
-    return detail::notImplemented("FaultFs::setExecutable", "T7");
+    KATANA_FAULT_POINT("setExecutable " + text(path));
+    return inner_.setExecutable(path);
 }
 
-core::Status FaultFs::syncDirectory(const std::filesystem::path&)
+core::Status FaultFs::syncDirectory(const Path& directory)
 {
-    return detail::notImplemented("FaultFs::syncDirectory", "T7");
+    return inner_.syncDirectory(directory);
 }
 
-core::Result<std::unique_ptr<FileLock>> FaultFs::tryLock(const std::filesystem::path&)
+core::Result<std::unique_ptr<FileLock>> FaultFs::tryLock(const Path& path)
 {
-    return detail::notImplemented("FaultFs::tryLock", "T7");
+    return inner_.tryLock(path);
 }
+
+#undef KATANA_FAULT_POINT
 
 } // namespace katana::update
