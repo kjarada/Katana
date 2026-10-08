@@ -495,6 +495,7 @@ TEST(InstallRecords, ATreeWithoutInstallJsonIsADevelopmentTreeWhateverElseIsInIt
     EXPECT_EQ(install->target, "");
     EXPECT_EQ(install->product, "katana");
     EXPECT_EQ(install->version, *update::parseVersion(KATANA_EXPECTED_VERSION));
+    EXPECT_EQ(update::toString(install->version), KATANA_EXPECTED_VERSION);
     EXPECT_EQ(install->sequence, 0u);
     EXPECT_FALSE(install->hasInstalledRecord);
     EXPECT_FALSE(install->hasInstalledManifest);
@@ -522,6 +523,7 @@ TEST(InstallRecords, AnInstallJsonAloneIsAFreshInstallOfTheNamedTarget)
     EXPECT_EQ(install->target, "win-arm64");
     // No installed.json: the version this program was built as, at sequence 0, and no record.
     EXPECT_EQ(install->version, *update::parseVersion(KATANA_EXPECTED_VERSION));
+    EXPECT_EQ(update::toString(install->version), KATANA_EXPECTED_VERSION);
     EXPECT_EQ(install->sequence, 0u);
     EXPECT_FALSE(install->hasInstalledRecord);
     EXPECT_FALSE(install->hasInstalledManifest);
@@ -551,6 +553,7 @@ TEST(InstallRecords, InstalledJsonSaysWhichBuildTheHelperPutThere)
     const auto install = update::readInstall(world.root, registry);
     ASSERT_TRUE(install.ok()) << install.error().describe();
     EXPECT_EQ(install->version, versionOf(0, 9, 0, 0, 3));
+    EXPECT_EQ(update::toString(install->version), "0.9.0") << "== ignores how many were written";
     EXPECT_EQ(install->sequence, 1790000000u);
     EXPECT_TRUE(install->hasInstalledRecord) << "exactly when installed.json is there";
 }
@@ -565,6 +568,7 @@ TEST(InstallRecords, VersionsOfFourComponentsAndSequencesBeyondTwoToTheFiftyThir
     const auto install = update::readInstall(world.root, registry);
     ASSERT_TRUE(install.ok()) << install.error().describe();
     EXPECT_EQ(install->version, versionOf(1, 2, 3, 4, 4));
+    EXPECT_EQ(update::toString(install->version), "1.2.3.4") << "== ignores how many were written";
     EXPECT_EQ(install->sequence, UINT64_MAX);
 }
 
@@ -1630,6 +1634,41 @@ TEST(CleanupList, ALineWithAWindowsLineEndingAndDuplicatesIsReadAsOneEntry)
     ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, world.disk).ok());
     EXPECT_FALSE(fs::exists(leftover));
     EXPECT_FALSE(fs::exists(world.list));
+}
+
+TEST(CleanupList, ALineOfBytesThatAreNotUtf8IsReadWithoutThrowingAndANonAsciiLeftoverIsRemoved)
+{
+    // The list is user-writable text read first thing at start-up, where nothing catches an
+    // exception. The names are written as bytes: e acute (C3 A9) in a folder of the state
+    // folder, two CJK characters (E5 9C B0 E5 9B B3) in one of the work folder. A line is
+    // taken as UTF-8 (core::pathFromUtf8); read by the code page, "caf" + C3 A9 names another
+    // folder on Windows, and the leftover stays.
+    CleanupWorld world;
+    const fs::path accented = world.stateDir / core::pathFromUtf8("caf\xC3\xA9");
+    const fs::path japanese =
+        world.work / "tx1" / core::pathFromUtf8("\xE5\x9C\xB0\xE5\x9B\xB3");
+    world.file(accented / "x.bin");
+    world.file(japanese / "y.bin");
+    const fs::path victim = world.file(world.temp.path() / "victim.txt");
+
+    const std::string under = core::pathToUtf8(world.stateDir / "run-1") + "/";
+    std::string text;
+    text += under + "\xFF\xFE\n";             // not UTF-8 at all
+    text += under + "caf\xC3\n";              // a sequence cut short
+    text += core::pathToUtf8(world.temp.path()) + "/\xC0\xAF\n"; // an overlong '/'
+    text += "\xFF\xFE\n";                     // and not absolute either
+    text += lineOf(accented);
+    text += lineOf(japanese);
+    writeFile(world.list, text);
+
+    bool ok = false;
+    ASSERT_NO_THROW(ok = update::processCleanupList(world.stateDir, world.root, world.disk).ok());
+    EXPECT_TRUE(ok);
+    EXPECT_FALSE(fs::exists(accented)) << "the folder named in UTF-8 is the one removed";
+    EXPECT_FALSE(fs::exists(japanese));
+    EXPECT_TRUE(fs::is_directory(world.work / "tx1")) << "only what the line named";
+    EXPECT_TRUE(fs::exists(victim));
+    EXPECT_FALSE(fs::exists(world.list)) << "no line is left that could be retried";
 }
 
 TEST(CleanupList, ALockedFileStaysListedAndEverythingElseIsRemoved)

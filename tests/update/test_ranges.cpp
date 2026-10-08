@@ -109,7 +109,10 @@ TEST(Ranges, TheRangeCoversTheHolesBetweenItsMembers)
 
 TEST(Ranges, AGapOfExactlyAMebibyteMergesAndOneByteMoreDoesNot)
 {
-    // [0,100) then a hole of exactly 1 MiB, then 100 bytes.
+    // [0,100) then a hole of exactly 1 MiB, then 100 bytes. "At most" 1 MiB merges
+    // (ranges.hpp, the contract): at 1 MiB the latency of a request and the bytes of the hole
+    // cost the same, so the boundary is a tie, and the design's "under 1 MiB apart" is the
+    // same rule spoken loosely.
     const std::uint64_t second = 100 + kMiB;
     const auto merged = update::mergeRanges({member(0, 0, 100), member(1, second, 100)});
     ASSERT_EQ(merged.size(), 1u);

@@ -797,10 +797,16 @@ TEST(Plan, AnInstallUnderNonAsciiNamesIsPlannedLikeAnyOther)
 {
     // UTF-8 in the manifest and in the root, wide characters on the file system (Windows).
     TempDir temp;
-    const fs::path root = temp.path() / core::pathFromUtf8("KÃ¤tana æ¥æ¬");
+    // The names are written as bytes, so that no editor or code page can change them: a-umlaut
+    // (C3 A4) in the root, two CJK characters (E6 97 A5 E6 9C AC) after a space.
+    const std::string rootName = "K\xC3\xA4tana \xE6\x97\xA5\xE6\x9C\xAC";
+    ASSERT_EQ(rootName.size(), 14u) << "K, 2 bytes, tana, a space, 3 and 3: valid UTF-8, once";
+    const fs::path root = temp.path() / core::pathFromUtf8(rootName);
     copyTree("v1", root);
-    const std::string cafe = "share/katana/cafÃ©.txt";             // cafe + e acute
-    const std::string map = "share/katana/å°å³.txt"; // two CJK characters
+    const std::string cafe = "share/katana/caf\xC3\xA9.txt"; // e acute: 2 bytes, not 4
+    const std::string map = "share/katana/\xE5\x9C\xB0\xE5\x9B\xB3.txt"; // two CJK characters
+    ASSERT_EQ(cafe.size(), std::string("share/katana/cafe.txt").size() + 1);
+    ASSERT_EQ(map.size(), std::string("share/katana/.txt").size() + 6);
     writeFile(root / core::pathFromUtf8(cafe), "as released");
     writeFile(root / core::pathFromUtf8(map), "edited by hand");
 

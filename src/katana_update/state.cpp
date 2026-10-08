@@ -13,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -35,9 +36,13 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <io.h>
 #include <windows.h>
-#elif defined(__APPLE__)
+#else
+#include <unistd.h>
+#if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#endif
 #endif
 
 namespace katana::update {
@@ -235,12 +240,37 @@ Replaced replaceFile(const stdfs::path& from, const stdfs::path& to)
 #endif
 }
 
-// The text goes to a file of its own beside the record and is renamed over it: a reader sees
-// the old record or the new one, never half of either, and a crash or a full disk leaves the
-// old one in place. Not flushed to the disk before the rename: these records are advice
-// (when to check next, what the last swap said), and one that a power cut turns into an
-// unreadable file is read as absent and rebuilt - unlike the swap's own files, whose
-// durability the FsOps seam provides (fsops.hpp).
+// `text` written to a new file `path` and pushed to stable storage before it is closed
+// (_commit is FlushFileBuffers; fsync).
+bool writeAndFlush(const stdfs::path& path, const std::string& text)
+{
+#ifdef _WIN32
+    std::FILE* file = _wfopen(path.c_str(), L"wb");
+#else
+    std::FILE* file = std::fopen(path.c_str(), "wb");
+#endif
+    if (file == nullptr) {
+        return false;
+    }
+    bool good = std::fwrite(text.data(), 1, text.size(), file) == text.size();
+    good = std::fflush(file) == 0 && good;
+#ifdef _WIN32
+    good = _commit(_fileno(file)) == 0 && good;
+#else
+    good = ::fsync(::fileno(file)) == 0 && good;
+#endif
+    good = std::fclose(file) == 0 && good;
+    return good;
+}
+
+// The text goes to a file of its own beside the record, is flushed to the disk, and is
+// renamed over it: a reader sees the old record or the new one, never half of either, and a
+// crash or a full disk leaves the old one in place. The flush comes BEFORE the rename: a
+// rename that reaches the disk ahead of the data it names leaves a record of zero length, and
+// last.json is the one place a person learns that an update was rolled back. (The swap's own
+// files go through the FsOps seam, fsops.hpp; these two records are written here, with no
+// FsOps to hand, so the fault loops do not see them.) A record that is unreadable anyway is
+// ParseFailure to the reader, which carries on with the defaults and says so (state.hpp).
 core::Status writeRecord(const stdfs::path& directory, const std::string& name,
                          const std::string& text)
 {
@@ -259,16 +289,10 @@ core::Status writeRecord(const stdfs::path& directory, const std::string& name,
     const stdfs::path temporary = directory / (name + "." + std::to_string(unique) + ".tmp");
     const stdfs::path target = directory / name;
 
-    {
-        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-        out.write(text.data(), static_cast<std::streamsize>(text.size()));
-        out.flush();
-        if (!out) {
-            out.close();
-            stdfs::remove(temporary, error);
-            return core::makeError(core::ErrorCode::FileExportFailure,
-                                   "the record cannot be written", core::pathToUtf8(temporary));
-        }
+    if (!writeAndFlush(temporary, text)) {
+        stdfs::remove(temporary, error);
+        return core::makeError(core::ErrorCode::FileExportFailure,
+                               "the record cannot be written", core::pathToUtf8(temporary));
     }
 
     // A reader that has the old record open, or a virus scanner that has just seen the new
