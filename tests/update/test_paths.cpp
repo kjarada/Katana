@@ -12,6 +12,13 @@
 //     ASCII names of the real tree pass (the review that added the rule checked the tree)
 //   - checkJournalPath: the manifest rules, plus exactly the three records of kRecordPaths
 //     (any case); install.json and every other reserved name are refused there
+//   - the shared table: read ${KATANA_UPDATE_FIXTURES}/path_rules.txt (the format is in its
+//     header: ok/no, a percent-escaped path, why) and fail on any line checkManifestPath
+//     answers differently. tools/update_make_manifest.py and tools/update_verify_release.py are
+//     already held to the same file (tests/update/tool_tests), so the engine and the tools agree
+//     by construction. The table has no COM0 / LPT0 line: on the Windows 11 the producer's author
+//     tested, both create ordinary files, so paths.hpp refuses COM1 to COM9 and LPT1 to LPT9 only
+//     unless the owner rules otherwise.
 //
 // Skipped, not passed: the file is in the suite so that task T4 only fills it, and
 // a skipped case is visible in every run until it does.
