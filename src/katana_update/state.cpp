@@ -199,6 +199,42 @@ core::Result<std::string> stringMember(const Json& json, const char* name, bool 
 
 // ---- writing a record whole or not at all -------------------------------------------------
 
+struct Replaced {
+    bool done = false;
+    bool worthRetrying = false; // the cause may pass: another program has the record open
+    std::string why;
+};
+
+// `from` renamed over `to`. Windows: MoveFileExW, so that the reason is the system's own error
+// number and the cases worth waiting for can be told from the rest; elsewhere a rename that
+// fails fails for good.
+Replaced replaceFile(const stdfs::path& from, const stdfs::path& to)
+{
+#ifdef _WIN32
+    if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        return {true, false, {}};
+    }
+    const DWORD error = GetLastError();
+    // 32 sharing violation and 33 lock violation: somebody has the record open. 5 access
+    // denied: the same when a scanner holds it, but also what a read-only record or a folder in
+    // its place gives, which no wait cures.
+    bool worthRetrying = error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
+    if (error == ERROR_ACCESS_DENIED) {
+        const DWORD attributes = GetFileAttributesW(to.c_str());
+        worthRetrying = attributes == INVALID_FILE_ATTRIBUTES ||
+                        (attributes & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY)) == 0;
+    }
+    return {false, worthRetrying, "os_error=" + std::to_string(error)};
+#else
+    std::error_code error;
+    stdfs::rename(from, to, error);
+    if (!error) {
+        return {true, false, {}};
+    }
+    return {false, false, error.message()};
+#endif
+}
+
 // The text goes to a file of its own beside the record and is renamed over it: a reader sees
 // the old record or the new one, never half of either, and a crash or a full disk leaves the
 // old one in place. Not flushed to the disk before the rename: these records are advice
@@ -235,24 +271,45 @@ core::Status writeRecord(const stdfs::path& directory, const std::string& name,
         }
     }
 
-    // A reader that has the old record open can make the replacement fail for a moment on
-    // Windows (a sharing violation); a few short tries cover it, and a record that is
-    // read-only or locked for good fails all of them and is reported.
-    constexpr int kTries = 5;
-    for (int attempt = 1;; ++attempt) {
-        stdfs::rename(temporary, target, error);
-        if (!error) {
+    // A reader that has the old record open, or a virus scanner that has just seen the new
+    // one, can make the replacement fail for a while on Windows (sharing violation, lock
+    // violation, access denied). last.json is the only way the person learns that an update was
+    // rolled back, so it is worth waiting for: the tries back off from 2 ms to 100 ms and stop
+    // after about two seconds. A failure that waiting cannot cure is reported at once.
+    constexpr auto kReplaceFor = std::chrono::seconds(2);
+    constexpr auto kLongestPause = std::chrono::milliseconds(100);
+    const auto giveUp = std::chrono::steady_clock::now() + kReplaceFor;
+    auto pause = std::chrono::milliseconds(2);
+    std::string why;
+    for (;;) {
+        const Replaced replaced = replaceFile(temporary, target);
+        if (replaced.done) {
             return {};
         }
-        if (attempt == kTries) {
+        why = replaced.why;
+        if (!replaced.worthRetrying || std::chrono::steady_clock::now() + pause > giveUp) {
             break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(pause);
+        pause = std::min(pause * 2, kLongestPause);
     }
     std::error_code ignored;
     stdfs::remove(temporary, ignored);
     return core::makeError(core::ErrorCode::FileExportFailure, "the record cannot be replaced",
-                           error.message() + "; " + core::pathToUtf8(target));
+                           why + "; " + core::pathToUtf8(target));
+}
+
+// stateDirectory() is an empty path on a machine with no home to put the state in, and an
+// empty path joined with a name is a name in the WORKING folder: wherever the program was
+// started from. Every function below that takes the state folder refuses an empty one, so that
+// state.json, last.json and cleanup.list are never read, written or acted on there.
+core::Status requireStateDirectory(const stdfs::path& stateDir)
+{
+    if (stateDir.empty()) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "there is no update state folder (no home folder to put it in)");
+    }
+    return {};
 }
 
 std::string dump(const Json& json)
@@ -531,6 +588,9 @@ stdfs::path healthMarkerPath(const stdfs::path& stateDir, const std::string& tra
 
 core::Result<UpdateState> readState(const stdfs::path& stateDir)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable.error();
+    }
     const stdfs::path file = stateDir / "state.json";
     const core::Result<std::optional<std::string>> text = readOptionalText(file, kMaxStateBytes);
     if (!text) {
@@ -582,6 +642,9 @@ core::Result<UpdateState> readState(const stdfs::path& stateDir)
 
 core::Status writeState(const stdfs::path& stateDir, const UpdateState& state)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable;
+    }
     Json json = Json::object();
     json["schema"] = 1;
     json["last_check"] = state.lastCheckEpoch;
@@ -595,6 +658,9 @@ core::Status writeState(const stdfs::path& stateDir, const UpdateState& state)
 
 core::Result<std::optional<LastResult>> readLastResult(const stdfs::path& stateDir)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable.error();
+    }
     const stdfs::path file = stateDir / "last.json";
     const core::Result<std::optional<std::string>> text = readOptionalText(file, kMaxRecordBytes);
     if (!text) {
@@ -632,6 +698,9 @@ core::Result<std::optional<LastResult>> readLastResult(const stdfs::path& stateD
 
 core::Status writeLastResult(const stdfs::path& stateDir, const LastResult& result)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable;
+    }
     Json json = Json::object();
     json["schema"] = 1;
     json["status"] = result.status;
@@ -644,6 +713,9 @@ core::Status writeLastResult(const stdfs::path& stateDir, const LastResult& resu
 
 core::Status clearLastResult(const stdfs::path& stateDir)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable;
+    }
     std::error_code error;
     stdfs::remove(stateDir / "last.json", error); // false, no error: it was not there
     if (error) {
@@ -657,6 +729,9 @@ core::Status clearLastResult(const stdfs::path& stateDir)
 
 core::Status appendCleanup(const stdfs::path& stateDir, const stdfs::path& leftover, FsOps& fs)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable;
+    }
     const std::string text = core::pathToUtf8(leftover);
     // One path to a line: a line break inside a name would turn one leftover into two
     // entries, the second of them anywhere. (A relative path is refused for the same
@@ -710,6 +785,9 @@ stdfs::path bare(const stdfs::path& path)
 // std::nullopt otherwise. Both are bare().
 std::optional<std::size_t> namesBelow(const stdfs::path& child, const stdfs::path& base)
 {
+    if (base.empty()) {
+        return std::nullopt; // no place at all is not every place
+    }
     auto c = child.begin();
     std::size_t shared = 0;
     for (auto b = base.begin(); b != base.end(); ++b, ++c, ++shared) {
@@ -722,6 +800,28 @@ std::optional<std::size_t> namesBelow(const stdfs::path& child, const stdfs::pat
     }
     return shared;
 }
+
+#ifdef _WIN32
+// Whether a name below the first `from` of `path` is one that Windows does not read as it is
+// spelled: it drops the dots and spaces at the end of a name, so "..." is the folder it is in
+// and ".. " may be the one above. Such a line would pass the check that it lies under the base
+// and then act on the base itself, or on what is above it. The updater never makes such a
+// name, so the line is not one it wrote.
+bool namesSomethingElseThanItSays(const stdfs::path& path, std::size_t from)
+{
+    std::size_t index = 0;
+    for (const stdfs::path& part : path) {
+        if (index++ < from) {
+            continue;
+        }
+        const std::wstring& name = part.native();
+        if (!name.empty() && (name.back() == L'.' || name.back() == L' ')) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 
 core::Status removeTree(FsOps& fs, const stdfs::path& path, int depth)
 {
@@ -787,6 +887,11 @@ LineOutcome cleanOne(FsOps& fs, const std::string& line, const std::vector<Clean
         if (!shared) {
             continue;
         }
+#ifdef _WIN32
+        if (namesSomethingElseThanItSays(path, *shared)) {
+            return LineOutcome::Done; // not a line this program wrote: never touched
+        }
+#endif
         // Each folder between the base and the path, itself excluded, must be a real folder:
         // through a link the path would name something that is not under the base at all.
         stdfs::path walk;
@@ -825,6 +930,9 @@ LineOutcome cleanOne(FsOps& fs, const std::string& line, const std::vector<Clean
 
 core::Status processCleanupList(const stdfs::path& stateDir, const stdfs::path& root, FsOps& fs)
 {
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable;
+    }
     const stdfs::path listFile = stateDir / kCleanupListName;
     const core::Result<EntryInfo> info = fs.stat(listFile);
     if (!info) {

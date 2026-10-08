@@ -13,10 +13,17 @@
 // either: it cannot be hashed without reading what it points at, so it counts as changed,
 // and the swap replaces the link, never what it points at (a seed that is a link is kept:
 // a seed is never read or written once it exists).
+//
+// What is a link on Windows is decided by the reparse TAG, not by the attribute: a reparse
+// point is also what OneDrive's placeholders, Windows' compressed and de-duplicated files and
+// ProjFS use, and those stay where they are (a folder in OneDrive is `Directory, ReparsePoint`
+// and holds ordinary files). Only a tag with the name-surrogate bit - symbolic link, junction
+// and the like - sends a path somewhere else.
 
 #include "katana/update/plan.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -39,6 +46,22 @@
 
 namespace katana::update {
 
+// ---- declared here until a shared header carries it (plan.hpp and fsops.hpp are T1's, not T6's)
+
+// Whether a Windows reparse tag is that of a LINK: a name surrogate (winnt.h:
+// IsReparseTagNameSurrogate, bit 29), which makes a path stand for another path. Symbolic links
+// (0xA000000C), junctions and mount points (0xA0000003), WSL symlinks (0xA000001D) are; OneDrive
+// and other cloud placeholders (0x9000001A, 0x9000701A, ...), the de-duplication and compression
+// filters (0x80000013, 0x80000017), app execution aliases (0x8000001B) and ProjFS (0x9000001C)
+// are not. Pure, so it is tested on every platform. FsOps::stat (T7) and the helper's own check
+// (T9) must apply the same rule.
+[[nodiscard]] bool isLinkReparseTag(std::uint32_t tag);
+
+bool isLinkReparseTag(std::uint32_t tag)
+{
+    return (tag & 0x20000000u) != 0;
+}
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -52,9 +75,10 @@ constexpr std::uint64_t kFreeSpaceTenths = 26;
 enum class Kind { Missing, File, Directory, Link, Other };
 
 // What is at `path`, without following a link at the last component (lstat). A Windows
-// reparse point is a Link whatever it is (junction, symbolic link, mount point):
-// std::filesystem on this toolchain reports none of them (libstdc++ for Windows has no
-// symlink_status of its own, and answers for the target).
+// reparse point that is a name surrogate (junction, symbolic link, mount point; see
+// isLinkReparseTag) is a Link: std::filesystem on this toolchain reports none of them
+// (libstdc++ for Windows has no symlink_status of its own, and answers for the target). Any
+// other reparse point (a OneDrive placeholder) is the file or folder it appears to be.
 core::Result<Kind> look(const fs::path& path)
 {
 #ifdef _WIN32
@@ -68,7 +92,20 @@ core::Result<Kind> look(const fs::path& path)
                                "os_error=" + std::to_string(error) + "; " + core::pathToUtf8(path));
     }
     if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        return Kind::Link;
+        // The tag is in the directory entry: dwReserved0 of what FindFirstFileW returns. The
+        // path exists (it has attributes) and has no wildcard that FindFirstFileW would expand.
+        WIN32_FIND_DATAW entry;
+        const HANDLE find = FindFirstFileW(path.c_str(), &entry);
+        if (find == INVALID_HANDLE_VALUE) {
+            return core::makeError(core::ErrorCode::FileImportFailure, "cannot examine the file",
+                                   "os_error=" + std::to_string(GetLastError()) + "; " +
+                                       core::pathToUtf8(path));
+        }
+        FindClose(find);
+        if ((entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+            isLinkReparseTag(entry.dwReserved0)) {
+            return Kind::Link;
+        }
     }
     return (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? Kind::Directory : Kind::File;
 #else

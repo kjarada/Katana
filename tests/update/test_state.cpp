@@ -171,6 +171,22 @@ class EnvGuard {
     std::optional<Text> previous_;
 };
 
+// Makes `to` the working folder for the length of a test and puts the old one back.
+class CwdGuard {
+  public:
+    explicit CwdGuard(const fs::path& to) : previous_(fs::current_path()) { fs::current_path(to); }
+    CwdGuard(const CwdGuard&) = delete;
+    CwdGuard& operator=(const CwdGuard&) = delete;
+    ~CwdGuard()
+    {
+        std::error_code ignored;
+        fs::current_path(previous_, ignored);
+    }
+
+  private:
+    fs::path previous_;
+};
+
 // ---- the file system, as FsOps describes it -----------------------------------------------
 
 core::Error osError(const char* what, long code, const fs::path& path)
@@ -850,6 +866,59 @@ TEST(StateFolder, TheNamesInsideItAreTheOnesTheHeaderListsAndNothingIsCreated)
     EXPECT_FALSE(fs::exists(u));
 }
 
+TEST(StateFolder, NoStateFolderIsRefusedByEveryFunctionAndIsNeverTheWorkingFolder)
+{
+    // stateDirectory() is an empty path on a machine with no home. Joined with a name that is a
+    // file in the working folder; the folder here holds the very files an unguarded call would
+    // read, replace, remove or act on.
+    TempDir temp;
+    DiskFs disk;
+    const fs::path victim = temp.path() / "victim.txt";
+    writeFile(victim, "x");
+    writeFile(temp.path() / "state.json", R"({"schema":1,"auto":false})");
+    writeFile(temp.path() / "last.json", R"({"schema":1,"status":"rolled_back"})");
+    writeFile(temp.path() / "cleanup.list", lineOf(victim));
+    const std::string stateBefore = readFile(temp.path() / "state.json");
+    const std::string lastBefore = readFile(temp.path() / "last.json");
+    const std::string listBefore = readFile(temp.path() / "cleanup.list");
+
+    CwdGuard here(temp.path());
+    const fs::path none;
+    const auto expectRefused = [](const core::Status& status, const char* what) {
+        ASSERT_FALSE(status.ok()) << what;
+        EXPECT_EQ(status.error().code, core::ErrorCode::InvalidArgument) << what;
+    };
+    {
+        const auto state = update::readState(none);
+        ASSERT_FALSE(state.ok()) << "read ./state.json as if it were the state";
+        EXPECT_EQ(state.error().code, core::ErrorCode::InvalidArgument);
+    }
+    {
+        const auto last = update::readLastResult(none);
+        ASSERT_FALSE(last.ok()) << "read ./last.json as if it were the last result";
+        EXPECT_EQ(last.error().code, core::ErrorCode::InvalidArgument);
+    }
+    expectRefused(update::writeState(none, update::UpdateState{}), "writeState");
+    expectRefused(update::writeLastResult(none, update::LastResult{"committed", "", "", "", ""}),
+                  "writeLastResult");
+    expectRefused(update::clearLastResult(none), "clearLastResult");
+    expectRefused(update::appendCleanup(none, temp.path() / "leftover.bin", disk), "appendCleanup");
+    expectRefused(update::processCleanupList(none, temp.path() / "R", disk), "processCleanupList");
+    expectRefused(update::processCleanupList(none, fs::path(), disk),
+                  "processCleanupList with no root");
+
+    EXPECT_TRUE(fs::exists(victim)) << "a list in the working folder was believed";
+    EXPECT_EQ(readFile(temp.path() / "state.json"), stateBefore);
+    EXPECT_EQ(readFile(temp.path() / "last.json"), lastBefore);
+    EXPECT_EQ(readFile(temp.path() / "cleanup.list"), listBefore);
+    std::size_t files = 0;
+    for (const fs::directory_entry& entry : fs::directory_iterator(temp.path())) {
+        (void)entry;
+        ++files;
+    }
+    EXPECT_EQ(files, 4u) << "and nothing was created";
+}
+
 // ---- state.json ---------------------------------------------------------------------------
 
 TEST(StateFile, NoFileIsTheDefaultsAndNotAnError)
@@ -1117,9 +1186,10 @@ TEST(StateFile, AReaderDuringManyRewritesNeverSeesHalfAFile)
     ASSERT_TRUE(update::writeState(temp.path(), wide).ok());
     std::atomic<bool> done{false};
     std::atomic<int> writeFailures{0};
+    constexpr int kWrites = 40;
     std::string firstFailure; // written by the writer thread alone, read after join()
     std::thread writer([&] {
-        for (int i = 0; i < 150; ++i) {
+        for (int i = 0; i < kWrites; ++i) {
             const core::Status written = update::writeState(temp.path(), i % 2 == 0 ? small : wide);
             if (!written.ok()) {
                 if (writeFailures++ == 0) {
@@ -1155,12 +1225,81 @@ TEST(StateFile, AReaderDuringManyRewritesNeverSeesHalfAFile)
     EXPECT_GT(reads, 0u);
     EXPECT_GT(sawWide, 0u);
     EXPECT_GT(sawSmall, 0u) << "both records were seen: the check covered a change of content";
-    // Windows will not rename over a record that a reader has open at that instant: the write
-    // is retried for 50 ms and, failing, reports it and leaves the old record (the case above).
-    // Here the reader reopens it every 300 microseconds, so a few of the 150 may be refused; most
-    // must not be.
-    EXPECT_LT(writeFailures.load(), 75) << firstFailure;
+    // Windows will not rename over a record that a reader has open at that instant, even one
+    // opened with every share mode: the write waits for the reader to let go (two seconds at
+    // most, the cases below). This reader reopens the file every 300 microseconds without end,
+    // which no real one does, so some writes wait for a long time and a few may give up; most
+    // must not.
+    EXPECT_LT(writeFailures.load(), kWrites / 2) << firstFailure;
 }
+
+#ifdef _WIN32
+TEST(StateFile, ARecordAnotherProgramHasOpenForAWhileIsReplacedWhenItLetsGo)
+{
+    // A virus scanner looking at a file that was just closed holds it with no sharing for a
+    // moment: 400 ms here, eight times what the first version of the retry waited. (Windows
+    // answers the rename with error 5, access denied, or 32, sharing violation.)
+    TempDir temp;
+    update::UpdateState first;
+    first.skippedVersion = "0.3.0";
+    ASSERT_TRUE(update::writeState(temp.path(), first).ok());
+    const fs::path file = temp.path() / "state.json";
+    HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    std::thread scanner([held] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        CloseHandle(held);
+    });
+    update::UpdateState second;
+    second.skippedVersion = "9.9.9";
+    const core::Status status = update::writeState(temp.path(), second);
+    scanner.join();
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    const auto back = update::readState(temp.path());
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_EQ(back->skippedVersion, "9.9.9");
+    std::size_t files = 0;
+    for (const fs::directory_entry& entry : fs::directory_iterator(temp.path())) {
+        (void)entry;
+        ++files;
+    }
+    EXPECT_EQ(files, 1u) << "no temporary file was left behind";
+}
+
+TEST(StateFile, ARecordHeldOpenForGoodIsReportedAfterTheWaitAndTheOldOneIsWhole)
+{
+    TempDir temp;
+    update::UpdateState first;
+    first.skippedVersion = "0.3.0";
+    ASSERT_TRUE(update::writeState(temp.path(), first).ok());
+    const fs::path file = temp.path() / "state.json";
+    const std::string before = readFile(file);
+    HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    update::UpdateState second;
+    second.skippedVersion = "9.9.9";
+    const auto begin = std::chrono::steady_clock::now();
+    const core::Status status = update::writeState(temp.path(), second);
+    const auto waited = std::chrono::steady_clock::now() - begin;
+    CloseHandle(held);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, core::ErrorCode::FileExportFailure);
+    const std::string& context = status.error().context;
+    EXPECT_TRUE(context.rfind("os_error=5;", 0) == 0 || context.rfind("os_error=32;", 0) == 0 ||
+                context.rfind("os_error=33;", 0) == 0)
+        << "the system's own number, one of the three that mean in use: " << context;
+    EXPECT_GE(waited, std::chrono::milliseconds(1500)) << "it waited for the program to let go";
+    EXPECT_EQ(readFile(file), before);
+    std::size_t files = 0;
+    for (const fs::directory_entry& entry : fs::directory_iterator(temp.path())) {
+        (void)entry;
+        ++files;
+    }
+    EXPECT_EQ(files, 1u) << "no temporary file was left behind";
+}
+#endif
 
 // ---- last.json ----------------------------------------------------------------------------
 
@@ -1535,6 +1674,36 @@ TEST(CleanupList, AFileReallyHeldOpenByAnotherProgramStaysListedUntilItIsRelease
     ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, world.disk).ok());
     EXPECT_FALSE(fs::exists(held.parent_path()));
     EXPECT_FALSE(fs::exists(world.list));
+}
+#endif
+
+#ifdef _WIN32
+TEST(CleanupList, OnWindowsANameThatTheSystemReadsAsAnotherIsNotALineThisProgramWrote)
+{
+    // Windows drops the dots and spaces at the end of a name: "U\..." is U itself, "U\. " too, and
+    // ".. " may be the folder above. Each passes the test that the line lies under U (or
+    // R/.update) when read as text. The state and the lock - the journals - are what would go.
+    CleanupWorld world;
+    world.file(world.stateDir / "state.json", "{}");
+    world.file(world.stateDir / "run-a" / "keep.txt");
+    world.file(world.work / "lock");
+    world.file(world.work / "tx1" / "journal");
+    std::string text;
+    for (const fs::path& base : {world.stateDir, world.work}) {
+        for (const char* name : {"...", "....", ". ", ".. ", "run-a.", "run-a ", "tx1."}) {
+            text += core::pathToUtf8(base) + "\\" + name + "\n";
+        }
+        text += core::pathToUtf8(base) + "\\tx1\\...\n"; // tx1\... is tx1
+        text += core::pathToUtf8(base) + "\\run-a\\keep.txt.\n";
+    }
+    writeFile(world.list, text);
+    ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, world.disk).ok());
+    EXPECT_TRUE(fs::exists(world.stateDir / "state.json"));
+    EXPECT_TRUE(fs::exists(world.stateDir / "run-a" / "keep.txt"));
+    EXPECT_TRUE(fs::exists(world.work / "lock"));
+    EXPECT_TRUE(fs::exists(world.work / "tx1" / "journal"));
+    EXPECT_TRUE(fs::is_directory(world.root));
+    EXPECT_FALSE(fs::exists(world.list)) << "and the lines are dropped, not kept";
 }
 #endif
 

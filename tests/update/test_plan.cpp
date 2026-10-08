@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -33,6 +34,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "katana/core/path_text.hpp"
@@ -48,10 +50,16 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <winioctl.h>
 #endif
 
 using namespace katana;
 namespace fs = std::filesystem;
+
+namespace katana::update {
+// Defined in src/katana_update/plan.cpp and declared in no header yet (see the note there).
+[[nodiscard]] bool isLinkReparseTag(std::uint32_t tag);
+} // namespace katana::update
 
 namespace {
 
@@ -127,6 +135,48 @@ class DirectoryLink {
     fs::path link_;
     bool made_ = false;
 };
+
+#ifdef _WIN32
+// An empty folder made a reparse point whose tag is not a name surrogate, as the folders that
+// OneDrive keeps are (0x9000701A there; a real one cannot be made without OneDrive). The tag is
+// a Microsoft one that no driver handles, so the system answers for the folder itself - it IS a
+// folder with the reparse attribute - and refuses to look below it (error 1920). Taken away again
+// by removing the folder, which needs no driver.
+class FilterReparseFolder {
+  public:
+    explicit FilterReparseFolder(const fs::path& folder) : folder_(folder)
+    {
+        std::error_code ignored;
+        fs::create_directories(folder, ignored);
+        const HANDLE handle =
+            CreateFileW(folder.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        struct {
+            DWORD tag;
+            WORD dataLength;
+            WORD reserved;
+            BYTE data[4];
+        } buffer{};
+        buffer.tag = 0x80001234;
+        buffer.dataLength = sizeof buffer.data;
+        DWORD returned = 0;
+        made_ = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &buffer, sizeof buffer, nullptr, 0,
+                                &returned, nullptr) != 0;
+        CloseHandle(handle);
+    }
+    FilterReparseFolder(const FilterReparseFolder&) = delete;
+    FilterReparseFolder& operator=(const FilterReparseFolder&) = delete;
+    ~FilterReparseFolder() { RemoveDirectoryW(folder_.c_str()); }
+    bool made() const { return made_; }
+
+  private:
+    fs::path folder_;
+    bool made_ = false;
+};
+#endif
 
 // ---- the fixtures -------------------------------------------------------------------------
 
@@ -638,6 +688,29 @@ TEST(Plan, AFileThatIsALinkIsNotReadAndCountsAsChangedUnlessItIsASeed)
         << "what it points at is untouched";
 }
 
+#ifdef _WIN32
+TEST(Plan, OnWindowsAReparsePointThatIsNotALinkIsNotRefusedAsOne)
+{
+    // OneDrive's folders are `Directory, ReparsePoint` and hold ordinary files; an install
+    // unpacked into a synced folder must not be refused as "reached through a link".
+    TempDir temp;
+    copyTree("v1", temp.path());
+    fs::remove_all(temp.path() / "share");
+    FilterReparseFolder placeholder(temp.path() / "share");
+    if (!placeholder.made()) {
+        GTEST_SKIP() << "this machine does not let the test make a reparse point";
+    }
+    const auto plan = planOf(manifestOf("v1"), temp.path());
+    ASSERT_FALSE(plan.ok()) << "the system will not look below the fake placeholder";
+    // Not "reached through a link" (InvalidState): the folder was entered, and it was the system
+    // that refused to go on.
+    EXPECT_EQ(plan.error().code, core::ErrorCode::FileImportFailure) << plan.error().describe();
+    EXPECT_EQ(plan.error().message.find("link"), std::string::npos) << plan.error().message;
+    EXPECT_NE(plan.error().context.find("os_error=1920"), std::string::npos)
+        << plan.error().context;
+}
+#endif
+
 TEST(Plan, AFileWhereAFolderShouldBeAndAFolderWhereAFileShouldBeAreRefusedByName)
 {
     {
@@ -689,6 +762,120 @@ TEST(Plan, AFileThatCannotBeReadIsAPlanErrorThatNamesIt)
     EXPECT_NE(plan.error().message.find("bin/libcore-1.dll"), std::string::npos)
         << plan.error().message;
     EXPECT_EQ(plan.error().context.rfind("bin/libcore-1.dll", 0), 0u) << plan.error().context;
+}
+
+TEST(Plan, ASeedThatExistsIsNeverOpenedSoOneThatCannotBeReadIsKeptAndNotAnError)
+{
+    // The same lock as above, on the seed instead of a lib: the plan must not even try to read it.
+    // A planner that hashed the seed and then ignored the answer would fail here, as would one
+    // that failed on a seed it could not read.
+    TempDir temp;
+    copyTree("v1", temp.path());
+    const fs::path seed = temp.path() / "etc" / "katana" / "settings.ini";
+#ifdef _WIN32
+    HANDLE held = CreateFileW(seed.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+#else
+    fs::permissions(seed, fs::perms::none);
+    if (std::ifstream(seed).is_open()) {
+        GTEST_SKIP() << "this user can read a file with no permissions (root?)";
+    }
+#endif
+    const auto plan = planOf(manifestOf("v2"), temp.path());
+#ifdef _WIN32
+    CloseHandle(held);
+#else
+    fs::permissions(seed, fs::perms::owner_all);
+#endif
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_FALSE(plan->files[4].changed) << "index 4 is etc/katana/settings.ini, a seed";
+    EXPECT_EQ(plan->changedFiles, 5u) << "the five files the release changes, and not the seed";
+}
+
+TEST(Plan, AnInstallUnderNonAsciiNamesIsPlannedLikeAnyOther)
+{
+    // UTF-8 in the manifest and in the root, wide characters on the file system (Windows).
+    TempDir temp;
+    const fs::path root = temp.path() / core::pathFromUtf8("KÃ¤tana æ¥æ¬");
+    copyTree("v1", root);
+    const std::string cafe = "share/katana/cafÃ©.txt";             // cafe + e acute
+    const std::string map = "share/katana/å°å³.txt"; // two CJK characters
+    writeFile(root / core::pathFromUtf8(cafe), "as released");
+    writeFile(root / core::pathFromUtf8(map), "edited by hand");
+
+    update::Manifest manifest = manifestOf("v1");
+    ASSERT_EQ(manifest.files.size(), 9u);
+    for (const auto& [path, bytes] : {std::pair<std::string, std::string>{cafe, "as released"},
+                                      std::pair<std::string, std::string>{map, "as released"}}) {
+        update::ManifestFile entry;
+        entry.path = path;
+        entry.fileClass = update::FileClass::Data;
+        entry.size = bytes.size();
+        entry.compressedSize = bytes.size();
+        entry.offset = 5000 + manifest.files.size();
+        entry.sha256 = core::sha256Hex(bytes);
+        manifest.files.push_back(entry);
+    }
+    const auto plan = planOf(manifest, root);
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_EQ(changedIndexes(*plan), (Indexes{10})) << "the edited file only; the other 10 are kept";
+    EXPECT_EQ(plan->changedBytes, 11u);
+}
+
+#ifdef _WIN32
+TEST(Plan, OnWindowsAFileWhoseNameDiffersOnlyInCaseIsTheSameFile)
+{
+    // Windows finds bin/katana.exe under the name Katana.EXE: the bytes decide, as for any other
+    // file, and the name on the disk is left as it is.
+    TempDir temp;
+    copyTree("v1", temp.path());
+    fs::rename(temp.path() / "bin" / "katana.exe", temp.path() / "bin" / "Katana.EXE");
+    const update::Manifest manifest = manifestOf("v1");
+    ASSERT_EQ(manifest.files[0].path, "bin/katana.exe");
+
+    auto plan = planOf(manifest, temp.path());
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_EQ(plan->changedFiles, 0u);
+    writeFile(temp.path() / "bin" / "Katana.EXE", "another build");
+    plan = planOf(manifest, temp.path());
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_EQ(changedIndexes(*plan), (Indexes{0}));
+
+    std::vector<std::string> names;
+    for (const fs::directory_entry& entry : fs::directory_iterator(temp.path() / "bin")) {
+        names.push_back(entry.path().filename().string());
+    }
+    EXPECT_NE(std::find(names.begin(), names.end(), "Katana.EXE"), names.end())
+        << "the planner renamed nothing";
+}
+#endif
+
+TEST(Plan, OnlyAReparseTagThatRedirectsAPathMakesItALink)
+{
+    // A name surrogate (bit 29 of the tag) is a link; every other reparse point stays where it is.
+    // The tags are winnt.h's, and the OneDrive one is read from this machine's own folder with
+    // `fsutil reparsepoint query`.
+    const struct {
+        std::uint32_t tag;
+        bool link;
+        const char* what;
+    } cases[] = {
+        {0xA000000C, true, "IO_REPARSE_TAG_SYMLINK"},
+        {0xA0000003, true, "IO_REPARSE_TAG_MOUNT_POINT (a junction)"},
+        {0xA000001D, true, "IO_REPARSE_TAG_LX_SYMLINK (WSL)"},
+        {0x9000001A, false, "IO_REPARSE_TAG_CLOUD"},
+        {0x9000701A, false, "a OneDrive folder placeholder (IO_REPARSE_TAG_CLOUD_7)"},
+        {0x9000F01A, false, "IO_REPARSE_TAG_CLOUD_F"},
+        {0x80000013, false, "IO_REPARSE_TAG_DEDUP"},
+        {0x80000017, false, "IO_REPARSE_TAG_WOF (compressed file)"},
+        {0x8000001B, false, "IO_REPARSE_TAG_APPEXECLINK"},
+        {0x9000001C, false, "IO_REPARSE_TAG_PROJFS"},
+        {0x00000000, false, "no tag"},
+    };
+    for (const auto& c : cases) {
+        EXPECT_EQ(update::isLinkReparseTag(c.tag), c.link) << c.what;
+    }
 }
 
 // ---- the arithmetic of the totals ---------------------------------------------------------
