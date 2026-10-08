@@ -23,7 +23,11 @@
 //     stormwater pits and pipes say theirs, 6 disused ones say so) and every
 //     other is a prompt; 140 codes carry attributes (the 245 less 105 with none).
 //   * the palette's two floors are the WCAG contrast formula and the OKLab
-//     distance of Bjorn Ottosson's published matrices, written out below.
+//     distance of Bjorn Ottosson's published matrices, written out below;
+//   * the service colours are AS 5488's: the standard names them and gives no
+//     sRGB, so the values are Katana's, and the one table of them is
+//     utilityTypeColour (utility_drawing.hpp), which UTILITY DRAW draws in and
+//     which the file's colours are held equal to.
 //
 // Nothing here names a definition, a code or a colour of the reference
 // customisation: where the two are compared it is by count, at run time.
@@ -46,6 +50,8 @@
 #include <vector>
 
 #include "katana/cad/customisation_host.hpp"
+#include "katana/cad/plot.hpp"
+#include "katana/cad/utilities/utility_drawing.hpp"
 #include "katana/entity/customisation.hpp"
 
 namespace {
@@ -360,16 +366,30 @@ TEST(KatanaStandard, EveryColourIsNamedByItsRoleAndNoStandardNameFoldsOntoIt)
     }
 }
 
-TEST(KatanaStandard, EveryColourIsReadableOnThePlanGroundAndOnWhitePaper)
+TEST(KatanaStandard, EveryColourIsReadableOnThePlanGroundAndOnPaperExceptYellowGasAndCreamSewerWhichPrintLight)
 {
     KS_LOAD();
     const Color ground{0x1E, 0x23, 0x29, 255};
     const Color paper{255, 255, 255, 255};
+    const katana::cad::PlotSettings plot;
+    // AS 5488's yellow and cream cannot be 3:1 on white and still be yellow and
+    // cream, so the two keep the ground's 3:1 and print light. They are the only
+    // colours excused, and a colour that needs no excuse is not given one.
+    const std::set<std::string> printsLight{"katana gas", "katana sewer"};
+    std::set<std::string> under;
     for (const auto& entry : file.colours.entries()) {
         // WCAG 2.x asks 3:1 of a graphical object against its ground.
         EXPECT_GE(contrast(entry.colour, ground), 3.0) << entry.name << " on the ground";
-        EXPECT_GE(contrast(entry.colour, paper), 3.0) << entry.name << " on paper";
+        // On paper it is the pen as the plot prints it: white prints black.
+        const double onPaper = contrast(katana::cad::paperColour(entry.colour, plot), paper);
+        if (onPaper < 3.0) {
+            under.insert(entry.name);
+        }
+        if (printsLight.count(entry.name) == 0) {
+            EXPECT_GE(onPaper, 3.0) << entry.name << " on paper";
+        }
     }
+    EXPECT_EQ(under, printsLight);
 }
 
 TEST(KatanaStandard, NoTwoColoursAreCloserThanFiveHundredthsInOKLabAndTheWarmClassesAreSixHundredthsApart)
@@ -402,14 +422,18 @@ TEST(KatanaStandard, TheClassesDrawnWithTheThinnestPensKeepAFloorOfThreeAndAQuar
     KS_LOAD();
     const Color ground{0x1E, 0x23, 0x29, 255};
     const Color paper{255, 255, 255, 255};
+    const katana::cad::PlotSettings plot;
     // Tree, planting, ground, building, wall and communications: a 0.13 to
     // 0.18 mm line of one of these is the faintest thing on a plan.
+    // Communications is AS 5488's white, so on paper it is the pen as the plot
+    // prints it, black.
     for (const char* name : {"katana tree", "katana planting", "katana ground", "katana building",
                              "katana wall", "katana telecom"}) {
         const auto colour = file.colours.find(name);
         ASSERT_TRUE(colour.has_value()) << name;
         EXPECT_GE(contrast(*colour, ground), 3.25) << name << " on the ground";
-        EXPECT_GE(contrast(*colour, paper), 3.25) << name << " on paper";
+        EXPECT_GE(contrast(katana::cad::paperColour(*colour, plot), paper), 3.25)
+            << name << " on paper";
     }
 }
 
@@ -634,6 +658,56 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndADisusedCodeSaysSo)
     EXPECT_EQ(disusedByLayer, disusedByStatus);
     EXPECT_EQ(disusedByStatus,
               (std::set<std::string>{"UWD", "USD", "UGD", "UED", "UCD", "URD"}));
+}
+
+TEST(KatanaStandard, EveryServiceColourIsTheColourUtilityDrawUses)
+{
+    KS_LOAD();
+    namespace sub = katana::survey::subsurface;
+    // Every kind of service there is, by the word the codes say it is
+    // (utility.type) and UTILITY DRAW names its layers by.
+    const std::vector<sub::UtilityType> kinds{
+        sub::UtilityType::Unknown,    sub::UtilityType::Electricity,
+        sub::UtilityType::Telecommunications, sub::UtilityType::Gas,
+        sub::UtilityType::Water,      sub::UtilityType::RecycledWater,
+        sub::UtilityType::FireService, sub::UtilityType::Sewer,
+        sub::UtilityType::Stormwater, sub::UtilityType::Fuel,
+        sub::UtilityType::IntelligentTransport, sub::UtilityType::Other};
+    std::map<std::string, sub::UtilityType> byWord;
+    for (const sub::UtilityType kind : kinds) {
+        byWord.emplace(std::string(katana::cad::utilities::utilityTypeWord(kind)), kind);
+    }
+    ASSERT_EQ(byWord.size(), 12u);
+
+    const auto attributes = rulesOf(file, SurveySection::StringAttribute);
+    std::set<sub::UtilityType> reached;
+    std::size_t checked = 0;
+    for (const auto& [key, feature] : rulesOf(file, SurveySection::Map)) {
+        const auto found = attributes.find(key);
+        if (found == attributes.end()) {
+            continue;
+        }
+        for (const auto& attribute : found->second->attributes) {
+            if (attribute.name != "utility.type") {
+                continue;
+            }
+            // The 60 utility codes and the 11 stormwater pits and pipes of class K.
+            ASSERT_EQ(byWord.count(attribute.value), 1u) << key << " says " << attribute.value;
+            const sub::UtilityType kind = byWord.at(attribute.value);
+            const Color expected = katana::cad::utilities::utilityTypeColour(kind);
+            ASSERT_FALSE(feature->colour.empty()) << key << " draws in no colour";
+            EXPECT_EQ(katana::entity::resolveColour(file.colours, feature->colour), expected)
+                << key << " is " << attribute.value << " and draws in " << feature->colour;
+            ++checked;
+            reached.insert(kind);
+        }
+    }
+    EXPECT_EQ(checked, 71u);
+    // It reached every kind but "other", for which the library has no code,
+    // so the loop is not passing for want of anything to compare.
+    std::set<sub::UtilityType> expectedKinds(kinds.begin(), kinds.end());
+    expectedKinds.erase(sub::UtilityType::Other);
+    EXPECT_EQ(reached, expectedKinds);
 }
 
 TEST(KatanaStandard, EveryBuriedUtilityLineAsksForItsOwnerItsConditionAndItsDepth)
@@ -919,10 +993,23 @@ TEST(KatanaStandard, NoNameOfItIsAnyNameInTheCompiledInBuiltIn)
             }
         }
     }
+    // Pure white is the one value not held to this. AS 5488 names the colour of
+    // communications white, so the library's communications colour is white,
+    // and white is the standard colour every drawing system starts from: a
+    // built-in that draws in it shares the value without sharing a design. The
+    // other 27 values are what shows the two are independent, and they stay at
+    // none in common.
+    const std::string white = Color{255, 255, 255, 255}.toHex();
     std::size_t sharedValues = 0;
+    std::size_t whites = 0;
     for (const auto& entry : file.colours.entries()) {
+        if (entry.colour.toHex() == white) {
+            ++whites;
+            continue;
+        }
         sharedValues += otherValues.count(entry.colour.toHex());
     }
+    EXPECT_EQ(whites, 1u) << "the one white is communications";
     EXPECT_EQ(sharedValues, 0u) << "colour values in common";
 
     std::set<std::string> otherLayers;

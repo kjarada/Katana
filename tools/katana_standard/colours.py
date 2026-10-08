@@ -13,14 +13,22 @@ Why these twenty-eight, and why these values:
   it colours (`katana water`) and none can fold onto one of the 27 standard names Katana already knows.
 - The plan view's ground is `#1E2329` (a blue-grey that is almost black) and paper is white, and the same
   library is plotted on paper and read on the screen. So each colour keeps a contrast ratio of at least 3:1
-  (the WCAG floor for graphical objects) against BOTH, and no two colours sit closer than 0.05 in OKLab, which
-  is about where two thin lines of different colour stop being told apart.
-- The six buried-service colours follow the widely published convention for marking buried utilities: water
-  blue, sewer green, gas yellow, electricity red, communications orange, recycled water purple. They are tuned
-  so the yellow and the orange still read on white. NOTE: Katana's own `UTILITY DRAW` has colours of its own
-  (electricity orange, communications white, sewer cream, stormwater green; `docs/subsurface_utilities.md`:
-  AS 5488 classifies information and sets none), so the two differ and a drawing that mixes them needs a
-  legend.
+  (the WCAG floor for graphical objects) against BOTH (gas and sewer excepted on paper, below), and no two
+  colours sit closer than 0.05 in OKLab, which is about where two thin lines of different colour stop being
+  told apart.
+- The buried-service colours are AS 5488's. The standard (Appendix B, the primary code and line colour table)
+  names a colour for each service: water blue, electricity orange, communications white, gas yellow, sewer
+  cream, stormwater green, recycled water purple, fire service red, unidentified services pink, and petroleum
+  brown (`AS5488_NAMES`; `docs/subsurface_utilities.md` has the sources). The standard names the colours and
+  gives no sRGB for them, so each value here is Katana's rendering of the name, and it is the same value
+  `UTILITY DRAW` draws in (`utilityTypeColour`, `include/katana/cad/utilities/utility_drawing.hpp`);
+  `tests/cad/customisation/test_katana_standard.cpp` holds the two equal. Traffic systems have no AS 5488
+  colour and stay Katana's choice. The US convention (electricity red, communications orange, sewer green)
+  is not Australian and is not used.
+- Yellow and cream are the exception to the 3:1 floor on paper. They cannot reach 3:1 on white and still be
+  yellow and cream, and the colour is the standard's, so they print light (`PRINTS_LIGHT`) and keep the floor
+  against the plan ground. Communications is white, which the plot prints black (`printed`, the rule of
+  `cad::paperColour`), so it is held to the floor as printed.
 - Everything above ground is keyed by what it is made of or what it is for, so a plan reads by colour before
   it reads by symbol: boundaries violet, kerbs taupe, vegetation green, walls brick, fences tan.
 - Lightness is not free. A colour needs 3:1 against the dark ground (relative luminance of at least about
@@ -29,7 +37,8 @@ Why these twenty-eight, and why these values:
   are therefore placed by a search, not by eye: each sits at least 0.06 from every other colour and from
   the other five (`WARM`, checked below), and the classes drawn with the thinnest pens (`THIN`: tree, planting,
   ground, building, wall, telecom) keep at least 3.25:1 on both grounds so a 0.13 mm line stays visible.
-  Stormwater is the dark green-teal that sits clear of sewer, traffic systems and ground.
+  Hazard is the one class that moved for the services: AS 5488's electricity orange left the old hazard
+  orange 0.043 away, under the 0.05 floor, so hazard is a red-orange 0.077 from electricity.
 - What colour cannot do is carry a class alone: for a reader who confuses red with green or blue with purple
   some pairs stay close whatever the values (OKLab distance under simulated colour blindness is as low as
   0.02 for a few warm pairs). So no class is identified by colour alone: utility pipes carry a letter in
@@ -38,6 +47,7 @@ Why these twenty-eight, and why these values:
 The palette is frozen by the Katana Standard contract; a change goes through its owner, not into this file.
 """
 import math
+import os
 import re
 import sys
 
@@ -45,17 +55,17 @@ GROUND = "#1E2329"   # the plan view's ground
 PAPER = "#FFFFFF"    # white paper
 
 COLOURS = {
-    "katana water": "#3986E4",
-    "katana sewer": "#1DA758",
-    "katana gas": "#A68E12",
-    "katana electricity": "#E24942",
-    "katana telecom": "#C57A00",
-    "katana recycled": "#9565C7",
-    "katana fire": "#DC6995",
+    "katana water": "#2F80ED",
+    "katana sewer": "#F0E2B0",
+    "katana gas": "#FFD500",
+    "katana electricity": "#E07000",
+    "katana telecom": "#FFFFFF",
+    "katana recycled": "#9B59D0",
+    "katana fire": "#E53935",
     "katana fuel": "#A36215",
     "katana its": "#0B9BA8",
-    "katana unknown": "#C344AE",
-    "katana stormwater": "#238463",
+    "katana unknown": "#F2559B",
+    "katana stormwater": "#00A800",
     "katana waterway": "#6399BE",
     "katana pavement": "#789295",
     "katana kerb": "#907368",
@@ -72,8 +82,39 @@ COLOURS = {
     "katana street": "#A2759D",
     "katana control": "#0999C9",
     "katana note": "#9A8EA4",
-    "katana hazard": "#DD5C00",
+    "katana hazard": "#FF5A37",
 }
+
+# What AS 5488 calls the colour of each buried-service class: the name, never an sRGB, because the standard gives
+# a name and no value, so each value of COLOURS above is Katana's rendering of the name. None where AS 5488 names
+# no colour and the class is Katana's choice. Petroleum's brown is in three published guides and not in a fourth's
+# chart (docs/subsurface_utilities.md, "Colours"), which is why `katana fuel` is brown and says so there.
+AS5488_NAMES = {
+    "katana water": "blue",
+    "katana electricity": "orange",
+    "katana telecom": "white",
+    "katana gas": "yellow",
+    "katana recycled": "purple",
+    "katana fire": "red",
+    "katana sewer": "cream",
+    "katana stormwater": "green",
+    "katana fuel": "brown",
+    "katana unknown": "pink",
+    "katana its": None,
+}
+
+# The AS 5488 colours that cannot reach the 3:1 floor against white paper and stay the colour the standard names.
+# They print light, and hold the floor against the plan ground only. Nothing else is excused: a colour that
+# comes to need it is added here on purpose, with the reason, and `problems()` says so when one on this list
+# no longer needs it.
+PRINTS_LIGHT = ("katana gas", "katana sewer")
+
+# The channel at or above which a pen prints black, all three of them: cad::kNearWhiteChannel
+# (include/katana/cad/plot.hpp), the plot's rule for white and near-white pens (PlotSettings::whiteToBlack).
+# `problems()` reads that header and fails when this number is not the plot's, so the two cannot drift apart.
+NEAR_WHITE_CHANNEL = 230
+PLOT_HEADER = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "include", "katana", "cad", "plot.hpp"))
 
 ROLES = {
     "katana water": "potable water",
@@ -159,6 +200,27 @@ def contrast(a, b):
     return (hi + 0.05) / (lo + 0.05)
 
 
+def printed(text):
+    """The colour a pen of '#RRGGBB' prints in on white paper: black when all three channels are at least
+    NEAR_WHITE_CHANNEL (the plot's white rule), else as it is."""
+    return "#000000" if min(rgb(text)) >= NEAR_WHITE_CHANNEL else text
+
+
+def paper_contrast(text):
+    """Contrast of a pen as it prints against white paper: `contrast(printed(text), PAPER)`."""
+    return contrast(printed(text), PAPER)
+
+
+def plot_near_white_channel():
+    """`kNearWhiteChannel` as include/katana/cad/plot.hpp declares it, or None when the header cannot be read."""
+    try:
+        with open(PLOT_HEADER, encoding="utf-8") as handle:
+            match = re.search(r"kNearWhiteChannel\s*=\s*(\d+)\s*;", handle.read())
+    except OSError:
+        return None
+    return int(match.group(1)) if match else None
+
+
 def oklab(text):
     """(L, a, b) of '#RRGGBB' in OKLab (Bjorn Ottosson's matrices)."""
     r, g, b = (_linear(v) for v in rgb(text))
@@ -204,17 +266,29 @@ def problems():
         if not re.fullmatch(r"#[0-9A-F]{6}", value):
             found.append(f"{name!r}: {value!r} is not '#RRGGBB' in capitals")
             continue
-        for ground, label in ((GROUND, "the plan ground"), (PAPER, "white paper")):
-            ratio = contrast(value, ground)
-            if ratio < 3.0:
-                found.append(f"{name!r} has contrast {ratio:.2f} against {label}; the floor is 3.0")
+        for ground, label, ratio in ((GROUND, "the plan ground", contrast(value, GROUND)),
+                                     (PAPER, "white paper", paper_contrast(value))):
+            if ratio < 3.0 and not (ground == PAPER and name in PRINTS_LIGHT):
+                found.append(f"{name!r} has contrast {ratio:.2f} against {label} as it prints; the floor is 3.0")
         if not ROLES.get(name):
             found.append(f"{name!r} has no role")
+    plot_channel = plot_near_white_channel()
+    if plot_channel != NEAR_WHITE_CHANNEL:
+        found.append(f"NEAR_WHITE_CHANNEL is {NEAR_WHITE_CHANNEL} and the plot's kNearWhiteChannel "
+                     f"({PLOT_HEADER}) reads {plot_channel}: `printed` must mirror the plot's white rule")
+    if not set(AS5488_NAMES) <= set(COLOURS):
+        found.append("AS5488_NAMES names a colour the palette does not have")
+    for name in PRINTS_LIGHT:
+        if AS5488_NAMES.get(name) is None:
+            found.append(f"{name!r} is excused from the paper floor and is not an AS 5488 colour; only those are")
+        elif name in COLOURS and paper_contrast(COLOURS[name]) >= 3.0:
+            found.append(f"{name!r} reads at {paper_contrast(COLOURS[name]):.2f}:1 on paper and no longer needs "
+                         "to be in PRINTS_LIGHT")
     for name in THIN:
-        for ground, label in ((GROUND, "the plan ground"), (PAPER, "white paper")):
-            ratio = contrast(COLOURS[name], ground)
+        for ground, label, ratio in ((GROUND, "the plan ground", contrast(COLOURS[name], GROUND)),
+                                     (PAPER, "white paper", paper_contrast(COLOURS[name]))):
             if ratio < THIN_FLOOR:
-                found.append(f"{name!r} is a thin-pen class and has contrast {ratio:.2f} against {label}; its floor is {THIN_FLOOR}")
+                found.append(f"{name!r} is a thin-pen class and has contrast {ratio:.2f} against {label} as it prints; its floor is {THIN_FLOOR}")
     names = sorted(COLOURS)
     for i, a in enumerate(names):
         for b in names[i + 1:]:
@@ -237,7 +311,7 @@ def closest_pairs(count=6):
 def table():
     lines = [f"{'name':<20}{'hex':<9}{'ground':>7}{'paper':>7}  role"]
     for name, value in COLOURS.items():
-        lines.append(f"{name:<20}{value:<9}{contrast(value, GROUND):>7.2f}{contrast(value, PAPER):>7.2f}  {ROLES[name]}")
+        lines.append(f"{name:<20}{value:<9}{contrast(value, GROUND):>7.2f}{paper_contrast(value):>7.2f}  {ROLES[name]}")
     return "\n".join(lines)
 
 

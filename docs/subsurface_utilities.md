@@ -299,33 +299,107 @@ tests; the command then creates what the drawing lacks, in this order:
   graded unlike their neighbours) has nothing to draw; its points are still
   drawn.
 
-**The colours are Katana's defaults, not the standard's.** AS 5488
-classifies information and sets no colours. The defaults follow the colours
-services are commonly marked in, and their pipes and conduits made in, in
-Australia, adjusted where the marking colour would vanish on white paper;
-each is at least 3:1 against the plan view's ground and, as it prints,
-against white paper
-(`UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaper`). They are layer
-colours, so a project with its own convention changes the layers after a
-draw - `MODIFY LAYERS utilities/water/QL-B SET LAYER.COLOUR=#RRGGBB`, or the
-layer panel - or makes them first, `LAYER NEW utilities/water/QL-B #RRGGBB`,
-since a draw uses a layer that exists as it is. (`LAYER` itself has no action
-that recolours a layer, and `LAYER NEW` refuses one that exists.)
+### Colours
 
-| Type | Default | Common marking colour |
-|---|---|---|
-| water | `#2F80ED` blue | blue |
-| electricity | `#E07000` orange | orange |
-| telecommunications | `#FFFFFF` white, which prints black (`PlotSettings::whiteToBlack`) | white |
-| gas | `#B8860B` dark gold | yellow, which vanishes on paper |
-| recycled-water | `#9B59D0` lilac | lilac |
-| fire-service | `#E53935` red | red |
-| sewer | `#A0896B` dark cream | cream, which vanishes on paper |
-| stormwater | `#43A047` green | none in common use: Katana's choice |
-| fuel | `#B06030` brown | Katana's choice |
-| its | `#009EB0` cyan | Katana's choice |
-| other | `#949494` grey | Katana's choice |
-| unknown | `#D63AD6` magenta | Katana's choice, to stand out: nobody established what it is |
+**The colours are AS 5488's names, in Katana's values.** AS 5488.1 has a
+primary code and line colour table (its Appendix B: Standards Australia's
+contents listing for the 2019 edition names "B.2 Primary code and line colour
+table", https://store.standards.org.au/product/as-5488-1-2019) that gives each
+kind of service a colour and a letter. The standard is not free, so what is
+known of the table is what published guides state, and Katana takes the names
+from them. The standard gives no sRGB that is public and cites no colour
+standard (not AS 2700, not AS/NZS 2648.1) in anything freely readable, so each
+value is Katana's rendering of the name, chosen as an unmistakable example of
+it and kept legible (below). The 2022 edition's preface names two "major
+changes", its terms and definitions and the recognition of GDA2020, and does not
+name the colour table
+(https://www.normsplash.com/Samples/AS/137553665/AS-5488.1-2022-en.pdf), so
+the table is taken to be the 2019 one, which no free page confirms.
+
+| Type | AS 5488 colour (letter) | Katana's value | On the plan ground | On white paper |
+|---|---|---|---|---|
+| water | blue (W) | `#2F80ED` | 4.09 : 1 | 3.87 : 1 |
+| electricity | orange (E) | `#E07000` | 4.89 : 1 | 3.24 : 1 |
+| telecommunications | white (C), black on a white ground | `#FFFFFF` | 15.82 : 1 | prints black (`PlotSettings::whiteToBlack`): 21.00 : 1 |
+| gas | yellow (G) | `#FFD500` | 11.12 : 1 | 1.42 : 1, prints light |
+| recycled-water | purple (R) | `#9B59D0` | 3.57 : 1 | 4.44 : 1 |
+| fire-service | red (F) | `#E53935` | 3.74 : 1 | 4.23 : 1 |
+| sewer | cream (S) | `#F0E2B0` | 12.21 : 1 | 1.30 : 1, prints light |
+| stormwater | green (D, drainage) | `#00A800` | 4.97 : 1 | 3.18 : 1 |
+| fuel | brown (P, petroleum products) | `#A36215` | 3.25 : 1 | 4.87 : 1 |
+| unknown | pink (U, unidentified services) | `#F2559B` | 4.93 : 1 | 3.21 : 1 |
+| its | none: Katana's choice | `#0B9BA8` | 4.72 : 1 | 3.35 : 1 |
+| other | none: Katana's choice | `#949494` | 5.21 : 1 | 3.03 : 1 |
+
+What the guides say, and where they differ. Each of these names the colours
+above: Dymark's marking-paint chart, which cites AS 5488.1:2022
+(https://www.dymark.com.au/ts1744322049/attachments/Category/1288/2025%20March-%20Line%20Colours%20and%20Code-Spray%20&%20Mark%20Instructional%20Guide.pdf);
+Sitemate (https://sitemate.com/resources/articles/geotechnical/as5488/);
+Geoscope (https://geoscopelocating.com.au/underground-utility-markings-explained/);
+and Jurovich Surveying, who say the colours go on plans as well as paint
+(https://www.jurovichsurveying.com.au/faq/standard-colours-for-underground-utility-surveys).
+They differ in three small ways. Sewer's letter is S in Sitemate and SW in
+Dymark; Geoscope prints D, a slip. Petroleum brown is in three of them and not
+in Dymark's chart, so `fuel` is the least certain row: if the standard has no
+colour for petroleum, it is Katana's choice. "Black on a white ground" for
+communications is in Sitemate and Jurovich. The convention that sewer is
+green, electricity red and communications orange is the United States'
+(APWA), not Australia's, and is not used anywhere in Katana.
+
+**The standard does not make a plan use them.** Clause 1.2.2 of the 2013
+edition (Standards Australia's free sample,
+https://nulca.com.au/db_uploads/5488-2013_V2.pdf) makes the symbology, line
+types and colours of maps, plans and electronic records "the prerogative of the
+entity that owns or operates the utility", recommends Appendix B for how
+information is recorded, and says nothing in the standard stops a mapper using
+its own. The 2019 edition retitles that clause "Representation of subsurface
+utilities"; its text is not free, so that it is unchanged is not verified.
+Katana follows the table on the owner's ruling that its colours match AS 5488,
+and says so rather than claiming the standard requires it.
+
+**Katana's values.** Each is at least 3:1 against the plan view's ground
+(`#1E2329`). Each is also at least 3:1 against white paper as it prints, except
+yellow gas and cream sewer, which keep the ground's 3:1 and print light
+("Yellow and cream print light", below). `UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaperExceptYellowAndCreamWhichPrintLight`
+holds both, with the two exceptions named, and
+`UtilityDrawing.TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays`
+holds the ten names and that each value reads as its name (hue, saturation and
+value bands). Dymark's chart draws the same names in values of the same hues
+(orange `#E24727`, yellow `#FFD400`, cream `#F9E7B6`, pink `#EE3A7F`, green
+`#008A59`), which is a check of hue and not a source: its blue, purple and
+red are too dark for the plan's ground (1.77, 1.68 and 2.69 : 1) and are not
+used. ITS and "other" have no AS 5488 colour and are Katana's choice: that
+same test lists the ten kinds that have one and requires these two to be the
+only others.
+
+**Yellow and cream print light.** Yellow gas and cream sewer cannot reach 3:1
+on white paper and still be yellow and cream, and the colour is the
+standard's, so Katana does not darken it: they keep 3:1 against the plan
+ground and print light on paper (1.42 and 1.30 : 1). The plot's white rule
+(`PlotSettings::whiteToBlack`, `cad::paperColour`) turns white and near-white
+pens black, which is how communications reads on paper, and does nothing for
+a light yellow: a rule that darkened one would change every plot, including a
+"light yellow" somebody chose on purpose, which `cad::kNearWhiteChannel`'s
+note keeps as chosen. So it is not done (see "Not done"), and
+`UtilityDrawing.OnPaperCommunicationsPrintsBlackAndYellowGasAndCreamSewerPrintAsDrawn`
+says what the plot does today. A plot of gas or sewer that must read firmly
+on white is plotted monochrome, which prints every pen black, or has the
+layers recoloured.
+
+**One table.** `utilityTypeColour` is the table; the Katana Standard survey
+library (`docs/katana_standard.md`) draws a coded service in the same values,
+so a coded service and a drawn one are one colour in one drawing.
+`KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` reads the
+committed library file and requires each of its 71 service codes to draw in
+the colour of its kind, and each service colour of the file to be one of this
+table's. Changing one value without the other fails that test.
+
+The colours are layer colours, so a project with its own convention changes
+the layers after a draw - `MODIFY LAYERS utilities/water/QL-B SET
+LAYER.COLOUR=#RRGGBB`, or the layer panel - or makes them first, `LAYER NEW
+utilities/water/QL-B #RRGGBB`, since a draw uses a layer that exists as it is.
+(`LAYER` itself has no action that recolours a layer, and `LAYER NEW` refuses
+one that exists.)
 
 **What the grading found is on the entities**, as `utility.*` properties
 (`utilities::keys`), so the property panel, `PROP LIST` or an agent can ask
@@ -581,7 +655,7 @@ pipes - heights and all, since every import writes them one way
   line or the verb - refuses the draw, naming the vertex: how a service was
   located is the whole of its quality level, so no default could be right.
   No uncertainty is "not assessed", which grades a detection QL-C, as a
-  schedule's empty cell does. No type is `unknown`, drawn magenta. A
+  schedule's empty cell does. No type is `unknown`, drawn pink. A
   GNSS or total station precision on an imported point is not taken as the
   service's uncertainty: it is the mark's, and the locator's error is most
   of the service's.
@@ -803,6 +877,11 @@ they are written as (`docs/ifc.md`, "In the window").
   symbols.
 - Attribute quality levels (grading the type, owner or material of a service
   separately from its position) are not modelled.
+- Yellow gas and cream sewer print light on white paper (1.42 and 1.30 : 1):
+  they are AS 5488's colours, and the plot has no rule that darkens a light
+  pen, only white and near-white ones (`cad::paperColour`). A rule that did,
+  for any pen under 3:1 on white, is a change to every plot and the owner's to
+  decide; until then, plot such a sheet monochrome or recolour the layers.
 - `CHECK` does not evaluate the schema's conditional attributes (it cannot
   know the condition) and does not check the `EPSG Code` beside the
   coordinate system, which the schema lists with no attribute of its own.

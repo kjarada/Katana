@@ -18,7 +18,7 @@ Everything below that is a table, a count or a description is generated from the
 | Definitions | 186: 73 linestyles and 113 symbols, in 49 groups, all in paper units, so a mark keeps its size at any zoom and plot scale |
 | Survey codes | 245, each three capital letters, in 12 classes and 49 subgroups; 770 rules |
 | Layers | 130, always three levels (`class/subgroup/family`), lower case |
-| Palette | 28 named colours, each at least 3:1 against the plan view's ground and against white paper |
+| Palette | 28 named colours, each at least 3:1 against the plan view's ground and against white paper as it prints (yellow gas and cream sewer, which are AS 5488's, print light); the service colours are AS 5488's and `UTILITY DRAW`'s |
 | Says nothing of | linework control words and import automation: loading it never resets a colleague's spellings or switches |
 | Notice | Katana Standard is original work made for Katana. It contains no third-party customisation, style library or survey code file. Its licence is that of the Katana repository. |
 
@@ -89,74 +89,78 @@ Every code names one of five weights, in millimetres of pen; a sixth is reserved
 
 ## The palette
 
-Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it colours, and none can fold onto one of the 27 standard names Katana already knows. Each is at least 3:1 against the plan view's ground (`#1E2329`, a blue-grey that is almost black) and against white paper, since one library is plotted and read on the screen; and no two are closer than 0.05 in OKLab, about where two thin lines of different colour stop being told apart. That leaves only a narrow band of lightness, so the six warm classes (kerb, wall, contour, fuel, fence, breakline) were placed by a search, each at least 0.06 from every other colour, and the six classes drawn with the thinnest pens (tree, planting, ground, building, wall, communications) keep at least 3.25 : 1 on both grounds. The six buried-service colours follow the widely published convention for marking buried utilities (water blue, sewer green, gas yellow, electricity red, communications orange, recycled water purple), tuned so the yellow and the orange still read on white. Colour does not carry a class alone: for a reader who confuses red with green some warm pairs stay close whatever their values, so every pipe has its letter and every line class its own pattern.
+Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it colours, and none can fold onto one of the 27 standard names Katana already knows. Each is at least 3:1 against the plan view's ground (`#1E2329`, a blue-grey that is almost black) and against white paper, since one library is plotted and read on the screen (two AS 5488 colours are excused on paper, below); and no two are closer than 0.05 in OKLab, about where two thin lines of different colour stop being told apart. That leaves only a narrow band of lightness, so the six warm classes (kerb, wall, contour, fuel, fence, breakline) were placed by a search, each at least 0.06 from every other colour, and the six classes drawn with the thinnest pens (tree, planting, ground, building, wall, communications) keep at least 3.25 : 1 on both grounds, as they print. Colour does not carry a class alone: for a reader who confuses red with green some warm pairs stay close whatever their values, so every pipe has its letter and every line class its own pattern.
 
-**The two utility conventions differ.** Katana's own `UTILITY DRAW` has colours of its own (electricity orange, communications white, sewer cream, stormwater green; `docs/subsurface_utilities.md`: they are Katana's defaults, and AS 5488 sets none). A drawing that mixes coded survey strings and `UTILITY DRAW` output has two conventions in it and wants a legend. Aligning one to the other is the owner's decision ("Not done").
+**The service colours are AS 5488's.** AS 5488.1 has a primary code and line colour table (its Appendix B) that names a colour for each service: water blue, electricity orange, communications white (black when drawn on a white ground), gas yellow, sewer cream, stormwater and drainage green, recycled water purple, fire service red and unidentified services pink; published guides add petroleum brown. The standard names the colours and gives no sRGB, and it leaves the colours of plans to whoever draws them (clause 1.2.2 of the 2013 edition), so each value here is Katana's rendering of the name. The sources, the names and the values are in `docs/subsurface_utilities.md`, "Colours". Traffic systems have no AS 5488 colour and are Katana's choice. The US convention (electricity red, communications orange, sewer green), which this library first used, is not Australian, so it is rejected: the library follows AS 5488.
+
+**The two utility conventions agree.** `UTILITY DRAW` draws its layers in these same values (`utilityTypeColour`), and `KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` holds the library and that table equal, service by service, and holds every utility code to its service's colour. A drawing that mixes coded survey strings and `UTILITY DRAW` output has one convention in it. Hazard is the one other colour that moved: AS 5488's electricity orange left the old hazard orange 0.043 away, under the 0.05 floor, so hazard is a red-orange (`#FF5A37`) 0.077 from electricity.
+
+**Yellow and cream print light.** On white paper yellow gas (1.42 : 1) and cream sewer (1.30 : 1) cannot reach 3:1 and still be yellow and cream. The colours are the standard's, so they are not darkened: they keep their 3:1 against the plan ground and print light, and the tests name them as the only two excused. Communications is white, which the plot prints black (`cad::paperColour`: every channel at 230 or more), so it is held to the floor as printed (21.00 : 1). A plot that must show gas and sewer firmly plots monochrome, which prints every pen black, or recolours those layers.
 
 ![The 28 colours of Katana Standard on the plan ground and on white paper](images/katana-standard-palette.png)
 
 **Buried services**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana water` | `#3986E4` | potable water | 4.30 : 1 | 3.68 : 1 |
-| `katana sewer` | `#1DA758` | sewer | 5.06 : 1 | 3.12 : 1 |
-| `katana gas` | `#A68E12` | gas | 4.90 : 1 | 3.23 : 1 |
-| `katana electricity` | `#E24942` | electricity | 3.97 : 1 | 3.99 : 1 |
-| `katana telecom` | `#C57A00` | communications | 4.64 : 1 | 3.41 : 1 |
-| `katana recycled` | `#9565C7` | recycled water | 3.74 : 1 | 4.23 : 1 |
-| `katana fire` | `#DC6995` | fire service | 4.89 : 1 | 3.23 : 1 |
-| `katana fuel` | `#A36215` | fuel and petroleum | 3.25 : 1 | 4.87 : 1 |
-| `katana its` | `#0B9BA8` | traffic systems | 4.72 : 1 | 3.35 : 1 |
-| `katana unknown` | `#C344AE` | unidentified service | 3.58 : 1 | 4.41 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana water` | `#2F80ED` | potable water | blue | 4.09 : 1 | 3.87 : 1 |
+| `katana sewer` | `#F0E2B0` | sewer | cream | 12.21 : 1 | 1.30 : 1 (prints light) |
+| `katana gas` | `#FFD500` | gas | yellow | 11.12 : 1 | 1.42 : 1 (prints light) |
+| `katana electricity` | `#E07000` | electricity | orange | 4.89 : 1 | 3.24 : 1 |
+| `katana telecom` | `#FFFFFF` | communications | white | 15.82 : 1 | 21.00 : 1 (prints black) |
+| `katana recycled` | `#9B59D0` | recycled water | purple | 3.57 : 1 | 4.44 : 1 |
+| `katana fire` | `#E53935` | fire service | red | 3.74 : 1 | 4.23 : 1 |
+| `katana fuel` | `#A36215` | fuel and petroleum | brown | 3.25 : 1 | 4.87 : 1 |
+| `katana its` | `#0B9BA8` | traffic systems | Katana's choice | 4.72 : 1 | 3.35 : 1 |
+| `katana unknown` | `#F2559B` | unidentified service | pink | 4.93 : 1 | 3.21 : 1 |
 
 **Water and drainage**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana stormwater` | `#238463` | stormwater pipes and pits | 3.43 : 1 | 4.61 : 1 |
-| `katana waterway` | `#6399BE` | creeks, open drains and water edges | 5.14 : 1 | 3.07 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana stormwater` | `#00A800` | stormwater pipes and pits | green | 4.97 : 1 | 3.18 : 1 |
+| `katana waterway` | `#6399BE` | creeks, open drains and water edges |  | 5.14 : 1 | 3.07 : 1 |
 
 **Roads, street and rail**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana pavement` | `#789295` | road edges, markings and paths | 4.78 : 1 | 3.31 : 1 |
-| `katana kerb` | `#907368` | kerbs | 3.64 : 1 | 4.34 : 1 |
-| `katana street` | `#A2759D` | street furniture and signs | 4.19 : 1 | 3.77 : 1 |
-| `katana rail` | `#816FA3` | track, overhead wire and platforms | 3.57 : 1 | 4.43 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana pavement` | `#789295` | road edges, markings and paths |  | 4.78 : 1 | 3.31 : 1 |
+| `katana kerb` | `#907368` | kerbs |  | 3.64 : 1 | 4.34 : 1 |
+| `katana street` | `#A2759D` | street furniture and signs |  | 4.19 : 1 | 3.77 : 1 |
+| `katana rail` | `#816FA3` | track, overhead wire and platforms |  | 3.57 : 1 | 4.43 : 1 |
 
 **Land, ground and boundaries**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana boundary` | `#796EDA` | lot boundaries, easements and boundary marks | 3.81 : 1 | 4.15 : 1 |
-| `katana contour` | `#B9704F` | contours, rock and cliff | 4.14 : 1 | 3.82 : 1 |
-| `katana breakline` | `#BE7D83` | breaklines | 4.86 : 1 | 3.26 : 1 |
-| `katana ground` | `#688F68` | ground shots and levels | 4.31 : 1 | 3.67 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana boundary` | `#796EDA` | lot boundaries, easements and boundary marks |  | 3.81 : 1 | 4.15 : 1 |
+| `katana contour` | `#B9704F` | contours, rock and cliff |  | 4.14 : 1 | 3.82 : 1 |
+| `katana breakline` | `#BE7D83` | breaklines |  | 4.86 : 1 | 3.26 : 1 |
+| `katana ground` | `#688F68` | ground shots and levels |  | 4.31 : 1 | 3.67 : 1 |
 
 **Vegetation**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana tree` | `#5C8627` | trees | 3.69 : 1 | 4.29 : 1 |
-| `katana planting` | `#779624` | shrubs, hedges and ground cover | 4.65 : 1 | 3.40 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana tree` | `#5C8627` | trees |  | 3.69 : 1 | 4.29 : 1 |
+| `katana planting` | `#779624` | shrubs, hedges and ground cover |  | 4.65 : 1 | 3.40 : 1 |
 
 **Built form**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana building` | `#627B8C` | buildings and structures | 3.56 : 1 | 4.44 : 1 |
-| `katana fence` | `#A18C65` | fences and gates | 4.86 : 1 | 3.25 : 1 |
-| `katana wall` | `#BA5556` | walls | 3.41 : 1 | 4.64 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana building` | `#627B8C` | buildings and structures |  | 3.56 : 1 | 4.44 : 1 |
+| `katana fence` | `#A18C65` | fences and gates |  | 4.86 : 1 | 3.25 : 1 |
+| `katana wall` | `#BA5556` | walls |  | 3.41 : 1 | 4.64 : 1 |
 
 **Control, notes and hazards**
 
-| Colour | Value | Used for | On the ground | On white |
-|---|---|---|---|---|
-| `katana control` | `#0999C9` | survey control and investigation points | 4.83 : 1 | 3.28 : 1 |
-| `katana note` | `#9A8EA4` | text and plan marks | 5.11 : 1 | 3.10 : 1 |
-| `katana hazard` | `#DD5C00` | hazards | 4.22 : 1 | 3.75 : 1 |
+| Colour | Value | Used for | AS 5488 | On the ground | On white |
+|---|---|---|---|---|---|
+| `katana control` | `#0999C9` | survey control and investigation points |  | 4.83 : 1 | 3.28 : 1 |
+| `katana note` | `#9A8EA4` | text and plan marks |  | 5.11 : 1 | 3.10 : 1 |
+| `katana hazard` | `#FF5A37` | hazards |  | 5.10 : 1 | 3.10 : 1 |
 
 ## Linestyles
 
@@ -164,7 +168,7 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 
 ![All 73 linestyles of Katana Standard, drawn by Katana](images/katana-standard-linestyles.png)
 
-*One sample of each, drawn by a code that uses it. Pen weights are not yet applied, so every line is the same width here.*
+*One sample of each, drawn by a code that uses it. Pen weights are not yet applied, so every line is the same width here. This is a plot on white paper: the communications cable prints black, and the sewer and gas pipes print light, since AS 5488's cream and yellow are under 3:1 on white (see the palette).*
 
 **How they are drawn.** The rules the data's own check enforces:
 
@@ -897,14 +901,14 @@ Pits, manholes, traps, headwalls and culvert ends.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `KPG` | Grated Gully Pit | symbol `Gully Pit`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Grated pit that takes surface water. Shoot the middle of the grate. Pit Size (mm) is the clear opening of the pit; Depth (m) is from the grate to the invert. Level the invert separately as GPI. |
-| `KPK` | Kerb Inlet Pit | symbol `Kerb Inlet Pit`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Pit with its opening in the kerb face. Shoot the middle of the kerb opening on the kerb line. The notch is drawn on the symbol's left and is not turned to follow the kerb. |
-| `KPJ` | Junction Pit | symbol `Junction Pit`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Pit where pipes meet, with a solid lid. Shoot the middle of the lid. Depth (m) is from the lid to the lowest invert, which is levelled as GPI. |
-| `KPH` | Stormwater Manhole | symbol `Stormwater Manhole`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/manhole` | Round access cover over a stormwater pipe. Shoot the middle of the cover. Lid Size (mm) is the clear diameter of the opening. Sewer covers are USH, not this. |
-| `KPT` | Gross Pollutant Trap | symbol `Gross Pollutant Trap`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/outlet` | Structure that traps litter and sediment before an outfall. Shoot the middle of the access lid. A trap large enough to need an outline is outlined with a generic line (XGL) and a note. |
-| `KPW` | Headwall | symbol `Headwall`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/outlet` | Concrete wall round the end of a pipe or culvert. Shoot the middle of the top of the wall, on the face where the pipe passes through, then code the pipe itself. The symbol is drawn open to the west and is not turned. |
-| `KPC` | Culvert End | symbol `Culvert End`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/outlet` | Open end of a culvert barrel. Shoot the middle of the mouth at the invert. Shoot both ends of the culvert so its length and fall are known. |
-| `KPS` | Subsoil Inspection Point | symbol `Subsoil Inspection Point`; `katana stormwater` (#238463); 0.25 mm | `drainage/structures/pit` | Inspection opening on a subsoil drain. Shoot the middle of the cap on the inspection riser. |
+| `KPG` | Grated Gully Pit | symbol `Gully Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Grated pit that takes surface water. Shoot the middle of the grate. Pit Size (mm) is the clear opening of the pit; Depth (m) is from the grate to the invert. Level the invert separately as GPI. |
+| `KPK` | Kerb Inlet Pit | symbol `Kerb Inlet Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Pit with its opening in the kerb face. Shoot the middle of the kerb opening on the kerb line. The notch is drawn on the symbol's left and is not turned to follow the kerb. |
+| `KPJ` | Junction Pit | symbol `Junction Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Pit where pipes meet, with a solid lid. Shoot the middle of the lid. Depth (m) is from the lid to the lowest invert, which is levelled as GPI. |
+| `KPH` | Stormwater Manhole | symbol `Stormwater Manhole`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/manhole` | Round access cover over a stormwater pipe. Shoot the middle of the cover. Lid Size (mm) is the clear diameter of the opening. Sewer covers are USH, not this. |
+| `KPT` | Gross Pollutant Trap | symbol `Gross Pollutant Trap`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | Structure that traps litter and sediment before an outfall. Shoot the middle of the access lid. A trap large enough to need an outline is outlined with a generic line (XGL) and a note. |
+| `KPW` | Headwall | symbol `Headwall`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | Concrete wall round the end of a pipe or culvert. Shoot the middle of the top of the wall, on the face where the pipe passes through, then code the pipe itself. The symbol is drawn open to the west and is not turned. |
+| `KPC` | Culvert End | symbol `Culvert End`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | Open end of a culvert barrel. Shoot the middle of the mouth at the invert. Shoot both ends of the culvert so its length and fall are known. |
+| `KPS` | Subsoil Inspection Point | symbol `Subsoil Inspection Point`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Inspection opening on a subsoil drain. Shoot the middle of the cap on the inspection riser. |
 
 #### `KC` Pipes and Culverts
 
@@ -912,9 +916,9 @@ Stormwater pipes, box culverts and subsoil drains.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `KCP` | Stormwater Pipe | `Stormwater Pipe Line`; `katana stormwater` (#238463); 0.35 mm | `drainage/pipes/pipe` | Stormwater pipe, shot pit to pit. Shoot the invert at every pit and manhole it passes through: the rule reads the level you shoot as the bottom of the pipe. Give Diameter (mm) and Material. Example: `KCP1 ST, KCP1, KCP1 END`. |
-| `KCB` | Box Culvert | `Culvert Outline`; `katana stormwater` (#238463); 0.35 mm | `drainage/pipes/culvert` | Rectangular culvert, drawn as a pair of walls. Shoot the invert along the middle of the culvert and at both ends. Width (mm) and Height (mm) are the clear opening, not the outside size. Example: `KCB1 ST, KCB1 END`. |
-| `KCS` | Subsoil Drain | `Subsoil Drain Line`; `katana stormwater` (#238463); 0.18 mm | `drainage/pipes/subsoil` | Perforated drain buried beside a road or a wall. Shoot along the drain at each inspection point and bend. Depth (m) is to the invert, and Condition says whether it was found blocked. Example: `KCS1 ST, KCS1, KCS1 END`. |
+| `KCP` | Stormwater Pipe | `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe` | Stormwater pipe, shot pit to pit. Shoot the invert at every pit and manhole it passes through: the rule reads the level you shoot as the bottom of the pipe. Give Diameter (mm) and Material. Example: `KCP1 ST, KCP1, KCP1 END`. |
+| `KCB` | Box Culvert | `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | Rectangular culvert, drawn as a pair of walls. Shoot the invert along the middle of the culvert and at both ends. Width (mm) and Height (mm) are the clear opening, not the outside size. Example: `KCB1 ST, KCB1 END`. |
+| `KCS` | Subsoil Drain | `Subsoil Drain Line`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/subsoil` | Perforated drain buried beside a road or a wall. Shoot along the drain at each inspection point and bend. Depth (m) is to the invert, and Condition says whether it was found blocked. Example: `KCS1 ST, KCS1, KCS1 END`. |
 
 #### `KW` Channels and Waterways
 
@@ -972,14 +976,14 @@ Drinking water mains, connections, valves, pits and tanks.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UWM` | Water Supply Pipe | `Water Supply Pipe`; `katana water` (#3986E4); 0.35 mm | `utilities/water/main` | Pressure main that carries drinking water. Shoot the centre of the main at every fitting and bend, and where a locator or a pothole places it. Diameter (mm), Material and Depth (m) to the top of the pipe are the three that matter. Example: `UWM1 ST, UWM1, UWM1 END`. |
-| `UWB` | Water Service Connection | `Service Connection Line`; `katana water` (#3986E4); 0.18 mm | `utilities/water/main` | Small pipe from a main to a property meter. Shoot from the tee on the main to the meter at the boundary. The string ends at the meter, which is coded UWX. Example: `UWB1 ST, UWB1 END`. |
-| `UWD` | Disused Water Main | `Disused Service Line`; `katana water` (#3986E4); 0.25 mm | `utilities/water/disused` | Water main that is no longer in service. Shoot it as carefully as a live main: it is still in the ground. Disused status is set for you. If it is cut and capped, say where in Condition. Example: `UWD1 ST, UWD1, UWD1 END`. |
-| `UWV` | Water Isolation Valve | symbol `Water Isolation Valve`; `katana water` (#3986E4); 0.25 mm | `utilities/water/fitting` | Isolating valve on a water main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main it controls. |
-| `UWX` | Water Flow Meter | symbol `Water Flow Meter`; `katana water` (#3986E4); 0.25 mm | `utilities/water/fitting` | Meter that records water supplied. Shoot the middle of the meter lid. A meter in a pit is shot at the lid; the pit is not coded again. |
-| `UWP` | Water Pit | symbol `Water Pit`; `katana water` (#3986E4); 0.25 mm | `utilities/water/structure` | Pit or chamber on a water service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UWT` | Water Tank | symbol `Water Tank`; `katana water` (#3986E4); 0.25 mm | `utilities/water/structure` | Tank or reservoir that stores water. Shoot the middle of the tank's footprint. Capacity (kL) is the rated volume in kilolitres. |
-| `UWU` | Water Pumping Station | symbol `Pumping Station`; `katana water` (#3986E4); 0.25 mm | `utilities/water/structure` | Pump station on a water main. Shoot the middle of the pump house, or the wet well lid when there is no building. |
+| `UWM` | Water Supply Pipe | `Water Supply Pipe`; `katana water` (#2F80ED); 0.35 mm | `utilities/water/main` | Pressure main that carries drinking water. Shoot the centre of the main at every fitting and bend, and where a locator or a pothole places it. Diameter (mm), Material and Depth (m) to the top of the pipe are the three that matter. Example: `UWM1 ST, UWM1, UWM1 END`. |
+| `UWB` | Water Service Connection | `Service Connection Line`; `katana water` (#2F80ED); 0.18 mm | `utilities/water/main` | Small pipe from a main to a property meter. Shoot from the tee on the main to the meter at the boundary. The string ends at the meter, which is coded UWX. Example: `UWB1 ST, UWB1 END`. |
+| `UWD` | Disused Water Main | `Disused Service Line`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/disused` | Water main that is no longer in service. Shoot it as carefully as a live main: it is still in the ground. Disused status is set for you. If it is cut and capped, say where in Condition. Example: `UWD1 ST, UWD1, UWD1 END`. |
+| `UWV` | Water Isolation Valve | symbol `Water Isolation Valve`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | Isolating valve on a water main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main it controls. |
+| `UWX` | Water Flow Meter | symbol `Water Flow Meter`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | Meter that records water supplied. Shoot the middle of the meter lid. A meter in a pit is shot at the lid; the pit is not coded again. |
+| `UWP` | Water Pit | symbol `Water Pit`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | Pit or chamber on a water service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| `UWT` | Water Tank | symbol `Water Tank`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | Tank or reservoir that stores water. Shoot the middle of the tank's footprint. Capacity (kL) is the rated volume in kilolitres. |
+| `UWU` | Water Pumping Station | symbol `Pumping Station`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | Pump station on a water main. Shoot the middle of the pump house, or the wet well lid when there is no building. |
 
 #### `US` Sewer
 
@@ -987,14 +991,14 @@ Gravity and pressure sewers, branches, maintenance holes and pump stations.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `USM` | Sewer Gravity Pipe | `Sewer Gravity Pipe`; `katana sewer` (#1DA758); 0.35 mm | `utilities/sewer/main` | Gravity sewer; the level that matters is the invert. Shoot the invert at every maintenance hole, walking downstream: the chevron points the way you shot. Diameter (mm) and Material are read at the hole. Example: `USM1 ST, USM1, USM1 END`. |
-| `USR` | Sewer Pressure Pipe | `Sewer Pressure Pipe`; `katana sewer` (#1DA758); 0.35 mm | `utilities/sewer/main` | Pressure sewer that carries flow under pump. Shoot the centre of the pipe from the pump toward the discharge. Unlike a gravity sewer it need not fall, so depth and diameter are the data. Example: `USR1 ST, USR1, USR1 END`. |
-| `USB` | Sewer Branch | `Service Connection Line`; `katana sewer` (#1DA758); 0.18 mm | `utilities/sewer/main` | Property connection to a sewer main. Shoot from the junction on the main to the property inspection opening. Depth (m) at the junction is the useful one. Example: `USB1 ST, USB1 END`. |
-| `USD` | Disused Sewer Main | `Disused Service Line`; `katana sewer` (#1DA758); 0.25 mm | `utilities/sewer/disused` | Sewer that is no longer in service. Shoot as a live sewer, at each maintenance hole and bend. Disused status is set for you; say in Condition if it is sealed or flowing. Example: `USD1 ST, USD1, USD1 END`. |
-| `USH` | Sewer Maintenance Hole | symbol `Sewer Maintenance Hole`; `katana sewer` (#1DA758); 0.25 mm | `utilities/sewer/structure` | Man-entry chamber on a sewer. Shoot the middle of the cover. Depth (m) is cover to lowest invert, Invert Level (m) is the outlet pipe's, Lid Size (mm) is the clear opening. Stormwater manholes are KPH. |
-| `USE` | Sewer Vent | symbol `Sewer Vent`; `katana sewer` (#1DA758); 0.25 mm | `utilities/sewer/fitting` | Vent stack on a sewer that lets gas out and air in. Shoot the middle of the stack at ground level. Height (m) is to the top of the vent. |
-| `UST` | Septic System Tank | symbol `Septic System Tank`; `katana sewer` (#1DA758); 0.25 mm | `utilities/sewer/structure` | Septic or other on-site treatment tank. Shoot the middle of the tank's access lid. Several lids on one tank are shot at the largest. |
-| `USP` | Sewage Pumping Station | symbol `Pumping Station`; `katana sewer` (#1DA758); 0.25 mm | `utilities/sewer/structure` | Pump station on a sewer that lifts flow to the next gravity run. Shoot the middle of the wet well lid. The control cabinet is not shot separately. |
+| `USM` | Sewer Gravity Pipe | `Sewer Gravity Pipe`; `katana sewer` (#F0E2B0); 0.35 mm | `utilities/sewer/main` | Gravity sewer; the level that matters is the invert. Shoot the invert at every maintenance hole, walking downstream: the chevron points the way you shot. Diameter (mm) and Material are read at the hole. Example: `USM1 ST, USM1, USM1 END`. |
+| `USR` | Sewer Pressure Pipe | `Sewer Pressure Pipe`; `katana sewer` (#F0E2B0); 0.35 mm | `utilities/sewer/main` | Pressure sewer that carries flow under pump. Shoot the centre of the pipe from the pump toward the discharge. Unlike a gravity sewer it need not fall, so depth and diameter are the data. Example: `USR1 ST, USR1, USR1 END`. |
+| `USB` | Sewer Branch | `Service Connection Line`; `katana sewer` (#F0E2B0); 0.18 mm | `utilities/sewer/main` | Property connection to a sewer main. Shoot from the junction on the main to the property inspection opening. Depth (m) at the junction is the useful one. Example: `USB1 ST, USB1 END`. |
+| `USD` | Disused Sewer Main | `Disused Service Line`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/disused` | Sewer that is no longer in service. Shoot as a live sewer, at each maintenance hole and bend. Disused status is set for you; say in Condition if it is sealed or flowing. Example: `USD1 ST, USD1, USD1 END`. |
+| `USH` | Sewer Maintenance Hole | symbol `Sewer Maintenance Hole`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | Man-entry chamber on a sewer. Shoot the middle of the cover. Depth (m) is cover to lowest invert, Invert Level (m) is the outlet pipe's, Lid Size (mm) is the clear opening. Stormwater manholes are KPH. |
+| `USE` | Sewer Vent | symbol `Sewer Vent`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/fitting` | Vent stack on a sewer that lets gas out and air in. Shoot the middle of the stack at ground level. Height (m) is to the top of the vent. |
+| `UST` | Septic System Tank | symbol `Septic System Tank`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | Septic or other on-site treatment tank. Shoot the middle of the tank's access lid. Several lids on one tank are shot at the largest. |
+| `USP` | Sewage Pumping Station | symbol `Pumping Station`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | Pump station on a sewer that lifts flow to the next gravity run. Shoot the middle of the wet well lid. The control cabinet is not shot separately. |
 
 #### `UG` Gas
 
@@ -1002,14 +1006,14 @@ Gas mains, services, valves, regulators and meters.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UGM` | Gas Supply Pipe | `Gas Supply Pipe`; `katana gas` (#A68E12); 0.35 mm | `utilities/gas/main` | Pipe that carries natural gas. Shoot the centre of the pipe at every fitting and bend. Pressure is the class the owner states (low, medium or high), never a guess. Diameter (mm), Material and Depth (m) as for any main. Example: `UGM1 ST, UGM1, UGM1 END`. |
-| `UGB` | Gas Service | `Service Connection Line`; `katana gas` (#A68E12); 0.18 mm | `utilities/gas/main` | Property connection to a gas main. Shoot from the tee on the main to the meter. The string ends at the meter, which is coded UGX. Example: `UGB1 ST, UGB1 END`. |
-| `UGD` | Disused Gas Main | `Disused Service Line`; `katana gas` (#A68E12); 0.25 mm | `utilities/gas/disused` | Gas main that is no longer in service. Shoot as a live main. A disused gas main may still hold gas, so say in Condition if it is purged or capped. Disused status is set for you. Example: `UGD1 ST, UGD1, UGD1 END`. |
-| `UGV` | Gas Isolation Valve | symbol `Gas Isolation Valve`; `katana gas` (#A68E12); 0.25 mm | `utilities/gas/fitting` | Isolating valve on a gas main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main. |
-| `UGR` | Gas Pressure Regulator | symbol `Gas Pressure Regulator`; `katana gas` (#A68E12); 0.25 mm | `utilities/gas/fitting` | Pressure regulator, where gas pressure steps down. Shoot the middle of the regulator, in its pit or on its pad. |
-| `UGX` | Gas Flow Meter | symbol `Gas Flow Meter`; `katana gas` (#A68E12); 0.25 mm | `utilities/gas/fitting` | Meter that records gas supplied. Shoot the middle of the meter housing or its lid. Meters usually sit at the property boundary, where the gas service (UGB) ends. |
-| `UGP` | Gas Pit | symbol `Gas Pit`; `katana gas` (#A68E12); 0.25 mm | `utilities/gas/structure` | Pit or valve box on a gas service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UGK` | Gas Marker Post | symbol `Marker Post`; `katana gas` (#A68E12); 0.25 mm | `utilities/gas/fitting` | Post that marks the route of a gas pipeline. Shoot the middle of the post at ground level. The pipeline is not necessarily directly beneath it. |
+| `UGM` | Gas Supply Pipe | `Gas Supply Pipe`; `katana gas` (#FFD500); 0.35 mm | `utilities/gas/main` | Pipe that carries natural gas. Shoot the centre of the pipe at every fitting and bend. Pressure is the class the owner states (low, medium or high), never a guess. Diameter (mm), Material and Depth (m) as for any main. Example: `UGM1 ST, UGM1, UGM1 END`. |
+| `UGB` | Gas Service | `Service Connection Line`; `katana gas` (#FFD500); 0.18 mm | `utilities/gas/main` | Property connection to a gas main. Shoot from the tee on the main to the meter. The string ends at the meter, which is coded UGX. Example: `UGB1 ST, UGB1 END`. |
+| `UGD` | Disused Gas Main | `Disused Service Line`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/disused` | Gas main that is no longer in service. Shoot as a live main. A disused gas main may still hold gas, so say in Condition if it is purged or capped. Disused status is set for you. Example: `UGD1 ST, UGD1, UGD1 END`. |
+| `UGV` | Gas Isolation Valve | symbol `Gas Isolation Valve`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Isolating valve on a gas main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main. |
+| `UGR` | Gas Pressure Regulator | symbol `Gas Pressure Regulator`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Pressure regulator, where gas pressure steps down. Shoot the middle of the regulator, in its pit or on its pad. |
+| `UGX` | Gas Flow Meter | symbol `Gas Flow Meter`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Meter that records gas supplied. Shoot the middle of the meter housing or its lid. Meters usually sit at the property boundary, where the gas service (UGB) ends. |
+| `UGP` | Gas Pit | symbol `Gas Pit`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/structure` | Pit or valve box on a gas service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| `UGK` | Gas Marker Post | symbol `Marker Post`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Post that marks the route of a gas pipeline. Shoot the middle of the post at ground level. The pipeline is not necessarily directly beneath it. |
 
 #### `UE` Electricity
 
@@ -1017,15 +1021,15 @@ Cables, overhead lines, ducts, poles, transformers and pillars.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UEC` | Underground Cable | `Underground Cable`; `katana electricity` (#E24942); 0.35 mm | `utilities/electricity/main` | Buried electricity cable. Shoot the centre of the cable, or of the duct bank that holds it. Voltage (V) is in whole volts and Ducts is the number of ducts. Assume every unlabelled cable is live. Example: `UEC1 ST, UEC1, UEC1 END`. |
-| `UEO` | Overhead Line | `Overhead Line`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/overhead` | Overhead power line, shot under each pole. Shoot the ground under the line at each pole and at each change of direction. Height (m) is the lowest wire above ground at the middle of a span. Example: `UEO1 ST, UEO1, UEO1 END`. |
-| `UED` | Disused Cable | `Disused Service Line`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/disused` | Cable that is no longer in service. Shoot as a live cable. A disused cable may still be live, so say what you know in Condition. Disused status is set for you. Example: `UED1 ST, UED1, UED1 END`. |
-| `UEN` | Electrical Duct | `Buried Duct`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/main` | Duct or conduit that carries electricity cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UEN1 ST, UEN1, UEN1 END`. |
-| `UEP` | Power Pole | symbol `Power Pole`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/structure` | Pole that carries power lines. Shoot the middle of the pole at ground level. Height (m) is the pole's height above ground, and Material is timber, concrete or steel. A street light on its own pole is SLS. |
-| `UEY` | Pole Guy | symbol `Guy Anchor`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/fitting` | Anchor of a stay wire that braces a pole. Shoot the anchor where it enters the ground. The wire itself is not shot. The symbol is drawn pointing west and is not turned. |
-| `UET` | Transformer | symbol `Transformer`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/structure` | Transformer on a pole or on the ground. Shoot the middle of a ground unit, or the pole that carries a pole-mounted unit. Rating (kVA) is read from the nameplate. |
-| `UEK` | Electrical Pillar | symbol `Electrical Pillar`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/structure` | Street pillar or cabinet of the electricity network. Shoot the middle of the pillar's footprint. Condition notes damage or a missing door. |
-| `UEJ` | Electrical Pit | symbol `Electrical Pit`; `katana electricity` (#E24942); 0.25 mm | `utilities/electricity/structure` | Pit or chamber on an electricity cable. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| `UEC` | Underground Cable | `Underground Cable`; `katana electricity` (#E07000); 0.35 mm | `utilities/electricity/main` | Buried electricity cable. Shoot the centre of the cable, or of the duct bank that holds it. Voltage (V) is in whole volts and Ducts is the number of ducts. Assume every unlabelled cable is live. Example: `UEC1 ST, UEC1, UEC1 END`. |
+| `UEO` | Overhead Line | `Overhead Line`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/overhead` | Overhead power line, shot under each pole. Shoot the ground under the line at each pole and at each change of direction. Height (m) is the lowest wire above ground at the middle of a span. Example: `UEO1 ST, UEO1, UEO1 END`. |
+| `UED` | Disused Cable | `Disused Service Line`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/disused` | Cable that is no longer in service. Shoot as a live cable. A disused cable may still be live, so say what you know in Condition. Disused status is set for you. Example: `UED1 ST, UED1, UED1 END`. |
+| `UEN` | Electrical Duct | `Buried Duct`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/main` | Duct or conduit that carries electricity cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UEN1 ST, UEN1, UEN1 END`. |
+| `UEP` | Power Pole | symbol `Power Pole`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Pole that carries power lines. Shoot the middle of the pole at ground level. Height (m) is the pole's height above ground, and Material is timber, concrete or steel. A street light on its own pole is SLS. |
+| `UEY` | Pole Guy | symbol `Guy Anchor`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/fitting` | Anchor of a stay wire that braces a pole. Shoot the anchor where it enters the ground. The wire itself is not shot. The symbol is drawn pointing west and is not turned. |
+| `UET` | Transformer | symbol `Transformer`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Transformer on a pole or on the ground. Shoot the middle of a ground unit, or the pole that carries a pole-mounted unit. Rating (kVA) is read from the nameplate. |
+| `UEK` | Electrical Pillar | symbol `Electrical Pillar`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Street pillar or cabinet of the electricity network. Shoot the middle of the pillar's footprint. Condition notes damage or a missing door. |
+| `UEJ` | Electrical Pit | symbol `Electrical Pit`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Pit or chamber on an electricity cable. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
 
 #### `UC` Communications
 
@@ -1033,13 +1037,13 @@ Telephone, data and fibre cables, ducts, pits and pillars.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UCC` | Communications Cable | `Communications Cable`; `katana telecom` (#C57A00); 0.35 mm | `utilities/telecommunications/main` | Buried telephone, data or fibre cable. Shoot the centre of the cable, or of the duct it runs in, at each pit and bend. Ducts is the number of ducts. Owner matters most here: several carriers share one route. Example: `UCC1 ST, UCC1, UCC1 END`. |
-| `UCN` | Communications Duct | `Buried Duct`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/main` | Duct or conduit that carries communications cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UCN1 ST, UCN1, UCN1 END`. |
-| `UCO` | Overhead Communications Cable | `Overhead Line`; `katana telecom` (#C57A00); 0.18 mm | `utilities/telecommunications/overhead` | Aerial communications cable. Shoot the ground under the cable at each pole. Height (m) is the lowest point of the span above ground. Example: `UCO1 ST, UCO1, UCO1 END`. |
-| `UCD` | Disused Communications Cable | `Disused Service Line`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/disused` | Communications cable that is no longer in service. Shoot as a live cable; owners often leave old cable in place. Disused status is set for you. Example: `UCD1 ST, UCD1, UCD1 END`. |
-| `UCP` | Communications Pit | symbol `Communications Pit`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/structure` | Pit on a communications route. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UCH` | Communications Maintenance Hole | symbol `Communications Maintenance Hole`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/structure` | Man-entry chamber on a communications route. Shoot the middle of the cover. Lid Size (mm) is the clear opening; Depth (m) is from the cover to the floor. |
-| `UCK` | Communications Pillar | symbol `Communications Pillar`; `katana telecom` (#C57A00); 0.25 mm | `utilities/telecommunications/structure` | Street pillar or cabinet of the communications network. Shoot the middle of the pillar's footprint. Owner is the carrier named on the door. |
+| `UCC` | Communications Cable | `Communications Cable`; `katana telecom` (#FFFFFF); 0.35 mm | `utilities/telecommunications/main` | Buried telephone, data or fibre cable. Shoot the centre of the cable, or of the duct it runs in, at each pit and bend. Ducts is the number of ducts. Owner matters most here: several carriers share one route. Example: `UCC1 ST, UCC1, UCC1 END`. |
+| `UCN` | Communications Duct | `Buried Duct`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/main` | Duct or conduit that carries communications cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UCN1 ST, UCN1, UCN1 END`. |
+| `UCO` | Overhead Communications Cable | `Overhead Line`; `katana telecom` (#FFFFFF); 0.18 mm | `utilities/telecommunications/overhead` | Aerial communications cable. Shoot the ground under the cable at each pole. Height (m) is the lowest point of the span above ground. Example: `UCO1 ST, UCO1, UCO1 END`. |
+| `UCD` | Disused Communications Cable | `Disused Service Line`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/disused` | Communications cable that is no longer in service. Shoot as a live cable; owners often leave old cable in place. Disused status is set for you. Example: `UCD1 ST, UCD1, UCD1 END`. |
+| `UCP` | Communications Pit | symbol `Communications Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | Pit on a communications route. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| `UCH` | Communications Maintenance Hole | symbol `Communications Maintenance Hole`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | Man-entry chamber on a communications route. Shoot the middle of the cover. Lid Size (mm) is the clear opening; Depth (m) is from the cover to the floor. |
+| `UCK` | Communications Pillar | symbol `Communications Pillar`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | Street pillar or cabinet of the communications network. Shoot the middle of the pillar's footprint. Owner is the carrier named on the door. |
 
 #### `UR` Recycled Water
 
@@ -1047,11 +1051,11 @@ Recycled water mains, connections, valves and pits.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `URM` | Recycled Water Pipe | `Recycled Water Pipe`; `katana recycled` (#9565C7); 0.35 mm | `utilities/recycled-water/main` | Main that carries recycled water. Shoot the centre of the main at every fitting and bend. Never assume it is drinking water: purple pipe and a purple lid are the clues. Diameter (mm), Material and Depth (m) as for any main. Example: `URM1 ST, URM1, URM1 END`. |
-| `URB` | Recycled Water Connection | `Service Connection Line`; `katana recycled` (#9565C7); 0.18 mm | `utilities/recycled-water/main` | Property connection to a recycled water main. Shoot from the tee on the main to the property meter. The string ends at the meter. Example: `URB1 ST, URB1 END`. |
-| `URD` | Disused Recycled Main | `Disused Service Line`; `katana recycled` (#9565C7); 0.25 mm | `utilities/recycled-water/disused` | Recycled water main that is no longer in service. Shoot as a live main: it is still in the ground and still in the way. Disused status is set for you. Example: `URD1 ST, URD1, URD1 END`. |
-| `URV` | Recycled Isolation Valve | symbol `Recycled Isolation Valve`; `katana recycled` (#9565C7); 0.25 mm | `utilities/recycled-water/fitting` | Isolating valve on a recycled water main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main. |
-| `URP` | Recycled Water Pit | symbol `Recycled Water Pit`; `katana recycled` (#9565C7); 0.25 mm | `utilities/recycled-water/structure` | Pit or chamber on a recycled water service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| `URM` | Recycled Water Pipe | `Recycled Water Pipe`; `katana recycled` (#9B59D0); 0.35 mm | `utilities/recycled-water/main` | Main that carries recycled water. Shoot the centre of the main at every fitting and bend. Never assume it is drinking water: purple pipe and a purple lid are the clues. Diameter (mm), Material and Depth (m) as for any main. Example: `URM1 ST, URM1, URM1 END`. |
+| `URB` | Recycled Water Connection | `Service Connection Line`; `katana recycled` (#9B59D0); 0.18 mm | `utilities/recycled-water/main` | Property connection to a recycled water main. Shoot from the tee on the main to the property meter. The string ends at the meter. Example: `URB1 ST, URB1 END`. |
+| `URD` | Disused Recycled Main | `Disused Service Line`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/disused` | Recycled water main that is no longer in service. Shoot as a live main: it is still in the ground and still in the way. Disused status is set for you. Example: `URD1 ST, URD1, URD1 END`. |
+| `URV` | Recycled Isolation Valve | symbol `Recycled Isolation Valve`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | Isolating valve on a recycled water main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main. |
+| `URP` | Recycled Water Pit | symbol `Recycled Water Pit`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/structure` | Pit or chamber on a recycled water service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
 
 #### `UF` Fire Service
 
@@ -1059,10 +1063,10 @@ Fire mains, hydrants, boosters and valves.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UFM` | Fire Service Pipe | `Fire Service Pipe`; `katana fire` (#DC6995); 0.35 mm | `utilities/fire-service/main` | Main that feeds hydrants and sprinkler systems. Shoot the centre of the main at every fitting and bend. A fire main inside a building boundary is usually private: say so in Owner. Example: `UFM1 ST, UFM1, UFM1 END`. |
-| `UFH` | Fire Hydrant | symbol `Fire Hydrant`; `katana fire` (#DC6995); 0.25 mm | `utilities/fire-service/fitting` | Fire hydrant, standing or underground. Shoot the middle of the hydrant, or of the lid of an underground one. Hydrant Type says pillar or underground. |
-| `UFB` | Booster Connection | symbol `Booster Connection`; `katana fire` (#DC6995); 0.25 mm | `utilities/fire-service/fitting` | Connection where the fire brigade boosts a building's supply. Shoot the middle of the cabinet or the pad that carries the booster outlets. |
-| `UFV` | Fire Isolation Valve | symbol `Fire Isolation Valve`; `katana fire` (#DC6995); 0.25 mm | `utilities/fire-service/fitting` | Isolating valve on a fire service. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the pipe. |
+| `UFM` | Fire Service Pipe | `Fire Service Pipe`; `katana fire` (#E53935); 0.35 mm | `utilities/fire-service/main` | Main that feeds hydrants and sprinkler systems. Shoot the centre of the main at every fitting and bend. A fire main inside a building boundary is usually private: say so in Owner. Example: `UFM1 ST, UFM1, UFM1 END`. |
+| `UFH` | Fire Hydrant | symbol `Fire Hydrant`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | Fire hydrant, standing or underground. Shoot the middle of the hydrant, or of the lid of an underground one. Hydrant Type says pillar or underground. |
+| `UFB` | Booster Connection | symbol `Booster Connection`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | Connection where the fire brigade boosts a building's supply. Shoot the middle of the cabinet or the pad that carries the booster outlets. |
+| `UFV` | Fire Isolation Valve | symbol `Fire Isolation Valve`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | Isolating valve on a fire service. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the pipe. |
 
 #### `UP` Fuel
 
@@ -1091,10 +1095,10 @@ What is there and has not been named: lines, pits, covers and paint.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `UXL` | Unknown Service | `Unknown Service Line`; `katana unknown` (#C344AE); 0.25 mm | `utilities/unknown/main` | Buried line whose service has not been established. Shoot a line you can see or detect but cannot name. Locate Method says how you found it (locator, radar, potholed). Recode it as soon as the owner replies; an unknown line is a question, not a fact. Example: `UXL1 ST, UXL1, UXL1 END`. |
-| `UXP` | Unknown Pit | symbol `Unknown Pit`; `katana unknown` (#C344AE); 0.25 mm | `utilities/unknown/structure` | Pit whose service has not been established. Shoot the middle of the lid. Lid Size (mm) is the clear opening. Lift the lid if it is safe to, and recode the pit if it says what it is. |
-| `UXH` | Unknown Maintenance Hole | symbol `Unknown Maintenance Hole`; `katana unknown` (#C344AE); 0.25 mm | `utilities/unknown/structure` | Man-entry chamber whose service has not been established. Shoot the middle of the cover. Lid Size (mm) is the clear opening. Do not open an unknown cover without a gas test. |
-| `UXM` | Surface Paint Mark | symbol `Paint Mark`; `katana unknown` (#C344AE); 0.25 mm | `utilities/unknown/marking` | Spray-paint mark that locates a service from the surface. Shoot the middle of the mark. Paint Colour is the colour you see, which names the service when the locator used the usual convention. Locate Method is who painted it and how. |
+| `UXL` | Unknown Service | `Unknown Service Line`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/main` | Buried line whose service has not been established. Shoot a line you can see or detect but cannot name. Locate Method says how you found it (locator, radar, potholed). Recode it as soon as the owner replies; an unknown line is a question, not a fact. Example: `UXL1 ST, UXL1, UXL1 END`. |
+| `UXP` | Unknown Pit | symbol `Unknown Pit`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | Pit whose service has not been established. Shoot the middle of the lid. Lid Size (mm) is the clear opening. Lift the lid if it is safe to, and recode the pit if it says what it is. |
+| `UXH` | Unknown Maintenance Hole | symbol `Unknown Maintenance Hole`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | Man-entry chamber whose service has not been established. Shoot the middle of the cover. Lid Size (mm) is the clear opening. Do not open an unknown cover without a gas test. |
+| `UXM` | Surface Paint Mark | symbol `Paint Mark`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/marking` | Spray-paint mark that locates a service from the surface. Shoot the middle of the mark. Paint Colour is the colour you see, which names the service when the locator used the usual convention. Locate Method is who painted it and how. |
 
 ### Class V: Vegetation and Landscape
 
@@ -1343,8 +1347,8 @@ Hazards, heritage items and habitat markers.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `XHZ` | Hazard Point | symbol `Hazard Point`; `katana hazard` (#DD5C00); 0.25 mm | `miscellaneous/hazards/hazard` | Point hazard, such as an open hole or exposed wire. Shoot the middle of the hazard. Hazard Type names it and Note says what to do about it. Tell the client at once if it is dangerous. |
-| `XHB` | Hazard Boundary | `Hazard Boundary`; `katana hazard` (#DD5C00); 0.25 mm | `miscellaneous/hazards/hazard` | Outline of a hazardous area. Shoot the outline of the area, such as contaminated ground or a drop, and close with CL. Hazard Type and Note as for a point hazard. Example: `XHB1 ST, XHB1, XHB1, XHB1 CL`. |
+| `XHZ` | Hazard Point | symbol `Hazard Point`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/hazards/hazard` | Point hazard, such as an open hole or exposed wire. Shoot the middle of the hazard. Hazard Type names it and Note says what to do about it. Tell the client at once if it is dangerous. |
+| `XHB` | Hazard Boundary | `Hazard Boundary`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/hazards/hazard` | Outline of a hazardous area. Shoot the outline of the area, such as contaminated ground or a drop, and close with CL. Hazard Type and Note as for a point hazard. Example: `XHB1 ST, XHB1, XHB1, XHB1 CL`. |
 | `XHT` | Heritage Item | symbol `Heritage Item`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` | Item of heritage value: a feature protected by a listing or an overlay. Shoot the middle of the item, or its base. Name is the common name and Listing is the register entry. Do not disturb it. |
 | `XHH` | Habitat Marker | symbol `Habitat Marker`; `katana tree` (#5C8627); 0.25 mm | `miscellaneous/hazards/habitat` | Nest, burrow or other habitat feature. Shoot the middle of the nest, the hollow or the burrow mouth. Habitat Type says which. Keep clear of it and leave it as you found it. |
 
@@ -1364,8 +1368,8 @@ Temporary fences and work zones.
 
 | Code | Name | Draws | Layer | What it is and how to shoot it |
 |---|---|---|---|---|
-| `XTF` | Temporary Fence | `Temporary Works Line`; `katana hazard` (#DD5C00); 0.25 mm | `miscellaneous/temporary/temporary` | Temporary fence or hoarding. Shoot the line of the temporary fence at each change of direction. It will be gone when the work is done, so date it in the job notes. Example: `XTF1 ST, XTF1, XTF1 END`. |
-| `XTW` | Work Zone Edge | `Temporary Works Line`; `katana hazard` (#DD5C00); 0.25 mm | `miscellaneous/temporary/temporary` | Edge of a work zone: a temporary limit of cones, barriers or tape. Shoot the edge of the work zone at each change of direction and close with CL when it encloses an area. Example: `XTW1 ST, XTW1, XTW1, XTW1 CL`. |
+| `XTF` | Temporary Fence | `Temporary Works Line`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/temporary/temporary` | Temporary fence or hoarding. Shoot the line of the temporary fence at each change of direction. It will be gone when the work is done, so date it in the job notes. Example: `XTF1 ST, XTF1, XTF1 END`. |
+| `XTW` | Work Zone Edge | `Temporary Works Line`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/temporary/temporary` | Edge of a work zone: a temporary limit of cones, barriers or tape. Shoot the edge of the work zone at each change of direction and close with CL when it encloses an area. Example: `XTW1 ST, XTW1, XTW1, XTW1 CL`. |
 
 ### The codes in alphabetical order
 
@@ -1637,7 +1641,7 @@ The built-in customisation of this repository was converted from a third party's
 
 ## How it is made and held
 
-- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` and `codes.py`, each importing nothing of the outside and each with its own `--check`. `make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, `--docs` this document, `--check` exits 1 when either committed output differs from what the data makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.
+- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` and `codes.py`, each importing nothing of the outside and each with its own `--check`; the check of `colours.py` also reads `kNearWhiteChannel` from `include/katana/cad/plot.hpp`, so the white rule it prints by is the plot's. `make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, `--docs` this document, `--check` exits 1 when either committed output differs from what the data makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.
 - **The bytes are the writer's.** The generator writes the canonical form `customisationToJson` writes (`docs/customisation.md`, "What the writer writes"): a file loaded by `CUSTOMISE <file>` and written again by `CUSTOMISE EXPORT <out> CODES LINESTYLES SYMBOLS` comes back byte for byte, except for the one line the session adds, its record of what it was loaded from (`make_katana_standard.py --check --round-trip <katana_cli>`). The tests below check the same on the value itself.
 - **A second opinion.** `tools/katana_standard/census.py` counts the committed file with the standard `json` module and no Katana code, and `tools/customisation_census.py` counts the generic figures. The tests pin the figures those scripts gave.
 - **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed file with the strict reader and holds the counts, the grammar, every name resolved, every definition used and catalogued, the weights, the utility words, the geometry bounds of the contract and the byte-for-byte writer round trip. `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code` imports the invented field file; `cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line` strings control words, which no field-file reader carries, into a curve, a rectangle and a closed line. A counts-only test cannot see a swapped colour, weight or linestyle, so `katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each data module's own check; they exist where Python does.
@@ -1646,7 +1650,7 @@ The built-in customisation of this repository was converted from a third party's
 ## Not done
 
 - **It is not the built-in.** The default stays the existing built-in, and a second compiled-in customisation with a chooser would touch the window, `katana_cli` and `katana_mcp` alike. Whether Katana Standard becomes the default, or a second built-in with a chooser, is the owner's decision.
-- **The colour convention** of the buried services differs from `UTILITY DRAW`'s. Aligning one to the other is the owner's decision.
+- **Yellow and cream print light.** AS 5488's gas and sewer colours are under 3:1 on white paper, and the plot has no rule that darkens a light colour: it turns only white and near-white pens black (`cad::paperColour`). A rule that did, for any pen under 3:1, would change every plot, so it is the owner's decision; until then they print light, as the palette section says.
 - **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the project licence does not cover and says the library is covered; the library was written by AI agents under the owner's direction, and what that means for copyright is a question for the owner and a lawyer.
 - **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's rotation, offset and raise. The library carries them for the day it does.
 - **A curve cannot come from a field file.** The readers Katana has strung points by the file's own strings and close one with opcode 20; control words (`BC`, `EC`, `ST`, `END`, `CL`, `RECT`) reach the linework only from a code kept in a point's property, so the curve and the rectangle are tested through `LINEWORK PROPERTY` and not through an import.
