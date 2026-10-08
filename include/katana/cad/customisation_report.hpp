@@ -17,9 +17,11 @@
 // from its state (customisation_state.hpp), where they live.
 
 #include <cstddef>
+#include <span>
 #include <string>
 #include <vector>
 
+#include "katana/cad/customisation_host.hpp"
 #include "katana/cad/customisation_record.hpp"
 #include "katana/cad/customisation_state.hpp"
 #include "katana/cad/document.hpp"
@@ -98,6 +100,13 @@ customisationSummary(const Document& document, const std::vector<CustomisationSo
 //
 //   name, origin, kept, description, notice, basedOn (null when none), builtIn
 //   (the name of the host's built-in, "" when it has none)
+//   builtIns     [{name, description, source, default, active, definitions,
+//                 codes, rules[, problem]}] - the built-in customisations the
+//                program offers (builtInChoices), the order CUSTOMISE BUILTIN
+//                lists them in: `default` marks the one `builtIn` names,
+//                `active` the one the session is, as installed; `source` is
+//                the file it was compiled in from, "" for one that was not;
+//                `problem` is there only for one that did not read
 //   sources      [{name, definitions, rules, notice}], in load order
 //   counts       {definitions, groups, symbols, linestyles, rules, codes, colours}
 //   automation   {codesOnSurveyImport, lineworkOnSurveyImport}
@@ -122,5 +131,11 @@ customisationSummary(const Document& document, const std::vector<CustomisationSo
 // the definitions or the rules themselves: a file does (CUSTOMISE EXPORT).
 // Text that is not UTF-8 is written with U+FFFD rather than thrown.
 [[nodiscard]] std::string customisationJson(const Document& document);
+// The same, with `offered` as the built-ins it lists: what CUSTOMISE JSON
+// gives (builtInsOf its host), where the form above lists those compiled into
+// the program (builtIns()) - which is the same list, unless the host was given
+// another to offer, as a test's is. The form a katana_mcp client is given.
+[[nodiscard]] std::string customisationJson(const Document& document,
+                                            std::span<const BuiltInEntry> offered);
 
 } // namespace katana::cad

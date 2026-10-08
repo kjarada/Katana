@@ -5,10 +5,13 @@
 //
 // Two built-ins are held to it. A small fixture handed over as a host hands
 // one over - always, whatever this build compiled in - and the customisation
-// compiled into the program, when there is one; that one is third-party
-// material, tracked as resources/customisation/nsw.customisation.json, so the
-// half of each test that needs it runs in a build made from a clean checkout
-// and SKIPS in a build whose KATANA_BUILTIN_CUSTOMISATION names no file.
+// compiled into the program, when there is one: the default's name for the
+// file renames, and the NSW alternate's library for the definition renames
+// (the 29 definitions were that customisation's own). The NSW one is
+// third-party material, tracked as resources/customisation/nsw.customisation.json,
+// so the half of a test that needs it runs in a build made from a clean
+// checkout and SKIPS in a build whose KATANA_ALTERNATE_CUSTOMISATIONS names no
+// such file.
 
 #include <gtest/gtest.h>
 
@@ -113,16 +116,18 @@ TEST(BuiltInRenames, NoDefinitionOfAFixtureBuiltInIsKnownAsAnEarlierName)
     }
 }
 
-TEST(BuiltInRenames, EveryRenamedDefinitionIsInTheCompiledInLibraryUnderTheNameItHasNow)
+TEST(BuiltInRenames, EveryRenamedDefinitionIsInTheNswBuiltInLibraryUnderTheNameItHasNow)
 {
-    const BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
-    if (!compiledIn.customisation) {
-        GTEST_SKIP() << "this build has no customisation compiled in";
+    // The library of the NSW built-in, found by name among what was compiled
+    // in: the default is Katana Standard, which holds none of the 29.
+    const katana::cad::BuiltInEntry* nsw = katana::cad::findBuiltIn(katana::cad::builtIns(), "NSW");
+    if (nsw == nullptr || !nsw->builtIn.customisation) {
+        GTEST_SKIP() << "this build has no NSW customisation compiled in";
     }
     // 29 definitions carried the publisher's word, which the reference
     // customisation was given without (the census's `carried`).
     ASSERT_EQ(katana::cad::builtinDefinitionRenames().size(), 29u);
-    const katana::entity::StyleLibrary& library = compiledIn.customisation->library;
+    const katana::entity::StyleLibrary& library = nsw->builtIn.customisation->library;
     for (const katana::cad::RenamedDefinition& rename : katana::cad::builtinDefinitionRenames()) {
         EXPECT_NE(library.find(std::string(rename.now)), nullptr) << rename.now;
     }

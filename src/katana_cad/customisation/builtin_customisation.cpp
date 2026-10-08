@@ -1,4 +1,4 @@
-// The built-in customisation: the one compiled into the program, and the seam
+// The built-in customisations: those compiled into the program, and the seam
 // that says what "the built-in" is for one run (customisation_host.hpp).
 
 #include "katana/cad/customisation_host.hpp"
@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "builtin_table.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 
@@ -14,58 +15,92 @@ namespace katana::cad {
 
 namespace {
 
-// The built-in's bytes, embedded by the compiler (#embed). The file is named
-// by KATANA_BUILTIN_CUSTOMISATION_FILE and found through --embed-dir, both
-// given to THIS file alone by src/katana_cad/CMakeLists.txt, and only when the
-// file exists: a build whose path names no file has none, and compiles the
-// other branch. The dependency file names the JSON, so editing it rebuilds this
-// file. #embed is C++26; the pragma keeps a C++23 build (KATANA_CXX_STANDARD)
-// from failing -Werror on it.
-#if defined(KATANA_BUILTIN_CUSTOMISATION_FILE)
-#pragma GCC diagnostic push
-#if defined(__clang__)
-// clang files #embed in C++ under the C23 extensions.
-#pragma clang diagnostic ignored "-Wc23-extensions"
-#else
-#pragma GCC diagnostic ignored "-Wc++26-extensions"
-#endif
-constexpr unsigned char kCompiledIn[] = {
-// An empty file is no customisation, and no array either: one zero byte
-// stands for it, which the reader refuses in so many words.
-#embed KATANA_BUILTIN_CUSTOMISATION_FILE if_empty(0)
-};
-#pragma GCC diagnostic pop
-
 // A failure is reported, never thrown: a program whose built-in is damaged
 // still starts, and says so.
-[[nodiscard]] BuiltInCustomisation parseCompiledIn()
+[[nodiscard]] BuiltInCustomisation parseCompiledIn(const detail::CompiledInFile& compiled)
 {
-    const std::string_view bytes(reinterpret_cast<const char*>(kCompiledIn), sizeof kCompiledIn);
     BuiltInCustomisation builtIn;
-    auto read = katana::entity::customisationFromJson(bytes);
+    auto read = katana::entity::customisationFromJson(compiled.bytes);
     if (!read) {
-        builtIn.problem = "the customisation compiled into this program is not read: " +
-                          read.error().describe();
+        builtIn.problem = "the customisation compiled into this program (" +
+                          std::string(compiled.file) + ") is not read: " + read.error().describe();
         return builtIn;
     }
     builtIn.customisation =
         std::make_shared<const katana::entity::Customisation>(std::move(*read));
-    builtIn.digest = katana::entity::customisationDigest(bytes);
+    builtIn.digest = katana::entity::customisationDigest(compiled.bytes);
     return builtIn;
 }
-#else
-// A build with no built-in: none, and no problem.
-[[nodiscard]] BuiltInCustomisation parseCompiledIn() { return {}; }
-#endif
+
+// A value the seam may use as a built-in's name: it names no folder, so it
+// cannot be a path to a file in one. (A file in the working folder that is
+// called like a built-in is given as ./name, as a file called like a keyword
+// is in the verbs.)
+[[nodiscard]] bool isBareWord(std::string_view seam)
+{
+    return seam.find_first_of("/\\") == std::string_view::npos;
+}
+
+// "\"A\", \"B\"": the names of `named`, for a sentence.
+[[nodiscard]] std::string namesOf(std::span<const BuiltInEntry> named)
+{
+    std::string text;
+    for (const BuiltInEntry& entry : named) {
+        text += (text.empty() ? "\"" : ", \"") + entry.name + "\"";
+    }
+    return text;
+}
 
 } // namespace
 
 const BuiltInCustomisation& compiledInCustomisation()
 {
-    // Parsed at the first call and never again: it is eight hundred
-    // definitions, and a session that never asks pays nothing.
-    static const BuiltInCustomisation compiledIn = parseCompiledIn();
+    // Parsed at the first call and never again: it is some hundreds of
+    // definitions, and a session that never asks pays nothing. The default
+    // ALONE: an alternate is parsed by builtIns(), when a list or a name asks.
+    static const BuiltInCustomisation compiledIn = [] {
+        const std::span<const detail::CompiledInFile> files = detail::compiledInFiles();
+        return detail::compiledInHasDefault() && !files.empty() ? parseCompiledIn(files.front())
+                                                                : BuiltInCustomisation{};
+    }();
     return compiledIn;
+}
+
+const BuiltInEntry* findBuiltIn(std::span<const BuiltInEntry> entries, std::string_view name)
+{
+    for (const BuiltInEntry& entry : entries) {
+        if (katana::core::equalsIgnoringCase(entry.name, name)) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+const std::vector<BuiltInEntry>& builtIns()
+{
+    static const std::vector<BuiltInEntry> entries = [] {
+        std::vector<BuiltInEntry> list;
+        const std::span<const detail::CompiledInFile> files = detail::compiledInFiles();
+        for (std::size_t at = 0; at < files.size(); ++at) {
+            BuiltInEntry entry;
+            entry.source = std::string(files[at].file);
+            // The default is the one parse compiledInCustomisation() made.
+            entry.builtIn = at == 0 && detail::compiledInHasDefault() ? compiledInCustomisation()
+                                                                      : parseCompiledIn(files[at]);
+            if (entry.builtIn.customisation != nullptr) {
+                entry.name = entry.builtIn.customisation->name;
+                entry.description = entry.builtIn.customisation->description;
+            } else {
+                entry.name = entry.source;
+            }
+            // One name, one entry: a second file of a name is not offered.
+            if (findBuiltIn(list, entry.name) == nullptr) {
+                list.push_back(std::move(entry));
+            }
+        }
+        return list;
+    }();
+    return entries;
 }
 
 BuiltInCustomisation builtInCustomisation()
@@ -74,18 +109,32 @@ BuiltInCustomisation builtInCustomisation()
     // Through core, never getenv: on Windows that gives the ANSI code page's
     // bytes, in which a file named outside the code page is a file named
     // with '?' (core/path_text.hpp).
-    return builtInCustomisationFor(katana::core::environmentVariable(kBuiltInCustomisationVariable),
-                                   compiledInCustomisation());
+    const std::string seam = katana::core::environmentVariable(kBuiltInCustomisationVariable);
+    // Every alternate is parsed for a name to be found among them, which a
+    // start that names a file, or none, or nothing, has no use for: it would
+    // pay for megabytes it never reads.
+    const bool mayBeAName =
+        !seam.empty() && katana::core::lowered(seam) != "none" && isBareWord(seam);
+    return builtInCustomisationFor(seam, compiledInCustomisation(),
+                                   mayBeAName ? std::span<const BuiltInEntry>(builtIns())
+                                              : std::span<const BuiltInEntry>());
 }
 
 BuiltInCustomisation builtInCustomisationFor(std::string_view seam,
-                                             const BuiltInCustomisation& compiledIn)
+                                             const BuiltInCustomisation& compiledIn,
+                                             std::span<const BuiltInEntry> named)
 {
     if (seam.empty()) {
         return compiledIn;
     }
     if (katana::core::lowered(seam) == "none") {
         return {};
+    }
+    const bool bareWord = isBareWord(seam);
+    if (bareWord) {
+        if (const BuiltInEntry* entry = findBuiltIn(named, seam)) {
+            return entry->builtIn;
+        }
     }
     // As text, through core's one conversion: on Windows the seam's value
     // arrives as UTF-8, but elsewhere, and from any other caller, the text
@@ -99,6 +148,13 @@ BuiltInCustomisation builtInCustomisationFor(std::string_view seam,
         none.problem = std::string("the file ") + kBuiltInCustomisationVariable +
                        " names as the built-in customisation is not read: " +
                        file.error().describe();
+        // A word that is no built-in's name is most likely a name mistyped,
+        // and the file it was read as says only that it is not there.
+        if (bareWord && !named.empty()) {
+            none.problem += "; it is no built-in customisation of this program either (it has " +
+                            namesOf(named) + "; a file of that name in this folder is ./" +
+                            std::string(seam) + ")";
+        }
         return none;
     }
     BuiltInCustomisation builtIn;

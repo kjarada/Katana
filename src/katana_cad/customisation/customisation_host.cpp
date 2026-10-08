@@ -3,12 +3,15 @@
 
 #include "katana/cad/customisation_host.hpp"
 
+#include <algorithm>
 #include <optional>
+#include <span>
 #include <system_error>
 #include <utility>
 
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/core/path_text.hpp"
+#include "katana/core/text.hpp"
 
 namespace katana::cad {
 
@@ -69,7 +72,64 @@ katana::core::Status installBuiltInCustomisation(Document& document,
     return document.installCustomisation(std::move(copy), CustomisationOrigin::BuiltIn, kept);
 }
 
+const std::vector<BuiltInEntry>& builtInsOf(const CustomisationHost& host)
+{
+    return host.builtIns ? *host.builtIns : builtIns();
+}
+
+std::vector<BuiltInChoice> builtInChoices(const Document& document,
+                                          std::span<const BuiltInEntry> entries)
+{
+    const CustomisationState& state = document.customisationState();
+    std::vector<BuiltInChoice> choices;
+    choices.reserve(entries.size());
+    for (const BuiltInEntry& entry : entries) {
+        BuiltInChoice choice;
+        choice.name = entry.name;
+        choice.description = entry.description;
+        choice.source = entry.source;
+        choice.problem = entry.builtIn.problem;
+        if (entry.builtIn.customisation != nullptr) {
+            const katana::entity::Customisation& customisation = *entry.builtIn.customisation;
+            choice.definitions = customisation.library.size();
+            choice.codes = customisation.map.keys().size();
+            choice.rules = customisation.map.size();
+        }
+        choice.isDefault = !state.builtIn.empty() && entry.name == state.builtIn;
+        choice.isActive = state.origin == CustomisationOrigin::BuiltIn && entry.name == state.name &&
+                          entry.builtIn.customisation != nullptr;
+        choices.push_back(std::move(choice));
+    }
+    return choices;
+}
+
 namespace {
+
+// Whether a kept customisation that says it is `basedOn` was made from
+// something the program does not have. The run's own built-in is the common
+// case and is judged first: by its name, and by its bytes (a host that could
+// give no digest has no edition to differ from). Another built-in the program
+// offers is not "another": the user chose it (CUSTOMISE BUILTIN, then KEEP),
+// and a copy of it kept says so in the same two words. It is another when the
+// program has no such built-in, or has another edition of it.
+bool madeFromAnotherBuiltIn(const katana::entity::CustomisationBase& basedOn,
+                            const CustomisationHost& host)
+{
+    const BuiltInCustomisation* ours = &host.builtIn;
+    // The list is looked through only when the name is not the run's: it may
+    // be parsed for it, and a start that finds its own needs none of that.
+    if (basedOn.name != host.builtIn.customisation->name) {
+        const std::vector<BuiltInEntry>& offered = builtInsOf(host);
+        const auto found = std::ranges::find_if(offered, [&](const BuiltInEntry& entry) {
+            return entry.name == basedOn.name && entry.builtIn.customisation != nullptr;
+        });
+        if (found == offered.end()) {
+            return true;
+        }
+        ours = &found->builtIn;
+    }
+    return !ours->digest.empty() && basedOn.digest != ours->digest;
+}
 
 // The choice startCustomisation makes, and its report.
 CustomisationStart chooseAndInstall(Document& document, const CustomisationHost& host)
@@ -104,13 +164,7 @@ CustomisationStart chooseAndInstall(Document& document, const CustomisationHost&
                 if (installed) {
                     summarise(report, document, CustomisationOrigin::Kept);
                     if (basedOn && hasBuiltIn) {
-                        // Another built-in by its name, or another edition
-                        // of this one by its bytes. A host that could give
-                        // no digest has no edition to differ from.
-                        const bool otherName = basedOn->name != host.builtIn.customisation->name;
-                        const bool otherEdition = !host.builtIn.digest.empty() &&
-                                                  basedOn->digest != host.builtIn.digest;
-                        report.keptFromAnotherBuiltIn = otherName || otherEdition;
+                        report.keptFromAnotherBuiltIn = madeFromAnotherBuiltIn(*basedOn, host);
                     }
                     return report;
                 }

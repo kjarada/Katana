@@ -862,18 +862,14 @@ TEST(KatanaStandard, EveryDefinitionAndEveryCodeIsCataloguedInTheDocument)
     EXPECT_EQ(missing, 0u);
 }
 
-TEST(KatanaStandard, NoNameOfItIsAnyNameInTheCompiledInBuiltIn)
+namespace {
+
+// Counts only, found at run time: nothing here names what the other holds.
+// Katana Standard was made from a design of its own, so no definition name,
+// group path, survey code key or colour name of it is one of the other's,
+// whole.
+void expectNothingInCommonWith(const Customisation& file, const Customisation& other)
 {
-    KS_LOAD();
-    const katana::cad::BuiltInCustomisation& builtIn = katana::cad::compiledInCustomisation();
-    if (!builtIn.customisation || builtIn.customisation->name == file.name) {
-        GTEST_SKIP() << "this build has no other customisation compiled in to compare with";
-    }
-    // Counts only, found at run time: nothing here names what the other holds.
-    // Katana Standard was made from a design of its own, so no definition
-    // name, group path, survey code key or colour name of it is one of the
-    // built-in's, whole.
-    const Customisation& other = *builtIn.customisation;
     std::size_t sharedNames = 0;
     file.library.forEach([&](const LineStyle& style) { sharedNames += other.library.contains(style.name) ? 1 : 0; });
     EXPECT_EQ(sharedNames, 0u) << "definition names in common";
@@ -936,4 +932,26 @@ TEST(KatanaStandard, NoNameOfItIsAnyNameInTheCompiledInBuiltIn)
         sharedLayers += otherLayers.count(rule->model);
     }
     EXPECT_EQ(sharedLayers, 0u) << "layer paths in common";
+}
+
+} // namespace
+
+TEST(KatanaStandard, NoNameOfItIsAnyNameInAnyOtherCompiledInBuiltIn)
+{
+    KS_LOAD();
+    // EVERY built-in this build compiled in but this one: Katana Standard is
+    // the default now, so the other is an alternate, and a build may carry
+    // several. Skipped only where there is none to compare with.
+    std::size_t compared = 0;
+    for (const katana::cad::BuiltInEntry& entry : katana::cad::builtIns()) {
+        if (!entry.builtIn.customisation || entry.builtIn.customisation->name == file.name) {
+            continue;
+        }
+        ++compared;
+        SCOPED_TRACE("compared with the built-in number " + std::to_string(compared));
+        expectNothingInCommonWith(file, *entry.builtIn.customisation);
+    }
+    if (compared == 0) {
+        GTEST_SKIP() << "this build has no other customisation compiled in to compare with";
+    }
 }

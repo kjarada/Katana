@@ -29,6 +29,10 @@
 //                  test_survey 11 rules over 8 codes
 //   the noticed    four customisations, each with a notice of its own
 //   session        (installNoticedSession)
+//   kPegsTwo       "Pegs Two": no definition; 2 rules over 1 code (PG* feature,
+//                  PG* symbol) - the second built-in of the chooser's tests,
+//                  beside kSite, which is the default (3 definitions, 3 rules
+//                  over 2 codes)
 //
 // What the kept file is after RESET, KEEP and REVERT - when it is written,
 // when it is set aside as .bak, that ONE such file is kept - is taken from
@@ -48,6 +52,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -135,6 +140,20 @@ constexpr const char* kOneCode = R"({
 }
 )";
 
+// The second built-in of the chooser's tests: kOneCode's rules under a name
+// of two words, so that the line it builds has to quote it.
+constexpr const char* kPegsTwo = R"({
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "Pegs Two",
+  "description": "Two rules for one code",
+  "codes": [
+    {"key": "PG*", "sets": "feature", "layer": "SITE PEGS", "draw": "point"},
+    {"key": "PG*", "sets": "symbol", "symbol": {"name": "SITE Peg"}}
+  ]
+}
+)";
+
 // A person's own customisation, as a kept file holds one: another name than
 // kSite's, one linestyle and no symbol, one rule over one code, and its
 // automation said - survey codes not applied, coded points joined.
@@ -194,6 +213,9 @@ struct SettingsFixture {
         context.openSymbolLibrary = [this] { ++openedSymbols; };
         context.hasBuiltIn = true;
         context.keptFile = kKeptFile;
+        // No built-in to choose between, whatever this build compiled in; the
+        // tests of the chooser give a list of their own.
+        context.builtIns = [] { return std::vector<katana::cad::BuiltInEntry>{}; };
     }
 
     // kSite installed whole, in the place of whatever the session held.
@@ -369,6 +391,59 @@ katana::entity::Customisation customisationInFile(const QString& path)
     return read.ok() ? read->customisation : katana::entity::Customisation{};
 }
 
+// `text` as an entry of the list a host offers, said to have been compiled in
+// from `source`.
+katana::cad::BuiltInEntry entryOf(const char* text, const char* source)
+{
+    katana::cad::BuiltInEntry entry;
+    auto read = katana::entity::customisationFromJson(text);
+    EXPECT_TRUE(read.ok()) << (read.ok() ? std::string{} : read.error().describe());
+    if (read.ok()) {
+        entry.builtIn.customisation =
+            std::make_shared<const katana::entity::Customisation>(std::move(*read));
+        entry.builtIn.digest = katana::entity::customisationDigest(text);
+        entry.name = entry.builtIn.customisation->name;
+        entry.description = entry.builtIn.customisation->description;
+    }
+    entry.source = source;
+    return entry;
+}
+
+// kSite, the default, and kPegsTwo: what the chooser offers in its tests.
+std::vector<katana::cad::BuiltInEntry> siteAndPegs()
+{
+    return {entryOf(kSite, "site.customisation.json"), entryOf(kPegsTwo, "pegs.customisation.json")};
+}
+
+// The two built-ins the dialog offers; to be done BEFORE the dialog is made,
+// which takes its context by value.
+void offerSiteAndPegs(SettingsFixture& f)
+{
+    const std::vector<katana::cad::BuiltInEntry> entries = siteAndPegs();
+    f.context.builtIns = [entries] { return entries; };
+}
+
+// kSite installed as the built-in of the run, kept, as a start leaves it.
+void startOnSite(SettingsFixture& f)
+{
+    offerSiteAndPegs(f);
+    const std::vector<katana::cad::BuiltInEntry> entries = siteAndPegs();
+    ASSERT_TRUE(katana::cad::installBuiltInCustomisation(f.document, entries[0].builtIn, true).ok());
+    f.document.setBuiltInCustomisationName("Site");
+}
+
+QComboBox* chooser(const QWidget& dialog) { return child<QComboBox>(dialog, "settingsBuiltIn"); }
+
+QStringList chooserItems(const QWidget& dialog)
+{
+    QStringList items;
+    const QComboBox* box = chooser(dialog);
+    for (int at = 0; at < box->count(); ++at) {
+        items << box->itemText(at);
+    }
+    return items;
+}
+
 // A session as a front end starts one whose user keeps a customisation of
 // their own: kSite as the program's built-in, and kMine in the kept file - on
 // disk BEFORE the host is handed over, which is when the family notes the file
@@ -441,7 +516,8 @@ TEST(SettingsDialog, ItIsANonModalDialogWithOnePageAndANameForEveryControl)
           "settingsExport",       "settingsReset",         "settingsKeep",
           "settingsRevert",       "settingsAutoCodes",     "settingsAutoLinework",
           "settingsLinework",     "settingsEditLinework",  "settingsOpenCodes",
-          "settingsOpenSymbols"}) {
+          "settingsOpenSymbols",  "settingsActiveBuiltIn", "settingsBuiltInRow",
+          "settingsBuiltIn",      "settingsBuiltInUse"}) {
         EXPECT_NE(page->findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
     }
     EXPECT_NE(dialog.findChild<QPlainTextEdit*>(QStringLiteral("settingsStatus")), nullptr);
@@ -1165,6 +1241,333 @@ TEST(SettingsDialog, AKeepThatIsRefusedBehindALineIsShownAsTheRefusalItIs)
     EXPECT_FALSE(checked(dialog, "settingsAutoCodes"));
     EXPECT_TRUE(shown(dialog, "settingsActiveKept").startsWith(QStringLiteral("Not kept:")));
     EXPECT_TRUE(enabled(dialog, "settingsKeep"));
+}
+
+// ---- the built-in library -----------------------------------------------------------------------
+//
+// The chooser (settingsBuiltIn) and Use (settingsBuiltInUse): a dialog given
+// two built-ins, kSite the default and kPegsTwo. Counts by hand from the
+// constants above: kSite 3 definitions and 3 rules over 2 codes, kPegsTwo none
+// and 2 rules over 1 code.
+
+TEST(SettingsDialog, TheChooserListsTheBuiltInsTheDefaultMarkedAndStandsOnTheOneTheSessionIs)
+{
+    SettingsFixture f;
+    startOnSite(f);
+    SettingsDialog dialog(f.context);
+
+    EXPECT_FALSE(child<QWidget>(dialog, "settingsBuiltInRow")->isHidden());
+    EXPECT_EQ(chooserItems(dialog), (QStringList{QStringLiteral("Site (default)"), QStringLiteral("Pegs Two")}));
+    const QComboBox* box = chooser(dialog);
+    EXPECT_EQ(box->itemData(0).toString(), QStringLiteral("Site"));
+    EXPECT_EQ(box->itemData(1).toString(), QStringLiteral("Pegs Two"));
+    // What a person is told of one before choosing it: its own description,
+    // what it holds and the file it was compiled in from.
+    EXPECT_EQ(box->itemData(0, Qt::ToolTipRole).toString(),
+              QStringLiteral("3 definitions, 3 survey code rules over 2 codes\nCompiled in from "
+                             "site.customisation.json"));
+    EXPECT_EQ(box->itemData(1, Qt::ToolTipRole).toString(),
+              QStringLiteral("Two rules for one code\n0 definitions, 2 survey code rules over 1 "
+                             "code\nCompiled in from pegs.customisation.json"));
+    // It stands on the one the session is, which Use has nothing to do for.
+    EXPECT_EQ(box->currentIndex(), 0);
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Site (default)"));
+    EXPECT_FALSE(enabled(dialog, "settingsBuiltInUse"));
+    EXPECT_EQ(tip(dialog, "settingsBuiltInUse"),
+              QStringLiteral("The session is this built-in customisation already."));
+    EXPECT_EQ(child<QPushButton>(dialog, "settingsBuiltInUse")->text(), QStringLiteral("Use"));
+    katana::qt::test::paint(dialog);
+}
+
+TEST(SettingsDialog, TheBuiltInRowIsHiddenWhenThereIsNothingToChooseBetween)
+{
+    // None, one: nothing to choose between. Two: the row is there.
+    for (const std::size_t offered : {std::size_t{0}, std::size_t{1}, std::size_t{2}}) {
+        SettingsFixture f;
+        std::vector<katana::cad::BuiltInEntry> entries = siteAndPegs();
+        entries.resize(offered);
+        f.context.builtIns = [entries] { return entries; };
+        SettingsDialog dialog(f.context);
+        EXPECT_EQ(child<QWidget>(dialog, "settingsBuiltInRow")->isHidden(), offered < 2)
+            << offered << " offered";
+        EXPECT_EQ(chooser(dialog)->count(), static_cast<int>(offered));
+        EXPECT_FALSE(enabled(dialog, "settingsBuiltInUse") && offered == 0);
+    }
+}
+
+TEST(SettingsDialog, ADialogGivenNoListOffersWhatThisProgramCompiledIn)
+{
+    SettingsFixture f;
+    f.context.builtIns = nullptr; // what the window gives
+    SettingsDialog dialog(f.context);
+    const std::vector<katana::cad::BuiltInEntry>& compiledIn = katana::cad::builtIns();
+    ASSERT_EQ(chooser(dialog)->count(), static_cast<int>(compiledIn.size()));
+    for (std::size_t at = 0; at < compiledIn.size(); ++at) {
+        EXPECT_EQ(chooser(dialog)->itemData(static_cast<int>(at)).toString(),
+                  QString::fromStdString(compiledIn[at].name));
+    }
+    EXPECT_EQ(child<QWidget>(dialog, "settingsBuiltInRow")->isHidden(), compiledIn.size() < 2);
+}
+
+TEST(SettingsDialog, UseBuildsTheLineWithTheNameQuotedAndKeepFollowsAKeptSession)
+{
+    SettingsFixture f;
+    startOnSite(f);
+    SettingsDialog dialog(f.context);
+    // Each line does to the Document what its verb does: the named built-in
+    // installed, not kept (it is not the run's own), and a KEEP kept.
+    f.answer = [&f](const QString& line) {
+        if (line == kKeep) {
+            f.document.setCustomisationKept(true);
+        } else if (line == QStringLiteral("CUSTOMISE BUILTIN \"Pegs Two\"")) {
+            EXPECT_TRUE(f.document
+                            .installCustomisation(customisationFromText(kPegsTwo),
+                                                  CustomisationOrigin::BuiltIn, false)
+                            .ok());
+        }
+        return carriedOut();
+    };
+    chooser(dialog)->setCurrentIndex(1);
+    ASSERT_TRUE(enabled(dialog, "settingsBuiltInUse"));
+    EXPECT_EQ(tip(dialog, "settingsBuiltInUse"),
+              QStringLiteral("Put the chosen built-in customisation in the place of the session's "
+                             "(CUSTOMISE BUILTIN).\nA session that is kept stays kept: the choice "
+                             "is what the next start gives."));
+    press(dialog, "settingsBuiltInUse");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE BUILTIN \"Pegs Two\""), kKeep}));
+    EXPECT_FALSE(saysARefusal(dialog));
+    EXPECT_EQ(status(dialog), QStringLiteral("> CUSTOMISE BUILTIN \"Pegs Two\"\nDone.\n> CUSTOMISE "
+                                             "KEEP\nDone."));
+
+    // The page follows the Document: the built-in the session is, now the
+    // chosen one, and Use has nothing more to do for it.
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveName"), QStringLiteral("Pegs Two"));
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Pegs Two"));
+    EXPECT_EQ(chooser(dialog)->currentIndex(), 1) << "it stays where the person put it";
+    EXPECT_FALSE(enabled(dialog, "settingsBuiltInUse"));
+
+    // A name of one word is one word.
+    f.ran.clear();
+    chooser(dialog)->setCurrentIndex(0);
+    ASSERT_TRUE(enabled(dialog, "settingsBuiltInUse"));
+    press(dialog, "settingsBuiltInUse");
+    ASSERT_FALSE(f.ran.isEmpty());
+    EXPECT_EQ(f.ran.front(), QStringLiteral("CUSTOMISE BUILTIN Site"));
+}
+
+TEST(SettingsDialog, UseOnASessionThatWasNotKeptIsNotFollowedByKeep)
+{
+    SettingsFixture f;
+    startOnSite(f);
+    f.document.setAutomation({.codesOnSurveyImport = false, .lineworkOnSurveyImport = true});
+    ASSERT_FALSE(f.document.customisationState().kept);
+    SettingsDialog dialog(f.context);
+    chooser(dialog)->setCurrentIndex(1);
+    press(dialog, "settingsBuiltInUse");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE BUILTIN \"Pegs Two\"")}));
+}
+
+TEST(SettingsDialog, UseIsRefusedWhileTheCodeManagerHoldsUnappliedEditsAndRunsNothing)
+{
+    SettingsFixture f;
+    startOnSite(f);
+    SettingsDialog dialog(f.context);
+    chooser(dialog)->setCurrentIndex(1);
+    f.dirty = true;
+    press(dialog, "settingsBuiltInUse");
+    EXPECT_TRUE(f.ran.isEmpty());
+    EXPECT_TRUE(saysARefusal(dialog));
+    EXPECT_TRUE(status(dialog).startsWith(QStringLiteral("Use Built-in was not run: the Survey Code "
+                                                         "Manager has rule edits that are not on "
+                                                         "the drawing")))
+        << status(dialog).toStdString();
+    ASSERT_EQ(f.logged.size(), 1u);
+    EXPECT_TRUE(f.logged.front().second);
+
+    f.dirty = false;
+    press(dialog, "settingsBuiltInUse");
+    EXPECT_EQ(f.ran.size(), 1);
+}
+
+TEST(SettingsDialog, TheChoiceIsKeptWhenTheDocumentChangesAndUseNeedsARunner)
+{
+    SettingsFixture f;
+    startOnSite(f);
+    SettingsDialog dialog(f.context);
+    chooser(dialog)->setCurrentIndex(1);
+    // The session changes under the dialog: the page is read again, and the
+    // person's choice stands.
+    f.document.setAutomation({.codesOnSurveyImport = false, .lineworkOnSurveyImport = true});
+    processEvents();
+    EXPECT_EQ(chooser(dialog)->currentIndex(), 1);
+    EXPECT_EQ(chooser(dialog)->currentData().toString(), QStringLiteral("Pegs Two"));
+    // The session is an edited copy now: the built-in it was made from.
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Based on Site"));
+
+    // With nothing to run its line, Use is disabled rather than refused.
+    SettingsFixture without;
+    startOnSite(without);
+    without.context.run = nullptr;
+    SettingsDialog bare(without.context);
+    chooser(bare)->setCurrentIndex(1);
+    EXPECT_FALSE(enabled(bare, "settingsBuiltInUse"));
+}
+
+TEST(SettingsDialog, TheBuiltInRowSaysWhatTheSessionIsOrWhatItWasMadeFrom)
+{
+    SettingsFixture f;
+    offerSiteAndPegs(f);
+    SettingsDialog dialog(f.context);
+    // Nothing installed.
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("None"));
+
+    // A customisation loaded from a file says nothing of a built-in.
+    f.install(CustomisationOrigin::Loaded, false);
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("None"));
+
+    // A built-in, installed as a start installs it: itself, and the default
+    // (the Document is told what the run's built-in is, as a start tells it).
+    f.document.setBuiltInCustomisationName("Site");
+    ASSERT_TRUE(katana::cad::installBuiltInCustomisation(f.document, siteAndPegs()[0].builtIn, true).ok());
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Site (default)"));
+    // The other one is the built-in the session is, and not the default.
+    ASSERT_TRUE(katana::cad::installBuiltInCustomisation(f.document, siteAndPegs()[1].builtIn, false).ok());
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Pegs Two"));
+    // Edited, it is a copy of that one.
+    f.document.setAutomation({.codesOnSurveyImport = false, .lineworkOnSurveyImport = true});
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Based on Pegs Two"));
+}
+
+// ---- the built-in library, with the verb itself -------------------------------------------------
+
+namespace {
+
+// A session as a front end starts one: kSite the built-in of the run and
+// kPegsTwo the other the host offers, a kept file named and not written, the
+// interpreter over the same Document as the runner.
+struct LibrarySession {
+    QTemporaryDir scratch;
+    QString keptFile;
+    QString setAside;
+    katana::cad::CustomisationHost host;
+    SettingsFixture f;
+    katana::cad::CommandInterpreter interpreter{f.document};
+
+    void start()
+    {
+        ASSERT_TRUE(scratch.isValid());
+        keptFile = scratch.filePath(QStringLiteral("kept here/customisation.json"));
+        setAside = keptFile + QStringLiteral(".bak");
+        const std::vector<katana::cad::BuiltInEntry> entries = siteAndPegs();
+        host.builtIn = entries[0].builtIn;
+        host.builtIns = entries;
+        host.keptFile = katana::core::pathFromUtf8(keptFile.toStdString());
+        f.context.keptFile = keptFile;
+        f.context.builtIns = [entries] { return entries; };
+        interpreter.setCustomisationHost(host);
+        const katana::cad::CustomisationStart started =
+            katana::cad::startCustomisation(f.document, host);
+        ASSERT_EQ(started.installed, CustomisationOrigin::BuiltIn);
+        ASSERT_TRUE(f.document.customisationState().kept);
+        f.answer = [this](const QString& line) { return runAsTheWindowDoes(interpreter, line); };
+    }
+};
+
+} // namespace
+
+TEST(SettingsDialog, WithTheVerbItselfAnAlternateBuiltInChosenInSettingsIsKeptAndTheDefaultRetiresIt)
+{
+    LibrarySession s;
+    s.start();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    SettingsFixture& f = s.f;
+    SettingsDialog dialog(f.context);
+    EXPECT_EQ(shown(dialog, "settingsActiveName"), QStringLiteral("Site"));
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Site (default)"));
+
+    // Use the other one. The session was kept (it is the default, which a
+    // start gives) and is not after the line, so KEEP follows: written, and
+    // it says which built-in it is based on.
+    chooser(dialog)->setCurrentIndex(1);
+    press(dialog, "settingsBuiltInUse");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE BUILTIN \"Pegs Two\""), kKeep}));
+    EXPECT_FALSE(saysARefusal(dialog)) << status(dialog).toStdString();
+    EXPECT_TRUE(status(dialog).contains(
+        QStringLiteral("used name=\"Pegs Two\" default=no definitions=0 codes=1 rules=2 kept=no")))
+        << status(dialog).toStdString();
+    EXPECT_TRUE(status(dialog).contains(QStringLiteral("written=yes name=\"Pegs Two\"")))
+        << status(dialog).toStdString();
+    ASSERT_TRUE(QFileInfo::exists(s.keptFile));
+    const katana::entity::Customisation kept = customisationInFile(s.keptFile);
+    EXPECT_EQ(kept.name, "Pegs Two");
+    ASSERT_TRUE(kept.basedOn.has_value());
+    EXPECT_EQ(kept.basedOn->name, "Pegs Two");
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Pegs Two"));
+    EXPECT_EQ(shown(dialog, "settingsActiveOrigin"), QStringLiteral("Built in"));
+    EXPECT_TRUE(shown(dialog, "settingsActiveKept").startsWith(QStringLiteral("Kept:")));
+
+    // A window started again comes up as that built-in, and says nothing of
+    // another one.
+    {
+        Document restarted;
+        const katana::cad::CustomisationStart next = katana::cad::startCustomisation(restarted, s.host);
+        EXPECT_EQ(next.installed, CustomisationOrigin::Kept);
+        EXPECT_EQ(next.name, "Pegs Two");
+        EXPECT_FALSE(next.keptFromAnotherBuiltIn);
+        EXPECT_TRUE(next.problems.empty());
+    }
+
+    // The default again: its use is the session being the built-in of the run,
+    // so the kept file is retired, and the way back is the file set aside.
+    f.ran.clear();
+    chooser(dialog)->setCurrentIndex(0);
+    press(dialog, "settingsBuiltInUse");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE BUILTIN Site"), kKeep}));
+    EXPECT_TRUE(
+        status(dialog).contains(QStringLiteral("written=no reason=the-session-is-the-built-in")))
+        << status(dialog).toStdString();
+    EXPECT_FALSE(QFileInfo::exists(s.keptFile));
+    ASSERT_TRUE(QFileInfo::exists(s.setAside));
+    EXPECT_EQ(customisationInFile(s.setAside).name, "Pegs Two");
+    processEvents();
+    EXPECT_EQ(shown(dialog, "settingsActiveBuiltIn"), QStringLiteral("Site (default)"));
+    {
+        Document restarted;
+        EXPECT_EQ(katana::cad::startCustomisation(restarted, s.host).installed,
+                  CustomisationOrigin::BuiltIn);
+    }
+}
+
+TEST(SettingsDialog, ResetToBuiltInAndUseOfTheDefaultLeaveTheSameSession)
+{
+    // Reset to Built-in and Use of the default give the same session.
+    LibrarySession a;
+    a.start();
+    LibrarySession b;
+    b.start();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    ASSERT_TRUE(a.interpreter.run("CUSTOMISE BUILTIN \"Pegs Two\"").ok());
+    ASSERT_TRUE(b.interpreter.run("CUSTOMISE BUILTIN \"Pegs Two\"").ok());
+    SettingsDialog first(a.f.context);
+    SettingsDialog second(b.f.context);
+    processEvents();
+    press(first, "settingsReset");
+    chooser(second)->setCurrentIndex(0);
+    press(second, "settingsBuiltInUse");
+    processEvents();
+    EXPECT_TRUE(a.f.document.customisation() == b.f.document.customisation());
+    EXPECT_EQ(a.f.document.customisationState().origin, CustomisationOrigin::BuiltIn);
+    EXPECT_EQ(shown(first, "settingsActiveBuiltIn"), shown(second, "settingsActiveBuiltIn"));
 }
 
 // ---- the status ---------------------------------------------------------------------------------

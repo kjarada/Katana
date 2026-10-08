@@ -14,7 +14,10 @@
 //   CUSTOMISE DEFINITIONS <file>...      merge their definitions and colours alone
 //   CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
 //                                        [ONLY <definition>...]
-//   CUSTOMISE RESET                      the host's built-in customisation
+//   CUSTOMISE RESET                      the host's built-in customisation (the
+//                                        run's own: the default unless the seam says)
+//   CUSTOMISE BUILTIN                    the built-ins the host offers
+//   CUSTOMISE BUILTIN <name>             one of them, in the place of the session's
 //   CUSTOMISE KEEP                       write the session to the kept file
 //   CUSTOMISE REVERT                     read the kept file again
 //   CUSTOMISE REMOVE <definition>... [FORCE]
@@ -38,7 +41,7 @@
 // THE HOST is what a front end hands the interpreter - the built-in
 // customisation and the path of the kept file (customisation_host.hpp). A
 // session given none (a test's bare Document, a tool) has everything here
-// but RESET, KEEP and REVERT, which are refused by name.
+// but RESET, BUILTIN, KEEP and REVERT, which are refused by name.
 //
 // Every reply is key=value records, one a line (recordValue,
 // scope_verbs.hpp), a file written with '/' in its path; no reply to a line

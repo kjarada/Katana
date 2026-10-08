@@ -584,6 +584,40 @@ katana::core::Error needsHost(const char* verb, const std::string& what)
     return makeError(ErrorCode::InvalidState, std::string("CUSTOMISE ") + verb + " " + what);
 }
 
+// Puts `builtIn` in the place of the session: the work CUSTOMISE RESET does for
+// the built-in of the run and CUSTOMISE BUILTIN <name> for any other the host
+// offers, in ONE place so that the two cannot come to differ in what they
+// leave. `runs`: `builtIn` is the run's own. `named`: it was chosen by name
+// (BUILTIN), whose reply says `used` and whether it is the default, where
+// RESET's says `reset` and has always said nothing of it.
+//
+// `kept`, the reply's last field and the session's flag, is what the next
+// start would give: the built-in OF THE RUN, and only when no kept file would
+// be read in its place. With one there, the session now differs from it until
+// a KEEP. Any other built-in is not kept, whatever the file says: the next
+// start gives the run's own, and a KEEP is what makes the choice last (it
+// writes the session, which says what it is based on).
+Result<std::string> installChosen(Document& document, const CustomisationVerbContext& context,
+                                  const BuiltInCustomisation& builtIn, bool runs, bool named)
+{
+    const fs::path& keptFile = context.host->keptFile;
+    const bool kept = runs && (keptFile.empty() || !isThere(keptFile));
+    if (auto installed = installBuiltInCustomisation(document, builtIn, kept); !installed) {
+        return installed.error();
+    }
+    if (runs) {
+        // What the earlier names of a project are answered with is the run's
+        // built-in's name: a session given another built-in does not change it.
+        document.setBuiltInCustomisationName(builtIn.customisation->name);
+    }
+    std::string reply = std::string(named ? "used" : "reset") +
+                        " name=" + recordValue(document.customisationState().name);
+    if (named) {
+        reply += std::string(" default=") + yesNo(runs);
+    }
+    return reply + countsOf(document) + " kept=" + yesNo(kept);
+}
+
 Result<std::string> resetToBuiltIn(Document& document, const CustomisationVerbContext& context)
 {
     if (!context.host) {
@@ -597,16 +631,88 @@ Result<std::string> resetToBuiltIn(Document& document, const CustomisationVerbCo
                                       : "cannot use the built-in customisation: " +
                                             builtIn.problem);
     }
-    // Kept only when no kept file would be read in its place at the next
-    // start: with one there, the session now differs from it until a KEEP.
-    const fs::path& keptFile = context.host->keptFile;
-    const bool kept = keptFile.empty() || !isThere(keptFile);
-    if (auto installed = installBuiltInCustomisation(document, builtIn, kept); !installed) {
-        return installed.error();
+    return installChosen(document, context, builtIn, true, false);
+}
+
+// The words after BUILTIN as one name: an unquoted "Katana Standard" is two
+// words by the time a verb sees it, and a name is matched whole.
+std::string joinedName(const Words& words)
+{
+    std::string name;
+    for (const std::string& word : words) {
+        name += (name.empty() ? "" : " ") + word;
     }
-    document.setBuiltInCustomisationName(builtIn.customisation->name);
-    return "reset name=" + recordValue(document.customisationState().name) +
-           countsOf(document) + " kept=" + yesNo(kept);
+    return name;
+}
+
+// CUSTOMISE BUILTIN: the built-ins the host offers, and with a name the choice
+// of one. The list is the one answer the JSON report and Settings read too
+// (builtInChoices).
+Result<std::string> builtInVerb(Document& document, const CustomisationVerbContext& context,
+                                const Words& words)
+{
+    if (!context.host) {
+        return needsHost("BUILTIN", "needs the program's built-in customisations, and this "
+                                    "session was given none");
+    }
+    const std::vector<BuiltInEntry>& entries = builtInsOf(*context.host);
+    if (!words.empty()) {
+        const std::string name = joinedName(words);
+        const BuiltInEntry* entry = findBuiltIn(entries, name);
+        if (entry == nullptr) {
+            std::string have;
+            for (const BuiltInEntry& each : entries) {
+                have += (have.empty() ? "\"" : ", \"") + each.name + "\"";
+            }
+            return makeError(ErrorCode::NotFound,
+                             "CUSTOMISE BUILTIN: this program has no built-in customisation of "
+                             "that name, so nothing was changed; " +
+                                 (have.empty() ? std::string("it has none")
+                                               : "it has " + have + " (CUSTOMISE BUILTIN lists them)"),
+                             name);
+        }
+        if (entry->builtIn.customisation == nullptr) {
+            return needsHost("BUILTIN", "cannot use the built-in customisation \"" + entry->name +
+                                            "\": " + entry->builtIn.problem);
+        }
+        // The run's own is the one RESET gives; judged as the host judges it.
+        const BuiltInCustomisation& own = context.host->builtIn;
+        const bool runs = own.customisation != nullptr &&
+                          entry->builtIn.customisation->name == own.customisation->name &&
+                          entry->builtIn.digest == own.digest;
+        return installChosen(document, context, entry->builtIn, runs, true);
+    }
+
+    const std::vector<BuiltInChoice> choices = builtInChoices(document, entries);
+    std::string defaultName;
+    std::string activeName;
+    for (const BuiltInChoice& choice : choices) {
+        if (choice.isDefault) {
+            defaultName = choice.name;
+        }
+        if (choice.isActive) {
+            activeName = choice.name;
+        }
+    }
+    std::string reply = "builtins count=" + number(choices.size()) +
+                        " default=" + recordValue(defaultName) +
+                        " active=" + recordValue(activeName);
+    // A kept or edited copy is not any built-in, but says which it came from.
+    const CustomisationState& state = document.customisationState();
+    if (activeName.empty() && state.basedOn) {
+        reply += " based_on=" + recordValue(state.basedOn->name);
+    }
+    for (const BuiltInChoice& choice : choices) {
+        reply += "\nbuiltin name=" + recordValue(choice.name) +
+                 " default=" + yesNo(choice.isDefault) + " active=" + yesNo(choice.isActive) +
+                 " definitions=" + number(choice.definitions) + " codes=" + number(choice.codes) +
+                 " rules=" + number(choice.rules) + " source=" + recordValue(choice.source) +
+                 " description=" + recordValue(choice.description);
+        if (!choice.problem.empty()) {
+            reply += " problem=" + recordValue(choice.problem);
+        }
+    }
+    return reply;
 }
 
 // Whether a kept file exists, and where, in a sentence: the record's `kept=yes`
@@ -1019,7 +1125,9 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
         }
     }
     if (is(word, "JSON")) {
-        return customisationJson(document);
+        // The built-ins it lists are the host's, as CUSTOMISE BUILTIN lists them.
+        return context.host ? customisationJson(document, builtInsOf(*context.host))
+                            : customisationJson(document);
     }
     if (is(word, "REPLACE")) {
         return load(document, context, rest, LoadMode::Replace);
@@ -1032,6 +1140,9 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
     }
     if (is(word, "RESET")) {
         return resetToBuiltIn(document, context);
+    }
+    if (is(word, "BUILTIN")) {
+        return builtInVerb(document, context, rest);
     }
     if (is(word, "KEEP")) {
         return keep(document, context);
@@ -1100,14 +1211,26 @@ Export    CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
           The file is the first word; a file called as one of EXPORT's own words is given
           with its directory (./CODES). After ONLY every word is a definition; a definition
           called NAME is listed by giving NAME <name> before ONLY
-Start     CUSTOMISE RESET   the program's built-in customisation in the place of the session's:
+Start     CUSTOMISE RESET   the built-in customisation of this run in the place of the session's -
+          the default, Katana Standard, unless KATANA_BUILTIN_CUSTOMISATION says another:
           reset name= definitions= codes= rules= kept=yes|no
+          CUSTOMISE BUILTIN   the built-in customisations this program has, the default marked and
+          the one the session is: builtins count= default= active= [based_on=<the built-in a kept
+          or edited session was made from, when it is none of them>], then builtin name=
+          default=yes|no active=yes|no definitions= codes= rules= source=<the file compiled in>
+          description=, one a built-in
+          CUSTOMISE BUILTIN <name>   that built-in in the place of the session's, as RESET does
+          (the name in any letter case, quoted or not): used name= default=yes|no definitions=
+          codes= rules= kept=yes|no. kept=yes only for the run's own built-in with no kept file
+          waiting; any other is not what the next start gives until a KEEP
           CUSTOMISE KEEP   write the session to the kept file, which the next start reads in
           the place of the built-in; the file that was there is kept beside it as .bak:
           kept file= written=yes name= definitions= codes= rules= backup=
-          When the session IS the built-in nothing is written and the kept file is set aside
-          (written=no reason=the-session-is-the-built-in), so that a later built-in is not
-          hidden by a copy of this one. A kept file that does not read - empty, damaged, or
+          When the session IS the built-in of the run nothing is written and the kept file is set
+          aside (written=no reason=the-session-is-the-built-in), so that a later built-in is not
+          hidden by a copy of this one. Another built-in of the program (CUSTOMISE BUILTIN
+          <name>) is written like any session, and the file says which it is based on: the next
+          start comes up as it. A kept file that does not read - empty, damaged, or
           written by a newer Katana - is put aside whole as .bad (one of that name is
           replaced) and the session written: backup=none set_aside=<the .bad>. Refused when
           the file changed on disk since this session read it, or cannot be read at all

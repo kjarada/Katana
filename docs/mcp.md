@@ -241,7 +241,7 @@ runs.
 
 | In | Out |
 |---|---|
-| `{part: "summary"}` | cad's report as one object, with no `part` or `total` beside its members: `name`, `origin`, `kept`, `description`, `notice`, `basedOn`, `builtIn`, `sources` (each with its notice), `counts`, `automation`, `linework`, `colours`, `problems` (counted), `coverage`, `missing`, `start` - what `CUSTOMISE JSON` prints (`docs/customisation.md`, "The replies") |
+| `{part: "summary"}` | cad's report as one object, with no `part` or `total` beside its members: `name`, `origin`, `kept`, `description`, `notice`, `basedOn`, `builtIn`, `builtIns`, `sources` (each with its notice), `counts`, `automation`, `linework`, `colours`, `problems` (counted), `coverage`, `missing`, `start` - what `CUSTOMISE JSON` prints (`docs/customisation.md`, "The replies") |
 | `{part: "codes", filter?, offset?, limit?}` | `{part, total, offset, limit, codes: [{index, key, sets, ...}]}`: one object a survey code rule |
 | `{part: "definitions", filter?, offset?, limit?}` | `{part, total, offset, limit, definitions: [{name, kind, group, units, atVertices, from}]}` |
 | `{part: "definitions", name}` | the same with the ONE definition of that name, whole: those six members and everything else its file holds, `strokes` included |
@@ -257,6 +257,15 @@ runs.
   JSON` would then give three different objects for one report, and a member
   cad adds later could meet one of the tool's own under the same name. A
   caller knows which part it asked for.
+- **`builtIns` lists the built-in customisations the program has**, so that an
+  agent can see what `CUSTOMISE BUILTIN <name>` would choose from:
+  `[{name, description, source, default, active, definitions, codes, rules}]`,
+  the default first, with `problem` on one that did not read. `default` marks the
+  built-in of the run (`builtIn` names it), `active` the one the session is - none
+  for a kept or edited copy, whose `basedOn` says which it came from - and
+  `source` the file it was compiled in from. It is the list `CUSTOMISE BUILTIN` and
+  Settings show (`cad::builtInChoices`); `McpServer.TheCustomisationSummaryListsTheBuiltInsTheProgramHas`
+  holds it. To choose one, an agent runs the line through `katana_run_commands`.
 - **`start` is what went wrong when the session started**:
   `{problems: [sentence], keptFromAnotherBuiltIn}`. A kept file that did not
   read - and what started in its place - and a built-in that did not read are

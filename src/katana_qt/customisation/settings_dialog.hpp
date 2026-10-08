@@ -37,9 +37,19 @@
 // and not kept. Only ONE such file is kept: the next KEEP that finds a kept
 // file puts that one in its place (docs/desktop.md, "Settings").
 //
+// THE BUILT-IN LIBRARY. A program may carry several built-in customisations
+// (cad::builtIns(): Katana Standard, the default, and the alternates a build
+// compiled in). "Built-in library" is a chooser of them and Use puts the chosen
+// one in the place of the session's: the line CUSTOMISE BUILTIN "<name>",
+// followed by KEEP like Reset (a kept session stays kept, so choosing one in
+// an interactive window is what the next start gives). The row is hidden when
+// the program has fewer than two to choose between, and Use is disabled while
+// the chosen one is the one the session already is. "Reset to Built-in" is
+// the default's, as ever (CUSTOMISE RESET).
+//
 // REFUSED HERE, with the reason in the status box and the log, and nothing
 // run:
-//   * Import, Reset to Built-in and Revert to Kept while the Survey Code
+//   * Import, Reset to Built-in, Use and Revert to Kept while the Survey Code
 //     Manager's buffer holds unapplied edits: its later Apply would put the
 //     rules it holds back over what was loaded, without a word;
 //   * a file whose path no command line can carry (a double quote, a line
@@ -53,13 +63,17 @@
 //
 // Object names: settingsDialog; settingsPages (the list), settingsStack,
 // settingsCustomisation (the page);
-//   settingsActiveName, settingsActiveOrigin, settingsActiveDefinitions,
+//   settingsActiveName, settingsActiveOrigin, settingsActiveBuiltIn (the
+//   built-in the session is, or the one it is based on), settingsActiveDefinitions,
 //   settingsActiveSymbols, settingsActiveRules, settingsActiveKept,
 //   settingsActiveProblems (what went wrong at start-up; hidden when nothing
 //   did), settingsShowNotice (hidden when there is no notice), settingsNotice
 //   (read-only, hidden until asked);
 //   settingsImportPath, settingsImportBrowse, settingsImportReplace,
 //   settingsImport;  settingsExportPath, settingsExportBrowse, settingsExport;
+//   settingsBuiltInRow (hidden with fewer than two built-ins), settingsBuiltIn
+//   (the chooser: each item the built-in's name, the default marked), and
+//   settingsBuiltInUse;
 //   settingsReset, settingsKeep, settingsRevert;
 //   settingsAutoCodes, settingsAutoLinework;
 //   settingsLinework (the seven spellings, read-only, each under the word
@@ -77,13 +91,16 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include <QDialog>
 #include <QString>
 
 #include "command_runner.hpp"
+#include "katana/cad/customisation_host.hpp"
 
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -129,6 +146,11 @@ struct SettingsContext {
     // showing - empty when this session keeps none. The file need not exist.
     bool hasBuiltIn = false;
     QString keptFile{};
+    // The built-ins the chooser offers (cad::builtInsOf of the session's host).
+    // Empty: those compiled into the program, cad::builtIns() - what the
+    // window wants. A test gives it to stand in for the build, so that it is
+    // the same test on a machine whose build compiled in other files.
+    std::function<std::vector<katana::cad::BuiltInEntry>()> builtIns{};
 };
 
 class SettingsDialog final : public QDialog {
@@ -172,6 +194,11 @@ class SettingsDialog final : public QDialog {
 
     void importFile();
     void exportFile();
+    // The chooser as the Document and the built-ins say, telling no one.
+    void showBuiltIns();
+    // Use as the chooser's choice leaves it: enabled, and what its tip says.
+    void showBuiltInUse();
+    void useBuiltIn();
     void browseImport();
     void browseExport();
     void automationToggled(const char* key, bool on);
@@ -193,6 +220,7 @@ class SettingsDialog final : public QDialog {
     QLabel* definitions_ = nullptr;
     QLabel* symbols_ = nullptr;
     QLabel* rules_ = nullptr;
+    QLabel* activeBuiltIn_ = nullptr;
     QLabel* kept_ = nullptr;
     QLabel* problems_ = nullptr;
     QCheckBox* showNotice_ = nullptr;
@@ -204,6 +232,11 @@ class SettingsDialog final : public QDialog {
     QLineEdit* exportPath_ = nullptr;
     QPushButton* exportBrowse_ = nullptr;
     QPushButton* export_ = nullptr;
+    QWidget* builtInRow_ = nullptr;
+    QComboBox* builtInChoice_ = nullptr;
+    QPushButton* builtInUse_ = nullptr;
+    // The built-ins the chooser lists, as it last listed them, in its order.
+    std::vector<katana::cad::BuiltInChoice> builtInChoices_;
     QPushButton* reset_ = nullptr;
     QPushButton* keep_ = nullptr;
     QPushButton* revert_ = nullptr;

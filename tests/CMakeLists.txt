@@ -468,8 +468,10 @@ endif()
 # window, a `cli.` line through katana_cli - says what customisation the
 # program starts with, so that it is the same test on a machine whose build
 # has a customisation compiled in and on one whose build has none (a default
-# build has the tracked NSW one, resources/customisation/nsw.customisation.json;
-# a build whose KATANA_BUILTIN_CUSTOMISATION names no file has nothing, and the
+# build has the tracked Katana Standard one,
+# resources/customisation/katana-standard.customisation.json, and the NSW one
+# beside it; a build whose KATANA_BUILTIN_CUSTOMISATION names no file has
+# no default, and the
 # program's tests must not depend on which). A program reads two environment
 # variables where it starts (cad/customisation_host.hpp):
 #
@@ -1931,6 +1933,90 @@ if(TARGET katana)
         PROPERTIES FIXTURES_REQUIRED qt_settings_kept_2 FIXTURES_SETUP qt_settings_kept_3)
     set_tests_properties(qt_after_a_reset_made_in_settings_the_next_window_starts_with_the_built_in_headless
         PROPERTIES FIXTURES_REQUIRED qt_settings_kept_3)
+
+    # The built-in LIBRARY in Settings: a combo of the built-ins the program
+    # has (Katana Standard, the default, and the NSW alternate) and Use, which
+    # runs CUSTOMISE BUILTIN and is kept like a reset. Four windows, one after
+    # another, on a kept file of the test's own, with the seam NAMING Katana
+    # Standard - the name form of KATANA_BUILTIN_CUSTOMISATION - registered
+    # where the build compiled in both (KATANA_BUILTIN_FILES). By hand, from
+    # each file's census (docs/katana_standard.md: 186 definitions, 245 codes,
+    # 770 rules; tests/cad/customisation/test_builtin_census.cpp: 792, 632,
+    # 1,624; the window's start-up line groups thousands, the cli's does not):
+    #  1. Starts with Katana Standard, built in. Settings says the session is
+    #     "Katana Standard (default)". NSW is chosen and Use pressed: the
+    #     session is NSW, not what the next start gives (kept=no), so the
+    #     dialog runs KEEP behind it: written, based on NSW.
+    #  2. Starts with that file: NSW, kept, "Based on NSW" (a kept copy is not
+    #     a built-in), and is NOT told it was made from another built-in.
+    #  3. Katana Standard is chosen again - "Katana Standard (default)" - and
+    #     Use pressed: the session is the built-in of the run, the kept file
+    #     stands (kept=no), so KEEP follows and sets it aside, writing nothing.
+    #  4. Starts with Katana Standard, built in.
+    set(_have_standard FALSE)
+    set(_have_nsw FALSE)
+    foreach(_built_in_file IN LISTS KATANA_BUILTIN_FILES)
+        if(_built_in_file MATCHES "/katana-standard\\.customisation\\.json$")
+            set(_have_standard TRUE)
+        elseif(_built_in_file MATCHES "/nsw\\.customisation\\.json$")
+            set(_have_nsw TRUE)
+        endif()
+    endforeach()
+    if(_have_standard AND _have_nsw)
+        set(_built_in_kept "${CMAKE_CURRENT_BINARY_DIR}/qt_built_in_kept")
+        add_test(NAME qt_built_in_kept_cleanup
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_kept}")
+        add_test(NAME qt_an_alternate_built_in_chosen_in_settings_is_kept_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|settingsBuiltIn=NSW|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveName|?settingsActiveKept"
+                "-DEXPECT=Customisation: Katana Standard, 186 definitions \\([0-9,]+ symbols\\) and 770 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none[\r\n]+settingsStatus: > CUSTOMISE BUILTIN NSW used name=NSW [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveBuiltIn: NSW[\r\n]+settingsActiveName: NSW[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_1_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        add_test(NAME qt_the_window_after_a_kept_alternate_starts_with_it_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=@fileSettings|?settingsActiveOrigin|?settingsActiveBuiltIn|?settingsActiveName"
+                "-DEXPECT=Customisation: NSW, 792 definitions \\([0-9,]+ symbols\\) and 1,624 survey code rules, kept\\..*settingsActiveOrigin: Kept by you[\r\n]+settingsActiveBuiltIn: Based on NSW[\r\n]+settingsActiveName: NSW"
+                "-DFORBID=made from another built-in"
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_2_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        add_test(NAME qt_choosing_the_default_in_settings_sets_the_kept_alternate_aside_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=@fileSettings|settingsBuiltIn=Katana Standard (default)|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveOrigin"
+                "-DEXPECT=used name=\"Katana Standard\" default=yes definitions=186 codes=245 rules=770 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*qt_built_in_kept/customisation\\.json\\.bak\"?[\r\n]+settingsStatus: > CUSTOMISE BUILTIN \"Katana Standard\" used name=\"Katana Standard\" [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=no reason=the-session-is-the-built-in [^\r\n]*[\r\n]+settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_3_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        add_test(NAME qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|?settingsActiveOrigin"
+                "-DEXPECT=Customisation: Katana Standard, 186 definitions \\([0-9,]+ symbols\\) and 770 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
+                "-DFORBID=survey code rules, kept"
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_4_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        set_tests_properties(qt_an_alternate_built_in_chosen_in_settings_is_kept_headless
+                             qt_the_window_after_a_kept_alternate_starts_with_it_headless
+                             qt_choosing_the_default_in_settings_sets_the_kept_alternate_aside_headless
+                             qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:Katana Standard;KATANA_CUSTOMISATION=set:${_built_in_kept}/customisation.json"
+            TIMEOUT 180)
+        set_tests_properties(qt_built_in_kept_cleanup PROPERTIES FIXTURES_SETUP qt_built_in_kept_0)
+        set_tests_properties(qt_an_alternate_built_in_chosen_in_settings_is_kept_headless
+            PROPERTIES FIXTURES_REQUIRED qt_built_in_kept_0 FIXTURES_SETUP qt_built_in_kept_1)
+        set_tests_properties(qt_the_window_after_a_kept_alternate_starts_with_it_headless
+            PROPERTIES FIXTURES_REQUIRED qt_built_in_kept_1 FIXTURES_SETUP qt_built_in_kept_2)
+        set_tests_properties(qt_choosing_the_default_in_settings_sets_the_kept_alternate_aside_headless
+            PROPERTIES FIXTURES_REQUIRED qt_built_in_kept_2 FIXTURES_SETUP qt_built_in_kept_3)
+        set_tests_properties(qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless
+            PROPERTIES FIXTURES_REQUIRED qt_built_in_kept_3)
+    endif()
 
     # Survey > Process Linework is the LINEWORK line through the window's one
     # executor, as Apply Survey Codes is the CODE line: on the selection when

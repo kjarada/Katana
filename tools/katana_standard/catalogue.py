@@ -156,9 +156,10 @@ def catalogue(data, root):
     # ---- using it ---------------------------------------------------------------------------------------------
     w("## Using it")
     w("")
-    w("What is true now. Katana Standard is **not** the built-in: the program still starts with the customisation "
-      "compiled into it, and there is no chooser between two compiled-in libraries (\"Not done\", below). It is "
-      "loaded like any customisation file (`docs/customisation.md`, \"Using the customisation\").")
+    w("What is true now. Katana Standard **is** the built-in (the owner's ruling, 2026-10-08): a program starts "
+      "with it, and the NSW customisation is compiled in beside it as an alternate that Settings (Built-in "
+      "library, then Use) and `CUSTOMISE BUILTIN NSW` choose. It also loads like any customisation file "
+      "(`docs/customisation.md`, \"Using the customisation\").")
     w("")
     w("1. **Load it alone.** `CUSTOMISE REPLACE resources/customisation/katana-standard.customisation.json` in "
       "the window's command line, in `katana_cli` or through `katana_mcp`; or File > Settings > Import with "
@@ -168,12 +169,15 @@ def catalogue(data, root):
       "The rules here are exact three-letter prefix rules, and the most specific rule wins field by field, so a "
       "broader prefix rule already in the session can still supply a field these rules leave unsaid (a symbol, "
       "a text). Load it alone when you want its library and nothing else.")
-    w("3. **For one run**, name it as the built-in for that run: `KATANA_BUILTIN_CUSTOMISATION=<file>` in the "
-      "environment of `katana`, `katana_cli` or `katana_mcp` (`docs/headless.md`, \"The customisation a run "
-      "starts with\").")
-    w("4. **Compiled in**: `-DKATANA_BUILTIN_CUSTOMISATION=<file>` at configure time embeds a different file "
-      "(`docs/building.md`, \"The built-in customisation and the reference folder\"). Only the one-run form of "
-      "this has been run with Katana Standard; no program was built with it embedded.")
+    w("3. **Start with it, or go back to it.** It is what a program starts with when nothing else is said. After "
+      "another built-in was chosen, `CUSTOMISE BUILTIN \"Katana Standard\"` or Settings > Built-in library > Use "
+      "puts it back, and `CUSTOMISE RESET` always does. `KATANA_BUILTIN_CUSTOMISATION=none` starts with no "
+      "built-in, and `KATANA_BUILTIN_CUSTOMISATION=NSW` with the other (`docs/headless.md`, \"The customisation "
+      "a run starts with\").")
+    w("4. **Compiled in**: `-DKATANA_BUILTIN_CUSTOMISATION=<file>` at configure time embeds a different default, "
+      "and `-DKATANA_ALTERNATE_CUSTOMISATIONS=<files>` further built-ins (`docs/building.md`, \"The built-in "
+      "customisation and the reference folder\"). A build directory configured before this became the default "
+      "keeps the old value until `cmake --preset release -U KATANA_BUILTIN_CUSTOMISATION`.")
     w("5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the "
       "points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and "
       "`CODE CHECK` read them. `CODE CHECK` reports no problems on the file: %d rules checked." % n_rules)
@@ -385,8 +389,9 @@ def catalogue(data, root):
     # ---- decisions --------------------------------------------------------------------------------------------
     w("## Originality")
     w("")
-    w("The built-in customisation of this repository was converted from a third party's files, and Katana "
-      "Standard was made so that nothing of them is in it. Its authors were given the built-in's structure and "
+    w("The NSW customisation of this repository, the alternate built-in, was converted from a third party's "
+      "files, and Katana Standard was made so that nothing of them is in it. Its authors were given that "
+      "built-in's structure and "
       "its statistics (how many groups, codes and strokes, which kinds of rule it uses and where it is weak) to "
       "know what a full survey library covers, and were forbidden to copy or paraphrase any name, group, layer, "
       "code key, comment, stroke, text or colour of it. They were not to read its contents, but in one "
@@ -478,9 +483,9 @@ def catalogue(data, root):
 
     w("## Not done")
     w("")
-    w("- **It is not the built-in.** The default stays the existing built-in, and a second compiled-in "
-      "customisation with a chooser would touch the window, `katana_cli` and `katana_mcp` alike. Whether Katana "
-      "Standard becomes the default, or a second built-in with a chooser, is the owner's decision.")
+    w("- **The earlier file names of an old project** are answered with the name of the built-in of the run "
+      "(`docs/customisation.md`, \"Not done by the built-ins\"), which is Katana Standard by default; the names "
+      "belonged to the NSW customisation. Narrow: a project saved in the first days of the built-in.")
     w("- **The colour convention** of the buried services differs from `UTILITY DRAW`'s. Aligning one to the "
       "other is the owner's decision.")
     w("- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the "

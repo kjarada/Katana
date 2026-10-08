@@ -258,8 +258,9 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_ENABLE_CPPCHECK` | `OFF` | cppcheck during compilation |
 | `KATANA_MODULE_FILTER` | empty | configure only the listed modules and their suites, e.g. `"katana_core;katana_math;katana_geometry"`; the configure fails, naming the module, when a listed module needs one that is not listed |
 | `KATANA_DEPLOY_RUNTIME` | `ON` | copy the runtime DLLs and the GDAL and PROJ data beside the programs ("The build tree runs on its own too") |
-| `KATANA_BUILTIN_CUSTOMISATION` | `resources/customisation/nsw.customisation.json`, tracked | the Katana customisation file compiled into `katana_cad` as the built-in; a build where the path names no file has none ("The built-in customisation and the reference folder"; `docs/customisation.md`, "The built-in") |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | `OFF` | fail the configure when that file is absent: a guard for a release job against the tracked file having been deleted or a path being wrong |
+| `KATANA_BUILTIN_CUSTOMISATION` | `resources/customisation/katana-standard.customisation.json`, tracked | the Katana customisation file compiled into `katana_cad` as THE built-in, the default; a build where the path names no file has none of its own ("The built-in customisation and the reference folder"; `docs/customisation.md`, "The built-in") |
+| `KATANA_ALTERNATE_CUSTOMISATIONS` | `resources/customisation/nsw.customisation.json`, tracked | a `;`-separated list of further Katana customisation files compiled in, offered by name (Settings, `CUSTOMISE BUILTIN`, the seam); one that is no file is not offered, and the list may be empty |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | `OFF` | fail the configure when the default file is absent: a guard for a release job against the tracked file having been deleted or a path being wrong |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | the reference folder under `docs/`, git-ignored | where the reference customisation is kept in the legacy formats; read only by the converter and by the legacy readers' own tests, which skip when the folder is absent or holds no such file; the program reads none of it ("The built-in customisation and the reference folder") |
 | `KATANA_CCACHE` | `ON` | compile through ccache when it is installed and no `CMAKE_CXX_COMPILER_LAUNCHER` is given ("Build and test speed") |
 
@@ -379,29 +380,43 @@ Points are absolute (`12.5,40`), relative (`@3,4`) or polar (`@5<30`).
 ## The built-in customisation and the reference folder
 
 The linestyles, symbols and survey codes a program starts with are compiled
-INTO it - from ONE file, in the window as in `katana_cli` and `katana_mcp`:
-the Katana customisation file the CMake variable
-`KATANA_BUILTIN_CUSTOMISATION` names, `resources/customisation/nsw.customisation.json`
-by default, embedded in `katana_cad` with `#embed`
-(`docs/customisation.md`, "The built-in", has where it comes from, why it is
-in the repository and the environment variable that overrides it for one
-run). Where the file is absent - a path that names none; the file is tracked,
-so a checkout has it - the program has no built-in and draws plain lines until
-a customisation is loaded. Nothing is installed beside the program, and
-nothing is read from that folder at run time.
+INTO it, in the window as in `katana_cli` and `katana_mcp`: the Katana
+customisation file the CMake variable `KATANA_BUILTIN_CUSTOMISATION` names,
+`resources/customisation/katana-standard.customisation.json` by default, is THE
+built-in; the files `KATANA_ALTERNATE_CUSTOMISATIONS` lists, the NSW file by
+default, are offered beside it by name. All are embedded in `katana_cad` with
+`#embed`, into one generated source in the build tree
+(`docs/customisation.md`, "The built-in", has where they come from, why they
+are in the repository and the environment variable that overrides the default
+for one run). Where a file is absent - a path that names none; the files are
+tracked, so a checkout has them - it is not offered, and with none at all the
+program has no built-in and draws plain lines until a customisation is loaded.
+Nothing is installed beside the program, and nothing is read from that folder
+at run time.
 
-Three things configure it, and none needs Python or a script:
+Four things configure it, and none needs Python or a script:
 
 | | Says | Default |
 |---|---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` | the file compiled in; it is picked up when it is put there after the configure (a `CONFIGURE_DEPENDS` glob over the path), and whether it is a file is asked of the file itself, so a checkout under a directory with `[` in its name still has it | `resources/customisation/nsw.customisation.json` |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | make its absence a configure error | `OFF`; `ON` for a release job, to catch the tracked file having been deleted or a path being wrong before a program that draws plain lines ships |
+| `KATANA_BUILTIN_CUSTOMISATION` | the default file compiled in; it is picked up when it is put there after the configure (a `CONFIGURE_DEPENDS` glob over the path), and whether it is a file is asked of the file itself, so a checkout under a directory with `[` in its name still has it | `resources/customisation/katana-standard.customisation.json` |
+| `KATANA_ALTERNATE_CUSTOMISATIONS` | the further files, a `;`-separated list, offered by name; each is checked and picked up the same way, a path that is no file is not offered (the configure says so), and a file already offered is offered once | `resources/customisation/nsw.customisation.json` |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | make the absence of the default a configure error | `OFF`; `ON` for a release job, to catch the tracked file having been deleted or a path being wrong before a program that draws plain lines ships |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | where the reference customisation is kept in the legacy formats | the git-ignored folder under `docs/` |
 
-Another file in `resources/customisation`, Katana Standard
-(`docs/katana_standard.md`), is tracked beside the built-in and is not compiled
-in: pointing `KATANA_BUILTIN_CUSTOMISATION` at it at configure time would embed it
-instead, which no build has been made with.
+Katana Standard (`docs/katana_standard.md`) is the default and the NSW file the
+alternate. To change which is the default, point `KATANA_BUILTIN_CUSTOMISATION`
+at the other and list the first in `KATANA_ALTERNATE_CUSTOMISATIONS`; to build
+without the NSW file, which is third-party material (`LICENSING.md`), give
+`-DKATANA_ALTERNATE_CUSTOMISATIONS=` an empty list and the program has Katana
+Standard alone.
+
+**A build directory keeps what it was given.** A cache variable that was set
+keeps its value, so a directory configured when NSW was the default still has
+`KATANA_BUILTIN_CUSTOMISATION` set to the NSW file: it offers NSW as the default
+and Katana Standard nowhere. The configure says so when it sees that value.
+`cmake --preset release -U KATANA_BUILTIN_CUSTOMISATION` removes the old value
+and the next configure gives the new default; a new build directory needs
+nothing.
 
 The built-in is tracked and the reference folder is not: its files are
 third-party material under their own licence, kept on disk and never committed
@@ -411,10 +426,12 @@ so the tests that read the reference files - the legacy readers' reference
 tests and the converter's - say so and skip, and no test of the WINDOW or of
 `katana_cli` depends on either (each says what customisation the program
 starts with, `docs/headless.md`, "The customisation a run starts with"). The
-tests that need the compiled-in file, `BuiltInCensus.*` and `BuiltInRenames.*`
-against it, run in a checkout and skip where the path names no file. A build
+tests that need a compiled-in file, `BuiltInCensus.*`, `BuiltInRenames.*` and
+`BuiltInLibrary.*` against it, find the built-in by NAME in the list of what the
+build compiled in, run in a checkout and skip where the build has none of
+that name. A build
 WITHOUT the file configures, builds and passes: it was built that way on
-2026-10-07, when the file was not tracked, with
+2026-10-07, when the file was not tracked and was the only built-in, with
 `-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not exist, and the cad
 suite gave 2,325 passed and 5 skipped (the five that need the reference
 customisation compiled in) and the app suite 124 passed

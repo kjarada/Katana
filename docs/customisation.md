@@ -8,7 +8,7 @@ as one thing: the value that holds one and the file that keeps it.
 
 After a short guide to using it, its first chapter, below, is the file format;
 its second, "The verbs", the commands that load, write, keep and edit a customisation; then "Settings and
-the kept customisation"; "The built-in", the customisation compiled into the
+the kept customisation"; "The built-in", the customisations compiled into the
 program; and last the converter that makes such a file from the older
 formats.
 
@@ -17,12 +17,15 @@ formats.
 For someone who has Katana and a survey to draw. Five steps; the rest of this
 document is the reasons.
 
-1. **The NSW customisation is built in, and applies at start-up.** Its
+1. **Katana Standard is built in, and applies at start-up.** Its
    linestyles, symbols and survey code rules are there the first time the
-   program runs, with nothing to load. (The NSW file is in the repository,
-   "Why the built-in is in the repository", below, so a build made from a clean
-   checkout has it. Only a build pointed at a file that does not exist starts
-   with no customisation until one is loaded.)
+   program runs, with nothing to load. Another is built in beside it, the NSW
+   customisation, and is one choice away: File > Settings > Built-in library,
+   then Use (the line is `CUSTOMISE BUILTIN NSW`), which a session that was kept
+   keeps for the next start. (Both files are in the repository, "Why the
+   built-in is in the repository", below, so a build made from a clean checkout
+   has them. Only a build pointed at files that do not exist starts with no
+   customisation until one is loaded.)
 2. **To use another customisation, load its file in File > Settings > Import.**
    It is merged onto the built-in automatically - a definition of a name takes
    the place of the one of that name, a code's rules take the place of that
@@ -1059,7 +1062,9 @@ had come to differ, are gone, and the older files they read no longer load.
 | `CUSTOMISE REPLACE <file>...` | loads them in the place of each KIND they bring |
 | `CUSTOMISE DEFINITIONS <file>...` | merges only the files' definitions and colours: what the Symbol Library's Import Definitions runs |
 | `CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>] [ONLY <definition>...]` | writes the session, or a part of it |
-| `CUSTOMISE RESET` | the program's built-in customisation in the place of the session's |
+| `CUSTOMISE RESET` | the built-in customisation of this run - the default, Katana Standard, unless the seam names another - in the place of the session's |
+| `CUSTOMISE BUILTIN` | the built-ins the program has, the default and the one the session is marked |
+| `CUSTOMISE BUILTIN <name>` | that built-in, its name in any letter case, in the place of the session's: what `RESET` does, for any of them |
 | `CUSTOMISE KEEP` | writes the session to the kept file, which the next start reads |
 | `CUSTOMISE REVERT` | reads the kept file again |
 | `CUSTOMISE REMOVE <definition>... [FORCE]` | removes definitions; refused while one is in use, unless `FORCE` |
@@ -1246,6 +1251,9 @@ CUSTOMISE [REPLACE] f...  repeated file=<f>                                     
                           customisation name=...                                  what is loaded now
 CUSTOMISE EXPORT f ...    exported file=<f> name=<n> definitions=<n> codes=<n> rules=<n> replaced=yes|no
 CUSTOMISE RESET           reset name=<n> definitions=<n> codes=<n> rules=<n> kept=yes|no
+CUSTOMISE BUILTIN         builtins count=<n> default=<name> active=<name> [based_on=<name>]
+                          builtin name=<n> default=yes|no active=yes|no definitions=<n> codes=<n> rules=<n> source=<file> description=<text> [problem=<why>]    one a built-in
+CUSTOMISE BUILTIN <name>  used name=<n> default=yes|no definitions=<n> codes=<n> rules=<n> kept=yes|no
 CUSTOMISE KEEP            kept file=<f> written=yes name=<n> definitions=<n> codes=<n> rules=<n> backup=<f>.bak|none [set_aside=<f>.bad]
                           kept file=<f> written=no reason=the-session-is-the-built-in backup=<f>.bak|none [set_aside=<f>.bad]
 CUSTOMISE REVERT          reverted file=<f> name=<n> definitions=<n> codes=<n> rules=<n>
@@ -1278,8 +1286,10 @@ made from a `CustomisationSummary`, as that text was.
 
 `CUSTOMISE JSON` is `cad::customisationJson`: one object, keys in
 alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
-`description`, `notice`, `basedOn`, `builtIn`, `sources` (each with its
-notice), `counts`, `automation`, `linework`, `colours`, `problems`,
+`description`, `notice`, `basedOn`, `builtIn`, `builtIns` (each built-in the
+program has: `name`, `description`, `source`, `default`, `active`,
+`definitions`, `codes`, `rules`, and `problem` for one that did not read),
+`sources` (each with its notice), `counts`, `automation`, `linework`, `colours`, `problems`,
 `coverage`, `missing` and `start`. `automation`, `linework` and `basedOn` use
 the format's own member names, so the report reads against a file. `problems`
 is the lint `CODE CHECK` prints, counted - `rules`, `cannotApply`, `warnings`,
@@ -1323,6 +1333,22 @@ file.
 `RESET` installs the built-in whole, the control codes and the switches
 included, through the one function a start with no kept file uses
 (`cad::installBuiltInCustomisation`). It writes nothing.
+
+`BUILTIN <name>` is `RESET` for any other built-in the host offers. The two
+share one function in `customisation_verbs.cpp` (`installChosen`; *rejected: a
+second install path for the named one*), so they cannot differ in what they
+leave: the same install (origin `builtIn`, based on itself), nothing written,
+nothing to undo - a customisation is session data, not an undo step - and the
+same `kept` rule. `kept=yes` is for the built-in OF THE RUN with no kept file
+there to be read in its place; any other built-in is `kept=no`, because the next
+start gives the run's own until a `KEEP` says otherwise. What the host offers is
+`CustomisationHost::builtIns`, which a front end leaves unset, so that it is those
+compiled into the program (`cad::builtIns()`); a test sets it to stand in for the
+build. The name is all the words after `BUILTIN`, joined by a blank, in any letter
+case, so `CUSTOMISE BUILTIN Katana Standard` and `CUSTOMISE BUILTIN "katana
+standard"` are one line; a name the program does not have is `NotFound` and lists
+the names it has. A built-in that is listed and did not read is refused by its
+reason. `RESET` and `BUILTIN` need a host, and the first needs a built-in of its own.
 
 `KEEP` writes the session, as `entity::customisationToJson` writes it, to a
 file beside the kept one and renames that into its place; the file that was
@@ -1378,6 +1404,38 @@ then failed. "Is the built-in" is asked of the install itself - the session is
 compared with what installing the built-in into an empty Document gives - so
 it cannot drift from what `RESET` leaves.
 
+**The rule for a built-in that is not the default.** `KEEP` retires the kept
+file - writes nothing, sets it aside - ONLY when the session is the built-in OF
+THE RUN, the one `RESET` gives. For any other built-in the program has, the
+session of `CUSTOMISE BUILTIN NSW` for one, `KEEP` does what it does for any
+session: it writes it, and the file says what it is based on, that built-in's name
+and the digest of its bytes. No new file and no new state: the choice is the
+file. At the next start the kept file's `basedOn` is judged against the run's
+built-in first, as ever, and then, when the name is another, against the other
+built-ins the program offers (`CustomisationStart::keptFromAnotherBuiltIn`). A
+built-in of that name in the edition the program has is not "another": the session
+comes up as it, kept, and says nothing. "Another" is a built-in the program no
+longer offers, or offers in another edition. So the choice survives a rebuild that
+changes the default (the file names the built-in, not "the default"), and a rebuild
+that drops it, or a new edition of it, is told at every start, as a new edition of
+the default always was.
+
+What it costs, accepted: the kept copy of an alternate hides that alternate's later
+editions, and the warning is how it is reported - the cost of any kept copy.
+*Rejected: a sidecar file naming the chosen built-in.* It is a second file with
+states of its own beside `.bak` and `.bad`, and a thing for `REVERT`, Settings and
+the tips to know about. *Rejected: a new member in the format* for what `basedOn`
+already says; it would be a format change. *Rejected: retiring the kept file for ANY
+built-in the program has*: NSW could not then survive a restart.
+`AnAlternateBuiltInChosenAndKeptIsWhatTheNextStartGivesAndNothingIsWarnedOf`,
+`AResetAndAKeepAfterAKeptAlternateRetireTheFileAndTheDefaultComesBack`,
+`ChoosingTheDefaultByNameAfterAKeptAlternateRetiresTheFileLikeAReset`,
+`AKeptCopyOfAnAlternateTheProgramOffersIsNotFromAnotherBuiltIn`,
+`AKeptCopyOfAnAlternateIsFromAnotherBuiltInWhenTheProgramLacksItOrHasAnotherEdition`
+and `AKeptCopyOfTheEarlierDefaultSurvivesARebuildThatChangesTheDefault` follow
+default to alternate to `KEEP` to a restart, an alternate to `RESET` to `KEEP`, and
+the three ways a kept copy is, or is not, from another built-in.
+
 `REVERT` reads the kept file again and installs it.
 
 ### What katana_cli and katana_mcp start with
@@ -1386,11 +1444,12 @@ The session those two programs share (`src/katana_app/session.cpp`) builds its
 host when it starts, hands it to the interpreter and then calls
 `cad::startCustomisation`:
 
-- **The built-in** is `cad::builtInCustomisation()`: the customisation
-  compiled into the program, or what the environment variable
-  `KATANA_BUILTIN_CUSTOMISATION` says in its place for one run - a Katana
-  customisation file, or `none` (`docs/survey_coding.md`, "The built-in, and
-  the seam").
+- **The built-in** is `cad::builtInCustomisation()`: the default customisation
+  compiled into the program, Katana Standard, or what the environment variable
+  `KATANA_BUILTIN_CUSTOMISATION` says in its place for one run - the name of
+  another compiled-in built-in (`NSW`), a Katana customisation file, or `none`
+  ("The built-in", below). `CUSTOMISE BUILTIN` lists what the program has and
+  chooses among them for the rest of the session.
 - **The kept file** is the one the environment variable `KATANA_CUSTOMISATION`
   names, and nothing else. *Rejected: a per-user place*, which the desktop
   window has. A command line run from a script, and a server an agent drives,
@@ -1420,10 +1479,15 @@ What was installed is said in one line on standard output - in `katana_mcp`
 that is the client's log, since the protocol has standard output to itself:
 
 ```
+Customisation: Katana Standard, 186 linestyles and symbols and 770 survey code rules, built in
 Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, built in
-Customisation: Site, 800 linestyles and symbols and 1630 survey code rules, kept
+Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, kept
 Customisation: One, 1 linestyle or symbol and 1 survey code rule, kept
 ```
+
+The first is a start with nothing said; the second a run whose seam names `NSW`;
+the third a kept copy of NSW (`CUSTOMISE BUILTIN NSW`, then `KEEP`), which comes up
+as it with no warning.
 
 Each noun goes by its count, as the window's start-up line does (`1 definition
 (1 symbol) and 1 survey code rule`): the line gave every count the plural
@@ -1471,7 +1535,11 @@ the refusals), and in `src/katana_app/CMakeLists.txt`
 `cli.the_next_session_starts_with_the_kept_customisation`,
 `cli.a_kept_file_that_does_not_read_is_said_and_the_built_in_starts_in_its_place`
 and, for the same start read again through `CUSTOMISE JSON`,
-`cli.customise_json_says_what_went_wrong_when_the_session_started`.
+`cli.customise_json_says_what_went_wrong_when_the_session_started`. The built-ins
+have `cli.customise_builtin_lists_the_built_ins_and_a_name_makes_one_the_session`,
+`cli.the_seam_names_a_compiled_in_built_in_and_the_session_starts_with_it` and, in
+two processes, `cli.an_alternate_built_in_kept_is_what_the_next_session_starts_with`
+(registered where the build compiled in both Katana Standard and NSW).
 
 ### CODE
 
@@ -1785,7 +1853,9 @@ the built-in.
 
 **Settings** (`src/katana_qt/customisation/settings_dialog.hpp`;
 `docs/desktop.md`, "Settings") is where a person sees all of this and does
-the whole-customisation things, each a line of the family:
+the whole-customisation things, each a line of the family. "What is active"
+names the built-in the session is (`settingsActiveBuiltIn`): `Katana Standard
+(default)`, `NSW`, or `Based on NSW` for a kept or edited copy of one.
 
 | In Settings | The line |
 |---|---|
@@ -1793,6 +1863,7 @@ the whole-customisation things, each a line of the family:
 | Import, Replace instead of merging ticked | `CUSTOMISE REPLACE "<file>"` |
 | Export, a file | `CUSTOMISE EXPORT "<file>"` |
 | Reset to Built-in | `CUSTOMISE RESET` |
+| Built-in library, a built-in chosen, Use | `CUSTOMISE BUILTIN "<name>"` |
 | Keep | `CUSTOMISE KEEP` |
 | Revert to Kept | `CUSTOMISE REVERT` |
 | Apply survey codes, toggled | `CUSTOMISE SET auto.codes=on` or `=off` |
@@ -1829,6 +1900,14 @@ each case is the verb's:
   through each press, with the tests);
 - **Reset to Built-in where nothing is kept** leaves the session the kept
   one already, and nothing follows;
+- **Use, in the Built-in library row,** puts the built-in chosen in the combo
+  (`settingsBuiltIn`) in the session's place, and is followed by `KEEP` as a
+  reset is. Choosing an alternate from a session that started from the default is
+  therefore kept - written, based on the alternate - and the next window comes up
+  as it; choosing the default again is a session that IS the built-in of the run,
+  so the kept file is set aside. The row is hidden when the program has fewer
+  than two built-ins, and Use is disabled while the chosen one is the one the
+  session already is;
 - **a `KEEP` that is refused** - the kept file changed on disk since this
   session read it, or cannot be read at all - is shown as the refusal it is,
   under the line that was carried out. The session is then edited and not
@@ -1870,24 +1949,33 @@ Not done:
 
 ## The built-in
 
-The customisation a program starts with is COMPILED INTO it: one Katana
-customisation file, embedded in `katana_cad` with `#embed`
-(`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
-is, and parsed once at first use by `cad::compiledInCustomisation()`. Nothing
-is found, loaded or configured at run time, nothing is installed beside the
-program, and no program reads a file of another program's format. Every front
-end hands it over as the host's built-in, and `startCustomisation` installs it
-unless the user has kept a customisation of their own ("What katana_cli and
-katana_mcp start with"; `docs/desktop.md`, "How the window starts").
+The customisations a program offers are COMPILED INTO it: Katana customisation
+files, embedded in `katana_cad` with `#embed` into one generated table
+(`src/katana_cad/customisation/builtin_table.hpp`, written by
+`src/katana_cad/CMakeLists.txt`), as the plot frame is. ONE of them is THE
+built-in, the DEFAULT - Katana Standard, an original library made for Katana -
+which a program starts with and which `CUSTOMISE RESET` gives; it is parsed
+once at first use by `cad::compiledInCustomisation()`, and alone, so a start
+reads its bytes only. The others are ALTERNATES - the NSW customisation - and
+`cad::builtIns()` lists them all, the default first, each with its name,
+description and the file it came from; a person picks one in Settings
+(Built-in library, then Use) and a script with `CUSTOMISE BUILTIN <name>`
+("The verbs"). Nothing is found, loaded or configured at run time, nothing is
+installed beside the program, and no program reads a file of another
+program's format. Every front end hands the built-in of the run over as the
+host's built-in, and `startCustomisation` installs it unless the user has kept
+a customisation of their own ("What katana_cli and katana_mcp start with";
+`docs/desktop.md`, "How the window starts").
 
 ### Where it comes from
 
-Three CMake variables and one environment variable say what it is:
+Four CMake variables and one environment variable say what they are:
 
 | | What it is | Default |
 |---|---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` (CMake, FILEPATH) | the Katana customisation file compiled in. Present at configure time it is embedded; absent, the program has NO built-in - a state it runs in, not a fault. Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it; a `CONFIGURE_DEPENDS` glob over the path remains, so a file put there after the configure is found by the next build | `resources/customisation/nsw.customisation.json`, tracked |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (CMake, option) | its absence is a configure error. The file is tracked, so the default build always has it; the option is for a release job, where the tracked file having been deleted or a path given wrongly would otherwise ship a program that draws plain lines | `OFF` |
+| `KATANA_BUILTIN_CUSTOMISATION` (CMake, FILEPATH) | the Katana customisation file compiled in as THE built-in, the default. Present at configure time it is embedded; absent, the program has NO built-in of its own - a state it runs in, not a fault (the alternates, if any, are then offered by name only). Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it; a `CONFIGURE_DEPENDS` glob over the path remains, so a file put there after the configure is found by the next build | `resources/customisation/katana-standard.customisation.json`, tracked |
+| `KATANA_ALTERNATE_CUSTOMISATIONS` (CMake, STRING) | a `;`-separated list of further Katana customisation files compiled in, offered by name. A path that is no file is not offered (a status line says so at the configure), and a file already offered is offered once; with the list empty, or every file absent, the build has the default alone and still configures | `resources/customisation/nsw.customisation.json`, tracked |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (CMake, option) | the absence of the DEFAULT is a configure error. The file is tracked, so the default build always has it; the option is for a release job, where the tracked file having been deleted or a path given wrongly would otherwise ship a program that draws plain lines | `OFF` |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` (CMake, PATH) | where the reference customisation is kept in the legacy formats. It is NOT what is compiled in: the converter reads it and the legacy readers' own tests do, and the program never does | the git-ignored reference folder under `docs/` |
 
 The built-in is a tracked file. The owner made it, on the machine that has the
@@ -1901,26 +1989,56 @@ reference folder", has how a build is pointed at another file.
 There is no script: the build needs nothing but the compiler, where the
 embedding this replaced ran Python over a folder of four files on every build.
 
-A second customisation is tracked beside the built-in and is not compiled in:
-Katana Standard, `resources/customisation/katana-standard.customisation.json`, an original
-library of 73 linestyles, 113 symbols and 245 survey codes made for Katana
-(`docs/katana_standard.md`: how to read it, how it is loaded now, and what is
-not done). It loads like any file, with `CUSTOMISE REPLACE` or Settings > Import
-with Replace ticked; naming it in `KATANA_BUILTIN_CUSTOMISATION` for one run
-makes it the built-in of that run. Making it the compiled-in default, or
-offering a choice of two compiled-in libraries, is the owner's decision.
+Katana Standard, `resources/customisation/katana-standard.customisation.json`,
+is the default (the owner's ruling, 2026-10-08): an original library of 73
+linestyles, 113 symbols and 245 survey codes made for Katana
+(`docs/katana_standard.md`: how to read it and what is not done). The NSW file
+is compiled in beside it as an alternate and stays selectable. Either also loads
+like any file, with `CUSTOMISE REPLACE` or Settings > Import with Replace ticked.
+
+*A build directory keeps what it was given.* A cache variable that was set keeps
+its value, so a build directory configured before Katana Standard became the
+default still has `KATANA_BUILTIN_CUSTOMISATION` set to the NSW file, and offers
+NSW as the default and Katana Standard nowhere (the NSW file named twice is
+offered once). The configure says so when it sees that value; `cmake --preset
+release -U KATANA_BUILTIN_CUSTOMISATION` gives the new default back
+(`docs/building.md`).
+
+*How a build compiles several in.* One generated translation unit in the build
+tree (`builtin_customisation_table.cpp`) holds an `#embed` of each file, by its
+absolute path, so that the number of built-ins is no limit of the source, two
+files of one name in two folders cannot collide (a `--embed-dir` would), and a
+file is embedded once. It is rewritten only when its text changes, and the
+compiler's dependency file names every file, so editing one rebuilds the table
+alone. Measured on GCC 16.2 (2026-10-08), with a six-way build running beside it: the
+table of both files, 1.7 MB of data, compiles in 1.5 s to an object of 1.7 MB.
+*Rejected: a fixed number of slots in a hand-written file* (a limit, and
+a macro for each); *one object library a file* (more CMake for nothing a table does
+not do).
 
 ### The seam
 
 The environment variable `KATANA_BUILTIN_CUSTOMISATION` (the same name, read by
 the program and not by CMake) says what "the built-in" is for ONE run, whatever
-was compiled in: unset or empty, the compiled-in one; `none`, no built-in; a
-file name, that Katana customisation file IS the built-in. It is read in one
-place, `cad::builtInCustomisation()`, which is what a front end asks for its
-host - never `compiledInCustomisation()`, which ignores it. A file the seam
-names that does not read gives NO built-in and the reason, never the
-compiled-in one in its place, which would pass a test that named a fixture and
-was given something else. It exists so that a test of a program is the same
+was compiled in. Tried in this order:
+
+1. unset or empty: the default compiled-in one;
+2. `none`, in any letter case: no built-in;
+3. a name: a value with no `/` or `\` that is the name of a compiled-in
+   built-in, in any letter case - `KATANA_BUILTIN_CUSTOMISATION=NSW`, or
+   `Katana Standard` with its blank. That built-in is the run's own: what
+   `RESET` gives, the "default" of this run's lists;
+4. otherwise a file: that Katana customisation file IS the built-in. A file in
+   the working folder that is called like a built-in is given as `./name`, the
+   family's own rule for a file called like a keyword.
+
+It is read in one place, `cad::builtInCustomisation()`, which is what a front end
+asks for its host - never `compiledInCustomisation()`, which ignores it. The
+alternates are parsed only for a value that might be a name. A file the seam
+names that does not read gives NO built-in and the reason (for a word that is no
+name, the reason also lists the names the program has, because a mistyped name is
+the likely cause), never the compiled-in one in its place, which would pass a test
+that named a fixture and was given something else. It exists so that a test of a program is the same
 test on a machine whose build has the built-in and on one whose build has not:
 the suite gives every program test `none` unless it names a committed fixture
 (`docs/headless.md`, "The customisation a run starts with"; the deferred scan
@@ -1944,8 +2062,10 @@ decided that releases ship it; nothing in the repository records that anyone
 granted a permission, and none is claimed here. The libraries' notice still
 exists in the reference files, and anyone who relies on this file in a build
 they pass on should make their own assessment first (a build without it is
-possible: `-DKATANA_BUILTIN_CUSTOMISATION=<a path with no file>`). Committed,
-the file stays in the history even if a later commit removes it.
+possible, and has Katana Standard alone: `-DKATANA_ALTERNATE_CUSTOMISATIONS=`,
+the list empty). Committed, the file stays in the history even if a later commit
+removes it. It is compiled into every program as an ALTERNATE built-in now, not
+as the one a program starts with; it is in the binary all the same.
 
 What was rejected, and why it was dropped. *Rejected: the file ignored, with
 `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` for a release that must not do without
@@ -1961,16 +2081,19 @@ never installed. The install check still refuses an install from
 `resources/customisation` or `docs`: the built-in is compiled into the
 programs, not installed beside them. A tracked test, document or fixture
 names nothing of the data - counts only, as the rule on names in this project
-has it. A build without the file, one where `KATANA_BUILTIN_CUSTOMISATION`
-names a path that does not exist, still configures and builds, has no
-built-in, says so, and skips the tests that need the data.
+has it. A build without the file, one where `KATANA_ALTERNATE_CUSTOMISATIONS`
+names a path that does not exist, still configures and builds, does not offer it,
+says so, and skips the tests that need the data. One where
+`KATANA_BUILTIN_CUSTOMISATION` names a path that does not exist has no default
+built-in of its own and offers the alternates by name only.
 `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` stays an option, `OFF`: it guards a
-release job against the tracked file having been deleted or a path being wrong.
+release job against the tracked default having been deleted or a path being wrong.
 
 ### What holds the product to it
 
 - `BuiltInCensus.*` (`tests/cad/customisation/test_builtin_census.cpp`): when
-  the compiled-in customisation is named "NSW", it holds the census figures -
+  the build offers a built-in named "NSW" (found by name among
+  `cad::builtIns()`, not as the default), it holds the census figures -
   792 definitions (471 symbols and 321 linestyles), 155 at vertices, 71 groups,
   35,692 strokes, 1,624 rules in 632 distinct keys, 7 colours, 5 names no
   library defines - counted by `tools/customisation_census.py` over the file
@@ -1981,12 +2104,64 @@ release job against the tracked file having been deleted or a path being wrong.
   built-in.
 - `BuiltInRenames.*` (`test_builtin_renames.cpp`): the names a project saved
   before the built-in was one customisation recorded are answered by its name,
-  against a committed fixture and against the compiled-in file.
+  against a committed fixture and against the compiled-in default; the 29
+  renamed definitions are looked up in the NSW alternate's library, which is
+  where they are.
+- `BuiltInLibrary.*` (`tests/cad/customisation/test_builtin_library.cpp`): the
+  list (default first, one entry a name, found by name in any letter case), the
+  seam's name form and its precedence, `builtInChoices`, and what this build
+  compiled in - Katana Standard's census (186 definitions, 770 rules over 245
+  codes, 28 colours; `tools/katana_standard/census.py`) and the NSW alternate's.
+  The first half is written against stand-ins and is the same test on every
+  build; the second skips what the build did not compile in.
 - No program holds the readers of the older formats: the test
   `the_programs_link_none_of_the_legacy_customisation_readers` walks the link
   closure of `katana`, `katana_cli` and `katana_mcp`, and the install check
   allows those three programs and no other (`docs/testing.md`, "What the
   programs hold"). Each is proved on a fixture.
+
+### Several built-ins: decisions, and what was rejected
+
+- **The default is Katana Standard** (the owner's ruling, 2026-10-08), the NSW
+  file stays shipped and selectable. `KATANA_BUILTIN_CUSTOMISATION` keeps its name
+  and meaning and gains the new default; a second variable lists the alternates.
+- **Absent files are not offered.** No error, no gap: a clean build with none
+  still works, and the tests that need a given built-in look it up by name at run
+  time and skip when the build lacks it. *Rejected: a configure-time list of
+  names*, which would put the file's contents in CMake.
+- **`RESET` stays the run's own built-in**, not "the first of the list": under a
+  seam that names `NSW` it gives NSW, because "the built-in" of that run IS NSW. A
+  program started with the default has the meaning the owner asked for - `RESET`
+  gives the default. *Rejected: a second reset that always gives the compiled-in
+  default*; the seam's job is to say what the run's is.
+- **One list, three readers.** `cad::builtInChoices` is the answer that
+  `CUSTOMISE BUILTIN`, the JSON report (`builtIns`, so `katana_customisation`'s
+  `summary` and the `katana://customisation` resource) and Settings' chooser all
+  read.
+- **The earlier file names of a project** (`builtinRenames`) are answered with the
+  run's built-in's name, as they were; they belonged to NSW, so under Katana Standard
+  a project saved in the first days of the built-in is answered by Standard. See
+  "Not done" below.
+
+### Not done by the built-ins
+
+- **A seam that names a FILE is no entry of the list.** `RESET` gives it; the
+  list, `BUILTIN <name>` and the JSON report offer what the program compiled in
+  (a test's host may give its own list, `CustomisationHost::builtIns`). The
+  file is a test and development seam.
+- **The one-line `HELP`** (`CommandInterpreter::helpText`, in
+  `src/katana_cad/command_interpreter.cpp`) does not list `CUSTOMISE BUILTIN`;
+  `HELP CUSTOMISE` does.
+- **The start-up lines** of the window and of `katana_cli` say which built-in
+  started and, for a kept copy made from another built-in, that "CUSTOMISE RESET
+  gives this program's"; they do not name `CUSTOMISE BUILTIN`.
+- **`benchmarks/bench_customisation.cpp`** measures the file `KATANA_BUILTIN_CUSTOMISATION`
+  names, which is Katana Standard now: 190,649 bytes, about an eighth of the 1,540,630
+  of the NSW file it once measured.
+- **The earlier file names a very old project may record** (`Document::customisationRenames`)
+  are answered with the run's built-in's name, which is Katana Standard by default
+  and not the customisation they belonged to. Narrow: they were recorded in the
+  first days of the built-in.
 
 ## Converting a customisation from the legacy formats
 

@@ -500,8 +500,9 @@ commit (`git commit -s`; [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 Not everything in the repository is covered by the project licence:
 
-- `resources/customisation/nsw.customisation.json`, the customisation compiled
-  into a default build, was converted from style and survey-code libraries that
+- `resources/customisation/nsw.customisation.json`, the NSW customisation,
+  compiled into a default build as an alternate built-in beside Katana Standard
+  (the default, original to Katana), was converted from style and survey-code libraries that
   came under someone else's licence. The owner states that the information in
   it is public and decided on 2026-10-08 to commit it and ship it in releases.
   The owner does not claim to have written it, nothing in the repository

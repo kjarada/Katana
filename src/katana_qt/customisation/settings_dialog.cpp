@@ -2,12 +2,14 @@
 
 #include <cstddef>
 #include <initializer_list>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -149,6 +151,55 @@ QString rulesWords(std::size_t rules, std::size_t codes)
         .arg(rules)
         .arg(codes)
         .arg(codes == 1 ? QStringLiteral("code") : QStringLiteral("codes"));
+}
+
+// "1 code", "2 codes": the count and the noun for it.
+QString countWords(std::size_t count, const char* one, const char* many)
+{
+    return QStringLiteral("%1 %2").arg(count).arg(QLatin1String(count == 1 ? one : many));
+}
+
+// One built-in as the chooser lists it: its name, and that it is the default.
+QString builtInItemText(const katana::cad::BuiltInChoice& choice)
+{
+    return text(choice.name) + (choice.isDefault ? QStringLiteral(" (default)") : QString());
+}
+
+// What a person is told of a built-in before choosing it: its own description,
+// what it holds and where it was compiled in from - or why it cannot be used.
+QString builtInTip(const katana::cad::BuiltInChoice& choice)
+{
+    if (!choice.problem.empty()) {
+        return text(choice.problem);
+    }
+    QStringList parts;
+    if (!choice.description.empty()) {
+        parts << text(choice.description);
+    }
+    parts << QStringLiteral("%1, %2 over %3")
+                 .arg(countWords(choice.definitions, "definition", "definitions"),
+                      countWords(choice.rules, "survey code rule", "survey code rules"),
+                      countWords(choice.codes, "code", "codes"));
+    if (!choice.source.empty()) {
+        parts << QStringLiteral("Compiled in from %1").arg(text(choice.source));
+    }
+    return parts.join(QLatin1Char('\n'));
+}
+
+// The "Built-in" row under "What is active": the built-in the session IS, or
+// the one a kept or edited copy of it was made from.
+QString activeBuiltInWords(const std::vector<katana::cad::BuiltInChoice>& choices,
+                           const CustomisationState& state)
+{
+    for (const katana::cad::BuiltInChoice& choice : choices) {
+        if (choice.isActive) {
+            return text(choice.name) + (choice.isDefault ? QStringLiteral(" (default)") : QString());
+        }
+    }
+    if (state.basedOn) {
+        return QStringLiteral("Based on %1").arg(text(state.basedOn->name));
+    }
+    return QStringLiteral("None");
 }
 
 QString noKeptFile()
@@ -438,9 +489,11 @@ QWidget* SettingsDialog::buildCustomisationPage()
     definitions_ = valueLabel("settingsActiveDefinitions", active);
     symbols_ = valueLabel("settingsActiveSymbols", active);
     rules_ = valueLabel("settingsActiveRules", active);
+    activeBuiltIn_ = valueLabel("settingsActiveBuiltIn", active);
     kept_ = valueLabel("settingsActiveKept", active);
     form->addRow(QStringLiteral("Name:"), name_);
     form->addRow(QStringLiteral("Origin:"), origin_);
+    form->addRow(QStringLiteral("Built-in:"), activeBuiltIn_);
     form->addRow(QStringLiteral("Definitions:"), definitions_);
     form->addRow(QStringLiteral("Symbols among them:"), symbols_);
     form->addRow(QStringLiteral("Survey code rules:"), rules_);
@@ -508,14 +561,33 @@ QWidget* SettingsDialog::buildCustomisationPage()
 
     // The built-in and the kept file.
     auto* startBox = new QGroupBox(QStringLiteral("Built-in and kept"), page);
-    auto* startLayout = new QHBoxLayout(startBox);
+    auto* startLayout = new QVBoxLayout(startBox);
+    // The chooser of the built-ins: its row is hidden until refresh() finds
+    // two to choose between.
+    builtInRow_ = new QWidget(startBox);
+    builtInRow_->setObjectName(QStringLiteral("settingsBuiltInRow"));
+    auto* builtInLayout = new QHBoxLayout(builtInRow_);
+    builtInLayout->setContentsMargins(0, 0, 0, 0);
+    auto* builtInLabel = new QLabel(QStringLiteral("Built-in library:"), builtInRow_);
+    builtInChoice_ = new QComboBox(builtInRow_);
+    builtInChoice_->setObjectName(QStringLiteral("settingsBuiltIn"));
+    builtInChoice_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    builtInLabel->setBuddy(builtInChoice_);
+    builtInUse_ = button(QStringLiteral("Use"), "settingsBuiltInUse", builtInRow_);
+    builtInLayout->addWidget(builtInLabel);
+    builtInLayout->addWidget(builtInChoice_, 1);
+    builtInLayout->addWidget(builtInUse_);
+    builtInRow_->hide();
+    startLayout->addWidget(builtInRow_);
+    auto* startButtons = new QHBoxLayout;
     reset_ = button(QStringLiteral("Reset to Built-in"), "settingsReset", startBox);
     keep_ = button(QStringLiteral("Keep"), "settingsKeep", startBox);
     revert_ = button(QStringLiteral("Revert to Kept"), "settingsRevert", startBox);
-    startLayout->addWidget(reset_);
-    startLayout->addStretch(1);
-    startLayout->addWidget(keep_);
-    startLayout->addWidget(revert_);
+    startButtons->addWidget(reset_);
+    startButtons->addStretch(1);
+    startButtons->addWidget(keep_);
+    startButtons->addWidget(revert_);
+    startLayout->addLayout(startButtons);
     grid->addWidget(startBox, 3, 0, 1, 2);
 
     // Automation.
@@ -574,6 +646,14 @@ QWidget* SettingsDialog::buildCustomisationPage()
     QObject::connect(reset_, &QPushButton::clicked, this, [this] {
         if (mayReplaceRules(QStringLiteral("Reset to Built-in"))) {
             run(QStringLiteral("CUSTOMISE RESET"), Then::KeepWhatWasKept);
+        }
+    });
+    QObject::connect(builtInUse_, &QPushButton::clicked, this, [this] { useBuiltIn(); });
+    // The button follows the chooser: it is for any built-in but the one the
+    // session already is.
+    QObject::connect(builtInChoice_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (!loading_) {
+            showBuiltInUse();
         }
     });
     QObject::connect(keep_, &QPushButton::clicked, this,
@@ -656,6 +736,7 @@ void SettingsDialog::refresh()
 
     linework_->setText(lineworkWords(state.linework));
     showAutomation();
+    showBuiltIns();
 
     for (QWidget* each :
          std::initializer_list<QWidget*>{importPath_, importBrowse_, importReplace_, import_,
@@ -682,6 +763,99 @@ void SettingsDialog::refresh()
     openSymbols_->setEnabled(static_cast<bool>(context_.openSymbolLibrary));
 }
 
+void SettingsDialog::showBuiltIns()
+{
+    if (!alive()) {
+        return;
+    }
+    const katana::cad::Document& document = *context_.document;
+    const std::vector<katana::cad::BuiltInEntry> entries =
+        context_.builtIns ? context_.builtIns() : katana::cad::builtIns();
+    const std::vector<katana::cad::BuiltInChoice> choices =
+        katana::cad::builtInChoices(document, entries);
+    activeBuiltIn_->setText(activeBuiltInWords(choices, document.customisationState()));
+
+    // The chooser is rebuilt from the built-ins and keeps the person's choice
+    // by name; with none made yet it stands on the built-in the session is,
+    // else on the default, else on the first.
+    const QString before = builtInChoice_->currentData().toString();
+    const bool wasLoading = loading_;
+    loading_ = true;
+    builtInChoice_->clear();
+    int standOn = -1;
+    int active = -1;
+    int fallback = -1;
+    for (std::size_t at = 0; at < choices.size(); ++at) {
+        const katana::cad::BuiltInChoice& choice = choices[at];
+        builtInChoice_->addItem(builtInItemText(choice), text(choice.name));
+        builtInChoice_->setItemData(static_cast<int>(at), builtInTip(choice), Qt::ToolTipRole);
+        if (!before.isEmpty() && text(choice.name) == before) {
+            standOn = static_cast<int>(at);
+        }
+        if (choice.isActive) {
+            active = static_cast<int>(at);
+        }
+        if (choice.isDefault) {
+            fallback = static_cast<int>(at);
+        }
+    }
+    if (standOn < 0) {
+        standOn = active >= 0 ? active : fallback;
+    }
+    builtInChoice_->setCurrentIndex(standOn >= 0 ? standOn : (choices.empty() ? -1 : 0));
+    loading_ = wasLoading;
+
+    builtInChoices_ = choices;
+
+    // Worth a row only when there is something to choose between.
+    builtInRow_->setVisible(choices.size() >= 2);
+    showBuiltInUse();
+}
+
+void SettingsDialog::showBuiltInUse()
+{
+    const int chosen = builtInChoice_->currentIndex();
+    if (chosen < 0 || static_cast<std::size_t>(chosen) >= builtInChoices_.size()) {
+        builtInUse_->setEnabled(false);
+        builtInUse_->setToolTip(QStringLiteral("This program has no built-in customisation to use."));
+        return;
+    }
+    const katana::cad::BuiltInChoice& choice = builtInChoices_[static_cast<std::size_t>(chosen)];
+    builtInUse_->setEnabled(!choice.isActive && choice.problem.empty() &&
+                            static_cast<bool>(context_.run));
+    if (choice.isActive) {
+        builtInUse_->setToolTip(QStringLiteral("The session is this built-in customisation already."));
+    } else if (!choice.problem.empty()) {
+        builtInUse_->setToolTip(text(choice.problem));
+    } else {
+        QString tip = QStringLiteral("Put the chosen built-in customisation in the place of the "
+                                     "session's (CUSTOMISE BUILTIN)");
+        if (!context_.keptFile.isEmpty()) {
+            tip += QStringLiteral(".\nA session that is kept stays kept: the choice is what the "
+                                  "next start gives.");
+        }
+        builtInUse_->setToolTip(tip);
+    }
+}
+
+void SettingsDialog::useBuiltIn()
+{
+    if (!mayReplaceRules(QStringLiteral("Use Built-in"))) {
+        return;
+    }
+    const QString name = builtInChoice_->currentData().toString();
+    if (name.isEmpty()) {
+        refuse(QStringLiteral("Use Built-in: no built-in customisation is chosen."));
+        return;
+    }
+    const auto word = commandWord(name, QStringLiteral("Use Built-in"));
+    if (!word) {
+        refuse(text(word.error().message));
+        return;
+    }
+    run(QStringLiteral("CUSTOMISE BUILTIN ") + *word, Then::KeepWhatWasKept);
+}
+
 void SettingsDialog::showAutomation()
 {
     if (!alive()) {
@@ -702,9 +876,10 @@ void SettingsDialog::showClosed()
     // nothing that would act can be pressed.
     for (QWidget* each :
          std::initializer_list<QWidget*>{importPath_, importBrowse_, importReplace_, import_,
-                                         exportPath_, exportBrowse_, export_, reset_, keep_,
-                                         revert_, autoCodes_, autoLinework_, editLinework_,
-                                         openCodes_, openSymbols_}) {
+                                         exportPath_, exportBrowse_, export_, builtInChoice_,
+                                         builtInUse_, reset_, keep_, revert_, autoCodes_,
+                                         autoLinework_, editLinework_, openCodes_,
+                                         openSymbols_}) {
         each->setEnabled(false);
     }
     say(context_.document == nullptr
