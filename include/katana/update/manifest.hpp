@@ -100,8 +100,32 @@ struct Manifest {
 //     payload.size and csize <= payload.size - offset); a notify-only manifest has
 //     no files, so there is nothing to place;
 //   - size <= kMaxInstallBytes for each file (the sum is checkManifestPaths's).
-// ParseFailure for malformed JSON or a missing or mistyped member; InvalidArgument
-// for a value that breaks a rule. The context names the member.
+// Every member of the sample above is required with its exact type (a whole number is
+// not "5.0" or "1e3"), except "exec" (absent is false: the producer writes it only when
+// true), "notify_only" (absent is false) and "payload" (absent exactly when notify-only).
+// Members it does not know are ignored; a member written twice, nesting deeper than 16
+// levels, a byte-order mark, a NUL byte anywhere in the text (a JSON reader takes it for the
+// end of its input) and an input over kMaxManifestBytes (feed.hpp) are refused.
+// Beyond what the header says: sequence >= 1; product, channel, target and tag are 1 to 64
+// letters, digits or . _ - (that they are THIS install's is verifyManifest's); notes_url is
+// https://; published and expires are real UTC times (see isExpired: expiry is never an
+// error); payload.codec is "deflate" and payload.size is 1 to 2^63-1; a manifest that
+// installs lists at least one file and a notify-only one none; `applier` is any whole
+// number from 1 to 2^32-1 (one above kApplierProtocol is not refused: the apply code
+// decides to use the staged helper).
+// ParseFailure for malformed JSON or a missing or mistyped member; InvalidArgument for a
+// value that breaks a rule. The context names the member (files[3].path).
 [[nodiscard]] core::Result<Manifest> parseManifest(std::string_view json);
+
+// "YYYY-MM-DDTHH:MM:SSZ" (UTC, as the producer writes `published` and `expires`) as seconds
+// since 1970-01-01T00:00:00Z. nullopt unless it is exactly that form and a real date from
+// 1970 (so 2027-02-29 and a month 13 are not times, and neither is a leap second, :60).
+[[nodiscard]] std::optional<std::int64_t> parseUtcTime(std::string_view text);
+
+// `expires` is advisory (design section 1): when it has passed, the dialog says the
+// information is old and the update is still offered. So this is a question for the
+// caller to word, never a refusal: false while `nowEpoch` is not after `expires`, and
+// false when `expires` cannot be read (parseManifest has already refused such a time).
+[[nodiscard]] bool isExpired(const Manifest& manifest, std::int64_t nowEpoch);
 
 } // namespace katana::update

@@ -31,9 +31,11 @@
 //     exactly these, and a name outside the list, installed.json.bak, is a file like
 //     any other.)
 // And a whole manifest is refused when two paths are equal after ASCII case-folding
-// (a file system that folds case would write one over the other), when it has
-// more than kMaxFiles entries, or when the sizes add up to more than
-// kMaxInstallBytes.
+// (a file system that folds case would write one over the other), when a path is also
+// the folder of another (bin/a and bin/a/b, also after folding: no volume holds both, so
+// an install that applied the set would fail half way), when it has more than kMaxFiles
+// entries, or when the sizes add up to more than kMaxInstallBytes. Only the letters A to Z
+// fold: '[' and '{' differ by the same bit and are two names.
 
 #include <array>
 #include <cstddef>
@@ -68,8 +70,11 @@ inline constexpr std::array<std::string_view, 3> kRecordPaths{
     "share/katana/installed.manifest.json.sig"};
 
 // What a path read back from a journal must pass (journal.hpp: the journal is not
-// authenticated): checkManifestPath, or exactly one of kRecordPaths (compared ignoring
-// ASCII case, like every reserved name).
+// authenticated): checkManifestPath, or exactly one of kRecordPaths, spelled as the helper
+// writes it. NOT compared ignoring case, unlike the reserved names: on a case-sensitive
+// file system "Share/katana/installed.json" is another place, outside bin, share, etc and
+// lib, and journal.hpp promises that a forged line cannot reach one. A record spelled in
+// another case is refused here, and skipped like any forged line.
 [[nodiscard]] core::Status checkJournalPath(std::string_view path);
 
 // True for the updater's own record names above, wherever they sit and in any ASCII
