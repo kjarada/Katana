@@ -5,7 +5,6 @@
 #include <set>
 #include <system_error>
 
-#include "katana/cad/customisation_host.hpp"
 #include "katana/core/text.hpp"
 
 namespace katana::cad {
@@ -124,9 +123,7 @@ std::vector<RenamedSource> builtinRenames(std::string_view builtIn)
 
 std::vector<RenamedSource> builtinRenames()
 {
-    const BuiltInCustomisation& compiledIn = compiledInCustomisation();
-    return builtinRenames(compiledIn.customisation ? compiledIn.customisation->name
-                                                   : std::string());
+    return builtinRenames(kEarlierFileNamesBelongTo);
 }
 
 namespace {

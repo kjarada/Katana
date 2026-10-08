@@ -52,12 +52,18 @@ Customisation: <name>, N definitions (M symbols) and K survey code rules, built 
 Customisation: <name>, N definitions (M symbols) and K survey code rules, kept.
 ```
 
-with the name the customisation gives itself, how many of its definitions it
+with the name the customisation gives itself (Katana Standard for the default
+built-in; NSW when the seam names it, or for a kept copy of it), how many of its definitions it
 lists as symbols, and which of the two it is - each noun by its count, so a
 customisation of one rule has "1 survey code rule" - then, for a kept one
 made from another built-in than this program has, a line saying so and naming
-`CUSTOMISE RESET`
+`CUSTOMISE RESET` and `CUSTOMISE BUILTIN`
 (`qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless`).
+A project opened that was drawn with a built-in the program has but is not the session
+(saved while NSW was, opened under Katana Standard) gets the log's warning of the
+customisations not loaded with one more sentence, `CUSTOMISE BUILTIN NSW makes the
+built-in "NSW" the session`
+(`qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless`).
 A problem - a built-in that does not parse, a kept file that does
 not read, the built-in then standing in for it - is an error line,
 `Customisation: <the problem>`, once. A build with no built-in and no kept
@@ -3530,7 +3536,10 @@ hands it a `SettingsContext`:
   and the kept file's path as text (`CustomisationServices::hasBuiltIn`,
   `keptFile`; "How the window starts" says where the file is). They are read
   once, when the dialog is first opened - a host does not change while a
-  session runs.
+  session runs;
+- the built-ins the chooser offers (`SettingsContext::builtIns`). The window
+  leaves it empty, and the dialog then lists those compiled into the program
+  (`cad::builtIns()`); a widget test gives its own.
 
 Every member has an empty default, and a button whose callback is empty is
 disabled, so a widget test builds the dialog on its own
@@ -3545,11 +3554,11 @@ today, Customisation (`settingsCustomisation`); a second is one more
 
 | Part | Object names | What it shows or runs |
 |---|---|---|
-| What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or - when the session has no kept file - "Nothing is kept: the next start gives the built-in customisation" (or "no customisation", where the program has none) and the variable that names a file to keep one in; what the START of the session found, in the error colour, hidden when it found nothing |
+| What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveBuiltIn`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); the built-in the session is (`Katana Standard (default)`, `NSW`) or, for a kept or edited copy of one, `Based on NSW`, else `None`; how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or - when the session has no kept file - "Nothing is kept: the next start gives the built-in customisation" (or "no customisation", where the program has none) and the variable that names a file to keep one in; what the START of the session found, in the error colour, hidden when it found nothing |
 | The notice | `settingsShowNotice`, `settingsNotice` | the author's notice, read-only and hidden until asked for: the customisation's own, then each source's under `From <name>:`. The toggle is hidden while there is none |
 | Import | `settingsImportPath`, `settingsImportBrowse`, `settingsImportReplace`, `settingsImport` | `CUSTOMISE "<file>"`, or with Replace instead of merging ticked `CUSTOMISE REPLACE "<file>"` |
 | Export | `settingsExportPath`, `settingsExportBrowse`, `settingsExport` | `CUSTOMISE EXPORT "<file>"` |
-| Built-in and kept | `settingsReset`, `settingsKeep`, `settingsRevert` | `CUSTOMISE RESET`, `CUSTOMISE KEEP`, `CUSTOMISE REVERT` |
+| Built-in and kept | `settingsBuiltInRow`, `settingsBuiltIn`, `settingsBuiltInUse`, `settingsReset`, `settingsKeep`, `settingsRevert` | the built-in library: a combo of the built-ins the program has (each item the customisation's name, the default marked ` (default)`, its tip the description, what it holds and the file it was compiled in from) and Use, which runs `CUSTOMISE BUILTIN "<name>"`, followed by `KEEP` like a reset, which puts the kept file away as the `.bak` (the tip says so first; "Use does the same, twice over", below); the row is hidden when there are fewer than two and Use is disabled while the chosen one is the one the session is. Then `CUSTOMISE RESET`, `CUSTOMISE KEEP`, `CUSTOMISE REVERT` |
 | When survey data comes in | `settingsAutoCodes`, `settingsAutoLinework` | `CUSTOMISE SET auto.codes=on` or `off`, `CUSTOMISE SET auto.linework=on` or `off`, when the box is toggled |
 | Linework control codes | `settingsLinework`, `settingsEditLinework` | the seven spellings, read-only, each under the word its editor labels it with (`Start: ST, End: END, Close: CL, Begin curve: BC, ...`; `(off)` for a control switched off), and a button that opens that editor, the Survey Code Manager at its Linework tab |
 | Editors | `settingsOpenCodes`, `settingsOpenSymbols` | open the Survey Code Manager and the Symbol Library |
@@ -3588,7 +3597,7 @@ of the start: a load or a reset since does not take them off the page
 `AKeptFileThatDidNotReadWhenTheSessionStartedIsSaidOnThePage`).
 
 **What is edited in Settings is kept.** A session that was kept before
-Import, Reset to Built-in or a toggled box, and is not kept after it, is kept
+Import, Reset to Built-in, Use or a toggled box, and is not kept after it, is kept
 again: the dialog runs `CUSTOMISE KEEP` behind its own line, and the status
 shows both lines and both answers. Only when the host has a kept file, only
 when the first line was carried out, and never behind Export, Keep or Revert
@@ -3639,10 +3648,24 @@ reset that is NOT kept - typed, or made here on a session that was not the
 kept one - leaves the kept file where it is, and Revert to Kept then does go
 back (`ARevertOfASessionThatWasResetAndNotKeptReadsTheKeptFileAgain`).
 
+**Use does the same, twice over.** Use is followed by `CUSTOMISE KEEP` on a kept
+session like Reset, and the kept file does not stay: choosing an alternate
+writes it over the kept file (what was there goes to the `.bak`), and choosing
+the built-in of the run sets it aside as the `.bak` - in both, replacing the
+`.bak` that was there. So a kept customisation of the person's own is in neither
+file after a second Use (an alternate, then the default), the case a combo makes
+natural. Use's tip says it before the press, in Reset's words: four forms, by
+the host (a kept file or none), the session (kept or not) and the choice (the
+run's own or another)
+(`UseSaysBeforeItIsPressedWhatKeepingTheChoiceDoesToTheKeptFile`). The way back
+is the same file, Imported with Replace. *Not done: a second backup generation*:
+the single `.bak` is every `KEEP`'s contract, as the paragraph above says of a
+reset.
+
 **Refused in the dialog**, with the reason in the status and the log, and
 nothing run:
 
-- **Import, Reset to Built-in and Revert to Kept while the Survey Code
+- **Import, Reset to Built-in, Use and Revert to Kept while the Survey Code
   Manager holds unapplied edits**, in the words the window refuses to close
   over them with (`CustomisationWorkbench::confirmClose`). The manager keeps
   its buffer when the drawing's rules change under it, and its Apply then

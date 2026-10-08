@@ -257,7 +257,8 @@ version 2 out. `libSFCGAL.dll` depends on CGAL and on MPFR.
 Katana's own resources (`resources/`: the icons, the plot frame, the online
 source catalogue) are part of Katana. The one exception is the built-in
 customisation, `resources/customisation/nsw.customisation.json`, which is
-compiled into every program and is **not** covered by the project licence. It
+compiled into every program as an alternate built-in beside Katana Standard (the
+default, which is original) and is **not** covered by the project licence. It
 is shipped on the owner's decision and statement that the information in it is
 public; a build without it is possible: see `LICENSING.md`, "What the licence
 does not cover".

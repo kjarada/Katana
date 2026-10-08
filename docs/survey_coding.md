@@ -21,8 +21,10 @@ the verbs). It holds three kinds of thing, which are useless apart:
 | **linestyle definitions** (`linestyles`) | what each linestyle is drawn with |
 | **symbol definitions** (`symbols`) | what each symbol is drawn with |
 
-Katana reads that one format. The program is built with a customisation of
-its own, the NSW customisation - 792 definitions (471 symbols and 321
+Katana reads that one format. The program is built with two customisations of
+its own: Katana Standard, the default, an original library made for Katana
+(`docs/katana_standard.md`), and the NSW customisation, an alternate that
+Settings and `CUSTOMISE BUILTIN` choose. The NSW customisation - 792 definitions (471 symbols and 321
 linestyles; the catalogue counts one more definition as a symbol, 472, by
 a signal other than the file's `symbols` list, below) and 1,624 survey code rules - which was made once from a real
 production customisation of a road authority, kept in two older formats. **That
@@ -30,9 +32,10 @@ is third-party material under its own licence and is NOT part of this
 repository; the file made from it IS**, committed on the owner's decision of
 2026-10-08 (`docs/customisation.md`, "Why the built-in is in the repository").
 The converted file is tracked, in `resources/customisation/`, and the build
-compiles it in (`docs/customisation.md`, "The built-in"; "The built-in, and the
-seam" below); a build whose path names no file has no built-in customisation,
-and every test that touches it skips, so the suite stays green without it.
+compiles it in as an alternate built-in (`docs/customisation.md`, "The
+built-in"; "The built-in, and the seam" below); a build whose path names no file
+does not offer it, and every test that touches it skips, so the suite stays
+green without it.
 
 The two older formats - the survey code file (`.mapfile`, XML) and the style
 library (`.4d`) - are NOT read by the program, in any front end. Only the
@@ -360,7 +363,11 @@ record as a name and what it brought (`CustomisationSource`):
   ... CUSTOMISE <file> loads a Katana customisation file." (it named Format >
   Load Customisation until that item went) and the CLI prints the same names
   on stderr - "warning: this project was drawn with customisations that are
-  not loaded: ...". What a project records of a Katana customisation is the
+  not loaded: ...". A recorded name that is one of the program's built-ins
+  (`NSW`, when the project was saved while that alternate was the session) is
+  no file to load, so both add the verb that makes it the session -
+  `CUSTOMISE BUILTIN NSW makes the built-in "NSW" the session`
+  (`cad::builtInAdviceFor`). What a project records of a Katana customisation is the
   name it declares and not a file's. Not an error: the drawing opens and
   draws, and what a missing customisation defined draws as a plain line until
   it is loaded.
@@ -384,8 +391,9 @@ repository:
   answered only in a record that also holds another earlier name of the same
   set, so recorded alone, or beside names that are not of its set, it is that
   person's file - reported missing and kept by the save. The table has grown
-  a second set, the four general names, and answers with the built-in's own
-  name ("What a project records, now that the Document keeps it" below).
+  a second set, the four general names, and answers with the name of the
+  customisation they belonged to, NSW ("What a project records, now that the
+  Document keeps it" below).
 - **An earlier definition name** is given its current one by
   `definitionNameNow` (`builtinDefinitionRenames`), asked only after an exact
   lookup missed, so a person's own definition that still has such a name is
@@ -414,20 +422,23 @@ it go: the session loaded it and replaced it, which is a judgement, but it is
 made at the install rather than at the load.
 
 Closed (2026-10-07): **every front end hands over a host, so the built-in's
-earlier names are answered.** The Document answers them with the name its
-host's built-in declares (`CustomisationState::builtIn`), and both the
+earlier names are answered.** The Document answered them with the name its
+host's built-in declared (`CustomisationState::builtIn`), and both the
 session of `katana_cli` and `katana_mcp` and the window
 (`MainWindow::loadDefaultCustomisation`) start through `startCustomisation`:
-a project recording the earlier names opens without a warning wherever the
-built-in is installed. The table the front ends used before answered each
+a project recording the earlier names opened without a warning wherever the
+built-in was installed. (2026-10-08, several built-ins: the names are NSW's and
+the Document answers them with `NSW`, `kEarlierFileNamesBelongTo`, whichever
+built-in its host has; see "The built-in's earlier names" below.) The table the front ends used before answered each
 first name with one of the four general file names, and while one of them
 still used it a project recording the four first names opened there with a
 warning of four missing files. The tables are held to the built-in by
 `BuiltInRenames.*` (`tests/cad/customisation/test_builtin_renames.cpp`): the
-eight file renames answer with the built-in's NAME - against a small fixture
-handed over as a host hands one over, always, and against the compiled-in
-customisation where there is one - and every one of the 29 definition renames
-is defined by the compiled-in customisation under the name it has now.
+eight file renames answer with the NAME the table is given, and with no name with
+`NSW`, in every build (`CustomisationState.TheEarlierFileNamesAreAnsweredByNswAndByNoOtherBuiltIn`
+holds that a session whose built-in is another does not answer them) - and every
+one of the 29 definition renames is defined by the NSW built-in, where the build
+compiled it in, under the name it has now.
 
 **Why the earlier names stay.** They are answers to PROJECT records, not to
 anything a customisation kept: a project saved by an earlier build carries the
@@ -555,19 +566,22 @@ out what was missing after an open. That logic is the Document's:
   definition still comes from it; one that brought rules is taken at its word.
   `CustomisationSource` is the very entry a file keeps in its `"sources"`, so
   the session's load record is written and read back without a second type.
-- **The built-in's earlier names are answered by the built-in's own name.**
-  `builtinRenames(builtIn)` gives eight entries in two sets: the four first
+- **The built-in's earlier names are answered by the name of the customisation
+  they belonged to, NSW.** `builtinRenames(builtIn)` gives eight entries in two sets: the four first
   file names, known by hash, and the four general names the files had next
   (`linestyles.4d`, `survey_codes.mapfile`, `survey_codes_names.mapfile`,
   `symbols.4d`). The general names are all PLAIN - anyone's own files might
   have them - and a plain name is answered only beside ANOTHER earlier name of
   its own set: the record of the built-in holds all four, and a person's own
   `symbols.4d` recorded alone is still that person's file, missing when it is.
-  The name is not written in the source: the Document passes the name its
-  host's built-in declares (`CustomisationState::builtIn`), and
-  `builtinRenames()` with none takes the compiled-in customisation's, which is
-  empty - and answers nothing - in a build that has none. That form is for a
-  caller with no Document to ask. `customisationNotLoaded`,
+  The names were NSW's four files, and a program has several built-ins now
+  with another for its default, so the answer is NSW's name
+  (`kEarlierFileNamesBelongTo`) and no other's: the Document asks for the table
+  with none (`builtinRenames()`), and does not pass its host's built-in. It did,
+  while NSW was the only built-in; under Katana Standard that answered a project
+  drawn with NSW's linestyles as having its customisation loaded. Loaded under
+  another name the four stay missing, and `CUSTOMISE BUILTIN NSW` clears them.
+  `customisationNotLoaded`,
   `noteCustomisationLoaded` and `customisationRecordToSave` take the table
   they are given and no longer have a form that takes none: it answered with
   whatever this program had compiled in, which is not the built-in of a run
@@ -628,16 +642,20 @@ it is:
 
 ### The built-in, and the seam
 
-One Katana customisation file is compiled into `katana_cad` with `#embed`
+Katana customisation files are compiled into `katana_cad` with `#embed`
 (`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
-is. The file is in the repository - third-party material, tracked on the
-owner's decision of 2026-10-08 - so a clean checkout and every CI build have
-it; a build whose path names no file has none, and that is a state the program
-runs in rather than a fault:
+is: one is the default and the others alternates (`docs/customisation.md`, "The
+built-in"). The files are in the repository - the default is original, and the
+alternate is third-party material, tracked on the owner's decision of
+2026-10-08 - so a clean checkout and every CI build have them; a build whose
+path names no file does not offer it, and that is a state the program runs in
+rather than a fault:
 
 - `KATANA_BUILTIN_CUSTOMISATION` (a CMake FILEPATH,
-  `resources/customisation/nsw.customisation.json` by default) names the file.
-  Present, it is embedded; absent, the program has no built-in. Whether it is
+  `resources/customisation/katana-standard.customisation.json` by default)
+  names the default file, and `KATANA_ALTERNATE_CUSTOMISATIONS` (a `;` list,
+  the NSW file by default) the others.
+  Present, it is embedded; absent, the program has no built-in of that name. Whether it is
   there is asked of the file (`if(EXISTS ... AND NOT IS_DIRECTORY ...)`), not
   of a glob: to a glob the path is a pattern, so a checkout under a directory
   with a `[` in its name had no built-in though the file was there, and a
@@ -656,8 +674,9 @@ runs in rather than a fault:
 
 **The seam.** The environment variable `KATANA_BUILTIN_CUSTOMISATION` says
 what "the built-in" is for one run, whatever was compiled in: unset, the
-compiled-in one; `none`, no built-in; anything else, that Katana customisation
-FILE is the built-in. It is read in one place, `builtInCustomisation()` -
+compiled-in default; `none`, no built-in; the NAME of a compiled-in built-in
+(`NSW`), that one; anything else, that Katana customisation FILE is the
+built-in. It is read in one place, `builtInCustomisation()` -
 which is what a front end asks for its host, not `compiledInCustomisation()`.
 It exists so that a test of a program is the same test on a machine whose
 build has the built-in and on one whose build has not. A file the seam names
@@ -666,7 +685,7 @@ one in its place, which would pass a test that named a fixture and was given
 something else.
 
 What the variable's value MEANS is a function of its own,
-`builtInCustomisationFor(seam, compiledIn)`, so that the rule is tested
+`builtInCustomisationFor(seam, compiledIn, named)`, so that the rule is tested
 against a stand-in for the compiled-in customisation: tested only through
 the environment, "whatever is compiled in" could not fail in a build that
 compiled nothing in, which is a build made without the file. The variable is read
@@ -693,15 +712,15 @@ PRIVATELY and the second on an install script that installs the converter.
 library when there is one and otherwise measures with the standard shapes.
 
 The file that is COMPILED IN is held to its census: `BuiltInCensus.*`
-(`tests/cad/customisation/test_builtin_census.cpp`) gives, when the built-in
-is the reference customisation, the figures that were counted by
+(`tests/cad/customisation/test_builtin_census.cpp`) gives, for the compiled-in
+built-in named "NSW" (the reference customisation, an alternate), the figures that were counted by
 `tools/customisation_census.py` over the compiled-in file and by
 `tools/reference_census.py` over the four legacy files it was converted from -
 792 definitions (471 symbols and 321 linestyles), 155 at vertices, 71 groups,
 35,692 strokes, 1,624 rules in 632 distinct keys, 7 colours and 5 names no
 library defines - and keeps a word that says only whose the customisation was
-from the front of the group paths. It skips where nothing, or another
-customisation, is compiled in. Counts only: no name of the data is in a
+from the front of the group paths. It skips where no built-in of that name is
+compiled in. Counts only: no name of the data is in a
 tracked test or document. That the file compiled in IS a fresh conversion of the reference
 files by the documented command is not tested: it takes the reference files,
 which are on one machine.
@@ -1879,9 +1898,9 @@ manager's Diagnostics and the symbol library show it ("The Format menu" in
 ## The customisation is part of the program
 
 Not a file to load, not a setting to point somewhere: the linestyles, symbols
-and survey codes are **compiled into the binary**, as ONE Katana customisation
-file, and every session starts with them on any machine whose build had the
-file, with nothing configured ("The built-in, and the seam" above, and
+and survey codes are **compiled into the binary**, as Katana customisation
+files, one of them the default, and every session starts with the default on any
+machine whose build had the file, with nothing configured ("The built-in, and the seam" above, and
 `docs/customisation.md`, "The built-in", which is where it comes from, the two
 variables and why it is in the repository). A build without the file has
 no built-in and says so, and Katana then draws every line as the plain
@@ -1917,8 +1936,10 @@ cmake -S . -B build/release -DKATANA_BUILTIN_CUSTOMISATION=D:/Survey/site.custom
 cmake --build build/release
 ```
 
-or, without rebuilding, hand a run the file as its built-in with the
-environment variable of the same name (the seam), or load it on top of the
+or, to add built-ins without replacing the default,
+`-DKATANA_ALTERNATE_CUSTOMISATIONS="<file>;<file>"`; or, without rebuilding, hand
+a run the file as its built-in with the environment variable of the same name
+(the seam), or load it on top of the
 built-in: `CUSTOMISE <file>...` merges, `CUSTOMISE REPLACE <file>...` takes the
 place of each kind it brings, and `CUSTOMISE KEEP` makes the result the one a
 user starts with. That is how a site tries a new customisation without

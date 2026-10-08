@@ -35,6 +35,7 @@
 
 namespace fs = std::filesystem;
 using katana::cad::BuiltInCustomisation;
+using katana::cad::BuiltInEntry;
 using katana::cad::CustomisationHost;
 using katana::cad::CustomisationOrigin;
 using katana::cad::CustomisationSource;
@@ -195,6 +196,25 @@ class ScopedSeam {
 
     std::optional<std::string> before_;
 };
+
+// A second built-in for a host to offer, an alternate to kSmall: 1 definition,
+// 1 rule over 1 key.
+const std::string kAlternate = R"({
+  "format": "katana-customisation", "version": 1, "name": "Alternate One",
+  "linestyles": [{"name": "ALT Line", "strokes": [["move", 0, 0], ["draw", 3, 0]]}],
+  "codes": [{"key": "AL*", "sets": "feature", "layer": "ALTERNATE", "linestyle": "ALT Line"}]
+})";
+
+// `text` as an entry of the list a host offers.
+BuiltInEntry entryOf(const std::string& text)
+{
+    BuiltInEntry entry;
+    entry.builtIn = builtInFrom(text);
+    if (entry.builtIn.customisation != nullptr) {
+        entry.name = entry.builtIn.customisation->name;
+    }
+    return entry;
+}
 
 // A built-in standing in for the compiled-in one. This build may have none,
 // and the rule of the seam is about whatever a build has: with a stand-in, the
@@ -380,8 +400,8 @@ TEST(CustomisationHost, TheSeamIsPutBackAsItWasWhenATestEnds)
 // ---- the rule of the seam, against a built-in that IS compiled in ----------------------------
 //
 // The tests above go through the environment and whatever this build compiled
-// in - the tracked NSW customisation in a default build, nothing in one whose
-// KATANA_BUILTIN_CUSTOMISATION names no file - so "whatever is compiled in"
+// in - the tracked Katana Standard customisation in a default build, nothing
+// in one whose KATANA_BUILTIN_CUSTOMISATION names no file - so "whatever is compiled in"
 // and "never the compiled-in one in its place" could not fail in the second.
 // These give the rule a compiled-in customisation to override in both.
 
@@ -504,28 +524,27 @@ TEST(CustomisationHost, TheFileIsNamedAsTextWhetherOrNotItsBytesAreUtf8)
     EXPECT_EQ(present.customisation->name, "Small Built In");
 }
 
-TEST(CustomisationHost, TheRenamesMadeWithNoNameAnswerWithTheCompiledInNameWhateverTheSeamSays)
+TEST(CustomisationHost, TheRenamesMadeWithNoNameAnswerWithNswWhateverTheSeamSays)
 {
-    // builtinRenames() with no name is for a caller with no Document to ask,
-    // and answers with the customisation COMPILED INTO this program - no name,
-    // and so nothing, in a build that has none. The seam changes the built-in
-    // of a run, which a Document is told (CustomisationState::builtIn); it
-    // does not change what was compiled in. With the seam naming the small
-    // fixture, the table must still not answer with "Small Built In".
+    // builtinRenames() with no name is the table the Document answers with, and
+    // answers with NSW, the customisation the early file names belonged to:
+    // not the built-in of the run, which the seam changes, and not the default
+    // compiled in. With the seam naming the small fixture, the table must
+    // still not answer with "Small Built In" - nor with the default's name
+    // when this build compiled in one.
     const Scratch scratch("renames-and-the-seam");
     const fs::path path = scratch.write("small.customisation.json", kSmall);
     const ScopedSeam seam(path.string().c_str());
     ASSERT_NE(katana::cad::builtInCustomisation().customisation, nullptr);
 
     const BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
-    const std::string name =
-        compiledIn.customisation ? compiledIn.customisation->name : std::string();
-    ASSERT_NE(name, "Small Built In") << "this build compiled in the test's own fixture name";
+    ASSERT_FALSE(compiledIn.customisation && compiledIn.customisation->name == "Small Built In")
+        << "this build compiled in the test's own fixture name";
     // Eight earlier names in two sets of four (customisation_record.hpp).
     const std::vector<katana::cad::RenamedSource> renames = katana::cad::builtinRenames();
     ASSERT_EQ(renames.size(), 8u);
     for (const katana::cad::RenamedSource& rename : renames) {
-        EXPECT_EQ(rename.now, name);
+        EXPECT_EQ(rename.now, "NSW");
     }
 }
 
@@ -986,4 +1005,104 @@ TEST(CustomisationStart, ASessionWrittenToTheKeptFileIsTheSessionTheNextStartGiv
     EXPECT_FALSE(second.customisationState().automation.codesOnSurveyImport);
     EXPECT_TRUE(second.customisationState().kept);
     EXPECT_EQ(second.customisationState().origin, CustomisationOrigin::Kept);
+}
+
+// ---- the built-ins a program offers, and a kept copy of one of them --------------------------
+//
+// A kept customisation says what it is based on, by name and digest. It is
+// "from another built-in" when that is neither the run's own nor any other the
+// program offers in the edition it has - so choosing an alternate and keeping
+// it (CUSTOMISE BUILTIN, then KEEP) survives a restart without a warning, and
+// survives a rebuild that makes another built-in the default.
+
+TEST(CustomisationStart, AKeptCopyOfAnAlternateTheProgramOffersIsNotFromAnotherBuiltIn)
+{
+    const Scratch scratch("kept-alternate");
+    CustomisationHost host;
+    host.builtIn = builtInFrom(kSmall);
+    host.builtIns = std::vector<BuiltInEntry>{entryOf(kSmall), entryOf(kAlternate)};
+    host.keptFile = scratch.write("customisation.json", keptText(fnv1a(kAlternate), "Alternate One"));
+
+    Document document;
+    const CustomisationStart report = katana::cad::startCustomisation(document, host);
+    EXPECT_EQ(report.installed, CustomisationOrigin::Kept);
+    EXPECT_EQ(report.name, "Mine");
+    EXPECT_FALSE(report.keptFromAnotherBuiltIn) << "made from a built-in this program has";
+    EXPECT_TRUE(report.problems.empty());
+    // The run's built-in is still the default, whatever the kept copy is from.
+    EXPECT_EQ(document.customisationState().builtIn, "Small Built In");
+    EXPECT_FALSE(document.customisationState().keptFromAnotherBuiltIn);
+}
+
+TEST(CustomisationStart, AKeptCopyOfAnAlternateIsFromAnotherBuiltInWhenTheProgramLacksItOrHasAnotherEdition)
+{
+    const Scratch scratch("kept-alternate-moved");
+    CustomisationHost host;
+    host.builtIn = builtInFrom(kSmall);
+    host.builtIns = std::vector<BuiltInEntry>{entryOf(kSmall), entryOf(kAlternate)};
+
+    // Another edition of the alternate: its bytes are not the ones it was kept from.
+    host.keptFile = scratch.write("edition.json", keptText("0123456789abcdef", "Alternate One"));
+    Document edition;
+    EXPECT_TRUE(katana::cad::startCustomisation(edition, host).keptFromAnotherBuiltIn);
+    EXPECT_TRUE(edition.customisationState().keptFromAnotherBuiltIn);
+
+    // A built-in this program does not offer (a rebuild dropped it).
+    host.keptFile = scratch.write("gone.json", keptText(fnv1a(kAlternate), "Dropped One"));
+    Document gone;
+    EXPECT_TRUE(katana::cad::startCustomisation(gone, host).keptFromAnotherBuiltIn);
+
+    // Offered by no list at all: a host with an empty one.
+    host.builtIns = std::vector<BuiltInEntry>{};
+    host.keptFile = scratch.write("none-offered.json", keptText(fnv1a(kAlternate), "Alternate One"));
+    Document none;
+    EXPECT_TRUE(katana::cad::startCustomisation(none, host).keptFromAnotherBuiltIn)
+        << "the run's own is Small; an alternate that is not offered is another built-in";
+}
+
+TEST(CustomisationStart, AKeptCopyOfTheEarlierDefaultSurvivesARebuildThatChangesTheDefault)
+{
+    // Kept when "Small Built In" was the default; the program now starts with
+    // "Alternate One" and still offers the other. Nothing has moved on: the
+    // copy is of a built-in this program has, in the edition it has.
+    const Scratch scratch("kept-earlier-default");
+    CustomisationHost host;
+    host.builtIn = builtInFrom(kAlternate);
+    host.builtIns = std::vector<BuiltInEntry>{entryOf(kAlternate), entryOf(kSmall)};
+    host.keptFile = scratch.write("customisation.json", keptText(fnv1a(kSmall)));
+
+    Document document;
+    const CustomisationStart report = katana::cad::startCustomisation(document, host);
+    EXPECT_EQ(report.installed, CustomisationOrigin::Kept);
+    EXPECT_FALSE(report.keptFromAnotherBuiltIn);
+    EXPECT_EQ(document.customisationState().builtIn, "Alternate One");
+
+    // And if the program no longer offers the earlier default, it says so.
+    host.builtIns = std::vector<BuiltInEntry>{entryOf(kAlternate)};
+    Document dropped;
+    EXPECT_TRUE(katana::cad::startCustomisation(dropped, host).keptFromAnotherBuiltIn);
+}
+
+TEST(CustomisationStart, WithNoBuiltInOfItsOwnAnAlternateOfferedIsStillNotStartedWith)
+{
+    // A run whose default is none (the seam said `none`, or the build has no
+    // default): the host may still offer built-ins by name, and a start with no
+    // kept file installs nothing and says nothing.
+    const Scratch scratch("alternates-only");
+    CustomisationHost host;
+    host.builtIns = std::vector<BuiltInEntry>{entryOf(kSmall), entryOf(kAlternate)};
+    host.keptFile = scratch.root / "customisation.json";
+
+    Document document;
+    const CustomisationStart report = katana::cad::startCustomisation(document, host);
+    EXPECT_EQ(report.installed, CustomisationOrigin::None);
+    EXPECT_TRUE(report.problems.empty());
+    EXPECT_TRUE(document.customisationState().builtIn.empty());
+
+    // A kept copy of one of them says nothing of another built-in, as with no list.
+    host.keptFile = scratch.write("kept.json", keptText(fnv1a(kSmall)));
+    Document kept;
+    const CustomisationStart again = katana::cad::startCustomisation(kept, host);
+    EXPECT_EQ(again.installed, CustomisationOrigin::Kept);
+    EXPECT_FALSE(again.keptFromAnotherBuiltIn);
 }

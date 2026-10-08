@@ -67,9 +67,8 @@ struct CustomisationState {
     // save keeps them in the record; a new drawing has none.
     std::vector<std::string> missingAtOpen{};
     // The name the host's built-in customisation declares, whether or not it
-    // is what is installed; empty when the host has none. It is what the
-    // names a project recorded for the built-in's earlier files are answered
-    // with (builtinRenames).
+    // is what is installed; empty when the host has none. It is the built-in
+    // of the run: what RESET gives and CUSTOMISE BUILTIN marks as the default.
     std::string builtIn{};
     // What went wrong when the session's customisation was STARTED
     // (startCustomisation, customisation_host.hpp), a sentence each: a

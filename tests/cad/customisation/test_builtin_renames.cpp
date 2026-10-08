@@ -4,11 +4,14 @@
 // nothing.
 //
 // Two built-ins are held to it. A small fixture handed over as a host hands
-// one over - always, whatever this build compiled in - and the customisation
-// compiled into the program, when there is one; that one is third-party
-// material, tracked as resources/customisation/nsw.customisation.json, so the
-// half of each test that needs it runs in a build made from a clean checkout
-// and SKIPS in a build whose KATANA_BUILTIN_CUSTOMISATION names no file.
+// one over - always, whatever this build compiled in - and the NSW customisation
+// compiled into the program, when there is one: its library for the definition
+// renames (the 29 definitions were its own), and its name, which the file
+// renames answer with in every build. The NSW one is
+// third-party material, tracked as resources/customisation/nsw.customisation.json,
+// so the half of a test that needs it runs in a build made from a clean
+// checkout and SKIPS in a build whose KATANA_ALTERNATE_CUSTOMISATIONS names no
+// such file.
 
 #include <gtest/gtest.h>
 
@@ -59,9 +62,11 @@ BuiltInCustomisation fixtureBuiltIn()
 } // namespace
 
 // Eight earlier names in two sets of four (customisation_record.hpp), and the
-// built-in answers for every one of them with its own NAME - one customisation
-// now stands where four files did.
-TEST(BuiltInRenames, TheFileRenamesAnswerWithTheNameOfTheBuiltIn)
+// table answers for every one of them with the NAME it is given - one
+// customisation now stands where four files did. Which name that is for a
+// session is not its host's built-in's: see the next test, and
+// CustomisationState.TheEarlierFileNamesAreAnsweredByNswAndByNoOtherBuiltIn.
+TEST(BuiltInRenames, TheFileRenamesAnswerWithTheNameTheTableIsGiven)
 {
     Document document;
     CustomisationHost host;
@@ -70,27 +75,39 @@ TEST(BuiltInRenames, TheFileRenamesAnswerWithTheNameOfTheBuiltIn)
     const katana::cad::CustomisationStart start = katana::cad::startCustomisation(document, host);
     ASSERT_TRUE(start.problems.empty());
 
-    // What the Document answers an earlier name with is the name its host's
-    // built-in declares (CustomisationState::builtIn).
+    // The host's built-in is the built-in of the run (CustomisationState::builtIn)...
     EXPECT_EQ(document.customisationState().builtIn, "TEST Built In");
-    const std::vector<katana::cad::RenamedSource> renames =
-        katana::cad::builtinRenames(document.customisationState().builtIn);
-    ASSERT_EQ(renames.size(), 8u);
-    for (const katana::cad::RenamedSource& rename : renames) {
-        EXPECT_EQ(rename.now, "TEST Built In");
+    // ...and a table made for any name answers with it.
+    for (const char* name : {"TEST Built In", "Another"}) {
+        const std::vector<katana::cad::RenamedSource> renames = katana::cad::builtinRenames(name);
+        ASSERT_EQ(renames.size(), 8u);
+        for (const katana::cad::RenamedSource& rename : renames) {
+            EXPECT_EQ(rename.now, name);
+        }
     }
 }
 
-TEST(BuiltInRenames, TheFileRenamesOfTheCompiledInCustomisationAnswerWithItsName)
+// The eight earlier names were the four files of the NSW customisation, so they
+// are answered by that one and by no other: the default of a program is Katana
+// Standard, which defines none of what they drew, and answering them with it
+// would say that a project drawn with NSW's linestyles has its customisation
+// loaded when it has not. The form with no name is the Document's table
+// (Document::customisationRenames), whatever this build compiled in.
+TEST(BuiltInRenames, TheFileRenamesWithNoNameAnswerWithNswWhateverIsCompiledIn)
 {
-    const BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
-    if (!compiledIn.customisation) {
-        GTEST_SKIP() << "this build has no customisation compiled in";
-    }
     const std::vector<katana::cad::RenamedSource> renames = katana::cad::builtinRenames();
     ASSERT_EQ(renames.size(), 8u);
     for (const katana::cad::RenamedSource& rename : renames) {
-        EXPECT_EQ(rename.now, compiledIn.customisation->name);
+        EXPECT_EQ(rename.now, "NSW");
+    }
+    EXPECT_EQ(katana::cad::kEarlierFileNamesBelongTo, "NSW");
+    // And not with the default's name, which is what they were answered with
+    // when the default was NSW.
+    const BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
+    if (compiledIn.customisation && compiledIn.customisation->name != "NSW") {
+        for (const katana::cad::RenamedSource& rename : renames) {
+            EXPECT_NE(rename.now, compiledIn.customisation->name);
+        }
     }
 }
 
@@ -113,16 +130,18 @@ TEST(BuiltInRenames, NoDefinitionOfAFixtureBuiltInIsKnownAsAnEarlierName)
     }
 }
 
-TEST(BuiltInRenames, EveryRenamedDefinitionIsInTheCompiledInLibraryUnderTheNameItHasNow)
+TEST(BuiltInRenames, EveryRenamedDefinitionIsInTheNswBuiltInLibraryUnderTheNameItHasNow)
 {
-    const BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
-    if (!compiledIn.customisation) {
-        GTEST_SKIP() << "this build has no customisation compiled in";
+    // The library of the NSW built-in, found by name among what was compiled
+    // in: the default is Katana Standard, which holds none of the 29.
+    const katana::cad::BuiltInEntry* nsw = katana::cad::findBuiltIn(katana::cad::builtIns(), "NSW");
+    if (nsw == nullptr || !nsw->builtIn.customisation) {
+        GTEST_SKIP() << "this build has no NSW customisation compiled in";
     }
     // 29 definitions carried the publisher's word, which the reference
     // customisation was given without (the census's `carried`).
     ASSERT_EQ(katana::cad::builtinDefinitionRenames().size(), 29u);
-    const katana::entity::StyleLibrary& library = compiledIn.customisation->library;
+    const katana::entity::StyleLibrary& library = nsw->builtIn.customisation->library;
     for (const katana::cad::RenamedDefinition& rename : katana::cad::builtinDefinitionRenames()) {
         EXPECT_NE(library.find(std::string(rename.now)), nullptr) << rename.now;
     }

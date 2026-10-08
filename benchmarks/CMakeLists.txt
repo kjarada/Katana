@@ -22,16 +22,18 @@ if(TARGET katana_interop)
     target_compile_definitions(katana_benchmarks PRIVATE KATANA_BENCH_WITH_INTEROP=1)
 endif()
 # bench_customisation.cpp measures a generated customisation and, where the
-# build has one to compile in, that very file: the one KATANA_BUILTIN_CUSTOMISATION
-# names, or resources/customisation/nsw.customisation.json when nothing names
-# one. The file is tracked, so a default build measures both, and one given no
-# file measures the generated one alone. Globbed with
-# CONFIGURE_DEPENDS so that a file converted after the configure is found by
-# the next build.
+# build has one to compile in, that very file: the DEFAULT built-in, the one
+# KATANA_BUILTIN_CUSTOMISATION names (Katana Standard unless the build was given
+# another), or resources/customisation/katana-standard.customisation.json when
+# nothing names one. The file is tracked, so a default build measures both, and
+# one given no file measures the generated one alone. The alternates
+# (KATANA_ALTERNATE_CUSTOMISATIONS, the NSW file by default) are not measured.
+# Globbed with CONFIGURE_DEPENDS so that a file converted after the configure is
+# found by the next build.
 set(_katana_builtin_customisation "${KATANA_BUILTIN_CUSTOMISATION}")
 if(NOT _katana_builtin_customisation)
     set(_katana_builtin_customisation
-        "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json")
+        "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")
 endif()
 file(GLOB _katana_builtin_customisation_found CONFIGURE_DEPENDS "${_katana_builtin_customisation}")
 if(_katana_builtin_customisation_found)

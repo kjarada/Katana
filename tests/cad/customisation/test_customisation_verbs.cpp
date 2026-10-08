@@ -19,6 +19,11 @@
 //                               (SITE Tree), GT* feature (layer GATES,
 //                               linestyle SITE Gate - which nothing defines).
 //
+// The built-ins section (CUSTOMISE BUILTIN) offers kBuiltIn and kSite as the two
+// built-ins of a host, as a host's own list stands in for the build: the
+// default is "Small Built In" (2 definitions, 2 codes, 2 rules) and the
+// alternate "Site" (2 definitions, 3 codes, 3 rules, by the lists above).
+//
 // Site MERGED into the built-in: TEST Peg replaced, SITE Tree added (3
 // definitions); FE* feature replaced, TR* symbol and GT* feature added (4
 // rules over 4 keys: FE*, PG*, TR*, GT*); SITE Gate asked for and undefined.
@@ -59,6 +64,7 @@
 
 namespace fs = std::filesystem;
 using katana::cad::BuiltInCustomisation;
+using katana::cad::BuiltInEntry;
 using katana::cad::CommandInterpreter;
 using katana::cad::CustomisationHost;
 using katana::cad::CustomisationOrigin;
@@ -231,6 +237,18 @@ BuiltInCustomisation builtInFrom(const std::string& text)
     return builtIn;
 }
 
+// `text` as an entry of the list a host offers: named as the customisation
+// names itself, with the file it is said to have been compiled in from.
+BuiltInEntry entryFrom(const std::string& text, const std::string& source = {})
+{
+    BuiltInEntry entry;
+    entry.builtIn = builtInFrom(text);
+    entry.name = entry.builtIn.customisation->name;
+    entry.description = entry.builtIn.customisation->description;
+    entry.source = source;
+    return entry;
+}
+
 bool contains(const std::string& text, std::string_view part)
 {
     return text.find(part) != std::string::npos;
@@ -317,6 +335,12 @@ struct Hosted : Bare {
     {
         if (builtIn) {
             host.builtIn = builtInFrom(kBuiltIn);
+        }
+        // The built-ins the host offers by name are the test's own, whatever
+        // this build compiled in: the one it starts with, and no other.
+        host.builtIns = std::vector<BuiltInEntry>{};
+        if (builtIn) {
+            host.builtIns->push_back(entryFrom(kBuiltIn));
         }
         if (kept) {
             host.keptFile = keptFile;
@@ -507,7 +531,10 @@ TEST(CustomisationVerbs, JsonIsTheSameAsOneObject)
     // `start`, the last member, is what the start found: the built-in read and
     // nothing was kept, so nothing went wrong and nothing was made from
     // another built-in. (The member was added on 2026-10-07; before it the
-    // object ended at `sources`.)
+    // object ended at `sources`.) `builtIns` lists what the host offers: the
+    // one built-in, the default and the one the session is, with the counts of
+    // kBuiltIn (2 definitions, 2 rules over 2 codes) and no file it was
+    // compiled in from.
     const std::string expected = R"({
   "automation": {
     "codesOnSurveyImport": true,
@@ -518,6 +545,18 @@ TEST(CustomisationVerbs, JsonIsTheSameAsOneObject)
     "name": "Small Built In"
   },
   "builtIn": "Small Built In",
+  "builtIns": [
+    {
+      "active": true,
+      "codes": 2,
+      "default": true,
+      "definitions": 2,
+      "description": "Two definitions and two rules, for tests",
+      "name": "Small Built In",
+      "rules": 2,
+      "source": ""
+    }
+  ],
   "colours": {
     "sui gas": "#FF7F00"
   },
@@ -1599,6 +1638,365 @@ TEST(CustomisationVerbs, ResetGivesTheBuiltInAndKeepingItRetiresTheKeptFile)
               "reset name=\"Small Built In\" definitions=2 codes=2 rules=2 kept=yes");
 }
 
+// ---- the built-ins -----------------------------------------------------------------------
+//
+// CUSTOMISE BUILTIN [<name>]: a host that offers two built-ins, kBuiltIn (the
+// one it starts with, so the default) and kSite. The counts are those at the
+// top of this file.
+
+struct TwoBuiltIns : Hosted {
+    explicit TwoBuiltIns(const std::string& name) : Hosted(name)
+    {
+        host.builtIns->push_back(entryFrom(kSite, "site.customisation.json"));
+    }
+};
+
+TEST(CustomisationVerbs, BuiltInAloneListsTheBuiltInsWithTheDefaultAndTheActiveOneMarked)
+{
+    TwoBuiltIns session("builtin-list");
+    session.host.builtIns->front().source = "small.customisation.json";
+    session.start();
+    const std::string reply = session.ok("CUSTOMISE BUILTIN");
+
+    const ReplyRecord header = record(reply, "builtins");
+    EXPECT_EQ(field(header, "count"), "2");
+    EXPECT_EQ(field(header, "default"), "Small Built In");
+    EXPECT_EQ(field(header, "active"), "Small Built In");
+    EXPECT_EQ(field(header, "based_on"), "(absent)") << "the session IS a built-in";
+    ASSERT_EQ(recordsOf(reply, "builtin"), 2u);
+    const ReplyRecord first = record(reply, "builtin", 0);
+    EXPECT_EQ(field(first, "name"), "Small Built In");
+    EXPECT_EQ(field(first, "default"), "yes");
+    EXPECT_EQ(field(first, "active"), "yes");
+    EXPECT_EQ(field(first, "definitions"), "2");
+    EXPECT_EQ(field(first, "codes"), "2");
+    EXPECT_EQ(field(first, "rules"), "2");
+    EXPECT_EQ(field(first, "source"), "small.customisation.json");
+    EXPECT_EQ(field(first, "description"), "Two definitions and two rules, for tests");
+    const ReplyRecord second = record(reply, "builtin", 1);
+    EXPECT_EQ(field(second, "name"), "Site");
+    EXPECT_EQ(field(second, "default"), "no");
+    EXPECT_EQ(field(second, "active"), "no");
+    EXPECT_EQ(field(second, "definitions"), "2");
+    EXPECT_EQ(field(second, "codes"), "3");
+    EXPECT_EQ(field(second, "rules"), "3");
+    EXPECT_EQ(field(second, "source"), "site.customisation.json");
+    EXPECT_EQ(field(second, "description"), "");
+    EXPECT_FALSE(reply.ends_with('\n'));
+    // A list changes nothing.
+    EXPECT_EQ(session.state().name, "Small Built In");
+    EXPECT_TRUE(session.state().kept);
+}
+
+TEST(CustomisationVerbs, BuiltInWithANameMakesThatBuiltInTheSessionAndResetStillGivesTheDefault)
+{
+    TwoBuiltIns session("builtin-use");
+    session.start();
+    const ReplyRecord used = record(session.ok("CUSTOMISE BUILTIN Site"), "used");
+    EXPECT_EQ(field(used, "name"), "Site");
+    EXPECT_EQ(field(used, "default"), "no");
+    EXPECT_EQ(field(used, "definitions"), "2");
+    EXPECT_EQ(field(used, "codes"), "3");
+    EXPECT_EQ(field(used, "rules"), "3");
+    // Not what the next start gives: that is the default, until a KEEP.
+    EXPECT_EQ(field(used, "kept"), "no");
+
+    // The session is the built-in, as RESET leaves its own: the origin, and
+    // based on ITSELF - its name, the digest of its bytes.
+    EXPECT_EQ(session.state().origin, CustomisationOrigin::BuiltIn);
+    EXPECT_EQ(session.state().name, "Site");
+    EXPECT_FALSE(session.state().kept);
+    ASSERT_TRUE(session.state().basedOn.has_value());
+    EXPECT_EQ(session.state().basedOn->name, "Site");
+    EXPECT_EQ(session.state().basedOn->digest, fnv1a(kSite));
+    EXPECT_EQ(session.document.styleLibrary().size(), 2u);
+    EXPECT_EQ(session.document.surveyMap().size(), 3u);
+    // What the project's earlier names are answered with is the RUN's
+    // built-in, not the one chosen.
+    EXPECT_EQ(session.state().builtIn, "Small Built In");
+
+    // The list follows: Site is the one the session is, Small still the default.
+    const ReplyRecord header = record(session.ok("CUSTOMISE BUILTIN"), "builtins");
+    EXPECT_EQ(field(header, "default"), "Small Built In");
+    EXPECT_EQ(field(header, "active"), "Site");
+
+    // RESET is the built-in OF THE RUN, the default here. No kept file is
+    // there, so it is what the next start gives.
+    EXPECT_EQ(session.ok("CUSTOMISE RESET"),
+              "reset name=\"Small Built In\" definitions=2 codes=2 rules=2 kept=yes");
+    EXPECT_EQ(session.state().name, "Small Built In");
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE BUILTIN"), "builtins"), "active"),
+              "Small Built In");
+
+    // The default chosen by name is the same as a RESET, and says it is the default.
+    session.ok("CUSTOMISE BUILTIN Site");
+    EXPECT_EQ(session.ok("CUSTOMISE BUILTIN Small Built In"),
+              "used name=\"Small Built In\" default=yes definitions=2 codes=2 rules=2 kept=yes");
+}
+
+TEST(CustomisationVerbs, BuiltInTakesTheNameInAnyLetterCaseQuotedOrNotAndKeptStaysNoWithAKeptFile)
+{
+    TwoBuiltIns session("builtin-spelling");
+    session.start();
+    EXPECT_EQ(field(record(session.ok("customise builtin SITE"), "used"), "name"), "Site");
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE BUILTIN \"small built in\""), "used"), "name"),
+              "Small Built In");
+    // Three words by the time a verb sees an unquoted name: joined by a blank.
+    session.ok("CUSTOMISE BUILTIN Site");
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE BUILTIN small built in"), "used"), "name"),
+              "Small Built In");
+
+    // With a kept file there, even the run's own is not what the next start
+    // gives: as RESET.
+    session.ok("CUSTOMISE SET auto.codes=off");
+    session.ok("CUSTOMISE KEEP");
+    EXPECT_EQ(session.ok("CUSTOMISE BUILTIN Small Built In"),
+              "used name=\"Small Built In\" default=yes definitions=2 codes=2 rules=2 kept=no");
+}
+
+TEST(CustomisationVerbs, BuiltInOfANameTheProgramLacksIsRefusedListingTheNamesAndChangesNothing)
+{
+    TwoBuiltIns session("builtin-unknown");
+    session.start();
+    session.ok("CUSTOMISE SET auto.codes=off");
+    const std::uint64_t generation = session.document.customisationGeneration();
+    const katana::core::Error error = session.refused("CUSTOMISE BUILTIN Nowhere");
+    EXPECT_EQ(error.code, ErrorCode::NotFound);
+    EXPECT_TRUE(contains(error.message, "no built-in customisation of that name")) << error.message;
+    EXPECT_TRUE(contains(error.message, "\"Small Built In\", \"Site\"")) << error.message;
+    EXPECT_EQ(error.context, "Nowhere");
+    EXPECT_EQ(session.document.customisationGeneration(), generation);
+    EXPECT_FALSE(session.state().automation.codesOnSurveyImport) << "the session is as it was";
+
+    // A host that offers none says so.
+    Hosted none("builtin-none", false);
+    none.start();
+    EXPECT_TRUE(contains(none.refused("CUSTOMISE BUILTIN Site").message, "it has none"));
+    EXPECT_EQ(field(record(none.ok("CUSTOMISE BUILTIN"), "builtins"), "count"), "0");
+}
+
+TEST(CustomisationVerbs, BuiltInIsRefusedWithNoHostAndForABuiltInThatDidNotRead)
+{
+    Bare bare;
+    const katana::core::Error needs = bare.refused("CUSTOMISE BUILTIN");
+    EXPECT_EQ(needs.code, ErrorCode::InvalidState);
+    EXPECT_TRUE(contains(needs.message, "CUSTOMISE BUILTIN needs the program's built-in"))
+        << needs.message;
+    EXPECT_EQ(bare.refused("CUSTOMISE BUILTIN Site").code, ErrorCode::InvalidState);
+
+    // A file compiled in that is no customisation is listed under its file
+    // name with the reason, and cannot be used.
+    TwoBuiltIns session("builtin-damaged");
+    BuiltInEntry damaged;
+    damaged.name = "damaged.customisation.json";
+    damaged.source = "damaged.customisation.json";
+    damaged.builtIn.problem = "the customisation compiled into this program is not read: damaged";
+    session.host.builtIns->push_back(damaged);
+    session.start();
+    const std::string reply = session.ok("CUSTOMISE BUILTIN");
+    EXPECT_EQ(field(record(reply, "builtins"), "count"), "3");
+    const ReplyRecord third = record(reply, "builtin", 2);
+    EXPECT_EQ(field(third, "name"), "damaged.customisation.json");
+    EXPECT_EQ(field(third, "definitions"), "0");
+    EXPECT_EQ(field(third, "problem"), damaged.builtIn.problem);
+    const katana::core::Error refused = session.refused("CUSTOMISE BUILTIN damaged.customisation.json");
+    EXPECT_EQ(refused.code, ErrorCode::InvalidState);
+    EXPECT_TRUE(contains(refused.message, "cannot use the built-in customisation")) << refused.message;
+    EXPECT_EQ(session.state().name, "Small Built In");
+}
+
+// The rule for a KEEP: it retires the kept file ONLY when the session is the
+// built-in of the run. Any other built-in is kept like any session, and the
+// file says which it is based on, so that the next start comes up as it.
+TEST(CustomisationVerbs, AnAlternateBuiltInChosenAndKeptIsWhatTheNextStartGivesAndNothingIsWarnedOf)
+{
+    TwoBuiltIns session("builtin-keep");
+    session.start();
+    session.ok("CUSTOMISE BUILTIN Site");
+    ASSERT_FALSE(session.state().kept);
+
+    const ReplyRecord kept = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(kept, "written"), "yes") << "not the built-in OF THE RUN: written like any";
+    EXPECT_EQ(field(kept, "name"), "Site");
+    EXPECT_EQ(field(kept, "definitions"), "2");
+    EXPECT_EQ(field(kept, "codes"), "3");
+    EXPECT_EQ(field(kept, "rules"), "3");
+    EXPECT_EQ(field(kept, "backup"), "none");
+    EXPECT_TRUE(session.state().kept);
+    const Customisation written = parsed(contentsOf(session.keptFile));
+    EXPECT_EQ(written.name, "Site");
+    ASSERT_TRUE(written.basedOn.has_value());
+    EXPECT_EQ(written.basedOn->name, "Site");
+    EXPECT_EQ(written.basedOn->digest, fnv1a(kSite));
+
+    // The next start: the kept copy, from a built-in this program has in the
+    // edition it has - so it is not "another built-in".
+    const auto start = katana::cad::startCustomisation(session.document, session.host);
+    EXPECT_EQ(start.installed, CustomisationOrigin::Kept);
+    EXPECT_EQ(start.name, "Site");
+    EXPECT_FALSE(start.keptFromAnotherBuiltIn);
+    EXPECT_TRUE(start.problems.empty());
+    EXPECT_EQ(session.state().builtIn, "Small Built In") << "the run's built-in is still the default";
+    EXPECT_FALSE(session.state().keptFromAnotherBuiltIn);
+
+    // The list says what the session is NOT, and what it was made from.
+    const ReplyRecord header = record(session.ok("CUSTOMISE BUILTIN"), "builtins");
+    EXPECT_EQ(field(header, "default"), "Small Built In");
+    EXPECT_EQ(field(header, "active"), "");
+    EXPECT_EQ(field(header, "based_on"), "Site");
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE BUILTIN"), "builtin", 1), "active"), "no");
+}
+
+TEST(CustomisationVerbs, AResetAndAKeepAfterAKeptAlternateRetireTheFileAndTheDefaultComesBack)
+{
+    TwoBuiltIns session("builtin-keep-reset");
+    session.start();
+    session.ok("CUSTOMISE BUILTIN Site");
+    session.ok("CUSTOMISE KEEP");
+    const std::string keptText = contentsOf(session.keptFile);
+
+    // A kept file is there, so the reset is not what the next start gives.
+    EXPECT_EQ(session.ok("CUSTOMISE RESET"),
+              "reset name=\"Small Built In\" definitions=2 codes=2 rules=2 kept=no");
+    const ReplyRecord retired = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(retired, "written"), "no");
+    EXPECT_EQ(field(retired, "reason"), "the-session-is-the-built-in");
+    EXPECT_EQ(field(retired, "backup"), shown(session.backup()));
+    EXPECT_FALSE(fs::exists(session.keptFile));
+    EXPECT_EQ(contentsOf(session.backup()), keptText);
+
+    const auto start = katana::cad::startCustomisation(session.document, session.host);
+    EXPECT_EQ(start.installed, CustomisationOrigin::BuiltIn);
+    EXPECT_EQ(start.name, "Small Built In");
+}
+
+TEST(CustomisationVerbs, ChoosingTheDefaultByNameAfterAKeptAlternateRetiresTheFileLikeAReset)
+{
+    TwoBuiltIns session("builtin-keep-default");
+    session.start();
+    session.ok("CUSTOMISE BUILTIN Site");
+    session.ok("CUSTOMISE KEEP");
+    EXPECT_EQ(session.ok("CUSTOMISE BUILTIN Small Built In"),
+              "used name=\"Small Built In\" default=yes definitions=2 codes=2 rules=2 kept=no");
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE KEEP"), "kept"), "written"), "no");
+    EXPECT_FALSE(fs::exists(session.keptFile));
+    EXPECT_TRUE(fs::exists(session.backup()));
+}
+
+// What Settings' Use warns of before it is pressed (it is followed by KEEP on a
+// kept session): ONE earlier file is kept, so a kept customisation of the
+// person's own is put away by the alternate that is kept over it, and put away
+// again - gone - by the default that is kept after that.
+TEST(CustomisationVerbs, AnAlternateThenTheDefaultKeptInTurnLeaveThePersonsOwnKeptFileInNeitherFile)
+{
+    TwoBuiltIns session("builtin-keep-twice");
+    session.start();
+    session.ok("CUSTOMISE SET auto.codes=off");
+    ASSERT_EQ(field(record(session.ok("CUSTOMISE KEEP"), "kept"), "written"), "yes");
+    const std::string personal = contentsOf(session.keptFile);
+    const Customisation own = parsed(personal);
+    ASSERT_TRUE(own.automation.has_value());
+    ASSERT_FALSE(own.automation->codesOnSurveyImport);
+
+    // The alternate over it: written, and the personal file beside it.
+    session.ok("CUSTOMISE BUILTIN Site");
+    const ReplyRecord over = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(over, "written"), "yes");
+    EXPECT_EQ(field(over, "backup"), shown(session.backup()));
+    EXPECT_EQ(contentsOf(session.backup()), personal);
+    const std::string alternate = contentsOf(session.keptFile);
+    EXPECT_NE(alternate, personal);
+
+    // The default after it: nothing is written, the alternate's file is set
+    // aside in the place of the personal one, which is in neither file.
+    session.ok("CUSTOMISE BUILTIN Small Built In");
+    const ReplyRecord retired = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(retired, "written"), "no");
+    EXPECT_FALSE(fs::exists(session.keptFile));
+    EXPECT_EQ(contentsOf(session.backup()), alternate);
+    EXPECT_NE(contentsOf(session.backup()), personal);
+}
+
+TEST(CustomisationVerbs, AnAlternateEditedAfterBeingChosenIsKeptAsAnEditedCopyBasedOnIt)
+{
+    TwoBuiltIns session("builtin-keep-edited");
+    session.start();
+    session.ok("CUSTOMISE BUILTIN Site");
+    session.ok("CUSTOMISE SET auto.codes=off");
+    ASSERT_EQ(session.state().origin, CustomisationOrigin::Edited);
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE KEEP"), "kept"), "written"), "yes");
+
+    // Not any built-in now, but made from Site.
+    const std::string reply = session.ok("CUSTOMISE BUILTIN");
+    EXPECT_EQ(field(record(reply, "builtins"), "active"), "");
+    EXPECT_EQ(field(record(reply, "builtins"), "based_on"), "Site");
+    const auto start = katana::cad::startCustomisation(session.document, session.host);
+    EXPECT_EQ(start.installed, CustomisationOrigin::Kept);
+    EXPECT_FALSE(start.keptFromAnotherBuiltIn);
+    EXPECT_FALSE(session.state().automation.codesOnSurveyImport);
+}
+
+TEST(CustomisationVerbs, JsonListsTheBuiltInsTheHostOffersWithTheOneTheSessionIsActive)
+{
+    TwoBuiltIns session("builtin-json");
+    session.start();
+    session.ok("CUSTOMISE BUILTIN Site");
+    const std::string json = session.ok("CUSTOMISE JSON");
+    // Two entries in the host's order, alphabetical keys: Small is the
+    // default, Site is the one the session is. Counts by hand, as above.
+    EXPECT_TRUE(contains(json, R"(  "builtIns": [
+    {
+      "active": false,
+      "codes": 2,
+      "default": true,
+      "definitions": 2,
+      "description": "Two definitions and two rules, for tests",
+      "name": "Small Built In",
+      "rules": 2,
+      "source": ""
+    },
+    {
+      "active": true,
+      "codes": 3,
+      "default": false,
+      "definitions": 2,
+      "description": "",
+      "name": "Site",
+      "rules": 3,
+      "source": "site.customisation.json"
+    }
+  ],)"))
+        << json;
+}
+
+// A project saved while an alternate built-in was the session records it by
+// name. Opened where another is the session, that name is "not loaded" - and it
+// is no file, so CUSTOMISE <file> cannot load it; the verb that does is the one
+// the front ends' warning names (cad::builtInAdviceFor).
+TEST(CustomisationVerbs, ABuiltInNamedAsNotLoadedByAProjectIsLoadedByCustomiseBuiltIn)
+{
+    TwoBuiltIns author("builtin-missing-author");
+    author.start();
+    author.ok("CUSTOMISE BUILTIN Site");
+    const fs::path project = author.scratch.root / "drawn.katana";
+    ASSERT_TRUE(author.document.saveAs(project).ok());
+
+    TwoBuiltIns session("builtin-missing-session");
+    session.start();
+    ASSERT_TRUE(session.document.open(project).ok());
+    EXPECT_EQ(session.document.customisationState().missingAtOpen,
+              (std::vector<std::string>{"Site"}));
+    // What a front end tells a person about it, from the very list the verb lists.
+    EXPECT_EQ(katana::cad::builtInAdviceFor(session.document.customisationState().missingAtOpen,
+                                            katana::cad::builtInsOf(session.host)),
+              "CUSTOMISE BUILTIN Site makes the built-in \"Site\" the session");
+
+    session.ok("CUSTOMISE BUILTIN Site");
+    EXPECT_TRUE(session.document.customisationState().missingAtOpen.empty())
+        << "the built-in the project was drawn with is the session now";
+    EXPECT_TRUE(contains(session.ok("CUSTOMISE JSON"), "  \"missing\": [],\n"));
+}
+
 TEST(CustomisationVerbs, KeepIsRefusedWhenTheKeptFileChangedOnDiskSinceTheSessionReadIt)
 {
     Hosted session("keep-changed");
@@ -2368,6 +2766,37 @@ TEST(CustomisationVerbs, OneRefusedItemSetsNoneOfThem)
 
 // ---- help ----------------------------------------------------------------------------------
 
+// The one-line index is what an agent reads first (`HELP`, the MCP tool's
+// help): a verb it does not name is a verb that is found only by chance.
+TEST(CustomisationVerbs, TheOneLineHelpIndexNamesCustomiseBuiltIn)
+{
+    const std::string help = CommandInterpreter::helpText();
+    EXPECT_TRUE(contains(help, "CUSTOMISE BUILTIN [<name>]")) << "the index row";
+    // On the family's own rows, beside RESET, whose words it explains.
+    const std::size_t builtIn = help.find("CUSTOMISE BUILTIN [<name>]");
+    const std::size_t reset = help.find("CUSTOMISE RESET (the built-in one)");
+    ASSERT_NE(builtIn, std::string::npos);
+    ASSERT_NE(reset, std::string::npos);
+    EXPECT_LT(reset - builtIn, std::size_t{200});
+}
+
+// The default is the file THIS build was given, so the help reads its name from
+// what was compiled in and writes none: a build whose default is another file
+// would otherwise say a thing that is not true.
+TEST(CustomisationVerbs, HelpCustomiseNamesTheDefaultThisBuildCompiledIn)
+{
+    const std::string help = katana::cad::customisationVerbHelp();
+    EXPECT_FALSE(contains(help, "@DEFAULT@")) << "the marker is replaced";
+    const katana::cad::BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
+    if (compiledIn.customisation) {
+        EXPECT_TRUE(contains(help, "the default, " + compiledIn.customisation->name +
+                                       ", unless KATANA_BUILTIN_CUSTOMISATION says another"));
+    } else {
+        EXPECT_TRUE(contains(help, "the default (this build has none), unless "
+                                   "KATANA_BUILTIN_CUSTOMISATION says another"));
+    }
+}
+
 TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
 {
     const std::string help = CommandInterpreter::helpText();
@@ -2392,7 +2821,8 @@ TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
                               "linework linework.start=", "missing", "loaded file=",
                               "removed definitions=", "undefined names=", "exported file=",
                               "left rules= linework=yes|no automation=yes|no",
-                              "reset name=", "kept file=", "written=no "
+                              "reset name=", "CUSTOMISE BUILTIN <name>", "builtins count=",
+                              "used name=", "kept file=", "written=no "
                                                           "reason=the-session-is-the-built-in",
                               "reverted file=", "removed definition=", "removed code=",
                               "set <key>=<value>", "./json", "CUSTOMIZE",

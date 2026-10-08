@@ -3924,7 +3924,8 @@ void MainWindow::loadDefaultCustomisation()
         // Installed all the same - it is the user's - but they may want to
         // know that the program's own has moved on since they kept theirs.
         logMessage("The kept customisation was made from another built-in customisation than "
-                   "this program has; CUSTOMISE RESET gives this program's.");
+                   "this program has; CUSTOMISE RESET gives this program's and CUSTOMISE "
+                   "BUILTIN lists the built-in customisations it has.");
     }
 }
 
@@ -3940,8 +3941,15 @@ void MainWindow::reportMissingCustomisation()
     // customisation defined draws as a plain line until it is loaded. By
     // name, as the project records them - never a path - and with the line
     // that loads one: the menu item this sentence once named is gone.
-    logMessage("Warning: this project was drawn with customisations that are not loaded: " +
-               quotedNames(missing) + ". CUSTOMISE <file> loads a Katana customisation file.");
+    // A name that is one of this program's built-ins is no file to load: it is
+    // made the session by name (cad::builtInAdviceFor).
+    const std::string advice = cad::builtInAdviceFor(missing, cad::builtIns());
+    QString warning = "Warning: this project was drawn with customisations that are not loaded: " +
+                      quotedNames(missing) + ". CUSTOMISE <file> loads a Katana customisation file.";
+    if (!advice.empty()) {
+        warning += " " + QString::fromStdString(advice) + ".";
+    }
+    logMessage(warning);
 }
 
 // Survey > Apply Survey Codes: the CODE line a person would type, through the

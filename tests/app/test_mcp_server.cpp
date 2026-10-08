@@ -1688,6 +1688,88 @@ TEST_F(McpServer, AKeptCustomisationMadeFromAnotherBuiltInIsSaidInTheSummary)
               (Json{{"keptFromAnotherBuiltIn", true}, {"problems", Json::array()}}));
 }
 
+// The built-ins the program has (docs/mcp.md, "The customisation"): the summary
+// lists what the build compiled in, the default marked and the one the session
+// is, so that an agent can see what CUSTOMISE BUILTIN <name> would choose from.
+// What this build compiled in is asked of the build; the figures of the two
+// files this repository ships are held where the files are (BuiltInLibrary).
+TEST_F(McpServer, TheCustomisationSummaryListsTheBuiltInsTheProgramHas)
+{
+    const std::vector<katana::cad::BuiltInEntry>& compiledIn = katana::cad::builtIns();
+    if (compiledIn.size() < 2) {
+        GTEST_SKIP() << "this build compiled in fewer than two built-in customisations";
+    }
+    // A program started with its default, named as the seam takes a name, and
+    // no kept file.
+    const std::string defaultName = compiledIn.front().name;
+    const StartEnvironment environment(defaultName.c_str(), nullptr);
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session started("katana_mcp");
+    (void)testing::internal::GetCapturedStdout();
+    (void)testing::internal::GetCapturedStderr();
+    Server own(started, "9.9.9");
+    initializeOf(own);
+
+    const auto listed = [&](const Json& content) {
+        std::vector<std::string> names;
+        for (const Json& each : content["builtIns"]) {
+            names.push_back(each["name"].get<std::string>());
+        }
+        return names;
+    };
+    std::vector<std::string> expectedNames;
+    for (const katana::cad::BuiltInEntry& entry : compiledIn) {
+        expectedNames.push_back(entry.name);
+    }
+
+    const Json first = callOf(own, "katana_customisation", Json{{"part", "summary"}});
+    ASSERT_FALSE(first["isError"].get<bool>()) << textOf(first);
+    const Json& content = first["structuredContent"];
+    // Every one the build compiled in, in its order, the default first.
+    EXPECT_EQ(listed(content), expectedNames);
+    ASSERT_EQ(content["builtIns"].size(), compiledIn.size());
+    for (std::size_t at = 0; at < compiledIn.size(); ++at) {
+        const Json& each = content["builtIns"][at];
+        EXPECT_EQ(each["source"], compiledIn[at].source) << at;
+        EXPECT_EQ(each["default"], at == 0) << each["name"];
+        EXPECT_EQ(each["active"], at == 0) << each["name"];
+        EXPECT_FALSE(each.contains("problem")) << each["name"];
+        EXPECT_EQ(each["description"], compiledIn[at].description) << at;
+        EXPECT_GT(each["definitions"].get<int>(), 0) << each["name"];
+        EXPECT_GT(each["rules"].get<int>(), 0) << each["name"];
+        EXPECT_GT(each["codes"].get<int>(), 0) << each["name"];
+    }
+    // The session IS the default, so its own counts are that entry's.
+    EXPECT_EQ(content["builtIn"], defaultName);
+    EXPECT_EQ(content["origin"], "builtIn");
+    EXPECT_EQ(content["builtIns"][0]["definitions"], content["counts"]["definitions"]);
+    EXPECT_EQ(content["builtIns"][0]["rules"], content["counts"]["rules"]);
+    EXPECT_EQ(content["builtIns"][0]["codes"], content["counts"]["codes"]);
+
+    // An agent chooses another through the line, and the summary follows: the
+    // active one moves, the default does not, and the session is the other.
+    const std::string other = compiledIn[1].name;
+    const Json chosen = callOf(own, "katana_run_commands",
+                               Json{{"commands", Json::array({"CUSTOMISE BUILTIN \"" + other + "\""})}});
+    ASSERT_FALSE(chosen["isError"].get<bool>()) << textOf(chosen);
+    const Json second = callOf(own, "katana_customisation", Json{{"part", "summary"}});
+    const Json& after = second["structuredContent"];
+    EXPECT_EQ(listed(after), expectedNames);
+    EXPECT_EQ(after["name"], other);
+    EXPECT_EQ(after["origin"], "builtIn");
+    EXPECT_EQ(after["builtIns"][0]["default"], true);
+    EXPECT_EQ(after["builtIns"][0]["active"], false);
+    EXPECT_EQ(after["builtIns"][1]["default"], false);
+    EXPECT_EQ(after["builtIns"][1]["active"], true);
+
+    // The resource, the text and the tool are one report.
+    const Json resource = requestOf(own, "resources/read", Json{{"uri", "katana://customisation"}});
+    ASSERT_TRUE(resource.contains("result")) << resource.dump();
+    EXPECT_EQ(Json::parse(resource["result"]["contents"][0]["text"].get<std::string>()), after);
+    EXPECT_EQ(Json::parse(textOf(second)), after);
+}
+
 TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)
 {
     initialize();

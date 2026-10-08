@@ -163,6 +163,11 @@ std::vector<std::string> undefinedRuleNames(const Document& document)
 
 std::string customisationJson(const Document& document)
 {
+    return customisationJson(document, builtIns());
+}
+
+std::string customisationJson(const Document& document, std::span<const BuiltInEntry> offered)
+{
     using Json = nlohmann::json;
     const CustomisationState& state = document.customisationState();
     const CustomisationSummary summary = customisationSummary(document);
@@ -197,6 +202,22 @@ std::string customisationJson(const Document& document)
         ++byKind[toString(issue.kind)];
     }
 
+    Json builtInList = Json::array();
+    for (const BuiltInChoice& choice : builtInChoices(document, offered)) {
+        Json one{{"name", choice.name},
+                 {"description", choice.description},
+                 {"source", choice.source},
+                 {"default", choice.isDefault},
+                 {"active", choice.isActive},
+                 {"definitions", choice.definitions},
+                 {"codes", choice.codes},
+                 {"rules", choice.rules}};
+        if (!choice.problem.empty()) {
+            one["problem"] = choice.problem;
+        }
+        builtInList.push_back(std::move(one));
+    }
+
     Json basedOn = nullptr;
     if (state.basedOn) {
         basedOn = Json{{"name", state.basedOn->name}, {"digest", state.basedOn->digest}};
@@ -209,6 +230,7 @@ std::string customisationJson(const Document& document)
         {"notice", state.notice},
         {"basedOn", basedOn},
         {"builtIn", state.builtIn},
+        {"builtIns", builtInList},
         {"sources", sources},
         {"counts",
          {{"definitions", summary.definitions},

@@ -1,13 +1,19 @@
-// The customisation compiled into the program, when it is the reference one.
+// The customisations compiled into the program, when they are the ones these
+// figures are of: the reference one and Katana Standard.
 //
 // The reference customisation is third-party material under its author's own
 // licence, tracked as resources/customisation/nsw.customisation.json on the
 // owner's decision (docs/customisation.md, "Why the built-in is in the
-// repository"), so a build from a clean checkout has it compiled in and these
-// tests run. A build whose KATANA_BUILTIN_CUSTOMISATION names no file has none
-// compiled in and every test here SKIPS: the suite must stay green without it.
-// Where it is compiled in - cad::compiledInCustomisation() holds a
-// customisation named "NSW" - these are the figures it must hold.
+// repository"), so a build from a clean checkout has it compiled in, as an
+// ALTERNATE built-in (Katana Standard is the default), and these tests run. A
+// build whose KATANA_ALTERNATE_CUSTOMISATIONS names no such file has no such
+// built-in and every test here SKIPS: the suite must stay green without it.
+// Where it is compiled in - cad::builtIns() lists a customisation named "NSW"
+// - these are the figures it must hold. Katana Standard's own are in
+// test_katana_standard.cpp (the file, read directly), and
+// BuiltInLibrary.TheDefaultBuildCompilesKatanaStandardInAsTheDefaultAndItHoldsItsCensus
+// (test_builtin_library.cpp) holds the compiled-in copy of it to the same
+// census, so that what the program starts with is what that file is.
 //
 // Where the figures come from: not from this program. They were counted by
 // two scripts that use none of its code and were run again for this test -
@@ -21,7 +27,9 @@
 //
 // What a build has compiled in is asked of the build, never of the
 // environment: the seam KATANA_BUILTIN_CUSTOMISATION changes what a program's
-// front end starts with, and not what was compiled in.
+// front end starts with, and not what was compiled in. It is found by NAME
+// in the list of what was compiled in (cad::builtIns), because which one is
+// the default is the build's choice and no figure here depends on it.
 
 #include <gtest/gtest.h>
 
@@ -29,6 +37,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/cad/customisation_host.hpp"
@@ -40,14 +49,20 @@ namespace {
 using katana::entity::Customisation;
 using katana::entity::LineStyle;
 
-// The compiled-in customisation when it is the reference one; null otherwise.
+// The compiled-in built-in of this name, by its entry; null when this build did
+// not compile one in.
+const katana::cad::BuiltInEntry* compiledInEntry(std::string_view name)
+{
+    const katana::cad::BuiltInEntry* entry =
+        katana::cad::findBuiltIn(katana::cad::builtIns(), name);
+    return entry != nullptr && entry->builtIn.customisation != nullptr ? entry : nullptr;
+}
+
+// The compiled-in reference customisation; null when this build has none.
 const Customisation* referenceBuiltIn()
 {
-    const katana::cad::BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
-    if (!compiledIn.customisation || compiledIn.customisation->name != "NSW") {
-        return nullptr;
-    }
-    return compiledIn.customisation.get();
+    const katana::cad::BuiltInEntry* entry = compiledInEntry("NSW");
+    return entry != nullptr ? entry->builtIn.customisation.get() : nullptr;
 }
 
 } // namespace
@@ -112,7 +127,9 @@ TEST(BuiltInCensus, EveryDefinitionIsFromTheCustomisationItselfByItsName)
     nsw->library.forEach(
         [&](const LineStyle& style) { elsewhere += style.source == nsw->name ? 0 : 1; });
     EXPECT_EQ(elsewhere, 0u);
-    EXPECT_FALSE(katana::cad::compiledInCustomisation().digest.empty());
+    // The digest of the entry for this very customisation, not of the default.
+    ASSERT_NE(compiledInEntry("NSW"), nullptr);
+    EXPECT_FALSE(compiledInEntry("NSW")->builtIn.digest.empty());
 }
 
 // A group path says what a definition is. A word put in front of most of them

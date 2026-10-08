@@ -196,7 +196,8 @@ TEST(Session, AKeptCustomisationMadeFromAnotherBuiltInStartsAndSaysSoOnStderr)
     // rules", and this expected it, until 2026-10-07.
     EXPECT_EQ(out, "Customisation: Mine, 0 linestyles and symbols and 1 survey code rule, kept\n");
     EXPECT_EQ(err, "warning: the kept customisation was made from another built-in customisation "
-                   "than this program has; CUSTOMISE RESET gives this program's\n");
+                   "than this program has; CUSTOMISE RESET gives this program's and CUSTOMISE "
+                   "BUILTIN lists the built-in customisations it has\n");
     EXPECT_EQ(session.document().customisationState().name, "Mine");
 }
 

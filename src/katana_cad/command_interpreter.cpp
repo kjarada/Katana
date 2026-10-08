@@ -534,6 +534,7 @@ Customise CUSTOMISE [REPLACE] <file> [<file>...]   load Katana customisation fil
           nothing. CUSTOMISE alone reports what is loaded, CUSTOMISE JSON as JSON
           CUSTOMISE DEFINITIONS <file> [<file>...]   merge their definitions and colours alone
           CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME name] [ONLY name...]
+          CUSTOMISE BUILTIN [<name>]   list the built-ins, or make one the session
           CUSTOMISE RESET (the built-in one) | KEEP (this one, for the next start) | REVERT
           CUSTOMISE REMOVE name... [FORCE] | REMOVE CODE key...
           CUSTOMISE SET auto.codes=on|off auto.linework=on|off linework.start=ST ...

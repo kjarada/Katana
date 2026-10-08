@@ -573,7 +573,9 @@ void Document::markCustomisationEdited()
 
 std::vector<RenamedSource> Document::customisationRenames() const
 {
-    return builtinRenames(customisation_.builtIn);
+    // The NSW customisation's, whichever built-in the host has: the early file
+    // names were its files (customisation_record.hpp).
+    return builtinRenames();
 }
 
 std::vector<katana::core::Error>

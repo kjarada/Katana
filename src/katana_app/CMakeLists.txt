@@ -457,6 +457,157 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.customise_json_says_what_went_wrong_when_the_session_started
         PROPERTIES
         PASS_REGULAR_EXPRESSION "\"start\": {${_eol}    \"keptFromAnotherBuiltIn\": false,${_eol}    \"problems\": \\[${_eol}      \"the kept customisation is not read, so the built-in customisation is used: ParseFailure: not a Katana customisation file")
+    # The built-in LIBRARY (cad/customisation_host.hpp): the program has more
+    # than one customisation compiled in, Katana Standard the default and NSW an
+    # alternate. These tests are registered where the build compiled in both
+    # (KATANA_BUILTIN_FILES, src/katana_cad/CMakeLists.txt); the seam names
+    # one by NAME, as the name form of KATANA_BUILTIN_CUSTOMISATION takes it.
+    # The counts are those of each file's own census (docs/katana_standard.md
+    # for Katana Standard: 186 definitions, 245 codes, 770 rules; the NSW
+    # file's tests/cad/customisation/test_builtin_census.cpp: 792, 632, 1,624,
+    # 7 colours); the start-up line spells a count without a separator.
+    set(_have_standard FALSE)
+    set(_have_nsw FALSE)
+    foreach(_built_in_file IN LISTS KATANA_BUILTIN_FILES)
+        if(_built_in_file MATCHES "/katana-standard\\.customisation\\.json$")
+            set(_have_standard TRUE)
+        elseif(_built_in_file MATCHES "/nsw\\.customisation\\.json$")
+            set(_have_nsw TRUE)
+        endif()
+    endforeach()
+    if(_have_standard AND _have_nsw)
+        # CUSTOMISE BUILTIN lists both, the default and the session's marked;
+        # a name makes that built-in the session (not kept: it is not what
+        # the next start gives) and RESET goes back to the run's own, which
+        # IS kept, there being no kept file.
+        add_test(NAME cli.customise_builtin_lists_the_built_ins_and_a_name_makes_one_the_session
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE BUILTIN" -c "CUSTOMISE BUILTIN nsw"
+                    -c "CUSTOMISE BUILTIN" -c "CUSTOMISE RESET")
+        set_tests_properties(
+            cli.customise_builtin_lists_the_built_ins_and_a_name_makes_one_the_session PROPERTIES
+            PASS_REGULAR_EXPRESSION "Customisation: Katana Standard, 186 linestyles and symbols and 770 survey code rules, built in${_eol}builtins count=2 default=\"Katana Standard\" active=\"Katana Standard\"${_eol}builtin name=\"Katana Standard\" default=yes active=yes definitions=186 codes=245 rules=770 source=katana-standard\\.customisation\\.json description=[^\r\n]*${_eol}builtin name=NSW default=no active=no definitions=792 codes=632 rules=1624 source=nsw\\.customisation\\.json description=[^\r\n]*${_eol}used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}builtins count=2 default=\"Katana Standard\" active=NSW${_eol}.*reset name=\"Katana Standard\" definitions=186 codes=245 rules=770 kept=yes"
+            FAIL_REGULAR_EXPRESSION "error")
+        # The seam names a built-in, in any letter case: the run starts with
+        # it, it is the built-in of the run (the list marks it the default)
+        # and RESET gives it back after the other was chosen.
+        add_test(NAME cli.the_seam_names_a_compiled_in_built_in_and_the_session_starts_with_it
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "KATANA_BUILTIN_CUSTOMISATION=nsw"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE" -c "CUSTOMISE BUILTIN"
+                    -c "CUSTOMISE BUILTIN katana standard" -c "CUSTOMISE RESET")
+        set_tests_properties(
+            cli.the_seam_names_a_compiled_in_built_in_and_the_session_starts_with_it PROPERTIES
+            PASS_REGULAR_EXPRESSION "Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, built in${_eol}.*customisation name=NSW origin=builtIn kept=yes definitions=792 codes=632 rules=1624 colours=7${_eol}.*builtins count=2 default=NSW active=NSW${_eol}.*used name=\"Katana Standard\" default=no definitions=186 codes=245 rules=770 kept=no${_eol}reset name=NSW definitions=792 codes=632 rules=1624 kept=yes"
+            FAIL_REGULAR_EXPRESSION "error")
+        # A word that names no built-in is read as a file, and the reason says
+        # what the program has, because a mistyped name is the likely cause;
+        # the run has no built-in and goes on.
+        add_test(NAME cli.a_seam_word_that_is_no_built_in_is_said_with_the_names_there_are
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "KATANA_BUILTIN_CUSTOMISATION=Nowhere"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE")
+        set_tests_properties(cli.a_seam_word_that_is_no_built_in_is_said_with_the_names_there_are
+            PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: the file KATANA_BUILTIN_CUSTOMISATION names as the built-in customisation is not read: [^\r\n]*it is no built-in customisation of this program either \\(it has \"Katana Standard\", \"NSW\"\\; a file of that name in this folder is \\./Nowhere\\).*No customisation is loaded\\.")
+        # The choice lasts only as a kept file does: the first process chooses
+        # NSW and keeps it (a built-in that is not the run's own is written,
+        # based on itself, like any session), the second starts with it, kept,
+        # and is told nothing of another built-in, the third chooses the
+        # default again and keeps that (nothing is written: the kept file is
+        # set aside) and the fourth starts with the default. Four processes,
+        # one kept file, in order.
+        set(_kept_built_in "${CMAKE_CURRENT_BINARY_DIR}/cli-built-in-kept.customisation.json")
+        add_test(NAME cli.built_in_kept_cleanup
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_kept_built_in}" "${_kept_built_in}.bak"
+                    "${_kept_built_in}.bad")
+        add_test(NAME cli.an_alternate_built_in_kept_is_what_the_next_session_starts_with
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE BUILTIN NSW" -c "CUSTOMISE KEEP")
+        add_test(NAME cli.the_session_after_a_kept_alternate_starts_with_it_and_warns_of_nothing
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE" -c "CUSTOMISE BUILTIN")
+        add_test(NAME cli.choosing_the_default_after_a_kept_alternate_sets_the_kept_file_aside
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE BUILTIN Katana Standard"
+                    -c "CUSTOMISE KEEP")
+        add_test(NAME cli.the_session_after_the_default_was_chosen_again_starts_with_the_default
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE")
+        set_tests_properties(cli.built_in_kept_cleanup PROPERTIES FIXTURES_SETUP cli_built_in_0)
+        set_tests_properties(cli.an_alternate_built_in_kept_is_what_the_next_session_starts_with
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_0 FIXTURES_SETUP cli_built_in_1
+            PASS_REGULAR_EXPRESSION "Customisation: Katana Standard, 186 linestyles and symbols and 770 survey code rules, built in${_eol}.*used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}kept file=[^\r\n]*cli-built-in-kept\\.customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.the_session_after_a_kept_alternate_starts_with_it_and_warns_of_nothing PROPERTIES
+            FIXTURES_REQUIRED cli_built_in_1 FIXTURES_SETUP cli_built_in_2
+            PASS_REGULAR_EXPRESSION "Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, kept${_eol}.*customisation name=NSW origin=kept kept=yes definitions=792 codes=632 rules=1624 colours=7${_eol}.*builtins count=2 default=\"Katana Standard\" active=\"\" based_on=NSW${_eol}builtin name=\"Katana Standard\" default=yes active=no [^\r\n]*${_eol}builtin name=NSW default=no active=no "
+            FAIL_REGULAR_EXPRESSION "error|warning")
+        set_tests_properties(
+            cli.choosing_the_default_after_a_kept_alternate_sets_the_kept_file_aside PROPERTIES
+            FIXTURES_REQUIRED cli_built_in_2 FIXTURES_SETUP cli_built_in_3
+            PASS_REGULAR_EXPRESSION "Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, kept${_eol}.*used name=\"Katana Standard\" default=yes definitions=186 codes=245 rules=770 kept=no${_eol}kept file=[^\r\n]*cli-built-in-kept\\.customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*cli-built-in-kept\\.customisation\\.json\\.bak"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.the_session_after_the_default_was_chosen_again_starts_with_the_default PROPERTIES
+            FIXTURES_REQUIRED cli_built_in_3
+            PASS_REGULAR_EXPRESSION "Customisation: Katana Standard, 186 linestyles and symbols and 770 survey code rules, built in${_eol}.*customisation name=\"Katana Standard\" origin=builtIn kept=yes definitions=186 codes=245 rules=770 colours=28"
+            FAIL_REGULAR_EXPRESSION "error|warning|, kept")
+        # A project saved while an alternate was the session records it by name,
+        # and opened where the default is the session it is "not loaded" - a name
+        # no CUSTOMISE <file> can load. The warning says that the name is a
+        # built-in of this program and what makes it the session, and that verb
+        # does: nothing is missing after it. Three processes, one project, in
+        # order (the seam names the default, no kept file is read).
+        set(_built_in_project "${CMAKE_CURRENT_BINARY_DIR}/cli-built-in-project.katana")
+        add_test(NAME cli.built_in_project_cleanup
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_project}")
+        add_test(NAME cli.a_project_saved_with_an_alternate_built_in_records_its_name
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    $<TARGET_FILE:katana_cli> -c "CUSTOMISE BUILTIN NSW" -c "LINE 0,0 10,0"
+                    -c "SAVE \"${_built_in_project}\"")
+        add_test(NAME cli.opening_it_under_the_default_names_the_built_in_and_the_verb_that_loads_it
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    $<TARGET_FILE:katana_cli> -c "OPEN \"${_built_in_project}\"")
+        add_test(NAME cli.the_verb_the_warning_names_loads_the_built_in_the_project_was_drawn_with
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    $<TARGET_FILE:katana_cli> -c "OPEN \"${_built_in_project}\""
+                    -c "CUSTOMISE BUILTIN NSW" -c "CUSTOMISE")
+        set_tests_properties(cli.built_in_project_cleanup PROPERTIES
+            FIXTURES_SETUP cli_built_in_project_0)
+        set_tests_properties(cli.a_project_saved_with_an_alternate_built_in_records_its_name
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_project_0
+            FIXTURES_SETUP cli_built_in_project_1
+            PASS_REGULAR_EXPRESSION "used name=NSW .*saved to [^\r\n]*cli-built-in-project\\.katana"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.opening_it_under_the_default_names_the_built_in_and_the_verb_that_loads_it
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_project_1
+            PASS_REGULAR_EXPRESSION "opened .*warning: this project was drawn with customisations that are not loaded: \"NSW\"\\; CUSTOMISE BUILTIN NSW makes the built-in \"NSW\" the session${_eol}"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.the_verb_the_warning_names_loads_the_built_in_the_project_was_drawn_with
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_project_1
+            PASS_REGULAR_EXPRESSION "used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}.*customisation name=NSW origin=builtIn kept=no definitions=792 codes=632 rules=1624 colours=7${_eol}source name=NSW "
+            FAIL_REGULAR_EXPRESSION "error|missing name=")
+    endif()
     # INFO with an entity's id describes the entity, as the interpreter's
     # INFO does, in a build with the GIS module too: there every INFO was
     # once read as INFO <file>. A 10 x 5 rectangle: perimeter 30, area 50.

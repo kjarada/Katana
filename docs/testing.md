@@ -225,8 +225,9 @@ reference customisation, or the compiled-in one, must pass without it
 **The suites that read third-party data** are three: the legacy readers' and
 writers' reference tests and the converter's (`tests/archive12d`), which read
 the reference folder `KATANA_REFERENCE_CUSTOMISATION_DIR` names, and
-`BuiltInCensus.*` and the compiled-in half of `BuiltInRenames.*`
-(`tests/cad/customisation`), which read the customisation compiled in. Each
+`BuiltInCensus.*`, the NSW half of `BuiltInRenames.*` and the NSW cases of
+`BuiltInLibrary.*` (`tests/cad/customisation`), which read the NSW customisation
+compiled in as an alternate built-in, found by name. Each
 skips, saying why, where its data is absent - the reference folder is on the
 owner's machine and in no clone, and a build has a built-in unless its path
 names no file, the file being tracked - and none is ever changed to match what
@@ -235,8 +236,10 @@ the program gave: the census's figures are counted by
 of the program's code, and no tracked test or document holds a name from the
 data, only counts (the converted file, being the data, holds them). A build
 with neither was built and run on 2026-10-07, when the file was not tracked
-(`-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not exist; the cad
-and app suites): it configures, builds and passes.
+(`-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not exist, when that
+file was the only built-in; today the equivalent is
+`-DKATANA_ALTERNATE_CUSTOMISATIONS=` with an empty list, which leaves Katana
+Standard alone; the cad and app suites): it configures, builds and passes.
 
 **What the programs hold** is proved twice, and each proof is itself proved on
 a fixture, since a check that cannot see a violation passes as quietly as one

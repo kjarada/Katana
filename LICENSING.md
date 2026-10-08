@@ -118,8 +118,9 @@ an AI agent is a question for a lawyer, and this page does not settle it.
 These are in the repository or its packages and are **not** covered by the
 project licence, or are not known to be:
 
-1. **`resources/customisation/nsw.customisation.json`**, the built-in
-   customisation (linestyles, symbols and survey codes). It was converted from
+1. **`resources/customisation/nsw.customisation.json`**, the NSW built-in
+   customisation (linestyles, symbols and survey codes), compiled in as an
+   alternate beside Katana Standard, the default, which is original to Katana. It was converted from
    third-party library files that came with a notice saying they may not be
    copied or used without their authors' authorisation. The owner states that
    the information in the file is public, decided on 2026-10-08 to include the
@@ -127,17 +128,20 @@ project licence, or are not known to be:
    from it. The owner does not claim to have written it, so the project licence
    does not extend to it. No document from the authors is recorded in this
    repository, and no permission is claimed.
-   * The file is compiled into `katana_cad`, so into every program, and the
-     release workflow ships it.
+   * The file is compiled into `katana_cad`, so into every program, as one of
+     the built-in customisations a person can choose (Settings, `CUSTOMISE
+     BUILTIN NSW`) - not the one a program starts with - and the release
+     workflow ships it.
    * The GPL (section 5(c)) wants the whole work, as passed on, licensed under
      it. Whether that is satisfied for a program containing this file rests on
      the owner's statement that the information is public; this repository
      cannot settle it, and a lawyer's confirmation is advised.
    * Making the repository public also publishes the file.
-   * Anyone who cannot rely on that statement can build without the file: a
-     configure option whose path names no file makes a program with no
-     built-in (`-DKATANA_BUILTIN_CUSTOMISATION=<a path with no file>`;
-     `src/katana_cad/CMakeLists.txt`, `docs/building.md`).
+   * Anyone who cannot rely on that statement can build without the file: an
+     empty list of alternates makes a program with Katana Standard alone
+     (`-DKATANA_ALTERNATE_CUSTOMISATIONS=`; `src/katana_cad/CMakeLists.txt`,
+     `docs/building.md`), and a default path that names no file as well makes one
+     with no built-in at all.
 2. **`samples/`**, installed in every package (`cmake/KatanaPackaging.cmake`).
    Where each file came from is not recorded in this repository, so no licence
    is granted for them here. What can be verified:

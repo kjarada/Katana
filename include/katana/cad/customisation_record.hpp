@@ -103,15 +103,16 @@ struct RenamedSource {
 //   "symbols.4d" recorded alone is still that person's file, missing when it
 //   is.
 //
-// The built-in's name is not written in this source. A caller that knows it
-// passes it - the Document passes the name its host's built-in declares
-// (CustomisationState::builtIn), and is the one caller a session has. The
-// form without one takes the name of the customisation COMPILED INTO this
-// program (compiledInCustomisation, customisation_host.hpp), which is empty,
-// and so answers nothing, in a build that has none - and which is not the
-// built-in of a run the seam gave another. It is for a caller with no
-// Document to ask; the functions below take the table they are given, and
-// have no form that guesses one.
+// WHOSE files those were: the NSW customisation's. A program has several
+// built-ins now and the default is another, so the earlier names are answered
+// by the one called kEarlierFileNamesBelongTo and by no other: under Katana
+// Standard, "Katana Standard" defines none of what they drew, and a project
+// drawn with them is told that its customisation is not loaded until NSW is
+// (CUSTOMISE BUILTIN NSW). A caller passes the name; the form without one
+// takes that constant, which is what the Document passes, whatever its host's
+// built-in is - the table does not follow the run's built-in. The functions
+// below take the table they are given, and have no form that guesses one.
+inline constexpr std::string_view kEarlierFileNamesBelongTo = "NSW";
 [[nodiscard]] std::vector<RenamedSource> builtinRenames(std::string_view builtIn);
 [[nodiscard]] std::vector<RenamedSource> builtinRenames();
 

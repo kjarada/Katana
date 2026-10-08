@@ -200,7 +200,7 @@ that records how and why it works. `docs/index.md` lists every document.
   cannot watch a screen; `katana_mcp` gives an agent the verbs `katana_cli`
   has, as tools. See [headless.md](docs/headless.md), [mcp.md](docs/mcp.md).
 
-`katana_cli -c "HELP"` prints the verbs: 385 lines in a default build, 384 with
+`katana_cli -c "HELP"` prints the verbs: 386 lines in a default build, 385 with
 no built-in customisation, at the time of writing.
 
 **Where the three ways in differ.** Not every capability is on all three yet.
@@ -500,8 +500,9 @@ commit (`git commit -s`; [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 Not everything in the repository is covered by the project licence:
 
-- `resources/customisation/nsw.customisation.json`, the customisation compiled
-  into a default build, was converted from style and survey-code libraries that
+- `resources/customisation/nsw.customisation.json`, the NSW customisation,
+  compiled into a default build as an alternate built-in beside Katana Standard
+  (the default, original to Katana), was converted from style and survey-code libraries that
   came under someone else's licence. The owner states that the information in
   it is public and decided on 2026-10-08 to commit it and ship it in releases.
   The owner does not claim to have written it, nothing in the repository

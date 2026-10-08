@@ -178,12 +178,16 @@ through their session's `startCustomisation`.)
 
 | Variable | What it says |
 |---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`include/katana/cad/customisation_host.hpp`): unset, the built-in is the customisation compiled into the program, when the build has one; `none`, there is no built-in for this run; a path, THAT Katana customisation file is the built-in. One that does not read is said, and the run has no built-in - never the compiled-in one in its place |
+| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`include/katana/cad/customisation_host.hpp`), tried in this order: unset, the built-in is the DEFAULT customisation compiled into the program (Katana Standard), when the build has one; `none`, there is no built-in for this run; a built-in's NAME (`NSW`, `Katana Standard`; any letter case), that compiled-in built-in is the built-in of this run; otherwise a path, THAT Katana customisation file is the built-in (a file in the working folder called like a built-in is given as `./name`). One that does not read is said - a word that is no built-in's name also lists the names there are - and the run has no built-in, never the compiled-in one in its place |
 | `KATANA_CUSTOMISATION` | the kept customisation file: what `CUSTOMISE KEEP` writes and the next start reads in the place of the built-in. Unset, a headless run has none, and `KEEP` and `REVERT` are refused naming the variable. It is the ONLY way a headless run reads or writes one: it looks in no per-user place, so that it is the same run on every machine. (An interactive window with the variable unset keeps its own in the per-user place: `docs/desktop.md`, "How the window starts") |
 
 The start-up line says what was installed, on stderr with the rest of the
 log: `Customisation: <name>, N definitions (M symbols) and K survey code
-rules, built in.` or `..., kept.` A run with nothing to install says nothing.
+rules, built in.` or `..., kept.` The name is the customisation's own - Katana
+Standard by default, NSW when the seam names it or a kept copy of it starts. A
+run with nothing to install says nothing. `CUSTOMISE BUILTIN` lists the
+built-ins the program has and chooses among them (`docs/customisation.md`, "The
+verbs").
 
 **File > Settings in a headless run.** The dialog is opened by its action and
 driven by its fields, as any dialog is: `@fileSettings` (it opens non-modal,
@@ -192,14 +196,35 @@ so the run goes on), then
 Browse opens no file dialog and says to fill the field -
 `settingsExportPath=<file>|!settingsExport` to write the session,
 `settingsAutoCodes=off` to untick a box, which runs its `CUSTOMISE SET` line
-as a click does, and `!settingsReset`, `!settingsKeep`, `!settingsRevert`.
+as a click does, and `!settingsReset`, `!settingsKeep`, `!settingsRevert`. A built-in is
+chosen by its name as the combo `settingsBuiltIn` lists it - the default
+carries ` (default)` - and `!settingsBuiltInUse` runs `CUSTOMISE BUILTIN`;
+`?settingsActiveBuiltIn` says which the session is. The row is hidden, and
+the fill refused, in a build that compiled in only one.
 Each press echoes nothing on stderr but what its line answers; the status box
 (`?settingsStatus`) holds the line and the answer together
 (`qt_settings_imports_sets_and_exports_by_the_customise_lines_headless`).
 What Settings changes is KEPT only where `KATANA_CUSTOMISATION` names a file:
 `qt_an_import_made_in_settings_is_kept_headless` and the three tests after
 it run four windows, one after another, on one such file in the test's own
-folder (`docs/desktop.md`, "Settings").
+folder (`docs/desktop.md`, "Settings"). The built-ins are held the same way,
+on a fresh kept file and with the seam naming `Katana Standard`: a built-in
+chosen in Settings is kept (`qt_an_alternate_built_in_chosen_in_settings_is_kept_headless`),
+the next window comes up as it and says nothing of another built-in
+(`qt_the_window_after_a_kept_alternate_starts_with_it_headless`), and choosing
+the default again sets the file aside
+(`qt_choosing_the_default_in_settings_sets_the_kept_alternate_aside_headless`) so that the
+window after that starts with the default
+(`qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless`).
+They are registered where the build compiled in both Katana Standard and NSW, as
+are the two windows that save a project under NSW and open it under the default, where
+the log's warning names the built-in and the verb that makes it the session
+(`qt_a_project_saved_with_an_alternate_built_in_records_its_name_headless`,
+`qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless`) and the
+three `katana_cli` runs that do the same
+(`cli.a_project_saved_with_an_alternate_built_in_records_its_name`,
+`cli.opening_it_under_the_default_names_the_built_in_and_the_verb_that_loads_it`,
+`cli.the_verb_the_warning_names_loads_the_built_in_the_project_was_drawn_with`).
 
 **Every program test says what it starts with.** A default build has the
 tracked customisation compiled in and a build whose

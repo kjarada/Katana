@@ -11,18 +11,28 @@
 // startCustomisation then does, once for every front end, what each would
 // otherwise do in its own words and with its own omissions.
 //
-// THE BUILT-IN is a Katana customisation file compiled into the program
-// (CMake's KATANA_BUILTIN_CUSTOMISATION, #embed). The file is tracked in the
-// repository (resources/customisation/nsw.customisation.json), so a build made
-// from a clean checkout has it; a build whose path names no file has none, and
-// that is a state the program runs in, not a fault.
+// THE BUILT-INS are Katana customisation files compiled into the program
+// (CMake's KATANA_BUILTIN_CUSTOMISATION and KATANA_ALTERNATE_CUSTOMISATIONS,
+// #embed). One of them is THE built-in, the DEFAULT: Katana Standard, which a
+// program starts with when nothing says otherwise. The others are alternates,
+// the NSW customisation among them, which a session may be given by name
+// (CUSTOMISE BUILTIN <name>) or a run may start with (the seam, below). The
+// files are tracked in the repository (resources/customisation), so a build
+// made from a clean checkout has them; a path that names no file is simply not
+// offered, and a build with none runs without one - a state the program runs
+// in, not a fault.
 //
 // THE SEAM. The environment variable KATANA_BUILTIN_CUSTOMISATION says what
 // "the built-in" is for one run, whatever was compiled in:
 //
-//   (unset, empty)  the compiled-in customisation, when there is one
+//   (unset, empty)  the default built-in, when there is one
 //   none            no built-in at all
+//   <name>          the compiled-in built-in of that name, in any letter case
+//                   (a value with no / or \ that names one)
 //   <file>          that Katana customisation file IS the built-in
+//
+// Tried in that order: `none`, then a name, then a file. A file in the working
+// folder that is called like a built-in is given as ./name.
 //
 // It exists so that a test of a program is the same test on a machine whose
 // build has the built-in and on one whose build has not: the suite sets `none`
@@ -35,6 +45,8 @@
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -75,35 +87,103 @@ struct BuiltInCustomisation {
     std::string problem{};
 };
 
-// The customisation compiled into this program, parsed once, at the first
-// call. None, with no problem, in a build that has none. One that does not
-// parse is reported in `problem` and never thrown: a program whose built-in
-// is damaged still starts, and says so.
+// The DEFAULT built-in compiled into this program, parsed once, at the first
+// call: KATANA_BUILTIN_CUSTOMISATION's file, and alone - the alternates are
+// not parsed for it, so a start costs the default's bytes only. None, with no
+// problem, in a build that has none. One that does not parse is reported in
+// `problem` and never thrown: a program whose built-in is damaged still
+// starts, and says so.
 [[nodiscard]] const BuiltInCustomisation& compiledInCustomisation();
 
-// The built-in of THIS RUN: what the seam says, else the compiled-in one -
-// builtInCustomisationFor of the environment variable's value and
-// compiledInCustomisation(). THIS, and not compiledInCustomisation(), is what
-// a front end asks for the host it hands over: once, at start-up. The
-// variable is read at each call. Never throws.
+// One built-in a program offers.
+struct BuiltInEntry {
+    // The customisation's own name, which is what CUSTOMISE BUILTIN <name> and
+    // the seam take, in any letter case. For a file that did not read, the
+    // file's name.
+    std::string name{};
+    // The customisation's own description; empty when it has none.
+    std::string description{};
+    // The file the build compiled it in from, by its name alone. Empty for a
+    // built-in that was not compiled in: a file the seam named, a test's
+    // stand-in.
+    std::string source{};
+    // As a host holds it; `problem` says why `customisation` is null.
+    BuiltInCustomisation builtIn{};
+};
+
+// EVERY built-in compiled into this program, parsed once, at the first call:
+// the default first when the build has one (it IS compiledInCustomisation(),
+// shared, not parsed twice), then the alternates in the order the build gave
+// them. A file that does not parse is listed under its file name with the
+// reason in `builtIn.problem`; a later file whose customisation has an earlier
+// one's name (letter case ignored) is not offered, so that a name picks one.
+// Empty in a build that has none. Never throws.
+[[nodiscard]] const std::vector<BuiltInEntry>& builtIns();
+
+// A Katana customisation file as text: its name without a folder, and its
+// bytes. What a build compiles in, per file, and the input of builtInsFrom.
+struct BuiltInFile {
+    std::string_view file{};
+    std::string_view bytes{};
+};
+
+// builtIns() for the files it is given, apart from the build that gave them, so
+// that its two rules are tested whatever this build compiled in: a file that
+// does not parse is listed under its file name with the reason in
+// `builtIn.problem`, and a later file with an earlier one's name (letter case
+// ignored) is not offered. `firstParsed`, when set, is the first file's built-in
+// already parsed (compiledInCustomisation(), which is shared, not parsed twice);
+// it is taken as it is.
+[[nodiscard]] std::vector<BuiltInEntry> builtInsFrom(std::span<const BuiltInFile> files,
+                                                     const BuiltInCustomisation* firstParsed = nullptr);
+
+// The entry of `entries` called `name`, letter case ignored; null when there
+// is none.
+[[nodiscard]] const BuiltInEntry* findBuiltIn(std::span<const BuiltInEntry> entries,
+                                              std::string_view name);
+
+// For a project drawn with customisations the session does not have
+// (CustomisationState::missingAtOpen): the words that tell a person which of
+// them are built-ins this program offers, and what makes one the session -
+// `CUSTOMISE BUILTIN NSW makes the built-in "NSW" the session`, one clause
+// for each, joined with "; ". A project saved while an alternate was the
+// session records it by name, and a program that starts with another does not
+// have it loaded; the name is no file to load, so without these words nothing
+// says that it is here. Empty when none of `missing` is a usable entry of
+// `entries` (letter case ignored, spelled as the entry spells it).
+[[nodiscard]] std::string builtInAdviceFor(std::span<const std::string> missing,
+                                           std::span<const BuiltInEntry> entries);
+
+// The built-in of THIS RUN: what the seam says, else the default -
+// builtInCustomisationFor of the environment variable's value,
+// compiledInCustomisation() and, where the value is a bare word, builtIns().
+// THIS, and not compiledInCustomisation(), is what a front end asks for the
+// host it hands over: once, at start-up. The variable is read at each call.
+// Never throws.
 [[nodiscard]] BuiltInCustomisation builtInCustomisation();
 
-// The rule of the seam, apart from the two things it is a rule about, so that
-// it can be tested whatever this build compiled in and whatever the
-// environment holds. `seam` is the variable's value - empty when it is not
-// set - and `compiledIn` what the program has:
+// The rule of the seam, apart from the things it is a rule about, so that it
+// can be tested whatever this build compiled in and whatever the environment
+// holds. `seam` is the variable's value - empty when it is not set -
+// `compiledIn` the default the program has, and `named` the built-ins it
+// offers by name:
 //
 //   (empty)   `compiledIn`, as it is - its problem too, when it has one
 //   none      no built-in and no problem, in any letter case
+//   <name>    a value with no '/' or '\' that is the name of an entry of
+//             `named`, letter case ignored: that entry's built-in, as it is
 //   <file>    that Katana customisation file, read (readCustomisationFile).
 //             One that does not read gives none and the reason, naming the
 //             variable and the file - never `compiledIn` in its place, which
 //             would pass a test that named a fixture and got something else.
+//             For a bare word, the reason also lists the names `named` has,
+//             because a mistyped name is the likely cause.
 //
 // The file is named as text: UTF-8, or the narrow bytes an environment gave
 // (core::pathFromUtf8, which takes both and throws on neither).
 [[nodiscard]] BuiltInCustomisation builtInCustomisationFor(std::string_view seam,
-                                                           const BuiltInCustomisation& compiledIn);
+                                                           const BuiltInCustomisation& compiledIn,
+                                                           std::span<const BuiltInEntry> named = {});
 
 // The name of the environment variable the seam is.
 inline constexpr const char* kBuiltInCustomisationVariable = "KATANA_BUILTIN_CUSTOMISATION";
@@ -118,11 +198,52 @@ inline constexpr const char* kKeptCustomisationVariable = "KATANA_CUSTOMISATION"
 
 // What a front end hands over.
 struct CustomisationHost {
+    // The built-in of this run: what RESET gives and a start falls back to.
     BuiltInCustomisation builtIn{};
     // Where the user's own customisation is kept between runs. Empty: this
     // front end keeps none. The file need not exist.
     std::filesystem::path keptFile{};
+    // The built-ins this host offers by name (CUSTOMISE BUILTIN <name>). Unset:
+    // those compiled into the program, builtIns(), which is what every front
+    // end wants and none sets. A test sets it to stand in for the build, so
+    // that it is the same test on a machine whose build compiled in different
+    // files.
+    std::optional<std::vector<BuiltInEntry>> builtIns{};
 };
+
+// The built-ins `host` offers by name: its own list when it gave one, else
+// those compiled into the program. In the build's order, the default first
+// when it has one. The built-in of the run (host.builtIn) is one of them in a
+// real run, whether it is the default or the seam named another by name; a
+// seam that names a FILE makes a built-in that is none of them, which RESET
+// still gives and no list shows.
+[[nodiscard]] const std::vector<BuiltInEntry>& builtInsOf(const CustomisationHost& host);
+
+// One built-in as a person or an agent is shown it: what it holds, and how it
+// stands to this session. The one answer that CUSTOMISE BUILTIN, the JSON
+// report (customisationJson) and Settings' chooser all read, so that the three
+// cannot come to disagree.
+struct BuiltInChoice {
+    std::string name{};
+    std::string description{};
+    std::string source{};
+    // Why it is not usable, when it is not; the counts are then 0.
+    std::string problem{};
+    std::size_t definitions = 0; // linestyles and symbols together
+    std::size_t codes = 0;       // distinct keys among the rules
+    std::size_t rules = 0;
+    // The built-in of the run: the one RESET gives and the next start falls
+    // back to. (CustomisationState::builtIn names it.)
+    bool isDefault = false;
+    // The session IS this built-in as installed: its origin is the built-in
+    // and its name is this entry's. A kept or edited copy of it is not active;
+    // it is based on it (CustomisationState::basedOn).
+    bool isActive = false;
+};
+
+// `entries` as choices, in their order, against `document`'s session.
+[[nodiscard]] std::vector<BuiltInChoice> builtInChoices(const Document& document,
+                                                        std::span<const BuiltInEntry> entries);
 
 // Installs `builtIn` as the session's customisation, origin BuiltIn, based on
 // ITSELF - basedOn its own name and `builtIn.digest`, whatever its file says
@@ -149,10 +270,13 @@ struct CustomisationStart {
     std::size_t colours = 0;
     // The kept customisation was made from another built-in than this program
     // has, or another edition of it: it says what it is based on, and that is
-    // not this built-in's name and digest. It is installed all the same - it
-    // is the user's - and they may want to know that the built-in has moved
-    // on. False when the kept file does not say, and when there is no
-    // built-in to have moved on.
+    // neither the run's built-in nor any other the program offers, in the
+    // edition it has (name and digest). A copy of an alternate the user chose
+    // and kept (CUSTOMISE BUILTIN <name>, then KEEP) is made from a built-in
+    // the program has, so it is not this. The kept customisation is installed
+    // all the same - it is the user's - and they may want to know that the
+    // built-in has moved on. False when the kept file does not say, and when
+    // there is no built-in to have moved on.
     bool keptFromAnotherBuiltIn = false;
     // What went wrong, in sentences: the built-in that did not parse, the
     // kept file that did not read (the built-in then stands in for it).
