@@ -39,16 +39,18 @@ class CredentialStore {
   public:
     virtual ~CredentialStore() = default;
 
-    // The stored token, without the ASCII blanks at its ends (core::trimmed). Never logs
-    // the value.
+    // The stored token, without the white space and the invisible characters at its ends
+    // (ASCII blanks, a no-break or zero-width space, a direction mark, a byte-order mark: what
+    // a token copied from a web page or a chat arrives with). Never logs the value.
     //
     // The errors, which a caller must tell apart:
-    //   NotFound      there is none: unset, empty or only blanks. "Absent" is the normal
+    //   NotFound      there is none: unset, empty or only ASCII blanks. "Absent" is the normal
     //                 state, so it is not an error to report loudly.
     //   InvalidState  there is something, and it is not a usable token (a control character,
-    //                 an inner space such as a pasted "Bearer " prefix, over 2560 bytes, not
-    //                 UTF-8). The message names the place, never the value, so a person can
-    //                 correct it.
+    //                 an inner space such as a pasted "Bearer " prefix, or an invisible
+    //                 character inside it, over 2560 bytes, not UTF-8; a value of only
+    //                 invisible characters too). The message names the place, never the
+    //                 value, so a person can correct it.
     //   Unsupported   Windows only: the Credential Manager cannot be used in this session
     //                 (a service or batch logon with no profile, a stripped image).
     //   Internal      Windows only: any other Credential Manager failure; the Windows error
@@ -61,9 +63,9 @@ class CredentialStore {
     [[nodiscard]] virtual core::Result<std::string> read() const = 0;
 
     // Stores the token (replacing one). The same token rule as read(): InvalidArgument for
-    // an empty, over-long, control-character, inner-space or non-UTF-8 token. Unsupported
-    // where the store is read-only (the environment), and for an unusable Credential Manager;
-    // Internal for its other failures.
+    // an empty, over-long, control-character, inner-space, invisible-character or non-UTF-8
+    // token. Unsupported where the store is read-only (the environment), and for an unusable
+    // Credential Manager; Internal for its other failures.
     [[nodiscard]] virtual core::Status write(std::string_view token) = 0;
 
     // Removes it; success when none was stored. Unsupported where read-only or where the

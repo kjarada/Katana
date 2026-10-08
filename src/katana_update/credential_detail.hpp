@@ -26,18 +26,22 @@ namespace katana::update::detail {
 // 2021 note on the new token formats), far inside this.
 inline constexpr std::size_t kMaxTokenBytes = 2560;
 
-// `token` itself when it can be used as a token, else why not (InvalidArgument; the callers
-// re-code it InvalidState when what they read is not usable). The caller trims it first
-// (core::trimmed: a token pasted into a field or exported from `$(cat file)` arrives with a
-// newline, and none of those characters can be part of one). A token goes into an HTTP header
+// `token` itself, without the white space and the invisible characters around it (ASCII blanks,
+// and Unicode's White_Space and zero-width and direction format characters, in any order and
+// number: a token copied from a web page or a chat arrives with a no-break space, and an editor
+// that saves "UTF-8" can put a byte-order mark in front of one), when it can be used as a token,
+// else why not (InvalidArgument; the callers re-code it InvalidState when what they read is not
+// usable). The callers trim ASCII first to tell "nothing there" from "not usable"; a token pasted
+// into a field or exported from `$(cat file)` arrives with a newline, and none of those
+// characters can be part of one. A token goes into an HTTP header
 // (`Authorization: Bearer <token>`), so a control character - 0x00 to 0x1F and 0x7F, above all a
 // carriage return or a line feed, which would end the header and begin another - is refused
-// wherever the token comes from. So is a space inside it: a token is one word, and a person who
-// pastes "Bearer ghp_..." would otherwise send "Authorization: Bearer Bearer ghp_..." and meet a
-// 401 that says nothing of the cause. Non-ASCII text is allowed: the store keeps whatever valid
-// UTF-8 it is given, and the server is the judge of what it accepts. `source` goes into the
-// error's context and must not be the token. Defined in credential_env.cpp, which is compiled on
-// every platform.
+// wherever the token comes from. So is a space inside it, ASCII or not (a no-break space, a
+// zero-width space): a token is one word, and a person who pastes "Bearer ghp_..." would otherwise
+// send "Authorization: Bearer Bearer ghp_..." and meet a 401 that says nothing of the cause. Other
+// non-ASCII text is allowed: the store keeps whatever valid UTF-8 it is given, and the server is
+// the judge of what it accepts. `source` goes into the error's context and must not be the token.
+// Defined in credential_env.cpp, which is compiled on every platform.
 [[nodiscard]] core::Result<std::string_view> usableToken(std::string_view token,
                                                          std::string_view source);
 
@@ -63,6 +67,14 @@ inline constexpr std::size_t kMaxTokenBytes = 2560;
 // <windows.h> stays out of this header.
 [[nodiscard]] core::Error credentialError(unsigned long code, std::string_view action,
                                           const std::string& target);
+
+// The same store with the three system calls (CredReadW, CredWriteW, CredDeleteW) replaced by calls
+// that fail with the Win32 error `code`, nothing stored or removed. A test cannot make a session
+// without a Credential Manager, and with this it holds what read(), write() and clear() each make
+// of a failure: the action they name and the kind of error. Same precondition on `target`.
+// Defined in credential_win.cpp.
+[[nodiscard]] std::unique_ptr<CredentialStore>
+makeCredentialManagerStoreFailingWith(std::string_view target, unsigned long code);
 
 // The wide target name `store` passes to the system, or empty when `store` is not a Credential
 // Manager store. A seam for a test, which checks the name a person's `cmdkey` command has to use
