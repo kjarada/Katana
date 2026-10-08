@@ -157,16 +157,31 @@ inline constexpr std::string_view kHeights = "utility.heights";
 // report's "recycled water" would need quoting.
 [[nodiscard]] std::string_view utilityTypeWord(katana::survey::subsurface::UtilityType type);
 
-// The colour a kind of service's layers are made in. Katana's defaults,
-// following the colours Australian locators commonly mark services in -
-// AS 5488 classifies information and sets no colours - adjusted so each reads
-// on the dark plan view AND on white paper: yellow gas is drawn dark gold and
-// cream sewer a darker cream, since the marking colours vanish on paper.
-// Telecommunications is white, which the plot prints black (PlotSettings::
-// whiteToBlack). docs/subsurface_utilities.md has the table. Only a layer the
-// drawing creates takes it; a person's own colour on an existing layer stays.
+// The colour a kind of service's layers are made in: AS 5488's. The standard's
+// primary code and line colour table (AS 5488.1, Appendix B) names one for each
+// service - water blue, electricity orange, communications white, gas yellow,
+// sewer cream, stormwater green, recycled water purple, fire service red,
+// unidentified services pink, petroleum (fuel) brown - and gives no sRGB, so
+// each value is Katana's rendering of the name. The standard leaves the
+// colours of a plan to whoever draws it (clause 1.2.2 of the 2013 edition), so
+// Katana follows its table and is not required to. The Katana Standard survey
+// library draws a coded service in the same values, and a test holds the two
+// equal. ITS and "other" have no AS 5488 colour and are Katana's choice. Each
+// reads at least 3:1 against the plan view's ground. On white paper each does
+// too, except yellow gas and cream sewer, which cannot and still be yellow and
+// cream: they print light.
+// Communications is white, which the plot prints black (PlotSettings::
+// whiteToBlack). docs/subsurface_utilities.md, "Colours", has the sources and
+// the table. Only a layer the drawing creates takes it; a person's own colour
+// on an existing layer stays.
 [[nodiscard]] katana::entity::Color
 utilityTypeColour(katana::survey::subsurface::UtilityType type);
+
+// AS 5488's name for that colour: "blue", "orange", "white", "yellow",
+// "purple", "red", "cream", "green", "brown" or "pink". Empty where AS 5488
+// names no colour for the kind and its colour is Katana's own (its, other).
+[[nodiscard]] std::string_view
+utilityTypeColourName(katana::survey::subsurface::UtilityType type);
 
 // The linetype a quality level's layers are drawn in: "continuous" for QL-A,
 // "utility-ql-b", "utility-ql-c" and "utility-ql-d" for the others.

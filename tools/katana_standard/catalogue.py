@@ -77,6 +77,18 @@ def bullets(doc, marker, end):
 def catalogue(data, root):
     import os
     colours = data.colours
+
+    def on_white(name):
+        """The "On white" cell: the contrast as the pen prints, and what the print does to a colour that is not
+        printed as drawn."""
+        value = colours.COLOURS[name]
+        ratio = colours.paper_contrast(value)
+        if colours.printed(value) != value:
+            return "%.2f : 1 (prints black)" % ratio
+        if name in colours.PRINTS_LIGHT:
+            return "%.2f : 1 (prints light)" % ratio
+        return "%.2f : 1" % ratio
+
     codes_module = data.codes_module
     sym_module = _sibling("symbols")
     lin_module = _sibling("linestyles")
@@ -145,8 +157,9 @@ def catalogue(data, root):
         ["Survey codes", "%d, each three capital letters, in %d classes and %d subgroups; %d rules" %
          (n_codes, data.classes, len(group_order) - 1, n_rules)],
         ["Layers", "%d, always three levels (`class/subgroup/family`), lower case" % len(layers)],
-        ["Palette", "%d named colours, each at least 3:1 against the plan view's ground and against white paper"
-         % len(colours.COLOURS)],
+        ["Palette", "%d named colours, each at least 3:1 against the plan view's ground and against white paper "
+                    "as it prints (yellow gas and cream sewer, which are AS 5488's, print light); the service "
+                    "colours are AS 5488's and `UTILITY DRAW`'s" % len(colours.COLOURS)],
         ["Says nothing of", "linework control words and import automation: loading it never resets a colleague's "
                             "spellings or switches"],
         ["Notice", " ".join(data.NOTICE)],
@@ -244,32 +257,52 @@ def catalogue(data, root):
     w("Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it colours, and none can "
       "fold onto one of the 27 standard names Katana already knows. Each is at least 3:1 against the plan "
       "view's ground (`%s`, a blue-grey that is almost black) and against white paper, since one library is "
-      "plotted and read on the screen; and no two are closer than 0.05 in OKLab, about where two thin lines "
-      "of different colour stop being told apart. That leaves only a narrow band of lightness, so the six warm "
-      "classes (kerb, wall, contour, fuel, fence, breakline) were placed by a search, each at least %.2f from "
-      "every other colour, and the six classes drawn with the thinnest pens (tree, planting, ground, building, "
-      "wall, communications) keep at least %.2f : 1 on both grounds. The six buried-service colours follow the "
-      "widely published convention for marking buried utilities (water blue, sewer green, gas yellow, "
-      "electricity red, communications orange, recycled water purple), tuned so the yellow and the orange still "
-      "read on white. Colour does not carry a class alone: for a reader who confuses red with green some warm "
-      "pairs stay close whatever their values, so every pipe has its letter and every line class its own pattern."
-      % (colours.GROUND, colours.WARM_FLOOR, colours.THIN_FLOOR))
+      "plotted and read on the screen (two AS 5488 colours are excused on paper, below); and no two are closer "
+      "than 0.05 in OKLab, about where two thin lines of different colour stop being told apart. That leaves "
+      "only a narrow band of lightness, so the six warm classes (kerb, wall, contour, fuel, fence, breakline) "
+      "were placed by a search, each at least %.2f from every other colour, and the six classes drawn with the "
+      "thinnest pens (tree, planting, ground, building, wall, communications) keep at least %.2f : 1 on both "
+      "grounds, as they print. Colour does not carry a class alone: for a reader who confuses red with green "
+      "some warm pairs stay close whatever their values, so every pipe has its letter and every line class its "
+      "own pattern." % (colours.GROUND, colours.WARM_FLOOR, colours.THIN_FLOOR))
     w("")
-    w("**The two utility conventions differ.** Katana's own `UTILITY DRAW` has colours of its own "
-      "(electricity orange, communications white, sewer cream, stormwater green; `docs/subsurface_utilities.md`: "
-      "they are Katana's defaults, and AS 5488 sets none). A drawing that mixes coded survey strings and "
-      "`UTILITY DRAW` output has two conventions in it and wants a legend. Aligning one to the other is the "
-      "owner's decision (\"Not done\").")
+    w("**The service colours are AS 5488's.** AS 5488.1 has a primary code and line colour table (its "
+      "Appendix B) that names a colour for each service: water blue, electricity orange, communications white "
+      "(black when drawn on a white ground), gas yellow, sewer cream, stormwater and drainage green, recycled "
+      "water purple, fire service red and unidentified services pink; published guides add petroleum brown. "
+      "The standard names the colours and gives no sRGB, and it leaves the colours of plans to whoever draws "
+      "them (clause 1.2.2 of the 2013 edition), so each value here is Katana's rendering of the name. The "
+      "sources, the names and the values are in `docs/subsurface_utilities.md`, \"Colours\". Traffic systems "
+      "have no AS 5488 colour and are Katana's choice. The US convention (electricity red, communications "
+      "orange, sewer green), which this library first used, is not Australian, so it is rejected: the "
+      "library follows AS 5488.")
+    w("")
+    w("**The two utility conventions agree.** `UTILITY DRAW` draws its layers in these same values "
+      "(`utilityTypeColour`), and `KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` holds the "
+      "library and that table equal, service by service, and holds every utility code to its service's colour. "
+      "A drawing that mixes coded survey strings and `UTILITY DRAW` output has one convention in it. Hazard is "
+      "the one other colour that moved: AS 5488's electricity orange left the old hazard orange 0.043 away, "
+      "under the 0.05 floor, so hazard is a red-orange (`#FF5A37`) 0.077 from electricity.")
+    w("")
+    w("**Yellow and cream print light.** On white paper yellow gas (%.2f : 1) and cream sewer (%.2f : 1) cannot "
+      "reach 3:1 and still be yellow and cream. The colours are the standard's, so they are not darkened: they "
+      "keep their 3:1 against the plan ground and print light, and the tests name them as the only two "
+      "excused. Communications is white, which the plot prints black (`cad::paperColour`: every channel at "
+      "230 or more), so it is held to the floor as printed (%.2f : 1). A plot that must show gas and sewer "
+      "firmly plots monochrome, which prints every pen black, or recolours those layers." %
+      (colours.paper_contrast(colours.COLOURS["katana gas"]), colours.paper_contrast(colours.COLOURS["katana sewer"]),
+       colours.paper_contrast(colours.COLOURS["katana telecom"])))
     w("")
     w("![The 28 colours of Katana Standard on the plan ground and on white paper](" + IMAGES + "palette.png)")
     w("")
     for heading, names in colours.FAMILIES:
         w("**%s**" % heading)
         w("")
-        w(table(["Colour", "Value", "Used for", "On the ground", "On white"],
+        w(table(["Colour", "Value", "Used for", "AS 5488", "On the ground", "On white"],
                 [["`%s`" % n, "`%s`" % colours.COLOURS[n], colours.ROLES[n],
+                  colours.AS5488_NAMES.get(n) or ("Katana's choice" if n in colours.AS5488_NAMES else ""),
                   "%.2f : 1" % colours.contrast(colours.COLOURS[n], colours.GROUND),
-                  "%.2f : 1" % colours.contrast(colours.COLOURS[n], colours.PAPER)] for n in names]))
+                  on_white(n)] for n in names]))
         w("")
 
     # ---- linestyles -------------------------------------------------------------------------------------------
@@ -281,7 +314,8 @@ def catalogue(data, root):
     w("![All %d linestyles of Katana Standard, drawn by Katana](" % n_ls + IMAGES + "linestyles.png)")
     w("")
     w("*One sample of each, drawn by a code that uses it. Pen weights are not yet applied, so every line is the "
-      "same width here.*")
+      "same width here. This is a plot on white paper: the communications cable prints black, and the sewer and "
+      "gas pipes print light, since AS 5488's cream and yellow are under 3:1 on white (see the palette).*")
     w("")
     w("**How they are drawn.** The rules the data's own check enforces:")
     w("")
@@ -481,8 +515,10 @@ def catalogue(data, root):
     w("- **It is not the built-in.** The default stays the existing built-in, and a second compiled-in "
       "customisation with a chooser would touch the window, `katana_cli` and `katana_mcp` alike. Whether Katana "
       "Standard becomes the default, or a second built-in with a chooser, is the owner's decision.")
-    w("- **The colour convention** of the buried services differs from `UTILITY DRAW`'s. Aligning one to the "
-      "other is the owner's decision.")
+    w("- **Yellow and cream print light.** AS 5488's gas and sewer colours are under 3:1 on white paper, and the "
+      "plot has no rule that darkens a light colour: it turns only white and near-white pens black "
+      "(`cad::paperColour`). A rule that did, for any pen under 3:1, would change every plot, so it is the "
+      "owner's decision; until then they print light, as the palette section says.")
     w("- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the "
       "project licence does not cover and says the library is covered; the library was written by AI agents "
       "under the owner's direction, and what that means for copyright is a question for the owner and a lawyer.")

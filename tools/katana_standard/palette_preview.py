@@ -4,8 +4,10 @@ with its role and both contrast ratios, grouped by family.
     python tools/katana_standard/palette_preview.py [--out docs/images/katana-standard-palette.png] [--scale 2]
 
 The picture is the proof of the palette's two promises (colours.py): each colour holds at least 3:1 against
-the dark ground and against white, and no two colours are close enough to be taken for each other. Each
-row shows the colour as a chip, as a line and as a ring, the three forms in which a plan uses it.
+the dark ground and against white as it prints, and no two colours are close enough to be taken for each
+other. The exception is AS 5488's yellow gas and cream sewer, which print light and are marked so. On the
+white panel each colour is drawn as the plot prints it (white prints black). Each row shows the colour as a
+chip, as a line and as a ring, the three forms in which a plan uses it.
 Needs Pillow; nothing else.
 """
 import os
@@ -20,9 +22,11 @@ import colours  # noqa: E402
 PANELS = (
     # (ground, heading ink, body ink, quiet ink, rule, which contrast to print, its label)
     {"ground": colours.GROUND, "head": "#E8ECF2", "body": "#C5CCD6", "quiet": "#7C8696", "rule": "#2E353E",
-     "other": colours.PAPER, "title": "On the plan view", "note": "ground #1E2329"},
+     "other": colours.PAPER, "title": "On the plan view", "note": "ground #1E2329", "paper": False,
+     "claim": "{n} colours against {note}: each holds at least 3 : 1"},
     {"ground": colours.PAPER, "head": "#1D232B", "body": "#3B4450", "quiet": "#7B8491", "rule": "#E3E6EA",
-     "other": colours.GROUND, "title": "On white paper", "note": "paper #FFFFFF"},
+     "other": colours.GROUND, "title": "On white paper", "note": "paper #FFFFFF", "paper": True,
+     "claim": "{n} colours as they print on {note}: 3 : 1 each, but AS 5488's yellow and cream print light"},
 )
 
 
@@ -56,8 +60,7 @@ def palette_sheet(path, scale=2):
         x0 = n * panel_w
         draw.rectangle([x0, 0, x0 + panel_w, height], fill=panel["ground"])
         draw.text((x0 + margin, 22 * s), panel["title"], font=f_title, fill=panel["head"])
-        draw.text((x0 + margin, 54 * s),
-                  f"{len(colours.COLOURS)} colours against {panel['note']}: each holds at least 3 : 1",
+        draw.text((x0 + margin, 54 * s), panel["claim"].format(n=len(colours.COLOURS), note=panel["note"]),
                   font=f_role, fill=panel["quiet"])
         y = head_h
         for heading, names in colours.FAMILIES:
@@ -67,6 +70,8 @@ def palette_sheet(path, scale=2):
             y += family_h
             for name in names:
                 value = colours.COLOURS[name]
+                if panel["paper"]:
+                    value = colours.printed(value)  # as the plot prints it: white is black on white paper
                 mid = y + row_h // 2
                 chip = [x0 + margin, mid - 9 * s, x0 + margin + 44 * s, mid + 9 * s]
                 draw.rounded_rectangle(chip, radius=4 * s, fill=value)
@@ -77,7 +82,13 @@ def palette_sheet(path, scale=2):
                 draw.text((x0 + margin + 142 * s, mid), name, font=f_name, fill=panel["head"], anchor="lm")
                 draw.text((x0 + margin + 276 * s, mid), colours.ROLES[name], font=f_role, fill=panel["body"], anchor="lm")
                 ratio = colours.contrast(value, panel["ground"])
-                draw.text((x0 + panel_w - margin, mid), f"{ratio:.2f} : 1", font=f_num, fill=panel["body"], anchor="rm")
+                note = ""
+                if panel["paper"] and value != colours.COLOURS[name]:
+                    note = "  prints black"
+                elif panel["paper"] and name in colours.PRINTS_LIGHT:
+                    note = "  prints light"
+                draw.text((x0 + panel_w - margin, mid), f"{ratio:.2f} : 1{note}", font=f_num, fill=panel["body"],
+                          anchor="rm")
                 y += row_h
 
     # The footer sits across both panels, on the plan ground.
@@ -89,10 +100,11 @@ def palette_sheet(path, scale=2):
     draw.text((margin, foot_y + 16 * s),
               "Closest pairs in OKLab (the floor is 0.05): " + pairs + ".", font=f_note, fill=ink)
     draw.text((margin, foot_y + 38 * s),
-              "The buried-service colours follow the widely published marking convention: water blue, sewer green, gas yellow, "
-              "electricity red, communications orange, recycled water purple.", font=f_note, fill=quiet)
+              "The buried-service colours are AS 5488's: water blue, electricity orange, communications white, gas yellow, "
+              "sewer cream, stormwater green, recycled water purple, fire service red, unidentified pink, petroleum brown.",
+              font=f_note, fill=quiet)
     draw.text((margin, foot_y + 58 * s),
-              "Katana's UTILITY DRAW has colours of its own (AS 5488 sets none), so a drawing that mixes the two needs a legend.",
+              "AS 5488 names the colours and gives no sRGB: these values are Katana's, and the same ones UTILITY DRAW draws in.",
               font=f_note, fill=quiet)
     image.save(path)
     return image.size

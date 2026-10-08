@@ -16,6 +16,8 @@
 #include <iterator>
 #include <set>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/plot.hpp"
@@ -313,12 +315,156 @@ TEST(UtilityDrawing, EachQualityLevelHasADistinctLinetypeInModelMetres)
     EXPECT_EQ(qualityLevelLinetype(sub::QualityLevel::D).pattern.front().isDot(), true);
 }
 
-TEST(UtilityDrawing, EveryTypeColourReadsOnTheScreenAndOnPaper)
+namespace {
+
+// A colour's place on the hue wheel, as the textbook HSV model puts it: hue in
+// degrees (red 0, yellow 60, green 120, blue 240), saturation and value 0 to 1.
+// Independent of the program: it is what says "this sRGB is orange".
+struct Hsv {
+    double hue;
+    double saturation;
+    double value;
+};
+
+Hsv hsv(katana::entity::Color colour)
+{
+    const double r = colour.r / 255.0;
+    const double g = colour.g / 255.0;
+    const double b = colour.b / 255.0;
+    const double high = std::max({r, g, b});
+    const double span = high - std::min({r, g, b});
+    double hue = 0.0;
+    if (span > 0.0) {
+        if (high == r) {
+            hue = 60.0 * std::fmod((g - b) / span, 6.0);
+        } else if (high == g) {
+            hue = 60.0 * ((b - r) / span + 2.0);
+        } else {
+            hue = 60.0 * ((r - g) / span + 4.0);
+        }
+        if (hue < 0.0) {
+            hue += 360.0;
+        }
+    }
+    return {hue, high == 0.0 ? 0.0 : span / high, high};
+}
+
+// The region of hue, saturation and value a colour name covers, for the ten
+// colours AS 5488 names. The bands are wide enough that any plain example of
+// the colour is in one, and none overlaps another (orange and brown differ in
+// value, yellow and cream in saturation), so a value that is in a band is that
+// colour and no other.
+struct Band {
+    std::string_view name;
+    double hueLow;
+    double hueHigh; // a band across red is written with low > high: 352 to 8
+    double saturationLow;
+    double saturationHigh;
+    double valueLow;
+    double valueHigh;
+};
+
+constexpr Band kBands[] = {
+    {"blue", 200.0, 250.0, 0.5, 1.0, 0.5, 1.0},
+    {"orange", 20.0, 40.0, 0.9, 1.0, 0.8, 1.0},
+    {"white", 0.0, 360.0, 0.0, 0.02, 0.98, 1.0},
+    {"yellow", 45.0, 60.0, 0.9, 1.0, 0.95, 1.0},
+    {"purple", 260.0, 290.0, 0.5, 1.0, 0.5, 1.0},
+    {"red", 352.0, 8.0, 0.7, 1.0, 0.8, 1.0},
+    {"cream", 40.0, 55.0, 0.15, 0.35, 0.9, 1.0},
+    {"green", 100.0, 140.0, 0.9, 1.0, 0.6, 1.0},
+    {"brown", 20.0, 40.0, 0.5, 0.9, 0.3, 0.7},
+    {"pink", 320.0, 345.0, 0.5, 0.8, 0.9, 1.0},
+};
+
+bool inBand(const Band& band, katana::entity::Color colour)
+{
+    const Hsv c = hsv(colour);
+    const bool hue = band.hueLow <= band.hueHigh ? (c.hue >= band.hueLow && c.hue <= band.hueHigh)
+                                                  : (c.hue >= band.hueLow || c.hue <= band.hueHigh);
+    return hue && c.saturation >= band.saturationLow && c.saturation <= band.saturationHigh &&
+           c.value >= band.valueLow && c.value <= band.valueHigh;
+}
+
+} // namespace
+
+TEST(UtilityDrawing, TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays)
+{
+    // The ten types AS 5488 names a colour for, with the name its Appendix B
+    // table gives, as the published guides state it (docs/subsurface_utilities.md,
+    // "Colours"). Written here, apart from the table, so the table is held to it.
+    const std::vector<std::pair<sub::UtilityType, std::string_view>> as5488{
+        {sub::UtilityType::Water, "blue"},
+        {sub::UtilityType::Electricity, "orange"},
+        {sub::UtilityType::Telecommunications, "white"},
+        {sub::UtilityType::Gas, "yellow"},
+        {sub::UtilityType::RecycledWater, "purple"},
+        {sub::UtilityType::FireService, "red"},
+        {sub::UtilityType::Sewer, "cream"},
+        {sub::UtilityType::Stormwater, "green"},
+        {sub::UtilityType::Fuel, "brown"},
+        {sub::UtilityType::Unknown, "pink"}};
+    ASSERT_EQ(as5488.size(), 10u);
+    std::set<sub::UtilityType> named;
+    for (const auto& [type, name] : as5488) {
+        named.insert(type);
+        EXPECT_EQ(utilityTypeColourName(type), name) << utilityTypeWord(type);
+        const katana::entity::Color colour = utilityTypeColour(type);
+        std::vector<std::string_view> reads;
+        for (const Band& band : kBands) {
+            if (inBand(band, colour)) {
+                reads.push_back(band.name);
+            }
+        }
+        // It reads as the colour it is named, and as no other of the ten.
+        EXPECT_EQ(reads, std::vector<std::string_view>{name})
+            << utilityTypeWord(type) << " " << colour.toHex();
+    }
+    EXPECT_EQ(named.size(), 10u) << "each type is named once";
+    // The other two kinds have no AS 5488 colour: Katana's choice, and said to
+    // be, by naming none. Together the twelve are every kind there is.
+    std::set<sub::UtilityType> katanasOwn;
+    for (const sub::UtilityType type : everyType()) {
+        if (utilityTypeColourName(type).empty()) {
+            katanasOwn.insert(type);
+        }
+    }
+    EXPECT_EQ(katanasOwn, (std::set<sub::UtilityType>{sub::UtilityType::IntelligentTransport,
+                                                       sub::UtilityType::Other}));
+    EXPECT_EQ(everyType().size(), named.size() + katanasOwn.size());
+}
+
+TEST(UtilityDrawing, OnPaperCommunicationsPrintsBlackAndYellowGasAndCreamSewerPrintAsDrawn)
+{
+    // The plot's white rule turns white and near-white pens black and nothing
+    // else (plot.hpp), so AS 5488's white is legible on paper and its yellow
+    // and cream are not darkened: they print light, which docs/subsurface_
+    // utilities.md says. The day a plot rule darkens light colours this test
+    // fails, and so do those words.
+    const katana::cad::PlotSettings plot;
+    EXPECT_EQ(katana::cad::paperColour(utilityTypeColour(sub::UtilityType::Telecommunications), plot),
+              (katana::entity::Color{0, 0, 0, 255}));
+    EXPECT_EQ(katana::cad::paperColour(utilityTypeColour(sub::UtilityType::Gas), plot),
+              utilityTypeColour(sub::UtilityType::Gas));
+    EXPECT_EQ(katana::cad::paperColour(utilityTypeColour(sub::UtilityType::Sewer), plot),
+              utilityTypeColour(sub::UtilityType::Sewer));
+    katana::cad::PlotSettings dark = plot;
+    dark.whiteToBlack = false;
+    EXPECT_EQ(katana::cad::paperColour(utilityTypeColour(sub::UtilityType::Telecommunications), dark),
+              utilityTypeColour(sub::UtilityType::Telecommunications))
+        << "it is the white rule that makes it black, not the colour";
+}
+
+TEST(UtilityDrawing, EveryTypeColourReadsOnTheScreenAndOnPaperExceptYellowAndCreamWhichPrintLight)
 {
     // The plan view's ground (viewport_widget.cpp) and a colour plot on white.
     const katana::entity::Color screen{0x1E, 0x23, 0x29, 255};
     const katana::entity::Color paper{255, 255, 255, 255};
     const katana::cad::PlotSettings plot;
+    // AS 5488's yellow gas and cream sewer cannot be 3:1 on white and still be
+    // yellow and cream, so they keep the screen's 3:1 and print light. Nothing
+    // else is excused, and neither is excused more than it needs.
+    const std::set<sub::UtilityType> printLight{sub::UtilityType::Gas, sub::UtilityType::Sewer};
     std::set<std::string> words;
     std::set<std::string> colours;
     for (const sub::UtilityType type : everyType()) {
@@ -328,9 +474,19 @@ TEST(UtilityDrawing, EveryTypeColourReadsOnTheScreenAndOnPaper)
         const katana::entity::Color colour = utilityTypeColour(type);
         colours.insert(colour.toHex());
         EXPECT_GE(contrast(colour, screen), 3.0) << word << " " << colour.toHex();
-        EXPECT_GE(contrast(katana::cad::paperColour(colour, plot), paper), 3.0)
-            << word << " " << colour.toHex();
+        const double onPaper = contrast(katana::cad::paperColour(colour, plot), paper);
+        if (printLight.contains(type)) {
+            EXPECT_LT(onPaper, 3.0) << word << " needs no exception: take it off the list";
+        } else {
+            EXPECT_GE(onPaper, 3.0) << word << " " << colour.toHex();
+        }
     }
+    // Worked by hand: yellow #FFD500 has luminance 0.2126 + 0.7152 * 0.66539 =
+    // 0.68848, so 1.05 / 0.73848 = 1.4218 on white; cream #F0E2B0 has 0.2126 *
+    // 0.87137 + 0.7152 * 0.76052 + 0.0722 * 0.43415 = 0.76053, so 1.05 /
+    // 0.81053 = 1.2955.
+    EXPECT_NEAR(contrast(utilityTypeColour(sub::UtilityType::Gas), paper), 1.4218, 0.0005);
+    EXPECT_NEAR(contrast(utilityTypeColour(sub::UtilityType::Sewer), paper), 1.2955, 0.0005);
     EXPECT_EQ(words.size(), everyType().size());
     EXPECT_EQ(colours.size(), everyType().size());
     EXPECT_EQ(utilityTypeWord(sub::UtilityType::RecycledWater), "recycled-water");
