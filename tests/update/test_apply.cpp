@@ -11,10 +11,12 @@
 
 #include <gtest/gtest.h>
 
+#include <cctype>
 #include <thread>
 
 #include "apply_harness.hpp"
 #include "command_line.hpp"
+#include "recover_internal.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -660,8 +662,11 @@ TEST(ApplyRefusals, AManifestForAnotherTargetIsRefused)
     StdFs disk;
     Rig rig(s, disk);
     const ApplyResult result = rig.run();
+    // verifyManifest (trust.cpp) is what asks "is this signed for this install's target", with
+    // the helper's own code, so that is the token and that is the sentence.
     EXPECT_EQ(result.outcome, ApplyOutcome::Refused);
-    EXPECT_TRUE(result.reason == "staged_manifest" || result.reason == "wrong_target") << result.reason;
+    EXPECT_EQ(result.reason, "staged_manifest");
+    EXPECT_NE(result.detail.find("another target"), std::string::npos) << result.detail;
     expectUntouched(s, result);
 }
 
@@ -1612,6 +1617,8 @@ TEST(ApplyHealth, AMarkerFollowedByANonZeroExitIsNotHealthyButAHungExitAfterTheM
         EXPECT_EQ(result.outcome, ApplyOutcome::RolledBack);
         EXPECT_EQ(result.reason, "health_exit");
         EXPECT_EQ(treeHash(s.root), s.v1Hash);
+        EXPECT_FALSE(isPresent(healthMarkerPath(s.state, rig.tx)))
+            << "the marker of a start that then failed is not left in the state folder";
     }
     {
         Scenario s("apply-health-marker-hang");
@@ -1711,6 +1718,233 @@ TEST(ApplyHealth, WhatALockKeepsFromBeingDeletedAfterAHealthyUpdateIsQueuedForTh
     EXPECT_EQ(treeHash(s.root), s.v2Hash);
 }
 
+// ---- what is left alone, what is planned, and where a rollback must reach --------------------------------------------
+
+TEST(Apply, FilesThatAreAlreadyRightAreNeitherCopiedNorMovedAndThePlanNamesExactlyWhatChanges)
+{
+    Scenario s("apply-keep");
+    buildFixtureScenario(s);
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(s, log);
+    ASSERT_EQ(rig.run().outcome, ApplyOutcome::Committed);
+
+    // Read off the T3 fixtures' two manifests by hand: katana_cli.exe, libcore-1.dll, empty.txt
+    // and random.bin have the same SHA-256 in v1 and v2, and settings.ini is a seed that is
+    // already there. Not one of them may be copied or moved - this is the whole point of
+    // deciding by hash, and the tree comes out the same if it is not done.
+    for (const char* kept : {"katana_cli.exe", "libcore-1.dll", "empty.txt", "random.bin", "settings.ini"}) {
+        for (const std::string& operation : log.log) {
+            if (operation.rfind("copyFile", 0) == 0 || operation.rfind("renameFile", 0) == 0) {
+                EXPECT_EQ(operation.find(kept), std::string::npos) << kept << " was touched: " << operation;
+            }
+        }
+    }
+
+    // The PLAN group lists exactly the files that change, are added or are removed, and the
+    // folder that has to be made - and the three records the helper writes.
+    const std::uint64_t at = log.find("appendDurable", " 1 PLAN ");
+    ASSERT_GT(at, 0u);
+    const std::string& line = log.log[at - 1];
+    const ParsedJournal plan = parseJournal(line.substr(line.find(" 1 PLAN ") + 1));
+    std::set<std::string> planned;
+    for (const JournalRecord& record : plan.records) {
+        if (record.op != JournalOp::Plan) {
+            ASSERT_EQ(record.args.size(), 1u);
+            planned.insert(std::string(toString(record.op)) + " " + record.args[0]);
+        }
+    }
+    const std::set<std::string> expected = {
+        "REPLACE bin/katana.exe",
+        "REPLACE share/katana/readme.txt",
+        "ADD bin/libnew-2.dll",
+        "ADD share/katana/help/index.txt",
+        "ADD share/katana/news.txt",
+        "REMOVE bin/libold-1.dll",
+        "REMOVE share/katana/legacy/old.txt",
+        "REPLACE share/katana/installed.json",
+        "REPLACE share/katana/installed.manifest.json",
+        "REPLACE share/katana/installed.manifest.json.sig",
+        "MKDIR share/katana/help",
+    };
+    EXPECT_EQ(planned, expected);
+    // And only those were copied from the stage: five files and nothing else (the records are
+    // written, not copied).
+    EXPECT_EQ(log.all("copyFile").size(), 5u);
+}
+
+TEST(Apply, AnInstallFolderGivenWithATrailingSeparatorIsTheSameFolder)
+{
+    // A shell's tab completion adds the separator: katana_updater --recover "C:\...\Katana\".
+    Scenario s("apply-trailing-separator");
+    buildFixtureScenario(s);
+    StdFs disk;
+    Rig rig(s, disk);
+    rig.request.root = Path(core::pathToUtf8(s.root) + "/");
+    const ApplyResult result = rig.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+}
+
+TEST(Apply, TheUninstallEntryNamesTheNewVersionOnlyOnceItHasProvedItStarts)
+{
+    {
+        Scenario s("apply-registry-after-health");
+        buildFixtureScenario(s);
+        StdFs disk;
+        Rig rig(s, disk);
+        rig.registry.location = s.root;
+        std::size_t writtenWhileChecking = 99;
+        rig.launcher.onRun = [&](const SpawnRequest& request) -> core::Result<SpawnResult> {
+            writtenWhileChecking = rig.registry.versions.size();
+            return healthyStart(s.state, rig.tx)(request);
+        };
+        ASSERT_EQ(rig.run().outcome, ApplyOutcome::Committed);
+        EXPECT_EQ(writtenWhileChecking, 0u) << "not before the new version has started";
+        ASSERT_EQ(rig.registry.versions.size(), 1u);
+        EXPECT_EQ(rig.registry.versions[0].first, "0.10.0");
+    }
+    {
+        // A release that is rolled back must not be the one Settings > Apps names.
+        Scenario s("apply-registry-rolled-back");
+        buildFixtureScenario(s);
+        StdFs disk;
+        Rig rig(s, disk);
+        rig.registry.location = s.root;
+        rig.launcher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
+            SpawnResult bad;
+            bad.exitCode = 3;
+            return bad;
+        };
+        ASSERT_EQ(rig.run().outcome, ApplyOutcome::RolledBack);
+        EXPECT_TRUE(rig.registry.versions.empty());
+    }
+}
+
+TEST(ApplyPlan, TheFolderOfTheRecordsIsHeldToTheSameRuleAsEveryOtherFolder)
+{
+    REQUIRE_CAN_SIGN();
+    // No file of either release lives in share/katana, so only the three records the helper
+    // itself writes there would go through a link at share/katana.
+    Scenario s("apply-reparse-records");
+    s.v1 = smallRelease("0.1.0", 100);
+    s.v2 = smallRelease("0.2.0", 200);
+    for (ReleaseSpec* release : {&s.v1, &s.v2}) {
+        for (FileSpec& file : release->files) {
+            if (file.path == "share/katana/data.txt") {
+                file.path = "share/other/data.txt";
+            }
+        }
+    }
+    writeInstall(s.root, s.v1);
+    writeStage(s.stage, s.v2);
+    s.v1Hash = treeHash(s.root);
+    s.v1Snapshot = snapshot(s.root);
+    StdFs disk;
+    HookFs hooked(disk);
+    hooked.adjustStat = [&](const Path& p, EntryInfo& info) {
+        if (p == s.root / "share/katana") {
+            info.reparsePoint = true;
+        }
+    };
+    Rig rig(s, hooked);
+    expectRefused(s, rig.run(), "reparse_point");
+}
+
+TEST(ApplyCommit, AFileWithTwoDotsInsideItsNameIsPutBackLikeAnyOther)
+{
+    REQUIRE_CAN_SIGN();
+    // "a..b.dat" is a legal name (only "." and ".." as a whole component are not), and a
+    // release may ship one. If rollback refused it, its old file would be lost with the folder.
+    Scenario s("apply-dots-in-name");
+    s.v1 = smallRelease("0.1.0", 100);
+    s.v2 = smallRelease("0.2.0", 200);
+    s.v1.files.push_back({"share/katana/a..b.dat", "a..b of the old version\n", FileClass::Data, false});
+    s.v2.files.push_back({"share/katana/a..b.dat", "a..b of the new version\n", FileClass::Data, false});
+    writeInstall(s.root, s.v1);
+    writeStage(s.stage, s.v2);
+    s.v1Hash = treeHash(s.root);
+    s.v1Snapshot = snapshot(s.root);
+
+    StdFs disk;
+    FaultFs faults(disk);
+    // The data class goes first, in path order: a..b.dat (renames 1 and 2), then data.txt. The
+    // fourth rename, data.txt's new file into place, fails - a..b.dat is the new one by then.
+    faults.failRenameWith(4, 32);
+    Rig rig(s, faults);
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::RolledBack) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_EQ(readText(s.root / "share/katana/a..b.dat"), "a..b of the old version\n");
+    EXPECT_FALSE(isPresent(s.root / ".update" / "recovery.log")) << "no record was refused";
+}
+
+TEST(ApplyCommit, AFolderTheReleaseBringsForTheFirstTimeIsGoneAgainAfterARollback)
+{
+    REQUIRE_CAN_SIGN();
+    // etc and lib are folders of their own in the journal (a bare name that checkJournalPath
+    // refuses for a file); rollback must remove them, or the tree is not the old version's.
+    Scenario s("apply-new-top-folders");
+    s.v1 = smallRelease("0.1.0", 100);
+    s.v2 = smallRelease("0.2.0", 200);
+    s.v2.files.push_back({"etc/katana/new.cfg", "a new setting\n", FileClass::Data, false});
+    s.v2.files.push_back({"lib/plugins/x.dat", "a new plug-in\n", FileClass::Data, false});
+    writeInstall(s.root, s.v1);
+    writeStage(s.stage, s.v2);
+    s.v1Hash = treeHash(s.root);
+    s.v1Snapshot = snapshot(s.root);
+    ASSERT_FALSE(isPresent(s.root / "etc"));
+    ASSERT_FALSE(isPresent(s.root / "lib"));
+
+    StdFs disk;
+    FaultFs faults(disk);
+    // Data class in path order: etc/katana/new.cfg (rename 1), lib/plugins/x.dat (2), then
+    // data.txt: its old file moves aside (3) - and that one fails.
+    faults.failRenameWith(3, 32);
+    Rig rig(s, faults);
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::RolledBack) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_FALSE(isPresent(s.root / "etc"));
+    EXPECT_FALSE(isPresent(s.root / "lib"));
+    EXPECT_FALSE(isPresent(s.root / ".update" / "recovery.log")) << "no record was refused";
+}
+
+TEST(ApplyHealth, OnlyAStateFileThatIsNotOursToParseMayBeReplacedByTheDefaults)
+{
+    // A scanner holding state.json for a moment is a failure to READ, and the person's
+    // "automatic" and "skipped" in it are not to be forgotten for the sake of one blocked
+    // release. (A real hold cannot be told from a failed write by a test: the rename that
+    // writes the defaults fails on a held file as well, so the rule is checked on its own.)
+    EXPECT_TRUE(detail::mayReplaceUnreadableState(
+        core::makeError(core::ErrorCode::ParseFailure, "the record is not a JSON object")));
+    for (const core::ErrorCode code :
+         {core::ErrorCode::FileImportFailure, core::ErrorCode::NotFound, core::ErrorCode::Unsupported,
+          core::ErrorCode::InvalidState, core::ErrorCode::Internal}) {
+        EXPECT_FALSE(detail::mayReplaceUnreadableState(core::makeError(code, "x"))) << static_cast<int>(code);
+    }
+}
+
+TEST(ApplyHealth, AStateFileThatIsNotJsonIsReplacedByTheDefaultsAndTheBlockedRelease)
+{
+    // state.hpp: an unreadable record is carried on from with the defaults. It is already lost.
+    Scenario s("apply-health-corrupt-state");
+    buildFixtureScenario(s);
+    writeText(s.state / "state.json", "this is not json");
+    StdFs disk;
+    Rig rig(s, disk);
+    rig.launcher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
+        SpawnResult bad;
+        bad.exitCode = 3;
+        return bad;
+    };
+    ASSERT_EQ(rig.run().outcome, ApplyOutcome::RolledBack);
+    const core::Result<UpdateState> state = readState(s.state);
+    ASSERT_TRUE(state.ok());
+    EXPECT_EQ(state->blockedSequences, std::vector<std::uint64_t>{1792312800});
+    EXPECT_TRUE(state->automatic);
+}
+
 // ---- the real Windows file system -----------------------------------------------------------------------------------------------
 
 #ifdef _WIN32
@@ -1770,6 +2004,171 @@ TEST(ApplyOnWindows, TwoHelpersContendForTheLockThroughTheRealFileSystem)
     running.join();
     EXPECT_EQ(secondResult.reason, "locked");
     EXPECT_EQ(firstResult.outcome, ApplyOutcome::Committed) << firstResult.reason << firstResult.detail;
+}
+
+// ---- what only the real file system can show -----------------------------------------------------------------------------
+
+namespace {
+
+bool makeJunction(const Path& link, const Path& target)
+{
+    const std::unique_ptr<Launcher> launcher = makeSystemLauncher();
+    SpawnRequest request;
+    request.executable = Path(core::environmentVariable("SystemRoot")) / "System32" / "cmd.exe";
+    request.arguments = {"/c", "mklink", "/J", core::pathToUtf8(link), core::pathToUtf8(target)};
+    const core::Result<SpawnResult> ran = launcher->run(request);
+    return ran.ok() && ran->exitCode == 0;
+}
+
+std::unique_ptr<FsOps> realFs()
+{
+    return makeSystemFsOps(RetryPolicy{std::chrono::milliseconds(5), std::chrono::milliseconds(100)});
+}
+
+// The path with the long-path prefix, for the test's own file calls (the system's long-path
+// setting must not decide whether the test can build its tree).
+Path prefixed(const Path& path)
+{
+    return Path(L"\\\\?\\" + path.native());
+}
+
+} // namespace
+
+TEST(ApplyOnWindows, AnInstallUnderAVeryDeepFolderIsUpdatedThroughTheLongPathPrefix)
+{
+    // The root is 216 characters, so that what the library reads by the plain name stays under
+    // the 260 of the ordinary calls (the install's own files: 242 to 252) while a copy made
+    // under R/.update/<tx>/new/ does not (share/katana/readme.txt there: 261, the new help
+    // index: 265). The copy's hash must be taken through the same prefix the file system uses,
+    // or the right bytes are refused as "staged_hash".
+    //
+    // std::filesystem cannot walk a tree by its prefixed name (probed with this library: the
+    // iteration and remove_all go wrong), so the test builds and checks the install at a short
+    // place and MOVES it to the deep one for the update and back afterwards.
+    Scenario s("apply-long-root");
+    buildFixtureScenario(s);
+    const Path top = s.scratch.path() / std::string(60, 'a');
+    if (top.native().size() > 150) {
+        GTEST_SKIP() << "the temporary folder is too deep to build a root of 216 characters in it";
+    }
+    Path deep = top;
+    std::size_t index = 0;
+    while (deep.native().size() + 61 <= 190) {
+        deep /= std::string(60, static_cast<char>('b' + index++ % 20));
+    }
+    deep /= std::string(216 - deep.native().size() - 1, 'z');
+    ASSERT_EQ(deep.native().size(), 216u);
+
+    std::error_code ec;
+    fs::create_directories(prefixed(deep.parent_path()), ec);
+    ASSERT_FALSE(ec) << ec.message();
+    fs::rename(s.root, prefixed(deep), ec);
+    ASSERT_FALSE(ec) << ec.message();
+    // Whatever happens next, the install comes back to where the test can look at it, and the
+    // empty folders it stood in are removed one by one.
+    struct Restore {
+        const Scenario& scenario;
+        const Path& deep;
+        const Path& top;
+        ~Restore()
+        {
+            std::error_code error;
+            fs::rename(prefixed(deep), scenario.root, error);
+            for (Path folder = deep.parent_path(); folder.native().size() >= top.native().size();
+                 folder = folder.parent_path()) {
+                fs::remove(prefixed(folder), error);
+            }
+        }
+    } restore{s, deep, top};
+
+    const auto disk = realFs();
+    Rig rig(s, *disk);
+    rig.request.root = deep; // the ordinary spelling, as a command line carries it
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    fs::rename(prefixed(deep), s.root, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(ApplyOnWindows, AnInstallUnderAFolderWithASpaceAndNonAsciiLettersIsUpdated)
+{
+    Scenario s("apply-non-ascii-root");
+    s.root = s.scratch.path() / core::pathFromUtf8("K\xC3\xA4se \xE6\x97\xA5\xE6\x9C\xAC") / "install";
+    buildFixtureScenario(s);
+    const auto disk = realFs();
+    Rig rig(s, *disk);
+    const ApplyResult result = rig.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(ApplyOnWindows, AnInstallFolderGivenInAnotherCaseIsTheSameFolder)
+{
+    Scenario s("apply-root-case");
+    buildFixtureScenario(s);
+    std::string shouting = core::pathToUtf8(s.root);
+    for (char& c : shouting) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    const auto disk = realFs();
+    Rig rig(s, *disk);
+    rig.request.root = core::pathFromUtf8(shouting);
+    ASSERT_NE(rig.request.root.native(), s.root.native());
+    const ApplyResult result = rig.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+}
+
+TEST(ApplyOnWindows, ANameThatDiffersOnlyInCaseIsOneFileAndIsNotRemovedAfterItIsInstalled)
+{
+    REQUIRE_CAN_SIGN();
+    // v1 lists bin/Old.dll and v2 bin/old.dll: on NTFS one file. v1's manifest lists a name
+    // v2's does not (to a byte-wise comparison), but removing "Old.dll" after "old.dll" was
+    // installed would delete what was just put in place.
+    Scenario s("apply-case-removal");
+    s.v1 = smallRelease("0.1.0", 100);
+    s.v2 = smallRelease("0.2.0", 200);
+    s.v1.files.push_back({"bin/Old.dll", "the old Old.dll\n", FileClass::Lib, false});
+    s.v2.files.push_back({"bin/old.dll", "the new old.dll\n", FileClass::Lib, false});
+    writeInstall(s.root, s.v1);
+    writeStage(s.stage, s.v2);
+    const auto disk = realFs();
+    Rig rig(s, *disk);
+    const ApplyResult result = rig.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(readText(s.root / "bin/old.dll"), "the new old.dll\n");
+    std::set<std::string> names;
+    for (const auto& entry : fs::directory_iterator(s.root / "bin")) {
+        names.insert(entry.path().filename().string());
+    }
+    EXPECT_EQ(names, (std::set<std::string>{"katana.exe", "lib.dll", "old.dll"}));
+}
+
+TEST(ApplyOnWindows, ARealJunctionInsideTheInstallRefusesTheUpdateAndNothingBeyondItIsWritten)
+{
+    REQUIRE_CAN_SIGN();
+    Scenario s("apply-junction");
+    s.v1 = smallRelease("0.1.0", 100);
+    s.v2 = smallRelease("0.2.0", 200);
+    s.v2.files.push_back({"share/katana/ext/new.dat", "must not leave the install\n", FileClass::Data, false});
+    writeInstall(s.root, s.v1);
+    writeStage(s.stage, s.v2);
+    const Path outside = s.scratch.path() / "outside";
+    fs::create_directories(outside);
+    ASSERT_TRUE(makeJunction(s.root / "share" / "katana" / "ext", outside)) << "mklink /J";
+    const std::string before = treeHash(s.root);
+
+    const auto disk = realFs();
+    Rig rig(s, *disk);
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Refused) << result.reason << ": " << result.detail;
+    EXPECT_EQ(result.reason, "reparse_point");
+    EXPECT_TRUE(fs::is_empty(outside)) << "nothing was written through the junction";
+    EXPECT_EQ(treeHash(s.root), before);
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
 }
 
 #endif // _WIN32

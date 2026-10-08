@@ -291,12 +291,13 @@ core::Status Journal::append(std::span<const JournalRecord> group)
     // bad line), so a journal with a torn tail is rewritten from its good prefix instead.
     std::string rewritten;
     bool rewrite = false;
-    if (next_ == 0) {
+    std::uint64_t next = next_;
+    if (next == 0) {
         const core::Result<ParsedJournal> existing = load();
         if (!existing.ok()) {
             return existing.error();
         }
-        next_ = existing.value().records.size() + 1;
+        next = existing.value().records.size() + 1;
         if (existing.value().tornTail) {
             rewrite = true;
             std::uint64_t number = 1;
@@ -307,12 +308,16 @@ core::Status Journal::append(std::span<const JournalRecord> group)
     }
     std::string bytes;
     for (const JournalRecord& record : group) {
-        bytes += encodeRecord(next_++, record);
+        bytes += encodeRecord(next++, record);
     }
-    if (rewrite) {
-        return fs_.writeDurable(path_, rewritten + bytes);
-    }
-    return fs_.appendDurable(path_, bytes);
+    const core::Status written = rewrite ? fs_.writeDurable(path_, rewritten + bytes)
+                                         : fs_.appendDurable(path_, bytes);
+    // The numbers move on only for a group that was written. One that failed may have left
+    // part of its bytes behind, and what the file holds is then learned again by the next
+    // append (which rewrites from the good prefix): carrying on from `next` would leave a gap
+    // in the numbers, and the read stops at the first gap.
+    next_ = written.ok() ? next : 0;
+    return written;
 }
 
 core::Result<ParsedJournal> Journal::load() const

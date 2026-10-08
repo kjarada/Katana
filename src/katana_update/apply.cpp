@@ -30,6 +30,8 @@
 #include <utility>
 
 #include "command_line.hpp"
+#include "long_path.hpp"
+#include "recover_internal.hpp"
 #include "remove_tree.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/sha256.hpp"
@@ -109,6 +111,13 @@ bool isUnderOrEqual(const Path& base, const Path& path)
 {
     const Path relative = folded(path).lexically_relative(folded(base));
     return !relative.empty() && *relative.begin() != "..";
+}
+
+// The SHA-256 of a file, named the way the file system names it (long paths: long_path.hpp).
+// Hashing goes to the disk directly, not through FsOps: it only looks, and a file can be large.
+core::Result<std::string> hashFile(const Path& path)
+{
+    return core::sha256FileHex(detail::openable(path));
 }
 
 std::string jsonString(std::string_view text)
@@ -280,9 +289,50 @@ struct JournalPlan {
     std::vector<std::string> refused;     // "<op> <path>: why", for the recovery log
 };
 
+// True when a '/'-separated path has "." or ".." as a whole component - the only forms of dot
+// a path may not contain. "a..b.dat" is a file name like any other, and a rule that refused it
+// would leave the old file of a release that ships one unrestored.
+bool hasDotComponent(std::string_view path)
+{
+    std::size_t start = 0;
+    while (start <= path.size()) {
+        std::size_t end = path.find('/', start);
+        if (end == std::string_view::npos) {
+            end = path.size();
+        }
+        const std::string_view part = path.substr(start, end - start);
+        if (part == "." || part == "..") {
+            return true;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
+// What a path read back from a journal, or found under old/, must pass before anything is done
+// with it: checkJournalPath (checkJournalDirectory for the folder an MKDIR record names: a
+// release that first brings etc or lib makes that folder bare) AND a second look that stays
+// inside the root when joined, which does not depend on the first being right.
+core::Status acceptablePath(const std::string& path, bool directory)
+{
+    const core::Status allowed = directory ? checkJournalDirectory(path) : checkJournalPath(path);
+    if (!allowed.ok()) {
+        return allowed;
+    }
+    const Path parsed = core::pathFromUtf8(path);
+    const bool contained = !path.empty() && !hasDotComponent(path) &&
+                           path.find('\\') == std::string::npos &&
+                           path.find(':') == std::string::npos && !parsed.is_absolute() &&
+                           !parsed.has_root_name() &&
+                           isUnderOrEqual(Path("root"), under(Path("root"), path));
+    if (!contained) {
+        return core::makeError(core::ErrorCode::InvalidArgument, "leaves the install", path);
+    }
+    return {};
+}
+
 // Reads the PLAN group of a journal. The journal is not authenticated (journal.hpp), so a
-// path in it is acted on only if checkJournalPath accepts it - AND it stays inside the root
-// when joined, a second look that does not depend on the first being right.
+// path in it is acted on only if acceptablePath says so.
 JournalPlan readPlan(const ParsedJournal& journal)
 {
     JournalPlan plan;
@@ -310,20 +360,10 @@ JournalPlan readPlan(const ParsedJournal& journal)
             continue;
         }
         const std::string& path = record.args.front();
-        // Directories are checked as the path of a file below them would be: the same
-        // first component and the same character rules, with a name that is not a file's.
-        const core::Status allowed = checkJournalPath(path);
-        const Path joined = under(Path("root"), path);
-        const bool contained = !path.empty() && path.find("..") == std::string::npos &&
-                               path.find('\\') == std::string::npos &&
-                               path.find(':') == std::string::npos &&
-                               !core::pathFromUtf8(path).is_absolute() &&
-                               !core::pathFromUtf8(path).has_root_name() &&
-                               isUnderOrEqual(Path("root"), joined);
-        if (!allowed.ok() || !contained) {
+        const core::Status allowed = acceptablePath(path, directory);
+        if (!allowed.ok()) {
             plan.refused.push_back(std::string(toString(record.op)) + " " + path + ": " +
-                                   (allowed.ok() ? std::string("leaves the install")
-                                                 : allowed.error().describe()));
+                                   allowed.error().describe());
             continue;
         }
         if (directory) {
@@ -335,6 +375,53 @@ JournalPlan readPlan(const ParsedJournal& journal)
     return plan;
 }
 
+// Every file under `folder`, as the '/'-joined path below it (`prefix` is what comes before).
+// Nothing is followed or entered that is a link; what is not an ordinary file or folder, and
+// what is too deep to be an install's, is named in `skipped`. A folder that is not there holds
+// nothing; one that cannot be read is `unreadable`, never "empty".
+void collectFiles(const FsOps& fs, const Path& folder, const std::string& prefix, int depth,
+                  std::vector<std::string>& files, std::vector<std::string>& skipped,
+                  std::optional<core::Error>& unreadable)
+{
+    constexpr int kMaxDepth = 32;
+    const core::Result<EntryInfo> self = fs.stat(folder);
+    if (!self.ok()) {
+        unreadable = self.error();
+        return;
+    }
+    if (self->kind == EntryKind::Missing) {
+        return;
+    }
+    if (self->kind != EntryKind::Directory || self->reparsePoint) {
+        skipped.push_back(prefix.empty() ? std::string("(the folder itself)") : prefix);
+        return;
+    }
+    const core::Result<std::vector<Path>> children = fs.listDirectory(folder);
+    if (!children.ok()) {
+        unreadable = children.error();
+        return;
+    }
+    for (const Path& child : children.value()) {
+        const std::string name = core::pathToUtf8(child.filename());
+        const std::string relative = prefix.empty() ? name : prefix + "/" + name;
+        const core::Result<EntryInfo> info = fs.stat(child);
+        if (!info.ok()) {
+            unreadable = info.error();
+            continue;
+        }
+        const bool ordinary = info->kind == EntryKind::File || info->kind == EntryKind::Directory;
+        if (info->reparsePoint || !ordinary) {
+            skipped.push_back(relative);
+        } else if (info->kind == EntryKind::File) {
+            files.push_back(relative);
+        } else if (depth + 1 >= kMaxDepth) {
+            skipped.push_back(relative);
+        } else {
+            collectFiles(fs, child, relative, depth + 1, files, skipped, unreadable);
+        }
+    }
+}
+
 // Step 6, the rollback, decided from the disk. `work` is R/.update/<tx>.
 //
 // For every file the plan names:
@@ -344,8 +431,17 @@ JournalPlan readPlan(const ParsedJournal& journal)
 //   ADD              R/p exists, new/p does not -> the transaction moved it in: move it back
 //                                     to new/p. If new/p still exists R/p is not ours.
 // then the directories the transaction created go, deepest first, when they are empty.
-// Nothing here depends on what the journal says happened - only on what is there.
-core::Status restoreFromDisk(FsOps& fs, const Path& root, const Path& work, const JournalPlan& plan)
+// Nothing here depends on what the journal says happened - only on what is there. That
+// includes WHICH files there are: every file under old/ whose name an update could have written
+// goes back, whether or not the journal lists it, because the caller deletes the folder
+// afterwards and a file left in old/ is a file lost (a journal damaged in the middle, or one
+// with a record the path rules refused, must not turn into a v1/v2 mix). A name under old/ that
+// no update writes is not ours: it is added to plan.refused and goes with the folder.
+//
+// Every file in old/ is either put back, reported as a failure, or - for a REMOVE whose file
+// has been made again since - left to the person's newer file; so an OK means old/ holds nothing
+// that was meant to be kept.
+core::Status restoreFromDisk(FsOps& fs, const Path& root, const Path& work, JournalPlan& plan)
 {
     const core::Result<Path> resolvedRoot = fs.resolve(root);
     if (!resolvedRoot.ok()) {
@@ -365,7 +461,36 @@ core::Status restoreFromDisk(FsOps& fs, const Path& root, const Path& work, cons
         }
     };
 
-    for (auto entry = plan.entries.rbegin(); entry != plan.entries.rend(); ++entry) {
+    // The journal's entries, then the files old/ holds that it does not list.
+    std::vector<PlanEntry> entries = plan.entries;
+    {
+        std::set<std::string> listed;
+        for (const PlanEntry& entry : entries) {
+            listed.insert(entry.path);
+        }
+        std::vector<std::string> files;
+        std::vector<std::string> skipped;
+        std::optional<core::Error> unreadable;
+        collectFiles(fs, oldRoot, std::string(), 0, files, skipped, unreadable);
+        if (unreadable) {
+            fail(*unreadable);
+        }
+        for (const std::string& relative : files) {
+            if (listed.contains(relative)) {
+                continue;
+            }
+            if (const core::Status allowed = acceptablePath(relative, false); !allowed.ok()) {
+                skipped.push_back(relative);
+                continue;
+            }
+            entries.push_back({Action::Replace, relative});
+        }
+        for (const std::string& name : skipped) {
+            plan.refused.push_back("old/" + name + ": not a file an update puts there");
+        }
+    }
+
+    for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
         const Path target = under(root, entry->path);
         const Path oldPath = under(oldRoot, entry->path);
         const Path newPath = under(newRoot, entry->path);
@@ -476,7 +601,8 @@ void reportRefusals(FsOps& fs, const Path& root, const std::string& transaction,
 
 // The order the classes are committed in (apply.hpp, step 5), the helper's own file after
 // the other programs, the removals after every new file is in place, and the records last:
-// installed.json is the claim "this version is installed", so it is the last to change.
+// installed.json first - the claim "this version is installed" - then the signed manifest and
+// its signature (they sort in that order, and rollback does not depend on it).
 enum class Phase { Data, Lib, Program, Helper, Remove, Record };
 
 struct Entry {
@@ -506,6 +632,7 @@ class Applier {
   private:
     // ---- the steps
     std::optional<Failure> begin();
+    std::optional<Failure> readInstallRecord();
     std::optional<Failure> verify();
     std::optional<Failure> waitForQuiet();
     std::optional<Failure> plan();
@@ -549,7 +676,7 @@ class Applier {
 
 ApplyResult Applier::run()
 {
-    root_ = request_.root;
+    root_ = request_.root.empty() ? Path() : detail::normalizedRoot(request_.root);
     if (root_.empty() || !isValidTransactionId(request_.transaction)) {
         return finish(fail(refuse("invalid_request", "the helper was started with an empty "
                                                      "install folder or a transaction id that is "
@@ -587,12 +714,14 @@ ApplyResult Applier::run()
         return finish(fail(refuse("journal", "the journal cannot be written", written.error()),
                            true));
     }
+    if (const std::optional<Failure> failure = watchHealth()) {
+        return finish(fail(*failure, true));
+    }
+    // Settings > Apps names the new version only once it has proved it starts: written before,
+    // a release that is rolled back would still be the one the person is told they have.
     if (install_.kind == InstallKind::Installer) {
         const std::string version = toString(manifest_->version);
         (void)services_.registry.setInstalledVersion(version, "Katana " + version);
-    }
-    if (const std::optional<Failure> failure = watchHealth()) {
-        return finish(fail(*failure, true));
     }
     finishHealthy();
 
@@ -606,14 +735,8 @@ ApplyResult Applier::run()
 // other helper is running.
 std::optional<Failure> Applier::begin()
 {
-    const core::Result<Install> install = readInstall(root_, services_.registry);
-    if (!install.ok()) {
-        return refuse("install_record", "the install's records cannot be read", install.error());
-    }
-    install_ = install.value();
-    if (install_.kind == InstallKind::Development || install_.target.empty()) {
-        return refuse("development_tree", "this is a development tree, not an install: it has "
-                                          "no share/katana/install.json, and is never updated");
+    if (std::optional<Failure> bad = readInstallRecord()) {
+        return bad;
     }
 
     if (const core::Status made = fs_.makeDirectories(updateDir_); !made.ok()) {
@@ -635,6 +758,37 @@ std::optional<Failure> Applier::begin()
         return refuse("root_not_writable", "the update lock cannot be taken", lock.error());
     }
     lock_ = std::move(lock).value();
+
+    // An earlier transaction that a crash left unfinished, or whose rollback failed, is put
+    // back BEFORE this one reads the tree: planned over a half-swapped tree, this update would
+    // succeed, and at the next start recovery would roll the old files of that transaction over
+    // the new version - a mix of both with the wrong installed.json. If it cannot be put back,
+    // nothing new is started on top of it.
+    if (const core::Status settled = detail::recoverLocked(root_, services_, request_.transaction,
+                                                           request_.stateDirectory);
+        !settled.ok()) {
+        return refuse("interrupted_update",
+                      "an earlier update was interrupted and could not be put back, so no new "
+                      "one is started. Run: katana_updater --recover \"" + core::pathToUtf8(root_) +
+                          "\"",
+                      settled.error());
+    }
+    // What is installed may be another version now (the rollback put it back).
+    return readInstallRecord();
+}
+
+// What the install is (install.json, installed.json, the registry), and that it is an install.
+std::optional<Failure> Applier::readInstallRecord()
+{
+    const core::Result<Install> install = readInstall(root_, services_.registry);
+    if (!install.ok()) {
+        return refuse("install_record", "the install's records cannot be read", install.error());
+    }
+    install_ = install.value();
+    if (install_.kind == InstallKind::Development || install_.target.empty()) {
+        return refuse("development_tree", "this is a development tree, not an install: it has "
+                                          "no share/katana/install.json, and is never updated");
+    }
     return std::nullopt;
 }
 
@@ -658,13 +812,11 @@ std::optional<Failure> Applier::verify()
     manifest_ = verified.value();
     const Manifest& manifest = *manifest_;
 
+    // verifyManifest has already refused, with the helper's own code, a manifest of another
+    // product, target or channel (trust.cpp) and one that breaks the path rules (the parse:
+    // checkManifestPaths), so they are not asked a second time here.
     if (manifest.notifyOnly) {
         return refuse("notify_only", "this release is announced only; it cannot be installed here");
-    }
-    if (manifest.product != install_.product || manifest.target != install_.target) {
-        return refuse("wrong_target", "the staged manifest is for " + manifest.product + " " +
-                                          manifest.target + ", not " + install_.product + " " +
-                                          install_.target);
     }
     if (manifest.applier > kApplierProtocol) {
         return refuse("applier_too_new", "this update needs a newer update helper than this one");
@@ -674,16 +826,6 @@ std::optional<Failure> Applier::verify()
                                        ") is not newer than the installed one (" +
                                        toString(install_.version) + ")");
     }
-    std::vector<std::string> paths;
-    std::vector<std::uint64_t> sizes;
-    for (const ManifestFile& file : manifest.files) {
-        paths.push_back(file.path);
-        sizes.push_back(file.size);
-    }
-    if (const core::Status rules = checkManifestPaths(paths, sizes); !rules.ok()) {
-        return refuse("path_rule", "the staged manifest breaks the path rules", rules.error());
-    }
-
     // The installed manifest decides what may be removed. One that does not verify (no record
     // on a fresh install; a key since dropped; a tampered file) decides nothing: nothing is
     // removed, which is the safe way to be wrong.
@@ -839,7 +981,7 @@ std::optional<Failure> Applier::plan()
         } else if (file.fileClass == FileClass::Seed) {
             continue; // written only when absent, so an edit by the person survives
         } else {
-            const core::Result<std::string> hash = core::sha256FileHex(target);
+            const core::Result<std::string> hash = hashFile(target);
             if (hash.ok() && hash.value() == file.sha256) {
                 continue; // KEEP
             }
@@ -868,7 +1010,7 @@ std::optional<Failure> Applier::plan()
             if (!info.ok() || info->kind != EntryKind::File || info->reparsePoint) {
                 continue;
             }
-            const core::Result<std::string> hash = core::sha256FileHex(target);
+            const core::Result<std::string> hash = hashFile(target);
             if (!hash.ok() || hash.value() != old.sha256) {
                 continue; // changed by the person, or unreadable: left alone
             }
@@ -891,7 +1033,13 @@ std::optional<Failure> Applier::plan()
         {std::string(kRecordPaths[2]), stagedSignature_},
     };
     for (const Record& record : records) {
-        const core::Result<EntryInfo> info = fs_.stat(under(root_, record.path));
+        // The records are written like any other file, so their folder is held to the same
+        // rule: share/katana may be a link even when no file of the release lives in it.
+        const Path recordPath = under(root_, record.path);
+        if (const std::optional<Failure> unsafe = guard.check(recordPath.parent_path())) {
+            return unsafe;
+        }
+        const core::Result<EntryInfo> info = fs_.stat(recordPath);
         if (!info.ok()) {
             return refuse("io_error", "a record of the install cannot be examined", info.error());
         }
@@ -979,7 +1127,7 @@ std::optional<Failure> Applier::plan()
             return refuse("copy_failed", "a staged file cannot be copied: " + file->path,
                           copied.error());
         }
-        const core::Result<std::string> hash = core::sha256FileHex(copy);
+        const core::Result<std::string> hash = hashFile(copy);
         if (!hash.ok() || hash.value() != file->sha256) {
             return refuse("staged_hash", "the staged file does not hash to the manifest's value: " +
                                              file->path);
@@ -1247,9 +1395,15 @@ ApplyResult Applier::fail(const Failure& failure, bool rollbackFirst)
         if (result.outcome == ApplyOutcome::RolledBack &&
             (failure.reason == "health_exit" || failure.reason == "health_timeout") &&
             manifest_ && !request_.stateDirectory.empty()) {
+            // The marker a start that then failed wrote is no evidence for the next one.
+            (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, request_.transaction));
             core::Result<UpdateState> state = readState(request_.stateDirectory);
+            // A file that is not ours to read is replaced; one that failed to read for another
+            // reason is left alone (recover_internal.hpp).
+            const bool replaceable = state.ok() || detail::mayReplaceUnreadableState(state.error());
             UpdateState updated = state.ok() ? state.value() : UpdateState{};
-            if (std::find(updated.blockedSequences.begin(), updated.blockedSequences.end(),
+            if (replaceable &&
+                std::find(updated.blockedSequences.begin(), updated.blockedSequences.end(),
                           manifest_->sequence) == updated.blockedSequences.end()) {
                 updated.blockedSequences.push_back(manifest_->sequence);
                 (void)writeState(request_.stateDirectory, updated);
@@ -1408,13 +1562,15 @@ ApplyResult apply(const ApplyRequest& request, const ApplyServices& services, st
     return applier.run();
 }
 
-core::Status rollback(const Path& root, const std::string& transaction, const ApplyServices& services)
+core::Status rollback(const Path& rootGiven, const std::string& transaction,
+                      const ApplyServices& services)
 {
     if (!isValidTransactionId(transaction)) {
         return core::makeError(core::ErrorCode::InvalidArgument,
                                "a transaction id is 1 to 64 characters of 0-9 and a-f", transaction);
     }
     FsOps& fs = services.fs;
+    const Path root = detail::normalizedRoot(rootGiven);
     const Path work = updateWorkDirectory(root) / core::pathFromUtf8(transaction);
     const core::Result<EntryInfo> folder = fs.stat(work);
     if (!folder.ok()) {
@@ -1440,13 +1596,15 @@ core::Status rollback(const Path& root, const std::string& transaction, const Ap
 
     std::vector<Path> leftovers;
     if (parsed->state != JournalState::RolledBack) {
-        const JournalPlan plan = readPlan(parsed.value());
-        reportRefusals(fs, root, transaction, plan);
+        JournalPlan plan = readPlan(parsed.value());
         if (parsed->state != JournalState::Empty) {
             const JournalRecord rolling{JournalOp::RollingBack, {}};
             (void)journal.append(std::span(&rolling, 1));
         }
-        if (const core::Status restored = restoreFromDisk(fs, root, work, plan); !restored.ok()) {
+        const core::Status restored = restoreFromDisk(fs, root, work, plan);
+        // After the restore, which adds what it found under old/ and would not touch.
+        reportRefusals(fs, root, transaction, plan);
+        if (!restored.ok()) {
             return restored; // the folder stays: it holds the old files
         }
         const JournalRecord done{JournalOp::RolledBack, {}};

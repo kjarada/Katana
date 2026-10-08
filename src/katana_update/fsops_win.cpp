@@ -41,6 +41,7 @@
 #include <windows.h>
 
 #include "katana/core/path_text.hpp"
+#include "long_path.hpp"
 
 namespace katana::update {
 
@@ -52,7 +53,6 @@ constexpr DWORD kShareAll = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELE
 // Past this a file is not a record or a manifest, and readFile would hold it all in memory.
 constexpr std::uint64_t kReadFileLimit = 256ull * 1024 * 1024;
 constexpr DWORD kReparseNameSurrogate = 0x20000000;
-constexpr std::size_t kLongPath = 240; // below MAX_PATH (260) with room for a file name
 
 std::string contextOf(DWORD osError, const Path& path)
 {
@@ -77,44 +77,9 @@ bool isRetryable(DWORD error)
                      static_cast<int>(error)) != std::end(kRetryableOsErrors);
 }
 
-Path absoluteNormal(const Path& path)
-{
-    std::error_code ec;
-    Path absolute = std::filesystem::absolute(path, ec);
-    if (ec) {
-        absolute = path;
-    }
-    absolute = absolute.lexically_normal();
-    absolute.make_preferred();
-    return absolute;
-}
-
-bool endsInDotOrSpace(const std::wstring& text)
-{
-    // A trailing separator is not part of the name.
-    std::size_t end = text.size();
-    while (end > 0 && text[end - 1] == L'\\') {
-        --end;
-    }
-    return end > 0 && (text[end - 1] == L'.' || text[end - 1] == L' ');
-}
-
-// The path as the wide string the system calls take.
-std::wstring widePath(const Path& path)
-{
-    const Path absolute = absoluteNormal(path);
-    std::wstring text = absolute.native();
-    if (text.rfind(L"\\\\?\\", 0) == 0 || text.rfind(L"\\\\.\\", 0) == 0) {
-        return text;
-    }
-    if (text.size() < kLongPath && !endsInDotOrSpace(text)) {
-        return text;
-    }
-    if (text.rfind(L"\\\\", 0) == 0) { // \\server\share\... -> \\?\UNC\server\share\...
-        return L"\\\\?\\UNC\\" + text.substr(2);
-    }
-    return L"\\\\?\\" + text;
-}
+// The one definition of how a path is handed to the system (long_path.hpp).
+using detail::widePath;
+using detail::absoluteNormal;
 
 // A handle that closes itself.
 class Handle {

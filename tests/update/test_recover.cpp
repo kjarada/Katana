@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "apply_harness.hpp"
+#include "recover_internal.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -654,6 +655,402 @@ TEST(Rollback, ARunningNewProgramIsMovedOutOfTheWayNotDeleted)
     const core::Status status = recoverInProcess(s.root, rig.services());
     EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
     EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+}
+
+// ---- an update started over an interrupted one --------------------------------------------------------------------------------
+
+namespace {
+
+std::string onlyTransaction(const Scenario& s)
+{
+    std::string tx;
+    for (const auto& entry : fs::directory_iterator(s.root / ".update")) {
+        if (entry.is_directory()) {
+            tx = entry.path().filename().string();
+        }
+    }
+    return tx;
+}
+
+} // namespace
+
+TEST(RecoverBeforeApply, AnUpdateStartedOverAnInterruptedOneFirstPutsTheOldVersionBack)
+{
+    // tx1 died in the middle of its commit and nothing has run recovery yet. A second update
+    // planned over that half-swapped tree would succeed, and the next start would roll the
+    // OLD files of tx1 over the new version: a mix, with the wrong installed.json.
+    Loop loop("apply-over-interrupted", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.renames[p.renames.size() / 2]);
+    const std::string crashed = treeHash(s.root);
+    ASSERT_NE(crashed, s.v1Hash);
+    ASSERT_NE(crashed, s.v2Hash) << "half swapped";
+
+    StdFs disk;
+    Rig second(s, disk, "bbbbbbbb");
+    const ApplyResult result = second.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty()) << "and the interrupted transaction's folder is gone";
+}
+
+TEST(RecoverBeforeApply, AnInterruptedUpdateThatCannotBePutBackStopsTheNewOneBeforeItTouchesAnything)
+{
+    Loop loop("apply-over-stuck", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.renames[p.renames.size() / 2]);
+    const std::string crashed = treeHash(s.root);
+
+    StdFs disk;
+    HookFs hooked(disk);
+    hooked.beforeRename = [](const Path& from, const Path&) -> std::optional<core::Status> {
+        return injected(32, from); // a file that stays locked
+    };
+    Rig second(s, hooked, "bbbbbbbb");
+    const ApplyResult result = second.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Refused);
+    EXPECT_EQ(result.reason, "interrupted_update") << result.detail;
+    EXPECT_NE(result.detail.find("katana_updater --recover"), std::string::npos) << result.detail;
+    EXPECT_EQ(treeHash(s.root), crashed) << "nothing of the new update was done";
+    EXPECT_FALSE(isPresent(s.root / ".update" / "bbbbbbbb")) << "and it made no folder of its own";
+    EXPECT_TRUE(second.registry.runOnce.empty());
+
+    // The old files are still in the first transaction's folder, and the next try finishes it.
+    ASSERT_TRUE(recoverClean(s).ok());
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+}
+
+// ---- a journal that is not whole ----------------------------------------------------------------------------------------------
+
+namespace {
+
+void tearJournal(const Path& journal, std::size_t bytes)
+{
+    std::string text = readText(journal);
+    ASSERT_GT(text.size(), bytes);
+    text.resize(text.size() - bytes);
+    writeText(journal, text);
+}
+
+} // namespace
+
+TEST(RecoverTorn, AJournalCutOffInTheMiddleOfAnyRecordOfTheCommitIsPutBackExactly)
+{
+    Loop loop("recover-torn-commit", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    std::size_t cases = 0;
+    for (const std::size_t at : {p.renames.size() / 4, p.renames.size() / 2, 3 * p.renames.size() / 4,
+                                 p.renames.size() - 1}) {
+        for (const std::size_t cut : {1u, 2u, 5u, 12u, 40u}) {
+            SCOPED_TRACE("crash before rename " + std::to_string(at) + ", last " + std::to_string(cut) +
+                         " bytes of the journal lost");
+            crashAt(loop, p.renames[at]);
+            tearJournal(s.root / ".update" / onlyTransaction(s) / "journal", cut);
+            ASSERT_TRUE(recoverClean(s).ok());
+            EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+            EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+            ++cases;
+        }
+    }
+    EXPECT_EQ(cases, 20u);
+}
+
+TEST(RecoverTorn, AJournalLostBeyondItsFirstRecordStillPutsEveryOldFileBack)
+{
+    // Damage in the middle of the file (the disk, not a torn write) leaves a journal that says
+    // PLAN and nothing else, over a tree whose files have all moved. The journal cannot say
+    // what to put back, but the folder can: every file under old/ was an old file of this
+    // install, and deleting the folder without it would lose the file for good. Files the
+    // release ADDED cannot be known from nothing, so they stay: the tree is the old version's
+    // files and some new ones, never the old version's files missing.
+    Loop loop("recover-damaged-plan", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.pending); // every file has moved, the pending record is not written
+    const Path journal = s.root / ".update" / onlyTransaction(s) / "journal";
+    const std::string text = readText(journal);
+    writeText(journal, text.substr(0, text.find('\n') + 1));
+    ASSERT_EQ(parseJournal(readText(journal)).state, JournalState::Planned);
+
+    ASSERT_TRUE(recoverClean(s).ok());
+    const std::map<std::string, std::string> after = snapshot(s.root);
+    for (const auto& [name, what] : s.v1Snapshot) {
+        const auto found = after.find(name);
+        ASSERT_NE(found, after.end()) << "lost: " << name;
+        EXPECT_EQ(found->second, what) << "not the old bytes: " << name;
+    }
+}
+
+TEST(RecoverTorn, WhatIsUnderOldAndNoUpdateWouldPutThereIsNotRestoredAndNotAnError)
+{
+    Forgery f("recover-old-junk");
+    // Names no update writes: a letter outside ASCII (the path rules are ASCII only), and a
+    // first folder that is not bin, share, etc or lib.
+    writeText(f.work / "old" / core::pathFromUtf8("bin/caf\xC3\xA9.dll"), "a name no update writes");
+    writeText(f.work / "old/docs/readme.txt", "a folder no update has");
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Committing, {}},
+    });
+    StdFs disk;
+    Rig rig(f.s, disk, "eeeeeeee");
+    EXPECT_TRUE(recoverInProcess(f.s.root, rig.services()).ok());
+    EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "lib 0.1.0\n") << "the honest one was restored";
+    EXPECT_FALSE(isPresent(f.s.root / core::pathFromUtf8("bin/caf\xC3\xA9.dll")));
+    EXPECT_FALSE(isPresent(f.s.root / "docs"));
+    const std::string log = readText(f.s.root / ".update" / "recovery.log");
+    EXPECT_NE(log.find("caf"), std::string::npos) << log;
+    EXPECT_NE(log.find("readme.txt"), std::string::npos) << log;
+}
+
+TEST(RecoverTorn, ADoubleDotInsideANameIsAnOrdinaryNameToRollback)
+{
+    Forgery f("recover-dots-in-name");
+    writeText(f.s.root / "share/katana/a..b.dat", "the new a..b\n");
+    writeText(f.work / "old/share/katana/a..b.dat", "the old a..b\n");
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Replace, {"share/katana/a..b.dat"}},
+        {JournalOp::Committing, {}},
+    });
+    StdFs disk;
+    Rig rig(f.s, disk, "eeeeeeee");
+    EXPECT_TRUE(recoverInProcess(f.s.root, rig.services()).ok());
+    EXPECT_EQ(readText(f.s.root / "share/katana/a..b.dat"), "the old a..b\n");
+    EXPECT_FALSE(isPresent(f.s.root / ".update" / "recovery.log")) << "no record was refused";
+}
+
+TEST(RecoverTorn, ABareInstallFolderIsAFolderTheTransactionMayHaveMadeButNeverAFileToRestore)
+{
+    Forgery f("recover-bare-folder");
+    fs::create_directories(f.s.root / "etc");
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::MakeDirectory, {"etc"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Remove, {"lib"}}, // a forged "delete the whole folder"
+        {JournalOp::Committing, {}},
+    });
+    StdFs disk;
+    Rig rig(f.s, disk, "eeeeeeee");
+    EXPECT_TRUE(recoverInProcess(f.s.root, rig.services()).ok());
+    EXPECT_FALSE(isPresent(f.s.root / "etc")) << "the empty folder the transaction made is gone";
+    const std::string log = readText(f.s.root / ".update" / "recovery.log");
+    EXPECT_NE(log.find("REMOVE lib"), std::string::npos) << log;
+    EXPECT_EQ(log.find("MKDIR etc"), std::string::npos) << "and the folder was not refused: " << log;
+}
+
+TEST(RecoverTorn, TheInstallFolderMayBeGivenWithATrailingSeparator)
+{
+    Loop loop("recover-trailing-separator", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    const Path spelled(core::pathToUtf8(s.root) + "/");
+    StdFs disk;
+    {
+        crashAt(loop, p.renames[p.renames.size() / 2]);
+        Rig rig(s, disk, "eeeeeeee");
+        ASSERT_TRUE(recoverInProcess(spelled, rig.services()).ok());
+        EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    }
+    {
+        crashAt(loop, p.renames[p.renames.size() / 2]);
+        Rig rig(s, disk, "eeeeeeee");
+        ASSERT_TRUE(rollback(spelled, onlyTransaction(s), rig.services()).ok());
+        EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    }
+}
+
+// ---- recover(): which helper it runs, with what, and what it sweeps ------------------------------------------------------------
+
+namespace {
+
+struct Interrupted {
+    explicit Interrupted(const std::string& label)
+        : loop(label, [](Scenario& s) { buildFixtureScenario(s); })
+    {
+        const Points p = measureCleanApply(loop);
+        crashAt(loop, p.renames[p.renames.size() / 2]);
+        transaction = onlyTransaction(loop.scenario());
+        helperName = installedProgram(Path(), "katana_updater").filename();
+    }
+    Scenario& scenario() { return loop.scenario(); }
+    Path copy() { return scenario().state / ("run-" + transaction) / helperName; }
+    Path own() { return scenario().root / "bin" / helperName; }
+
+    Loop loop;
+    std::string transaction;
+    Path helperName;
+};
+
+constexpr std::chrono::milliseconds kShortWait{100};
+
+} // namespace
+
+TEST(RecoverWith, TheHelperCopyIsRunWithRecoverAndTheRootFromItsOwnFolderAndNoLongerNeededAfterwards)
+{
+    Interrupted x("recoverwith-args");
+    Scenario& s = x.scenario();
+    writeText(x.copy(), "a stand-in for the helper copy");
+    StdFs disk;
+    FakeLauncher launcher;
+    const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait);
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+
+    ASSERT_EQ(launcher.ran.size(), 1u);
+    EXPECT_EQ(launcher.ran[0].executable, x.copy());
+    EXPECT_EQ(launcher.ran[0].arguments,
+              (std::vector<std::string>{"--recover", core::pathToUtf8(s.root)}));
+    EXPECT_EQ(launcher.ran[0].workingDirectory, x.copy().parent_path());
+    EXPECT_GT(launcher.ran[0].timeout, std::chrono::seconds(30)) << "a bound, and not a short one";
+    EXPECT_TRUE(launcher.started.empty());
+    // The helper has exited by now, so the copy of itself it could not delete is deleted.
+    EXPECT_FALSE(isPresent(x.copy().parent_path()));
+}
+
+TEST(RecoverWith, TheRootIsPassedWithoutATrailingSeparator)
+{
+    Interrupted x("recoverwith-trailing");
+    Scenario& s = x.scenario();
+    writeText(x.copy(), "stand-in");
+    StdFs disk;
+    FakeLauncher launcher;
+    ASSERT_TRUE(detail::recoverWith(Path(core::pathToUtf8(s.root) + "/"), disk, launcher, s.state, kShortWait).ok());
+    ASSERT_EQ(launcher.ran.size(), 1u);
+    EXPECT_EQ(launcher.ran[0].arguments,
+              (std::vector<std::string>{"--recover", core::pathToUtf8(s.root)}));
+}
+
+TEST(RecoverWith, TheCopyOutsideTheInstallIsPreferredAndTheInstallsOwnIsTheFallback)
+{
+    {
+        Interrupted x("recoverwith-prefers-copy");
+        Scenario& s = x.scenario();
+        writeText(x.copy(), "the copy");
+        writeText(x.own(), "the install's own");
+        StdFs disk;
+        FakeLauncher launcher;
+        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+        ASSERT_EQ(launcher.ran.size(), 1u);
+        EXPECT_EQ(launcher.ran[0].executable, x.copy());
+        EXPECT_TRUE(isPresent(x.own())) << "the install's own helper is not the copy's to delete";
+    }
+    {
+        Interrupted x("recoverwith-falls-back");
+        Scenario& s = x.scenario();
+        writeText(x.own(), "the install's own");
+        StdFs disk;
+        FakeLauncher launcher;
+        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+        ASSERT_EQ(launcher.ran.size(), 1u);
+        EXPECT_EQ(launcher.ran[0].executable, x.own());
+        EXPECT_EQ(launcher.ran[0].workingDirectory, x.own().parent_path());
+    }
+}
+
+TEST(RecoverWith, AHelperThatFailsLeavesItsCopyForTheRunOnceEntryAndSaysTheCommandByHand)
+{
+    Interrupted x("recoverwith-fails");
+    Scenario& s = x.scenario();
+    writeText(x.copy(), "stand-in");
+    StdFs disk;
+    FakeLauncher launcher;
+    launcher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
+        SpawnResult failed;
+        failed.exitCode = 2;
+        return failed;
+    };
+    const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait);
+    ASSERT_FALSE(status.ok());
+    EXPECT_NE(status.error().message.find("katana_updater --recover"), std::string::npos);
+    EXPECT_NE(status.error().context.find("2"), std::string::npos) << status.error().describe();
+    EXPECT_TRUE(isPresent(x.copy())) << "the RunOnce entry runs --recover from it at the next logon";
+
+    FakeLauncher timedOutLauncher;
+    timedOutLauncher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
+        SpawnResult hung;
+        hung.timedOut = true;
+        return hung;
+    };
+    EXPECT_FALSE(detail::recoverWith(s.root, disk, timedOutLauncher, s.state, kShortWait).ok());
+    EXPECT_TRUE(isPresent(x.copy()));
+}
+
+TEST(RecoverWith, WhatALockKeptFromBeingDeletedAfterARollbackIsSweptAtTheNextStartWithoutAHelper)
+{
+    Loop loop("recoverwith-sweep", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.pending); // every file is in place; the pending record is not written
+
+    // The rollback moves the new katana.exe back into the transaction's folder; something holds
+    // it, so the folder cannot be deleted, and nothing here can queue it for later.
+    StdFs disk;
+    class Holding final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Status removeFile(const Path& path) override
+        {
+            if (path.filename() == "katana.exe" && path.string().find(".update") != std::string::npos) {
+                return osError(core::ErrorCode::FileExportFailure, "sharing violation", path, 32);
+            }
+            return inner_.removeFile(path);
+        }
+    } holding(disk);
+    {
+        Rig rig(s, holding, "eeeeeeee");
+        ASSERT_TRUE(recoverInProcess(s.root, rig.services()).ok());
+    }
+    EXPECT_EQ(treeHash(s.root), s.v1Hash);
+    ASSERT_FALSE(leftoversInUpdate(s.root).empty()) << "the folder stays: a file in it is held";
+    ASSERT_EQ(journalStateOf(s.root), JournalState::RolledBack);
+
+    // The next start: the file is free. recover() sweeps it without starting anything.
+    FakeLauncher launcher;
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_TRUE(launcher.ran.empty());
+    EXPECT_EQ(treeHash(s.root), s.v1Hash);
+}
+
+TEST(RecoverWith, ASweepIsLeftToTheUpdateThatIsRunningIfThereIsOne)
+{
+    Loop loop("recoverwith-sweep-locked", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.healthy + 1);
+    ASSERT_EQ(journalStateOf(s.root), JournalState::Healthy);
+    StdFs disk;
+    core::Result<std::unique_ptr<FileLock>> taken = disk.tryLock(s.root / ".update" / "lock");
+    ASSERT_TRUE(taken.ok());
+    std::unique_ptr<FileLock> holder = std::move(taken).value();
+    FakeLauncher launcher;
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_FALSE(leftoversInUpdate(s.root).empty()) << "an update is running: it is cleaning up after itself";
+    holder.reset();
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(RecoverWith, NothingToDoStartsNothingAndTakesNoLock)
+{
+    Scenario s("recoverwith-nothing");
+    s.v1 = tiny("0.1.0", 1);
+    writeInstall(s.root, s.v1);
+    StdFs disk;
+    WatchedFs watched(disk);
+    FakeLauncher launcher;
+    EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(launcher.ran.empty());
+    EXPECT_EQ(watched.locks, 0);
+    writeText(s.root / ".update" / "lock", "");
+    EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait).ok());
+    EXPECT_EQ(watched.locks, 0);
 }
 
 // ---- recover(), the system seams, on Windows -----------------------------------------------------------------------------------------

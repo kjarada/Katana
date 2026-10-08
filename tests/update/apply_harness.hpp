@@ -739,10 +739,26 @@ inline bool canSign()
     return KATANA_TEST_CAN_SIGN != 0;
 }
 
-// At the top of a test that signs: skipped, and said so, where OpenSSL's headers are not found.
-#define REQUIRE_CAN_SIGN()                                                                  \
-    if (!canSign()) {                                                                        \
-        GTEST_SKIP() << "OpenSSL headers are not available to sign the test manifests";      \
+// True where a continuous-integration service runs the tests (it sets CI, and GitHub also
+// GITHUB_ACTIONS).
+inline bool inContinuousIntegration()
+{
+    return !core::environmentVariable("CI").empty() ||
+           !core::environmentVariable("GITHUB_ACTIONS").empty();
+}
+
+// At the top of a test that signs. Where OpenSSL's headers are not found: skipped, and said so,
+// on a developer's machine - but a FAILURE in continuous integration, because the 40-file crash
+// loop, the recovery loop and the rename-failure loop are among the tests that sign, and a
+// skip count cannot be told from T8's three placeholders: the central tests would stop
+// running and nobody would see it.
+#define REQUIRE_CAN_SIGN()                                                              \
+    if (!::katana::update::harness::canSign()) {                                        \
+        if (::katana::update::harness::inContinuousIntegration()) {                     \
+            FAIL() << "OpenSSL headers are not available to sign the test manifests, "  \
+                      "and in continuous integration the signing tests are not optional";\
+        }                                                                               \
+        GTEST_SKIP() << "OpenSSL headers are not available to sign the test manifests"; \
     }
 
 // The signature line of `message` under the test key whose seed is `seedHex` (the active key

@@ -366,6 +366,79 @@ TEST(JournalFile, ACrashInsideAGroupWritesNothingOfIt)
     EXPECT_EQ(loaded->state, JournalState::Planned);
 }
 
+TEST(JournalFile, AGroupThatFailedToBeWrittenLeavesNoGapInTheNumbers)
+{
+    // Parsing stops at the first number that is not the previous one plus one, so a gap would
+    // make every record after it unreadable. The failed group is numbered again.
+    Scratch scratch("journal-failed-append");
+    StdFs disk;
+    HookFs hooked(disk);
+    int appends = 0;
+    hooked.beforeAppend = [&](const Path& p, std::string_view) -> std::optional<core::Status> {
+        return ++appends == 2 ? std::optional<core::Status>(injected(112, p)) : std::nullopt;
+    };
+    const Path path = scratch.path() / "journal";
+    Journal journal(hooked, path);
+    const JournalRecord plan{JournalOp::Plan, {"t1", "1", "2"}};
+    const JournalRecord committing{JournalOp::Committing, {}};
+    const JournalRecord moved{JournalOp::MovedOld, {"bin/a.dll"}};
+    ASSERT_TRUE(journal.append(std::span(&plan, 1)).ok());
+    EXPECT_FALSE(journal.append(std::span(&committing, 1)).ok());
+    ASSERT_TRUE(journal.append(std::span(&moved, 1)).ok());
+
+    const core::Result<ParsedJournal> loaded = Journal(disk, path).load();
+    ASSERT_TRUE(loaded.ok());
+    ASSERT_EQ(loaded->records.size(), 2u);
+    EXPECT_EQ(loaded->records[0].op, JournalOp::Plan);
+    EXPECT_EQ(loaded->records[1].op, JournalOp::MovedOld);
+    EXPECT_FALSE(loaded->tornTail);
+}
+
+TEST(JournalFile, AGroupThatWasHalfWrittenBeforeItFailedIsReplacedByTheNextOne)
+{
+    Scratch scratch("journal-half-append");
+    StdFs disk;
+    class HalfOnce final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Status appendDurable(const Path& p, std::string_view bytes) override
+        {
+            if (!failed_ && p.filename() == "journal" && bytes.find("COMMITTING") != std::string_view::npos) {
+                failed_ = true;
+                (void)inner_.appendDurable(p, bytes.substr(0, bytes.size() / 2));
+                return injected(112, p);
+            }
+            return inner_.appendDurable(p, bytes);
+        }
+
+      private:
+        bool failed_ = false;
+    } half(disk);
+    const Path path = scratch.path() / "journal";
+    Journal journal(half, path);
+    const JournalRecord plan{JournalOp::Plan, {"t1", "1", "2"}};
+    const JournalRecord committing{JournalOp::Committing, {}};
+    const JournalRecord moved{JournalOp::MovedOld, {"bin/a.dll"}};
+    ASSERT_TRUE(journal.append(std::span(&plan, 1)).ok());
+    ASSERT_FALSE(journal.append(std::span(&committing, 1)).ok());
+    ASSERT_TRUE(parseJournal(readText(path)).tornTail) << "half a record is in the file";
+    ASSERT_TRUE(journal.append(std::span(&moved, 1)).ok());
+
+    const core::Result<ParsedJournal> loaded = Journal(disk, path).load();
+    ASSERT_TRUE(loaded.ok());
+    ASSERT_EQ(loaded->records.size(), 2u);
+    EXPECT_EQ(loaded->records[1].op, JournalOp::MovedOld);
+    EXPECT_FALSE(loaded->tornTail);
+}
+
+TEST(FsOpsContract, TheErrorsARenameRetriesAreAccessDeniedSharingAndLockViolations)
+{
+    // What an antivirus scanner or a program that has the file causes (design 5.5). The real
+    // file system retries exactly these; the Windows tests below show it for 5 and 32.
+    EXPECT_EQ(std::vector<int>(std::begin(kRetryableOsErrors), std::end(kRetryableOsErrors)),
+              (std::vector<int>{5, 32, 33}));
+}
+
 // ---- the real file system, on Windows ---------------------------------------------------------------
 
 #ifdef _WIN32
@@ -640,6 +713,33 @@ TEST(WindowsFs, ARenameWaitsOutAScannerThatLetsGoHalfWayThrough)
     EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
     EXPECT_TRUE(isPresent(scratch.path() / "moved.dll"));
     EXPECT_FALSE(isPresent(scratch.path() / "busy.dll"));
+}
+
+TEST(WindowsFs, ARenameAnsweredWithAccessDeniedIsRetriedUntilTheHolderLetsGo)
+{
+    // Renaming a folder while a file inside it is open is answered with ERROR_ACCESS_DENIED (5)
+    // whatever share mode that file was opened with (probed on this Windows) - the other
+    // answer, beside 32, that a scanner or a running program causes. The retry is for it too.
+    Scratch scratch("winfs-access-denied");
+    writeText(scratch.path() / "dir" / "file.txt", "x");
+    auto held = std::make_unique<HeldOpen>(scratch.path() / "dir" / "file.txt",
+                                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    ASSERT_TRUE(held->ok());
+    {
+        const auto once = systemFs(10, 0);
+        const core::Status refused = once->renameFile(scratch.path() / "dir", scratch.path() / "dir2");
+        ASSERT_FALSE(refused.ok());
+        EXPECT_EQ(osErrorOf(refused.error()), "5") << refused.error().describe();
+    }
+    const auto disk = systemFs(10, 3000);
+    std::thread scanner([&held] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        held->release();
+    });
+    const core::Status status = disk->renameFile(scratch.path() / "dir", scratch.path() / "dir2");
+    scanner.join();
+    EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
+    EXPECT_TRUE(isPresent(scratch.path() / "dir2" / "file.txt"));
 }
 
 TEST(WindowsFs, ANoRetryPolicyFailsOnTheFirstSharingViolation)

@@ -10,9 +10,12 @@
 //                                             left as it is - the tree is a whole version, and
 //                                             the folder is what a health rollback needs.
 //   RolledBack, Healthy                       over. The tree is whole; what is left of the
-//                                             folder (a crash part way through deleting it) is
-//                                             swept, so a crash in the clean-up does not leak
-//                                             the copies of a release for ever.
+//                                             folder (a crash part way through deleting it, a
+//                                             file a scanner held at the time) is swept, so a
+//                                             crash in the clean-up does not leak the copies of
+//                                             a release for ever. recover() sweeps these itself,
+//                                             without starting the helper: there is no tree to
+//                                             put back.
 
 #include "katana/update/recover.hpp"
 
@@ -20,6 +23,7 @@
 #include <thread>
 
 #include "katana/core/path_text.hpp"
+#include "recover_internal.hpp"
 #include "remove_tree.hpp"
 #include "katana/update/journal.hpp"
 #include "katana/update/install.hpp"
@@ -112,11 +116,176 @@ bool anyNeedsWork(const std::vector<Found>& found)
                        [](const Found& one) { return needsWork(one.state); });
 }
 
+// Deletes a folder through FsOps; what cannot be deleted now (a file something holds open) is
+// queued for the next start when there is a state folder to queue it in.
+void sweep(FsOps& fs, const Path& folder, const Path& stateDirectory, std::string_view last)
+{
+    std::vector<Path> leftovers;
+    detail::removeTree(fs, folder, leftovers, last);
+    if (!stateDirectory.empty()) {
+        for (const Path& leftover : leftovers) {
+            (void)appendCleanup(stateDirectory, leftover, fs);
+        }
+    }
+}
+
 } // namespace
 
-core::Status recoverInProcess(const Path& root, const ApplyServices& services)
+namespace detail {
+
+core::Status recoverLocked(const Path& rootGiven, const ApplyServices& services,
+                           std::string_view except, const Path& stateDirectory)
 {
     FsOps& fs = services.fs;
+    const Path root = normalizedRoot(rootGiven);
+    const core::Result<std::vector<Found>> pending = actionable(fs, root);
+    if (!pending.ok()) {
+        return pending.error();
+    }
+    std::optional<core::Error> failure;
+    for (const Found& one : pending.value()) {
+        if (one.name == except) {
+            continue;
+        }
+        if (isFinished(one.state)) {
+            sweep(fs, updateWorkDirectory(root) / core::pathFromUtf8(one.name), stateDirectory,
+                  "journal");
+            continue;
+        }
+        if (const core::Status undone = rollback(root, one.name, services); !undone.ok()) {
+            if (!failure) {
+                failure = undone.error();
+            }
+        }
+    }
+    if (failure) {
+        return *failure;
+    }
+    return {};
+}
+
+core::Status recoverWith(const Path& rootGiven, FsOps& fs, Launcher& launcher,
+                         const Path& stateDirectory, std::chrono::milliseconds lockWait)
+{
+    const Path root = normalizedRoot(rootGiven);
+    const core::Result<std::vector<Found>> first = actionable(fs, root);
+    if (!first.ok()) {
+        // No way to tell: a start must not be held up by a question it cannot answer.
+        return {};
+    }
+    const Path lockPath = updateWorkDirectory(root) / "lock";
+    if (!anyNeedsWork(first.value())) {
+        if (first->empty()) {
+            return {};
+        }
+        // Only folders of transactions that are over: no tree to put back, so no helper to
+        // run. Swept here, if no update is running, so that a clean-up cut short (a crash, a
+        // file a scanner held) does not leave the copies of a release behind for ever.
+        core::Result<std::unique_ptr<FileLock>> taken = fs.tryLock(lockPath);
+        if (!taken.ok()) {
+            return {}; // an update is running; it is cleaning up after itself
+        }
+        const core::Result<std::vector<Found>> again = actionable(fs, root);
+        if (again.ok()) {
+            for (const Found& one : again.value()) {
+                if (isFinished(one.state)) {
+                    sweep(fs, updateWorkDirectory(root) / core::pathFromUtf8(one.name),
+                          stateDirectory, "journal");
+                }
+            }
+        }
+        return {};
+    }
+
+    // A live update holds the lock: wait for it, and look again when it lets go.
+    std::vector<Found> pending = first.value();
+    const Clock::time_point start = Clock::now();
+    while (true) {
+        core::Result<std::unique_ptr<FileLock>> taken = fs.tryLock(lockPath);
+        if (taken.ok()) {
+            break; // released at the end of this statement's scope: the helper takes it itself
+        }
+        if (!isHeld(taken.error())) {
+            return core::makeError(core::ErrorCode::InvalidState,
+                                   "an interrupted update was found and the update lock cannot be "
+                                   "taken; " + byHand(root),
+                                   taken.error().describe());
+        }
+        if (Clock::now() - start >= lockWait) {
+            return {};
+        }
+        std::this_thread::sleep_for(std::min(kPoll, lockWait));
+        const core::Result<std::vector<Found>> again = actionable(fs, root);
+        if (!again.ok() || !anyNeedsWork(again.value())) {
+            return {};
+        }
+        pending = again.value();
+    }
+
+    // The helper copy the interrupted update ran from, if it is still there: it is outside
+    // R, so it works when R's own bin/ is half swapped. Else the install's own.
+    const Path stem = installedProgram(Path(), kHelperStem).filename();
+    Path helper;
+    for (const Found& one : pending) {
+        if (stateDirectory.empty()) {
+            break; // no state folder, so no copies in it
+        }
+        const Path copy = runPath(stateDirectory, one.name) / stem;
+        const core::Result<EntryInfo> info = fs.stat(copy);
+        if (info.ok() && info->kind == EntryKind::File) {
+            helper = copy;
+            break;
+        }
+    }
+    if (helper.empty()) {
+        const Path own = installedProgram(root, kHelperStem);
+        const core::Result<EntryInfo> info = fs.stat(own);
+        if (info.ok() && info->kind == EntryKind::File) {
+            helper = own;
+        }
+    }
+    if (helper.empty()) {
+        return core::makeError(core::ErrorCode::NotFound,
+                               "an interrupted update was found and there is no update helper to "
+                               "put it back with; " + byHand(root));
+    }
+
+    SpawnRequest request;
+    request.executable = helper;
+    request.arguments = {"--recover", core::pathToUtf8(root)};
+    request.workingDirectory = helper.parent_path();
+    request.timeout = std::chrono::duration_cast<std::chrono::milliseconds>(kHelperRunLimit);
+    const core::Result<SpawnResult> ran = launcher.run(request);
+    if (!ran.ok()) {
+        return core::makeError(core::ErrorCode::InvalidState,
+                               "an interrupted update was found and the update helper could not be "
+                               "started; " + byHand(root),
+                               ran.error().describe());
+    }
+    if (ran->timedOut || ran->exitCode != 0) {
+        return core::makeError(core::ErrorCode::InvalidState,
+                               "an interrupted update could not be put back; " + byHand(root),
+                               ran->timedOut ? "the helper did not finish in time"
+                                             : "the helper exited with code " +
+                                                   std::to_string(ran->exitCode));
+    }
+
+    // The helper has exited and put everything back, so the copies of itself that it could not
+    // delete while it ran can go now (a copy that is still held is queued for the next start).
+    if (!stateDirectory.empty()) {
+        for (const Found& one : pending) {
+            sweep(fs, runPath(stateDirectory, one.name), stateDirectory, {});
+        }
+    }
+    return {};
+}
+
+} // namespace detail
+
+core::Status recoverInProcess(const Path& rootGiven, const ApplyServices& services)
+{
+    FsOps& fs = services.fs;
+    const Path root = detail::normalizedRoot(rootGiven);
     const core::Result<std::vector<Found>> first = actionable(fs, root);
     if (!first.ok()) {
         return first.error();
@@ -151,28 +320,11 @@ core::Status recoverInProcess(const Path& root, const ApplyServices& services)
     }
 
     // Under the lock, look again: the holder we waited for may have finished the job.
-    const core::Result<std::vector<Found>> pending = actionable(fs, root);
-    if (!pending.ok()) {
-        return pending.error();
-    }
-    std::optional<core::Error> failure;
-    for (const Found& one : pending.value()) {
-        if (isFinished(one.state)) {
-            std::vector<Path> leftovers; // a file still held open stays; the next sweep tries again
-            detail::removeTree(fs, updateWorkDirectory(root) / core::pathFromUtf8(one.name),
-                               leftovers, "journal");
-            continue;
-        }
-        if (const core::Status undone = rollback(root, one.name, services); !undone.ok()) {
-            if (!failure) {
-                failure = undone.error();
-            }
-        }
-    }
-    if (failure) {
+    const core::Status undone = detail::recoverLocked(root, services, {}, Path());
+    if (!undone.ok()) {
         return core::makeError(core::ErrorCode::InvalidState,
                                "an interrupted update could not be put back; " + byHand(root),
-                               failure->describe());
+                               undone.error().describe());
     }
     (void)services.registry.clearRunOnce(kRunOnceName);
     return {};
@@ -181,86 +333,8 @@ core::Status recoverInProcess(const Path& root, const ApplyServices& services)
 core::Status recover(const Path& root)
 {
     const std::unique_ptr<FsOps> fs = makeSystemFsOps();
-    const core::Result<std::vector<Found>> first = actionable(*fs, root);
-    if (!first.ok() || !anyNeedsWork(first.value())) {
-        // Nothing to do, or no way to tell: a start must not be held up by a question it
-        // cannot answer. (A folder only left to sweep is not worth starting a program for.)
-        return {};
-    }
-
-    // A live update holds the lock: wait for it, and look again when it lets go.
-    std::vector<Found> pending = first.value();
-    const Path lockPath = updateWorkDirectory(root) / "lock";
-    const Clock::time_point start = Clock::now();
-    while (true) {
-        core::Result<std::unique_ptr<FileLock>> taken = fs->tryLock(lockPath);
-        if (taken.ok()) {
-            break; // released at the end of this statement's scope: the helper takes it itself
-        }
-        if (!isHeld(taken.error())) {
-            return core::makeError(core::ErrorCode::InvalidState,
-                                   "an interrupted update was found and the update lock cannot be "
-                                   "taken; " + byHand(root),
-                                   taken.error().describe());
-        }
-        if (Clock::now() - start >= kRecoverWait) {
-            return {};
-        }
-        std::this_thread::sleep_for(kPoll);
-        const core::Result<std::vector<Found>> again = actionable(*fs, root);
-        if (!again.ok() || !anyNeedsWork(again.value())) {
-            return {};
-        }
-        pending = again.value();
-    }
-
-    // The helper copy the interrupted update ran from, if it is still there: it is outside
-    // R, so it works when R's own bin/ is half swapped. Else the install's own.
-    const Path stem = installedProgram(Path(), kHelperStem).filename();
-    Path helper;
-    const Path stateDir = stateDirectory();
-    for (const Found& one : pending) {
-        const Path copy = runPath(stateDir, one.name) / stem;
-        const core::Result<EntryInfo> info = fs->stat(copy);
-        if (info.ok() && info->kind == EntryKind::File) {
-            helper = copy;
-            break;
-        }
-    }
-    if (helper.empty()) {
-        const Path own = installedProgram(root, kHelperStem);
-        const core::Result<EntryInfo> info = fs->stat(own);
-        if (info.ok() && info->kind == EntryKind::File) {
-            helper = own;
-        }
-    }
-    if (helper.empty()) {
-        return core::makeError(core::ErrorCode::NotFound,
-                               "an interrupted update was found and there is no update helper to "
-                               "put it back with; " + byHand(root));
-    }
-
     const std::unique_ptr<Launcher> launcher = makeSystemLauncher();
-    SpawnRequest request;
-    request.executable = helper;
-    request.arguments = {"--recover", core::pathToUtf8(root)};
-    request.workingDirectory = helper.parent_path();
-    request.timeout = std::chrono::duration_cast<std::chrono::milliseconds>(kHelperRunLimit);
-    const core::Result<SpawnResult> ran = launcher->run(request);
-    if (!ran.ok()) {
-        return core::makeError(core::ErrorCode::InvalidState,
-                               "an interrupted update was found and the update helper could not be "
-                               "started; " + byHand(root),
-                               ran.error().describe());
-    }
-    if (ran->timedOut || ran->exitCode != 0) {
-        return core::makeError(core::ErrorCode::InvalidState,
-                               "an interrupted update could not be put back; " + byHand(root),
-                               ran->timedOut ? "the helper did not finish in time"
-                                             : "the helper exited with code " +
-                                                   std::to_string(ran->exitCode));
-    }
-    return {};
+    return detail::recoverWith(root, *fs, *launcher, stateDirectory(), kRecoverWait);
 }
 
 } // namespace katana::update
