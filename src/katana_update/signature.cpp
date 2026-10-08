@@ -556,10 +556,13 @@ core::Status verifyEd25519(const PublicKey& key, std::string_view message, const
     if (status == 1) {
         return {};
     }
-    return core::makeError(core::ErrorCode::InvalidArgument,
-                           status == 0 ? "the signature does not match the message under this key"
-                                       : "OpenSSL could not complete the verification",
-                           context);
+    if (status == 0) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "the signature does not match the message under this key", context);
+    }
+    // Below zero is OpenSSL failing to run the check, which says nothing about the signature:
+    // not the code of a bad signature, for a caller that tells "forged" from "could not look".
+    return core::makeError(core::ErrorCode::Internal, "OpenSSL could not complete the verification", context);
 }
 
 core::Status hardenOpenSslEnvironment()

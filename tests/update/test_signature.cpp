@@ -24,17 +24,25 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
+#include "katana/core/path_text.hpp"
 #include "katana/update/feed.hpp"
+#include "katana/update/process.hpp"
 #include "katana/update/signature.hpp"
 
 #ifndef KATANA_UPDATE_FIXTURES
@@ -99,11 +107,13 @@ std::string encodeBase64(const std::string& bytes)
     return text;
 }
 
+// Through the project's reader, so that a checkout under a folder named in any script opens.
 std::string readFixture(const std::string& relative)
 {
-    std::ifstream in(std::string(KATANA_UPDATE_FIXTURES) + "/" + relative, std::ios::binary);
-    EXPECT_TRUE(in.good()) << relative;
-    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    const core::Result<std::string> bytes =
+        core::readFileBytes(core::pathFromUtf8(std::string(KATANA_UPDATE_FIXTURES) + "/" + relative));
+    EXPECT_TRUE(bytes.ok()) << relative << ": " << (bytes.ok() ? "" : bytes.error().describe());
+    return bytes.ok() ? bytes.value() : std::string();
 }
 
 // ---- RFC 8032, section 7.1 ------------------------------------------------------------------
@@ -524,8 +534,9 @@ TEST(Signature, ASignatureWhoseSIsNotBelowTheGroupOrderIsRefusedForThat)
 TEST(Signature, TheLargestScalarBelowTheGroupOrderIsRefusedAsAMismatchNotForItsSize)
 {
     // L - 1 is a legal S (RFC 8032, 5.1.7 says S < L), so the explicit comparison lets it
-    // through to OpenSSL, which finds it does not belong to this message. A comparison that
-    // used <= would refuse it for its size instead.
+    // through to OpenSSL, which finds it does not belong to this message. A comparison that is
+    // off by one the other way (S + 1 against L, or "equal" declared one byte too early) would
+    // refuse it for its size instead.
     const RfcVector& vector = kRfcVectors[1];
     const std::string r = bytesFromHex(vector.signature).substr(0, 32);
     const std::string s = bytesFromHex("ecd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
@@ -624,6 +635,110 @@ TEST(Signature, TheRfcKeysAreAcceptedAsPrimeOrderPoints)
         const core::Status status = update::verifyEd25519(keyFromHex(vector.publicKey), bytesFromHex(vector.message), wrong);
         ASSERT_FALSE(status.ok());
         EXPECT_FALSE(contains(status.error().message, kKeyNotAccepted)) << vector.name << ": " << status.error().describe();
+    }
+}
+
+TEST(Signature, TwentyFourKeysGeneratedAndSignedByOpensslAreAcceptedAndVerify)
+{
+    // The check that a key is a prime-order point is arithmetic of this file's own, and a false
+    // refusal of the owner's real key would leave every installed copy unable to update, with
+    // nothing in the build to say so. Three RFC keys are too few samples for that: these are 24
+    // keys made by `openssl genpkey -algorithm ed25519` with a signature each by
+    // `openssl pkeyutl -sign -rawin` over the message printed. The keys are throw-away (their
+    // secrets were not kept) and each signature was checked back with `pkeyutl -verify`. Such
+    // keys are what the pinned ones will be.
+    struct Generated {
+        const char* publicKey;
+        const char* message;
+        const char* signature;
+    };
+    static constexpr Generated kGenerated[] = {
+    {"8f4b3d1e44e9e2ad69f61922143dd1d601c2b6a482576bb8a3b2aab6c23c36d0",
+     "katana pinned-key acceptance 00",
+     "71f67902866966899e9bd2e5146d0c71cbfb8fd7f47062da3f11640becd460a29143e60bbc4aa828cdf6cff6f90792fb9fb1e4edf83ecf91b1df18a6ac7c2901"},
+    {"90f81fa3df0c6ee3240d22bc1d98bf02e57de454037185969b6770b731cf8d8d",
+     "katana pinned-key acceptance 01",
+     "bc10c225b36b54f7da3c31d8ed2b9abcdc9d9adddb54848dada9319c26df4cc1e80b9adb0d5027e0ec403fc5efa85ac10336a5c1567c64c211ca58fbcc133305"},
+    {"327505024baf2b72195b33ca5279b3a8ee4a14230d3e8173d9f548b732908102",
+     "katana pinned-key acceptance 02",
+     "2c004fa0f34a4a87c1326762e546b1d42566b1ca5d0a4f127c76ecfeadbaf6a7d1588e0278bc6d829f2abf782eb11493609a9de0f874ca0789bac2abab026508"},
+    {"4a76c73dc2e9723de4513e4e4941bbfcdcfa44a8b217a101a98af8a244b40b04",
+     "katana pinned-key acceptance 03",
+     "67eb5d05f383c72d01c36d1654085a8933753686efaa87a6b85d704e8ac047cc9bd7c517009ceb9a22e3f0cb35f255b9427e6b12cc858a49e37a65b1d1b00e0e"},
+    {"6848403760627b5ee74dd4a814be716041e39b88f9d8f40bf877fa6ee42bd531",
+     "katana pinned-key acceptance 04",
+     "adb9715e4968a2bb0d7037c525d788b9c1e650bc2e939d3162eef1ca405ee41e666caf9975492f6dc57d0e5f523b760ce89eb2316b36e9b41f55d59cc9afe504"},
+    {"1dde638a3b8de773720464e9fe89422143f547d92a0385233e8d7ad01a8bf794",
+     "katana pinned-key acceptance 05",
+     "8e1b5d8829eab19899ed548f01d5d858f629bcdd689615ab9a006aeed462b1784e5165d45006a2a9e4a2d0503a575a16e7a79faaae964176ed2166c592ee110f"},
+    {"d167bf3b67fd2b35a966e9d92faca7e99b6a93374aa9e78714729b959460ebf1",
+     "katana pinned-key acceptance 06",
+     "470349a0c91d2991606a3c1b46d4607214beee50b4b00a9aacedea31b190a6e0c429b7052f3c4eb42834521e949841f043cebce5e54b0e5cec3fec0909db8b05"},
+    {"db80f56b5f28b86b1ed8f603905439084f6091176c54581b78f061f74cf62ff1",
+     "katana pinned-key acceptance 07",
+     "da7ebe7845a191807386a0913c0538d55539b332c97076c137c71fef3045815a45682c657b52c00dd5e8b9afef536c2b7ab8e2dc10f40218103b382e8def3f0f"},
+    {"f9c5a68f13722d22e401d1a35468bdf46ed29c3bd2d3009e4977ef210d8b3845",
+     "katana pinned-key acceptance 08",
+     "84256eb77ed1270ac38f853f67763b87719486ade4ad30e58cfc239c049e1f4d84ed423df6f63e0a0ed4ac6f9224bd5006a75ebf2c6e69ed2ca2b9d4dfb41c02"},
+    {"c873020c2511c531458ed9f70b9cd951ec5eb6e132b8398fedfd89d05a5f5696",
+     "katana pinned-key acceptance 09",
+     "53113e3617c3e655493591c2a4fbe125e219bb571216e2aef15f5f0a39c224c02ac766a9d2766e558b1fffc6f3e2ebacf310e0723fa6e0f308494412ee796705"},
+    {"bc5ab8b95569f114b4518d24803deafdcab4eb4192cae0f7248dc59c4371284d",
+     "katana pinned-key acceptance 10",
+     "c4fb49b3ee9d7acb18e5a0294e0e772dfde95e84d923ddb72c4aad501a7f94476270ff5549ad61fc98895932d24fd6c554fd6e0213c1bc0d2248236b2b311407"},
+    {"a6666db5dde6e1cfb23e0ac88b7846af6b6fe2b756afaa4eed4489107e518eed",
+     "katana pinned-key acceptance 11",
+     "e1bfc8fcd5bcd9a02020ac7677bfa2b683e85ca8b83503c21edecbe70b99cbd8eb52c8d882cdfacc6a486d9428b213d3e148ccc0c116774d47351ea128233c00"},
+    {"180cb369001c685ddeb100d9d2a91e06e5b84cf82e62480c943169becd5f06cd",
+     "katana pinned-key acceptance 12",
+     "00e42c762ac8521700d74702fea4d0e0dd4d15eae12a899f6e0b21d91afe7cd3cdc8607c0394b4a1aea5c7aeff93bd1fc0c82c9456970842c0eea9b2f4934704"},
+    {"9f098d312c327f70a7fab43cb06566521770634490cfd2ddcbbd2579f7b8f25f",
+     "katana pinned-key acceptance 13",
+     "56e73ce09321869d232752df1665cd796f81db99aa8802d8d50d6d49db2209d4c60d987ad88b89b12e990b4ac370118e871f5e6bf39a27262b5dd6c338097800"},
+    {"515f1ab9696e39c0382ecc45fc2115b2a2120440b6bda4e82126dd6021793307",
+     "katana pinned-key acceptance 14",
+     "89fd9650cfa9f56b5c601b37bdf6758b988c319ad85afc89a550b348c17045d0e2d29978046ff0199908d11fe72f9c8acc2c8493c1aaa45a23c6c8369a4c830e"},
+    {"013b7e24fa650062ad46a338c498d2e6d68e4af4349df1508277bdbc3faa7875",
+     "katana pinned-key acceptance 15",
+     "6ade83b3e43ef779fcdbedf3a920f9b5a43c647e7f49f26dc05ecb89322d85f93d283e8eaffc9b8159abc87b51ff6d6eccaf31b2d295af845fc9a6d6dc4fe60a"},
+    {"e67f6d8f6963d780d71a83e62e931f3afaa3a7e806f15d3fad8a5a0aa418eec3",
+     "katana pinned-key acceptance 16",
+     "f6a3ab1b06009338b05486a547a9f1a6f30d17a183fdea8de8c3cb53b60a1f3386c1f433082f882f92e24e01ed971f7669d8c970626d34a33535f48c046f810e"},
+    {"d0bd9a1528b97f1afae87e081d898db8a26b6f9615176a004d3734d77da4b862",
+     "katana pinned-key acceptance 17",
+     "91278ba50a82e7af34310c22f09d821a9676293ed4dc7277db862b8127a7dd253a75195b138b45cf5c8eb0065472744619443863bda5a2a5814e80dacb5d7001"},
+    {"cfbff8e9016695eb3a486c05a31267df8f149a84d735fc9ba68a130f7791fff9",
+     "katana pinned-key acceptance 18",
+     "d1c86294658844bd0a7a2dd1bdbab07f69ed4bee37d370548a1f71eaff9ab654692aa6d4eee57919dfb37fa6df98f815f7bc98f3492089116319c1c3241f1d00"},
+    {"85f717e404472727b03a826d6e877ad49a8240a351c6abf6c6d961a997252c33",
+     "katana pinned-key acceptance 19",
+     "d605b3ca4c2e08164b74ddd62e3d1cfd10fef287f6d66425f0ea2dde3b6baaee17459e1a8419abd58e754b5adc947c21d68ea03134ea6b997df186a65ce9c00c"},
+    {"08615244369c8e9ea481bc746941b2e22e7ff9f530ed55ac6299571000409559",
+     "katana pinned-key acceptance 20",
+     "bf907c35577d5d94197933709d3bde53dc30cb8323d251b6af74d46a90077c3791b1c8565124abc0745b9b0c7124f2884394680fdc8337b09681def93bac710b"},
+    {"e4fae266737fde6b9300329bb2c3b3727a60e4298414d829aef96dbeba088ea3",
+     "katana pinned-key acceptance 21",
+     "027f4b16abbc02945cc6edc72d2595e866edcbc53221aad48a850eb7ddac50dcea442599b02f9d8ca0981c04522f39f3ca1dd8694c2d509f7122626589d5eb0b"},
+    {"44f87831819905fd429073ec69cccb029084aeda11c18fd0e596906bd5b62add",
+     "katana pinned-key acceptance 22",
+     "ef242155b147f2d85027358e7a083da6834e51694d47a3da3bfadf604fd673f49572a5d8754a266d7549594cdd77d41992f0f6962367b4c985a6bc92f9d5440f"},
+    {"81eb584872bc2e1bc9a490ceebd233204aaa86924402ee14b5fa3b6bbba9e346",
+     "katana pinned-key acceptance 23",
+     "f26a8919ae496c2ed956db0509901ba7e069727950abd57b94697aa9e7d8dc5969878fa8e4b2e7025c5881e5a12e0355872a335900ef81523b96463c727f5202"},
+    };
+    for (const Generated& entry : kGenerated) {
+        const update::PublicKey key = keyFromHex(entry.publicKey);
+        const update::SignatureBytes signature = signatureFromHex(entry.signature);
+        const core::Status good = update::verifyEd25519(key, entry.message, signature);
+        EXPECT_TRUE(good.ok()) << entry.publicKey << ": " << (good.ok() ? "" : good.error().describe());
+
+        // One bit of the message: a MISMATCH for this key, so the key was accepted as a key.
+        std::string altered = entry.message;
+        altered[0] = static_cast<char>(altered[0] ^ 1);
+        const core::Status bad = update::verifyEd25519(key, altered, signature);
+        ASSERT_FALSE(bad.ok()) << entry.publicKey;
+        EXPECT_TRUE(contains(bad.error().message, kDoesNotMatch)) << bad.error().describe();
+        EXPECT_FALSE(contains(bad.error().message, kKeyNotAccepted)) << bad.error().describe();
     }
 }
 
@@ -744,6 +859,13 @@ TEST(Signature, VerificationIsSafeFromManyThreadsAtOnce)
 namespace {
 
 constexpr const char* kOpenSslVariables[] = {"OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"};
+// The one that marks the program started again by the configuration test at the end of this file.
+constexpr const char* kHostileChildMarker = "KATANA_T5_HOSTILE_CHILD";
+// Every variable a test of this file sets, for the guard to put back whatever way the test ends
+// (an ASSERT returns early).
+constexpr const char* kVariablesTheTestsSet[] = {"OPENSSL_CONF",        "OPENSSL_MODULES",
+                                                 "OPENSSL_ENGINES",     "OPENSSL_CONF_INCLUDE",
+                                                 "KATANA_T5_UNRELATED", kHostileChildMarker};
 
 void setVariable(const char* name, const char* value)
 {
@@ -763,13 +885,13 @@ void removeVariable(const char* name)
 #endif
 }
 
-// Puts the three variables back as they were: other tests in this process read the environment.
+// Puts the variables back as they were: other tests in this process read the environment.
 class RestoreOpenSslVariables {
   public:
     RestoreOpenSslVariables()
     {
-        for (std::size_t i = 0; i < std::size(kOpenSslVariables); ++i) {
-            if (const char* value = std::getenv(kOpenSslVariables[i])) {
+        for (std::size_t i = 0; i < std::size(kVariablesTheTestsSet); ++i) {
+            if (const char* value = std::getenv(kVariablesTheTestsSet[i])) {
                 saved_[i] = value;
             }
         }
@@ -778,17 +900,17 @@ class RestoreOpenSslVariables {
     RestoreOpenSslVariables& operator=(const RestoreOpenSslVariables&) = delete;
     ~RestoreOpenSslVariables()
     {
-        for (std::size_t i = 0; i < std::size(kOpenSslVariables); ++i) {
+        for (std::size_t i = 0; i < std::size(kVariablesTheTestsSet); ++i) {
             if (saved_[i]) {
-                setVariable(kOpenSslVariables[i], saved_[i]->c_str());
+                setVariable(kVariablesTheTestsSet[i], saved_[i]->c_str());
             } else {
-                removeVariable(kOpenSslVariables[i]);
+                removeVariable(kVariablesTheTestsSet[i]);
             }
         }
     }
 
   private:
-    std::optional<std::string> saved_[std::size(kOpenSslVariables)];
+    std::optional<std::string> saved_[std::size(kVariablesTheTestsSet)];
 };
 
 } // namespace
@@ -852,3 +974,142 @@ TEST(Signature, HardeningRemovesTheVariablesWhateverTheirCaseOnWindows)
     }
 }
 #endif
+
+// ---- OPENSSL_INIT_NO_LOAD_CONFIG: a configuration file must not decide what verifies ---------------
+//
+// OpenSSL reads the file OPENSSL_CONF names when it first initialises, once per process, and the
+// file decides which providers load. The one written below loads the base provider alone, which has
+// no Ed25519: a library that read it would find no algorithm to verify with, and a file that loads
+// a provider of the attacker's choosing would decide the verdict itself. verifyEd25519 initialises
+// libcrypto with OPENSSL_INIT_NO_LOAD_CONFIG, and this is the case that fails if that flag goes.
+//
+// It cannot be proved in this process: by the time any test runs, an earlier one may have
+// initialised libcrypto already, with or without the variable. So the case starts this program
+// again on this one case, with the variable set and nothing having called libcrypto. The child
+// does not call hardenOpenSslEnvironment either, which would clear the variable and hide the flag:
+// that function is tested above, and its clearing is a second line of defence, not this one.
+// (Measured with the flag set to 0: the child fails, verifyEd25519 answering Internal because
+// EVP_PKEY_new_raw_public_key finds no Ed25519.)
+
+namespace {
+
+std::filesystem::path thisProgram()
+{
+    std::filesystem::path program;
+    std::error_code ignored;
+#ifdef _WIN32
+    const std::vector<std::string> arguments = update::utf8Arguments(0, nullptr);
+    if (!arguments.empty()) {
+        program = core::pathFromUtf8(arguments.front());
+    }
+    if (!program.empty() && !std::filesystem::exists(program, ignored) && program.extension().empty()) {
+        program += ".exe"; // started as `katana_update_tests` from a command prompt
+    }
+#else
+    if (std::filesystem::exists("/proc/self/exe", ignored)) {
+        program = std::filesystem::read_symlink("/proc/self/exe", ignored);
+    } else if (!::testing::internal::GetArgvs().empty()) {
+        program = ::testing::internal::GetArgvs().front();
+    }
+#endif
+    return program.empty() ? program : std::filesystem::absolute(program, ignored);
+}
+
+struct ScratchFolder {
+    std::filesystem::path path;
+    ScratchFolder()
+    {
+        std::error_code ignored;
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = std::filesystem::temp_directory_path(ignored) / ("katana_t5_" + std::to_string(stamp));
+        std::filesystem::create_directories(path, ignored);
+    }
+    ScratchFolder(const ScratchFolder&) = delete;
+    ScratchFolder& operator=(const ScratchFolder&) = delete;
+    ~ScratchFolder()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
+    }
+};
+
+bool isAscii(const std::string& text)
+{
+    return std::all_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; });
+}
+
+// Runs `program --gtest_filter=<filter>`, both of its streams into `output`; its exit code, or -1
+// when it could not be started.
+int runProgramOnOneCase(const std::filesystem::path& program, const std::string& filter,
+                        const std::filesystem::path& output)
+{
+#ifdef _WIN32
+    // cmd.exe /c drops the first and the last quote of a command that begins with a quote and
+    // holds more of them, so the whole command is wrapped in one more pair.
+    const std::wstring command = L"\"\"" + program.wstring() + L"\" --gtest_color=no --gtest_filter=" +
+                                 std::wstring(filter.begin(), filter.end()) + L" > \"" + output.wstring() +
+                                 L"\" 2>&1\"";
+    return _wsystem(command.c_str());
+#else
+    const std::string command = "'" + program.string() + "' --gtest_color=no --gtest_filter=" + filter +
+                                " > '" + output.string() + "' 2>&1";
+    const int status = std::system(command.c_str());
+    return status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+}
+
+} // namespace
+
+TEST(Signature, AConfigurationFileNamedByTheEnvironmentDoesNotChangeWhatVerifies)
+{
+    if (std::getenv(kHostileChildMarker) != nullptr) {
+        // The child: its first use of libcrypto. RFC 8032 TEST 1 to 3 must verify.
+        for (const RfcVector& vector : kRfcVectors) {
+            const core::Status status = update::verifyEd25519(
+                keyFromHex(vector.publicKey), bytesFromHex(vector.message), signatureFromHex(vector.signature));
+            EXPECT_TRUE(status.ok()) << vector.name << ": " << (status.ok() ? "" : status.error().describe());
+        }
+        return;
+    }
+
+    const std::filesystem::path program = thisProgram();
+    ASSERT_TRUE(!program.empty() && std::filesystem::exists(program))
+        << "cannot find this program: '" << program.string() << "'";
+    const ScratchFolder scratch;
+    ASSERT_TRUE(std::filesystem::is_directory(scratch.path));
+    const std::filesystem::path configuration = scratch.path / "base_provider_only.cnf";
+    const std::filesystem::path output = scratch.path / "child_output.txt";
+    if (!isAscii(configuration.string()) || !isAscii(program.string())) {
+        GTEST_SKIP() << "OPENSSL_CONF reaches OpenSSL in the ANSI code page: a folder named outside ASCII "
+                        "cannot be named to it";
+    }
+    {
+        std::ofstream file(configuration, std::ios::binary);
+        file << "openssl_conf = katana_t5_init\n"
+                "[katana_t5_init]\n"
+                "providers = katana_t5_providers\n"
+                "[katana_t5_providers]\n"
+                "base = katana_t5_base\n"
+                "[katana_t5_base]\n"
+                "activate = 1\n";
+        ASSERT_TRUE(file.good());
+    }
+
+    const RestoreOpenSslVariables restore;
+    setVariable("OPENSSL_CONF", configuration.string().c_str());
+    setVariable("OPENSSL_MODULES", (scratch.path / "no_modules_here").string().c_str());
+    setVariable("OPENSSL_ENGINES", (scratch.path / "no_engines_here").string().c_str());
+    setVariable(kHostileChildMarker, "1");
+
+    const ::testing::TestInfo* const info = ::testing::UnitTest::GetInstance()->current_test_info();
+    const std::string filter = std::string(info->test_suite_name()) + "." + info->name();
+    const int exitCode = runProgramOnOneCase(program, filter, output);
+    const core::Result<std::string> childOutput = core::readFileBytes(output);
+    const std::string text =
+        childOutput.ok() ? childOutput.value() : "(no output: " + childOutput.error().describe() + ")";
+
+    EXPECT_EQ(exitCode, 0) << text;
+    // One case ran in the child (a filter that matched nothing would also exit 0) and it passed.
+    EXPECT_TRUE(contains(text, "[  PASSED  ] 1 test.")) << text;
+    EXPECT_FALSE(contains(text, "SKIPPED")) << text;
+}

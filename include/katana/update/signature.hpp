@@ -54,7 +54,9 @@ struct SignatureLine {
 // OK when `signature` is a valid Ed25519 signature of `message` under `key`.
 // InvalidArgument when it is not (the message says which: key not accepted,
 // S out of range, mismatch) - never a crash on any input, and never OK for a
-// message that was altered by one bit.
+// message that was altered by one bit. Internal, and only then, when OpenSSL
+// itself fails (libcrypto cannot be initialised, a context cannot be made,
+// the check cannot run): that says nothing about the signature.
 [[nodiscard]] core::Status verifyEd25519(const PublicKey& key, std::string_view message,
                                          const SignatureBytes& signature);
 

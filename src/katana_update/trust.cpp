@@ -12,6 +12,10 @@
 
 #include "katana/update/trust.hpp"
 
+#include <algorithm>
+#include <optional>
+#include <string>
+
 #include "katana/update/feed.hpp"
 
 #if !defined(KATANA_UPDATE_KEY_ACTIVE) || !defined(KATANA_UPDATE_KEY_SPARE) || \
@@ -85,46 +89,63 @@ core::Result<Manifest> verifyManifest(std::string_view json, std::string_view si
                                std::to_string(json.size()) + " bytes");
     }
 
-    // 1. The signature line parses and names a key this build trusts. A listed key whose id is
-    //    not the id of its bytes is a Trust somebody built wrongly, and counts as absent.
-    const core::Result<SignatureLine> line = parseSignatureLine(sig);
+    // The bytes this call works on, taken once: the signature is checked over these, the manifest
+    // is read from these, and these are what the result carries, so "the bytes that were verified
+    // are the bytes that are kept" holds by construction, whoever else can write to the caller's
+    // buffer (a mapped file, a buffer another thread refills). The line is copied up to one byte
+    // past its cap, which is all parseSignatureLine needs to refuse an oversize one.
+    const std::string signedJson(json);
+    const std::string signatureLine(sig.substr(0, std::min(sig.size(), static_cast<std::size_t>(kMaxSignatureBytes) + 1)));
+
+    // 1. The signature line parses.
+    const core::Result<SignatureLine> line = parseSignatureLine(signatureLine);
     if (!line) {
         return line.error();
     }
-    const TrustedKey* signer = nullptr;
+
+    // 2. A trust flagged as placeholders verifies nothing, whatever it lists, and for such a build
+    //    that is the reason an update is refused: it is said here, before the lookup that would
+    //    otherwise answer "signed by a key this build does not trust" to every real release.
+    if (trust.placeholder) {
+        return core::makeError(core::ErrorCode::Unsupported, "this build carries placeholder update keys",
+                               "key " + line.value().keyId);
+    }
+
+    // 3. The line names a key this build trusts. A listed key whose id is not the id of its bytes
+    //    is a Trust somebody built wrongly, and counts as absent.
+    // 4. The signature over the exact bytes. Every listed key with the named id is tried, in the
+    //    order listed (active, then spare): two keys share an id with probability 2^-64, but a
+    //    Trust is a parameter and need not come from the generator.
+    std::optional<core::Status> outcome;
     for (const TrustedKey& candidate : trust.keys) {
-        if (candidate.id == line.value().keyId && keyIdOf(candidate.key) == candidate.id) {
-            signer = &candidate;
+        if (candidate.id != line.value().keyId || keyIdOf(candidate.key) != candidate.id) {
+            continue;
+        }
+        core::Status attempt = verifyEd25519(candidate.key, signedJson, line.value().signature);
+        const bool accepted = attempt.ok();
+        if (accepted || !outcome) { // the first refusal is the one reported, unless a later key accepts
+            outcome = std::move(attempt);
+        }
+        if (accepted) {
             break;
         }
     }
-    if (signer == nullptr) {
+    if (!outcome) {
         return core::makeError(core::ErrorCode::Unsupported, "signed by a key this build does not trust",
-                               "key " + line.value().keyId +
-                                   (trust.placeholder ? "; this build carries placeholder update keys" : ""));
+                               "key " + line.value().keyId);
+    }
+    if (!outcome->ok()) {
+        return outcome->error();
     }
 
-    // 2. A trust flagged as placeholders verifies nothing, whatever it lists. Step 1 has already
-    //    sent every real signer away from such a trust, saying why in its context; this is the
-    //    backstop for a line that names a key the trust lists.
-    if (trust.placeholder) {
-        return core::makeError(core::ErrorCode::Unsupported, "this build carries placeholder update keys",
-                               "key " + signer->id);
-    }
-
-    // 3. The signature over the exact bytes.
-    if (const core::Status verified = verifyEd25519(signer->key, json, line.value().signature); !verified) {
-        return verified.error();
-    }
-
-    // 4. Only now is the text read as a manifest.
-    core::Result<Manifest> parsed = parseManifest(json);
+    // 5. Only now is the text read as a manifest.
+    core::Result<Manifest> parsed = parseManifest(signedJson);
     if (!parsed) {
         return parsed.error();
     }
     Manifest manifest = std::move(parsed).value();
 
-    // 5. Signed, and for this program: a validly signed manifest of another product, another
+    // 6. Signed, and for this program: a validly signed manifest of another product, another
     //    platform or another channel is still not an update for this install.
     if (manifest.product != install.product) {
         return core::makeError(core::ErrorCode::InvalidArgument,
@@ -142,8 +163,8 @@ core::Result<Manifest> verifyManifest(std::string_view json, std::string_view si
                                "manifest '" + manifest.channel + "'");
     }
 
-    manifest.signedJson = std::string(json);
-    manifest.signatureLine = std::string(sig);
+    manifest.signedJson = signedJson;
+    manifest.signatureLine = signatureLine;
     return manifest;
 }
 

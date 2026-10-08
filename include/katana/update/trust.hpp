@@ -56,13 +56,15 @@ struct Trust {
 // downloaded. In this order, stopping at the first failure:
 //   0. `json` is not empty and not above kMaxManifestBytes (InvalidArgument), whatever
 //      `sig` holds;
-//   1. the signature line parses and its key id names a key in `trust`
-//      (otherwise Unsupported "signed by a key this build does not trust"; when `trust`
-//      is a placeholder the context says so, because for such a build that is the reason);
-//   2. trust is not a placeholder;
-//   3. verifyEd25519 over the EXACT bytes of `json`;
-//   4. only now parseManifest;
-//   5. the signed product equals install.product, target equals
+//   1. the signature line parses (ParseFailure);
+//   2. trust is not a placeholder (Unsupported, "this build carries placeholder update
+//      keys"): asked before the key is looked up, so that a development build says why
+//      it refuses every release and not that it does not know the signer;
+//   3. the line's key id names a key in `trust` (otherwise Unsupported "signed by a key
+//      this build does not trust");
+//   4. verifyEd25519 over the EXACT bytes of `json`;
+//   5. only now parseManifest;
+//   6. the signed product equals install.product, target equals
 //      install.target, channel is "stable";
 // and the result carries signedJson and signatureLine. It does NOT decide
 // "newer than installed" - check() does, with the installed (version,
