@@ -54,18 +54,27 @@ struct Trust {
 
 // The whole gate. `json` and `sig` are the two files of a release as
 // downloaded. In this order, stopping at the first failure:
-//   1. the signature line parses and its key id names a key in `trust`
-//      (otherwise Unsupported "signed by a key this build does not trust");
-//   2. trust is not a placeholder;
-//   3. verifyEd25519 over the EXACT bytes of `json`;
-//   4. only now parseManifest;
-//   5. the signed product equals install.product, target equals
+//   0. `json` is not empty and not above kMaxManifestBytes (InvalidArgument), whatever
+//      `sig` holds;
+//   1. the signature line parses (ParseFailure);
+//   2. trust is not a placeholder (Unsupported, "this build carries placeholder update
+//      keys"): asked before the key is looked up, so that a development build says why
+//      it refuses every release and not that it does not know the signer;
+//   3. the line's key id names a key in `trust` (otherwise Unsupported "signed by a key
+//      this build does not trust");
+//   4. verifyEd25519 over the EXACT bytes of `json`;
+//   5. only now parseManifest;
+//   6. the signed product equals install.product, target equals
 //      install.target, channel is "stable";
 // and the result carries signedJson and signatureLine. It does NOT decide
 // "newer than installed" - check() does, with the installed (version,
 // sequence) - because the helper repeats that test itself from its own copy.
-// Failures: InvalidArgument (bad signature, wrong product/target/channel),
-// ParseFailure (not a manifest), Unsupported (key or placeholder).
+// Failures: InvalidArgument (an empty or oversize manifest, a signature that does not verify, a
+// manifest for another product, target or channel), ParseFailure (a signature line or a manifest
+// that does not parse), Unsupported (a key this build does not trust, or placeholder keys), and
+// Internal when libcrypto itself failed: that says nothing about the manifest, so a caller must
+// treat it as "could not check", never as "forged". Callers that tell these apart do it on the
+// code, not on the message text.
 [[nodiscard]] core::Result<Manifest> verifyManifest(std::string_view json, std::string_view sig,
                                                     const Trust& trust, const Install& install);
 
