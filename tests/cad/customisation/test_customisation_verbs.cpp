@@ -1883,6 +1883,40 @@ TEST(CustomisationVerbs, ChoosingTheDefaultByNameAfterAKeptAlternateRetiresTheFi
     EXPECT_TRUE(fs::exists(session.backup()));
 }
 
+// What Settings' Use warns of before it is pressed (it is followed by KEEP on a
+// kept session): ONE earlier file is kept, so a kept customisation of the
+// person's own is put away by the alternate that is kept over it, and put away
+// again - gone - by the default that is kept after that.
+TEST(CustomisationVerbs, AnAlternateThenTheDefaultKeptInTurnLeaveThePersonsOwnKeptFileInNeitherFile)
+{
+    TwoBuiltIns session("builtin-keep-twice");
+    session.start();
+    session.ok("CUSTOMISE SET auto.codes=off");
+    ASSERT_EQ(field(record(session.ok("CUSTOMISE KEEP"), "kept"), "written"), "yes");
+    const std::string personal = contentsOf(session.keptFile);
+    const Customisation own = parsed(personal);
+    ASSERT_TRUE(own.automation.has_value());
+    ASSERT_FALSE(own.automation->codesOnSurveyImport);
+
+    // The alternate over it: written, and the personal file beside it.
+    session.ok("CUSTOMISE BUILTIN Site");
+    const ReplyRecord over = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(over, "written"), "yes");
+    EXPECT_EQ(field(over, "backup"), shown(session.backup()));
+    EXPECT_EQ(contentsOf(session.backup()), personal);
+    const std::string alternate = contentsOf(session.keptFile);
+    EXPECT_NE(alternate, personal);
+
+    // The default after it: nothing is written, the alternate's file is set
+    // aside in the place of the personal one, which is in neither file.
+    session.ok("CUSTOMISE BUILTIN Small Built In");
+    const ReplyRecord retired = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(retired, "written"), "no");
+    EXPECT_FALSE(fs::exists(session.keptFile));
+    EXPECT_EQ(contentsOf(session.backup()), alternate);
+    EXPECT_NE(contentsOf(session.backup()), personal);
+}
+
 TEST(CustomisationVerbs, AnAlternateEditedAfterBeingChosenIsKeptAsAnEditedCopyBasedOnIt)
 {
     TwoBuiltIns session("builtin-keep-edited");
@@ -2744,6 +2778,23 @@ TEST(CustomisationVerbs, TheOneLineHelpIndexNamesCustomiseBuiltIn)
     ASSERT_NE(builtIn, std::string::npos);
     ASSERT_NE(reset, std::string::npos);
     EXPECT_LT(reset - builtIn, std::size_t{200});
+}
+
+// The default is the file THIS build was given, so the help reads its name from
+// what was compiled in and writes none: a build whose default is another file
+// would otherwise say a thing that is not true.
+TEST(CustomisationVerbs, HelpCustomiseNamesTheDefaultThisBuildCompiledIn)
+{
+    const std::string help = katana::cad::customisationVerbHelp();
+    EXPECT_FALSE(contains(help, "@DEFAULT@")) << "the marker is replaced";
+    const katana::cad::BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
+    if (compiledIn.customisation) {
+        EXPECT_TRUE(contains(help, "the default, " + compiledIn.customisation->name +
+                                       ", unless KATANA_BUILTIN_CUSTOMISATION says another"));
+    } else {
+        EXPECT_TRUE(contains(help, "the default (this build has none), unless "
+                                   "KATANA_BUILTIN_CUSTOMISATION says another"));
+    }
 }
 
 TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)

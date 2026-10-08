@@ -1905,9 +1905,17 @@ each case is the verb's:
   reset is. Choosing an alternate from a session that started from the default is
   therefore kept - written, based on the alternate - and the next window comes up
   as it; choosing the default again is a session that IS the built-in of the run,
-  so the kept file is set aside. The row is hidden when the program has fewer
-  than two built-ins, and Use is disabled while the chosen one is the one the
-  session already is;
+  so the kept file is set aside. Either way **the kept file that was there is
+  gone from its place**: the alternate is written over it, or it is renamed to
+  `<kept file>.bak`, in both cases replacing the `.bak` of that name - so a
+  customisation of the person's own is in neither file after a SECOND Use (an
+  alternate, then the default). Use's tip says so before it is pressed, in
+  Reset's words, and the way back is the same: Import the `.bak` with Replace.
+  *Not done: a second backup generation* - the single `.bak` is the contract of
+  every `KEEP` (Import and Reset have it too), and widening it is not this
+  chooser's to decide. The row is hidden when the program has fewer than two
+  built-ins, and Use is disabled while the chosen one is the one the session
+  already is;
 - **a `KEEP` that is refused** - the kept file changed on disk since this
   session read it, or cannot be read at all - is shown as the refusal it is,
   under the line that was carried out. The session is then edited and not
@@ -2620,7 +2628,10 @@ milliseconds, the coefficient of variation of the five between 1 and 5 % in
 every row. The generated customisation is made in code to the reference
 one's size and mix (792 definitions, 35,692 strokes with coordinates of three
 decimals, 1,624 rules), so that the measurement can be repeated in any clone;
-the built-in column is the converted reference file, where the build has one.
+the built-in column is the converted reference file (the NSW file), which was the
+build's built-in when this was measured; the default is now Katana Standard, an
+eighth of the size (190,649 bytes), and the benchmark reads that, so a new run's
+built-in column is not comparable with this one.
 
 | | Generated, 1,559,276 bytes | Built-in, 1,541,462 bytes |
 |---|---|---|

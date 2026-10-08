@@ -1161,7 +1161,7 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
 
 std::string customisationVerbHelp()
 {
-    return R"(CUSTOMISE: the session's customisation - its linestyle and symbol definitions, its survey
+    std::string text = R"(CUSTOMISE: the session's customisation - its linestyle and symbol definitions, its survey
 code rules, colours, linework codes and automation - read and written as one Katana
 customisation file (docs/customisation.md). A keyword is the whole FIRST word, in any case; a
 file called as one is given with its directory (./json). CUSTOMIZE is the same verb. A reply
@@ -1212,7 +1212,7 @@ Export    CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
           with its directory (./CODES). After ONLY every word is a definition; a definition
           called NAME is listed by giving NAME <name> before ONLY
 Start     CUSTOMISE RESET   the built-in customisation of this run in the place of the session's -
-          the default, Katana Standard, unless KATANA_BUILTIN_CUSTOMISATION says another:
+          @DEFAULT@ unless KATANA_BUILTIN_CUSTOMISATION says another:
           reset name= definitions= codes= rules= kept=yes|no
           CUSTOMISE BUILTIN   the built-in customisations this program has, the default marked and
           the one the session is: builtins count= default= active= [based_on=<the built-in a kept
@@ -1249,6 +1249,14 @@ Settings  CUSTOMISE SET <key>=<value>...   auto.codes=on|off and auto.linework=o
           that control is off). A key is given once in a line, and one refused item sets
           none: set <key>=<value> ...
 Editing a customisation changes the session only: KEEP makes it what the next start gives.)";
+    // The default is whatever this build compiled in as its default: its name
+    // is read, not written here, since a build may be given another file.
+    const BuiltInCustomisation& compiledIn = compiledInCustomisation();
+    const std::string theDefault =
+        compiledIn.customisation ? "the default, " + compiledIn.customisation->name + ","
+                                 : std::string("the default (this build has none),");
+    text.replace(text.find("@DEFAULT@"), std::string_view("@DEFAULT@").size(), theDefault);
+    return text;
 }
 
 } // namespace katana::cad

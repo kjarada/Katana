@@ -1331,8 +1331,11 @@ TEST(SettingsDialog, UseBuildsTheLineWithTheNameQuotedAndKeepFollowsAKeptSession
     ASSERT_TRUE(enabled(dialog, "settingsBuiltInUse"));
     EXPECT_EQ(tip(dialog, "settingsBuiltInUse"),
               QStringLiteral("Put the chosen built-in customisation in the place of the session's "
-                             "(CUSTOMISE BUILTIN).\nA session that is kept stays kept: the choice "
-                             "is what the next start gives."));
+                             "(CUSTOMISE BUILTIN).\nThis session is the kept one, so the choice is "
+                             "kept too: the kept file is written with it, and what was there is "
+                             "set aside as C:/kept files/customisation.json.bak, replacing the "
+                             "file of that name.\nImport that file with Replace instead of "
+                             "merging ticked to have it back."));
     press(dialog, "settingsBuiltInUse");
     EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE BUILTIN \"Pegs Two\""), kKeep}));
     EXPECT_FALSE(saysARefusal(dialog));
@@ -1354,6 +1357,73 @@ TEST(SettingsDialog, UseBuildsTheLineWithTheNameQuotedAndKeepFollowsAKeptSession
     press(dialog, "settingsBuiltInUse");
     ASSERT_FALSE(f.ran.isEmpty());
     EXPECT_EQ(f.ran.front(), QStringLiteral("CUSTOMISE BUILTIN Site"));
+}
+
+TEST(SettingsDialog, UseSaysBeforeItIsPressedWhatKeepingTheChoiceDoesToTheKeptFile)
+{
+    const QString plain = QStringLiteral("Put the chosen built-in customisation in the place of the "
+                                         "session's (CUSTOMISE BUILTIN)");
+    const QString way = QStringLiteral("Import that file with Replace instead of merging ticked to "
+                                       "have it back.");
+    const QString aside = QStringLiteral("C:/kept files/customisation.json.bak");
+    {
+        // A kept session, the other built-in chosen: the choice is written to
+        // the kept file, and what was there is put away - the person's own
+        // customisation, when that is what was kept - and an earlier file of
+        // that name is replaced. The warning Reset gives, for the same loss.
+        SettingsFixture f;
+        startOnSite(f);
+        SettingsDialog dialog(f.context);
+        chooser(dialog)->setCurrentIndex(1);
+        EXPECT_EQ(tip(dialog, "settingsBuiltInUse"),
+                  plain + QStringLiteral(".\nThis session is the kept one, so the choice is kept "
+                                         "too: the kept file is written with it, and what was "
+                                         "there is set aside as ") +
+                      aside + QStringLiteral(", replacing the file of that name.\n") + way);
+    }
+    {
+        // The built-in of the run chosen, over a session that is another and
+        // kept: KEEP writes nothing for it and sets the kept file aside, so
+        // Revert has none to read. The tip follows the chooser.
+        SettingsFixture f;
+        startOnSite(f);
+        SettingsDialog dialog(f.context);
+        ASSERT_TRUE(f.document
+                        .installCustomisation(customisationFromText(kPegsTwo),
+                                              CustomisationOrigin::BuiltIn, true)
+                        .ok());
+        processEvents();
+        chooser(dialog)->setCurrentIndex(0);
+        ASSERT_TRUE(enabled(dialog, "settingsBuiltInUse"));
+        EXPECT_EQ(tip(dialog, "settingsBuiltInUse"),
+                  plain + QStringLiteral(".\nThis session is the kept one, so the choice is kept "
+                                         "too: that is the built-in every start gives when "
+                                         "nothing is kept, so the kept file is set aside as ") +
+                      aside +
+                      QStringLiteral(", replacing the file of that name, and Revert to Kept then "
+                                     "has none to read.\n") +
+                      way);
+    }
+    {
+        // Not the kept one: nothing follows the press and the kept file stands.
+        SettingsFixture f;
+        startOnSite(f);
+        f.document.setAutomation({.codesOnSurveyImport = false, .lineworkOnSurveyImport = true});
+        SettingsDialog dialog(f.context);
+        chooser(dialog)->setCurrentIndex(1);
+        EXPECT_EQ(tip(dialog, "settingsBuiltInUse"),
+                  plain + QStringLiteral(".\nThis session is not the kept one, so the choice is "
+                                         "not kept: the kept file stands."));
+    }
+    {
+        // A host that keeps no file has none to put away.
+        SettingsFixture f;
+        f.context.keptFile.clear();
+        startOnSite(f);
+        SettingsDialog dialog(f.context);
+        chooser(dialog)->setCurrentIndex(1);
+        EXPECT_EQ(tip(dialog, "settingsBuiltInUse"), plain);
+    }
 }
 
 TEST(SettingsDialog, UseOnASessionThatWasNotKeptIsNotFollowedByKeep)

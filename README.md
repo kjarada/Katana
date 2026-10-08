@@ -200,7 +200,7 @@ that records how and why it works. `docs/index.md` lists every document.
   cannot watch a screen; `katana_mcp` gives an agent the verbs `katana_cli`
   has, as tools. See [headless.md](docs/headless.md), [mcp.md](docs/mcp.md).
 
-`katana_cli -c "HELP"` prints the verbs: 385 lines in a default build, 384 with
+`katana_cli -c "HELP"` prints the verbs: 386 lines in a default build, 385 with
 no built-in customisation, at the time of writing.
 
 **Where the three ways in differ.** Not every capability is on all three yet.

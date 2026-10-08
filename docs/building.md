@@ -537,9 +537,15 @@ nothing globs beside the converted file. (Until the legacy readers' reference te
 reference folder instead of the one the old embedding compiled from, two of
 them handed every file of `resources/customisation/` to the legacy loader and
 would have failed on the converted one; they read the reference folder now.)
-`benchmarks/bench_customisation.cpp` measures the converted file when it is
-there, found again at each build, and `benchmarks/qt/bench_plan_paint.cpp` draws
-with its library when there is one.
+`benchmarks/bench_customisation.cpp` measures the DEFAULT built-in when there is
+one (the file `KATANA_BUILTIN_CUSTOMISATION` names, found again at each build:
+Katana Standard now, and not this converted file, which is an alternate), and
+`benchmarks/qt/bench_plan_paint.cpp` draws with the default's library when there
+is one. Both therefore measure the smaller file since the default moved:
+`bench_plan_paint` draws with 186 definitions where it drew with 792. Its
+`libraryDefinitions` counter says which, and a run is compared only with one that
+has the same figure, so the figures taken before the default moved are not
+baselines for it.
 
 ## Bundling
 

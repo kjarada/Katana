@@ -254,6 +254,44 @@ QString resetTip(bool hasBuiltIn, bool kept, const QString& keptFile)
     return tip;
 }
 
+// What Use says of itself BEFORE it is pressed, for the same reason as Reset
+// (no question is asked after). The press is followed by CUSTOMISE KEEP when
+// the session is the kept one, and the file that was kept does not stay where
+// it is: the chosen built-in is written in its place and what was there goes
+// to `<kept file>.bak`, replacing the one before it; or, when the chosen one
+// is the built-in of the run, which every start gives when nothing is kept,
+// nothing is written and the kept file is set aside the same way. The press
+// after that replaces the `.bak` again, so a kept customisation of the
+// person's own is in neither file by the second press.
+// A session that is not kept is followed by nothing, and its kept file stands.
+QString useTip(bool kept, bool chosenIsTheRunsOwn, const QString& keptFile)
+{
+    QString tip = QStringLiteral("Put the chosen built-in customisation in the place of the "
+                                 "session's (CUSTOMISE BUILTIN)");
+    if (keptFile.isEmpty()) {
+        return tip;
+    }
+    if (!kept) {
+        return tip + QStringLiteral(".\nThis session is not the kept one, so the choice is not "
+                                    "kept: the kept file stands.");
+    }
+    const QString aside = setAsideFile(keptFile);
+    if (chosenIsTheRunsOwn) {
+        return tip + QStringLiteral(".\nThis session is the kept one, so the choice is kept too: "
+                                    "that is the built-in every start gives when nothing is kept, "
+                                    "so the kept file is set aside as %1, replacing the file of "
+                                    "that name, and Revert to Kept then has none to read.\nImport "
+                                    "that file with Replace instead of merging ticked to have it "
+                                    "back.")
+                       .arg(aside);
+    }
+    return tip + QStringLiteral(".\nThis session is the kept one, so the choice is kept too: the "
+                                "kept file is written with it, and what was there is set aside as "
+                                "%1, replacing the file of that name.\nImport that file with "
+                                "Replace instead of merging ticked to have it back.")
+                   .arg(aside);
+}
+
 // What Keep says of itself: why it cannot be pressed, or what the press does.
 // A session whose origin is still BuiltIn is the built-in and nothing more -
 // any edit makes it Edited, any load Loaded - and CUSTOMISE KEEP writes no
@@ -828,13 +866,10 @@ void SettingsDialog::showBuiltInUse()
     } else if (!choice.problem.empty()) {
         builtInUse_->setToolTip(text(choice.problem));
     } else {
-        QString tip = QStringLiteral("Put the chosen built-in customisation in the place of the "
-                                     "session's (CUSTOMISE BUILTIN)");
-        if (!context_.keptFile.isEmpty()) {
-            tip += QStringLiteral(".\nA session that is kept stays kept: the choice is what the "
-                                  "next start gives.");
-        }
-        builtInUse_->setToolTip(tip);
+        // The tip follows the Document, as Reset's does: a dialog whose
+        // Document has gone says nothing of what a press would keep.
+        const bool kept = alive() && context_.document->customisationState().kept;
+        builtInUse_->setToolTip(useTip(kept, choice.isDefault, context_.keptFile));
     }
 }
 
