@@ -578,18 +578,28 @@ TEST(UpdateManifest, AnApplierAboveWhatThisBuildSpeaksIsNotAParseError)
     EXPECT_EQ(parsed.value().applier, 2u);
 }
 
-TEST(UpdateManifest, TheSequenceIsOneOrMoreAndCanBeAsLargeAsSixtyFourBitsHold)
+TEST(UpdateManifest, TheSequenceIsUtcSecondsFromOneToTheYear2100)
 {
+    // The producer's own range (update_make_manifest.py): 1 to 4102444800, which is
+    // 2100-01-01T00:00:00Z (Python calendar.timegm((2100, 1, 1, 0, 0, 0))).
     Doc doc = sample();
     doc.top.set("sequence", "1");
     ASSERT_TRUE(parse(doc).ok());
     EXPECT_EQ(parse(doc).value().sequence, 1u);
-    doc.top.set("sequence", "18446744073709551615");
+    doc.top.set("sequence", "4102444800");
     ASSERT_TRUE(parse(doc).ok());
-    EXPECT_EQ(parse(doc).value().sequence, kUint64Max);
+    EXPECT_EQ(parse(doc).value().sequence, 4102444800u);
 
     doc.top.set("sequence", "0");
     expectInvalid(doc, "sequence", "sequence 0");
+    doc.top.set("sequence", "4102444801");
+    expectInvalid(doc, "sequence", "one second past 2100");
+    // The same instant as the fixtures' (1792312800) in milliseconds: a signed typo that would
+    // outrank every later build of the same version.
+    doc.top.set("sequence", "1792312800000");
+    expectInvalid(doc, "sequence", "epoch milliseconds");
+    doc.top.set("sequence", "18446744073709551615");
+    expectInvalid(doc, "sequence", "sequence 2^64-1");
     // 2^64 is a float to the reader, so it is a mistyped member, not a wrapped 0.
     doc.top.set("sequence", "18446744073709551616");
     expectMalformed(doc, "sequence", "sequence 2^64");
@@ -923,16 +933,16 @@ TEST(UpdateManifestPlacement, TheLargestPayloadIsFourGibiBytesAndDataMayEndAtIts
 
 TEST(UpdateManifestPlacement, AStreamMayBeItsFilesSizePlusADeflatesWorstCaseAndNotOneByteMore)
 {
-    // The bound is size + size / 1000 + 64 (integer division). Worked out by hand:
-    //   size 0 -> 0 + 0 + 64 = 64;  size 999 -> 999 + 0 + 64 = 1063;  size 1000 -> 1000 + 1 + 64 = 1065;
-    //   size 1999 -> 1999 + 1 + 64 = 2064;  size 2000 -> 2000 + 2 + 64 = 2066;
-    //   size 2^31 -> 2147483648 + 2147483 + 64 = 2149631195.
+    // The bound is size + size / 8 + 64 (integer division). Worked out by hand:
+    //   size 0 -> 0 + 0 + 64 = 64;  size 7 -> 7 + 0 + 64 = 71;  size 8 -> 8 + 1 + 64 = 73;
+    //   size 999 -> 999 + 124 + 64 = 1187;  size 1000 -> 1000 + 125 + 64 = 1189;
+    //   size 2^31 -> 2147483648 + 268435456 + 64 = 2415919168.
     struct Case {
         std::uint64_t size;
         std::uint64_t largest;
     };
-    for (const Case c : {Case{0, 64}, Case{999, 1063}, Case{1000, 1065}, Case{1999, 2064}, Case{2000, 2066},
-                         Case{2 * kGiB, 2149631195ull}}) {
+    for (const Case c : {Case{0, 64}, Case{7, 71}, Case{8, 73}, Case{999, 1187}, Case{1000, 1189},
+                         Case{2 * kGiB, 2415919168ull}}) {
         const auto withStream = [&](std::uint64_t csize) {
             Doc doc = placed(0, csize, 4 * kGiB);
             doc.files[0].set("size", std::to_string(c.size));
@@ -942,6 +952,32 @@ TEST(UpdateManifestPlacement, AStreamMayBeItsFilesSizePlusADeflatesWorstCaseAndN
         expectInvalid(withStream(c.largest + 1), "files[0].csize",
                       "size " + std::to_string(c.size) + ", csize " + std::to_string(c.largest + 1));
     }
+}
+
+TEST(UpdateManifestPlacement, AStreamAnEncoderCanReallyMakeOfAnIncompressibleFileIsAccepted)
+{
+    const auto streamOf = [](std::uint64_t size, std::uint64_t csize) {
+        Doc doc = placed(0, csize, 4 * kGiB);
+        doc.files[0].set("size", std::to_string(size));
+        return doc;
+    };
+    // An encoder that codes every byte of 144 to 255 as a 9-bit fixed-Huffman literal (RFC 1951,
+    // 3.2.6) writes 3 bits of header, 9 bits a byte and 7 bits of end-of-block: ceil((9n + 10) / 8)
+    // bytes. By hand: n=1: 19 bits -> 3; n=2: 28 -> 4; n=100: 910 -> 114 (113.75);
+    // n=4096: 36874 -> 4610 (4609.25); n=65535: 589825 -> 73729 (73728.125).
+    struct Case {
+        std::uint64_t size;
+        std::uint64_t stream;
+    };
+    for (const Case c : {Case{1, 3}, Case{2, 4}, Case{100, 114}, Case{4096, 4610}, Case{65535, 73729}}) {
+        expectAccepted(streamOf(c.size, c.stream),
+                       "size " + std::to_string(c.size) + ", fixed-Huffman stream " + std::to_string(c.stream));
+    }
+    // And a real one, from an independent encoder: Python 3.14.7 (zlib-ng 2.2.4), level 1,
+    // random.Random(0).randbytes(5_000_000) -> 5,273,379 bytes, 5.5% over (level 9: 5,001,520).
+    // The old bound of a part in a thousand refused this release for every installed copy.
+    expectAccepted(streamOf(5'000'000, 5'273'379), "zlib-ng level 1 on 5,000,000 random bytes");
+    expectAccepted(streamOf(5'000'000, 5'001'520), "zlib-ng level 9 on the same bytes");
 }
 
 TEST(UpdateManifestPlacement, AStreamOfAnyLengthThatIsPlacedPastThePayloadIsRefusedForItsPlaceFirst)

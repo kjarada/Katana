@@ -52,13 +52,21 @@ constexpr std::uint64_t kMaxPayloadBytes = 2 * kMaxInstallBytes;
 // A deflate stream is never empty (manifest.hpp): the shortest, an empty final block, is the
 // two bytes 03 00.
 constexpr std::uint64_t kMinCompressedBytes = 2;
+// 2100-01-01T00:00:00Z in epoch seconds.
+constexpr std::uint64_t kMaxSequence = 4'102'444'800;
 
-// The most a deflate stream of `size` bytes can be: zlib's worst case is the input and five
-// bytes for each stored block (about 0.03%) and 13 bytes, so one part in a thousand and 64
-// bytes leave room for any encoder. `size` is at most kMaxInstallBytes: nothing overflows.
+// The most a deflate stream of `size` bytes can be. An encoder that falls back to stored
+// blocks when coding does not pay stays within a few hundredths of a percent of the input
+// (zlib-ng levels 2 to 9 on random bytes: 0.03%, measured). One that does not compare
+// (zlib-ng's quick level 1: 5.5% over, measured) codes each byte as a fixed-Huffman
+// literal, and the byte values 144 to 255 take 9 bits there (RFC 1951, 3.2.6): at worst
+// 9/8 of the input and 3 + 7 bits of block header and end-of-block, which is at most
+// size + size / 8 + 3 bytes. An eighth and 64 bytes cover that, so the bound does not
+// depend on the encoder or the level the producer uses (it pins level 9 today).
+// `size` is at most kMaxInstallBytes: nothing overflows.
 constexpr std::uint64_t maxCompressedBytes(std::uint64_t size)
 {
-    return size + size / 1000 + 64;
+    return size + size / 8 + 64;
 }
 
 core::Error malformed(std::string what, std::string_view member)
@@ -518,7 +526,7 @@ core::Result<ManifestFile> readFile(const Json& json, std::size_t index,
     }
     if (compressed.value() > maxCompressedBytes(size.value())) {
         return invalid("a deflate stream is not longer than its file by more than deflate's "
-                       "worst case (one part in a thousand and 64 bytes)",
+                       "worst case (an eighth and 64 bytes)",
                        members.name("csize"));
     }
     file.size = size.value();
@@ -647,6 +655,13 @@ core::Result<Manifest> parseManifest(std::string_view json)
     }
     if (sequence.value() == 0) {
         return invalid("the sequence must be 1 or more (0 means none, in an install record)",
+                       "sequence");
+    }
+    // The producer's own range (tools/update_make_manifest.py, MAX_SEQUENCE). A number past it,
+    // such as the time in milliseconds, would outrank every later build of the same version.
+    if (sequence.value() > kMaxSequence) {
+        return invalid("the sequence is UTC seconds and at most 4102444800 (2100-01-01), not "
+                       "milliseconds",
                        "sequence");
     }
     manifest.sequence = sequence.value();
