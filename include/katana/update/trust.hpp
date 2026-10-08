@@ -69,8 +69,12 @@ struct Trust {
 // and the result carries signedJson and signatureLine. It does NOT decide
 // "newer than installed" - check() does, with the installed (version,
 // sequence) - because the helper repeats that test itself from its own copy.
-// Failures: InvalidArgument (bad signature, wrong product/target/channel),
-// ParseFailure (not a manifest), Unsupported (key or placeholder).
+// Failures: InvalidArgument (an empty or oversize manifest, a signature that does not verify, a
+// manifest for another product, target or channel), ParseFailure (a signature line or a manifest
+// that does not parse), Unsupported (a key this build does not trust, or placeholder keys), and
+// Internal when libcrypto itself failed: that says nothing about the manifest, so a caller must
+// treat it as "could not check", never as "forged". Callers that tell these apart do it on the
+// code, not on the message text.
 [[nodiscard]] core::Result<Manifest> verifyManifest(std::string_view json, std::string_view sig,
                                                     const Trust& trust, const Install& install);
 

@@ -15,6 +15,11 @@
 // that task lands parseManifest is a stub that says "not implemented", and they are skipped,
 // visibly, rather than failed or faked. The cases that stop before the parse - everything about
 // the signature, the keys and the placeholders - run now.
+//
+// WHEN T4 IS MERGED (the integration step): `ctest -R "^Trust\."` must show 0 skipped, and
+// manifestParserIsImplemented, REQUIRE_THE_MANIFEST_PARSER and passedTheSignatureGate below are
+// deleted in the same change, so that a later parser regression fails these cases instead of
+// skipping them. (Run against T4's parser on a throwaway merge, all of them pass: see the T5 report.)
 
 #include <gtest/gtest.h>
 
@@ -100,6 +105,34 @@ bool contains(const std::string& text, std::string_view part)
     return text.find(part) != std::string::npos;
 }
 
+// The value of `set(<name> <value>)` inside the block of cmake/KatanaUpdateKeys.cmake that
+// tools/update_keytool.py rewrites (between the ">>> keys" and "<<< keys" lines), without its
+// quotes; empty when the block or the line is not there.
+std::string keysCmakeValue(const std::string& file, std::string_view name)
+{
+    const std::size_t begin = file.find("# >>> keys");
+    const std::size_t end = file.find("# <<< keys");
+    if (begin == std::string::npos || end == std::string::npos || end < begin) {
+        return {};
+    }
+    const std::string block = file.substr(begin, end - begin);
+    const std::string opening = "set(" + std::string(name) + " ";
+    const std::size_t at = block.find(opening);
+    if (at == std::string::npos) {
+        return {};
+    }
+    const std::size_t from = at + opening.size();
+    const std::size_t close = block.find(')', from);
+    if (close == std::string::npos) {
+        return {};
+    }
+    std::string value = block.substr(from, close - from);
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+    }
+    return value;
+}
+
 // True when `key` passes the key check of verifyEd25519: a signature that is wrong for a key the
 // check accepts is a MISMATCH, and for one it does not accept, "public key is not accepted".
 bool keyIsAcceptedAsAKey(const update::PublicKey& key)
@@ -176,6 +209,39 @@ TEST(Trust, TheBuildPinsTwoDistinctKeysAndNoneOfThemIsAPublishedTestKey)
     }
     // The one object, whoever asks and whenever.
     EXPECT_EQ(&update::productionTrust(), &trust);
+}
+
+TEST(Trust, ThePinnedKeysAreTheOnesInKatanaUpdateKeysCmakeActiveThenSpare)
+{
+    // What trust.cpp pins reaches it as compile definitions from cmake/KatanaUpdateKeys.cmake. This
+    // reads the same file as TEXT, the other way round, so that keys swapped between the two slots,
+    // a define that went stale, or a flag that disagrees with the file are all caught: the file is
+    // the oracle, "active" being the one CI signs with and "spare" the offline one. (The file is
+    // reached through the fixtures folder: tests/update/fixtures -> the source root.)
+    const std::string file = readFixture("../../../cmake/KatanaUpdateKeys.cmake");
+    const std::string active = keysCmakeValue(file, "KATANA_UPDATE_KEY_ACTIVE");
+    const std::string spare = keysCmakeValue(file, "KATANA_UPDATE_KEY_SPARE");
+    const std::string flag = keysCmakeValue(file, "KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS");
+    ASSERT_EQ(active.size(), 64u) << "KATANA_UPDATE_KEY_ACTIVE not found in the keys block";
+    ASSERT_EQ(spare.size(), 64u) << "KATANA_UPDATE_KEY_SPARE not found in the keys block";
+    ASSERT_TRUE(flag == "ON" || flag == "OFF") << "KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS is '" << flag << "'";
+
+    const update::Trust& trust = update::productionTrust();
+    ASSERT_EQ(trust.keys.size(), 2u);
+    EXPECT_EQ(trust.keys[0].key, keyFromHex(active)) << "slot 0 must be the active key";
+    EXPECT_EQ(trust.keys[1].key, keyFromHex(spare)) << "slot 1 must be the spare key";
+    // The key id is the first 16 digits of the key as the file spells it (tools/update_keytool.py).
+    EXPECT_EQ(trust.keys[0].id, active.substr(0, 16));
+    EXPECT_EQ(trust.keys[1].id, spare.substr(0, 16));
+    EXPECT_EQ(trust.placeholder, flag == "ON");
+
+    if (trust.placeholder) {
+        // While the owner has not pinned real keys: the ASCII the file's comment says they spell.
+        const std::string_view activeWords = "PLACEHOLDER-ACTIVE";
+        const std::string_view spareWords = "PLACEHOLDER-SPARE";
+        EXPECT_TRUE(std::equal(activeWords.begin(), activeWords.end(), trust.keys[0].key.begin()));
+        EXPECT_TRUE(std::equal(spareWords.begin(), spareWords.end(), trust.keys[1].key.begin()));
+    }
 }
 
 TEST(Trust, TheKeyCheckHelperTellsAKeyTheCheckAcceptsFromOneItDoesNot)

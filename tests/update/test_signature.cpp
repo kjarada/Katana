@@ -18,6 +18,16 @@
 //
 // What each case would catch is named in its comment: removing the explicit S check, the
 // key check or the strict base64 makes the case after it fail.
+//
+// To regenerate the Python-derived literals (about 100 lines of Python from RFC 8032 sections
+// 5.1 and 6 and nothing else; check it against TEST 1 to 3 first): an order-8 point is L * Q for
+// a curve point Q found by decoding small y values, and its other-sign and other-y forms are the
+// same points with x or y negated; a non-canonical alias is y + p written in 255 bits
+// (p = 2^255 - 19); the mixed-order key is TEST 1's A plus one order-8 point, encoded; "S + L" is
+// TEST 2's S plus L, little-endian, in the signature's second half (it still satisfies
+// 8*S*B = 8*R + 8*h*A, which is why only the explicit S < L test refuses it). The count for the
+// all-zero key is `openssl pkeyutl -verify -pubin -rawin` over the 256 one-byte messages, with a
+// 64-byte zero sigfile and the SPKI header 302a300506032b6570032100 before 32 zero bytes.
 
 #include <gtest/gtest.h>
 
@@ -410,6 +420,30 @@ TEST(Signature, Rfc8032Section71Tests1To3Verify)
     }
 }
 
+TEST(Signature, AMessageWithNoDataPointerIsTheEmptyMessage)
+{
+    // TEST 1 signs the empty message, and bytesFromHex("") hands over an empty std::string, whose
+    // data() is a real pointer. A default string_view's is null, which is what a caller with
+    // nothing to say may pass; verifyEd25519 must still verify it as the empty message and not
+    // hand a null pointer to OpenSSL. (Measured: OpenSSL 3.6.5 itself accepts a null pointer with a
+    // length of 0, so on this OpenSSL the substitution in verifyEd25519 is a safeguard and this case
+    // pins the behaviour; on a library that refuses the null it is what keeps TEST 1 verifying.)
+    const std::string_view nothing;
+    ASSERT_EQ(nothing.data(), nullptr) << "the premise: this view has no data pointer";
+    const RfcVector& one = kRfcVectors[0];
+    const core::Status status =
+        update::verifyEd25519(keyFromHex(one.publicKey), nothing, signatureFromHex(one.signature));
+    EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
+    // And it is the empty message and nothing else: another key's signature of another message
+    // does not verify for it, and TEST 1's signature does not verify for a message of one byte.
+    expectRefused(update::verifyEd25519(keyFromHex(kRfcVectors[1].publicKey), nothing,
+                                        signatureFromHex(kRfcVectors[1].signature)),
+                  kDoesNotMatch);
+    expectRefused(update::verifyEd25519(keyFromHex(one.publicKey), std::string_view("\0", 1),
+                                        signatureFromHex(one.signature)),
+                  kDoesNotMatch);
+}
+
 TEST(Signature, EachRfcVectorFailsWhenAnyBitOfTheMessageIsFlipped)
 {
     // TEST 2 and 3 sign 8 and 16 bits. TEST 1 signs the empty message, which has no bit to
@@ -610,7 +644,7 @@ TEST(Signature, TheAllZeroKeyAndSignatureThatOpensslAcceptsAreRefused)
 {
     // Measured with `openssl pkeyutl -verify -pubin -rawin` (3.6.5): the all-zero public key
     // (a point of order 4) and the all-zero signature verify one-byte messages 9, 14, 17, 19, 26,
-    // 27, 39, 47, 49, 51 ... 239 (65 of 256), because the equation 8*S*B = 8*R + 8*h*A has only
+    // 27, 39, 47, 49, 51 ... 239 (64 of 256), because the equation 8*S*B = 8*R + 8*h*A has only
     // multiples of the order-4 point in it. This is a forgery for a build that pins the
     // zero key; the key check is what stops it. All 256 messages, so that it does not depend on
     // which of them the equation happens to hold for.
@@ -1033,26 +1067,26 @@ struct ScratchFolder {
     }
 };
 
-bool isAscii(const std::string& text)
-{
-    return std::all_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; });
-}
-
-// Runs `program --gtest_filter=<filter>`, both of its streams into `output`; its exit code, or -1
-// when it could not be started.
+// Runs `program --gtest_filter=<filter>` with `folder` as its working directory, both of its
+// streams into `output`; its exit code, or -1 when it could not be started. The folder is how the
+// child names its configuration file by a relative, ASCII-only path whatever the user's profile
+// folder is called: OPENSSL_CONF reaches OpenSSL in the ANSI code page, so an absolute path under
+// a profile named outside ASCII could not be named to it.
 int runProgramOnOneCase(const std::filesystem::path& program, const std::string& filter,
-                        const std::filesystem::path& output)
+                        const std::filesystem::path& folder, const std::filesystem::path& output)
 {
 #ifdef _WIN32
     // cmd.exe /c drops the first and the last quote of a command that begins with a quote and
     // holds more of them, so the whole command is wrapped in one more pair.
-    const std::wstring command = L"\"\"" + program.wstring() + L"\" --gtest_color=no --gtest_filter=" +
+    const std::wstring command = L"\"cd /d \"" + folder.wstring() + L"\" && \"" + program.wstring() +
+                                 L"\" --gtest_color=no --gtest_filter=" +
                                  std::wstring(filter.begin(), filter.end()) + L" > \"" + output.wstring() +
                                  L"\" 2>&1\"";
     return _wsystem(command.c_str());
 #else
-    const std::string command = "'" + program.string() + "' --gtest_color=no --gtest_filter=" + filter +
-                                " > '" + output.string() + "' 2>&1";
+    const std::string command = "cd '" + folder.string() + "' && '" + program.string() +
+                                "' --gtest_color=no --gtest_filter=" + filter + " > '" + output.string() +
+                                "' 2>&1";
     const int status = std::system(command.c_str());
     return status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 #endif
@@ -1079,10 +1113,6 @@ TEST(Signature, AConfigurationFileNamedByTheEnvironmentDoesNotChangeWhatVerifies
     ASSERT_TRUE(std::filesystem::is_directory(scratch.path));
     const std::filesystem::path configuration = scratch.path / "base_provider_only.cnf";
     const std::filesystem::path output = scratch.path / "child_output.txt";
-    if (!isAscii(configuration.string()) || !isAscii(program.string())) {
-        GTEST_SKIP() << "OPENSSL_CONF reaches OpenSSL in the ANSI code page: a folder named outside ASCII "
-                        "cannot be named to it";
-    }
     {
         std::ofstream file(configuration, std::ios::binary);
         file << "openssl_conf = katana_t5_init\n"
@@ -1096,14 +1126,15 @@ TEST(Signature, AConfigurationFileNamedByTheEnvironmentDoesNotChangeWhatVerifies
     }
 
     const RestoreOpenSslVariables restore;
-    setVariable("OPENSSL_CONF", configuration.string().c_str());
-    setVariable("OPENSSL_MODULES", (scratch.path / "no_modules_here").string().c_str());
-    setVariable("OPENSSL_ENGINES", (scratch.path / "no_engines_here").string().c_str());
+    // Relative names, resolved against the child's working directory (the scratch folder).
+    setVariable("OPENSSL_CONF", "base_provider_only.cnf");
+    setVariable("OPENSSL_MODULES", "no_modules_here");
+    setVariable("OPENSSL_ENGINES", "no_engines_here");
     setVariable(kHostileChildMarker, "1");
 
     const ::testing::TestInfo* const info = ::testing::UnitTest::GetInstance()->current_test_info();
     const std::string filter = std::string(info->test_suite_name()) + "." + info->name();
-    const int exitCode = runProgramOnOneCase(program, filter, output);
+    const int exitCode = runProgramOnOneCase(program, filter, scratch.path, output);
     const core::Result<std::string> childOutput = core::readFileBytes(output);
     const std::string text =
         childOutput.ok() ? childOutput.value() : "(no output: " + childOutput.error().describe() + ")";

@@ -67,7 +67,10 @@ struct SignatureLine {
 // verifyEd25519 makes the same initialisation on its first use, so a program that skips this
 // still never loads a configuration through this library - provided nothing else in the process
 // initialised libcrypto first. Not thread-safe against other threads reading the environment, so
-// call it before starting any. Idempotent. Internal if libcrypto cannot be initialised.
+// call it before starting any. Idempotent. Internal if libcrypto cannot be initialised. The three
+// variables are gone for the rest of the process's life, so a program it starts inherits none of
+// them: the helper that relaunches katana (T9) reads them BEFORE this call if it means to hand the
+// user's own values on, and builds the child's environment from that copy.
 [[nodiscard]] core::Status hardenOpenSslEnvironment();
 
 } // namespace katana::update
