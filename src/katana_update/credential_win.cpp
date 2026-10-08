@@ -7,8 +7,8 @@
 // UTF-8 bytes. Read also takes a blob that is UTF-16LE text, because that is what `cmdkey
 // /generic:Katana/update-token /user:x /pass:<token>` writes (measured on Windows 11,
 // 2026-10-08: the password "abc" is stored as 61 00 62 00 63 00).
-// UTF-8 text has no NUL inside it, so a blob that has one inside is UTF-16, and the two cannot be
-// confused (blobText).
+// UTF-8 text has no NUL inside it, so a blob that has one inside is taken to be UTF-16 (blobText
+// has the limits of that guess).
 //
 // The token is never logged and never in an error. The blob this file builds and the one the
 // system hands back are zeroed before they are released.
@@ -20,11 +20,13 @@
 #include "katana/update/credential.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/core/text.hpp"
@@ -57,6 +59,13 @@ namespace detail {
 // is UTF-8, not empty, at most 32767 characters (CRED_MAX_GENERIC_TARGET_NAME_LENGTH in
 // wincred.h) - a precondition, std::invalid_argument when broken.
 [[nodiscard]] std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target);
+
+// The same store with the three system calls (CredReadW, CredWriteW, CredDeleteW) replaced by calls
+// that fail with the Win32 error `code`, nothing stored or removed. A test cannot make a session
+// without a Credential Manager, and with this it holds what read(), write() and clear() each make
+// of a failure: the action they name and the kind of error. Same precondition on `target`.
+[[nodiscard]] std::unique_ptr<CredentialStore>
+makeCredentialManagerStoreFailingWith(std::string_view target, unsigned long code);
 
 // What the Win32 error `code` of a Credential Manager call means to a caller, as an Error that
 // names `action` ("read", "store", "remove") and carries `target` as its context. The codes that
@@ -134,12 +143,58 @@ struct CredentialFree {
     }
 };
 
+// The three system calls a store makes, so that a test can have them fail (detail::
+// makeCredentialManagerStoreFailingWith). Each returns what the Win32 call returns and leaves its
+// error for GetLastError.
+struct SystemCalls {
+    std::function<BOOL(LPCWSTR target, PCREDENTIALW* found)> read;
+    std::function<BOOL(PCREDENTIALW credential)> write;
+    std::function<BOOL(LPCWSTR target)> remove;
+};
+
+[[nodiscard]] SystemCalls realCalls()
+{
+    return {
+        [](LPCWSTR target, PCREDENTIALW* found) {
+            return CredReadW(target, CRED_TYPE_GENERIC, 0, found);
+        },
+        [](PCREDENTIALW credential) { return CredWriteW(credential, 0); },
+        [](LPCWSTR target) { return CredDeleteW(target, CRED_TYPE_GENERIC, 0); },
+    };
+}
+
+[[nodiscard]] SystemCalls callsFailingWith(DWORD code)
+{
+    return {
+        [code](LPCWSTR, PCREDENTIALW*) {
+            SetLastError(code);
+            return FALSE;
+        },
+        [code](PCREDENTIALW) {
+            SetLastError(code);
+            return FALSE;
+        },
+        [code](LPCWSTR) {
+            SetLastError(code);
+            return FALSE;
+        },
+    };
+}
+
 // The text a blob holds, still unchecked. UTF-8 is what write() stores. A NUL is no part of UTF-8
-// text, so a blob that has one inside it is UTF-16LE (cmdkey's form) and is decoded; NULs at the
-// END only are the terminator of a C string and are dropped. A known limit: UTF-16 text in which
-// no code unit has a zero byte (two CJK characters, U+65E5 U+672C, are E5 65 2C 67) shows no NUL,
-// is read as UTF-8, which it is not, and is refused as InvalidState. A GitHub token is ASCII, whose
-// UTF-16 always has NULs, so the guess is not worth a heuristic.
+// text, so a blob that has one inside it is taken to be UTF-16LE (cmdkey's form) and is decoded;
+// NULs at the END only are the terminator of a C string and are dropped. The guess has two known
+// limits, both of blobs that no tool is known to write, and both left alone because the only rule
+// that would tell them apart is one that refuses real UTF-16 tokens:
+//   - UTF-16 text in which no code unit has a zero byte (two CJK characters, U+65E5 U+672C, are
+//     E5 65 2C 67) shows no NUL, is read as UTF-8, which it is not, and is refused as
+//     InvalidState.
+//   - A UTF-8 blob with a NUL inside it (write() refuses a NUL, so it is another program's) and an
+//     even length is read as UTF-16, and gives a token of other characters: 61 62 63 00 64 65 is
+//     U+6261 U+0063 U+6564. The server then answers 401, as it does to any wrong token. (An odd
+//     length is refused here: UTF-16 is whole code units.) What tells it from real UTF-16 text
+//     such as 'a', U+00E9, U+65E5, which a case holds, is a script rule.
+// A GitHub token is ASCII, whose UTF-16 always has NULs, so the guess is not worth more.
 [[nodiscard]] core::Result<std::string> blobText(const BYTE* bytes, std::size_t size)
 {
     std::string_view blob(reinterpret_cast<const char*>(bytes), size);
@@ -170,8 +225,8 @@ struct CredentialFree {
 
 class CredentialManagerStore final : public CredentialStore {
   public:
-    explicit CredentialManagerStore(std::string_view target)
-        : targetUtf8_(target), target_(wideFromUtf8(target))
+    explicit CredentialManagerStore(std::string_view target, SystemCalls calls = realCalls())
+        : calls_(std::move(calls)), targetUtf8_(target), target_(wideFromUtf8(target))
     {
         if (target.empty() || target_.empty() ||
             target_.size() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH || !core::isValidUtf8(target)) {
@@ -183,7 +238,7 @@ class CredentialManagerStore final : public CredentialStore {
     [[nodiscard]] core::Result<std::string> read() const override
     {
         PCREDENTIALW found = nullptr;
-        if (CredReadW(target_.c_str(), CRED_TYPE_GENERIC, 0, &found) == FALSE) {
+        if (calls_.read(target_.c_str(), &found) == FALSE) {
             const DWORD code = GetLastError();
             if (code == ERROR_NOT_FOUND) {
                 return core::makeError(core::ErrorCode::NotFound, "no token is stored",
@@ -242,7 +297,7 @@ class CredentialManagerStore final : public CredentialStore {
         credential.CredentialBlob = blob.data();
         credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
         credential.UserName = const_cast<LPWSTR>(L"Katana");
-        const BOOL stored = CredWriteW(&credential, 0);
+        const BOOL stored = calls_.write(&credential);
         const DWORD code = stored != FALSE ? 0 : GetLastError();
         SecureZeroMemory(blob.data(), blob.size());
         if (stored == FALSE) {
@@ -253,7 +308,7 @@ class CredentialManagerStore final : public CredentialStore {
 
     [[nodiscard]] core::Status clear() override
     {
-        if (CredDeleteW(target_.c_str(), CRED_TYPE_GENERIC, 0) == FALSE) {
+        if (calls_.remove(target_.c_str()) == FALSE) {
             const DWORD code = GetLastError();
             if (code == ERROR_NOT_FOUND) {
                 return {}; // nothing was stored: the state asked for
@@ -269,6 +324,7 @@ class CredentialManagerStore final : public CredentialStore {
     [[nodiscard]] const std::wstring& target() const { return target_; }
 
   private:
+    SystemCalls calls_;
     std::string targetUtf8_;
     std::wstring target_;
 };
@@ -280,6 +336,13 @@ namespace detail {
 std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target)
 {
     return std::make_unique<CredentialManagerStore>(target);
+}
+
+std::unique_ptr<CredentialStore> makeCredentialManagerStoreFailingWith(std::string_view target,
+                                                                       unsigned long code)
+{
+    return std::make_unique<CredentialManagerStore>(target,
+                                                    callsFailingWith(static_cast<DWORD>(code)));
 }
 
 core::Error credentialError(DWORD code, std::string_view action, const std::string& target)

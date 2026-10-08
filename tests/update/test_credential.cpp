@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/core/path_text.hpp"
@@ -107,6 +108,57 @@ std::string byteName(char byte)
 {
     return "byte " + std::to_string(static_cast<unsigned>(static_cast<unsigned char>(byte))) +
            " (decimal)";
+}
+
+// The UTF-8 bytes of a code point below U+10000, from the encoding's own table and not from the
+// code under test: U+0080-U+07FF is 110xxxxx 10xxxxxx, U+0800-U+FFFF is 1110xxxx 10xxxxxx
+// 10xxxxxx (U+00A0 is C2 A0, U+2003 is E2 80 83, U+FEFF is EF BB BF).
+std::string utf8Of(char32_t codePoint)
+{
+    std::string bytes;
+    if (codePoint < 0x800) {
+        bytes += static_cast<char>(0xC0 | (codePoint >> 6));
+        bytes += static_cast<char>(0x80 | (codePoint & 0x3F));
+    } else {
+        bytes += static_cast<char>(0xE0 | (codePoint >> 12));
+        bytes += static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F));
+        bytes += static_cast<char>(0x80 | (codePoint & 0x3F));
+    }
+    return bytes;
+}
+
+// The code points beyond ASCII that are white space or invisible, and that a token copied from a
+// web page, a chat or a PDF carries at its ends: Unicode's White_Space list (U+0085, U+00A0,
+// U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000) and the zero-width and direction
+// format characters (U+180E, U+200B-U+200F, U+202A-U+202E, U+2060-U+206F, U+FEFF), each range
+// written out by its ends. (U+2065 is unassigned and U+206A-U+206F are deprecated format controls;
+// they sit inside the one run from U+205F to U+206F.)
+std::vector<char32_t> invisibleCodePoints()
+{
+    std::vector<char32_t> codePoints = {0x0085, 0x00A0, 0x1680, 0x180E, 0x3000, 0xFEFF};
+    for (const auto& [first, last] : {std::pair<char32_t, char32_t>{0x2000, 0x200F},
+                                      {0x2028, 0x202F},
+                                      {0x205F, 0x206F}}) {
+        for (char32_t codePoint = first; codePoint <= last; ++codePoint) {
+            codePoints.push_back(codePoint);
+        }
+    }
+    return codePoints;
+}
+
+// Visible characters next to the ends of those ranges, which a token may hold anywhere: the
+// inverted comma U+00A1, the Canadian syllabics letter U+167F and the Ogham letter U+1681 beside
+// U+1680, the hyphen U+2010 after U+200F, the hyphenation point U+2027 before U+2028, the per mille
+// sign U+2030 after U+202F, the vertical four dots U+205E before U+205F, superscript zero U+2070
+// after U+206F, the ideographic comma U+3001 after U+3000, the full-width exclamation mark U+FF01.
+std::vector<char32_t> visibleNeighbours()
+{
+    return {0x00A1, 0x167F, 0x1681, 0x2010, 0x2027, 0x2030, 0x205E, 0x2070, 0x3001, 0xFF01};
+}
+
+std::string codePointName(char32_t codePoint)
+{
+    return "code point " + std::to_string(static_cast<unsigned>(codePoint)) + " (decimal)";
 }
 
 // ---- the environment ----------------------------------------------------------------------
@@ -304,6 +356,72 @@ TEST_F(EnvironmentCredentialStoreTest, EachBlankAroundTheValueIsDroppedAndTheWor
     }
 }
 
+TEST_F(EnvironmentCredentialStoreTest, EveryInvisibleOrNonAsciiBlankAroundTheValueIsDropped)
+{
+    // A no-break space, a zero-width space, a direction mark or a byte-order mark comes along with
+    // a token copied from a web page, a chat or a PDF; core::trimmed knows only ASCII, and the
+    // server would answer 401 with no cause.
+    for (const char32_t codePoint : invisibleCodePoints()) {
+        SCOPED_TRACE(codePointName(codePoint));
+        const std::string blank = utf8Of(codePoint);
+        variable_.set(blank + "abc123" + blank);
+        const auto token = store_->read();
+        ASSERT_TRUE(token) << token.error().describe();
+        EXPECT_EQ(*token, "abc123");
+    }
+}
+
+TEST_F(EnvironmentCredentialStoreTest, BlanksOfEveryKindAroundTheValueAreDroppedInAnyOrder)
+{
+    // Five at the front and four at the back, ASCII and not, interleaved: a pass of one kind would
+    // leave the others. U+00A0 is C2 A0, U+FEFF is EF BB BF, U+200B is E2 80 8B.
+    variable_.set(std::string("\xEF\xBB\xBF \t\xC2\xA0 abc123") + "\xE2\x80\x8B\r\n\xC2\xA0 ");
+    const auto token = store_->read();
+    ASSERT_TRUE(token) << token.error().describe();
+    EXPECT_EQ(*token, "abc123");
+}
+
+TEST_F(EnvironmentCredentialStoreTest, AnInvisibleCharacterInsideTheValueIsRefusedLikeASpace)
+{
+    for (const char32_t codePoint : invisibleCodePoints()) {
+        SCOPED_TRACE(codePointName(codePoint));
+        variable_.set(std::string(kSecret) + utf8Of(codePoint) + "cd");
+        const auto token = store_->read();
+        ASSERT_FALSE(token);
+        EXPECT_EQ(token.error().code, core::ErrorCode::InvalidState);
+        EXPECT_FALSE(mentionsSecret(token.error())) << token.error().describe();
+        EXPECT_NE(token.error().message.find("KATANA_UPDATE_TOKEN"), std::string::npos);
+        EXPECT_NE(token.error().message.find("invisible"), std::string::npos)
+            << token.error().describe();
+    }
+}
+
+TEST_F(EnvironmentCredentialStoreTest, TheCharactersNextToTheInvisibleOnesAreKeptEvenAtAnEnd)
+{
+    for (const char32_t codePoint : visibleNeighbours()) {
+        SCOPED_TRACE(codePointName(codePoint));
+        const std::string visible = utf8Of(codePoint);
+        for (const std::string& value :
+             {"ab" + visible + "cd", visible + "abc123", "abc123" + visible,
+              visible + "abc123" + visible}) {
+            variable_.set(value);
+            const auto token = store_->read();
+            ASSERT_TRUE(token) << token.error().describe();
+            EXPECT_EQ(*token, value);
+        }
+    }
+}
+
+TEST_F(EnvironmentCredentialStoreTest, AValueOfNothingButInvisibleCharactersIsNotATokenAndSaysSo)
+{
+    // Not "unset": a person put something there, and the sentence names the variable.
+    variable_.set(utf8Of(0x00A0) + utf8Of(0xFEFF) + " ");
+    const auto token = store_->read();
+    ASSERT_FALSE(token);
+    EXPECT_EQ(token.error().code, core::ErrorCode::InvalidState);
+    EXPECT_NE(token.error().message.find("KATANA_UPDATE_TOKEN"), std::string::npos);
+}
+
 #ifndef _WIN32
 // (Windows holds a value as UTF-16, so a value that is not text cannot be set there.)
 TEST_F(EnvironmentCredentialStoreTest, AValueThatIsNotUtf8IsRefused)
@@ -445,9 +563,12 @@ TEST(RedactToken, ReplacesTheTokenWhereverItIsInAUrlToo)
 
 namespace katana::update::detail {
 // credential_win.cpp: seams for this test, not in the header, which is the contract for the one
-// target a person's token is under. The Credential Manager store under another target name; what
-// a Win32 error code means to a caller; the wide target name a store passes to the system.
+// target a person's token is under. The Credential Manager store under another target name, and
+// the same with every system call failing with a given error; what a Win32 error code means to a
+// caller; the wide target name a store passes to the system.
 std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target);
+std::unique_ptr<CredentialStore> makeCredentialManagerStoreFailingWith(std::string_view target,
+                                                                       unsigned long code);
 core::Error credentialError(DWORD code, std::string_view action, const std::string& target);
 std::wstring credentialTargetOf(const CredentialStore& store);
 } // namespace katana::update::detail
@@ -824,6 +945,78 @@ TEST_F(CredentialManagerStoreTest, ASpaceInsideATokenIsRefusedAndSaysToLeaveTheW
     EXPECT_EQ(rawRead(target_).blob, "abc123");
 }
 
+TEST_F(CredentialManagerStoreTest, InvisibleCharactersAroundATokenAreNotStoredAndInsideItAreRefused)
+{
+    // A token copied from a web page: a no-break space (U+00A0, C2 A0) in front and a byte-order
+    // mark (U+FEFF, EF BB BF) behind are dropped, as ASCII blanks are.
+    ASSERT_TRUE(store_->write(utf8Of(0x00A0) + "abc123" + utf8Of(0xFEFF)));
+    EXPECT_EQ(rawRead(target_).blob, "abc123");
+    ASSERT_TRUE(store_->clear());
+
+    // Inside, every one of them is refused with the sentence that names the cause, and nothing is
+    // stored.
+    for (const char32_t codePoint : invisibleCodePoints()) {
+        SCOPED_TRACE(codePointName(codePoint));
+        const core::Status refused = store_->write(std::string(kSecret) + utf8Of(codePoint) + "cd");
+        ASSERT_FALSE(refused);
+        EXPECT_EQ(refused.error().code, core::ErrorCode::InvalidArgument);
+        EXPECT_NE(refused.error().message.find("invisible"), std::string::npos)
+            << refused.error().describe();
+        EXPECT_FALSE(mentionsSecret(refused.error())) << refused.error().describe();
+        EXPECT_FALSE(rawRead(target_).found);
+    }
+
+    // The visible characters beside them are stored and read back, inside and at the ends.
+    for (const char32_t codePoint : visibleNeighbours()) {
+        SCOPED_TRACE(codePointName(codePoint));
+        const std::string value = utf8Of(codePoint) + "abc" + utf8Of(codePoint);
+        ASSERT_TRUE(store_->write(value));
+        EXPECT_EQ(rawRead(target_).blob, value);
+        const auto token = store_->read();
+        ASSERT_TRUE(token) << token.error().describe();
+        EXPECT_EQ(*token, value);
+    }
+}
+
+TEST_F(CredentialManagerStoreTest, AStoredBlobWithInvisibleCharactersAtItsEndsIsReadWithoutThem)
+{
+    // A file saved as "UTF-8" by an editor that adds a byte-order mark, a token pasted with a
+    // no-break space after it; stored by another program, so the blob is exactly this.
+    ASSERT_EQ(rawWrite(target_, utf8Of(0xFEFF) + "abc123"), 0U);
+    auto token = store_->read();
+    ASSERT_TRUE(token) << token.error().describe();
+    EXPECT_EQ(*token, "abc123");
+
+    ASSERT_EQ(rawWrite(target_, "abc123" + utf8Of(0x00A0)), 0U);
+    token = store_->read();
+    ASSERT_TRUE(token) << token.error().describe();
+    EXPECT_EQ(*token, "abc123");
+
+    // Inside, it is not a token.
+    ASSERT_EQ(rawWrite(target_, std::string(kSecret) + utf8Of(0x00A0) + "x"), 0U);
+    token = store_->read();
+    ASSERT_FALSE(token);
+    EXPECT_EQ(token.error().code, core::ErrorCode::InvalidState);
+    EXPECT_FALSE(mentionsSecret(token.error())) << token.error().describe();
+}
+
+TEST_F(CredentialManagerStoreTest, ATruncatedInvisibleCharacterIsNotUtf8AndIsRefused)
+{
+    // The first one or two bytes of U+2003 (E2 80 83) and of U+FEFF (EF BB BF), at the front, at
+    // the back, and alone: the rule that looks for these characters must find the end of the text
+    // and stop, and the text is not UTF-8.
+    const std::string truncated[] = {
+        "\xE2",         "\xE2\x80",       "\xEF",         "\xEF\xBB",
+        "abc\xE2\x80",  "\xE2\x80" "abc", "abc\xEF\xBB",  "\xEF\xBB" "abc",
+    };
+    for (const std::string& value : truncated) {
+        const core::Status refused = store_->write(value);
+        ASSERT_FALSE(refused) << "accepted a token of " << value.size() << " bytes";
+        EXPECT_EQ(refused.error().code, core::ErrorCode::InvalidArgument);
+        EXPECT_FALSE(rawRead(target_).found);
+    }
+}
+
 TEST_F(CredentialManagerStoreTest, ATokenAnotherToolStoredAsUtf16IsReadAsText)
 {
     // cmdkey stores the password "abc" as 61 00 62 00 63 00 (measured on Windows 11, 2026-10-08).
@@ -1147,6 +1340,91 @@ TEST(CredentialManagerErrors, TheCodesForNoCredentialManagerInThisSessionAreUnsu
             << code.name << ": " << error.describe();
         EXPECT_EQ(error.context, "Katana/x") << code.name;
     }
+}
+
+TEST(CredentialManagerFailures, EachOperationNamesItsOwnActionAndMapsTheCodeToItsKindOfError)
+{
+    // The system's three calls are replaced by calls that fail with a given code (nothing is read,
+    // stored or removed), so that what read(), write() and clear() each make of the failure is held
+    // to their own words: the mapping function alone (below) would pass if write() said "read".
+    // 1312 is ERROR_NO_SUCH_LOGON_SESSION (no Credential Manager in this session), 87 is
+    // ERROR_INVALID_PARAMETER (any other fault).
+    const std::string token = std::string(kSecret) + "-1";
+    {
+        const auto store =
+            update::detail::makeCredentialManagerStoreFailingWith("Katana/x", 1312);
+        const auto looked = store->read();
+        ASSERT_FALSE(looked);
+        EXPECT_EQ(looked.error().code, core::ErrorCode::Unsupported);
+        EXPECT_EQ(looked.error().context, "Katana/x");
+        const core::Status written = store->write(token);
+        ASSERT_FALSE(written);
+        EXPECT_EQ(written.error().code, core::ErrorCode::Unsupported);
+        EXPECT_EQ(written.error().context, "Katana/x");
+        EXPECT_FALSE(mentionsSecret(written.error())) << written.error().describe();
+        const core::Status cleared = store->clear();
+        ASSERT_FALSE(cleared);
+        EXPECT_EQ(cleared.error().code, core::ErrorCode::Unsupported);
+        EXPECT_EQ(cleared.error().context, "Katana/x");
+        for (const core::Error* error : {&looked.error(), &written.error(), &cleared.error()}) {
+            EXPECT_NE(error->message.find("not available in this session (Windows error 1312)"),
+                      std::string::npos)
+                << error->describe();
+        }
+    }
+    {
+        const auto store = update::detail::makeCredentialManagerStoreFailingWith("Katana/x", 87);
+        const auto looked = store->read();
+        ASSERT_FALSE(looked);
+        EXPECT_EQ(looked.error().code, core::ErrorCode::Internal);
+        EXPECT_EQ(looked.error().context, "Katana/x");
+        EXPECT_NE(looked.error().message.find("could not read the token (Windows error 87)"),
+                  std::string::npos)
+            << looked.error().describe();
+
+        const core::Status written = store->write(token);
+        ASSERT_FALSE(written);
+        EXPECT_EQ(written.error().code, core::ErrorCode::Internal);
+        EXPECT_EQ(written.error().context, "Katana/x");
+        EXPECT_NE(written.error().message.find("could not store the token (Windows error 87)"),
+                  std::string::npos)
+            << written.error().describe();
+        EXPECT_FALSE(mentionsSecret(written.error())) << written.error().describe();
+
+        const core::Status cleared = store->clear();
+        ASSERT_FALSE(cleared);
+        EXPECT_EQ(cleared.error().code, core::ErrorCode::Internal);
+        EXPECT_EQ(cleared.error().context, "Katana/x");
+        EXPECT_NE(cleared.error().message.find("could not remove the token (Windows error 87)"),
+                  std::string::npos)
+            << cleared.error().describe();
+    }
+}
+
+TEST(CredentialManagerFailures, NotFoundIsNoTokenForReadAndSuccessForClearButAFaultForWrite)
+{
+    // 1168 is ERROR_NOT_FOUND. Reading what is not there is the normal "none"; clearing it is the
+    // state asked for; but storing cannot meet it, so a write that is told that is a fault.
+    const auto store = update::detail::makeCredentialManagerStoreFailingWith("Katana/x", 1168);
+    const auto looked = store->read();
+    ASSERT_FALSE(looked);
+    EXPECT_EQ(looked.error().code, core::ErrorCode::NotFound);
+    EXPECT_TRUE(store->clear());
+    const core::Status written = store->write("abc123");
+    ASSERT_FALSE(written);
+    EXPECT_EQ(written.error().code, core::ErrorCode::Internal);
+    EXPECT_NE(written.error().message.find("(Windows error 1168)"), std::string::npos)
+        << written.error().describe();
+}
+
+TEST(CredentialManagerFailures, AnUnusableTokenIsRefusedBeforeTheSystemIsAsked)
+{
+    // The refusal is the token's (InvalidArgument), not the system's (87): the rule runs first, so
+    // a person is told what is wrong with the token even where the Credential Manager is down.
+    const auto store = update::detail::makeCredentialManagerStoreFailingWith("Katana/x", 1312);
+    const core::Status refused = store->write("Bearer " + std::string(kSecret));
+    ASSERT_FALSE(refused);
+    EXPECT_EQ(refused.error().code, core::ErrorCode::InvalidArgument);
 }
 
 TEST(CredentialManagerErrors, EveryOtherCodeIsAnInternalFaultThatNamesTheActionAndTheCode)

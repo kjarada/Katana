@@ -14,6 +14,12 @@
 // fault). Every one of them means "no token to send" to such a caller; whether to say so, and
 // whether an unusable variable falls back to the Credential Manager, is the caller's to decide.
 // The header promises NotFound only; this is the whole set.
+//
+// What write() can return (the Credential Manager's; the environment's is Unsupported, always):
+// InvalidArgument for a token that is empty, over 2560 bytes, not UTF-8, or that holds a control
+// character, a space or an invisible character (usableToken below); Unsupported when the
+// Credential Manager cannot be used in this session; Internal for any other system fault. clear()
+// returns success when none was stored, else Unsupported or Internal.
 
 #include "katana/update/credential.hpp"
 
@@ -54,19 +60,106 @@ namespace detail {
 // 2021 note on the new token formats), far inside this.
 inline constexpr std::size_t kMaxTokenBytes = 2560;
 
-// `token` itself when it can be used as a token, else why not. The caller trims it first
-// (core::trimmed: a token pasted into a field or exported from `$(cat file)` arrives with a
-// newline, and none of those characters can be part of one). A token goes into an HTTP header
+namespace {
+
+// Whether `text` starts with a code point that is white space or invisible and no part of a token,
+// and that core::trimmed (ASCII only) does not know: the length of its UTF-8 form in bytes (2 or
+// 3), else 0. A token copied from a web page, a chat or a PDF carries these at its ends (a
+// no-break space, a zero-width space, a direction mark), and an editor that saves "UTF-8" can put
+// a byte-order mark in front of one in a file; the server answers a 401 that names no cause.
+// The code points are Unicode's White_Space characters and the zero-width and direction
+// format characters; each is matched on its encoded bytes, worked out from the code point:
+//   U+0085 C2 85                U+00A0 C2 A0
+//   U+1680 E1 9A 80             U+180E E1 A0 8E
+//   U+2000..U+200F E2 80 80..8F (spaces, zero-width characters, direction marks)
+//   U+2028..U+202F E2 80 A8..AF (line and paragraph separators, direction controls, narrow space)
+//   U+205F..U+206F E2 81 9F..AF (medium space, word joiner, invisible operators, direction
+//                                isolates, the deprecated format controls)
+//   U+3000 E3 80 80             U+FEFF EF BB BF
+[[nodiscard]] std::size_t invisibleLengthAtFront(std::string_view text)
+{
+    const auto byteAt = [&text](std::size_t index) -> unsigned {
+        return index < text.size() ? static_cast<unsigned char>(text[index]) : 0U;
+    };
+    const unsigned first = byteAt(0);
+    const unsigned second = byteAt(1);
+    const unsigned third = byteAt(2);
+    switch (first) {
+    case 0xC2:
+        return second == 0x85 || second == 0xA0 ? 2 : 0;
+    case 0xE1:
+        return (second == 0x9A && third == 0x80) || (second == 0xA0 && third == 0x8E) ? 3 : 0;
+    case 0xE2:
+        if (second == 0x80) {
+            return (third >= 0x80 && third <= 0x8F) || (third >= 0xA8 && third <= 0xAF) ? 3 : 0;
+        }
+        if (second == 0x81) {
+            return third >= 0x9F && third <= 0xAF ? 3 : 0;
+        }
+        return 0;
+    case 0xE3:
+        return second == 0x80 && third == 0x80 ? 3 : 0;
+    case 0xEF:
+        return second == 0xBB && third == 0xBF ? 3 : 0;
+    default:
+        return 0;
+    }
+}
+
+// The same for the end of `text`. Every lead byte above is a lead byte, never the continuation of
+// a longer character (those are 0x80-0xBF), so the end of a well-formed text cannot be mistaken.
+[[nodiscard]] std::size_t invisibleLengthAtBack(std::string_view text)
+{
+    for (const std::size_t length : {std::size_t{2}, std::size_t{3}}) {
+        if (text.size() >= length &&
+            invisibleLengthAtFront(text.substr(text.size() - length)) == length) {
+            return length;
+        }
+    }
+    return 0;
+}
+
+// `token` without the ASCII blanks (core::trimmed) and the invisible code points around it, in any
+// order and number.
+[[nodiscard]] std::string_view withoutBlanks(std::string_view token)
+{
+    for (bool changed = true; changed;) {
+        changed = false;
+        const std::string_view ascii = core::trimmed(token);
+        if (ascii.size() != token.size()) {
+            token = ascii;
+            changed = true;
+        }
+        if (const std::size_t front = invisibleLengthAtFront(token); front != 0) {
+            token.remove_prefix(front);
+            changed = true;
+        }
+        if (const std::size_t back = invisibleLengthAtBack(token); back != 0) {
+            token.remove_suffix(back);
+            changed = true;
+        }
+    }
+    return token;
+}
+
+} // namespace
+
+// `token` itself, without the white space and the invisible characters around it, when it can be
+// used as a token, else why not. (The callers trim ASCII first to tell "nothing there" from "not
+// usable"; a token pasted into a field or exported from `$(cat file)` arrives with a newline, and
+// none of those characters can be part of one.) A token goes into an HTTP header
 // (`Authorization: Bearer <token>`), so a control character - 0x00 to 0x1F and 0x7F, above all a
 // carriage return or a line feed, which would end the header and begin another - is refused
-// wherever the token comes from. So is a space inside it: a token is one word, and a person who
-// pastes "Bearer ghp_..." would otherwise send "Authorization: Bearer Bearer ghp_..." and meet a
-// 401 that says nothing of the cause. Non-ASCII text is allowed: the store keeps whatever valid
+// wherever the token comes from. So is a space inside it, ASCII or not (a no-break space, a
+// zero-width space; invisibleLengthAtFront): a token is one word, and a person who pastes
+// "Bearer ghp_..." would otherwise send "Authorization: Bearer Bearer ghp_..." and meet a 401
+// that says nothing of the cause. Other non-ASCII text is allowed: the store keeps whatever valid
 // UTF-8 it is given, and the server is the judge of what it accepts. `source` goes into the
 // error's context and must not be the token.
 [[nodiscard]] core::Result<std::string_view> usableToken(std::string_view token,
                                                          std::string_view source)
 {
+    token = withoutBlanks(token);
     if (token.empty()) {
         return core::makeError(core::ErrorCode::InvalidArgument, "the token is empty",
                                std::string(source));
@@ -92,6 +185,14 @@ inline constexpr std::size_t kMaxTokenBytes = 2560;
                                "the token holds a space: give the token alone, without \"Bearer\" "
                                "or any other word before it",
                                std::string(source));
+    }
+    for (std::size_t i = 0; i < token.size(); ++i) {
+        if (invisibleLengthAtFront(token.substr(i)) != 0) {
+            return core::makeError(core::ErrorCode::InvalidArgument,
+                                   "the token holds a no-break or zero-width space or another "
+                                   "invisible character: copy the token again, as plain text",
+                                   std::string(source));
+        }
     }
     if (!core::isValidUtf8(token)) {
         return core::makeError(core::ErrorCode::InvalidArgument,
