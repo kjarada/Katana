@@ -253,63 +253,45 @@ std::string_view utilityTypeWord(sub::UtilityType type)
     return "unknown";
 }
 
-namespace {
-
-// One row of the colour table: AS 5488's name for the colour of a kind of
-// service, which is empty where the standard names none, and the sRGB Katana
-// renders it in. AS 5488 gives the names and no values, so every value is
-// Katana's: a clear example of the named colour, kept at least 3:1 against the
-// plan view's ground (#1E2329) and, as it prints, against white paper - the
-// contrast asked of lines and symbols - except yellow and cream, which cannot
-// be and still be what they are named. The Katana Standard library
-// (tools/katana_standard/colours.py) holds the same values, and
-// KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses requires it.
-struct ServiceColour {
-    std::string_view name;
-    Color colour;
-};
-
-ServiceColour serviceColour(sub::UtilityType type)
+// AS 5488's colour for each kind of service, as Katana renders it: the standard
+// names a colour and gives no value, so every value is Katana's, a clear example
+// of the named colour kept at least 3:1 against the plan view's ground (#1E2329)
+// and, as it prints, against white paper - the contrast asked of lines and
+// symbols - except yellow and cream, which cannot be and still be what they are
+// named. The name each case carries is AS 5488's; ITS and "other" have none and
+// are Katana's choice. The Katana Standard library (tools/katana_standard/
+// colours.py) holds the same values, and KatanaStandard.
+// EveryServiceColourIsTheColourUtilityDrawUses requires it; the names are held
+// by UtilityDrawing.TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays.
+Color utilityTypeColour(sub::UtilityType type)
 {
     switch (type) {
     case sub::UtilityType::Water:
-        return {"blue", hex(0x2F, 0x80, 0xED)};
+        return hex(0x2F, 0x80, 0xED); // blue
     case sub::UtilityType::Electricity:
-        return {"orange", hex(0xE0, 0x70, 0x00)};
+        return hex(0xE0, 0x70, 0x00); // orange
     case sub::UtilityType::Telecommunications:
-        return {"white", hex(0xFF, 0xFF, 0xFF)}; // prints black (PlotSettings::whiteToBlack)
+        return hex(0xFF, 0xFF, 0xFF); // white: prints black (PlotSettings::whiteToBlack)
     case sub::UtilityType::Gas:
-        return {"yellow", hex(0xFF, 0xD5, 0x00)}; // 1.42:1 on white: prints light
+        return hex(0xFF, 0xD5, 0x00); // yellow: 1.42:1 on white, prints light
     case sub::UtilityType::RecycledWater:
-        return {"purple", hex(0x9B, 0x59, 0xD0)};
+        return hex(0x9B, 0x59, 0xD0); // purple
     case sub::UtilityType::FireService:
-        return {"red", hex(0xE5, 0x39, 0x35)};
+        return hex(0xE5, 0x39, 0x35); // red
     case sub::UtilityType::Sewer:
-        return {"cream", hex(0xF0, 0xE2, 0xB0)}; // 1.30:1 on white: prints light
+        return hex(0xF0, 0xE2, 0xB0); // cream: 1.30:1 on white, prints light
     case sub::UtilityType::Stormwater:
-        return {"green", hex(0x00, 0xA8, 0x00)};
+        return hex(0x00, 0xA8, 0x00); // green
     case sub::UtilityType::Fuel:
-        return {"brown", hex(0xA3, 0x62, 0x15)}; // petroleum: in three published guides, not a fourth's chart
+        return hex(0xA3, 0x62, 0x15); // brown (petroleum): in three published guides, not a fourth's chart
     case sub::UtilityType::IntelligentTransport:
-        return {"", hex(0x0B, 0x9B, 0xA8)}; // Katana's choice
+        return hex(0x0B, 0x9B, 0xA8); // no AS 5488 colour: Katana's choice
     case sub::UtilityType::Other:
-        return {"", hex(0x94, 0x94, 0x94)}; // Katana's choice
+        return hex(0x94, 0x94, 0x94); // no AS 5488 colour: Katana's choice
     case sub::UtilityType::Unknown:
-        return {"pink", hex(0xF2, 0x55, 0x9B)}; // unidentified services
+        return hex(0xF2, 0x55, 0x9B); // pink (unidentified services)
     }
-    return {"pink", hex(0xF2, 0x55, 0x9B)};
-}
-
-} // namespace
-
-Color utilityTypeColour(sub::UtilityType type)
-{
-    return serviceColour(type).colour;
-}
-
-std::string_view utilityTypeColourName(sub::UtilityType type)
-{
-    return serviceColour(type).name;
+    return hex(0xF2, 0x55, 0x9B);
 }
 
 std::string_view qualityLevelLinetypeName(sub::QualityLevel level)

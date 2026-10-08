@@ -177,12 +177,6 @@ inline constexpr std::string_view kHeights = "utility.heights";
 [[nodiscard]] katana::entity::Color
 utilityTypeColour(katana::survey::subsurface::UtilityType type);
 
-// AS 5488's name for that colour: "blue", "orange", "white", "yellow",
-// "purple", "red", "cream", "green", "brown" or "pink". Empty where AS 5488
-// names no colour for the kind and its colour is Katana's own (its, other).
-[[nodiscard]] std::string_view
-utilityTypeColourName(katana::survey::subsurface::UtilityType type);
-
 // The linetype a quality level's layers are drawn in: "continuous" for QL-A,
 // "utility-ql-b", "utility-ql-c" and "utility-ql-d" for the others.
 [[nodiscard]] std::string_view

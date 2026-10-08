@@ -408,7 +408,6 @@ TEST(UtilityDrawing, TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsName
     std::set<sub::UtilityType> named;
     for (const auto& [type, name] : as5488) {
         named.insert(type);
-        EXPECT_EQ(utilityTypeColourName(type), name) << utilityTypeWord(type);
         const katana::entity::Color colour = utilityTypeColour(type);
         std::vector<std::string_view> reads;
         for (const Band& band : kBands) {
@@ -421,11 +420,12 @@ TEST(UtilityDrawing, TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsName
             << utilityTypeWord(type) << " " << colour.toHex();
     }
     EXPECT_EQ(named.size(), 10u) << "each type is named once";
-    // The other two kinds have no AS 5488 colour: Katana's choice, and said to
-    // be, by naming none. Together the twelve are every kind there is.
+    // The other two kinds have no AS 5488 colour and are Katana's choice: every
+    // kind there is that the ten above do not name. A thirteenth kind added to
+    // the enum, or an eleventh named, fails here until it is placed on purpose.
     std::set<sub::UtilityType> katanasOwn;
     for (const sub::UtilityType type : everyType()) {
-        if (utilityTypeColourName(type).empty()) {
+        if (!named.contains(type)) {
             katanasOwn.insert(type);
         }
     }

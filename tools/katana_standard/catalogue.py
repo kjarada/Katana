@@ -477,7 +477,9 @@ def catalogue(data, root):
     w("## How it is made and held")
     w("")
     w("- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` "
-      "and `codes.py`, each importing nothing of the outside and each with its own `--check`. "
+      "and `codes.py`, each importing nothing of the outside and each with its own `--check`; the check of "
+      "`colours.py` also reads `kNearWhiteChannel` from `include/katana/cad/plot.hpp`, so the white rule it "
+      "prints by is the plot's. "
       "`make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, "
       "`--docs` this document, `--check` exits 1 when either committed output differs from what the data "
       "makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.")

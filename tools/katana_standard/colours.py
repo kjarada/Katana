@@ -47,6 +47,7 @@ Why these twenty-eight, and why these values:
 The palette is frozen by the Katana Standard contract; a change goes through its owner, not into this file.
 """
 import math
+import os
 import re
 import sys
 
@@ -110,7 +111,10 @@ PRINTS_LIGHT = ("katana gas", "katana sewer")
 
 # The channel at or above which a pen prints black, all three of them: cad::kNearWhiteChannel
 # (include/katana/cad/plot.hpp), the plot's rule for white and near-white pens (PlotSettings::whiteToBlack).
+# `problems()` reads that header and fails when this number is not the plot's, so the two cannot drift apart.
 NEAR_WHITE_CHANNEL = 230
+PLOT_HEADER = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "include", "katana", "cad", "plot.hpp"))
 
 ROLES = {
     "katana water": "potable water",
@@ -207,6 +211,16 @@ def paper_contrast(text):
     return contrast(printed(text), PAPER)
 
 
+def plot_near_white_channel():
+    """`kNearWhiteChannel` as include/katana/cad/plot.hpp declares it, or None when the header cannot be read."""
+    try:
+        with open(PLOT_HEADER, encoding="utf-8") as handle:
+            match = re.search(r"kNearWhiteChannel\s*=\s*(\d+)\s*;", handle.read())
+    except OSError:
+        return None
+    return int(match.group(1)) if match else None
+
+
 def oklab(text):
     """(L, a, b) of '#RRGGBB' in OKLab (Bjorn Ottosson's matrices)."""
     r, g, b = (_linear(v) for v in rgb(text))
@@ -258,6 +272,10 @@ def problems():
                 found.append(f"{name!r} has contrast {ratio:.2f} against {label} as it prints; the floor is 3.0")
         if not ROLES.get(name):
             found.append(f"{name!r} has no role")
+    plot_channel = plot_near_white_channel()
+    if plot_channel != NEAR_WHITE_CHANNEL:
+        found.append(f"NEAR_WHITE_CHANNEL is {NEAR_WHITE_CHANNEL} and the plot's kNearWhiteChannel "
+                     f"({PLOT_HEADER}) reads {plot_channel}: `printed` must mirror the plot's white rule")
     if not set(AS5488_NAMES) <= set(COLOURS):
         found.append("AS5488_NAMES names a colour the palette does not have")
     for name in PRINTS_LIGHT:

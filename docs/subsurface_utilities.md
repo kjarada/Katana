@@ -357,16 +357,19 @@ Katana follows the table on the owner's ruling that its colours match AS 5488,
 and says so rather than claiming the standard requires it.
 
 **Katana's values.** Each is at least 3:1 against the plan view's ground
-(`#1E2329`) and, as it prints, against white paper, which
-`UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaperExceptYellowAndCreamWhichPrintLight`
-holds, and `UtilityDrawing.TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays`
+(`#1E2329`). Each is also at least 3:1 against white paper as it prints, except
+yellow gas and cream sewer, which keep the ground's 3:1 and print light
+("Yellow and cream print light", below). `UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaperExceptYellowAndCreamWhichPrintLight`
+holds both, with the two exceptions named, and
+`UtilityDrawing.TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays`
 holds the ten names and that each value reads as its name (hue, saturation and
 value bands). Dymark's chart draws the same names in values of the same hues
 (orange `#E24727`, yellow `#FFD400`, cream `#F9E7B6`, pink `#EE3A7F`, green
 `#008A59`), which is a check of hue and not a source: its blue, purple and
 red are too dark for the plan's ground (1.77, 1.68 and 2.69 : 1) and are not
-used. ITS and "other" have no AS 5488 colour and are Katana's choice, and the
-accessor `utilityTypeColourName` returns nothing for them.
+used. ITS and "other" have no AS 5488 colour and are Katana's choice: that
+same test lists the ten kinds that have one and requires these two to be the
+only others.
 
 **Yellow and cream print light.** Yellow gas and cream sewer cannot reach 3:1
 on white paper and still be yellow and cream, and the colour is the
