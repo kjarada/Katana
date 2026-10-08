@@ -13,9 +13,11 @@
 // Credential Manager adds Unsupported (not usable in this session) and Internal (a system
 // fault). Every one of them means "no token to send" to such a caller; whether to say so, and
 // whether an unusable variable falls back to the Credential Manager, is the caller's to decide.
-// The header promises NotFound only; this is the whole set.
+// The header lists the same set.
 
 #include "katana/update/credential.hpp"
+
+#include "credential_detail.hpp"
 
 #include <cstddef>
 #include <string>
@@ -46,26 +48,8 @@ void secureZero(std::string& text)
 
 namespace detail {
 
-// The most bytes a token may have. The Windows Credential Manager refuses a blob over
-// 5 * 512 = 2560 bytes (CRED_MAX_CREDENTIAL_BLOB_SIZE in the Windows SDK's wincred.h; mingw-w64's
-// copy says 512, which is not what the system enforces - measured on Windows 11 on 2026-10-08:
-// 2560 accepted, 2561 refused with error 1783), and a token the store could not hold is not one
-// to accept from the environment either. GitHub advises storing its tokens in 255 characters (its
-// 2021 note on the new token formats), far inside this.
-inline constexpr std::size_t kMaxTokenBytes = 2560;
-
-// `token` itself when it can be used as a token, else why not. The caller trims it first
-// (core::trimmed: a token pasted into a field or exported from `$(cat file)` arrives with a
-// newline, and none of those characters can be part of one). A token goes into an HTTP header
-// (`Authorization: Bearer <token>`), so a control character - 0x00 to 0x1F and 0x7F, above all a
-// carriage return or a line feed, which would end the header and begin another - is refused
-// wherever the token comes from. So is a space inside it: a token is one word, and a person who
-// pastes "Bearer ghp_..." would otherwise send "Authorization: Bearer Bearer ghp_..." and meet a
-// 401 that says nothing of the cause. Non-ASCII text is allowed: the store keeps whatever valid
-// UTF-8 it is given, and the server is the judge of what it accepts. `source` goes into the
-// error's context and must not be the token.
-[[nodiscard]] core::Result<std::string_view> usableToken(std::string_view token,
-                                                         std::string_view source)
+// The rule and the reasons for it are on the declaration (credential_detail.hpp).
+core::Result<std::string_view> usableToken(std::string_view token, std::string_view source)
 {
     if (token.empty()) {
         return core::makeError(core::ErrorCode::InvalidArgument, "the token is empty",

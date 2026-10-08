@@ -19,6 +19,8 @@
 
 #include "katana/update/credential.hpp"
 
+#include "credential_detail.hpp"
+
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -41,43 +43,6 @@
 #include <wincred.h>
 
 namespace katana::update {
-
-namespace detail {
-
-// credential_env.cpp has the one rule for what a token may be. Declared here by hand because the
-// header that would carry it is not this file's to change; the linker holds the PARAMETER types
-// of the two sides to each other, and nothing holds the return type (it is not in an Itanium
-// function's linker name), so a change to this is a change to credential_env.cpp in the same
-// commit.
-[[nodiscard]] core::Result<std::string_view> usableToken(std::string_view token,
-                                                         std::string_view source);
-
-// The same store under another target name, so that a test never touches the one a person's
-// token is in. Not in the header: nothing but a test has a reason to name another target. `target`
-// is UTF-8, not empty, at most 32767 characters (CRED_MAX_GENERIC_TARGET_NAME_LENGTH in
-// wincred.h) - a precondition, std::invalid_argument when broken.
-[[nodiscard]] std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target);
-
-// What the Win32 error `code` of a Credential Manager call means to a caller, as an Error that
-// names `action` ("read", "store", "remove") and carries `target` as its context. The codes that
-// mean "the Credential Manager cannot be used in this session", as opposed to a fault in what was
-// asked, are Unsupported: a service or batch logon with no profile loaded, a locked-down or
-// stripped Windows image. A caller (the update window) says so in a sentence, and a test skips.
-// The numbers are from Microsoft's "System Error Codes" list:
-//   5 ERROR_ACCESS_DENIED, 50 ERROR_NOT_SUPPORTED, 120 ERROR_CALL_NOT_IMPLEMENTED,
-//   1312 ERROR_NO_SUCH_LOGON_SESSION, 1355 ERROR_NO_SUCH_DOMAIN.
-// Every other code is Internal. The number is in the message, so access denied is not hidden by
-// being called "not available". Not in the header: it is a seam for a test, which cannot make a
-// session without a Credential Manager.
-[[nodiscard]] core::Error credentialError(DWORD code, std::string_view action,
-                                          const std::string& target);
-
-// The wide target name `store` passes to the system, or empty when `store` is not a Credential
-// Manager store. A seam for a test, which checks the name a person's `cmdkey` command has to use
-// without reading or writing the credential under it.
-[[nodiscard]] std::wstring credentialTargetOf(const CredentialStore& store);
-
-} // namespace detail
 
 namespace {
 

@@ -54,6 +54,25 @@ foreach(_katana_which IN ITEMS ACTIVE SPARE)
             "python tools/update_keytool.py pub writes it.")
     endif()
 endforeach()
+# The public halves of RFC 8032 section 7.1, TEST 1, 2 and 3: published, so anyone holds the private
+# halves and can sign an update that a build pinning one would accept. The same list as
+# TEST_PUBLIC_KEYS in tools/update_make_manifest.py (which update_keytool.py refuses them by); a
+# test holds the two to the RFC's own values. Refused whatever KATANA_REQUIRE_UPDATE_KEYS says: no
+# build, release or not, has a reason to pin them (the tests pass a test trust root as a
+# parameter, update/trust.hpp), and a hand edit or a tool run with --allow-test-keys on the
+# tree's own file is how one would get in.
+set(_katana_published_test_keys
+    "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+    "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025")
+foreach(_katana_which IN ITEMS ACTIVE SPARE)
+    if("${KATANA_UPDATE_KEY_${_katana_which}}" IN_LIST _katana_published_test_keys)
+        message(FATAL_ERROR
+            "KATANA_UPDATE_KEY_${_katana_which} is a published RFC 8032 test key. Anyone holds its "
+            "private half and can sign an update that this build would accept. Generate real keys "
+            "(docs/update.md, the owner's steps) and run python tools/update_keytool.py pub.")
+    endif()
+endforeach()
 if(KATANA_UPDATE_KEY_ACTIVE STREQUAL KATANA_UPDATE_KEY_SPARE)
     message(FATAL_ERROR
         "the spare key must be a different key from the active key: a spare that is the active key "

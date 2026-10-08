@@ -42,6 +42,8 @@ katana_add_test_suite(update
         test_check.cpp
         test_stage.cpp
 )
+# src/katana_update/credential_detail.hpp, the seams test_credential.cpp holds the stores to.
+target_include_directories(katana_update_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/katana_update")
 target_compile_definitions(katana_update_tests PRIVATE
     # The version the project declares, to hold the library's KATANA_VERSION to.
     KATANA_EXPECTED_VERSION="${PROJECT_VERSION}"
@@ -135,6 +137,20 @@ katana_add_update_keys_test(refuses_a_flag_that_says_placeholder_over_real_keys 
     flag_says_placeholder_over_real_keys)
 katana_phrase(_phrase "says the keys are placeholders, but they do not spell PLACEHOLDER")
 set_tests_properties(update_keys_refuses_a_flag_that_says_placeholder_over_real_keys PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+# A published RFC 8032 test key (anyone holds its private half) is refused in either slot, and
+# with the release switch OFF as well as ON: no build has a reason to pin one. The last case is
+# the third published key, which the test executables do not use.
+katana_add_update_keys_test(refuses_a_published_test_key_as_the_active_key OFF published_test_key_as_active)
+katana_phrase(_phrase "KATANA_UPDATE_KEY_ACTIVE is a published RFC 8032 test key")
+set_tests_properties(update_keys_refuses_a_published_test_key_as_the_active_key PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+katana_add_update_keys_test(refuses_a_published_test_key_as_the_spare_key ON published_test_key_as_spare)
+katana_phrase(_phrase "KATANA_UPDATE_KEY_SPARE is a published RFC 8032 test key")
+set_tests_properties(update_keys_refuses_a_published_test_key_as_the_spare_key PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+katana_add_update_keys_test(refuses_the_third_published_test_key OFF published_test_key_three_as_spare)
+set_tests_properties(update_keys_refuses_the_third_published_test_key PROPERTIES
     PASS_REGULAR_EXPRESSION "${_phrase}")
 
 # ---- the helper's imports (tests/update/check_updater_imports.cmake) -----------------------

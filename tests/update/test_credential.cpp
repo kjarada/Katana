@@ -31,6 +31,10 @@
 #include "katana/core/text_encoding.hpp"
 #include "katana/update/credential.hpp"
 
+// The seams of credential_win.cpp (another target name, the meaning of a Win32 error, the wide
+// target name): private to the update layer, so not under include/.
+#include "credential_detail.hpp"
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -442,15 +446,6 @@ TEST(RedactToken, ReplacesTheTokenWhereverItIsInAUrlToo)
 }
 
 #ifdef _WIN32
-
-namespace katana::update::detail {
-// credential_win.cpp: seams for this test, not in the header, which is the contract for the one
-// target a person's token is under. The Credential Manager store under another target name; what
-// a Win32 error code means to a caller; the wide target name a store passes to the system.
-std::unique_ptr<CredentialStore> makeCredentialManagerStore(std::string_view target);
-core::Error credentialError(DWORD code, std::string_view action, const std::string& target);
-std::wstring credentialTargetOf(const CredentialStore& store);
-} // namespace katana::update::detail
 
 namespace {
 

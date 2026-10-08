@@ -106,20 +106,75 @@ class Pinning(ToolTest):
         self.assertIn(RFC_PUBLIC[1][:16], done.stdout)
         self.assertIn(RFC_PUBLIC[2][:16], done.stdout)
 
+    def validate(self, *extra: str, require: str = "ON") -> subprocess.CompletedProcess:
+        """The scratch file run through its own validator, as a script: the check a configure makes."""
+        return subprocess.run([CMAKE, f"-DKATANA_REQUIRE_UPDATE_KEYS={require}", *extra, "-P", str(self.scratch)],
+                              capture_output=True, text=True, check=False)
+
+    def public_of(self, pem: Path) -> str:
+        return subprocess.run([OPENSSL, "pkey", "-in", str(pem), "-pubout", "-outform", "DER"],
+                              capture_output=True, check=True).stdout[-32:].hex()
+
     @needs_cmake
     def test_the_files_own_validator_refuses_placeholders_and_accepts_what_the_tool_wrote(self) -> None:
-        def validate(*extra: str) -> subprocess.CompletedProcess:
-            return subprocess.run([CMAKE, "-DKATANA_REQUIRE_UPDATE_KEYS=ON", *extra, "-P", str(self.scratch)],
-                                  capture_output=True, text=True, check=False)
-
         # The control: with the placeholders in force the validator can say no, so its yes means something.
-        control = validate(f"-DKATANA_UPDATE_KEYS_FIXTURE={PLACEHOLDER_FIXTURE}")
+        control = self.validate(f"-DKATANA_UPDATE_KEYS_FIXTURE={PLACEHOLDER_FIXTURE}")
         self.assertNotEqual(control.returncode, 0, control.stderr)
         self.assertIn("PLACEHOLDER", control.stderr)
-        self.assert_tool_ok(self.pub("--allow-test-keys"))
-        done = validate()
+        # Two keys that are not published ones, pinned by the tool without --allow-test-keys.
+        first = self.write_pem("first.pem", THROWAWAY_SEED)
+        second = self.write_pem("second.pem", "07" * 32)
+        self.assert_tool_ok(self.pub(active=first, spare=second))
+        done = self.validate()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn(f"Update keys: pinned, active {RFC_PUBLIC[1][:16]}, spare {RFC_PUBLIC[2][:16]}", done.stderr + done.stdout)
+        self.assertIn(f"Update keys: pinned, active {self.public_of(first)[:16]}, "
+                      f"spare {self.public_of(second)[:16]}", done.stderr + done.stdout)
+
+    @needs_cmake
+    def test_the_files_own_validator_refuses_a_published_test_key_in_either_slot_whatever_the_flag(self) -> None:
+        # What `update_keytool.py pub --allow-test-keys` writes, or a hand edit of the tree's own file: the
+        # tool refuses these keys without the flag, and the configure must refuse them whoever wrote them.
+        mine = self.public_of(self.write_pem("other.pem", THROWAWAY_SEED))
+        # Two keys that are not published ones: the key the test key leaves in the other slot.
+        real_looking = "97fcb0a317920f5d988416cb98ba6937886975cc6b4a35d65a4b244c82d76428"
+        for number in (1, 2, 3):
+            for slot in ("ACTIVE", "SPARE"):
+                for require in ("ON", "OFF"):
+                    with self.subTest(test_key=number, slot=slot, require=require):
+                        if slot == "ACTIVE":
+                            self.pin_by_hand(RFC_PUBLIC[number], real_looking)
+                        else:
+                            self.pin_by_hand(real_looking, RFC_PUBLIC[number])
+                        done = self.validate(require=require)
+                        self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
+                        self.assertRegex(done.stderr, rf"KATANA_UPDATE_KEY_{slot}\s+is\s+a\s+published\s+RFC\s+8032")
+        # The control: the same file with no test key in it passes, so the refusals above are about the key.
+        self.pin_by_hand(mine, real_looking)
+        for require in ("ON", "OFF"):
+            done = self.validate(require=require)
+            self.assertEqual(done.returncode, 0, done.stderr)
+
+    def pin_by_hand(self, active: str, spare: str) -> None:
+        """The scratch file with exactly these two keys and the flag off: a hand edit, not the tool."""
+        text = self.original.decode("utf-8")
+        newline = "\r\n" if "\r\n" in text else "\n"
+        block = newline.join([
+            "set(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS OFF)",
+            f'set(KATANA_UPDATE_KEY_ACTIVE "{active}")',
+            f'set(KATANA_UPDATE_KEY_SPARE "{spare}")',
+        ])
+        start = re.search(r"^# >>> keys[^\r\n]*", text, re.MULTILINE)
+        end = re.search(r"^# <<< keys", text, re.MULTILINE)
+        self.scratch.write_bytes((text[: start.end()] + newline + block + newline + text[end.start():]).encode("utf-8"))
+
+    def test_the_validators_list_of_published_keys_is_the_rfcs_and_the_tools(self) -> None:
+        text = REAL_FILE.read_text(encoding="utf-8")
+        listed = re.search(r"set\(_katana_published_test_keys\s+([^)]*)\)", text)
+        self.assertIsNotNone(listed, "cmake/KatanaUpdateKeys.cmake must list the published test keys")
+        in_cmake = re.findall(r'"([0-9a-f]{64})"', listed.group(1))
+        # RFC_PUBLIC is copied from RFC 8032 section 7.1; the tool's own list must be the same three.
+        self.assertCountEqual(in_cmake, RFC_PUBLIC.values())
+        self.assertCountEqual(keytool.TEST_PUBLIC_KEYS, RFC_PUBLIC.values())
 
     def test_a_published_test_key_is_refused_without_the_flag_and_the_file_is_untouched(self) -> None:
         self.assert_tool_failed(self.pub(), "published test key")
@@ -210,7 +265,9 @@ class Pinning(ToolTest):
         self.assert_tool_failed(done, "neither is among the new keys", "--replace-both")
         self.assertEqual(self.scratch.read_bytes(), before)
         self.assert_tool_ok(self.pub("--allow-test-keys", "--replace-both", active=first, spare=second))
-        self.assertNotIn(RFC_PUBLIC[1], self.scratch.read_text(encoding="utf-8"))
+        # The pinned keys are the new pair. (Not "the RFC key is nowhere in the file": the file lists the
+        # published test keys it refuses, so those digits are in it whatever is pinned.)
+        self.assertEqual(self.pinned(), (self.public_of(first), self.public_of(second)))
 
     def test_a_rotation_that_keeps_one_pinned_key_is_allowed(self) -> None:
         self.assert_tool_ok(self.pub("--allow-test-keys"))
