@@ -43,13 +43,23 @@ constexpr int kMaxDepth = 16;
 constexpr std::size_t kMaxTokenBytes = 64;
 constexpr std::size_t kMaxPayloadNameBytes = 255;
 constexpr std::size_t kMaxUrlBytes = 2048;
-// The offsets and lengths go to APIs with signed 64-bit offsets (HTTP range arithmetic,
-// curl_off_t, std::streamoff), so a payload larger than that is not one.
-constexpr std::uint64_t kMaxPayloadBytes =
-    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+// The zip holds every file deflated alone, and the files add up to at most kMaxInstallBytes,
+// so the zip is that and a little (maxCompressedBytes below, and its headers): twice the
+// install cap is room for all of it, and no signed number can make the payload, or a range in
+// it, larger than that. The offsets and lengths go to APIs with signed 64-bit offsets (HTTP
+// range arithmetic, curl_off_t, std::streamoff) and stay far below them.
+constexpr std::uint64_t kMaxPayloadBytes = 2 * kMaxInstallBytes;
 // A deflate stream is never empty (manifest.hpp): the shortest, an empty final block, is the
 // two bytes 03 00.
 constexpr std::uint64_t kMinCompressedBytes = 2;
+
+// The most a deflate stream of `size` bytes can be: zlib's worst case is the input and five
+// bytes for each stored block (about 0.03%) and 13 bytes, so one part in a thousand and 64
+// bytes leave room for any encoder. `size` is at most kMaxInstallBytes: nothing overflows.
+constexpr std::uint64_t maxCompressedBytes(std::uint64_t size)
+{
+    return size + size / 1000 + 64;
+}
 
 core::Error malformed(std::string what, std::string_view member)
 {
@@ -130,12 +140,19 @@ core::Result<Json> parseJson(std::string_view text)
         return Json::parse(text, watch, /*allow_exceptions=*/true, /*ignore_comments=*/false);
     } catch (const Refusal& refusal) {
         return refusal.error;
+    } catch (const Json::parse_error& error) {
+        // Not error.what(): nlohmann ends that text with "last read: '<the token>'", which is
+        // the whole string or number it was in (megabytes of a manifest) and holds its raw
+        // bytes, control characters and invalid UTF-8 among them. The place is enough.
+        return malformed("not well-formed JSON: the reader stopped at byte " +
+                             std::to_string(error.byte),
+                         "");
     } catch (const Json::exception& error) {
-        // nlohmann's message names the line and column and what it expected; it holds no
-        // part of the input except the one character it stopped at.
-        return malformed(std::string("not well-formed JSON: ") + error.what(), "");
-    } catch (const std::exception& error) {
-        return malformed(std::string("the JSON could not be read: ") + error.what(), "");
+        return malformed("the JSON could not be read (reader error " +
+                             std::to_string(error.id) + ")",
+                         "");
+    } catch (const std::exception&) {
+        return malformed("the JSON could not be read", "");
     }
 }
 
@@ -222,19 +239,28 @@ class Members {
 
 // ---- value rules --------------------------------------------------------------------------
 
+bool isAlphanumeric(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
 bool isNameCharacter(char c)
 {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-           c == '.' || c == '_' || c == '-';
+    return isAlphanumeric(c) || c == '.' || c == '_' || c == '-';
 }
 
 // product, channel, target, tag and the payload's name end up in a URL, a file name or a
-// message; letters, digits and . _ - are all they need, and nothing else is let through.
+// message; letters, digits and . _ - are all they need, and nothing else is let through. The
+// first is a letter or a digit: "." and ".." are dot-segments of the URL
+// (releases/download/<tag>/<name>) and a leading dot is a hidden file.
 core::Status checkName(std::string_view value, std::size_t maxBytes, std::string_view member)
 {
     if (value.empty() || value.size() > maxBytes) {
         return invalid("the value must be 1 to " + std::to_string(maxBytes) + " characters",
                        member);
+    }
+    if (!isAlphanumeric(value.front())) {
+        return invalid("the value must start with a letter or a digit", member);
     }
     for (const char c : value) {
         if (!isNameCharacter(c)) {
@@ -415,9 +441,6 @@ core::Result<Payload> readPayload(const Json& json)
         !status) {
         return status.error();
     }
-    if (name.value().front() == '.') {
-        return invalid("the name must not start with a dot", members.name("name"));
-    }
     payload.name = std::move(name.value());
 
     core::Result<std::uint64_t> size = members.unsignedInteger("size");
@@ -425,7 +448,7 @@ core::Result<Payload> readPayload(const Json& json)
         return size.error();
     }
     if (size.value() == 0 || size.value() > kMaxPayloadBytes) {
-        return invalid("the size must be from 1 to 9223372036854775807", members.name("size"));
+        return invalid("the size must be from 1 to 4294967296 (4 GiB)", members.name("size"));
     }
     payload.size = size.value();
     return payload;
@@ -492,6 +515,11 @@ core::Result<ManifestFile> readFile(const Json& json, std::size_t index,
     const std::uint64_t payloadSize = payload ? payload->size : 0;
     if (offset.value() > payloadSize || compressed.value() > payloadSize - offset.value()) {
         return invalid("the file's bytes are not inside the payload", members.name("offset"));
+    }
+    if (compressed.value() > maxCompressedBytes(size.value())) {
+        return invalid("a deflate stream is not longer than its file by more than deflate's "
+                       "worst case (one part in a thousand and 64 bytes)",
+                       members.name("csize"));
     }
     file.size = size.value();
     file.compressedSize = compressed.value();

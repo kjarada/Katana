@@ -7,7 +7,7 @@
 // Compared component by component as integers, never as text ("0.10" is
 // newer than "0.9"). A missing trailing component is zero, so "0.3" and
 // "0.3.0" are the same version; how many were written is kept only so that
-// toString gives the text back as it came.
+// toString gives the text back with as many components (a leading zero is not kept).
 //
 // There is no pre-release syntax ("-beta") on purpose: the workflow cannot
 // produce one, and a version the updater cannot order is one it must not offer.

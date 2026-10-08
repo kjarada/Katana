@@ -12,7 +12,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -605,10 +607,25 @@ TEST(UpdateManifest, ProductChannelTargetAndTagAreNamesOfOneToSixtyFourSafeChara
         }
         for (const std::string& bad : std::vector<std::string>{
              "", std::string(65, 'x'), "a b", "a/b", "a\\\\b", "..\\/x", "a:b", "a?b", "a\\\"b",
-              "caf\xC3\xA9", "\\u00e9", "a\\u0000b", "\\u0000", "a\\nb", "a\\tb", "a%41", "a;b", "a b "}) {
+              "caf\xC3\xA9", "\\u00e9", "a\\u0000b", "\\u0000", "a\\nb", "a\\tb", "a%41", "a;b", "a b ",
+              // "." and ".." are dot-segments of the URL the tag and the asset name go into
+              // (releases/download/<tag>/<name>); the rest are first characters that are
+              // neither a letter nor a digit.
+              ".", "..", "...", ".hidden", ".v0.3.0", "-v1", "_v1", "-", "_"}) {
             Doc doc = sample();
             doc.top.set(key, jsonString(bad));
             expectInvalid(doc, key, std::string(key) + " = " + bad);
+        }
+    }
+}
+
+TEST(UpdateManifest, ANameMayHaveDotsDashesAndUnderscoresAnywhereAfterItsFirstCharacter)
+{
+    for (const char* key : {"product", "channel", "target", "tag"}) {
+        for (const std::string& good : std::vector<std::string>{"0", "9a", "a.", "a..", "a-", "a_", "a..b", "7.-_"}) {
+            Doc doc = sample();
+            doc.top.set(key, jsonString(good));
+            expectAccepted(doc, std::string(key) + " = " + good);
         }
     }
 }
@@ -711,7 +728,7 @@ TEST(UpdateManifest, TheNotesAddressIsAnHttpsAddressOfPrintableCharacters)
     }
 }
 
-TEST(UpdateManifest, ThePayloadIsDeflateWithASafeNameAndASizeThatFitsASignedSixtyFourBits)
+TEST(UpdateManifest, ThePayloadIsDeflateWithASafeNameAndASizeOfOneByteToFourGibiBytes)
 {
     const auto withPayload = [](const std::string& codec, const std::string& name, const std::string& size) {
         Doc doc = sample();
@@ -719,8 +736,9 @@ TEST(UpdateManifest, ThePayloadIsDeflateWithASafeNameAndASizeThatFitsASignedSixt
         doc.top.set("payload", R"({"codec":)" + codec + R"(,"name":)" + name + R"(,"size":)" + size + "}");
         return doc;
     };
-    expectAccepted(withPayload("\"deflate\"", "\"Katana-0.3.0-win64.update.zip\"", "9223372036854775807"),
-                   "size 2^63-1");
+    // Twice kMaxInstallBytes: 2 * 2 GiB = 4 GiB = 2^32.
+    expectAccepted(withPayload("\"deflate\"", "\"Katana-0.3.0-win64.update.zip\"", "4294967296"),
+                   "size 4 GiB");
     expectAccepted(withPayload("\"deflate\"", jsonString(std::string(255, 'a')), "100"), "a 255-character name");
     expectAccepted(withPayload("\"deflate\"", "\"a\"", "2"), "size 2");
 
@@ -730,11 +748,12 @@ TEST(UpdateManifest, ThePayloadIsDeflateWithASafeNameAndASizeThatFitsASignedSixt
     }
     for (const std::string& name : {std::string(""), std::string(256, 'a'), std::string("a/b.zip"),
                                    std::string("a\\\\b.zip"), std::string(".hidden"), std::string(".."),
-                                   std::string("."), std::string("a b.zip"), std::string("a\\u0000.zip"),
+                                   std::string("."), std::string("-a.zip"), std::string("_a.zip"), std::string("a b.zip"), std::string("a\\u0000.zip"),
                                    std::string("caf\xC3\xA9.zip"), std::string("a:b"), std::string("a%2Fb")}) {
         expectInvalid(withPayload("\"deflate\"", jsonString(name), "100"), "payload.name", "name " + name);
     }
-    for (const char* size : {"0", "9223372036854775808", "18446744073709551615"}) {
+    for (const char* size : {"0", "4294967297", "4294967298", "9223372036854775807", "9223372036854775808",
+                             "18446744073709551615"}) {
         expectInvalid(withPayload("\"deflate\"", "\"a.zip\"", size), "payload.size", size);
     }
 }
@@ -822,12 +841,17 @@ TEST(UpdateManifest, ThePathsOfTheSharedTableAreJudgedHereAsTheyAreByTheRulesThe
 
 namespace {
 
-// One file placed in a payload of `payloadSize` bytes; the rest of the sample around it.
+// One file placed in a payload of `payloadSize` bytes; the rest of the sample around it. The
+// file is as large as its stream (a stored file: deflate's own bound on the stream, which is
+// the next group of tests, never comes into it), at most 2 GiB.
 Doc placed(std::uint64_t offset, std::uint64_t csize, std::uint64_t payloadSize)
 {
     Doc doc = sample();
     doc.files = {fileEntry("bin/a")};
-    doc.files[0].set("offset", std::to_string(offset)).set("csize", std::to_string(csize));
+    doc.files[0]
+        .set("offset", std::to_string(offset))
+        .set("csize", std::to_string(csize))
+        .set("size", std::to_string(std::min<std::uint64_t>(csize, 2 * kGiB)));
     doc.top.set("payload", R"({"codec":"deflate","name":"a.zip","size":)" + std::to_string(payloadSize) + "}");
     return doc;
 }
@@ -876,15 +900,61 @@ TEST(UpdateManifestPlacement, OffsetAndLengthThatWrapWhenAddedAreRefusedNotSumme
     expectInvalid(placed(50, kUint64Max - 49, 100), "files[0].offset", "sum is exactly 2^64, offset 50");
     // 2^63 + 2^63 = 2^64
     expectInvalid(placed(kInt64Max + 1, kInt64Max + 1, 100), "files[0].offset", "two halves of 2^64");
-    // The same wraps against the largest payload the reader accepts.
-    expectInvalid(placed(kInt64Max, kInt64Max, kInt64Max), "files[0].offset", "payload 2^63-1, both 2^63-1");
+    // The same wraps against the largest payload the reader accepts, 2^32 bytes: 2^32 plus
+    // 2^64 - 2^32 is exactly 2^64, which is 0; 2^32 - 1 plus 2^64 - 2^32 + 3 is 2.
+    constexpr std::uint64_t kLargestPayload = 1ull << 32;
+    expectInvalid(placed(kLargestPayload, kUint64Max - kLargestPayload + 1, kLargestPayload), "files[0].offset",
+                  "payload 2^32, offset 2^32, csize 2^64-2^32");
+    expectInvalid(placed(kLargestPayload - 1, kUint64Max - kLargestPayload + 4, kLargestPayload), "files[0].offset",
+                  "payload 2^32, offset 2^32-1, csize 2^64-2^32+3");
+    expectInvalid(placed(kInt64Max, kInt64Max, kLargestPayload), "files[0].offset", "both 2^63-1");
 }
 
-TEST(UpdateManifestPlacement, TheLargestPayloadThatFitsASignedOffsetIsAcceptedWithDataAtItsEnd)
+TEST(UpdateManifestPlacement, TheLargestPayloadIsFourGibiBytesAndDataMayEndAtItsLastByte)
 {
-    expectAccepted(placed(kInt64Max - 2, 2, kInt64Max), "data in the last two bytes of 2^63-1");
-    expectInvalid(placed(kInt64Max - 1, 2, kInt64Max), "files[0].offset", "one byte too many");
-    expectAccepted(placed(0, kInt64Max, kInt64Max), "csize == payload == 2^63-1");
+    constexpr std::uint64_t kLargestPayload = 4 * kGiB;
+    EXPECT_EQ(kLargestPayload, 2 * update::kMaxInstallBytes);
+    expectAccepted(placed(kLargestPayload - 2, 2, kLargestPayload), "data in the last two bytes of 4 GiB");
+    expectInvalid(placed(kLargestPayload - 1, 2, kLargestPayload), "files[0].offset", "one byte too many");
+    // A payload one byte over the cap is refused for its size, whatever is placed in it.
+    expectInvalid(placed(0, 2, kLargestPayload + 1), "payload.size", "payload 4 GiB + 1");
+    expectInvalid(placed(0, 2, kInt64Max), "payload.size", "payload 2^63-1");
+}
+
+TEST(UpdateManifestPlacement, AStreamMayBeItsFilesSizePlusADeflatesWorstCaseAndNotOneByteMore)
+{
+    // The bound is size + size / 1000 + 64 (integer division). Worked out by hand:
+    //   size 0 -> 0 + 0 + 64 = 64;  size 999 -> 999 + 0 + 64 = 1063;  size 1000 -> 1000 + 1 + 64 = 1065;
+    //   size 1999 -> 1999 + 1 + 64 = 2064;  size 2000 -> 2000 + 2 + 64 = 2066;
+    //   size 2^31 -> 2147483648 + 2147483 + 64 = 2149631195.
+    struct Case {
+        std::uint64_t size;
+        std::uint64_t largest;
+    };
+    for (const Case c : {Case{0, 64}, Case{999, 1063}, Case{1000, 1065}, Case{1999, 2064}, Case{2000, 2066},
+                         Case{2 * kGiB, 2149631195ull}}) {
+        const auto withStream = [&](std::uint64_t csize) {
+            Doc doc = placed(0, csize, 4 * kGiB);
+            doc.files[0].set("size", std::to_string(c.size));
+            return doc;
+        };
+        expectAccepted(withStream(c.largest), "size " + std::to_string(c.size) + ", csize " + std::to_string(c.largest));
+        expectInvalid(withStream(c.largest + 1), "files[0].csize",
+                      "size " + std::to_string(c.size) + ", csize " + std::to_string(c.largest + 1));
+    }
+}
+
+TEST(UpdateManifestPlacement, AStreamOfAnyLengthThatIsPlacedPastThePayloadIsRefusedForItsPlaceFirst)
+{
+    // Both are wrong; the range check is the one a caller can act on first. A stream of 2^64-1
+    // bytes of a 10-byte file is in no payload.
+    Doc doc = placed(0, 2, 100);
+    doc.files[0].set("csize", "18446744073709551615").set("size", "10");
+    expectInvalid(doc, "files[0].offset", "csize 2^64-1 in a payload of 100");
+    // And inside the payload but far beyond the file: refused for the stream's own length.
+    Doc inside = placed(0, 2, 4 * kGiB);
+    inside.files[0].set("csize", std::to_string(kGiB)).set("size", "10");
+    expectInvalid(inside, "files[0].csize", "a 1 GiB stream for a 10-byte file");
 }
 
 TEST(UpdateManifestPlacement, AFileMayBeAsLargeAsTwoGibiBytesAndNoLarger)
@@ -906,9 +976,9 @@ TEST(UpdateManifestPlacement, SeveralFilesAreEachPlacedInsideThePayloadAndMaySha
     // Offsets are not required to be ordered or disjoint: the reader checks each file's own range.
     Doc doc = sample();
     doc.files = {fileEntry("bin/a"), fileEntry("bin/b"), fileEntry("bin/c")};
-    doc.files[0].set("offset", "90").set("csize", "10");
-    doc.files[1].set("offset", "0").set("csize", "100");
-    doc.files[2].set("offset", "95").set("csize", "5");
+    doc.files[0].set("offset", "90").set("csize", "10").set("size", "10");
+    doc.files[1].set("offset", "0").set("csize", "100").set("size", "100");
+    doc.files[2].set("offset", "95").set("csize", "5").set("size", "5");
     doc.top.set("payload", R"({"codec":"deflate","name":"a.zip","size":100})");
     expectAccepted(doc, "three files in 100 bytes");
     // The second one past the end is the one named.
@@ -1269,9 +1339,58 @@ TEST(UpdateManifestHostile, TheErrorOfAHostileValueNeverCarriesRawControlCharact
     }
 }
 
+namespace {
+
+// Every byte of an error's text is printable ASCII and the whole is short: nothing of the
+// input is carried into a log line or a dialog.
+void expectBoundedPrintable(const core::Error& error, const std::string& what)
+{
+    const std::string text = error.describe();
+    EXPECT_LT(text.size(), 400u) << what;
+    for (const char c : text) {
+        EXPECT_TRUE(static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) <= 0x7E)
+            << what << ": byte " << static_cast<int>(static_cast<unsigned char>(c));
+    }
+}
+
+} // namespace
+
+TEST(UpdateManifestHostile, AJsonSyntaxErrorSaysWhereTheReaderStoppedAndCarriesNoneOfTheInput)
+{
+    // nlohmann's own text ends with the token it was in: here a megabyte of x, cut by a raw
+    // control character (JSON strings may not hold one), which would put 1 MB into the error.
+    const std::string longString = "{\"a\":\"" + std::string(1'000'000, 'x') + "\x01\"}";
+    const core::Result<update::Manifest> parsed = parse(longString);
+    ASSERT_FALSE(parsed.ok());
+    EXPECT_EQ(parsed.error().code, core::ErrorCode::ParseFailure);
+    expectBoundedPrintable(parsed.error(), "1 MB string cut by a control character");
+    // The place is given: the control character is the byte at index 1,000,006 (6 bytes of
+    // '{"a":"' and 1,000,000 x), so the offset the reader names is 1,000,006 to 1,000,008
+    // whether it counts from 0 or 1 and whether it counts the byte that stopped it.
+    const std::string message = parsed.error().message;
+    const std::size_t at = message.find("byte ");
+    ASSERT_NE(at, std::string::npos) << message;
+    const unsigned long long offset = std::strtoull(message.c_str() + at + 5, nullptr, 10);
+    EXPECT_GE(offset, 1'000'006ull) << message;
+    EXPECT_LE(offset, 1'000'008ull) << message;
+
+    // Raw bytes that are not UTF-8 in a string, in a key and in front of the object; a
+    // sequence cut short; a DEL and an escape character where a literal or a number goes.
+    for (const std::string& text :
+         {std::string("{\"a\":\"\xFF\xFE\"}"), std::string("{\"\xC0\x80\":1}"),
+          std::string("{\"a\":\"\xE2\x82\"}"), std::string("{\"a\":\"") + std::string(5000, '\xFF') + "\"}",
+          std::string("\xFF\xFE{}"), std::string("{\"a\":tru\x7F}"), std::string("{\"a\":1\x1B[31m}")}) {
+        const core::Result<update::Manifest> bad = parse(text);
+        ASSERT_FALSE(bad.ok()) << text.size();
+        expectBoundedPrintable(bad.error(), "hostile bytes, length " + std::to_string(text.size()));
+    }
+}
+
 TEST(UpdateManifestHostile, AManifestOfManyUnknownMembersIsReadInReasonableTime)
 {
-    // 200,000 unknown members of a few bytes each (about 2 MB): nothing quadratic in the reader.
+    // 200,000 unknown members of a few bytes each (about 2 MB): nothing quadratic in the
+    // reader. A pass takes well under a second; a reader that compared every member with
+    // every other would need 2 * 10^10 comparisons, so a generous bound tells them apart.
     Doc doc = sample();
     std::string members = "{";
     for (int i = 0; i < 200'000; ++i) {
@@ -1280,7 +1399,12 @@ TEST(UpdateManifestHostile, AManifestOfManyUnknownMembersIsReadInReasonableTime)
     members += "}";
     doc.top.set("future", members);
     ASSERT_LT(doc.text().size(), update::kMaxManifestBytes);
-    EXPECT_TRUE(parse(doc).ok());
+    const std::string text = doc.text();
+    const auto begin = std::chrono::steady_clock::now();
+    const core::Result<update::Manifest> parsed = parse(text);
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    EXPECT_TRUE(parsed.ok());
+    EXPECT_LT(elapsed, std::chrono::seconds(10));
 }
 
 // ---- file classes ---------------------------------------------------------------------------------------------
@@ -1607,7 +1731,7 @@ TEST(UpdateManifestFixtures, TheSecondReleaseIsRefusedAtEveryLengthShorterThanIt
     // the whole is accepted, whichever byte it stops at.
     const std::string whole = readFixture("release/v2/Katana-update-win64.json");
     ASSERT_TRUE(parse(whole).ok());
-    for (std::size_t length = 0; length + 1 < whole.size(); length += 7) {
+    for (std::size_t length = 0; length + 1 < whole.size(); ++length) {
         const core::Result<update::Manifest> parsed = parse(whole.substr(0, length));
         EXPECT_FALSE(parsed.ok()) << "accepted a prefix of " << length << " bytes";
     }

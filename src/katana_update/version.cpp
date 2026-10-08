@@ -122,9 +122,13 @@ std::string_view programVersionText()
     return KATANA_VERSION;
 }
 
-core::Result<Version> programVersion()
+namespace detail {
+
+// programVersion for any text, so that the refusal can be tested without a broken build
+// (tests/update/test_version.cpp declares it; it is in no public header).
+core::Result<Version> programVersionOf(std::string_view text)
 {
-    core::Result<Version> parsed = parseVersion(programVersionText());
+    core::Result<Version> parsed = parseVersion(text);
     if (parsed) {
         return parsed;
     }
@@ -133,7 +137,14 @@ core::Result<Version> programVersion()
     return core::makeError(core::ErrorCode::Internal,
                            "the program's own version is not MAJOR.MINOR[.PATCH[.BUILD]]: " +
                                parsed.error().message,
-                           excerpt(programVersionText()));
+                           excerpt(text));
+}
+
+} // namespace detail
+
+core::Result<Version> programVersion()
+{
+    return detail::programVersionOf(programVersionText());
 }
 
 } // namespace katana::update

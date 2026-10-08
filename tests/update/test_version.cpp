@@ -18,6 +18,12 @@
 
 using namespace katana;
 
+// Not in any public header: version.cpp's programVersion for any text, so that the refusal
+// (a broken build) can be reached without one.
+namespace katana::update::detail {
+core::Result<Version> programVersionOf(std::string_view text);
+} // namespace katana::update::detail
+
 namespace {
 
 update::Version parsed(std::string_view text)
@@ -287,4 +293,29 @@ TEST(UpdateVersion, TheProgramsOwnVersionParsesAndSpellsTheTextItWasBuiltWith)
     // The project writes MAJOR.MINOR.PATCH without leading zeros (CMakeLists.txt), so the
     // text comes back exactly.
     EXPECT_EQ(update::toString(own.value()), update::programVersionText());
+}
+
+TEST(UpdateVersion, AProgramVersionTextThatIsNoVersionIsAnInternalErrorNotAParseFailure)
+{
+    // A bad file is a ParseFailure (parseVersion); the program's own text is not a file, so a
+    // refusal of it is a broken build and says so (version.hpp).
+    for (const char* text : {"", "1", "0.x", "0.3.0-beta", "v0.3.0", "0.3.0.1.2", " 0.3.0", "0..3", "1234567890.0"}) {
+        const core::Result<update::Version> own = update::detail::programVersionOf(text);
+        ASSERT_FALSE(own.ok()) << text;
+        EXPECT_EQ(own.error().code, core::ErrorCode::Internal) << text;
+        EXPECT_FALSE(update::parseVersion(text).ok()) << text;
+        EXPECT_EQ(update::parseVersion(text).error().code, core::ErrorCode::ParseFailure) << text;
+        EXPECT_EQ(own.error().context, text) << "the context is the text";
+    }
+    // A good text is the same as parseVersion's.
+    const core::Result<update::Version> good = update::detail::programVersionOf("0.3.0");
+    ASSERT_TRUE(good.ok());
+    EXPECT_EQ(good.value(), parsed("0.3"));
+    // The context is bounded and printable, as every version error's is.
+    const core::Result<update::Version> hostile =
+        update::detail::programVersionOf(std::string("0.3\n") + std::string(100000, 'x'));
+    ASSERT_FALSE(hostile.ok());
+    EXPECT_EQ(hostile.error().code, core::ErrorCode::Internal);
+    EXPECT_LE(hostile.error().context.size(), 64u);
+    EXPECT_EQ(hostile.error().context.find('\n'), std::string::npos);
 }

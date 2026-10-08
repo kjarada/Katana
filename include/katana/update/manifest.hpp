@@ -99,7 +99,11 @@ struct Manifest {
 //   - offset + csize <= payload.size, computed so that it cannot wrap (offset <=
 //     payload.size and csize <= payload.size - offset); a notify-only manifest has
 //     no files, so there is nothing to place;
-//   - size <= kMaxInstallBytes for each file (the sum is checkManifestPaths's).
+//   - size <= kMaxInstallBytes for each file (the sum is checkManifestPaths's);
+//   - csize <= size + size/1000 + 64: a deflate stream is as long as its file and at most
+//     deflate's worst case more (zlib adds about 0.03%), and payload.size <= 2 *
+//     kMaxInstallBytes (4 GiB). So no signed value makes a range longer than its own file
+//     plus that, or the payload larger than the install can be and a little.
 // Every member of the sample above is required with its exact type (a whole number is
 // not "5.0" or "1e3"), except "exec" (absent is false: the producer writes it only when
 // true), "notify_only" (absent is false) and "payload" (absent exactly when notify-only).
@@ -107,14 +111,21 @@ struct Manifest {
 // levels, a byte-order mark, a NUL byte anywhere in the text (a JSON reader takes it for the
 // end of its input) and an input over kMaxManifestBytes (feed.hpp) are refused.
 // Beyond what the header says: sequence >= 1; product, channel, target and tag are 1 to 64
-// letters, digits or . _ - (that they are THIS install's is verifyManifest's); notes_url is
+// letters, digits or . _ - starting with a letter or a digit (no "." or "..": the tag is a
+// segment of a URL; that they are THIS install's is verifyManifest's); notes_url is
 // https://; published and expires are real UTC times (see isExpired: expiry is never an
-// error); payload.codec is "deflate" and payload.size is 1 to 2^63-1; a manifest that
+// error); payload.codec is "deflate", payload.name is such a name too, and payload.size is
+// 1 to 4294967296 (see the placement rules above); a manifest that
 // installs lists at least one file and a notify-only one none; `applier` is any whole
 // number from 1 to 2^32-1 (one above kApplierProtocol is not refused: the apply code
 // decides to use the staged helper).
 // ParseFailure for malformed JSON or a missing or mistyped member; InvalidArgument for a
-// value that breaks a rule. The context names the member (files[3].path).
+// value that breaks a rule. The context names the member (files[3].csize, payload.size), except
+// where a path rule of paths.hpp refuses a path (one path, or the set: a duplicate once case is
+// folded, a file inside a file): there the context is the path (shortened, with every byte that
+// is not printable ASCII spelled in hexadecimal) and, for a single path, the message names the
+// member. An error never holds raw input: a JSON syntax error says where the reader stopped
+// (a byte offset), not what it was reading.
 [[nodiscard]] core::Result<Manifest> parseManifest(std::string_view json);
 
 // "YYYY-MM-DDTHH:MM:SSZ" (UTC, as the producer writes `published` and `expires`) as seconds

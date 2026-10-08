@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace katana::update {
@@ -254,23 +255,52 @@ core::Status checkManifestPaths(std::span<const std::string> paths,
     // so an install that applied the set would fail half way. Both after folding ASCII case.
     std::unordered_set<std::string> folded;
     folded.reserve(paths.size());
-    for (const std::string& path : paths) {
-        if (!folded.insert(lowerAscii(path)).second) {
-            return refuse("two paths are the same name once ASCII case is folded", path);
+    // The folded names in byte order, each with its place in the list: the set above owns
+    // the strings and its nodes never move, so the views stay good while it is not changed.
+    std::vector<std::pair<std::string_view, std::size_t>> ordered;
+    ordered.reserve(paths.size());
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        const auto inserted = folded.insert(lowerAscii(paths[i]));
+        if (!inserted.second) {
+            return refuse("two paths are the same name once ASCII case is folded", paths[i]);
         }
+        ordered.emplace_back(std::string_view(*inserted.first), i);
     }
+    std::sort(ordered.begin(), ordered.end());
+
+    // "Q is a folder of another path" is "some listed name starts with Q and a slash", and the
+    // names that do are one run of the sorted list, which begins at the first name not below
+    // "Q/". One binary search for each name, so the cost is the sum of the lengths times a
+    // logarithm: it must not depend on how many slashes a name has (a signed manifest may hold
+    // one path of megabytes, "bin/a/a/a/...", and a probe of every prefix of it is quadratic).
     for (const std::string& path : paths) {
-        const std::string lower = lowerAscii(path);
-        for (std::size_t slash = lower.find('/'); slash != std::string::npos;
-             slash = lower.find('/', slash + 1)) {
-            if (folded.contains(lower.substr(0, slash))) {
-                return refuse("a path is inside another path that is listed as a file (case "
-                              "folded)",
-                              path);
-            }
+        std::string folder = lowerAscii(path);
+        folder.push_back('/');
+        const auto below = std::lower_bound(
+            ordered.begin(), ordered.end(), folder,
+            [](const std::pair<std::string_view, std::size_t>& entry, const std::string& key) {
+                return entry.first < key;
+            });
+        if (below != ordered.end() && below->first.starts_with(folder)) {
+            return refuse("a path is inside another path that is listed as a file (case "
+                          "folded)",
+                          paths[below->second]);
         }
     }
     return {};
+}
+
+core::Status checkJournalDirectory(std::string_view path)
+{
+    // A release that first brings etc or lib makes that folder itself, and rollback removes
+    // it again, so the journal names it bare. Only for a folder: a bare name in an ADD,
+    // REPLACE or REMOVE record would let a forged line delete a whole install folder, and
+    // checkJournalPath keeps refusing it.
+    if (std::find(kInstallRoots.begin(), kInstallRoots.end(), path) != kInstallRoots.end()) {
+        return {};
+    }
+    // The records are files; a folder spelled as one is as forged as any other.
+    return checkManifestPath(path);
 }
 
 core::Status checkJournalPath(std::string_view path)

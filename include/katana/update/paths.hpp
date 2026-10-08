@@ -35,7 +35,10 @@
 // the folder of another (bin/a and bin/a/b, also after folding: no volume holds both, so
 // an install that applied the set would fail half way), when it has more than kMaxFiles
 // entries, or when the sizes add up to more than kMaxInstallBytes. Only the letters A to Z
-// fold: '[' and '{' differ by the same bit and are two names.
+// fold: '[' and '{' differ by the same bit and are two names. The cost of the set checks is the
+// total length of the paths times a logarithm, whatever the paths look like; no cap on the
+// length of one path is part of the rules (the table and both Python tools would have to
+// carry it), so a signed manifest may hold one path of megabytes and it is read in linear time.
 
 #include <array>
 #include <cstddef>
@@ -76,6 +79,14 @@ inline constexpr std::array<std::string_view, 3> kRecordPaths{
 // lib, and journal.hpp promises that a forged line cannot reach one. A record spelled in
 // another case is refused here, and skipped like any forged line.
 [[nodiscard]] core::Status checkJournalPath(std::string_view path);
+
+// What the path of a DIRECTORY (an MKDIR record) read back from a journal must pass: the
+// same as a file's under checkManifestPath, and also a bare install folder - "etc", "lib" -
+// which a release that brings that folder for the first time makes, and which rollback must
+// remove again. Never one of kRecordPaths (they are files). A bare folder stays refused by
+// checkJournalPath, for the records that name a FILE: a forged "REMOVE bin" must not delete
+// a whole install folder.
+[[nodiscard]] core::Status checkJournalDirectory(std::string_view path);
 
 // True for the updater's own record names above, wherever they sit and in any ASCII
 // case ("Share/Katana/INSTALL.JSON" is one): such a file is never in a manifest and

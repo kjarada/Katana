@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -653,6 +654,62 @@ TEST(UpdatePathSet, ANameThatIsAFileAndAlsoTheFolderOfAnotherIsRefused)
     EXPECT_TRUE(checkSetOfPaths({"share/x/y", "share/x/z"}).ok());
 }
 
+TEST(UpdatePathSet, AFolderIsFoundWhereverTheByteOrderPutsItsFilesAndNamesBetweenAreNotInTheWay)
+{
+    // In byte order '-' (0x2D) and '.' (0x2E) sort BEFORE '/' (0x2F), so "bin/a-b" and
+    // "bin/a.d" sit between "bin/a" and "bin/a/c": the file and the file below it are not
+    // neighbours in a sorted list, and a check of neighbours only would miss the pair.
+    EXPECT_FALSE(checkSetOfPaths({"bin/a", "bin/a-b", "bin/a.d", "bin/a/c"}).ok());
+    EXPECT_FALSE(checkSetOfPaths({"bin/a/c", "bin/a.d", "bin/a-b", "bin/a"}).ok());
+    EXPECT_FALSE(checkSetOfPaths({"share/x/y", "share/x/y-z", "share/x/y.w", "share/x/y/w"}).ok());
+    // '0' (0x30) and 'a' (0x61) sort after '/', so these come after the folder's files.
+    EXPECT_FALSE(checkSetOfPaths({"bin/a", "bin/a0", "bin/aa", "bin/a/c", "bin/b"}).ok());
+    // The same names without a file below "bin/a": only neighbours by spelling, no folder.
+    EXPECT_TRUE(checkSetOfPaths({"bin/a", "bin/a-b", "bin/a.d", "bin/a0", "bin/aa", "bin/a_", "bin/b/a"}).ok());
+    // A file below a folder that is not itself listed is an ordinary tree.
+    EXPECT_TRUE(checkSetOfPaths({"bin/a/b", "bin/a/c/d", "bin/a-b/c", "bin/a.d/c"}).ok());
+}
+
+TEST(UpdatePathSet, TheFileInsideAFileIsNamedByTheInnerPathAsWritten)
+{
+    // "bin/A/C" is inside "bin/a" once case is folded; the error shows it as the manifest wrote it.
+    const core::Status status = checkSetOfPaths({"bin/a", "bin/A-b", "bin/A/C"});
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(status.error().context, "bin/A/C");
+}
+
+TEST(UpdatePathSet, OnePathOfMegabytesIsCheckedInTimeProportionalToItsLength)
+{
+    // "bin/a/a/a/..." of 2 MiB has about a million slashes. A signed manifest may hold such a
+    // path (the cap on the manifest is 8 MiB), and a check that looked at every prefix of it
+    // against the listed names would copy and hash a million prefixes of a mean half a MiB:
+    // 10^12 bytes of work, in the helper, with the lock held. The bound is generous: a pass
+    // takes milliseconds.
+    std::string longPath = "bin";
+    while (longPath.size() < 2 * 1024 * 1024) {
+        longPath += "/a";
+    }
+    ASSERT_TRUE(accepts(longPath));
+
+    const auto begin = std::chrono::steady_clock::now();
+    EXPECT_FALSE(checkSetOfPaths({longPath, "bin/b", "share/x", longPath + "/x", longPath + "/y"}).ok())
+        << "longPath is a file and the folder of longPath/x";
+    EXPECT_TRUE(checkSetOfPaths({longPath, "bin/b", "share/x"}).ok());
+    EXPECT_TRUE(checkSetOfPaths({longPath + "/x", longPath + "/y", "bin/a/b"}).ok());
+    // "bin/a/a" is a file and the folder of longPath: found at the shallowest slash.
+    EXPECT_FALSE(checkSetOfPaths({longPath, "bin/a/a"}).ok());
+    EXPECT_FALSE(checkSetOfPaths({"bin/a/a", longPath}).ok());
+    // Two of them, equal but for case in the middle: a duplicate once folded.
+    std::string shouting = longPath;
+    shouting[(shouting.size() / 2) & ~std::size_t{1}] = 'A'; // an even index holds an 'a'
+    ASSERT_NE(shouting, longPath);
+    ASSERT_TRUE(accepts(shouting));
+    EXPECT_FALSE(checkSetOfPaths({longPath, shouting}).ok());
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    EXPECT_LT(elapsed, std::chrono::seconds(10));
+}
+
 // ---- checkJournalPath ---------------------------------------------------------------------------------------
 
 TEST(UpdateJournalPaths, EveryPathAManifestMayHoldIsAJournalPath)
@@ -727,6 +784,54 @@ TEST(UpdateJournalPaths, AJournalPathCannotLeaveTheInstallFolders)
           "bin/../../../etc/passwd", "bin\\..\\..\\x", "\\\\?\\C:\\x", "\\\\.\\pipe\\x",
           "other/x", "LICENSE", "bin", "bin/", "share/con", "bin/a:b", "bin/PROGRA~1"}) {
         EXPECT_FALSE(update::checkJournalPath(path).ok()) << "'" << path << "'";
+    }
+}
+
+TEST(UpdateJournalDirectories, ABareInstallFolderIsADirectoryTheJournalMayNameButNeverAFile)
+{
+    // A release that first brings etc or lib makes the folder and journals MKDIR for it; the
+    // rollback must be able to remove it. The same bare name in an ADD, REPLACE or REMOVE record
+    // would let a forged line delete the whole folder, so checkJournalPath keeps refusing it.
+    for (const std::string_view root : update::kInstallRoots) {
+        EXPECT_TRUE(update::checkJournalDirectory(root).ok()) << root;
+        EXPECT_FALSE(update::checkJournalPath(root).ok()) << root;
+        EXPECT_FALSE(update::checkManifestPath(root).ok()) << root;
+    }
+    ASSERT_EQ(update::kInstallRoots.size(), 4u);
+    for (const std::string_view root : {"bin", "share", "etc", "lib"}) {
+        EXPECT_TRUE(update::checkJournalDirectory(root).ok()) << root;
+    }
+}
+
+TEST(UpdateJournalDirectories, AFolderBelowAnInstallFolderPassesAsAFilesPathWould)
+{
+    for (const std::string_view path : {"share/katana", "etc/katana/profiles", "bin/platforms", "lib/x", "share/proj",
+                                        "share/katana/installed.json.bak"}) {
+        EXPECT_TRUE(update::checkJournalDirectory(path).ok()) << path;
+    }
+}
+
+TEST(UpdateJournalDirectories, OnlyTheFourExactNamesAreBareFoldersAndNothingAroundThemIs)
+{
+    for (const std::string_view path : {"", "Bin", "SHARE", "Etc", "LIB", "bin/", "/bin", "bin//", "bin/.", "bin/..",
+                                        "other", "usr", "binx", "bin ", "bin.", "bin\\", "bin:", "./bin", "../bin",
+                                        "C:/bin", "bin/bin/..", "share/katana/../.."}) {
+        EXPECT_FALSE(update::checkJournalDirectory(path).ok()) << "'" << path << "'";
+    }
+    EXPECT_FALSE(update::checkJournalDirectory(std::string("bin\0", 4)).ok());
+    EXPECT_FALSE(update::checkJournalDirectory(std::string("etc\0lib", 7)).ok());
+}
+
+TEST(UpdateJournalDirectories, ADirectoryIsHeldToTheManifestRulesAndNoRecordIsOne)
+{
+    // The three records are files; a MKDIR of one is as forged as any other line.
+    for (const std::string_view record : update::kRecordPaths) {
+        EXPECT_FALSE(update::checkJournalDirectory(record).ok()) << record;
+    }
+    for (const std::string_view path :
+         {"bin/../x", "bin/con", "bin/a~1", "share/.update", ".update", "share/katana/install.json",
+          "share/katana/INSTALLED.JSON", "bin/a.", "bin\\a", "share/katana/a:b", "other/x", "bin/a\x01"}) {
+        EXPECT_FALSE(update::checkJournalDirectory(path).ok()) << path;
     }
 }
 
