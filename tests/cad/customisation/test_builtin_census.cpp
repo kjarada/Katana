@@ -10,9 +10,10 @@
 // built-in and every test here SKIPS: the suite must stay green without it.
 // Where it is compiled in - cad::builtIns() lists a customisation named "NSW"
 // - these are the figures it must hold. Katana Standard's own are in
-// test_katana_standard.cpp (the file, read directly); the third test below
-// holds the compiled-in copy of it to the same census, so that what the
-// program starts with is what that file is.
+// test_katana_standard.cpp (the file, read directly), and
+// BuiltInLibrary.TheDefaultBuildCompilesKatanaStandardInAsTheDefaultAndItHoldsItsCensus
+// (test_builtin_library.cpp) holds the compiled-in copy of it to the same
+// census, so that what the program starts with is what that file is.
 //
 // Where the figures come from: not from this program. They were counted by
 // two scripts that use none of its code and were run again for this test -

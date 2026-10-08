@@ -174,7 +174,8 @@ void startWithTheHostsCustomisation(katana::cad::Document& document,
         // that the program's own has moved on since they kept theirs.
         std::cerr << "warning: the kept customisation was made from another built-in "
                      "customisation than this program has; CUSTOMISE RESET gives this "
-                     "program's\n";
+                     "program's and CUSTOMISE BUILTIN lists the built-in customisations it "
+                     "has\n";
     }
 }
 
@@ -349,7 +350,15 @@ bool runLine(SessionState& session, const std::string& line)
         if (!missing.empty()) {
             std::cerr << "warning: this project was drawn with customisations that are not "
                          "loaded: "
-                      << quotedNames(missing) << "\n";
+                      << quotedNames(missing);
+            // A name that is one of this program's built-ins is no file to
+            // load: it is made the session by name.
+            const std::string advice =
+                katana::cad::builtInAdviceFor(missing, katana::cad::builtIns());
+            if (!advice.empty()) {
+                std::cerr << "; " << advice;
+            }
+            std::cerr << "\n";
         }
     }
 #if defined(KATANA_WITH_INTEROP)

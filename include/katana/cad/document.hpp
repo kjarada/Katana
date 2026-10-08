@@ -288,8 +288,9 @@ class Document {
     // Whether the session is what the next start would give: true after it
     // was written to the kept file, false once it differs again.
     void setCustomisationKept(bool kept);
-    // The name the host's built-in customisation declares (empty: none), for
-    // the record's renames. startCustomisation sets it.
+    // The name the host's built-in customisation declares (empty: none), which
+    // is what CUSTOMISE BUILTIN marks as the default. startCustomisation sets
+    // it.
     void setBuiltInCustomisationName(std::string name);
     // What a start found: what went wrong, a sentence each, and whether the
     // kept customisation was made from another built-in than the host has
@@ -477,7 +478,8 @@ class Document {
     // The origin is Edited and the session no longer kept; counted only when
     // that changes something.
     void markCustomisationEdited();
-    // The record's renames, answered with the host's built-in.
+    // The record's renames: the early file names, answered by the NSW
+    // customisation (builtinRenames()).
     [[nodiscard]] std::vector<RenamedSource> customisationRenames() const;
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();

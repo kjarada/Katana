@@ -410,13 +410,29 @@ without the NSW file, which is third-party material (`LICENSING.md`), give
 `-DKATANA_ALTERNATE_CUSTOMISATIONS=` an empty list and the program has Katana
 Standard alone.
 
-**A build directory keeps what it was given.** A cache variable that was set
-keeps its value, so a directory configured when NSW was the default still has
-`KATANA_BUILTIN_CUSTOMISATION` set to the NSW file: it offers NSW as the default
-and Katana Standard nowhere. The configure says so when it sees that value.
-`cmake --preset release -U KATANA_BUILTIN_CUSTOMISATION` removes the old value
-and the next configure gives the new default; a new build directory needs
-nothing.
+**A build directory keeps what it was given, and is moved once.** A cache
+variable that was set keeps its value, so a directory configured when NSW was
+the default still had `KATANA_BUILTIN_CUSTOMISATION` set to the NSW file: it
+offered NSW as the default and Katana Standard nowhere, and the tests of the new
+default skipped while the suite stayed green. So the first configure that finds
+that value MOVES it to Katana Standard, once, and says so in a status line
+(`cmake/KatanaBuiltInDefault.cmake`). Nothing else is moved:
+
+- a new build directory is given the default as it is;
+- a `-DKATANA_BUILTIN_CUSTOMISATION=<file>` with no type is a choice and is kept,
+  on a directory that was configured before as on a new one;
+- once moved, or once configured by this version, the entry is settled and a
+  value given later (typed or not) is kept;
+- a stale directory that holds a file of your own is not the earlier default
+  and keeps it.
+
+The one case it cannot tell apart is `-DKATANA_BUILTIN_CUSTOMISATION:FILEPATH=<the
+NSW file>`, typed, on the very first configure of a directory that already had
+that value; the status line says how to put NSW back as the default. To have NSW
+as the default, give the file with `-D` once. The move is held by the test
+`builtin_default_moves_the_earlier_nsw_default_once_and_keeps_a_choice`
+(`tools/check_builtin_default.cmake`), which configures small projects with the
+real CMake.
 
 The built-in is tracked and the reference folder is not: its files are
 third-party material under their own licence, kept on disk and never committed

@@ -1998,11 +1998,12 @@ like any file, with `CUSTOMISE REPLACE` or Settings > Import with Replace ticked
 
 *A build directory keeps what it was given.* A cache variable that was set keeps
 its value, so a build directory configured before Katana Standard became the
-default still has `KATANA_BUILTIN_CUSTOMISATION` set to the NSW file, and offers
-NSW as the default and Katana Standard nowhere (the NSW file named twice is
-offered once). The configure says so when it sees that value; `cmake --preset
-release -U KATANA_BUILTIN_CUSTOMISATION` gives the new default back
-(`docs/building.md`).
+default still had `KATANA_BUILTIN_CUSTOMISATION` set to the NSW file, and would
+offer NSW as the default and Katana Standard nowhere (the NSW file named twice is
+offered once) while the tests of the new default skipped. The first configure
+that sees that value moves it to the new default, once, and says so; a value
+given with `-D` is a choice and is never moved (`docs/building.md`,
+`cmake/KatanaBuiltInDefault.cmake`).
 
 *How a build compiles several in.* One generated translation unit in the build
 tree (`builtin_customisation_table.cpp`) holds an `#embed` of each file, by its
@@ -2138,10 +2139,27 @@ release job against the tracked default having been deleted or a path being wron
   `CUSTOMISE BUILTIN`, the JSON report (`builtIns`, so `katana_customisation`'s
   `summary` and the `katana://customisation` resource) and Settings' chooser all
   read.
-- **The earlier file names of a project** (`builtinRenames`) are answered with the
-  run's built-in's name, as they were; they belonged to NSW, so under Katana Standard
-  a project saved in the first days of the built-in is answered by Standard. See
-  "Not done" below.
+- **The earlier file names of a project** (`builtinRenames`) are answered by NSW and
+  by no other built-in (`kEarlierFileNamesBelongTo`, in `customisation_record.hpp`):
+  they were the four files NSW was first shipped as. They were answered with the
+  run's built-in's name while NSW was the only one; under Katana Standard that said a
+  project drawn with NSW's linestyles had its customisation loaded, which it had not.
+  Now such a project opened under the default lists its early names as not loaded,
+  and `CUSTOMISE BUILTIN NSW` (or a run that starts with NSW) clears them. *Rejected:
+  answering with every built-in the program offers*, which is the same mistake for
+  all but one of them.
+- **A built-in a project names is said to be one.** A project saved while an
+  alternate was the session records it by name (`NSW`), and opened where another is
+  the session that name is "not loaded" and is no file to `CUSTOMISE`. The window's
+  warning and `katana_cli`'s then add `CUSTOMISE BUILTIN NSW makes the built-in "NSW"
+  the session` (`cad::builtInAdviceFor`, one clause for each name that is a built-in
+  the program offers and that read). An agent has the same from `katana_customisation`:
+  `missing` and `builtIns` side by side.
+- **The list is built from files by one function** (`cad::builtInsFrom`), of which
+  `builtIns()` is the compiled-in case, so that its two rules - a later file of an
+  earlier one's name, in any letter case, is not offered; a file that is no
+  customisation is listed under its file name with the reason - are tested over
+  files a test writes out, whatever the build compiled in.
 
 ### Not done by the built-ins
 
@@ -2149,19 +2167,19 @@ release job against the tracked default having been deleted or a path being wron
   list, `BUILTIN <name>` and the JSON report offer what the program compiled in
   (a test's host may give its own list, `CustomisationHost::builtIns`). The
   file is a test and development seam.
-- **The one-line `HELP`** (`CommandInterpreter::helpText`, in
-  `src/katana_cad/command_interpreter.cpp`) does not list `CUSTOMISE BUILTIN`;
-  `HELP CUSTOMISE` does.
 - **The start-up lines** of the window and of `katana_cli` say which built-in
   started and, for a kept copy made from another built-in, that "CUSTOMISE RESET
-  gives this program's"; they do not name `CUSTOMISE BUILTIN`.
+  gives this program's and CUSTOMISE BUILTIN lists the built-in customisations it
+  has". Settings' sentence, beside its own Built-in library, says "Reset to Built-in
+  gives this program's".
 - **`benchmarks/bench_customisation.cpp`** measures the file `KATANA_BUILTIN_CUSTOMISATION`
   names, which is Katana Standard now: 190,649 bytes, about an eighth of the 1,540,630
   of the NSW file it once measured.
-- **The earlier file names a very old project may record** (`Document::customisationRenames`)
-  are answered with the run's built-in's name, which is Katana Standard by default
-  and not the customisation they belonged to. Narrow: they were recorded in the
-  first days of the built-in.
+- **A project that records the earlier file names** is told that they are not
+  loaded, under the default, without the `CUSTOMISE BUILTIN NSW` words: the missing
+  names are those file names and not "NSW", and only a name that is a built-in's is
+  matched (`cad::builtInAdviceFor`). Narrow: they were recorded in the first days of
+  the built-in.
 
 ## Converting a customisation from the legacy formats
 

@@ -120,10 +120,39 @@ struct BuiltInEntry {
 // Empty in a build that has none. Never throws.
 [[nodiscard]] const std::vector<BuiltInEntry>& builtIns();
 
+// A Katana customisation file as text: its name without a folder, and its
+// bytes. What a build compiles in, per file, and the input of builtInsFrom.
+struct BuiltInFile {
+    std::string_view file{};
+    std::string_view bytes{};
+};
+
+// builtIns() for the files it is given, apart from the build that gave them, so
+// that its two rules are tested whatever this build compiled in: a file that
+// does not parse is listed under its file name with the reason in
+// `builtIn.problem`, and a later file with an earlier one's name (letter case
+// ignored) is not offered. `firstParsed`, when set, is the first file's built-in
+// already parsed (compiledInCustomisation(), which is shared, not parsed twice);
+// it is taken as it is.
+[[nodiscard]] std::vector<BuiltInEntry> builtInsFrom(std::span<const BuiltInFile> files,
+                                                     const BuiltInCustomisation* firstParsed = nullptr);
+
 // The entry of `entries` called `name`, letter case ignored; null when there
 // is none.
 [[nodiscard]] const BuiltInEntry* findBuiltIn(std::span<const BuiltInEntry> entries,
                                               std::string_view name);
+
+// For a project drawn with customisations the session does not have
+// (CustomisationState::missingAtOpen): the words that tell a person which of
+// them are built-ins this program offers, and what makes one the session -
+// `CUSTOMISE BUILTIN NSW makes the built-in "NSW" the session`, one clause
+// for each, joined with "; ". A project saved while an alternate was the
+// session records it by name, and a program that starts with another does not
+// have it loaded; the name is no file to load, so without these words nothing
+// says that it is here. Empty when none of `missing` is a usable entry of
+// `entries` (letter case ignored, spelled as the entry spells it).
+[[nodiscard]] std::string builtInAdviceFor(std::span<const std::string> missing,
+                                           std::span<const BuiltInEntry> entries);
 
 // The built-in of THIS RUN: what the seam says, else the default -
 // builtInCustomisationFor of the environment variable's value,

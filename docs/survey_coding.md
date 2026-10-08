@@ -363,7 +363,11 @@ record as a name and what it brought (`CustomisationSource`):
   ... CUSTOMISE <file> loads a Katana customisation file." (it named Format >
   Load Customisation until that item went) and the CLI prints the same names
   on stderr - "warning: this project was drawn with customisations that are
-  not loaded: ...". What a project records of a Katana customisation is the
+  not loaded: ...". A recorded name that is one of the program's built-ins
+  (`NSW`, when the project was saved while that alternate was the session) is
+  no file to load, so both add the verb that makes it the session -
+  `CUSTOMISE BUILTIN NSW makes the built-in "NSW" the session`
+  (`cad::builtInAdviceFor`). What a project records of a Katana customisation is the
   name it declares and not a file's. Not an error: the drawing opens and
   draws, and what a missing customisation defined draws as a plain line until
   it is loaded.
@@ -387,8 +391,9 @@ repository:
   answered only in a record that also holds another earlier name of the same
   set, so recorded alone, or beside names that are not of its set, it is that
   person's file - reported missing and kept by the save. The table has grown
-  a second set, the four general names, and answers with the built-in's own
-  name ("What a project records, now that the Document keeps it" below).
+  a second set, the four general names, and answers with the name of the
+  customisation they belonged to, NSW ("What a project records, now that the
+  Document keeps it" below).
 - **An earlier definition name** is given its current one by
   `definitionNameNow` (`builtinDefinitionRenames`), asked only after an exact
   lookup missed, so a person's own definition that still has such a name is
@@ -417,20 +422,23 @@ it go: the session loaded it and replaced it, which is a judgement, but it is
 made at the install rather than at the load.
 
 Closed (2026-10-07): **every front end hands over a host, so the built-in's
-earlier names are answered.** The Document answers them with the name its
-host's built-in declares (`CustomisationState::builtIn`), and both the
+earlier names are answered.** The Document answered them with the name its
+host's built-in declared (`CustomisationState::builtIn`), and both the
 session of `katana_cli` and `katana_mcp` and the window
 (`MainWindow::loadDefaultCustomisation`) start through `startCustomisation`:
-a project recording the earlier names opens without a warning wherever the
-built-in is installed. The table the front ends used before answered each
+a project recording the earlier names opened without a warning wherever the
+built-in was installed. (2026-10-08, several built-ins: the names are NSW's and
+the Document answers them with `NSW`, `kEarlierFileNamesBelongTo`, whichever
+built-in its host has; see "The built-in's earlier names" below.) The table the front ends used before answered each
 first name with one of the four general file names, and while one of them
 still used it a project recording the four first names opened there with a
 warning of four missing files. The tables are held to the built-in by
 `BuiltInRenames.*` (`tests/cad/customisation/test_builtin_renames.cpp`): the
-eight file renames answer with the built-in's NAME - against a small fixture
-handed over as a host hands one over, always, and against the compiled-in
-customisation where there is one - and every one of the 29 definition renames
-is defined by the compiled-in customisation under the name it has now.
+eight file renames answer with the NAME the table is given, and with no name with
+`NSW`, in every build (`CustomisationState.TheEarlierFileNamesAreAnsweredByNswAndByNoOtherBuiltIn`
+holds that a session whose built-in is another does not answer them) - and every
+one of the 29 definition renames is defined by the NSW built-in, where the build
+compiled it in, under the name it has now.
 
 **Why the earlier names stay.** They are answers to PROJECT records, not to
 anything a customisation kept: a project saved by an earlier build carries the
@@ -558,19 +566,22 @@ out what was missing after an open. That logic is the Document's:
   definition still comes from it; one that brought rules is taken at its word.
   `CustomisationSource` is the very entry a file keeps in its `"sources"`, so
   the session's load record is written and read back without a second type.
-- **The built-in's earlier names are answered by the built-in's own name.**
-  `builtinRenames(builtIn)` gives eight entries in two sets: the four first
+- **The built-in's earlier names are answered by the name of the customisation
+  they belonged to, NSW.** `builtinRenames(builtIn)` gives eight entries in two sets: the four first
   file names, known by hash, and the four general names the files had next
   (`linestyles.4d`, `survey_codes.mapfile`, `survey_codes_names.mapfile`,
   `symbols.4d`). The general names are all PLAIN - anyone's own files might
   have them - and a plain name is answered only beside ANOTHER earlier name of
   its own set: the record of the built-in holds all four, and a person's own
   `symbols.4d` recorded alone is still that person's file, missing when it is.
-  The name is not written in the source: the Document passes the name its
-  host's built-in declares (`CustomisationState::builtIn`), and
-  `builtinRenames()` with none takes the compiled-in customisation's, which is
-  empty - and answers nothing - in a build that has none. That form is for a
-  caller with no Document to ask. `customisationNotLoaded`,
+  The names were NSW's four files, and a program has several built-ins now
+  with another for its default, so the answer is NSW's name
+  (`kEarlierFileNamesBelongTo`) and no other's: the Document asks for the table
+  with none (`builtinRenames()`), and does not pass its host's built-in. It did,
+  while NSW was the only built-in; under Katana Standard that answered a project
+  drawn with NSW's linestyles as having its customisation loaded. Loaded under
+  another name the four stay missing, and `CUSTOMISE BUILTIN NSW` clears them.
+  `customisationNotLoaded`,
   `noteCustomisationLoaded` and `customisationRecordToSave` take the table
   they are given and no longer have a form that takes none: it answered with
   whatever this program had compiled in, which is not the built-in of a run

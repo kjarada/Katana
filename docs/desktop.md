@@ -57,8 +57,13 @@ built-in; NSW when the seam names it, or for a kept copy of it), how many of its
 lists as symbols, and which of the two it is - each noun by its count, so a
 customisation of one rule has "1 survey code rule" - then, for a kept one
 made from another built-in than this program has, a line saying so and naming
-`CUSTOMISE RESET`
+`CUSTOMISE RESET` and `CUSTOMISE BUILTIN`
 (`qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless`).
+A project opened that was drawn with a built-in the program has but is not the session
+(saved while NSW was, opened under Katana Standard) gets the log's warning of the
+customisations not loaded with one more sentence, `CUSTOMISE BUILTIN NSW makes the
+built-in "NSW" the session`
+(`qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless`).
 A problem - a built-in that does not parse, a kept file that does
 not read, the built-in then standing in for it - is an error line,
 `Customisation: <the problem>`, once. A build with no built-in and no kept

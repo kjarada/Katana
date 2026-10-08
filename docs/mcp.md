@@ -266,6 +266,11 @@ runs.
   `source` the file it was compiled in from. It is the list `CUSTOMISE BUILTIN` and
   Settings show (`cad::builtInChoices`); `McpServer.TheCustomisationSummaryListsTheBuiltInsTheProgramHas`
   holds it. To choose one, an agent runs the line through `katana_run_commands`.
+  A name in `missing` that is also a `name` here (a project saved while NSW
+  was the session, opened under the default) is no file to `CUSTOMISE`: the same
+  line, `CUSTOMISE BUILTIN <name>`, loads it. The window's and `katana_cli`'s
+  warnings say so in words (`cad::builtInAdviceFor`); a client of `katana_mcp`
+  never reads standard error, so it reads the two lists side by side.
 - **`start` is what went wrong when the session started**:
   `{problems: [sentence], keptFromAnotherBuiltIn}`. A kept file that did not
   read - and what started in its place - and a built-in that did not read are

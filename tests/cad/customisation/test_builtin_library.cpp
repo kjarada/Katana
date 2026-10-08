@@ -195,6 +195,131 @@ TEST(BuiltInLibrary, AnEntryIsFoundByItsNameInAnyLetterCaseAndOnlyByItsWholeName
     EXPECT_EQ(katana::cad::findBuiltIn({}, "Alpha"), nullptr);
 }
 
+// ---- the list built from files ---------------------------------------------------------------
+
+// builtIns() is builtInsFrom over what the build compiled in, so its rules are
+// tested here over files the test writes out: no build can reach a second file
+// of one name, or a file that is no customisation, unless it is made so.
+
+TEST(BuiltInLibrary, AListFromFilesHoldsThemInTheirOrderWithTheirNamesSourcesAndDigests)
+{
+    const std::vector<katana::cad::BuiltInFile> files{{"alpha.customisation.json", kAlpha},
+                                                      {"beta.customisation.json", kBeta}};
+    const std::vector<BuiltInEntry> list = katana::cad::builtInsFrom(files);
+    ASSERT_EQ(list.size(), 2u);
+    EXPECT_EQ(list[0].name, "Alpha");
+    EXPECT_EQ(list[0].description, "The first stand-in");
+    EXPECT_EQ(list[0].source, "alpha.customisation.json");
+    EXPECT_EQ(list[0].builtIn.digest, katana::entity::customisationDigest(kAlpha));
+    ASSERT_NE(list[0].builtIn.customisation, nullptr);
+    EXPECT_EQ(list[1].name, "Beta Two");
+    EXPECT_EQ(list[1].source, "beta.customisation.json");
+    EXPECT_EQ(list[1].builtIn.digest, katana::entity::customisationDigest(kBeta));
+    EXPECT_TRUE(katana::cad::builtInsFrom({}).empty()) << "no files, no built-ins";
+}
+
+TEST(BuiltInLibrary, TheFirstFileTakesTheParseItIsGivenAndOnlyTheFirst)
+{
+    const std::vector<BuiltInEntry> parsed = twoEntries();
+    const std::vector<katana::cad::BuiltInFile> files{{"alpha.customisation.json", kAlpha},
+                                                      {"beta.customisation.json", kBeta}};
+    // The default is the parse compiledInCustomisation() made: shared, not read twice.
+    const std::vector<BuiltInEntry> shared = katana::cad::builtInsFrom(files, &parsed[0].builtIn);
+    ASSERT_EQ(shared.size(), 2u);
+    EXPECT_EQ(shared[0].builtIn.customisation, parsed[0].builtIn.customisation);
+    EXPECT_NE(shared[1].builtIn.customisation, parsed[1].builtIn.customisation)
+        << "the second file is read here, whatever the first was given";
+    // Handed none, every file is read, so the first is a parse of its own.
+    const std::vector<BuiltInEntry> read = katana::cad::builtInsFrom(files);
+    EXPECT_NE(read[0].builtIn.customisation, parsed[0].builtIn.customisation);
+    EXPECT_EQ(read[0].name, "Alpha");
+}
+
+TEST(BuiltInLibrary, ALaterFileWithAnEarlierOnesNameInAnyLetterCaseIsNotOffered)
+{
+    // The copy says it is "ALPHA", and has the second stand-in's single definition.
+    std::string copy = kBeta;
+    const std::string was = "\"name\": \"Beta Two\"";
+    copy.replace(copy.find(was), was.size(), "\"name\": \"ALPHA\"");
+    const std::vector<katana::cad::BuiltInFile> files{{"alpha.customisation.json", kAlpha},
+                                                      {"copy.customisation.json", copy},
+                                                      {"beta.customisation.json", kBeta}};
+    const std::vector<BuiltInEntry> list = katana::cad::builtInsFrom(files);
+    ASSERT_EQ(list.size(), 2u) << "a name picks one entry";
+    EXPECT_EQ(list[0].source, "alpha.customisation.json") << "the earlier file keeps the name";
+    EXPECT_NE(list[0].builtIn.customisation->library.find("ALPHA Line"), nullptr)
+        << "the earlier file's own contents";
+    EXPECT_EQ(list[0].builtIn.customisation->library.find("BETA Line"), nullptr);
+    EXPECT_EQ(list[1].source, "beta.customisation.json") << "the files after it are still read";
+    EXPECT_EQ(katana::cad::findBuiltIn(list, "alpha")->source, "alpha.customisation.json");
+}
+
+TEST(BuiltInLibrary, AFileThatIsNoCustomisationIsListedByItsFileNameWithTheReason)
+{
+    const std::vector<katana::cad::BuiltInFile> files{{"broken.customisation.json", "{ not a customisation"},
+                                                      {"beta.customisation.json", kBeta}};
+    const std::vector<BuiltInEntry> list = katana::cad::builtInsFrom(files);
+    ASSERT_EQ(list.size(), 2u);
+    // Listed, so that a person can see that it is there and why it is of no use...
+    EXPECT_EQ(list[0].name, "broken.customisation.json");
+    EXPECT_EQ(list[0].source, "broken.customisation.json");
+    EXPECT_EQ(list[0].builtIn.customisation, nullptr);
+    EXPECT_NE(list[0].builtIn.problem.find("broken.customisation.json"), std::string::npos)
+        << list[0].builtIn.problem;
+    EXPECT_NE(list[0].builtIn.problem.find("is not read"), std::string::npos) << list[0].builtIn.problem;
+    // ...and the next file is not held up by it.
+    EXPECT_EQ(list[1].name, "Beta Two");
+    ASSERT_NE(list[1].builtIn.customisation, nullptr);
+
+    // A default that did not read was parsed by someone else, and is taken as
+    // it is: its reason is theirs, its place the file name.
+    BuiltInCustomisation failed;
+    failed.problem = "the reason the default was refused";
+    const std::vector<BuiltInEntry> withFailed = katana::cad::builtInsFrom(files, &failed);
+    ASSERT_EQ(withFailed.size(), 2u);
+    EXPECT_EQ(withFailed[0].name, "broken.customisation.json");
+    EXPECT_EQ(withFailed[0].builtIn.problem, "the reason the default was refused");
+}
+
+// ---- what to tell of a name that is a built-in ------------------------------------------------
+
+TEST(BuiltInLibrary, AMissingNameThatIsABuiltInIsToldWithTheVerbThatMakesItTheSession)
+{
+    const std::vector<BuiltInEntry> entries = twoEntries();
+    const auto advice = [&](const std::vector<std::string>& missing,
+                            const std::vector<BuiltInEntry>& offered) {
+        return katana::cad::builtInAdviceFor(missing, offered);
+    };
+    // Spelled as the entry spells it, whatever case the project recorded.
+    EXPECT_EQ(advice({"beta two"}, entries),
+              "CUSTOMISE BUILTIN Beta Two makes the built-in \"Beta Two\" the session");
+    // A name that is no built-in's, among others that are not, says nothing...
+    EXPECT_EQ(advice({"Site", "streets.4d"}, entries), "");
+    // ...and one that is, among those, is said alone.
+    EXPECT_EQ(advice({"Site", "ALPHA"}, entries),
+              "CUSTOMISE BUILTIN Alpha makes the built-in \"Alpha\" the session");
+    // Two of them: a clause each, in the project's order.
+    EXPECT_EQ(advice({"Beta Two", "Alpha"}, entries),
+              "CUSTOMISE BUILTIN Beta Two makes the built-in \"Beta Two\" the session; "
+              "CUSTOMISE BUILTIN Alpha makes the built-in \"Alpha\" the session");
+    EXPECT_EQ(advice({}, entries), "");
+    EXPECT_EQ(advice({"Alpha"}, {}), "") << "a program with no built-in";
+}
+
+TEST(BuiltInLibrary, ABuiltInThatDidNotReadIsNotOfferedToAProjectThatNamesIt)
+{
+    std::vector<BuiltInEntry> entries = twoEntries();
+    BuiltInEntry damaged;
+    damaged.name = "damaged.customisation.json";
+    damaged.source = damaged.name;
+    damaged.builtIn.problem = "not read";
+    entries.push_back(damaged);
+    // CUSTOMISE BUILTIN would refuse it, so the words do not send anyone to it.
+    EXPECT_EQ(katana::cad::builtInAdviceFor(std::vector<std::string>{"damaged.customisation.json"},
+                                            entries),
+              "");
+}
+
 // ---- the seam: the name form -----------------------------------------------------------------
 
 TEST(BuiltInLibrary, TheSeamNamesACompiledInBuiltInAndThatBuiltInIsTheRunsOwn)

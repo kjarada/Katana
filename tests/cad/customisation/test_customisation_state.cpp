@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -839,7 +840,12 @@ TEST(CustomisationState, ASaveKeepsTheNamesTheOpenFoundMissingUntilTheyAreLoaded
     EXPECT_EQ(other.metadata().customisation, (std::vector<std::string>{"Site"}));
 }
 
-TEST(CustomisationState, TheBuiltInsEarlierFileNamesInARecordAreAnsweredByTheNameTheHostGave)
+// The four files a very old project may record were the NSW customisation's
+// (customisation_record.hpp, kEarlierFileNamesBelongTo). So NSW answers them,
+// whichever built-in the run has, and no other customisation does: the default
+// of a program is another one, and a project drawn with NSW's linestyles must
+// not be told its customisation is loaded because the default is.
+TEST(CustomisationState, TheEarlierFileNamesAreAnsweredByNswAndByNoOtherBuiltIn)
 {
     const Scratch scratch("earlier-names");
     const fs::path project = scratch.root / "old.katana";
@@ -856,21 +862,49 @@ TEST(CustomisationState, TheBuiltInsEarlierFileNamesInARecordAreAnsweredByTheNam
         EXPECT_EQ(untold.customisationState().missingAtOpen, general);
     }
     {
-        // Told that the built-in is called "Site": the four files it once was
-        // are answered by it, nothing is missing, and the save records the
-        // one name the drawing is drawn with now.
-        Document told;
-        ASSERT_TRUE(told.installCustomisation(site(), CustomisationOrigin::BuiltIn, true).ok());
-        Recorder recorder(told);
-        told.setBuiltInCustomisationName("Site");
+        // Told that the built-in of the run is called "Site": it is that of the
+        // run (CustomisationState::builtIn), and it is not NSW, whose files
+        // the four were, so it does not answer them: they stay missing, and
+        // the save keeps them in the record beside the one it draws with.
+        Document run;
+        ASSERT_TRUE(run.installCustomisation(site(), CustomisationOrigin::BuiltIn, true).ok());
+        Recorder recorder(run);
+        run.setBuiltInCustomisationName("Site");
         ASSERT_EQ(recorder.calls.size(), 1u);
         EXPECT_EQ(recorder.calls[0], std::uint32_t{DocumentChange::Customisation});
-        EXPECT_EQ(told.customisationState().builtIn, "Site");
+        EXPECT_EQ(run.customisationState().builtIn, "Site");
 
+        ASSERT_TRUE(run.open(project).ok());
+        EXPECT_EQ(run.customisationState().missingAtOpen, general);
+        // To a copy: the project above is read again by the part after this one.
+        ASSERT_TRUE(run.saveAs(scratch.root / "resaved.katana").ok());
+        EXPECT_EQ(run.metadata().customisation.front(), "Site");
+        for (const std::string& name : general) {
+            EXPECT_NE(std::find(run.metadata().customisation.begin(),
+                                run.metadata().customisation.end(), name),
+                      run.metadata().customisation.end())
+                << name << " is still recorded";
+        }
+
+        // Then NSW is made the session, as CUSTOMISE BUILTIN NSW does, on the
+        // run whose built-in is still "Site": the four files are loaded now,
+        // by the customisation that was made of them.
+        ASSERT_TRUE(run.installCustomisation(codesOnly("NSW"), CustomisationOrigin::BuiltIn).ok());
+        EXPECT_TRUE(run.customisationState().missingAtOpen.empty());
+        EXPECT_EQ(run.customisationState().builtIn, "Site");
+    }
+    {
+        // NSW as the built-in of the run answers them from the start: nothing
+        // is missing, and the save records the one name the drawing is drawn
+        // with now.
+        Document told;
+        ASSERT_TRUE(
+            told.installCustomisation(codesOnly("NSW"), CustomisationOrigin::BuiltIn, true).ok());
+        told.setBuiltInCustomisationName("NSW");
         ASSERT_TRUE(told.open(project).ok());
         EXPECT_TRUE(told.customisationState().missingAtOpen.empty());
         ASSERT_TRUE(told.save().ok());
-        EXPECT_EQ(told.metadata().customisation, (std::vector<std::string>{"Site"}));
+        EXPECT_EQ(told.metadata().customisation, (std::vector<std::string>{"NSW"}));
     }
 }
 

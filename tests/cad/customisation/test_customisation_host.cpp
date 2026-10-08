@@ -524,28 +524,27 @@ TEST(CustomisationHost, TheFileIsNamedAsTextWhetherOrNotItsBytesAreUtf8)
     EXPECT_EQ(present.customisation->name, "Small Built In");
 }
 
-TEST(CustomisationHost, TheRenamesMadeWithNoNameAnswerWithTheCompiledInNameWhateverTheSeamSays)
+TEST(CustomisationHost, TheRenamesMadeWithNoNameAnswerWithNswWhateverTheSeamSays)
 {
-    // builtinRenames() with no name is for a caller with no Document to ask,
-    // and answers with the customisation COMPILED INTO this program - no name,
-    // and so nothing, in a build that has none. The seam changes the built-in
-    // of a run, which a Document is told (CustomisationState::builtIn); it
-    // does not change what was compiled in. With the seam naming the small
-    // fixture, the table must still not answer with "Small Built In".
+    // builtinRenames() with no name is the table the Document answers with, and
+    // answers with NSW, the customisation the early file names belonged to:
+    // not the built-in of the run, which the seam changes, and not the default
+    // compiled in. With the seam naming the small fixture, the table must
+    // still not answer with "Small Built In" - nor with the default's name
+    // when this build compiled in one.
     const Scratch scratch("renames-and-the-seam");
     const fs::path path = scratch.write("small.customisation.json", kSmall);
     const ScopedSeam seam(path.string().c_str());
     ASSERT_NE(katana::cad::builtInCustomisation().customisation, nullptr);
 
     const BuiltInCustomisation& compiledIn = katana::cad::compiledInCustomisation();
-    const std::string name =
-        compiledIn.customisation ? compiledIn.customisation->name : std::string();
-    ASSERT_NE(name, "Small Built In") << "this build compiled in the test's own fixture name";
+    ASSERT_FALSE(compiledIn.customisation && compiledIn.customisation->name == "Small Built In")
+        << "this build compiled in the test's own fixture name";
     // Eight earlier names in two sets of four (customisation_record.hpp).
     const std::vector<katana::cad::RenamedSource> renames = katana::cad::builtinRenames();
     ASSERT_EQ(renames.size(), 8u);
     for (const katana::cad::RenamedSource& rename : renames) {
-        EXPECT_EQ(rename.now, name);
+        EXPECT_EQ(rename.now, "NSW");
     }
 }
 

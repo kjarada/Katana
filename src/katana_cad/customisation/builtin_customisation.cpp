@@ -17,7 +17,7 @@ namespace {
 
 // A failure is reported, never thrown: a program whose built-in is damaged
 // still starts, and says so.
-[[nodiscard]] BuiltInCustomisation parseCompiledIn(const detail::CompiledInFile& compiled)
+[[nodiscard]] BuiltInCustomisation parseCompiledIn(const BuiltInFile& compiled)
 {
     BuiltInCustomisation builtIn;
     auto read = katana::entity::customisationFromJson(compiled.bytes);
@@ -30,6 +30,16 @@ namespace {
         std::make_shared<const katana::entity::Customisation>(std::move(*read));
     builtIn.digest = katana::entity::customisationDigest(compiled.bytes);
     return builtIn;
+}
+
+// What the build compiled in, as the public type.
+[[nodiscard]] std::vector<BuiltInFile> compiledInAsFiles()
+{
+    std::vector<BuiltInFile> files;
+    for (const detail::CompiledInFile& compiled : detail::compiledInFiles()) {
+        files.push_back({compiled.file, compiled.bytes});
+    }
+    return files;
 }
 
 // A value the seam may use as a built-in's name: it names no folder, so it
@@ -60,8 +70,9 @@ const BuiltInCustomisation& compiledInCustomisation()
     // ALONE: an alternate is parsed by builtIns(), when a list or a name asks.
     static const BuiltInCustomisation compiledIn = [] {
         const std::span<const detail::CompiledInFile> files = detail::compiledInFiles();
-        return detail::compiledInHasDefault() && !files.empty() ? parseCompiledIn(files.front())
-                                                                : BuiltInCustomisation{};
+        return detail::compiledInHasDefault() && !files.empty()
+                   ? parseCompiledIn({files.front().file, files.front().bytes})
+                   : BuiltInCustomisation{};
     }();
     return compiledIn;
 }
@@ -76,30 +87,49 @@ const BuiltInEntry* findBuiltIn(std::span<const BuiltInEntry> entries, std::stri
     return nullptr;
 }
 
+std::string builtInAdviceFor(std::span<const std::string> missing,
+                             std::span<const BuiltInEntry> entries)
+{
+    std::string advice;
+    for (const std::string& name : missing) {
+        const BuiltInEntry* entry = findBuiltIn(entries, name);
+        if (entry == nullptr || entry->builtIn.customisation == nullptr) {
+            continue;
+        }
+        advice += (advice.empty() ? "" : "; ") + std::string("CUSTOMISE BUILTIN ") + entry->name +
+                  " makes the built-in \"" + entry->name + "\" the session";
+    }
+    return advice;
+}
+
+std::vector<BuiltInEntry> builtInsFrom(std::span<const BuiltInFile> files,
+                                       const BuiltInCustomisation* firstParsed)
+{
+    std::vector<BuiltInEntry> list;
+    for (std::size_t at = 0; at < files.size(); ++at) {
+        BuiltInEntry entry;
+        entry.source = std::string(files[at].file);
+        entry.builtIn =
+            at == 0 && firstParsed != nullptr ? *firstParsed : parseCompiledIn(files[at]);
+        if (entry.builtIn.customisation != nullptr) {
+            entry.name = entry.builtIn.customisation->name;
+            entry.description = entry.builtIn.customisation->description;
+        } else {
+            entry.name = entry.source;
+        }
+        // One name, one entry: a second file of a name is not offered.
+        if (findBuiltIn(list, entry.name) == nullptr) {
+            list.push_back(std::move(entry));
+        }
+    }
+    return list;
+}
+
 const std::vector<BuiltInEntry>& builtIns()
 {
-    static const std::vector<BuiltInEntry> entries = [] {
-        std::vector<BuiltInEntry> list;
-        const std::span<const detail::CompiledInFile> files = detail::compiledInFiles();
-        for (std::size_t at = 0; at < files.size(); ++at) {
-            BuiltInEntry entry;
-            entry.source = std::string(files[at].file);
-            // The default is the one parse compiledInCustomisation() made.
-            entry.builtIn = at == 0 && detail::compiledInHasDefault() ? compiledInCustomisation()
-                                                                      : parseCompiledIn(files[at]);
-            if (entry.builtIn.customisation != nullptr) {
-                entry.name = entry.builtIn.customisation->name;
-                entry.description = entry.builtIn.customisation->description;
-            } else {
-                entry.name = entry.source;
-            }
-            // One name, one entry: a second file of a name is not offered.
-            if (findBuiltIn(list, entry.name) == nullptr) {
-                list.push_back(std::move(entry));
-            }
-        }
-        return list;
-    }();
+    // The default is the one parse compiledInCustomisation() made.
+    static const std::vector<BuiltInEntry> entries = builtInsFrom(
+        compiledInAsFiles(), detail::compiledInHasDefault() ? &compiledInCustomisation() : nullptr);
     return entries;
 }
 

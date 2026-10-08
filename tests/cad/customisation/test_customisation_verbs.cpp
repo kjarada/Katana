@@ -1935,6 +1935,34 @@ TEST(CustomisationVerbs, JsonListsTheBuiltInsTheHostOffersWithTheOneTheSessionIs
         << json;
 }
 
+// A project saved while an alternate built-in was the session records it by
+// name. Opened where another is the session, that name is "not loaded" - and it
+// is no file, so CUSTOMISE <file> cannot load it; the verb that does is the one
+// the front ends' warning names (cad::builtInAdviceFor).
+TEST(CustomisationVerbs, ABuiltInNamedAsNotLoadedByAProjectIsLoadedByCustomiseBuiltIn)
+{
+    TwoBuiltIns author("builtin-missing-author");
+    author.start();
+    author.ok("CUSTOMISE BUILTIN Site");
+    const fs::path project = author.scratch.root / "drawn.katana";
+    ASSERT_TRUE(author.document.saveAs(project).ok());
+
+    TwoBuiltIns session("builtin-missing-session");
+    session.start();
+    ASSERT_TRUE(session.document.open(project).ok());
+    EXPECT_EQ(session.document.customisationState().missingAtOpen,
+              (std::vector<std::string>{"Site"}));
+    // What a front end tells a person about it, from the very list the verb lists.
+    EXPECT_EQ(katana::cad::builtInAdviceFor(session.document.customisationState().missingAtOpen,
+                                            katana::cad::builtInsOf(session.host)),
+              "CUSTOMISE BUILTIN Site makes the built-in \"Site\" the session");
+
+    session.ok("CUSTOMISE BUILTIN Site");
+    EXPECT_TRUE(session.document.customisationState().missingAtOpen.empty())
+        << "the built-in the project was drawn with is the session now";
+    EXPECT_TRUE(contains(session.ok("CUSTOMISE JSON"), "  \"missing\": [],\n"));
+}
+
 TEST(CustomisationVerbs, KeepIsRefusedWhenTheKeptFileChangedOnDiskSinceTheSessionReadIt)
 {
     Hosted session("keep-changed");
@@ -2703,6 +2731,20 @@ TEST(CustomisationVerbs, OneRefusedItemSetsNoneOfThem)
 }
 
 // ---- help ----------------------------------------------------------------------------------
+
+// The one-line index is what an agent reads first (`HELP`, the MCP tool's
+// help): a verb it does not name is a verb that is found only by chance.
+TEST(CustomisationVerbs, TheOneLineHelpIndexNamesCustomiseBuiltIn)
+{
+    const std::string help = CommandInterpreter::helpText();
+    EXPECT_TRUE(contains(help, "CUSTOMISE BUILTIN [<name>]")) << "the index row";
+    // On the family's own rows, beside RESET, whose words it explains.
+    const std::size_t builtIn = help.find("CUSTOMISE BUILTIN [<name>]");
+    const std::size_t reset = help.find("CUSTOMISE RESET (the built-in one)");
+    ASSERT_NE(builtIn, std::string::npos);
+    ASSERT_NE(reset, std::string::npos);
+    EXPECT_LT(reset - builtIn, std::size_t{200});
+}
 
 TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
 {

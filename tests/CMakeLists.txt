@@ -37,6 +37,17 @@ add_test(NAME packaging_installs_only_present_first_party_files
     COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR} -DKATANA_BINARY=${CMAKE_BINARY_DIR}
             -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
 
+# The cache entry KATANA_BUILTIN_CUSTOMISATION, which keeps what an earlier
+# configure gave it: a build directory made when NSW was the default would offer
+# Katana Standard nowhere, and the suite would stay green while testing none of
+# it. cmake/KatanaBuiltInDefault.cmake moves that entry once; this proves it, and
+# that a choice made with -D is never moved, on small projects with the real
+# CMake (tools/check_builtin_default.cmake).
+add_test(NAME builtin_default_moves_the_earlier_nsw_default_once_and_keeps_a_choice
+    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
+            -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/builtin_default
+            -P ${PROJECT_SOURCE_DIR}/tools/check_builtin_default.cmake)
+
 # The programs do not hold the older customisation formats. Their readers and
 # writers (src/katana_archive12d/legacy) are the converter's, and the program
 # reads one format, the Katana customisation; a reader that found its way back
@@ -1799,7 +1810,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE"
-            "-DEXPECT=Customisation: mine, 1 definition \\(1 symbol\\) and 1 survey code rule, kept\\.[\r\n]+The kept customisation was made from another built-in customisation than this program has; CUSTOMISE RESET gives this program's\\.[\r\n].*customisation name=mine origin=kept kept=yes definitions=1 codes=1 rules=1 colours=0"
+            "-DEXPECT=Customisation: mine, 1 definition \\(1 symbol\\) and 1 survey code rule, kept\\.[\r\n]+The kept customisation was made from another built-in customisation than this program has; CUSTOMISE RESET gives this program's and CUSTOMISE BUILTIN lists the built-in customisations it has\\.[\r\n].*customisation name=mine origin=kept kept=yes definitions=1 codes=1 rules=1 colours=0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_kept_from_another_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless
@@ -2016,6 +2027,43 @@ if(TARGET katana)
             PROPERTIES FIXTURES_REQUIRED qt_built_in_kept_2 FIXTURES_SETUP qt_built_in_kept_3)
         set_tests_properties(qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless
             PROPERTIES FIXTURES_REQUIRED qt_built_in_kept_3)
+
+        # A project saved while an alternate was the session records it by name;
+        # opened under the default it is "not loaded", a name no CUSTOMISE <file>
+        # can load. The window's warning says it is a built-in of this program and
+        # what makes it the session, and that verb does. By hand: the first window
+        # saves, the second opens (the seam names the default, the kept file is a
+        # path that is never written).
+        set(_built_in_project "${CMAKE_CURRENT_BINARY_DIR}/qt_built_in_project.katana")
+        add_test(NAME qt_built_in_project_cleanup
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_project}")
+        add_test(NAME qt_a_project_saved_with_an_alternate_built_in_records_its_name_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=>CUSTOMISE BUILTIN NSW|>LINE 0,0 10,0|>SAVE ${_built_in_project}"
+                "-DEXPECT=used name=NSW .*saved to "
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_project_1_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        add_test(NAME qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=>OPEN ${_built_in_project}"
+                "-DEXPECT=opened .*Warning: this project was drawn with customisations that are not loaded: \"NSW\"\\. CUSTOMISE <file> loads a Katana customisation file\\. CUSTOMISE BUILTIN NSW makes the built-in \"NSW\" the session\\."
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_project_2_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        set_tests_properties(qt_a_project_saved_with_an_alternate_built_in_records_its_name_headless
+                             qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:Katana Standard;KATANA_CUSTOMISATION=set:${CMAKE_CURRENT_BINARY_DIR}/qt_built_in_project_kept/customisation.json"
+            TIMEOUT 180)
+        set_tests_properties(qt_built_in_project_cleanup PROPERTIES
+            FIXTURES_SETUP qt_built_in_project_0)
+        set_tests_properties(qt_a_project_saved_with_an_alternate_built_in_records_its_name_headless
+            PROPERTIES FIXTURES_REQUIRED qt_built_in_project_0 FIXTURES_SETUP qt_built_in_project_1)
+        set_tests_properties(qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless
+            PROPERTIES FIXTURES_REQUIRED qt_built_in_project_1)
     endif()
 
     # Survey > Process Linework is the LINEWORK line through the window's one

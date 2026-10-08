@@ -171,13 +171,14 @@ def catalogue(data, root):
       "a text). Load it alone when you want its library and nothing else.")
     w("3. **Start with it, or go back to it.** It is what a program starts with when nothing else is said. After "
       "another built-in was chosen, `CUSTOMISE BUILTIN \"Katana Standard\"` or Settings > Built-in library > Use "
-      "puts it back, and `CUSTOMISE RESET` always does. `KATANA_BUILTIN_CUSTOMISATION=none` starts with no "
-      "built-in, and `KATANA_BUILTIN_CUSTOMISATION=NSW` with the other (`docs/headless.md`, \"The customisation "
-      "a run starts with\").")
+      "puts it back, and `CUSTOMISE RESET` does too unless the run was started with another built-in as its "
+      "own: `KATANA_BUILTIN_CUSTOMISATION=NSW` starts with the other, and RESET then gives that one "
+      "(`docs/headless.md`, \"The customisation a run starts with\"). `KATANA_BUILTIN_CUSTOMISATION=none` "
+      "starts with no built-in.")
     w("4. **Compiled in**: `-DKATANA_BUILTIN_CUSTOMISATION=<file>` at configure time embeds a different default, "
       "and `-DKATANA_ALTERNATE_CUSTOMISATIONS=<files>` further built-ins (`docs/building.md`, \"The built-in "
       "customisation and the reference folder\"). A build directory configured before this became the default "
-      "keeps the old value until `cmake --preset release -U KATANA_BUILTIN_CUSTOMISATION`.")
+      "that still has the earlier default is moved to this one by its next configure, once, with a line saying so.")
     w("5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the "
       "points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and "
       "`CODE CHECK` read them. `CODE CHECK` reports no problems on the file: %d rules checked." % n_rules)
@@ -483,9 +484,11 @@ def catalogue(data, root):
 
     w("## Not done")
     w("")
-    w("- **The earlier file names of an old project** are answered with the name of the built-in of the run "
-      "(`docs/customisation.md`, \"Not done by the built-ins\"), which is Katana Standard by default; the names "
-      "belonged to the NSW customisation. Narrow: a project saved in the first days of the built-in.")
+    w("- **The earlier file names of an old project** belonged to the NSW customisation and are answered by it "
+      "alone (`docs/customisation.md`, \"Several built-ins\"): opened under Katana Standard such a project lists "
+      "them as not loaded, and `CUSTOMISE BUILTIN NSW` clears them. The warning does not name that verb for "
+      "them, since what is missing is the old file names. Narrow: a project saved in the first days of the "
+      "built-in.")
     w("- **The colour convention** of the buried services differs from `UTILITY DRAW`'s. Aligning one to the "
       "other is the owner's decision.")
     w("- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the "

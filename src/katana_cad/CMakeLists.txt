@@ -76,12 +76,14 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/plotting/frame.cpp" PRO
 # alternate compiles a program with no built-in at all.
 #
 # NOTE: a cache keeps what it was given. A build directory configured before
-# Katana Standard became the default still has KATANA_BUILTIN_CUSTOMISATION set
-# to the earlier default; the configure says so below and docs/building.md
-# says how to move it.
-set(KATANA_BUILTIN_CUSTOMISATION
-    "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json"
-    CACHE FILEPATH "The Katana customisation file compiled into the program as THE built-in (the default); none when it does not exist")
+# Katana Standard became the default has KATANA_BUILTIN_CUSTOMISATION set to the
+# earlier default, and would offer Katana Standard nowhere. The first configure
+# that sees it MOVES it to the new default, once, and says so
+# (cmake/KatanaBuiltInDefault.cmake); a -D given on the command line is a
+# choice and is never moved.
+include(KatanaBuiltInDefault)
+katana_declare_builtin_default(
+    "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")
 set(KATANA_ALTERNATE_CUSTOMISATIONS
     "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json"
     CACHE STRING "Katana customisation files compiled into the program besides the default, a ;-separated list; one that does not exist is not offered")
@@ -149,17 +151,6 @@ foreach(_katana_alternate IN LISTS KATANA_ALTERNATE_CUSTOMISATIONS)
         message(STATUS "Built-in customisation (alternate): ${_katana_alternate_file}")
     endif()
 endforeach()
-# A build directory configured when NSW was the default keeps it so, and then
-# offers Katana Standard nowhere; say it rather than leave a person to wonder.
-# (It cannot tell that from a person who chose NSW as the default, so it only
-# says what is so, and how to change it.)
-if(KATANA_BUILTIN_CUSTOMISATION MATCHES "/nsw\\.customisation\\.json$")
-    message(STATUS
-        "Built-in customisation: KATANA_BUILTIN_CUSTOMISATION is the NSW file, which was the "
-        "default before Katana Standard. If you did not choose that, "
-        "`cmake --preset release -U KATANA_BUILTIN_CUSTOMISATION` gives the default back, "
-        "and NSW then stays selectable as an alternate (docs/building.md).")
-endif()
 
 # The table: ONE generated translation unit holding every file's bytes, so the
 # number of built-ins is no limit of the source and a file is embedded once.

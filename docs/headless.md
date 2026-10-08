@@ -216,7 +216,15 @@ the default again sets the file aside
 (`qt_choosing_the_default_in_settings_sets_the_kept_alternate_aside_headless`) so that the
 window after that starts with the default
 (`qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless`).
-They are registered where the build compiled in both Katana Standard and NSW.
+They are registered where the build compiled in both Katana Standard and NSW, as
+are the two windows that save a project under NSW and open it under the default, where
+the log's warning names the built-in and the verb that makes it the session
+(`qt_a_project_saved_with_an_alternate_built_in_records_its_name_headless`,
+`qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless`) and the
+three `katana_cli` runs that do the same
+(`cli.a_project_saved_with_an_alternate_built_in_records_its_name`,
+`cli.opening_it_under_the_default_names_the_built_in_and_the_verb_that_loads_it`,
+`cli.the_verb_the_warning_names_loads_the_built_in_the_project_was_drawn_with`).
 
 **Every program test says what it starts with.** A default build has the
 tracked customisation compiled in and a build whose
