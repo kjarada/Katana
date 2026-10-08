@@ -421,8 +421,10 @@ TEST(UtilityDrawing, TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsName
     }
     EXPECT_EQ(named.size(), 10u) << "each type is named once";
     // The other two kinds have no AS 5488 colour and are Katana's choice: every
-    // kind there is that the ten above do not name. A thirteenth kind added to
-    // the enum, or an eleventh named, fails here until it is placed on purpose.
+    // kind there is that the ten above do not name. An eleventh named fails
+    // here until it is placed on purpose; a thirteenth kind added to the enum
+    // fails TheListOfEveryTypeHasEveryEnumeratorOfUtilityType first, which is
+    // what keeps everyType() honest.
     std::set<sub::UtilityType> katanasOwn;
     for (const sub::UtilityType type : everyType()) {
         if (!named.contains(type)) {
@@ -432,6 +434,30 @@ TEST(UtilityDrawing, TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsName
     EXPECT_EQ(katanasOwn, (std::set<sub::UtilityType>{sub::UtilityType::IntelligentTransport,
                                                        sub::UtilityType::Other}));
     EXPECT_EQ(everyType().size(), named.size() + katanasOwn.size());
+}
+
+TEST(UtilityDrawing, TheListOfEveryTypeHasEveryEnumeratorOfUtilityType)
+{
+    // everyType() is written by hand and the enum has no count, so the
+    // enumerators are counted the way they are laid out: from zero, one after
+    // another, ending at Other. A kind put in anywhere before Other makes
+    // Other's value outrun the list; one put after Other is the next value, and
+    // a kind with a word is no longer "unknown" there.
+    const auto& types = everyType();
+    const int last = static_cast<int>(sub::UtilityType::Other);
+    EXPECT_EQ(types.size(), static_cast<std::size_t>(last) + 1)
+        << "a kind was added to UtilityType: place it in everyType() and in the colour table";
+    std::set<int> values;
+    for (const sub::UtilityType type : types) {
+        values.insert(static_cast<int>(type));
+    }
+    EXPECT_EQ(values.size(), types.size()) << "no kind is listed twice";
+    ASSERT_FALSE(values.empty());
+    EXPECT_EQ(*values.begin(), 0);
+    EXPECT_EQ(*values.rbegin(), last);
+    const auto beyond = static_cast<sub::UtilityType>(last + 1);
+    EXPECT_STREQ(sub::toString(beyond), "unknown") << "a kind was added after Other";
+    EXPECT_EQ(utilityTypeWord(beyond), "unknown") << "a kind was added after Other";
 }
 
 TEST(UtilityDrawing, OnPaperCommunicationsPrintsBlackAndYellowGasAndCreamSewerPrintAsDrawn)

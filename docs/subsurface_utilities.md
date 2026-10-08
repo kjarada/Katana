@@ -310,10 +310,11 @@ known of the table is what published guides state, and Katana takes the names
 from them. The standard gives no sRGB that is public and cites no colour
 standard (not AS 2700, not AS/NZS 2648.1) in anything freely readable, so each
 value is Katana's rendering of the name, chosen as an unmistakable example of
-it and kept legible (below). The 2022 edition's preface lists only its terms
-and the datum as changed
+it and kept legible (below). The 2022 edition's preface names two "major
+changes", its terms and definitions and the recognition of GDA2020, and does not
+name the colour table
 (https://www.normsplash.com/Samples/AS/137553665/AS-5488.1-2022-en.pdf), so
-the table is taken to be the 2019 one.
+the table is taken to be the 2019 one, which no free page confirms.
 
 | Type | AS 5488 colour (letter) | Katana's value | On the plan ground | On white paper |
 |---|---|---|---|---|

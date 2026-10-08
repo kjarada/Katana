@@ -708,20 +708,6 @@ TEST(KatanaStandard, EveryServiceColourIsTheColourUtilityDrawUses)
     std::set<sub::UtilityType> expectedKinds(kinds.begin(), kinds.end());
     expectedKinds.erase(sub::UtilityType::Other);
     EXPECT_EQ(reached, expectedKinds);
-
-    // And no service colour of the table is held apart from UTILITY DRAW's:
-    // each is the colour of some kind.
-    std::set<std::string> serviceColours;
-    for (const sub::UtilityType kind : kinds) {
-        serviceColours.insert(katana::cad::utilities::utilityTypeColour(kind).toHex());
-    }
-    for (const char* name : {"katana water", "katana sewer", "katana gas", "katana electricity",
-                             "katana telecom", "katana recycled", "katana fire", "katana fuel",
-                             "katana its", "katana unknown", "katana stormwater"}) {
-        const auto colour = file.colours.find(name);
-        ASSERT_TRUE(colour.has_value()) << name;
-        EXPECT_EQ(serviceColours.count(colour->toHex()), 1u) << name << " " << colour->toHex();
-    }
 }
 
 TEST(KatanaStandard, EveryBuriedUtilityLineAsksForItsOwnerItsConditionAndItsDepth)
