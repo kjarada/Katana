@@ -54,8 +54,11 @@ struct Trust {
 
 // The whole gate. `json` and `sig` are the two files of a release as
 // downloaded. In this order, stopping at the first failure:
+//   0. `json` is not empty and not above kMaxManifestBytes (InvalidArgument), whatever
+//      `sig` holds;
 //   1. the signature line parses and its key id names a key in `trust`
-//      (otherwise Unsupported "signed by a key this build does not trust");
+//      (otherwise Unsupported "signed by a key this build does not trust"; when `trust`
+//      is a placeholder the context says so, because for such a build that is the reason);
 //   2. trust is not a placeholder;
 //   3. verifyEd25519 over the EXACT bytes of `json`;
 //   4. only now parseManifest;

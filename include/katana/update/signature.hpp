@@ -58,4 +58,14 @@ struct SignatureLine {
 [[nodiscard]] core::Status verifyEd25519(const PublicKey& key, std::string_view message,
                                          const SignatureBytes& signature);
 
+// The first thing the helper's main() does (src/katana_updater, task T9): removes OPENSSL_CONF,
+// OPENSSL_MODULES and OPENSSL_ENGINES from this process's environment and initialises libcrypto
+// without reading a configuration file. Not called by katana, katana_cli or katana_mcp: they
+// share a process with libcurl and Qt, which read those variables for their own reasons.
+// verifyEd25519 makes the same initialisation on its first use, so a program that skips this
+// still never loads a configuration through this library - provided nothing else in the process
+// initialised libcrypto first. Not thread-safe against other threads reading the environment, so
+// call it before starting any. Idempotent. Internal if libcrypto cannot be initialised.
+[[nodiscard]] core::Status hardenOpenSslEnvironment();
+
 } // namespace katana::update
