@@ -34,18 +34,20 @@ Windows device name (CON PRN AUX NUL COM1-9 LPT1-9, with or without an extension
 no '.update' component; no two paths equal after case folding; no file that is also the folder of
 another (bin/a and bin/A/b, case folded); at most 10,000 files and 2 GiB. The one file the producer
 leaves out by itself is share/katana/install.json, which the CPack install writes and the updater
-owns. A symbolic link, a file that is not a regular file, and a file or folder that cannot be read are
-refused: the manifest has no way to say them, and leaving them out would make every installed copy
-delete them.
+owns. A symbolic link, a Windows directory junction or any other reparse point, a file that is not a
+regular file, and a file or folder that cannot be read are refused: the manifest has no way to say
+them, and leaving them out would make every installed copy delete them.
 
-The sequence is UTC epoch seconds: --sequence, else SOURCE_DATE_EPOCH, else now. `published` is that
-instant and `expires` is 180 days later, so the same inputs make the same bytes (the zip too, for one
-zlib). Give every target of a release the same sequence (tools/update_verify_release.py fails a release
+The sequence is UTC epoch seconds, from 1 to 4102444800 (2100-01-01): --sequence, else SOURCE_DATE_EPOCH,
+else now. `published` is that instant and `expires` is 180 days later, so the same inputs make the same
+bytes (the zip too, for one zlib). Give every target of a release the same sequence (tools/update_verify_release.py fails a release
 whose manifests differ in sequence, version or tag): one --sequence, or one SOURCE_DATE_EPOCH, for the
 whole loop over the targets.
 
 --key signs, and only with a key the tree pins: --keys-cmake (default cmake/KatanaUpdateKeys.cmake) must
 exist and hold real keys, never the placeholders, and never a published test key (tests pass --test-key).
+The openssl command line runs with OPENSSL_CONF, OPENSSL_MODULES and OPENSSL_ENGINES removed from its
+environment, so that no setting of the machine decides what a signature is or whether it verifies.
 
 Exit status: 0 made, 1 refused or failed (nothing written), 2 a usage error.
 """
@@ -86,6 +88,7 @@ MAX_FILES = 10_000
 MAX_INSTALL_BYTES = 2 * 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024  # kMaxManifestBytes (feed.hpp): the engine refuses a larger one
 EXPIRES_AFTER_DAYS = 180
+MAX_SEQUENCE = 4_102_444_800  # 2100-01-01T00:00:00Z: far past any real build, and `expires` still fits a date
 CLASS_ORDER = ("program", "lib", "data", "seed")
 DEFAULT_PROGRAMS = ("katana", "katana_cli", "katana_mcp", "katana_updater")
 # The updater's own records: never in a manifest. share/katana/install.json is the one the CPack
@@ -101,6 +104,9 @@ CHUNK = 1 << 20
 # The DER prefix of an Ed25519 SubjectPublicKeyInfo (RFC 8410): the 32 key bytes follow.
 SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
 SIGNATURE_BYTES = 64
+# Settings of the machine that change what the openssl command line loads, and so what it accepts
+# (review B4: the helper clears the same three).
+OPENSSL_CLEARED_VARIABLES = ("OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES")
 
 # The published RFC 8032 section 7.1 test keys (TEST 1, 2, 3), public halves. Anyone can sign with
 # the private halves, so a release is never signed with one (refused below) and a test never signs
@@ -221,6 +227,13 @@ class Scan:
     problems: list[str] = field(default_factory=list)
 
 
+def is_link_like(info: os.stat_result) -> bool:
+    """A symbolic link, or on Windows any reparse point: a directory junction (which os.path.islink does
+    not call a link, and os.walk walks into) or a mount point. The tree must hold plain files and folders."""
+    attributes = getattr(info, "st_file_attributes", 0) or 0
+    return stat.S_ISLNK(info.st_mode) or bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def execute_bit(mode: int, posix: bool = os.name != "nt") -> bool:
     """Whether a file's mode has an execute bit that means something: only on a POSIX file system."""
     return posix and bool(mode & 0o111)
@@ -246,11 +259,20 @@ def scan_tree(root: Path, excludes: Iterable[str] = (), posix: bool = os.name !=
 
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False, onerror=unreadable):
         dirnames.sort()
+        walkable = []
         for name in dirnames:
             full = os.path.join(dirpath, name)
-            if os.path.islink(full):
+            try:
+                folder_info = os.lstat(full)
+            except OSError as error:
+                unreadable(error)
+                continue
+            if is_link_like(folder_info):
                 rel = os.path.relpath(full, root).replace(os.sep, "/")
-                result.problems.append(f"{rel}: a symbolic link (a manifest cannot say one)")
+                result.problems.append(f"{rel}: a symbolic link or junction (a manifest cannot say one)")
+            else:
+                walkable.append(name)
+        dirnames[:] = walkable  # never walk into a link: what it points at is not part of this tree
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root).replace(os.sep, "/")
@@ -259,8 +281,8 @@ def scan_tree(root: Path, excludes: Iterable[str] = (), posix: bool = os.name !=
             except OSError as error:
                 unreadable(error)
                 continue
-            if stat.S_ISLNK(info.st_mode):
-                result.problems.append(f"{rel}: a symbolic link (a manifest cannot say one)")
+            if is_link_like(info):
+                result.problems.append(f"{rel}: a symbolic link or reparse point (a manifest cannot say one)")
             elif not stat.S_ISREG(info.st_mode):
                 result.problems.append(f"{rel}: not a regular file")
             elif rel.lower() == CPACK_INSTALL_RECORD:
@@ -480,8 +502,8 @@ def resolve_sequence(explicit: Optional[int], environ: Mapping[str, str]) -> int
         value = int(text)
     else:
         value = int(time.time())
-    if not 0 < value < 1 << 40:
-        raise ToolError(f"the sequence {value} is not a plausible UTC epoch-seconds value")
+    if not 0 < value <= MAX_SEQUENCE:
+        raise ToolError(f"the sequence {value} is not UTC epoch seconds between 1 and {MAX_SEQUENCE} (the year 2100)")
     return value
 
 
@@ -495,9 +517,36 @@ def find_openssl(explicit: Optional[str] = None) -> str:
     return candidate
 
 
+def openssl_environment(environ: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """The environment the openssl command line runs in: this one without the settings that change what it loads."""
+    cleared = {name.upper() for name in OPENSSL_CLEARED_VARIABLES}  # Windows names are not case sensitive
+    return {name: value for name, value in (os.environ if environ is None else environ).items() if name.upper() not in cleared}
+
+
+def outside_code_page(text: str, encoding: str) -> bool:
+    """Whether `text` has a character that `encoding` (a Windows ANSI code page) cannot hold."""
+    try:
+        text.encode(encoding)
+    except UnicodeEncodeError:
+        return True
+    return False
+
+
+def code_page_hint(*paths: Path) -> str:
+    """Why openssl may not find a file that is there. On Windows the openssl command line receives its
+    arguments in the ANSI code page, so a path with a letter outside it arrives with a '?' in its place."""
+    if os.name != "nt":
+        return ""
+    for path in paths:
+        if outside_code_page(str(path), "mbcs"):
+            return (f" (the path {path} has a character outside this machine's ANSI code page, which the openssl "
+                    "command line cannot receive on Windows: keep the key in a folder whose whole path is plain ASCII)")
+    return ""
+
+
 def _openssl(openssl: str, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run([openssl, *args], capture_output=True, check=False)
+        return subprocess.run([openssl, *args], capture_output=True, check=False, env=openssl_environment())
     except OSError as error:
         raise ToolError(f"could not run {openssl}: {error}") from error
 
@@ -508,7 +557,8 @@ def public_key_of(openssl: str, private_pem: Path) -> bytes:
         out = Path(scratch) / "public.der"
         done = _openssl(openssl, "pkey", "-in", str(private_pem), "-pubout", "-outform", "DER", "-out", str(out))
         if done.returncode != 0 or not out.exists():
-            raise ToolError(f"{private_pem} is not a private key openssl can read: {done.stderr.decode(errors='replace').strip()}")
+            raise ToolError(f"{private_pem} is not a private key openssl can read: "
+                            f"{done.stderr.decode(errors='replace').strip()}{code_page_hint(private_pem, out)}")
         der = out.read_bytes()
     if len(der) != len(SPKI_PREFIX) + 32 or not der.startswith(SPKI_PREFIX):
         raise ToolError(f"{private_pem} is not an Ed25519 private key")
@@ -531,7 +581,8 @@ def sign_file(openssl: str, private_pem: Path, message: Path) -> bytes:
         out = Path(scratch) / "signature.bin"
         done = _openssl(openssl, "pkeyutl", "-sign", "-rawin", "-inkey", str(private_pem), "-in", str(message), "-out", str(out))
         if done.returncode != 0 or not out.exists():
-            raise ToolError(f"openssl could not sign: {done.stderr.decode(errors='replace').strip()}")
+            raise ToolError(f"openssl could not sign: {done.stderr.decode(errors='replace').strip()}"
+                            f"{code_page_hint(private_pem, message, out)}")
         signature = out.read_bytes()
     if len(signature) != SIGNATURE_BYTES:
         raise ToolError(f"openssl made a {len(signature)}-byte signature; Ed25519 makes {SIGNATURE_BYTES}")

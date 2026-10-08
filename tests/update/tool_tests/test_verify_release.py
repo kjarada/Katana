@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import ast
 import base64
+import hashlib
 import json
+import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Callable
 from unittest import mock
@@ -26,6 +31,8 @@ from support import (
     REPO,
     RFC_PUBLIC,
     RFC_SEED,
+    RFC_VECTOR,
+    SEQUENCE_1790000000,
     THROWAWAY_SEED,
     TOOLS,
     ToolTest,
@@ -84,8 +91,8 @@ class Checked(ToolTest):
         self.release = self.tmp / "release"
         shutil.copytree(self.baseline, self.release)
 
-    def verify(self, *extra: object, directory: Path = None, trust: tuple = ("--test-keys",)):
-        return run_tool("update_verify_release.py", directory or self.release, *trust, *extra)
+    def verify(self, *extra: object, directory: Path = None, trust: tuple = ("--test-keys",), env: dict = None):
+        return run_tool("update_verify_release.py", directory or self.release, *trust, *extra, env=env)
 
     def manifest(self, token: str = "win64") -> dict:
         return json.loads((self.release / f"Katana-update-{token}.json").read_bytes())
@@ -255,6 +262,63 @@ class TheSignature(Checked):
         (self.release / MANIFEST).write_bytes(bytes(data))
         self.assert_tool_failed(self.verify(), "not a valid Ed25519 signature")
 
+    def test_manifests_handed_in_as_bytes_are_judged_as_given_and_not_as_the_file_stands(self) -> None:
+        good = (self.release / MANIFEST).read_bytes()
+        (self.release / MANIFEST).write_bytes(b"what the file holds a moment later")
+        report = verifier.verify_release(self.release, trust={RFC_PUBLIC[1]: "test"}, openssl=OPENSSL,
+                                         manifest_bytes={MANIFEST: good})
+        self.assertTrue(report.ok, report.errors)
+        self.assertEqual(sorted(report.manifests), ["win64"])
+        # A manifest the caller did not hand in is read from the directory, as before.
+        report = verifier.verify_release(self.release, allow_unsigned=True,
+                                         manifest_bytes={"Katana-update-linux-x86_64.json": good})
+        self.assertFalse(report.ok)
+        self.assertTrue(any("win64.json" in error for error in report.errors), report.errors)
+
+    def base_only_configuration(self) -> Path:
+        """An openssl configuration that activates only the base provider: openssl run with it can neither sign
+        nor verify, because no signature algorithm is loaded."""
+        conf = self.tmp / "base-only.cnf"
+        conf.write_text("openssl_conf = openssl_init\n[openssl_init]\nproviders = provider_sect\n"
+                        "[provider_sect]\nbase = base_sect\n[base_sect]\nactivate = 1\n", newline="\n")
+        return conf
+
+    def test_a_configuration_of_the_machine_cannot_make_a_good_signature_fail_to_verify(self) -> None:
+        conf = self.base_only_configuration()
+        message = bytes.fromhex("72")                      # RFC 8032 section 7.1, TEST 2
+        signature = bytes.fromhex(RFC_VECTOR[2][1])
+        with mock.patch.dict(os.environ, {"OPENSSL_CONF": str(conf)}):
+            plain = verifier.subprocess.run(
+                [OPENSSL, "pkeyutl", "-verify", "-pubin", "-inkey", str(self.write_public(RFC_PUBLIC[2])), "-rawin",
+                 "-in", str(self.write_bytes("m", message)), "-sigfile", str(self.write_bytes("s", signature))],
+                capture_output=True, check=False)
+            self.assertNotEqual(plain.returncode, 0, "the configuration is meant to break a plain openssl run")
+            self.assertTrue(verifier.openssl_verifies(OPENSSL, RFC_PUBLIC[2], message, signature))
+            self.assertFalse(verifier.openssl_verifies(OPENSSL, RFC_PUBLIC[2], b"s", signature))   # still a real check
+        done = self.verify(env={"OPENSSL_CONF": str(conf)})
+        self.assert_tool_ok(done)
+        self.assertIn("signature verified", done.stdout)
+
+    def write_public(self, public_hex: str) -> Path:
+        path = self.tmp / "public.pem"
+        der = bytes.fromhex("302a300506032b6570032100") + bytes.fromhex(public_hex)
+        path.write_text("-----BEGIN PUBLIC KEY-----\n" + base64.encodebytes(der).decode() + "-----END PUBLIC KEY-----\n",
+                        newline="\n")
+        return path
+
+    def write_bytes(self, name: str, data: bytes) -> Path:
+        path = self.tmp / name
+        path.write_bytes(data)
+        return path
+
+    def test_the_variables_that_change_what_openssl_loads_are_removed_whatever_their_case(self) -> None:
+        with mock.patch.dict(os.environ, {"OPENSSL_CONF": "a", "openssl_modules": "b", "OpenSSL_Engines": "c",
+                                          "KATANA_TEST_MARK": "m"}):
+            kept = verifier.openssl_environment()
+        for name in kept:
+            self.assertNotIn(name.upper(), ("OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"))
+        self.assertEqual(kept["KATANA_TEST_MARK"], "m")
+
 
 class TheManifestBytes(Checked):
     def rewrite_bytes(self, change: Callable[[bytes], bytes]) -> None:
@@ -311,6 +375,17 @@ class TheManifestFields(Checked):
 
     def test_a_tag_that_is_not_v_and_the_version_is_named(self) -> None:
         self.broken(lambda m: m.update(tag="v9.9.9"), "tag is")
+
+    def test_the_notes_url_must_be_an_https_url_of_the_releases_tag_page(self) -> None:
+        good = "https://github.com/kjarada/Katana/releases/tag/v0.9.0"
+        self.assertEqual(self.manifest()["notes_url"], good)
+        self.broken(lambda m: m.update(notes_url=good.replace("https:", "http:")), "notes_url is not an https URL")
+        self.rewrite(lambda m: m.update(notes_url=5))
+        self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "notes_url is not an https URL")
+        self.rewrite(lambda m: m.update(notes_url=good.replace("v0.9.0", "v9.9.9")))
+        self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "notes_url does not end in /releases/tag/v0.9.0")
+        self.rewrite(lambda m: m.update(notes_url=good + "/"))
+        self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "notes_url does not end in")
 
     def test_versions_that_the_workflow_cannot_write_are_refused(self) -> None:
         # The last is "1.2" in Arabic-Indic digits: a str pattern's \d matches it, version.hpp does not.
@@ -487,6 +562,32 @@ class TheFiles(Checked):
         # zlib that made it; either way the range check names the member.
         self.assertTrue("does not give the signed bytes" in done.stdout or "do not inflate" in done.stdout, done.stdout)
 
+    def test_an_encrypted_member_is_named_and_does_not_stop_the_report(self) -> None:
+        path = self.release / ZIP
+        data = bytearray(path.read_bytes())
+        with zipfile.ZipFile(path) as archive:
+            first_entry_of_the_directory = archive.start_dir
+        self.assertEqual(bytes(data[first_entry_of_the_directory:first_entry_of_the_directory + 4]), b"PK\x01\x02")
+        data[first_entry_of_the_directory + 8] |= 0x01          # general purpose flag, bit 0: encrypted
+        path.write_bytes(bytes(data))
+        done = self.verify("--allow-unsigned", trust=())
+        self.assert_tool_failed(done, ": encrypted")
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_a_directory_entry_in_the_zip_is_named(self) -> None:
+        with zipfile.ZipFile(self.release / ZIP, "a") as archive:
+            archive.writestr(zipfile.ZipInfo("bin/sub/", date_time=(1980, 1, 1, 0, 0, 0)), b"")
+        self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "bin/sub/: a directory entry")
+
+    def test_a_member_name_that_appears_twice_is_named(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")   # zipfile warns about the duplicate it is asked to write
+            with zipfile.ZipFile(self.release / ZIP, "a") as archive:
+                info = zipfile.ZipInfo("bin/katana.exe", date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, b"a second bin/katana.exe")
+        self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "has a member name twice")
+
     def test_a_member_that_is_stored_or_timestamped_differently_is_named(self) -> None:
         path = self.release / ZIP
         entries = {}
@@ -547,6 +648,152 @@ class TheReleaseAsAWhole(ToolTest):
                     self.assert_tool_ok(done)
                 else:
                     self.assert_tool_failed(done, "is not above the previous release")
+
+    def rewrite_previous(self, directory: Path, change) -> None:
+        path = directory / "Katana-update-win64.json"
+        manifest = json.loads(path.read_bytes())
+        change(manifest)
+        path.write_bytes(producer.encode_manifest(manifest))
+
+    def test_a_previous_manifest_that_cannot_be_ordered_is_named_and_is_not_a_traceback(self) -> None:
+        old, new = self.tmp / "old", self.tmp / "new"
+        self.make(old, "win64", "1790000000")
+        self.make(new, "win64", "1790000001")
+        for name, change, phrase in (
+            ("a sequence that is text", lambda m: m.update(sequence="1790000000"), "sequence '1790000000' is not a positive integer"),
+            ("a sequence of zero", lambda m: m.update(sequence=0), "sequence 0 is not a positive integer"),
+            ("a version that is a number", lambda m: m.update(version=9), "version 9 is not a string"),
+            ("a version that is not a version", lambda m: m.update(version="nine"), "version 'nine' is not MAJOR.MINOR"),
+            ("no sequence at all", lambda m: m.pop("sequence"), "sequence None is not a positive integer"),
+        ):
+            with self.subTest(case=name):
+                shutil.rmtree(old)
+                self.make(old, "win64", "1790000000")
+                self.rewrite_previous(old, change)
+                done = run_tool("update_verify_release.py", new, "--allow-unsigned", "--previous", old)
+                self.assert_tool_failed(done, "the previous manifest", "cannot be read", phrase)
+                self.assertNotIn("Traceback", done.stderr)
+        (old / "Katana-update-win64.json").write_bytes(b"not json")
+        self.assert_tool_failed(run_tool("update_verify_release.py", new, "--allow-unsigned", "--previous", old),
+                                "cannot be read")
+
+    def test_one_manifest_given_as_previous_is_compared_with_its_own_target_only(self) -> None:
+        # The previous win64 release is 0.10.0. The new release (0.9.0 here, so below it) holds win64 and linux:
+        # only win64 can be below the previous win64; linux has no previous manifest and is only noted.
+        old, new = self.tmp / "old", self.tmp / "new"
+        self.make(old, "win64", "1790000000", version="0.10.0")
+        self.make(new, "win64", "1790000001", version="0.9.0")
+        self.make(new, "linux-x86_64", "1790000001", version="0.9.0")
+        done = run_tool("update_verify_release.py", new, "--allow-unsigned", "--previous", old / "Katana-update-win64.json")
+        self.assert_tool_failed(done, "win64: (version 0.9.0, sequence 1790000001) is not above the previous release's "
+                                      "(version 0.10.0, sequence 1790000000)")
+        self.assertEqual(len([line for line in done.stdout.splitlines() if line.startswith("ERROR")]), 1, done.stdout)
+        self.assertIn("linux-x86_64: no previous manifest for this target", done.stdout)
+
+    def test_one_manifest_given_as_previous_that_is_for_no_target_here_compares_nothing_and_says_so(self) -> None:
+        old, new = self.tmp / "old", self.tmp / "new"
+        self.make(old, "win64", "1790000000")
+        self.make(new, "linux-x86_64", "1790000001")
+        done = run_tool("update_verify_release.py", new, "--allow-unsigned", "--previous", old / "Katana-update-win64.json")
+        self.assert_tool_failed(done, "is for another target than any here (linux-x86_64): nothing was compared")
+
+    def test_the_report_says_that_the_previous_manifests_are_not_signature_checked(self) -> None:
+        old, new = self.tmp / "old", self.tmp / "new"
+        self.make(old, "win64", "1790000000")
+        self.make(new, "win64", "1790000001")
+        said = "signatures are not checked"
+        done = run_tool("update_verify_release.py", new, "--allow-unsigned", "--previous", old)
+        self.assert_tool_ok(done)
+        self.assertIn(said, done.stdout)
+        self.assertNotIn(said, run_tool("update_verify_release.py", new, "--allow-unsigned").stdout)
+
+    def test_a_previous_directory_without_a_manifest_for_the_target_is_noted_and_compares_nothing(self) -> None:
+        new, nothing = self.tmp / "new", self.tmp / "nothing"
+        self.make(new, "win64", "1790000001")
+        nothing.mkdir()
+        done = run_tool("update_verify_release.py", new, "--allow-unsigned", "--previous", nothing)
+        self.assert_tool_ok(done)
+        self.assertIn(f"win64: no previous manifest for this target at {nothing / 'Katana-update-win64.json'}", done.stdout)
+        self.assertNotIn("signatures are not checked", done.stdout)
+
+
+def hand_zip(members: list[tuple[str, bytes, bytes]]) -> tuple[bytes, dict[str, tuple[int, int]]]:
+    """A zip written byte by byte (struct), so that a test can store exactly the raw data it wants.
+
+    Each member is (name, the bytes stored as its deflate data, the file's content); the central directory carries
+    the CRC of the content and the stored length. Returns the zip and, per name, (offset, length) of the stored data."""
+    body, directory, placed = bytearray(), bytearray(), {}
+    for name, stored, content in members:
+        encoded = name.encode("ascii")
+        crc = zlib.crc32(content)
+        header_offset = len(body)
+        # signature, version 2.0, flags 0, deflate (8), time 0, date 1980-01-01 (0x21), crc, sizes, name length, extra 0
+        body += struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 8, 0, 0x21, crc, len(stored), len(content), len(encoded), 0)
+        body += encoded
+        placed[name] = (len(body), len(stored))
+        body += stored
+        directory += struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 0x031E, 20, 0, 8, 0, 0x21, crc, len(stored),
+                                 len(content), len(encoded), 0, 0, 0, 0, 0o100644 << 16, header_offset)
+        directory += encoded
+    end = struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, len(members), len(members), len(directory), len(body), 0)
+    return bytes(body + directory + end), placed
+
+
+class TheRangeOfAMember(ToolTest):
+    """The signed range offset..offset+csize must be exactly one deflate stream, however well zipfile reads the member."""
+
+    CONTENT = b"print('hello from a test program')\n" * 20
+
+    def release_with(self, trailing: bytes) -> Path:
+        compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+        stream = compressor.compress(self.CONTENT) + compressor.flush()
+        archive, placed = hand_zip([("bin/katana.exe", stream + trailing, self.CONTENT)])
+        offset, length = placed["bin/katana.exe"]
+        self.assertEqual(length, len(stream) + len(trailing))
+        directory = self.tmp / ("release-" + str(len(trailing)))
+        directory.mkdir()
+        (directory / ZIP).write_bytes(archive)
+        sequence, published, expires = SEQUENCE_1790000000
+        manifest = {
+            "applier": 1, "channel": "stable", "expires": expires,
+            "files": [{"class": "program", "csize": length, "exec": True, "offset": offset, "path": "bin/katana.exe",
+                       "sha256": hashlib.sha256(self.CONTENT).hexdigest(), "size": len(self.CONTENT)}],
+            "notes_url": "https://github.com/kjarada/Katana/releases/tag/v0.9.0",
+            "payload": {"codec": "deflate", "name": ZIP, "size": len(archive)},
+            "product": "katana", "published": published, "schema": 1, "sequence": int(sequence), "tag": "v0.9.0",
+            "target": "win64", "version": "0.9.0",
+        }
+        (directory / MANIFEST).write_bytes(producer.encode_manifest(manifest))
+        return directory
+
+    def test_a_zip_written_by_hand_with_exactly_the_stream_verifies(self) -> None:
+        # The control: the same hand-made zip and manifest, with nothing after the stream, is a good release.
+        self.assert_tool_ok(run_tool("update_verify_release.py", self.release_with(b""), "--allow-unsigned"))
+
+    def test_bytes_after_the_end_of_the_stream_inside_the_signed_range_are_named(self) -> None:
+        # zipfile reads this member happily (it stops at the end of the stream, and the CRC is of the content), and
+        # the zip's compressed size equals the manifest's csize. Only the check that the range holds exactly one
+        # deflate stream notices that two bytes of something else lie inside the signed range.
+        directory = self.release_with(b"\x00\x00")
+        with zipfile.ZipFile(directory / ZIP) as archive:
+            self.assertEqual(archive.read("bin/katana.exe"), self.CONTENT)
+            self.assertIsNone(archive.testzip())
+        done = run_tool("update_verify_release.py", directory, "--allow-unsigned")
+        self.assert_tool_failed(done, "are not exactly one deflate stream")
+        self.assertEqual(len([line for line in done.stdout.splitlines() if line.startswith("ERROR")]), 1, done.stdout)
+
+
+class TheManifestSizeCap(ToolTest):
+    CAP = 8 * 1024 * 1024  # kMaxManifestBytes of include/katana/update/feed.hpp
+
+    def test_a_manifest_of_exactly_eight_mebibytes_parses_and_one_byte_more_does_not(self) -> None:
+        # '{"a":"' is 6 bytes and '"}' plus a line feed 3, so (CAP - 9) bytes of padding make exactly CAP.
+        exactly = b'{"a":"' + b"x" * (self.CAP - 9) + b'"}\n'
+        self.assertEqual(len(exactly), self.CAP)
+        self.assertEqual(len(verifier.parse_manifest_bytes(exactly)["a"]), self.CAP - 9)
+        with self.assertRaises(ValueError) as raised:
+            verifier.parse_manifest_bytes(b"x" + exactly)
+        self.assertIn("at most 8388608", str(raised.exception))
 
 
 class TheConsole(Checked):

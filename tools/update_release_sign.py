@@ -3,9 +3,11 @@
 
 The workflow with `sign=offline` builds a draft release that has the manifests and the update zips but
 no `.sig`. The owner downloads them, runs this tool on the machine that holds the private key, and
-uploads the signatures. This tool NEVER runs `gh` (it does not even import a way to start a program):
-every `gh` command it shows is for the owner to read and run. So the flow is three steps with this
-tool in the middle, and the same tool command is run twice:
+uploads the signatures. This tool NEVER runs `gh`: every `gh` command it shows is for the owner to
+read and run. (Design section 3 has the tool upload and un-draft; the task that wrote this tool made
+that a printed command, because no tool writes to GitHub.) The only program the tool starts is openssl,
+to sign and to verify; a test records every program it starts to hold it to that. So the flow is three
+steps with this tool in the middle, and the same tool command is run twice:
 
     python tools/update_release_sign.py --repo kjarada/Katana --tag vX.Y.Z --key update-signing.pem
 
@@ -18,7 +20,8 @@ Nothing is signed until every step has passed:
          gh release download vPREV --repo kjarada/Katana --dir release-vPREV --pattern 'Katana-update-*.json'
      (Whether `gh` finds a DRAFT by its tag is one of the first-release checks of docs/update.md.)
   1. Recheck every asset with tools/update_verify_release.py's code, which re-derives every hash from the
-     zip members and the signed byte ranges (the producer's own word is not taken).
+     zip members and the signed byte ranges (the producer's own word is not taken). The manifests are
+     judged as the very bytes hashed before this step (see 4), and those are the bytes signed in step 5.
   2. Show what changed against --previous: per target, the files added, removed and changed, and the bytes an
      installed copy of the previous release would download.
   3. Check the key: it must be one the tree pins (cmake/KatanaUpdateKeys.cmake), because an installed copy
@@ -102,11 +105,7 @@ def _listing(marker: str, paths: list[str], classes: dict[str, str]) -> list[str
 def describe_changes(report: verifier.Report, previous: Optional[Path]) -> list[str]:
     lines = []
     for token, new in sorted(report.manifests.items()):
-        old = None
-        if previous is not None:
-            old_path = previous if previous.is_file() else previous / f"Katana-update-{token}.json"
-            if old_path.is_file():
-                old = verifier.parse_manifest_bytes(old_path.read_bytes())
+        old = verifier.previous_manifest(previous, token) if previous is not None else None
         heading = f"  {token}: Katana {new['version']}, sequence {new['sequence']}"
         if old:
             heading += f"  (was {old['version']}, sequence {old['sequence']})"
@@ -193,7 +192,8 @@ def run(args: argparse.Namespace) -> int:
     print(f"Offline signing of {args.tag} ({args.repo}) from {directory}")
     print("Step 1: recomputing every hash from the update zips")
     reviewed = take_snapshot(directory)
-    report = verifier.verify_release(directory, allow_unsigned=True, previous=args.previous)
+    report = verifier.verify_release(directory, allow_unsigned=True, previous=args.previous,
+                                     manifest_bytes=reviewed.manifests)
     for warning in report.warnings:
         print(f"  warning: {warning}")
     if not report.ok:

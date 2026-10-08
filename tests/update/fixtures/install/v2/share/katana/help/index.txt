@@ -1,0 +1,2 @@
+The first file of share/katana/help.
+0.9.0 had no such folder: 0.10.0 creates it.

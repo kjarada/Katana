@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 import zipfile
 import zlib
 from pathlib import Path
@@ -62,66 +63,23 @@ THROWAWAY_SEED = hashlib.sha256(b"katana update tool tests: a throwaway key that
 SEQUENCE_1790000000 = ("1790000000", "2026-09-21T14:13:20Z", "2027-03-20T14:13:20Z")
 SEQUENCE_1792312800 = ("1792312800", "2026-10-18T08:40:00Z", "2027-04-16T08:40:00Z")
 
+def load_path_cases(source: Path) -> list[tuple[str, bool]]:
+    """The cases of fixtures/path_rules.txt as (path, acceptable): `ok|no`, a tab, the path with %XX escapes, a tab,
+    the reason. The file is the one table every implementation of the rules is held to (see its header)."""
+    cases = []
+    for number, line in enumerate(source.read_text(encoding="ascii").splitlines(), 1):
+        if line == "" or line.startswith("#"):
+            continue
+        verdict, encoded, *_ = line.split("\t")
+        if verdict not in ("ok", "no"):
+            raise ValueError(f"{source}:{number}: '{verdict}' is neither ok nor no")
+        cases.append((urllib.parse.unquote(encoded, encoding="utf-8", errors="strict"), verdict == "ok"))
+    return cases
+
+
 # The path rules of include/katana/update/paths.hpp, as cases: (path, acceptable). Both Python
 # implementations (the producer and the independent verifier) must agree with every line.
-PATH_CASES = [
-    ("bin/katana.exe", True),
-    ("bin/platforms/qwindows.dll", True),
-    ("share/katana/readme.txt", True),
-    ("etc/ssl/certs/ca-bundle.crt", True),
-    ("lib/libx.so.1.2", True),
-    ("share/proj/proj.db", True),
-    ("bin/console.exe", True),            # CON followed by letters is not CON
-    ("bin/com10.dll", True),              # only COM1 to COM9
-    ("bin/com.txt", True),
-    ("bin/a~b.dll", True),                # a tilde without a digit is not 8.3
-    ("share/katana/installed.json.bak", True),
-    ("share/katana/install.json.txt", True),
-    ("share/.updated/x", True),
-    ("bin/.hidden", True),
-    ("bin/a b.txt", True),
-    ("share/katana/news-0.10.0.txt", True),
-    ("", False),
-    ("/bin/a", False),                    # absolute
-    ("C:/bin/a", False),                  # drive
-    ("C:bin/a", False),
-    ("bin\\a.dll", False),
-    ("bin/a:stream", False),
-    ("bin/../etc/x", False),
-    ("bin/./a", False),
-    ("bin//a", False),
-    ("bin/", False),
-    ("other/a.txt", False),               # first component
-    ("LICENSE", False),
-    ("bin", False),
-    ("share/caf\u00e9.txt", False),       # non-ASCII
-    ("bin/a\tb", False),                  # control character
-    ("bin/a\x7fb", False),                # DEL
-    ("bin/a*b", False),
-    ("bin/a?b", False),
-    ('bin/a"b', False),
-    ("bin/a<b", False),
-    ("bin/a>b", False),
-    ("bin/a|b", False),
-    ("bin/a.", False),                    # Windows drops a trailing dot
-    ("bin/a ", False),
-    ("share/dir./x", False),
-    ("bin/con", False),                   # device names
-    ("bin/NUL.txt", False),
-    ("bin/Com1.dll", False),
-    ("bin/lpt9", False),
-    ("bin/PRN", False),
-    ("bin/PROGRA~1.DLL", False),          # 8.3
-    ("share/KATANA~12/x", False),
-    ("share/katana/install.json", False), # the updater's own records, in any case
-    ("share/katana/INSTALL.JSON", False),
-    ("share/katana/installed.json", False),
-    ("share/katana/installed.manifest.json", False),
-    ("share/katana/installed.manifest.json.sig", False),
-    ("share/.update/x", False),
-    ("share/.UPDATE/x", False),
-    ("bin/.update", False),
-]
+PATH_CASES = load_path_cases(FIXTURES / "path_rules.txt")
 
 
 def sha256_hex(data: bytes) -> str:
