@@ -79,7 +79,11 @@ a copy that already has them is not offered them a second time; a whole new
 run for the same tag builds new packages, with a later sequence, and those
 are offered to the copies an update had already brought to that version (a
 copy installed by hand keeps what it has until the next version; "Update
-assets", `--sequence`). To take a bad release out of
+assets", `--sequence`). So a published build is replaced for those copies
+by a NEW run, not by running one of its build jobs again: a job run again
+keeps its run's sequence, and its new package would stand in the release
+without being offered to a copy that took the old one. To take a bad
+release out of
 circulation, mark the one before it as the latest,
 `gh release edit vPREVIOUS --latest`: installed copies read whichever release
 is the latest, and are never offered a version below their own.
