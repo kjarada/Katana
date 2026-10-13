@@ -161,8 +161,11 @@ inline constexpr std::string_view kHeights = "utility.heights";
 // primary code and line colour table (AS 5488.1, Appendix B) names one for each
 // service - water blue, electricity orange, communications white, gas yellow,
 // sewer cream, stormwater green, recycled water purple, fire service red,
-// unidentified services pink, petroleum (fuel) brown - and gives no sRGB, so
-// each value is Katana's rendering of the name. The standard leaves the
+// unidentified services pink - and gives no sRGB, so each value is Katana's
+// rendering of the name. Petroleum (fuel) brown is the least certain row: three
+// of the four guides that state the table name it and the fourth's chart does
+// not, so if the standard has no colour for fuel, brown is Katana's choice. The
+// standard leaves the
 // colours of a plan to whoever draws it (clause 1.2.2 of the 2013 edition), so
 // Katana follows its table and is not required to. The Katana Standard survey
 // library draws a coded service in the same values, and a test holds the two

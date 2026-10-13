@@ -436,6 +436,66 @@ TEST(UtilityDrawing, TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsName
     EXPECT_EQ(everyType().size(), named.size() + katanasOwn.size());
 }
 
+TEST(UtilityDrawing, TheColourTableIsTheDocumentedOneValueForValue)
+{
+    // The twelve values of docs/subsurface_utilities.md, "Colours": Katana's
+    // rendering of AS 5488's names (the sRGB is Katana's choice, so these are
+    // pinned exactly rather than by the hue bands above). Written here from
+    // that table, not read from the program, so a value changed in the
+    // program alone, or in the document alone, fails.
+    const std::vector<std::pair<sub::UtilityType, std::string_view>> documented{
+        {sub::UtilityType::Water, "#2F80ED"},
+        {sub::UtilityType::Electricity, "#E07000"},
+        {sub::UtilityType::Telecommunications, "#FFFFFF"},
+        {sub::UtilityType::Gas, "#FFD500"},
+        {sub::UtilityType::RecycledWater, "#9B59D0"},
+        {sub::UtilityType::FireService, "#E53935"},
+        {sub::UtilityType::Sewer, "#F0E2B0"},
+        {sub::UtilityType::Stormwater, "#00A800"},
+        {sub::UtilityType::Fuel, "#A36215"},
+        {sub::UtilityType::Unknown, "#F2559B"},
+        {sub::UtilityType::IntelligentTransport, "#0B9BA8"},
+        {sub::UtilityType::Other, "#949494"}};
+    EXPECT_EQ(documented.size(), everyType().size());
+
+    std::ifstream file(KATANA_UTILITY_DOC, std::ios::binary);
+    ASSERT_TRUE(file.good()) << "no document at " << KATANA_UTILITY_DOC;
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const std::size_t begin = text.find("### Colours");
+    ASSERT_NE(begin, std::string::npos);
+    // The section runs to the next heading of its level or above.
+    const std::size_t end = std::min(text.find("\n## ", begin + 1),
+                                     text.find("\n### ", begin + 1));
+    ASSERT_NE(end, std::string::npos);
+    std::vector<std::string> rows;
+    std::size_t at = begin;
+    while (at < end) {
+        std::size_t stop = text.find('\n', at);
+        stop = stop == std::string::npos || stop > end ? end : stop;
+        std::string line = text.substr(at, stop - at);
+        while (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        rows.push_back(std::move(line));
+        at = stop + 1;
+    }
+
+    for (const auto& [type, hex] : documented) {
+        EXPECT_EQ(utilityTypeColour(type).toHex(), hex) << utilityTypeWord(type);
+        // One row of the document's table is this type's, and shows this value.
+        const std::string start = "| " + std::string(utilityTypeWord(type)) + " |";
+        std::vector<std::string> mine;
+        for (const std::string& row : rows) {
+            if (row.rfind(start, 0) == 0) {
+                mine.push_back(row);
+            }
+        }
+        ASSERT_EQ(mine.size(), 1u) << "the document's table has one row for " << utilityTypeWord(type);
+        EXPECT_NE(mine.front().find("`" + std::string(hex) + "`"), std::string::npos)
+            << utilityTypeWord(type) << " is " << hex << " but its row says: " << mine.front();
+    }
+}
+
 TEST(UtilityDrawing, TheListOfEveryTypeHasEveryEnumeratorOfUtilityType)
 {
     // everyType() is written by hand and the enum has no count, so the

@@ -1,76 +1,94 @@
 # Katana Standard
 
-Katana Standard is a survey feature library written for Katana: one Katana customisation file, `resources/customisation/katana-standard.customisation.json`, with 73 linestyles, 113 symbols and 245 survey codes (770 rules) in 12 classes, and a palette of 28 colours. It is original work. Every name, code, colour and stroke was designed for it from a written specification and none was taken from another library ("Originality", below). This document is its catalogue: how to load it, how to read a code, every definition and every code, and what Katana does and does not yet do with what the file says.
+Katana Standard is a survey feature library written for Katana: one Katana customisation file, `resources/customisation/katana-standard.customisation.json`, with 98 linestyles, 123 symbols and 632 survey codes (1103 rules), a palette of 28 colours and 160 layers. Its survey code **keys** are the NSW customisation's, byte for byte, and each key stands for the same thing and has the same kinds of rule there as here, so a field file coded for one is read by the other and makes the same kinds of entity in both. That is the owner's decision. What the library names, draws and words is Katana's own: every linestyle and symbol, every layer path, colour, pen weight, text style and legend label was designed and written for it ("What is shared and what is not", below, says exactly what comes from the other library). This document is its catalogue: how to load it, how to read a code, every definition and every code, and what Katana does and does not yet do with what the file says.
 
 Everything below that is a table, a count or a description is generated from the data by `tools/katana_standard/make_katana_standard.py --docs`, so it cannot disagree with the file; the prose around it is written by hand in `tools/katana_standard/catalogue.py`. "How it is made and held" says what keeps the two true.
 
 ![An invented street corner drawn entirely by Katana Standard, in Katana's plan view](images/katana-standard-showcase.png)
 
-*An invented street corner, drawn in Katana's plan view with nothing but the library: 221 of its 245 codes are in it, kerbs and lots, houses, fences, trees, the services under and over the road, a stretch of rail on a bridge, contours and a creek, control marks and the labels. Every mark is the size it is on paper and sits where its code put it (`tools/katana_standard/showcase.py`). Katana does not yet apply a code's pen weight, so every line is drawn at one width here and the weight ladder of "Pen weights" is not shown.*
+*An invented street corner, drawn in Katana's plan view with nothing but the library: 192 of its 632 codes are in it, kerbs and lots, houses, fences, trees, the services under and over the road, a stretch of rail on a bridge, contours and a creek, control marks and the labels. Every line and symbol is the size it is on paper and is drawn by its code (`tools/katana_standard/showcase.py`); the words take their layer and colour from a text code and their height from the script, since Katana does not yet apply a text rule. Nor does it yet apply a code's pen weight, so every line is drawn at one width here and the weight ladder of "Pen weights" is not shown.*
 
-**Contents.** [At a glance](#at-a-glance) · [Using it](#using-it) · [Reading a code](#reading-a-code) · [The palette](#the-palette) · [Linestyles](#linestyles) · [Symbols](#symbols) · [The codes](#the-codes) · [Alphabetical index](#the-codes-in-alphabetical-order) · [Originality](#originality) · [Decisions](#decisions-and-what-was-rejected) · [How it is made and held](#how-it-is-made-and-held) · [Not done](#not-done)
+**Contents.** [At a glance](#at-a-glance) · [Using it](#using-it) · [Reading a code](#reading-a-code) · [What is shared and what is not](#what-is-shared-and-what-is-not) · [The palette](#the-palette) · [Linestyles](#linestyles) · [Symbols](#symbols) · [The codes](#the-codes) · [Index by key](#the-codes-in-alphabetical-order) · [Index by label](#the-codes-by-label) · [Decisions](#decisions-and-what-was-rejected) · [How it is made and held](#how-it-is-made-and-held) · [Not done](#not-done)
 
 ## At a glance
 
 |  |  |
 |---|---|
 | Name | `Katana Standard`, edition 1, Katana customisation format version 1 |
-| Definitions | 186: 73 linestyles and 113 symbols, in 49 groups, all in paper units, so a mark keeps its size at any zoom and plot scale |
-| Survey codes | 245, each three capital letters, in 12 classes and 49 subgroups; 770 rules |
-| Layers | 130, always three levels (`class/subgroup/family`), lower case |
+| Definitions | 221: 98 linestyles and 123 symbols, in 51 groups, all in paper units, so a mark keeps its size at any zoom and plot scale |
+| Survey codes | 632 keys: 422 prefix keys that end in `*`, 209 exact keys and the bare `*`; in 13 classes and 57 groups; 1103 rules |
+| The keys | the other built-in's, byte for byte; what each key stands for (with the size or the model zone the other gives it) and its rule kinds, draw mode, text and pipe rules and surface flag follow the other built-in's too ("What is shared and what is not") |
+| Layers | 160, always three levels (`class/group/family`), lower case |
 | Palette | 28 named colours, each at least 3:1 against the plan view's ground and against white paper as it prints (yellow gas and cream sewer, which are AS 5488's, print light); the service colours are AS 5488's and `UTILITY DRAW`'s |
 | Says nothing of | linework control words and import automation: loading it never resets a colleague's spellings or switches |
-| Notice | Katana Standard is original work made for Katana. It contains no third-party customisation, style library or survey code file. Its licence is that of the Katana repository. |
+| Notice | Katana Standard was made for Katana: its linestyles, symbols, layers, colours and words are Katana's own. Its survey code keys, what each key stands for and the kinds of rule each key has are those of the other built-in library, kept so that the same field data works with either, on the owner's decision. Its licence is that of the Katana repository, whose LICENSING.md says what that leaves open for the keys. |
 
 ## Using it
 
 What is true now. Katana Standard **is** the built-in (the owner's ruling, 2026-10-08): a program starts with it, and the NSW customisation is compiled in beside it as an alternate that Settings (Built-in library, then Use) and `CUSTOMISE BUILTIN NSW` choose. It also loads like any customisation file (`docs/customisation.md`, "Using the customisation").
 
 1. **Load it alone.** `CUSTOMISE REPLACE resources/customisation/katana-standard.customisation.json` in the window's command line, in `katana_cli` or through `katana_mcp`; or File > Settings > Import with "Replace instead of merging" ticked. Its definitions become the whole library and its rules the whole of the codes. It brings no linework spellings and no import switches, so the session keeps its own.
-2. **Merging works, with one caution.** `CUSTOMISE <file>`, or Import without the tick, merges by name. The rules here are exact three-letter prefix rules, and the most specific rule wins field by field, so a broader prefix rule already in the session can still supply a field these rules leave unsaid (a symbol, a text). Load it alone when you want its library and nothing else.
+2. **Merging works, with one caution.** `CUSTOMISE <file>`, or Import without the tick, merges by name. The most specific rule wins field by field, so a broader prefix rule already in the session can still supply a field these rules leave unsaid (a symbol, a text). Merged onto the NSW customisation, which has the same keys and the same kinds of rule for each, every rule of that one is replaced by this library's, so the codes become Katana Standard's while the other's definitions and colours stay loaded beside these, named by no code: load it alone when you want its library and nothing else.
 3. **Start with it, or go back to it.** It is what a program starts with when nothing else is said. After another built-in was chosen, `CUSTOMISE BUILTIN "Katana Standard"` or Settings > Built-in library > Use puts it back, and `CUSTOMISE RESET` does too unless the run was started with another built-in as its own: `KATANA_BUILTIN_CUSTOMISATION=NSW` starts with the other, and RESET then gives that one (`docs/headless.md`, "The customisation a run starts with"). `KATANA_BUILTIN_CUSTOMISATION=none` starts with no built-in.
 4. **Compiled in**: `-DKATANA_BUILTIN_CUSTOMISATION=<file>` at configure time embeds a different default, and `-DKATANA_ALTERNATE_CUSTOMISATIONS=<files>` further built-ins (`docs/building.md`, "The built-in customisation and the reference folder"). A build directory configured before this became the default that still has the earlier default is moved to this one by its next configure, once, with a line saying so.
-5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and `CODE CHECK` read them. `CODE CHECK` reports no problems on the file: 770 rules checked.
+5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and `CODE CHECK` read them. `CODE CHECK` reports no problems on the file: 1103 rules checked, no error and no warning (`cli.katana_standard_code_check_finds_no_problem`).
 
-A worked example, run for this document and held by `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code`. The invented field file `tests/data/katana_standard/street_corner.fld` has twenty entered coordinates: a lot boundary coded `CBT` in string 1 and closed by opcode 20, a kerb `KKT`, a paling fence `FFP`, a water main `UWM` and a disused cable `UED`, five single points (a valve `UWV`, a tree `VTB`, a gully pit `KPG`, a control mark `MCC`) and one mistyped code, `UWQ`. With the library loaded by `CUSTOMISE REPLACE`, `SURVEY IMPORT` draws 20 points and 5 lines: 19 points are coded onto 9 layers in 9 styles, and the 20th, `UWQ`, is reported as a code no rule answers, since every code has its own rule and no family rule swallows a typo. The lot boundary is a closed line of 100 m round, 600 square metres; the kerb and the water main are 24 m, the fence 10 m and the cable 20 m. Worked out by hand from the codes below before it was run.
+A worked example, run for this document and held by `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code`. The invented field file `tests/data/katana_standard/street_corner.fld` has twenty entered coordinates: a lot boundary coded `BT` in string 1 and closed by opcode 20, a kerb `KB`, a fence `FE`, a water main `WM` and a buried power line `EU`, four single points (an isolating valve `PWSV`, a tree trunk `PT04`, a gully pit `PGUL` and a bench mark `PBMK`) and one mistyped code, `PWSW`. With the library loaded by `CUSTOMISE REPLACE`, `SURVEY IMPORT` draws 20 points and 5 lines: 19 points are coded onto 9 layers in 9 styles, and the 20th, `PWSW`, is reported as a code no rule answers, since only the bare `*` fits it and that rule names no layer, no linestyle and no symbol. The lot boundary is a closed line of 100 m round, 600 square metres; the kerb and the water main are 24 m, the fence 10 m and the power line 20 m. Worked out by hand from the codes below before it was run.
 
 ![The street corner field file after SURVEY IMPORT, in the plan view](images/katana-standard-plan.png)
 
-*After the import, from the top: the closed lot boundary with its control mark and its tree; the paling fence beside it; the kerb with a gully pit; the water main with its valve; the disused cable. The plain cross inside the lot is `UWQ`, the point no rule answers. Pen weights are not yet applied, so the boundary is no heavier than the fence. The words beside each feature are laid on the screenshot afterwards, from the library's own legend labels.*
+*After the import, from the top: the closed lot boundary with its bench mark and its tree trunk; the fence beside it, drawn as posts on a wire; the kerb with a gully pit; the water main with its valve; the buried power line. The plain cross inside the lot is `PWSW`, the point no rule answers. Pen weights are not yet applied, so the boundary is no heavier than the fence. The words beside each feature are laid on the screenshot afterwards, from the library's own legend labels.*
 
 ## Reading a code
 
-A code is **three capital letters**: the class, the subgroup in that class, and the item. `UWM` is Utilities, Water, Main; `KKT` is Kerbs and Drainage, Kerbs, Top edge. In the field a point's code is the key and a string number, then control words: `UWM1 ST`, `UWM1`, `UWM1 END` is one water main. The grammar, in full:
+A code is a **key**, and the keys are the NSW customisation's: `AC*` is a bollard, `PT04` a tree trunk 400 mm across, `WM*` a water main. In the field a point's code is the key and a string number, then control words: `WM1 ST`, `WM1`, `WM1 END` is one water main. The grammar, in full:
 
-1. A key is THREE capital letters: class, subgroup, item. `UWM` is Utilities, Water, Main; `KKT` is Kerbs and Drainage, Kerbs, Top edge. The first two letters are in the table of classes below and fix the group and the first two levels of the layer; the third names the item inside its subgroup.
-2. Utility items share their third letter across services, so it is learnt once: M main, B branch or connection (a fire booster is UFB), D disused main, V isolation valve, X meter, P pit, H maintenance hole, K marker post or pillar, T tank or transformer, C cable, N duct, O overhead line. An item with no plain letter takes the next natural one, and those are this library's own and are learnt with it: U pumping station (UWU), P pumping station and power pole (USP, UEP; the power pit is J, UEJ), Y pole guy (UEY), H hydrant (UFH; a fire main has no maintenance hole), R pressure sewer and gas regulator (USR, UGR), E sewer vent (USE), L loop detector and unknown line (UIL, UXL), and M, free in the unknown services because their line is L, is the surface paint mark (UXM). The service letters are those of the one-letter asset types of AS 5488 where one exists (C E F G I P S W); R (recycled water) and X (unknown) are ours.
-3. DIGITS ARE NEVER PART OF A KEY. `UWM`, `UWM1` and `UWM01` are one code; the digits are the STRING NUMBER, which the linework reads: `UWM1` and `UWM2` are two water mains. A key written with a digit before its `*` would match only numbered names. A key is matched as written, in capitals: `uwm1` matches no rule (`CODE EXPLAIN uwm1` says the key `UWM*` differs only in letter case), so set the data collector to send capitals.
-4. Control words follow the code, after a space: `ST` first point, `END` last point, `CL` last point and close, `BC` and `EC` begin and end a curve (three points fix an arc), `JPN n` also join to point number n, `RECT` the third point of a rectangle. These are Katana's default spellings; the library says nothing about them, so loading it never resets a colleague's own. No key is a control word.
-5. There is no left or right suffix: the rule engine matches a key exactly or by prefix and has nothing else. Handedness is by walking direction. Ticks, barbs, triangles, scallops and chevrons always fall to the LEFT of travel, and each code's field-book line says which way to walk. Symbols are drawn upright and are not turned to a bearing (Katana reads a rule's rotation and does not yet apply it), so a symbol's position is its message.
-6. Every code owns a `KEY*` rule, so a typo (`UWQ`) is reported as "no rule" and is never swallowed by a family rule. All keys are three letters, so no key is a prefix of another; there is no bare `*` rule, and no rule is shadowed or repeated.
-7. What a code sets, in this order. `feature`: layer, colour, draw (line or point), linestyle (lines only), weight, group and comment. `symbol` for points and for lines that carry a symbol at every vertex (`both`: fences, tree rows, leaders). `text` for the six text codes. `pipe` for the nine pipe codes. `attributes`. `surface`, written for EVERY code, true or false: true for ground shots and levels, kerb, carriageway and path edges, banks, ridges, gullies, hard and soft breaklines, water edges, the cliff edge, drain inverts, and ballast and platform edges; false for everything else, including the exclusion boundary.
-8. Attributes. An attribute with an EMPTY value is a PROMPT: the code asks for it. One with a value is applied. Names carry their unit (`Depth (m)`, `Diameter (mm)`). Every buried utility asks Owner, Depth (m) and Condition, and a pipe also Material and Diameter (mm). Every utility code sets `utility.type` to its service word, and a disused code sets `utility.status` to `disused`. So do the stormwater pits and pipes of class K (KP and KC: `utility.type` is `stormwater`), which sit in Kerbs and Drainage because they are drainage, and are services all the same. Those are the keys and words Katana's utility tools read, so a coded string is already typed for UTILITY DRAW. The kerbs, channels and creeks of class K set none. The prompts use the library's own names, not `utility.owner`, so an empty prompt never reads as "recorded".
-9. `comment` is the LEGEND LABEL: a noun phrase in sentence case, 1 to 36 characters, which the plot legend prints in capitals. When several codes share one linestyle the legend takes the linestyle's name instead, unless every coded entity agrees on the label. Longer text is the meaning and the field-book line.
-10. Weights, in millimetres of pen: 0.13 hairline, 0.18 fine, 0.25 light, 0.35 medium, 0.50 strong (0.70 is reserved). The hairline is for hatching, joints, hidden detail, tree rows and canopies, flow paths, text and leaders; nothing in the planting or ground classes is lighter than 0.18, since those colours are the faintest on paper. Katana stores `weight` and does not yet apply it; the scale is still the documented intent.
-11. What Katana applies today and what it only stores. `CODE` applies layer, colour, linestyle, symbol name and size, and the string attributes (a value starting with `$` is deferred, not written), and the legend prints the comment. It stores, lists and lints, and does not yet apply: weight, group, hide, surface, text rules, pipe rules (justify, shape, sizes taken from the attributes), rotation, offset and raise. The rules are written for the day it does.
-12. Load the library alone, or with Replace. Merged onto another customisation, a broader prefix rule there can supply a field these rules leave unsaid (a symbol, a text), because the most specific rule wins field by field.
+1. THE KEYS ARE ANOTHER LIBRARY'S, AND SO IS WHAT EACH KEY STANDS FOR. Katana has two built-in customisations, this one and the NSW one (resources/customisation/nsw.customisation.json). By the owner's decision they use the SAME survey code keys, byte for byte, so that a field file coded for either draws in both. With a key comes what it is: the thing it codes, read from the other library's label for it (with the size or the model zone that library gives it), and the kinds of rule it has (rule 6). Nothing the other library NAMES, DRAWS or WORDS is taken: every layer, colour, weight, linestyle, symbol, attribute name, text style, group and legend label, and every sentence of the meanings and of this document, is Katana's own. No key is ours: the keys are the other library's identifiers, reused for field-data compatibility, and the licence notes say so (LICENSING.md).
+2. A key is an exact code or a prefix. `PBMK` matches the code PBMK and no other; `AC*` matches every code that begins AC (AC, AC1, AC01, ACE); the bare `*` matches every code. A code meets every key that fits it, and for each field the most specific rule that says anything about it wins: an exact key before a prefix, a longer prefix before a shorter, `*` last (`SurveyMap::lookup`). So the keys `PT04` and `PT04*` are two parts of one code: the first gives a trunk its symbol and the second keeps it out of the ground surface; and `Z0*` is more specific than `Z*`. A key is matched as written, in capitals: `ac1` matches no rule (`CODE EXPLAIN ac1` says the key `AC*` differs only in letter case), so set the data collector to send capitals.
+3. Keys are capital letters and digits. A digit that is part of a key belongs to it: `U1*` is a 225 mm stormwater pipe and `PT04` a 400 mm trunk. The STRING NUMBER follows the key, and the linework reads it: `WM1` and `WM2` are two water mains, both answered by `WM*`. The keys `1`, `2`, `3`, `4`, `5`, `7` and `8` are text sizes (1.5, 2.5, 3.5, 5, 7 and 10 mm of paper, and the parcel label's 2.5), and `1*` to `8*` give that text its layer.
+4. Control words follow the code, after a space: `ST` first point, `END` last point, `CL` last point and close, `BC` and `EC` begin and end a curve (three points fix an arc), `JPN n` also join to point number n, `RECT` the third point of a rectangle. These are Katana's default spellings; the library says nothing about them, so loading it never resets a colleague's own. The first token of a point's code is always the key, and a control word is read only after it. So a control word typed ALONE is a code, and six of the seven are answered: four keys are spelled like one (`BC*`, `CL*`, `EC*` and `ST*`: a point coded `CL` is a string called CL) and two more answer one by prefix (`EN*` answers `END`, `RE*` answers `RECT`); only `JPN` is answered by no key.
+5. There is no left or right suffix: the rule engine matches a key exactly or by prefix and has nothing else. A handed pair is two keys (`CV*` and `CY*` chevrons, `DA*` and `DC*` dragons teeth, `LH*` and `LR*` broken barrier lines, `HE*` and `HR*` wall hatching). Otherwise handedness is by walking direction: ticks, barbs, triangles, scallops and chevrons fall to the LEFT of travel. Symbols are drawn upright and are not turned to a bearing (Katana reads a rule's rotation and does not yet apply it), so a symbol's position is its message.
+6. The STRUCTURE of every key is the other library's: the same ordered kinds of rule (feature, symbol, text, pipe, vertexPipe, segmentPipe, attributes, vertexAttributes, surface), the same draw mode (line or point), the same hide and surface flags, text rules where it has text rules and pipe rules where it has pipe rules, so that one field file makes the same kinds of entity (points, lines, text, pipes, surface members) in either library. `tools/katana_standard/parity.py` compares the two files and the tests hold it. What a key LOOKS like is Katana's.
+7. One clean rule set per key. The other library repeats rules and shadows them, names pen colours that resolve to nothing, draws a symbol through a linestyle slot, and hangs on the pipe rules of its bare `*` attributes that a lookup applies to every code; this one writes one rule of each kind per key, resolves every name, says a symbol in a symbol rule and puts no attribute on a pipe rule. Where the two differ for that reason the key is listed in `parity_exceptions.json` with the reason, and `parity.py` fails the day an entry explains nothing.
+8. What a code sets, in this order. `feature`: layer, colour, draw (line or point, none for a layer-only key), linestyle (lines only), weight, group and comment. `symbol` for points and for lines that carry a symbol at every vertex. `text` for the text keys. `pipe`, `vertexPipe` and `segmentPipe` for the bare `*`. `attributes` and `vertexAttributes`. `surface`, written where the other library writes it, and false there every time: it keeps what is not the ground (a mark, a trunk, a design string, a pipe) out of a ground surface, and no key says it belongs in one. Layers are three levels, lower case (`class/group/family`), and a family is what one switches on and off together.
+9. Attributes. An attribute with an EMPTY value is a PROMPT: the code asks for it. One with a value is applied. Names carry their unit (`Depth (m)`, `Diameter (mm)`). The other library's attribute rules are kept as they are (a model zone to check, a point code), and one more is added to a code that stands for a buried or strung service, last: `utility.type` set to the service word, then the prompts Owner, Depth (m) (Height (m) for a line strung overhead) and Condition; a pipe also Material and Diameter (mm), a box culvert Width (mm) and Height (mm). Where the key stands for a size (a 300 mm pipe, a culvert 1200 mm high: the other library's label for the key gives it, the key itself states none) the size is applied. Those are the words Katana's utility tools read, so a coded string is already typed for UTILITY DRAW. Stormwater pits and pipes are services too, though they are catalogued with drainage. The prompts use the library's own names, not `utility.owner`, so an empty prompt never reads as "recorded". The added rule makes no entity and `parity.py` counts it apart.
+10. `comment` is the LEGEND LABEL: a noun phrase in sentence case, 1 to 36 characters, which the plot legend prints in capitals. When several codes share one linestyle the legend takes the linestyle's name instead, unless every coded entity agrees on the label. The longer text is `meaning`.
+11. Weights, in millimetres of pen: 0.13 hairline, 0.18 fine, 0.25 light, 0.35 medium, 0.50 strong (0.70 is reserved). The hairline is for hatching, joints, hidden detail, tree outlines, text and design strings; nothing in the planting or ground classes is lighter than 0.18, since those colours are the faintest on paper. Katana stores `weight` and does not yet apply it; the scale is still the documented intent.
+12. What Katana applies today and what it only stores. `CODE` applies layer, colour, linestyle, symbol name and size, and the string attributes (a value starting with `$` is deferred, not written), and the legend prints the comment. It stores, lists and lints, and does not yet apply: weight, group, hide, surface, text rules, pipe rules (justify, shape, sizes taken from the attributes), rotation, offset and raise. The rules are written for the day it does.
+13. Load the library alone, or with Replace. Merged onto another customisation, a broader prefix rule there can supply a field these rules leave unsaid (a symbol, a text), because the most specific rule wins field by field. Merged onto the other library, which has the same keys and the same kinds of rule for each, every rule of it is replaced by this library's (a merge replaces the rules of a key of one kind), so the codes become this library's; the other's definitions and colours stay loaded beside these, and no code names them.
+14. The classes. The 13 classes and their groups are this library's own way of arranging the keys for a reader and for the layer tree: a class letter is a label in the catalogue and is not part of any key. The keys that the other library labels as design strings (road, lane, earthworks, kerb, bridge, drainage and barrier design, master strings) are class D, Design and Setting Out; the bare `*` belongs to no class.
 
-### The twelve classes
+### The thirteen classes
 
-| Letter | Class | Codes | Subgroups | What it holds |
+The classes and groups arrange the keys for a reader and fix the first two levels of a layer. A class letter is a label for this table and for the picture scripts, and no key is built from one.
+
+| Letter | Class | Codes | Groups | What it holds |
 |---|---|---|---|---|
-| `C` | Boundaries and Cadastre | 18 | `CB` Lot Boundaries, `CE` Easements and Reserves, `CM` Boundary Marks | Where one owner's land ends and the next begins, and the marks that prove it. |
-| `R` | Roads and Pavements | 19 | `RC` Carriageway, `RM` Markings, `RP` Paths and Access | The made surface: its edges, its paint and the paths beside it. |
-| `S` | Street Furniture and Signs | 17 | `SS` Signs, `SL` Lighting, `SB` Posts and Barriers, `SA` Amenities, `ST` Traffic Control | What people read, sit on, light their way by or steer round. |
-| `K` | Kerbs and Drainage | 21 | `KK` Kerbs, `KP` Pits and Structures, `KC` Pipes and Culverts, `KW` Channels and Waterways | Where the street meets the water: kerbs, pits, pipes and channels. |
-| `T` | Rail and Transit | 10 | `TT` Track, `TO` Overhead and Signals, `TP` Platforms | Track, the wires above it and the platforms beside it. |
-| `U` | Utilities | 60 | `UW` Water, `US` Sewer, `UG` Gas, `UE` Electricity, `UC` Communications, `UR` Recycled Water, `UF` Fire Service, `UP` Fuel, `UI` Traffic Systems, `UX` Unknown Services | Everything buried or strung that carries a service, one family per service. |
-| `V` | Vegetation and Landscape | 16 | `VT` Trees, `VS` Shrubs and Plants, `VG` Ground Cover | Trees, shrubs and the edges of planted and natural ground cover. |
-| `B` | Buildings and Structures | 15 | `BB` Buildings, `BS` Structures, `BA` Steps and Access | What stands on the ground: buildings, bridges, masts, tanks and steps. |
-| `F` | Fences and Walls | 17 | `FF` Fences, `FW` Walls, `FG` Gates and Posts | What divides land: fences, walls, and the posts and gates between. |
-| `G` | Terrain and Breaklines | 23 | `GP` Ground Points, `GB` Breaklines, `GC` Contours, `GW` Water Edges, `GR` Rock and Cliff | The shape of the ground: shots, breaklines, contours, water edges and rock. |
-| `M` | Survey Control and Annotation | 20 | `MC` Control Marks, `MI` Investigation Points, `MT` Text and Notes, `MM` Plan Marks | The survey's own marks, its investigations and the words on the plan. |
-| `X` | Miscellaneous | 9 | `XH` Hazards and Heritage, `XG` General, `XT` Temporary Works | Hazards, heritage, temporary works and the catch-alls. |
+| `C` | Boundaries and Cadastre | 30 | Lot Boundaries, Easements and Reserves, Boundary Marks | Where one owner's land ends and the next begins, and the marks that prove it. |
+| `R` | Roads and Pavements | 36 | Carriageway, Markings, Paths and Access | The made surface: its edges, its paint and the paths beside it. |
+| `S` | Street Furniture and Signs | 36 | Signs, Lighting, Posts and Barriers, Amenities, Traffic Control | What people read, sit on, light their way by or steer round. |
+| `K` | Kerbs and Drainage | 82 | Kerbs, Pits and Structures, Pipes and Culverts, Channels and Waterways | Where the street meets the water: kerbs, pits, pipes and channels. |
+| `T` | Rail and Transit | 13 | Track, Overhead and Signals, Platforms | Track, the lineside fittings and the platforms beside it. |
+| `U` | Utilities | 118 | Water, Sewer, Gas, Electricity, Communications, Recycled Water, Fire Service, Fuel, Traffic Systems, Unknown Services | Everything buried or strung that carries a service, one family per service. |
+| `V` | Vegetation and Landscape | 58 | Trees, Ground Cover | Trees and the edges of planted and natural ground cover. |
+| `B` | Buildings and Structures | 35 | Buildings, Structures, Steps and Access | What stands on the ground: buildings, bridges, masts, tanks and steps. |
+| `F` | Fences and Walls | 8 | Fences, Walls, Gates and Posts | What divides land: fences, walls, and the posts and gates between. |
+| `G` | Terrain and Breaklines | 25 | Ground Points, Breaklines, Contours, Water Edges, Rock and Cliff | The shape of the ground: shots, breaklines, contours, water edges and rock. |
+| `M` | Survey Control and Annotation | 54 | Control Marks, Investigation Points, Text and Notes, Plan Marks | The survey's own marks, its investigations and the words on the plan. |
+| `X` | Miscellaneous | 21 | Hazards and Heritage, General, Land Use Areas | Hazards, heritage, land use and the catch-alls. |
+| `D` | Design and Setting Out | 115 | Road Design Strings, Lane Marking Design, Earthworks Design, Kerb and Carriageway Design, Bridge Design, Drainage Design, Barrier and Fence Design, Master Strings, Design General | Strings that carry a design, not a survey: set out from them, do not read the ground from them. |
+
+The bare `*` belongs to no class. What each kind of code draws, by count:
+
+| Kind | Codes | Meaning |
+|---|---|---|
+| line | 359 | a line, joined from the points |
+| point | 205 | a point, with a symbol (all but `POCP`, `PRTR` and `PLIG*`, which name none and draw as a plain point) |
+| both | 1 | a line with a symbol at every vertex |
+| text | 7 | text of a size |
+| layer | 7 | the layer of the text codes |
+| surface | 52 | a surface flag and nothing else |
+| pipe | 1 | the round pipe section of any string that carries a diameter |
 
 ### Pen weights
 
@@ -78,14 +96,43 @@ Every code names one of five weights, in millimetres of pen; a sixth is reserved
 
 | Weight | Role | For |
 |---|---|---|
-| 0.13 | hairline | hatching, joints, hidden detail, tree rows, leaders, text |
+| 0.13 | hairline | hatching, joints, hidden detail, tree outlines, design strings, text |
 | 0.18 | fine | vegetation, ground shots and levels, intermediate contours, markings, minor services |
-| 0.25 | light | everyday detail: fences, paths, branches |
+| 0.25 | light | everyday detail: fences, paths, branches, structures |
 | 0.35 | medium | primary detail: kerbs, building walls, service mains, index contours |
 | 0.50 | strong | title boundary, bridge decks, limit of survey |
 | 0.70 | bold | reserved; not used by a code in edition 1 |
 
-**What Katana applies today.** `CODE` and a survey import apply layer, colour, linestyle, symbol name and the string attributes, and the plot legend prints the comment. Katana stores, lists and lints, and does not yet apply: `weight`, `group`, `hide`, `surface`, text rules, pipe rules, and a symbol's rotation, offset and raise. So the codes `GPG` and `GPR` (ground points shown by their level) are marked `hide` and still draw their one-millimetre plus, the six text codes draw a plus until text rules are applied, and the plain continuous lines of one colour on one layer, such as the two carriageway edges `RCE` and `RCI`, or the kerb top `KKT` and the kerb return `KKR` (one feature, straight and curved), look the same on the plan until the weight is applied. The rules are written for the day it does.
+**What Katana applies today.** `CODE` and a survey import apply layer, colour, linestyle, symbol name and the string attributes, and the plot legend prints the comment. Katana stores, lists and lints, and does not yet apply: `weight`, `group`, `hide`, `surface`, text rules, pipe rules, and a symbol's rotation, offset and raise. So the four hidden symbols still draw, the seven text codes draw a plus until text rules are applied, and the plain continuous lines of one colour on one layer, such as the kerb top `KB*` and the kerb edge of a median `TM*`, look the same on the plan until the weight is applied. The rules are written for the day it does.
+
+## What is shared and what is not
+
+**Shared, by the owner's decision: the survey code keys, what each key stands for, and what it does.** Three things come from the NSW customisation, and each is a fact about a key and not a name, a drawing or a sentence:
+
+1. **The keys.** The same 632 keys, byte for byte, including every prefix rule ending in `*`, the numbered families and the bare `*`.
+2. **What each key stands for.** A key says nothing by itself: that `AC*` is a bollard and `U3*` a 375 mm pipe is read from the other library's label for the key, and so is every size and number a code here states. 28 keys apply a pipe diameter and 18 a culvert height that the other library's label gives and the key does not; 12 keys apply the model zone of the other library's attributes rule; the 7 text keys have its text sizes. The reading is this library's, worded in its own sentences ("Not done" says where a label left the purpose open).
+3. **What each key does.** The same kinds of rule in the same order, the same draw mode (line or point), the same hide and surface flags, a text rule of the same units, size and justification where the other has one, and pipe rules of the same justification and shape where the other has them. A field file therefore makes the same kinds of entity in either.
+
+These are the other library's identifiers and its facts about them, reused for field-data compatibility (`LICENSING.md` says what that leaves open). `tools/katana_standard/parity.py` compares the two files and the tests hold the result.
+
+**Katana's own: everything the library names, draws and words.** Linestyles and symbols (every one drawn here, from a written brief and looked at in Katana's own renderer) and their names, group paths, layer paths, colours and the colour table, pen weights, attribute names, text styles, legend labels, and every sentence of every meaning and of this document. `tools/katana_standard/originality.py` scans the two files for what a person could copy and the test `KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the result: no definition name, group path, layer path, legend label, colour name, attribute name or text style is the same in both, and no stroke list is, exactly, moved or scaled, beyond the dash, the plus and the square that any library draws. A name is the same when its letters and digits are, whatever its case, blanks and punctuation; and a definition name is compared with everything the other library calls a thing: its definition names, those names without the capitals it puts in front of them, and its legend labels, since a symbol named after the other library's label would be its name for the thing all the same. None is. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for communications and which every drawing system has. The script and the tests excuse that one white, the communications colour of `utilityTypeColour`, and no other value: a second white would fail them.
+
+**What two libraries cannot help sharing** is the trade's own names for real things, and the sizes above. A give way line, a sewage pumping station and a culvert by its height are called that by anyone, so some legend labels here are near the other library's label for the same key without being it: `originality.py` counts them (28 at 0.85 alike or more) and prints this library's side, as a figure to read. No definition name and no legend label is as near as 0.9 to anything the other library calls a thing, whatever the key. The meanings are sentences written for this document, and where one uses a term of the trade or of the law (a permanent survey mark, an endangered ecological community) it is because that is the thing's name.
+
+**One field file, the same kinds of entity.** A code is answered by several keys at once, the exact key and every prefix key that fits it, and each field comes from the most specific rule that says it; so beside comparing key with key, `parity.py` looks up 2292 codes in both files as the program does (every key's own code, alone and followed by a string number, a padded one and a letter) and compares what comes out: the draw mode, the surface flag, whether a symbol is drawn and whether it is hidden, the text and the pipe rules. They are the same for every one.
+
+**Where the other library is not clean, this one is.** The NSW customisation holds 1624 rules over 632 keys. 446 of the rules repeat an earlier rule of their key exactly and 257 add nothing to an earlier one, in 465 of the keys; 5 more say something the first rule of their kind leaves unsaid, which a lookup then takes (in 4 keys a `hide`, so the symbol is hidden); 3 keys name a pen colour that resolves to nothing; 1 draws its symbol through the linestyle slot, which `CODE CHECK` reports as a linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in which a rule can be for one case of an attribute, carry those cases as attributes, which a lookup here applies to every code (4 of them). Katana Standard keeps one clean rule set per key: one rule of each kind, every name resolved, the symbol said in a symbol rule, `hide` said where the lookup makes it true, and no attribute on a pipe rule. Those 669 differences are listed in `tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and `parity.py` fails on an entry that explains nothing or a difference that has none.
+
+| Reason | Keys | What the other library does and this one does not |
+|---|---|---|
+| nsw-duplicate-collapsed | 445 | repeats a rule of the key field for field |
+| nsw-shadowed-collapsed | 214 | has a later rule of a kind that says nothing the earlier one of the key did not |
+| nsw-fields-merged | 5 | has a later rule that says a field, or names an attribute, that the first leaves unsaid; here the one rule says the field |
+| nsw-unknown-colour-replaced | 3 | names a pen colour that resolves to nothing |
+| nsw-linestyle-symbol-resolved | 1 | names a symbol as a linestyle; here a symbol rule follows the feature rule |
+| nsw-pipe-attributes-left-out | 1 | carries attributes on its pipe rules, which a lookup applies to every code the key answers; here a pipe rule carries none |
+
+**What this library adds.** 186 keys carry one more attributes rule than the other library has for them, last: the service word `utility.type` and the prompts Owner, Depth (m) and Condition (grammar rule 9). The rule makes no entity, so the same field file still makes the same kinds of entity; it is why a coded string is typed for `UTILITY DRAW`. `parity.py` counts these apart (186 rules) and `--no-extra-attributes` makes them differences. So the kinds of entity are the same in the two libraries and the properties on them are not: a service coded here carries its service word and its prompts, and nothing coded here carries the attributes the other's `*` rules apply.
 
 ## The palette
 
@@ -144,7 +191,7 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 | Colour | Value | Used for | AS 5488 | On the ground | On white |
 |---|---|---|---|---|---|
 | `katana tree` | `#5C8627` | trees |  | 3.69 : 1 | 4.29 : 1 |
-| `katana planting` | `#779624` | shrubs, hedges and ground cover |  | 4.65 : 1 | 3.40 : 1 |
+| `katana planting` | `#779624` | the edges of timber, scrub, grass and crops |  | 4.65 : 1 | 3.40 : 1 |
 
 **Built form**
 
@@ -164,9 +211,9 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 
 ## Linestyles
 
-73 linestyles, each a repeating cell. A linestyle named by a rule replaces the line, so the gaps are the library's job; every one is drawn so that it reads at plan scale on screen and on a plotted sheet.
+98 linestyles, each a repeating cell. A linestyle named by a rule replaces the line, so the gaps are the library's job; every one is drawn so that it reads at plan scale on screen and on a plotted sheet.
 
-![All 73 linestyles of Katana Standard, drawn by Katana](images/katana-standard-linestyles.png)
+![All 98 linestyles of Katana Standard, drawn by Katana](images/katana-standard-linestyles.png)
 
 *One sample of each, drawn by a code that uses it. Pen weights are not yet applied, so every line is the same width here. This is a plot on white paper: the communications cable prints black, and the sewer and gas pipes print light, since AS 5488's cream and yellow are under 3:1 on white (see the palette).*
 
@@ -174,11 +221,12 @@ Twenty-eight colours, each named `katana <role>` so a rule reads as the thing it
 
 - Units are paper millimetres, so a pattern keeps its size at any plan scale.  +x runs along the line and +y is to its LEFT.  Instance k starts at k times `length`; every stroke lies inside 0..length in x and inside plus or minus 3.4 mm in y, so a pattern closes on itself and nothing overshoots a join.
 - A cell is laid out from x = 0.  A dash starts it, so a line opens with a full dash, and every dash is one stroke inside its cell: nothing abuts across the join, which would show as a faint seam where two antialiased ends meet.  Marks stand at the exact middle of a gap or of the cell.  Waves start on the line.
-- The repeating pattern is mirror-symmetric along the line, about the middle of one of its dashes or marks, so read from either end it has the same marks in the same places: only where a mark stands to one side (a tick, a hump) does the digitising direction show, always as the LEFT.  The few patterns with a direction of their own (the flow chevrons, the dot-dot-dash drain) or an irregular tuft are named in SYMMETRY with "none", and the lightning bolt, which leans, with "point"; the check proves the symmetry of the rest.
+- The repeating pattern is mirror-symmetric along the line, about the middle of one of its dashes or marks, so read from either end it has the same marks in the same places: only where a mark stands to one side (a tick, a hump) does the digitising direction show, always as the LEFT.  The few patterns with a direction of their own (the flow chevrons, the dot-dot-dash drain) or an irregular tuft are named in SYMMETRY with "none", and the barrier hatch, which leans, with "point"; the check proves the symmetry of the rest.
 - Katana lays a definition by giving every stroke POINT its own distance along the line, so a long straight stroke is a chord and cuts a corner.  Every straight run along the line is drawn in chords of at most one millimetre (`_Pen.run`), which keeps a dash or a baseline within about 0.35 mm of a right-angle corner.
 - A dot is a 0.6 mm dash.  Katana draws the `dot` stroke as one point the width of the pen: a speck a third of the line's weight on a plot and a single pixel on the screen, so that a dash-dot line reads as dashes.
-- Posts stand ON the line, which runs through them: guard rails, fence posts, chain mesh.  Beads are THREADED on it, the line stopping at each side of the bead and the inside left open: the contour diamond, the insulator ring, the exclusion square.  The two kinds of mark are then told apart at a glance even where their outlines match.
+- Posts stand ON the line, which runs through them: guard rails, fence posts, chain mesh.  Beads are THREADED on it, the line stopping at each side of the bead and the inside left open: the contour diamond and the insulator ring.  The two kinds of mark are then told apart at a glance even where their outlines match.
 - Letters are 2.4 mm and `middle-centre`, in a gap of 5 mm or more.  Numbers carry at most three decimals. No stroke names a pen: the code's rule gives the colour.
+- Paint is drawn as lines, so a "solid" shape (an arrowhead, a block) is a closed outline ruled with fine lines parallel to its axis, 0.4 to 0.5 mm apart, which reads as ink at plan scale.  A road arrow lies along the line and points the way you shot; a turn or a branch stands to the LEFT or RIGHT of the line, as its name says.  A mark that leans (an arrow, a hatch tick) is named in SYMMETRY with "none".
 
 Reading a table: *Period* is the length of one cell in millimetres of paper; *Used by* lists the codes that name it. A linestyle shared by several codes is the same line in each: the layer and the colour tell them apart.
 
@@ -186,265 +234,307 @@ Reading a table: *Period* is the length of one cell in millimetres of paper; *Us
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Title Boundary` | 25 | Unbroken line crossed by a short tick every 25 mm: the registered title boundary, the firmest line in the cadastre. | `CBT` |
-| `Occupation Boundary` | 10 | Even dashes, 7 on and 3 off: a boundary as occupied on the ground (a fence line, a wall face) and not as titled. | `CBO` |
-| `Compiled Boundary` | 14 | Long dash, then one dot: a boundary compiled from plans and not measured in the field. | `CBC` |
-| `Reserve Boundary` | 18 | Long dash, then two dots: the limit of a public road reserve or of a park or reserve. | `CBR` `CER` |
-| `Municipal Boundary` | 20 | Long dash and a short dash in turn: the boundary between two local government areas. | `CBM` |
+| `Surveyed Boundary` | 25 | Unbroken line crossed by a short tick every 25 mm: the registered title boundary, the firmest line in the cadastre. | `BT*` |
+| `Compiled Boundary` | 14 | Long dash, then one dot: a boundary compiled from plans and not measured in the field. | `BC*` |
+| `Estimated Boundary` | 12 | Unbroken line with a small ring standing against it on the left every 12 mm: a boundary known only to about half a metre. | `BN*` |
+| `Digital Boundary` | 3.5 | A sparse dotted line, one dot every 3.5 mm: a boundary read from the digital cadastre, the least certain of the boundary lines. | `BM*` |
+| `Acquisition Boundary` | 14 | Long dashes with the letter A standing in each gap: the proposed boundary of land to be acquired, not yet on title. | `BY*` |
+| `Stratum Parcel Edge` | 6 | A square wave 1.2 mm high with 3 mm steps and no baseline, like levels stacked one above the next: the limit of a stratum parcel. | `BZ*` |
+| `Survey Join Line` | 9 | Fine dashes with a short bar across the line in each gap: a line that joins two points of a plan and is not itself a boundary. | `JL*` |
 
 ### Boundaries and Cadastre/Easements and Reserves
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Easement Boundary` | 9 | Paired short dashes, 2.6 on, 0.9 off, 2.6 on, then 2.9 off: the edge of an easement or covenant area; the code says what it carries. | `CEA` `CED` `CES` `CEG` `CEV` |
+| `Easement Boundary` | 9 | Paired short dashes, 2.6 on, 0.9 off, 2.6 on, then 2.9 off: the edge of an easement or covenant area; the code says what it carries. | `BE*` |
 
 ### Roads and Pavements/Carriageway
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Unsealed Road Edge` | 2.5 | A fine stipple of short specks, like gravel thrown on the edge: the edge of an unsealed road. | `RCU` |
-| `Shoulder Edge` | 8 | Dashes, 6 on and 2 off: the outer edge of the road shoulder. | `RCS` |
-| `Road Centreline` | 14 | Long dashes with a cross tick standing in each gap: the centre of the carriageway, shot at the crown. | `RCL` |
+| `Unsealed Road Edge` | 2.5 | A fine stipple of short specks, like gravel thrown on the edge: the edge of an unsealed road. | `EK*` `UR*` `VT*` |
+| `Road Centreline` | 14 | Long dashes with a cross tick standing in each gap: the centre of the carriageway, shot at the crown. | `OF*` `RC*` `NL*` |
 
 ### Roads and Pavements/Markings
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Dashed Lane Marking` | 12 | Short painted dashes with long gaps, 4 on and 8 off: the dashed line between traffic lanes. | `RMD` |
-| `Double Barrier Marking` | 10 | Two close unbroken lines, 1 mm apart: the double continuous barrier line painted on a road. | `RMB` |
-| `Zebra Crossing Marking` | 3 | A row of bars across the line with no baseline, like the stripes of a zebra crossing; shoot it along the crossing's width. | `RMZ` |
+| `Dashed Lane Marking` | 12 | Short painted dashes with long gaps, 4 on and 8 off: the dashed line between traffic lanes. | `LL*` `L3*` `L4*` `L6*` `LN*` |
+| `Double Barrier Marking` | 10 | Two close unbroken lines, 1 mm apart: the double continuous barrier line painted on a road. | `DB*` `LD*` |
+| `Zebra Crossing Marking` | 3 | A row of bars across the line with no baseline, like the stripes of a zebra crossing; shoot it along the crossing's width. | `CZ*` `TL*` `LZ*` |
+| `Lane Continuity Marking` | 8 | Short paint dashes, 2 on and 6 off: the broken line that carries a lane, a turn or a give-way line through a junction. | `CC*` `LA*` `LF*` `LJ*` `LT*` `LW*` |
+| `Equal Dash Marking` | 10 | Paint dashes and gaps of equal length, 5 on and 5 off: the broken line of separation and clearway marking. | `CN*` `CW*` |
+| `Give Way Marking` | 4 | Unbroken line with a row of small triangles standing on it to the left, one every 4 mm: the give-way line across a turning lane. | `CG*` |
+| `Left Chevron Marking` | 5 | A row of open chevrons 3 mm wide centred on the line, each with its point to the left of travel: painted hatching on an island or gore. | `CV*` |
+| `Right Chevron Marking` | 5 | A row of open chevrons 3 mm wide centred on the line, each with its point to the right of travel: painted hatching on an island or gore. | `CY*` |
+| `Crossing Approach Marking` | 8 | A sharp zigzag 3 mm high and 8 mm long with no baseline: the zigzag painted along the approach to a pedestrian crossing. | `CA*` |
+| `Signal Crossing Marking` | 8 | Two parallel rows of dashes 4 mm apart, 4 on and 4 off: the lines that bound a pedestrian crossing controlled by signals. | `CX*` |
+| `Left Broken Barrier Marking` | 9 | An unbroken line with a broken line 1 mm to its left, 6 on and 3 off: a barrier line on one side and a separation line on the other. | `BS*` `LH*` |
+| `Right Broken Barrier Marking` | 9 | An unbroken line with a broken line 1 mm to its right, 6 on and 3 off: the mirror of the left broken barrier marking. | `SB*` `LR*` |
+| `Left Dragons Teeth Marking` | 6 | A row of painted triangles 4 mm along the line and 3 mm deep, standing to its left, one every 6 mm, with no baseline: dragons teeth. | `DA*` |
+| `Right Dragons Teeth Marking` | 6 | A row of painted triangles 4 mm along the line and 3 mm deep, standing to its right, one every 6 mm, with no baseline: dragons teeth. | `DC*` |
+| `Straight Ahead Arrow Marking` | 22 | A painted lane arrow along the line, a shaft ending in a ruled arrowhead, one every 22 mm and pointing the way you shot. | `AS*` |
+| `Left Turn Arrow Marking` | 14 | A painted lane arrow along the line: a shaft that turns 90 degrees to the left into a ruled arrowhead, one every 14 mm. | `AL*` |
+| `Right Turn Arrow Marking` | 14 | A painted lane arrow along the line: a shaft that turns 90 degrees to the right into a ruled arrowhead, one every 14 mm. | `AR*` |
+| `Straight and Left Arrow Marking` | 22 | A painted lane arrow along the line: a straight arrow with a second, smaller arrow branching to the left, one every 22 mm. | `AE*` |
+| `Straight and Right Arrow Marking` | 22 | A painted lane arrow along the line: a straight arrow with a second, smaller arrow branching to the right, one every 22 mm. | `AI*` |
 
-### Roads and Pavements/Paths and Access
+### Street Furniture and Signs/Signs
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Cycleway Edge` | 10 | Dashes with a small bead in each gap: the edge of a cycleway or a shared path. | `RPC` |
+| `Hundred Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 100: a stretch of road signed with a speed limit of 100 km/h. | `S1*` |
+| `Hundred and Ten Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 110: a stretch of road signed with a speed limit of 110 km/h. | `S2*` |
+| `Forty Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 40: a stretch of road signed with a speed limit of 40 km/h. | `S4*` |
+| `Fifty Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 50: a stretch of road signed with a speed limit of 50 km/h. | `S5*` |
+| `Sixty Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 60: a stretch of road signed with a speed limit of 60 km/h. | `S6*` |
+| `Seventy Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 70: a stretch of road signed with a speed limit of 70 km/h. | `S7*` |
+| `Eighty Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 80: a stretch of road signed with a speed limit of 80 km/h. | `S8*` |
+| `Ninety Speed Zone Line` | 30 | Unbroken line broken every 30 mm by the number 90: a stretch of road signed with a speed limit of 90 km/h. | `S9*` |
 
 ### Street Furniture and Signs/Posts and Barriers
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Guard Rail Line` | 12 | Unbroken line with a small square post every 12 mm, the rail running through it: a roadside guard rail or crash barrier. | `SBL` |
+| `Guard Rail Line` | 12 | Unbroken line with a small square post every 12 mm, the rail running through it: a roadside guard rail or crash barrier. | `FG*` `TG*` `BF*` `BG*` `MS*` |
+| `Wire Rope Barrier Line` | 3 | Two fine waves in opposite phase that cross every 1.5 mm like a twisted rope, with no posts: a safety barrier of tensioned cable. | `FW*` |
+| `Concrete Barrier Line` | 2.4 | Two parallel lines 1.6 mm apart ruled with a close diagonal hatch, like concrete in section: a solid safety barrier, shot along its base. | `KJ*` |
 
 ### Kerbs and Drainage/Kerbs
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Gutter Lip Line` | 9 | Long dashes with a narrow gap, 7.6 on and 1.4 off, like the joints of a concrete gutter: the flow line at the foot of a kerb face. | `KKL` |
-| `Kerb Back Line` | 3.3 | Fine short dashes, 2.2 on and 1.1 off, stitched along the line: the back edge of a kerb, where it meets the verge or the path. | `KKB` |
-| `Mountable Kerb Edge` | 6 | Unbroken line with a rounded hump to the left every 6 mm: a low kerb a vehicle can drive over. | `KKM` |
-| `Dish Drain Edge` | 8 | Unbroken line with a shallow V standing to its left every 8 mm: a V-shaped concrete dish drain. | `KKD` |
+| `Gutter Lip Line` | 9 | Long dashes with a narrow gap, 7.6 on and 1.4 off, like the joints of a concrete gutter: the flow line at the foot of a kerb face. | `FI*` `LP*` |
+| `Kerb Back Line` | 3.3 | Fine short dashes, 2.2 on and 1.1 off, stitched along the line: the back edge of a kerb, where it meets the verge or the path. | `BK*` |
+| `Dish Drain Edge` | 8 | Unbroken line with a shallow V standing to its left every 8 mm: a V-shaped concrete dish drain. | `DD*` `ID*` |
 
 ### Kerbs and Drainage/Pipes and Culverts
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Stormwater Pipe Line` | 16 | A line broken by the letter D every 16 mm: a stormwater pipe, shot at the surface or inside the pits. | `KCP` |
-| `Subsoil Drain Line` | 9 | Two dots and a dash in turn, written in the digitising direction: a perforated subsoil drain. | `KCS` |
-| `Culvert Outline` | 12 | Two parallel lines 1.8 mm apart joined by a tie every 12 mm, like a ladder: a rectangular culvert. | `KCB` |
+| `Stormwater Pipe Line` | 16 | A line broken by the letter D every 16 mm: a stormwater pipe, shot at the surface or inside the pits. | `U1*` `U2*` `U3*` `U4*` `U5*` `U6*` `U7*` `U9*` `UU*` `UX*` `UZ*` `V1*` `V2*` `V3*` `V5*` `V6*` `V8*` `DI*` |
+| `Culvert Outline` | 12 | Two parallel lines 1.8 mm apart joined by a tie every 12 mm, like a ladder: a rectangular culvert. | `B0*` `B1*` `B2*` `B3*` `B4*` `B6*` `B7*` `B9*` `BX*` `D0*` `D1*` `D2*` `D3*` `D4*` `D5*` `D6*` `D7*` `D8*` `D9*` `DZ*` `UB*` `DV*` |
 
 ### Kerbs and Drainage/Channels and Waterways
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Open Drain Invert` | 14 | Unbroken line with an open chevron that points the way you shot, downstream: an open drain, a swale or a flow path. | `KWD` `KWS` `KWF` |
-| `Creek Centreline` | 12 | A smooth continuous wave 1.8 mm high and 6 mm long: the centre of a creek or river bed. | `KWC` |
+| `Open Drain Invert` | 14 | Unbroken line with an open chevron that points the way you shot, downstream: an open drain, a swale or a flow path. | `DF*` `DT*` `DL*` `DU*` |
+| `Creek Centreline` | 12 | A smooth continuous wave 1.8 mm high and 6 mm long: the centre of a creek or river bed. | `WC*` |
 
 ### Rail and Transit/Track
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Running Rail` | 4 | Unbroken line crossed by a tie every 4 mm, like a ladder: the head of a running rail. | `TTR` |
-| `Track Centreline` | 14 | Long dashes with a small square standing in each gap: the centre of the track between the rails. | `TTC` |
-| `Ballast Edge` | 3 | Two rows of tiny dashes, one 1 mm above the other and staggered, like stones: the shoulder of the ballast. | `TTB` |
-
-### Rail and Transit/Overhead and Signals
-
-| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Contact Wire Line` | 12 | Unbroken line with a tick to the left, then a tick to the right: the overhead contact wire, shot at each mast. | `TOW` |
+| `Running Rail` | 4 | Unbroken line crossed by a tie every 4 mm, like a ladder: the head of a running rail. | `RA*` |
+| `Track Centreline` | 14 | Long dashes with a small square standing in each gap: the centre of the track between the rails. | `RT*` |
+| `Track Formation Edge` | 7 | Unbroken line with a pair of close short ticks to the left every 7 mm: the edge of the formation that carries the ballast. | `RF*` |
 
 ### Rail and Transit/Platforms
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Platform Edge Line` | 5 | Unbroken line with a short tick to the left every 5 mm: the edge of a platform. | `TPE` |
+| `Platform Edge Line` | 5 | Unbroken line with a short tick to the left every 5 mm: the edge of a platform. | `RP*` `LB*` |
 
 ### Utilities/Water
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Water Supply Pipe` | 16 | A line broken by the letter W every 16 mm: a pressure main that carries drinking water. | `UWM` |
+| `Water Supply Pipe` | 16 | A line broken by the letter W every 16 mm: a pressure main that carries drinking water. | `UO*` `WI*` `WM*` `WZ*` |
 
 ### Utilities/Sewer
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Sewer Gravity Pipe` | 20 | A line broken by the letter S and a small flow chevron: a gravity sewer. The chevron points the way you shot, so shoot downhill. | `USM` |
-| `Sewer Pressure Pipe` | 20 | A line broken by the letters SR every 20 mm: a pressure sewer that carries flow uphill. | `USR` |
+| `Sewer Gravity Pipe` | 20 | A line broken by the letter S and a small flow chevron: a gravity sewer. The chevron points the way you shot, so shoot downhill. | `SM*` `SZ*` |
+| `Sewer Pressure Pipe` | 20 | A line broken by the letters SR every 20 mm: a pressure sewer that carries flow uphill. | `SR*` |
 
 ### Utilities/Gas
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Gas Supply Pipe` | 16 | A line broken by the letter G every 16 mm: a pipe that carries natural gas. | `UGM` |
+| `Gas Supply Pipe` | 16 | A line broken by the letter G every 16 mm: a pipe that carries natural gas. | `HA*` `HG*` `LG*` `NG*` `YG*` `ZG*` |
 
 ### Utilities/Electricity
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Underground Cable` | 12 | A line broken by the letter E every 12 mm: a buried electricity cable. | `UEC` |
-| `Overhead Line` | 14 | Unbroken line with a small ring, an insulator, threaded on it every 14 mm: an overhead power or communications line. | `UEO` `UCO` |
+| `Underground Cable` | 12 | A line broken by the letter E every 12 mm: a buried electricity cable. | `EA*` `EU*` `EZ*` |
+| `Overhead Line` | 14 | Unbroken line with a small ring, an insulator, threaded on it every 14 mm: an overhead power or communications line. | `SC*` `UE*` `UL*` `OA*` |
 
 ### Utilities/Communications
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Communications Cable` | 12 | A line broken by the letter C every 12 mm: a buried telephone, data or fibre cable. | `UCC` |
+| `Communications Cable` | 12 | A line broken by the letter C every 12 mm: a buried telephone, data or fibre cable. | `OU*` `OZ*` `TN*` `TZ*` |
 
 ### Utilities/Recycled Water
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Recycled Water Pipe` | 16 | A line broken by the letter R every 16 mm: a main that carries recycled water. | `URM` |
-
-### Utilities/Fire Service
-
-| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Fire Service Pipe` | 16 | A line broken by the letter F every 16 mm: a main that serves hydrants and sprinklers. | `UFM` |
+| `Recycled Water Pipe` | 16 | A line broken by the letter R every 16 mm: a main that carries recycled water. | `RM*` |
 
 ### Utilities/Fuel
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Fuel Supply Pipe` | 16 | A line broken by the letter P every 16 mm: a pipeline for fuel or oil. | `UPM` |
+| `Fuel Supply Pipe` | 16 | A line broken by the letter P every 16 mm: a pipeline for fuel or oil. | `FU*` `FZ*` `HO*` `HZ*` |
+
+### Utilities/Traffic Systems
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Traffic Systems Cable` | 18 | A line broken by the letters TS every 18 mm: a buried cable of the traffic systems service, which serves signals and cameras. | `IT*` `SD*` |
 
 ### Utilities/Unknown Services
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Unknown Service Line` | 12 | A line broken by a question mark every 12 mm: a buried line whose service is not yet known. | `UXL` |
+| `Unknown Service Line` | 12 | A line broken by a question mark every 12 mm: a buried line whose service is not yet known. | `UP*` |
 
 ### Utilities/All Services
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Buried Duct` | 10 | Two close parallel dashed lines, 1.2 mm apart: a duct or conduit that carries cable, whatever the service. | `UEN` `UCN` `UIC` |
-| `Service Connection Line` | 6 | Fine even dashes, 3 on and 3 off: the small property connection between a main and a lot. | `UWB` `USB` `UGB` `URB` |
-| `Disused Service Line` | 8 | Dashes with a small cross in each gap: a service that is no longer in use, whatever its kind. | `UWD` `USD` `UGD` `UED` `UCD` `URD` |
-
-### Vegetation and Landscape/Shrubs and Plants
-
-| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Hedge Line` | 2.4 | A row of small round scallops to the left with no baseline: a clipped hedge, shot along its face. | `VSH` |
+| `Buried Duct` | 10 | Two close parallel dashed lines, 1.2 mm apart: a duct or conduit that carries cable, whatever the service. | `RS*` `ED*` `OD*` `TD*` |
+| `Service Connection Line` | 6 | Fine even dashes, 3 on and 3 off: the small property connection between a main and a lot. | `WY*` `SY*` `DG*` `EY*` `TY*` |
 
 ### Vegetation and Landscape/Ground Cover
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Bush Edge Line` | 7 | Unbroken line with three uneven ticks to the left, like a tuft: the edge of scrub or bush. | `VGB` |
-| `Grass Edge` | 6 | Unbroken line with a small fan of three blades to the left every 6 mm: the edge of mown grass. | `VGL` |
+| `Bush Edge Line` | 7 | Unbroken line with three uneven ticks to the left, like a tuft: the edge of scrub or bush. | `JD*` |
+| `Medium Bush Edge` | 12 | Unbroken line with one tuft of three uneven ticks to its left every 12 mm: the edge of medium-density timber or scrub. | `JM*` |
+| `Scattered Bush Edge` | 20 | Dashes with one short tick to the left in each gap: the edge of scattered timber or scrub, the sparsest of the three bush edges. | `JS*` |
+| `Grass Edge` | 6 | Unbroken line with a small fan of three blades to the left every 6 mm: the edge of mown grass. | `JG*` `OG*` `OP*` |
 
 ### Buildings and Structures/Buildings
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Eave Line` | 10.5 | A long dash and a short dash in turn, 1.5 mm apart: the edge of a roof overhang, a verandah or an awning. | `BBE` `BBV` |
-| `Hidden Outline` | 3 | Fine short dashes, 1 on and 2 off: a building edge seen only on a plan, or a building not yet finished. | `BBH` `BBU` |
+| `Eave Line` | 10.5 | A long dash and a short dash in turn, 1.5 mm apart: the edge of a roof overhang, a verandah or an awning. | `AW*` `BV*` |
+| `Hidden Outline` | 3 | Fine short dashes, 1 on and 2 off: a building edge seen only on a plan, or a building not yet finished. | `CB*` `BW*` `OR*` `UC*` `UT*` `SL*` `XB*` |
+
+### Buildings and Structures/Structures
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Abutment Foot Line` | 5 | Unbroken line with a small ruled block against it on the left every 5 mm, like the toe of a footing: the foot of a bridge abutment. | `AB*` |
 
 ### Buildings and Structures/Steps and Access
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Steps Edge` | 3.5 | Unbroken line crossed by a row of treads 2.4 mm long, one every 3.5 mm: the nosing of a flight of steps. | `BAS` |
+| `Steps Edge` | 3.5 | Unbroken line crossed by a row of treads 2.4 mm long, one every 3.5 mm: the nosing of a flight of steps. | `SO*` |
 
 ### Fences and Walls/Fences
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Chain Mesh Fence` | 8 | Unbroken line with a small cross every 8 mm: a wire mesh fence on steel posts. | `FFC` |
-| `Paling Fence` | 2 | Unbroken line with a close comb of ticks to the left, one every 2 mm: a timber paling fence. | `FFP` |
-| `Post and Rail Fence` | 12 | Two parallel rails 1 mm apart with a square post every 12 mm: a timber or steel post and rail fence. | `FFR` |
-| `Post and Wire Fence` | 10 | Unbroken line with a small ring for a post every 10 mm: a rural fence of plain wire on posts. | `FFW` |
-| `Barbed Wire Fence` | 6 | Unbroken line with a small V barb above the line, then one below it: a rural fence with barbed wire. | `FFB` |
-| `Electric Fence` | 12 | Unbroken line with a lightning bolt every 12 mm: a fence with an electrified wire. | `FFE` |
-| `Metal Palisade Fence` | 2 | Unbroken line crossed by a close row of short bars, one every 2 mm: a steel palisade or pool fence. | `FFM` |
+| `Post and Wire Fence` | 10 | Unbroken line with a small ring for a post every 10 mm: a rural fence of plain wire on posts. | `FE*` |
+| `Metal Palisade Fence` | 2 | Unbroken line crossed by a close row of short bars, one every 2 mm: a steel palisade or pool fence. | `FM*` `SF*` |
 
 ### Fences and Walls/Walls
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Brick Wall` | 5 | Two parallel lines 1 mm apart with a joint across them every 5 mm: a brick or block wall, shot on its lower face. | `FWB` `FWK` |
-| `Stone Wall` | 2.4 | A chain of separate rings, 1.6 mm across and 0.8 mm apart, centred on the line: a dry or mortared stone wall. | `FWS` |
-| `Earth Retaining Wall` | 4 | Unbroken line with a small triangle to the left every 4 mm: a wall that holds back earth; the barbs point to the lower side. | `FWR` `FWT` |
+| `Earth Retaining Wall` | 4 | Unbroken line with a small triangle to the left every 4 mm: a wall that holds back earth; the barbs point to the lower side. | `RW*` `MW*` |
+
+### Fences and Walls/Gates and Posts
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Gate Leaf Outline` | 4 | Two close rails joined by a rung and a sloping brace, like the frame of a field gate: a gate leaf shot from its hinge to its latch. | `AG*` |
 
 ### Terrain and Breaklines/Breaklines
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Bank Top Edge` | 6 | Unbroken line with a long tick to the left every 6 mm: the top edge of a slope, the ticks pointing downhill. | `GBT` `GBK` |
-| `Bank Toe Edge` | 3 | Unbroken line with a short tick to the left every 3 mm: the bottom edge of a slope, the ticks standing away from the slope. | `GBB` `GBF` |
-| `Ridge Line` | 10 | Dashes with a small caret pointing to the left in each gap: a line along a crest. | `GBR` |
-| `Gully Line` | 10 | Dashes with a small caret pointing to the right in each gap: a line along the bottom of a gully. | `GBG` |
-| `Soft Breakline` | 4 | Fine short dashes, 2.5 on and 1.5 off: a gentle change in grade that a surface should still follow. | `GBS` |
-| `Exclusion Boundary` | 8 | Unbroken line with a small hollow square threaded on it every 8 mm: an area a surface must leave out, such as a building or a lake. | `GBX` |
+| `Bank Top Edge` | 6 | Unbroken line with a long tick to the left every 6 mm: the top edge of a slope, the ticks pointing downhill. | `CU*` `TC*` `VL*` `IB*` |
+| `Bank Toe Edge` | 3 | Unbroken line with a short tick to the left every 3 mm: the bottom edge of a slope, the ticks standing away from the slope. | `BB*` `OH*` `IA*` |
+| `Ridge Line` | 10 | Dashes with a small caret pointing to the left in each gap: a line along a crest. | `NB*` |
+| `Soft Breakline` | 4 | Fine short dashes, 2.5 on and 1.5 off: a gentle change in grade that a surface should still follow. | `NS*` |
 
 ### Terrain and Breaklines/Contours
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Index Contour` | 20 | Unbroken line with a small diamond bead threaded on it every 20 mm: every fifth contour, marked so it can be followed. | `GCI` |
-| `Depression Contour` | 8 | Unbroken line with a short tick to the left every 8 mm: a contour round a hollow, the ticks pointing downhill. | `GCD` |
+| `Index Contour` | 20 | Unbroken line with a small diamond bead threaded on it every 20 mm: every fifth contour, marked so it can be followed. | `Z*` `Z0*` |
+| `Depression Contour` | 8 | Unbroken line with a short tick to the left every 8 mm: a contour round a hollow, the ticks pointing downhill. | `XQ*` `ZQ*` |
 
 ### Terrain and Breaklines/Water Edges
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Water Edge` | 10 | Dashes with a small ripple arc to the left in each gap: the edge of water, or the line of the highest recent water. | `GWE` `GWH` |
+| `Water Edge` | 10 | Dashes with a small ripple arc to the left in each gap: the edge of water, or the line of the highest recent water. | `WE*` `WL*` `WR*` |
+| `Marsh Edge` | 16 | Dashes with a two-stroke reed tuft standing to the left on every second dash: the edge of a swamp or marsh. | `JW*` |
 
 ### Terrain and Breaklines/Rock and Cliff
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Rock Outcrop Edge` | 5 | A sharp zigzag 1.6 mm high with no baseline: the edge of exposed rock. | `GRO` |
-| `Cliff Edge` | 4 | Unbroken line with ticks to the left, a long one and a short one in turn: the top edge of a cliff, pointing downhill. | `GRC` |
+| `Rock Outcrop Edge` | 5 | A sharp zigzag 1.6 mm high with no baseline: the edge of exposed rock. | `JR*` |
+| `Cliff Edge` | 4 | Unbroken line with ticks to the left, a long one and a short one in turn: the top edge of a cliff, pointing downhill. | `VC*` |
 
 ### Survey Control and Annotation/Plan Marks
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Limit of Survey Line` | 24 | Long dashes with an open triangle in each gap: the edge of the surveyed area; nothing beyond it was measured. | `MMS` |
-| `Revision Cloud Edge` | 6 | A row of large round scallops to the left with no baseline: a cloud drawn round an area that has changed. | `MMV` |
+| `Limit of Survey Line` | 24 | Long dashes with an open triangle in each gap: the edge of the surveyed area; nothing beyond it was measured. | `FS*` `NF*` |
+| `Photo Detail Boundary` | 14 | Long dashes with a small target, a ring crossed by a plus, in each gap: the limit of detail taken from photography, not the field. | `DE*` |
 
-### Miscellaneous/Hazards and Heritage
-
-| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Hazard Boundary` | 10 | Dashes with an exclamation mark in each gap: the boundary of a hazardous area. | `XHB` |
-
-### Miscellaneous/Temporary Works
+### Design and Setting Out/Lane Marking Design
 
 | Linestyle | Period (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Temporary Works Line` | 10 | Dashes with the letter T in each gap: a temporary fence, a hoarding or the edge of a work zone. | `XTF` `XTW` |
+| `Dividing Line Marking` | 12 | Long paint dashes, 9 on and 3 off: the broken line that divides opposing traffic, told from the lane line by its long dash. | `L2*` `L8*` `L9*` |
+| `Bicycle Lane Marking` | 10 | Dashes with a pair of small rings, like bicycle wheels, in each gap: the broken line beside a bicycle lane or along a bicycle path. | `L0*` `L7*` |
+| `Bicycle Crossing Marking` | 2.4 | Two rows of small squares 3 mm apart with no baseline, the line running between them: a bicycle crossing painted across the carriageway. | `LY*` |
+
+### Design and Setting Out/Drainage Design
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Subsoil Drain Line` | 9 | Two dots and a dash in turn, written in the digitising direction: a perforated subsoil drain. | `SH*` |
+
+### Design and Setting Out/Barrier and Fence Design
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Chain Mesh Fence` | 8 | Unbroken line with a small cross every 8 mm: a wire mesh fence on steel posts. | `FN*` |
+| `Post and Rail Fence` | 12 | Two parallel rails 1 mm apart with a square post every 12 mm: a timber or steel post and rail fence. | `SA*` |
+
+### Design and Setting Out/Master Strings
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Temporary Works Line` | 10 | Dashes with the letter T in each gap: temporary works, such as a hoarding or the edge of a work zone, that the finished road does not keep. | `MX*` |
+
+### Design and Setting Out/Design General
+
+| Linestyle | Period (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Hazard Boundary` | 10 | Dashes with an exclamation mark in each gap: the boundary of a hazardous area. | `HL*` |
+| `Left Wall Face Hatch Line` | 1.5 | Unbroken line with close slanting ticks to its left, leaning back along the line: shows which side is the face of a designed wall. | `HE*` |
+| `Right Wall Face Hatch Line` | 1.5 | Unbroken line with close slanting ticks to its right, leaning back along the line: shows which side is the face of a designed wall. | `HR*` |
 
 ## Symbols
 
-113 symbols, every one drawn at its vertex, unrotated, in paper millimetres, with its origin at the centre of its box unless its description says where else.
+123 symbols, every one drawn at its vertex, unrotated, in paper millimetres, with its origin at the centre of its box unless its description says where else.
 
-![All 113 symbols of Katana Standard, drawn by Katana](images/katana-standard-symbols.png)
+![All 123 symbols of Katana Standard, drawn by Katana](images/katana-standard-symbols.png)
+
+*As the Symbol Library draws them, each in the colour of a code that uses it. The dialog scales every icon to fill its tile, so the figures under a name are the symbol's width and height on paper: the canopies and the trunks differ by size alone.*
 
 **The house style**, which makes each symbol learnt once:
 
-- **Cell.** Three size classes by larger extent: S about 3 mm (small furniture, posts, marks), M about 4.4 mm (most objects), L about 6 mm (canopies, tanks, stations, primary control).  The origin is the centre of the bounding box, so a symbol sits on its vertex without a rule offsetting it.  Where the surveyed point is NOT the box centre (a valve beside its letter, a doorway's wall line, a building corner, a camera's pole, a station's dot, a north arrow's shaft) the origin is within 0.6 mm of the box centre and the description says where it is; the check holds both.
+- **Cell.** Three size classes by larger extent: S about 3 mm (small furniture, posts, marks), M about 4.4 mm (most objects), L about 6 mm (canopies, tanks, stations, primary control).  The origin is the centre of the bounding box, so a symbol sits on its vertex without a rule offsetting it.  Where the surveyed point is NOT the box centre (a drill hole beside its wing, a picket's stem, a pole under its stay, a pump beside its hose, a building corner, the point of a water level mark) the origin is within 0.6 mm of the box centre and the description says where it is; the check holds both.
 - **Weight.** One weight: every symbol is outline.  The renderer applies the entity's own pen, so a symbol never carries a colour or a width.  Gaps are fixed: 0.4 mm between the rings of a double ring, 0.3 mm between a ring and a ray or tick, and a letter is always 2.4 mm high.
-- **Fill.** There are no fills.  A solid centre mark (a very small ring with a dot in it, because Katana draws a `dot` as one pen-width point whatever its radius) means "a physical mark or stem is here and this is its exact point": pegs, pins, pipes, stations, poles, trunks.  A shape WITHOUT one is a cover, a sign or an observation.  Hatching (at most four strokes) means "solid": a borehole's quadrants, a trap's grating.  A dashed ring means a temporary or former state: a dead tree, a pothole.  Rays mean a light (street light, bollard light, signal lamp) or, on a GNSS base, a signal.
-- **Services.** One grammar for every service, learnt once; the service colour comes from the rule and the letter names the service (W water, S sewer, G gas, E electricity, C communications, R recycled, F fire, P fuel, I traffic systems, ? unknown).  Square = pit or box; single ring = round cover or pole; double ring = maintenance hole; bow-tie = valve; diamond = regulator or marker; ring with a bar = meter.  A letter is inside a pit, a ring or a hole, and BELOW a valve.
-- **Trees.** Distinguished by canopy outline, all with a trunk dot: scalloped = broadleaf, spiked star = conifer, curved fronds = palm, irregular lobes with branches = native gum, dashed ring with a cross = dead, rings = stump; shrubs are the same scallop at a smaller size.
-- **Control.** Distinguished by class: triangle with ring and dot = primary station; ring with long cross-hairs and dot = secondary mark; ring with a bar and arrow = benchmark; diamond with dot = fixed mark; open diamond with a plus = temporary; ring with a compass of rays and dot = GNSS base; triangle in a ring = instrument station.
-- **Direction.** A symbol is not rotated, so a symbol that points (an arrow, a lens, a gate) points to +x or +y; the rule and the line it sits on say the rest.
+- **Fill.** There are no fills.  A solid centre mark (a very small ring with a dot in it, because Katana draws a `dot` as one pen-width point whatever its radius) means "a physical mark or stem is here and this is its exact point": pegs, pins, pipes, stations, poles, trunks.  A shape WITHOUT one is a cover, a sign or an observation.  Hatching (at most four strokes) means "solid": a borehole's quadrants. A dashed ring means a temporary or former state: a pothole, or a trunk whose width was not taken.  Rays mean a light (street light, bollard light, signal lamp).
+- **Services.** One grammar for every service, learnt once; the service colour comes from the rule and the letter names the service (W water, S sewer, G gas, E electricity, C communications, R recycled, F fire, P fuel, I traffic systems, ? unknown).  Square = pit or box; single ring = round cover or pole; double ring = maintenance hole; bow-tie = valve; diamond = regulator or marker; ring with a bar = meter.  A letter is inside a pit, a ring or a hole, and BELOW a valve.  A fitting that several services share (air release valve, washout valve, test point, earthing point, tap) carries no letter: the rule's colour and layer name the service.  A fitting with a lettered family keeps its letter (a vent, a flow meter, a maintenance hole, a pit with two or three lids).
+- **Trees.** A tree is shot by its canopy or by its trunk, and both are drawn as plain shapes with a centre dot.  A measured crown is a plain ring with a trunk dot and a radius line, in six sizes; a measured trunk is an eight-sided outline round a trunk dot, in six sizes, dashed when no width was taken.  The sizes step by about 0.8 mm so each is told from the next at screen size, and they are not to scale: a symbol keeps its paper size.
+- **Control.** Distinguished by class: triangle with ring and dot = primary station; ring with long cross-hairs and dot = secondary mark; ring with a bar and arrow = benchmark; diamond with dot = fixed mark; open diamond with a plus = temporary; ring and square frame with a plus = the centre of an aerial photograph.
+- **Direction.** A symbol is not rotated, so a symbol that points (an anchor's arrow, a camera's lens, a pennant) points along x or y; the rule and the line it sits on say the rest.
 
 Reading a table: *Size* is the symbol's width and height in millimetres of paper, measured from its strokes.
 
@@ -452,1208 +542,2611 @@ Reading a table: *Size* is the symbol's width and height in millimetres of paper
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Corner Peg` | 3.2 x 3.2 | Square with a centre dot. A peg or stake set at a boundary corner. | `CMP` |
-| `Iron Pin` | 3.2 x 3.2 | Ring with a centre dot. A round iron pin or rod set at a corner. | `CMI` |
-| `Iron Pipe` | 3.4 x 3.4 | Double ring with a centre dot. An iron pipe: the inner ring is its bore. | `CMT` |
-| `Survey Spike` | 2.6 x 2.6 | Small ring held by four ticks. A spike or nail driven into a hard surface; no dot, the ring is the head. | `CMS` |
-| `Drilled Hole` | 2.2 x 2.2 | Ring with a small cross inside it. A hole drilled in rock or concrete, with the cross cut at its centre. | `CMD` |
-| `Chiselled Cross` | 3.9 x 3.9 | Square with a cross whose arms run past the corners. A cross cut into a kerb, step or slab. | `CMX` |
-| `Mark Not Found` | 3.2 x 3.2 | Ring struck through by a slash that runs past it. A mark that was searched for and not found. | `CMN` |
+| `Corner Peg` | 3.2 x 3.2 | Square with a centre dot. A peg or stake set at a boundary corner. | `PBPG` `PRMB` |
+| `Iron Pin` | 3.2 x 3.2 | Ring with a centre dot. A round iron pin or rod set at a corner. | `PBDY` |
+| `Iron Pipe` | 3.4 x 3.4 | Double ring with a centre dot. An iron pipe: the inner ring is its bore. | `PGPI` |
+| `Survey Spike` | 2.6 x 2.6 | Small ring held by four ticks. A spike or nail driven into a hard surface; no dot, the ring is the head. | `PGIN` `PNAL` `PSKI` `PBLT` `PSSE` |
+| `Winged Drill Hole` | 3.1 x 2.0 | Ring with a cross, a drilled hole, and an open wedge running out to +x: the wing cut beside it to lead the eye to the hole. The origin is the hole. | `PDHL` |
+| `Steel Picket` | 2.7 x 2.3 | Three arms at 120 degrees round a centre dot: the section of a steel picket driven in as a mark. The origin is its centre dot. | `PSTA` |
 
 ### Roads and Pavements/Markings
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Road Arrow Marking` | 6.0 x 2.6 | Block arrow pointing +x, drawn as an outline. A painted lane arrow; turn it by drawing the line the other way. | `RMA` |
-
-### Roads and Pavements/Paths and Access
-
-| Symbol | Size (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Kerb Ramp` | 3.6 x 2.4 | Trapezoid, wide at the kerb and narrowing away, with an arrow up the ramp. A pedestrian kerb ramp. | `RPR` |
-| `Tactile Paving` | 3.2 x 3.2 | Square holding a three by three grid of dots. Tactile ground surface indicators. | `RPT` |
+| `Raised Pavement Marker` | 3.1 x 1.3 | Ring with a small solid mark each side. A domed marker fixed to the road, the dome between its two reflectors. | `PTMX` |
 
 ### Street Furniture and Signs/Signs
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Regulatory Sign` | 3.4 x 3.4 | Ring crossed edge to edge by a backslash bar. A regulatory sign face such as a prohibition or a limit. | `SSR` |
-| `Warning Sign` | 3.6 x 3.1 | Triangle, apex up. A warning sign face (hazard ahead, give way, signals). | `SSW` |
-| `Guide Sign` | 3.6 x 2.2 | Wide rectangle. A direction or guide sign face, such as a street name or destination. | `SSG` |
-| `Information Sign` | 3.2 x 3.2 | Round-cornered square holding a lower-case i. An information or tourist sign face; the round corners tell it from a pit. | `SSI` |
+| `Plain Sign Post` | 2.0 x 1.8 | Ring with a centre dot and a plate touching its right side. The post of a sign whose face is not classified. | `PSIN` |
+| `Double Sided Sign Post` | 2.4 x 1.8 | Ring with a centre dot and a plate touching each side. A post carrying a sign face on both of its sides. | `PSDS` |
 
 ### Street Furniture and Signs/Lighting
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Street Light` | 4.4 x 4.4 | Ring with a centre dot and eight rays. A street light pole and its lantern. | `SLS` |
-| `Bollard Light` | 3.1 x 3.1 | Small ring with four short rays. A light built into a bollard. | `SLB` |
+| `Street Light` | 4.4 x 4.4 | Ring with a centre dot and eight rays. A street light pole and its lantern. | `PLPL` |
+| `Bollard Light` | 3.1 x 3.1 | Small ring with four short rays. A light built into a bollard. | `PLGN` |
+| `Hanging Light` | 4.0 x 3.4 | Ring hung from a wire by a short hanger, with five rays shining down. A light hung from an overhead wire; the origin is the ring centre. | `PLSU` |
 
 ### Street Furniture and Signs/Posts and Barriers
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Bollard` | 2.0 x 2.0 | Ring inside a ring. A fixed bollard. | `SBB` |
-| `Removable Bollard` | 1.9 x 1.9 | Ring with a bar across its middle. A bollard that lifts out or lowers. | `SBR` |
-| `Delineator Post` | 1.8 x 1.8 | Small square with one diagonal. A roadside delineator or marker post. | `SBG` |
+| `Bollard Post` | 2.0 x 2.0 | Ring inside a ring. A fixed bollard. | `AC*` `AD*` |
 
 ### Street Furniture and Signs/Amenities
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Bench` | 4.0 x 1.6 | Long rectangle with two slat lines. A seat or bench. | `SAB` |
-| `Litter Bin` | 2.3 x 2.6 | Hexagon with a centre dot. A litter or waste bin. | `SAR` |
-| `Drinking Fountain` | 3.4 x 3.4 | Ring holding a teardrop. A drinking fountain or bubbler. | `SAF` |
-| `Bus Stop Shelter` | 5.4 x 3.6 | Rectangle holding a bench divided into seats. A bus shelter; the large box is its roof outline. | `SAS` |
+| `Bus Stop Sign` | 3.2 x 3.2 | Round-cornered square holding B. A bus stop sign face; the origin is its middle, a little off the post it stands on. | `PBUS` |
+| `Litter Bin` | 2.3 x 2.6 | Hexagon with a centre dot. A litter or waste bin. | `BI*` `PBIN` |
+| `Barbecue Hearth` | 3.0 x 3.0 | Square hearth holding a flame with a tongue inside it. A built fireplace or barbecue hearth. | `PFPL` |
+| `Kerbside Meter` | 1.9 x 2.2 | Ring with a centre dot carrying a flat head on its top. A kerbside parking meter; the origin is the pole, the ring centre. | `PKME` |
+| `Letterbox` | 2.8 x 2.5 | Wide box with a half-round lid and a slot across its face. A letterbox at a property frontage. | `PMBX` |
 
 ### Street Furniture and Signs/Traffic Control
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Signal Pole` | 3.5 x 2.8 | Ring with a dot beside a tall box holding three lamp dots. A traffic signal pole and its signal head. | `STS` |
-| `Roadside Camera` | 3.8 x 2.2 | Ring with a triangular lens pointing +x. A speed, red-light or traffic camera; the origin is its pole, the ring's centre. | `STC` |
-| `Signal Controller Cabinet` | 3.2 x 3.2 | Square holding the letter T. The traffic signal controller cabinet. | `STK` |
+| `Signal Pole` | 3.5 x 2.8 | Ring with a dot beside a tall box holding three lamp dots. A traffic signal pole and its signal head. | `PSGL` |
+| `Roadside Camera` | 3.8 x 2.2 | Ring with a triangular lens pointing +x. A speed, red-light or traffic camera; the origin is its pole, the ring's centre. | `PCAM` `PCTV` |
+| `Signal Controller Cabinet` | 3.2 x 3.2 | Square holding the letter T. The traffic signal controller cabinet. | `PSCL` |
+| `Camera Strobe` | 3.2 x 3.2 | Ring holding a lightning bolt. The flash unit of an enforcement camera, shot at its pole. | `PCFU` |
 
 ### Kerbs and Drainage/Pits and Structures
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Gully Pit` | 3.2 x 3.2 | Square with three grate bars. A stormwater gully pit with its grating. | `KPG` |
-| `Kerb Inlet Pit` | 4.0 x 2.4 | Rectangle with a V notch cut into its left end. A side-entry pit; the notch faces the kerb. | `KPK` |
-| `Junction Pit` | 3.2 x 3.2 | Square with both diagonals. A stormwater junction pit. | `KPJ` |
-| `Stormwater Manhole` | 3.4 x 3.4 | Double ring holding the letter D. A stormwater maintenance hole (D for drainage). | `KPH` |
-| `Gross Pollutant Trap` | 5.4 x 3.2 | Rectangle crossed by four hatch lines. A gross pollutant trap or litter trap. | `KPT` |
-| `Headwall` | 5.3 x 3.8 | Three sides of a box, open to -x, with wings flaring outward. A pipe headwall; the pipe arrives from the open side. | `KPW` |
-| `Culvert End` | 4.0 x 2.0 | T shape with turned-in ends. A culvert end: the bar is its headwall, the stem the pipe running away from it. | `KPC` |
-| `Subsoil Inspection Point` | 2.2 x 2.2 | Small ring holding a smaller square, the cap of the riser. An inspection point on a subsoil drain. | `KPS` |
+| `Gully Grate` | 3.2 x 3.2 | Square with three grate bars. A stormwater gully pit with its grating. | `PGUL` |
+| `Junction Pit` | 3.2 x 3.2 | Square with both diagonals. A stormwater junction pit. | `PJBX` |
+| `Stormwater Manhole` | 3.4 x 3.4 | Double ring holding the letter D. A stormwater maintenance hole (D for drainage). | `PDJM` |
+| `Pipe Headwall` | 5.3 x 3.8 | Three sides of a box, open to -x, with wings flaring outward. A pipe headwall; the pipe arrives from the open side. | `PHWB` `PHWT` |
+| `Subsoil Inspection Point` | 2.2 x 2.2 | Small ring holding a smaller square, the cap of the riser. An inspection point on a subsoil drain. | `PSFP` |
+| `Wingwall End` | 2.4 x 2.4 | Short wall stub at 45 degrees, two lines apart and closed at the outer end. The free end of a wing wall; the origin is the middle of the stub. | `PEWW` |
+| `Sump Inlet` | 3.2 x 3.2 | Square holding a downward arrow that lands on a bar. Drainage dropping into a sump. | `PILT` |
+
+### Kerbs and Drainage/Pipes and Culverts
+
+| Symbol | Size (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Invert Level` | 2.0 x 2.0 | Ring holding a downward triangle. The invert of a pipe or channel. | `PSDO` `PI01` `PI02` `PI03` `PI04` `PI05` `PI06` `PI07` `PI09` `PI10` `PI12` `PI13` `PI15` `PI16` `PI18` `PINV` |
+| `Obvert Level` | 2.2 x 2.2 | Ring holding an arch over a bar. The obvert of a pipe, its highest inside point; the pair of Invert Level. | `POBV` |
 
 ### Rail and Transit/Track
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Turnout Marker` | 4.5 x 1.0 | Y shape forking toward +x. The toe of a turnout (points). | `TTX` |
-| `Buffer Stop` | 3.8 x 2.6 | Two rails ending against a block. The end of a track. | `TTE` |
+| `Trackside Control Box` | 2.8 x 2.8 | Square holding two parallel bars, the rails. A control or relay box beside the track. | `PRBX` |
+| `Rail Cable Trough` | 3.4 x 1.2 | Long narrow box cut into three lid slabs by two cross lines. A lineside trough carrying signalling cables. | `PRCC` |
 
 ### Rail and Transit/Overhead and Signals
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Signal Mast` | 4.7 x 1.9 | Pole ring with a dot, joined to a lamp ring with rays. A railway signal on its mast. | `TOS` |
-| `Overhead Mast` | 4.4 x 2.4 | Square with a centre dot and two arms. A mast carrying overhead wires. | `TOM` |
+| `Signal Mast` | 4.7 x 1.9 | Pole ring with a dot, joined to a lamp ring with rays. A railway signal on its mast. | `PRSG` |
+| `Overhead Mast` | 4.4 x 2.4 | Square with a centre dot and two arms. A mast carrying overhead wires. | `PSTR` |
 
 ### Utilities/Water
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Water Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter W below. A water main valve; the origin is between valve and letter. | `UWV` |
-| `Water Pit` | 3.4 x 3.4 | Square holding W. A water meter or valve pit. | `UWP` |
-| `Water Flow Meter` | 3.4 x 3.4 | Ring holding W above a bar. A water meter on the line. | `UWX` |
-| `Water Tank` | 5.6 x 5.6 | Ring inside a ring holding W. A water tank or reservoir seen from above. | `UWT` |
+| `Water Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter W below. A water main valve; the origin is between valve and letter. | `PWSV` |
+| `Water Flow Meter` | 3.4 x 3.4 | Ring holding W above a bar. A water meter on the line. | `PWMR` |
 
 ### Utilities/Sewer
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Sewer Maintenance Hole` | 3.8 x 3.8 | Double ring holding S. A sewer maintenance hole. | `USH` |
-| `Sewer Vent` | 2.8 x 4.0 | Ring holding S with a chevron above. A sewer vent shaft. | `USE` |
-| `Septic System Tank` | 5.6 x 3.4 | Two-cell box with S in the left cell. A septic or treatment tank. | `UST` |
+| `Sewer Maintenance Hole` | 3.8 x 3.8 | Double ring holding S. A sewer maintenance hole. | `PSMH` |
+| `Sewer Vent` | 2.8 x 4.0 | Ring holding S with a chevron above. A sewer vent shaft. | `PSVP` |
+| `Sewer Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter S below. A sewer stop valve; the origin is between valve and letter. | `PSSV` |
+| `Sewer Inspection Opening` | 3.2 x 3.2 | Single ring holding S. A small round cover giving a lamp a view along a sewer; the double ring is the man-entry hole. | `PSLH` |
 
 ### Utilities/Gas
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Gas Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter G below. A gas main valve; the origin is between valve and letter. | `UGV` |
-| `Gas Pit` | 3.4 x 3.4 | Square holding G. A gas valve or meter pit. | `UGP` |
-| `Gas Flow Meter` | 3.4 x 3.4 | Ring holding G above a bar. A gas meter. | `UGX` |
-| `Gas Pressure Regulator` | 3.8 x 3.8 | Diamond holding G. A gas pressure regulating set. | `UGR` |
+| `Gas Pit` | 3.4 x 3.4 | Square holding G. A gas valve or meter pit. | `PGAS` |
+| `Gas Flow Meter` | 3.4 x 3.4 | Ring holding G above a bar. A gas meter. | `PGMR` |
+| `Gas Pressure Regulator` | 3.8 x 3.8 | Diamond holding G. A gas pressure regulating set. | `PGRB` |
+| `Gas Maintenance Hole` | 3.8 x 3.8 | Double ring holding the letter G. A gas maintenance hole. | `PGHL` |
+| `Gas Vent` | 2.8 x 4.0 | Ring holding G with a chevron above. A vent riser on a gas main or casing. | `PGVP` |
+| `High Pressure Marker Post` | 3.0 x 3.0 | Marker Post ring holding two stacked triangles. A pipeline marker for a high pressure gas main. | `PGHM` |
 
 ### Utilities/Electricity
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Power Pole` | 3.1 x 3.1 | Ring, inner ring and centre dot. A power pole: the rings are the pole and its footing. | `UEP` |
-| `Guy Anchor` | 3.6 x 1.2 | Line with an arrowhead at -x and an anchor bar at +x. A pole's stay wire running to its ground anchor. | `UEY` |
-| `Transformer` | 3.8 x 2.4 | Two overlapping rings. A pole or pad transformer. | `UET` |
-| `Electrical Pillar` | 3.0 x 3.0 | Square with one diagonal. A pillar, kiosk or service cabinet; the slash marks a pillar, as on the communications one. | `UEK` |
-| `Electrical Pit` | 3.4 x 3.4 | Square holding E. An electrical pit. | `UEJ` |
+| `Power Pole` | 3.1 x 3.1 | Ring, inner ring and centre dot. A power pole: the rings are the pole and its footing. | `PPPL` `PTPL` |
+| `Guy Anchor` | 3.6 x 1.2 | Line with an arrowhead at -x and an anchor bar at +x. A pole's stay wire running to its ground anchor. | `PSAP` |
+| `Transformer` | 3.8 x 2.4 | Two overlapping rings. A pole or pad transformer. | `PETC` `PPTR` |
+| `Electrical Pillar` | 3.0 x 3.0 | Square with one diagonal. A pillar, kiosk or service cabinet; the slash marks a pillar, as on the communications one. | `PEUP` |
+| `Electrical Pit` | 3.4 x 3.4 | Square holding E. An electrical pit. | `PEJB` |
+| `Electrical Maintenance Hole` | 3.8 x 3.8 | Double ring holding the letter E. A maintenance hole giving access to underground cables. | `PEMH` |
+| `Electrical Fuse` | 3.2 x 1.1 | Narrow box with a line through its length that runs past both ends. A fuse on a distribution cable, in a pole or a cabinet. | `PEFP` |
+| `Power and Light Pole` | 4.0 x 3.6 | Power Pole with two short sprays of rays at its upper left and right. A pole carrying both power lines and a lantern. | `PPLP` |
+| `Stay Wire Pole` | 2.6 x 2.6 | Small ring with a centre dot and a brace running to the upper right, ending in a cross tick. A short pole carrying a stay wire; the origin is the ring centre. | `PSPL` |
+| `Transmission Pylon` | 5.8 x 5.8 | Four leg squares at the corners joined by sides and diagonals round a small ring. The footprint of a lattice tower on high voltage lines. | `PHTT` |
 
 ### Utilities/Communications
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Communications Pit` | 3.4 x 3.4 | Square holding C. A communications pit. | `UCP` |
-| `Communications Maintenance Hole` | 3.8 x 3.8 | Double ring holding C. A communications maintenance hole. | `UCH` |
-| `Communications Pillar` | 3.2 x 3.2 | Square holding C with a broken diagonal. A communications pillar or cabinet. | `UCK` |
+| `Communications Pit` | 3.4 x 3.4 | Square holding C. A communications pit. | `POFP` `PTSP` |
+| `Communications Pillar` | 3.2 x 3.2 | Square holding C with a broken diagonal. A communications pillar or cabinet. | `POFJ` `PTDP` |
+| `Communications Twin Pit` | 4.7 x 3.0 | Box of two square cells, each holding C. A communications pit with two lids side by side. | `PTTP` |
+| `Communications Triple Pit` | 6.3 x 3.0 | Box of three square cells, each holding C. A communications pit with three lids in a row. | `PT3P` |
+| `Communications Main Pit` | 6.0 x 6.0 | Large square holding a smaller square lid with C. A main pit at a major cable junction, twice the size of the ordinary pit. | `PTMP` |
+| `Public Telephone` | 4.4 x 4.4 | Square holding a telephone handset, an arch with a ring at each end. A public call box on the footpath. | `PTBX` |
+| `Mast` | 2.6 x 4.0 | A-frame with a crossbar and a small ring on its apex. A communications or lighting mast. | `PMPT` |
 
 ### Utilities/Recycled Water
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Recycled Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter R below. A recycled water valve; the origin is between valve and letter. | `URV` |
-| `Recycled Water Pit` | 3.4 x 3.4 | Square holding R. A recycled water pit. | `URP` |
+| `Recycled Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter R below. A recycled water valve; the origin is between valve and letter. | `PRSV` |
+| `Recycled Flow Meter` | 3.4 x 3.4 | Ring holding R above a bar. A recycled water meter. | `PRMR` |
 
 ### Utilities/Fire Service
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Fire Hydrant` | 4.6 x 3.0 | Ring with a plus and a nozzle tick each side. A fire hydrant. | `UFH` |
-| `Booster Connection` | 4.0 x 3.2 | Square holding F with two nozzle ticks on its right. A fire booster connection; the origin is the middle of the square. | `UFB` |
-| `Fire Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter F below. A fire service valve; the origin is between valve and letter. | `UFV` |
+| `Fire Service Hydrant` | 4.6 x 3.0 | Ring with a plus and a nozzle tick each side. A fire hydrant. | `PWHY` `PRHY` `PWFB` |
 
 ### Utilities/Fuel
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Fuel Isolation Valve` | 3.6 x 4.4 | Bow-tie with the letter P below. A fuel line valve; the origin is between valve and letter. | `UPV` |
+| `Fuel Dispenser` | 3.5 x 3.2 | Tall box holding P, with a hose running out of its side to a nozzle tick. A fuel dispenser; the origin is the middle of its body. | `PPET` |
 
 ### Utilities/Traffic Systems
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Loop Detector` | 3.4 x 3.4 | Square holding a three-peak zigzag. A traffic detector loop. | `UIL` |
-| `Traffic Systems Pit` | 3.4 x 3.4 | Square holding I. A traffic systems or ITS pit. | `UIP` |
+| `Loop Detector` | 3.4 x 3.4 | Square holding a three-peak zigzag. A traffic detector loop. | `PSDR` |
+| `Traffic Systems Pit` | 3.4 x 3.4 | Square holding I. A traffic systems or ITS pit. | `PSJX` |
 
 ### Utilities/Unknown Services
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Unknown Pit` | 3.4 x 3.4 | Square holding a question mark. A pit whose service is not known. | `UXP` |
-| `Unknown Maintenance Hole` | 3.8 x 3.8 | Double ring holding a question mark. A hole whose service is not known. | `UXH` |
-| `Paint Mark` | 1.7 x 1.7 | Cross through a small ring. A spray-paint mark on the ground. | `UXM` |
+| `Unknown Pit` | 3.4 x 3.4 | Square holding a question mark. A pit whose service is not known. | `PGAT` |
+| `Storage Tank` | 5.8 x 5.8 | Ring inside a ring. A storage tank or silo seen from above. | `PUTP` |
+| `Query Point` | 3.4 x 3.4 | Ring holding a question mark. A point whose identity is in doubt and must be checked in the field. | `PPOL` `PUSR` |
 
 ### Utilities/All Services
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Pumping Station` | 5.4 x 5.4 | Square holding a ring with a flow arrow. A pumping station of any service. | `UWU` `USP` |
-| `Marker Post` | 2.0 x 2.0 | Ring holding an upward triangle. A route marker post for any service. | `UGK` `UPK` |
+| `Pumping Station` | 5.4 x 5.4 | Square holding a ring with a flow arrow. A pumping station of any service. | `PWEP` `PSPS` |
+| `Marker Post` | 2.0 x 2.0 | Ring holding an upward triangle. A route marker post for any service. | `PWMM` `PSMM` `PGPM` `PECM` `POFM` `PTCM` `PTJP` `PRMM` `PFPM` `POHM` |
+| `Air Release Valve` | 3.2 x 2.8 | Bow-tie with a stem and an arrowhead rising from it. A valve that lets air out at a high point of a pressure main. | `PWAV` `PRAV` |
+| `Washout Valve` | 3.2 x 2.8 | Bow-tie with a stem and an arrowhead falling from it. A valve that empties a main at a low point. | `PWSR` |
+| `Pipeline Test Point` | 1.6 x 2.3 | Small ring with a stem and a cross bar rising from it. A fitting on a pipeline where pressure or protection is tested; the origin is the ring centre. | `PWCP` `PGTP` |
+| `Earthing Point` | 1.8 x 2.5 | Small ring on a stem that ends in three bars of falling length. The point where a pipe is bonded to earth; the origin is the middle of the sign. | `PWET` `PRET` |
+| `Standpipe Tap` | 1.7 x 2.3 | Small ring with a spout that rises and turns down. A tap, outlet or standpipe; the origin is the ring centre. | `PWTP` `PRTP` |
 
 ### Vegetation and Landscape/Trees
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Broadleaf Tree` | 5.4 x 5.6 | Scalloped canopy of ten round lobes with a trunk dot. A broadleaf or deciduous tree. | `VTB` `VTR` |
-| `Conifer Tree` | 5.8 x 5.8 | Eight-point spiked star with a trunk dot. A conifer or pine. | `VTC` |
-| `Palm Tree` | 5.5 x 5.3 | Seven curved leaf fronds from a trunk dot. A palm or tree fern. | `VTP` |
-| `Native Gum Tree` | 5.4 x 5.6 | Irregular five-lobed canopy with two branches and a trunk dot. A native gum or other spreading tree. | `VTG` |
-| `Dead Tree` | 4.0 x 4.0 | Dashed ring with a cross inside. A dead or fallen tree still on site. | `VTD` |
-| `Tree Stump` | 2.0 x 2.0 | Ring with two broken growth rings and a centre dot. A cut stump; the broken rings tell it from a bollard. | `VTS` |
-
-### Vegetation and Landscape/Shrubs and Plants
-
-| Symbol | Size (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Shrub` | 2.3 x 2.5 | Six-lobed scallop with a centre dot. A single shrub. | `VSS` |
-| `Shrub Cluster` | 4.3 x 4.1 | One scalloped outline round three plants, each with its stem dot. A clump or bed of shrubs. | `VSC` |
-| `Tussock` | 2.9 x 1.9 | Fan of five curved blades. A grass tussock or sedge clump. | `VST` |
+| `Tiny Tree Canopy` | 2.2 x 2.2 | Plain ring 2.2 mm across with a trunk dot and a radius line. A tree with a measured spread of one or two metres; not to scale. | `PF01` `PF02` |
+| `Small Tree Canopy` | 3.0 x 3.0 | Plain ring 3.0 mm across with a trunk dot and a radius line. A tree with a measured spread of three or four metres; not to scale. | `PF03` `PF04` |
+| `Medium Tree Canopy` | 3.8 x 3.8 | Plain ring 3.8 mm across with a trunk dot and a radius line. A tree with a measured spread of five or six metres; not to scale. | `PF05` `PF06` |
+| `Large Tree Canopy` | 4.6 x 4.6 | Plain ring 4.6 mm across with a trunk dot and a radius line. A tree with a measured spread of seven or eight metres; not to scale. | `PF07` `PF08` |
+| `Broad Tree Canopy` | 5.4 x 5.4 | Plain ring 5.4 mm across with a trunk dot and a radius line. A tree with a measured spread of nine or ten metres; not to scale. | `PF09` `PF10` |
+| `Giant Tree Canopy` | 6.2 x 6.2 | Plain ring 6.2 mm across with a trunk dot and a radius line. A tree with a measured spread of twelve metres or more; not to scale. | `PF12` `PF15` |
+| `Hundred Millimetre Tree Trunk` | 1.8 x 1.8 | Eight-sided outline 1.8 mm across round a centre dot. A tree trunk about 100 mm across, shot at its middle. | `PT01` |
+| `Two Hundred Millimetre Tree Trunk` | 2.6 x 2.6 | Eight-sided outline 2.6 mm across round a centre dot. A tree trunk about 200 mm across, shot at its middle. | `PT02` |
+| `Three Hundred Millimetre Tree Trunk` | 3.4 x 3.4 | Eight-sided outline 3.4 mm across round a centre dot. A tree trunk about 300 mm across, shot at its middle. | `PT03` |
+| `Narrow Tree Trunk` | 4.2 x 4.2 | Eight-sided outline 4.2 mm across round a centre dot. A tree trunk from 400 to 600 mm across, shot at its middle. | `PT04` `PT05` `PT06` |
+| `Medium Tree Trunk` | 5.2 x 5.2 | Eight-sided outline 5.2 mm across round a centre dot. A tree trunk from 700 to 900 mm across, shot at its middle. | `PT07` `PT08` `PT09` |
+| `Wide Tree Trunk` | 6.2 x 6.2 | Eight-sided outline 6.2 mm across round a centre dot. A tree trunk of 1000 mm or more across, shot at its middle. | `PT10` `PT12` `PT15` |
+| `Unmeasured Tree Trunk` | 4.2 x 4.2 | Dashed eight-sided outline 4.2 mm across round a centre dot. A tree trunk whose width was not measured. | `PTRE` |
 
 ### Buildings and Structures/Buildings
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Building Corner` | 1.2 x 1.2 | Right-angle bracket with its corner at the origin. A building corner; it opens to +x and -y. | `BBC` |
-| `Doorway` | 4.4 x 2.1 | Wall ends, a door leaf at right angles and its swing arc. A door in a wall; the origin is on the wall centre line. | `BBD` |
+| `Building Corner` | 1.2 x 1.2 | Right-angle bracket with its corner at the origin. A building corner; it opens to +x and -y. | `PCBU` |
+| `Awning Mark` | 3.2 x 1.6 | Box whose lower edge is a row of four scallops. A point on an awning or canopy over a footpath. | `PAWN` |
 
 ### Buildings and Structures/Structures
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Bridge Column` | 3.2 x 3.2 | Ring crossed by an X. A bridge pier or column. | `BSP` |
-| `Mast` | 2.6 x 4.0 | A-frame with a crossbar and a small ring on its apex. A communications or lighting mast. | `BST` |
-| `Storage Tank` | 5.8 x 5.8 | Ring inside a ring. A storage tank or silo seen from above. | `UPT` `BSK` |
-| `Flagpole` | 2.9 x 1.2 | Ring with a pennant flying to +x. A flagpole. | `BSF` |
-| `Monument` | 3.2 x 3.2 | Square holding an eight-spoke star. A monument, memorial or statue base. | `BSM` |
+| `Bridge Column` | 3.2 x 3.2 | Ring crossed by an X. A bridge pier or column. | `PBPI` |
+| `Flagstaff` | 2.9 x 1.2 | Ring with a pennant flying to +x. A flagpole. | `PFLG` |
+| `Top Abutment Point` | 2.8 x 2.8 | Square with a hatched band along its upper edge. A point on the top of a bridge abutment. | `PABT` |
+| `Bottom Abutment Point` | 2.8 x 2.8 | Square with a hatched band along its lower edge. A point at the foot of a bridge abutment. | `PABB` |
+| `Pile Cap` | 3.0 x 3.0 | Square holding a ring. A bridge pile standing in its cap, seen from above. | `PBCP` |
+| `Windmill Tower` | 5.9 x 5.9 | Four leaning kite-shaped vanes round a hub ring. A windmill, shot at the middle of its tower. | `PWML` |
 
 ### Fences and Walls/Gates and Posts
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Fence Post` | 1.2 x 1.2 | Small square. A fence post at every vertex of a fence line. | `FFC` `FFP` `FFR` `FFW` `FFB` `FFE` `FFM` `FGF` |
-| `Strainer Post` | 1.8 x 1.8 | Small square with both diagonals. A braced end or corner post. | `FGS` |
-| `Pedestrian Gate` | 4.4 x 2.8 | Two posts, fence stubs and a half-circle swing about the hinge. A pedestrian gate that opens either way; the origin is its centre. | `FGP` |
-| `Vehicle Gate` | 6.1 x 5.6 | Two hinge posts and a half-circle swing about each. A double vehicle gate that opens either way; the origin is its centre. | `FGV` |
+| `Fence Post` | 1.2 x 1.2 | Small square. A fence post at every vertex of a fence line. | `POST` |
 
 ### Terrain and Breaklines/Ground Points
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Ground Shot` | 1.5 x 1.5 | Dot with a small plus. A surveyed ground point. | `GPG` `GPR` |
-| `Spot Level` | 3.0 x 3.0 | Plus through a ring a millimetre and a half across. A spot level on the ground or a structure. | `GPS` |
-| `High Point` | 3.4 x 2.9 | Triangle, apex up, with a centre dot. The top of a rise. | `GPH` |
-| `Low Point` | 3.4 x 2.9 | Triangle, apex down, with a centre dot. The bottom of a dip. | `GPL` |
-| `Invert Level` | 2.0 x 2.0 | Ring holding a downward triangle. The invert of a pipe or channel. | `GPI` |
+| `Ground Shot` | 1.5 x 1.5 | Dot with a small plus. A surveyed ground point. | `PNSS` |
+| `Spot Level` | 3.0 x 3.0 | Plus through a ring a millimetre and a half across. A spot level on the ground or a structure. | `PRAL` `PFLR` `PSHT` |
 
-### Terrain and Breaklines/Rock and Cliff
+### Terrain and Breaklines/Breaklines
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Boulder` | 3.1 x 3.2 | Irregular hexagon with a crack. A boulder or loose rock. | `GRB` |
+| `Breakline Point` | 3.0 x 0.5 | Dot between two bars, a dash-dot-dash. A ground point that lies on a breakline. | `PBRK` |
+
+### Terrain and Breaklines/Water Edges
+
+| Symbol | Size (mm) | What it looks like and when to use it | Used by |
+|---|---|---|---|
+| `Water Level Mark` | 2.2 x 2.9 | Downward triangle standing on two wavy lines. The level of a water surface, or of a flood; the origin is the triangle's point. | `PFHT` `PWLP` |
+| `Swamp` | 3.6 x 1.9 | Two broken dashes with three reed ticks standing on the upper one. A swamp or marsh marked by a point. | `PSWA` |
 
 ### Survey Control and Annotation/Control Marks
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Trigonometric Station` | 5.6 x 4.8 | Large triangle holding a ring and a dot. A primary control station; the origin is its dot. | `MCT` |
-| `Control Mark` | 4.6 x 4.6 | Ring with long cross-hairs and a dot. A secondary or traverse control mark. | `MCC` |
-| `Level Benchmark` | 3.2 x 3.2 | Ring with a bar across it and an upward arrow above the bar. A levelling benchmark. | `MCB` |
-| `Fixed Survey Mark` | 3.6 x 3.6 | Diamond with a centre dot. A permanent survey mark. | `MCP` |
-| `GNSS Base` | 5.8 x 5.8 | Ring with a dot and a compass of eight rays, the cardinal ones longer. A GNSS base or reference station. | `MCG` |
-| `Temporary Control` | 3.6 x 3.6 | Open diamond with a plus and no dot. A temporary control point. | `MCW` |
-| `Instrument Station` | 4.2 x 4.2 | Triangle inside a ring. A total station or instrument set-up point. | `MCI` |
+| `Trigonometric Station` | 5.6 x 4.8 | Large triangle holding a ring and a dot. A primary control station; the origin is its dot. | `PSSF` `PTSS` |
+| `Traverse Mark` | 4.6 x 4.6 | Ring with long cross-hairs and a dot. A secondary or traverse control mark. | `PCMK` `PHCP` `PMCP` `PSSA` `PSSG` `PSSM` |
+| `Level Benchmark` | 3.2 x 3.2 | Ring with a bar across it and an upward arrow above the bar. A levelling benchmark. | `PBMK` `PBMZ` `PSSB` `PVCP` |
+| `Fixed Survey Mark` | 3.6 x 3.6 | Diamond with a centre dot. A permanent survey mark. | `PCRM` `PMSM` `PPMK` `PRTM` `PDSM` `PPSM` `PSSD` |
+| `Temporary Control` | 3.6 x 3.6 | Open diamond with a plus and no dot. A temporary control point. | `PDPY` `PSSC` |
+| `Setting Out Pin` | 4.3 x 1.7 | Ring with a centre dot between two bars that run along the alignment. A pin set on a design alignment for setting out. | `PAPN` |
+| `Aerial Photo Centre` | 3.6 x 3.6 | Ring holding a square frame with a small plus at its middle. The centre of an aerial photograph. | `PPCN` |
 
 ### Survey Control and Annotation/Investigation Points
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Borehole` | 3.4 x 3.4 | Ring split into quadrants, two opposite ones evenly hatched. A borehole. | `MIB` |
-| `Test Pit` | 3.4 x 3.4 | Square with a diamond joining the middles of its sides. A test pit or trench. | `MIT` |
-| `Pothole` | 3.6 x 3.6 | Ring of eight dashes holding P. A pothole dug to expose a service. | `MIP` |
-
-### Survey Control and Annotation/Plan Marks
-
-| Symbol | Size (mm) | What it looks like and when to use it | Used by |
-|---|---|---|---|
-| `Leader Dot` | 1.2 x 1.2 | Small ring with a dot. The end of a leader line. | `MML` |
-| `North Arrow` | 3.0 x 6.3 | Arrow with a split, half-shaded head and the letter N at its tail. Points to +y, the plan's north; the origin is midway along the shaft. | `MMN` |
+| `Investigation Bore` | 3.4 x 3.4 | Ring split into quadrants, two opposite ones evenly hatched. A borehole. | `PBHX` |
+| `Trial Pit` | 3.4 x 3.4 | Square with a diamond joining the middles of its sides. A test pit or trench. | `PGEO` |
+| `Pothole` | 3.6 x 3.6 | Ring of eight dashes holding P. A pothole dug to expose a service. | `PHNL` `PHRL` |
+| `Seismic Shot Point` | 2.8 x 1.7 | Dot with two arcs on each side, the pulse leaving it. A seismic test shot. | `PSTS` |
 
 ### Miscellaneous/Hazards and Heritage
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Hazard Point` | 3.8 x 3.3 | Warning triangle holding an exclamation mark. Any hazard the crew flags: unstable ground, asbestos, a live line. | `XHZ` |
-| `Heritage Item` | 3.8 x 3.6 | Five-point star outline. A protected heritage item such as a marker stone, a post or a plaque. | `XHT` |
-| `Habitat Marker` | 3.4 x 3.4 | Ring holding a leaf. A habitat or protected-species marker. | `XHH` |
+| `Hazard Point` | 3.8 x 3.3 | Warning triangle holding an exclamation mark. Any hazard the crew flags: unstable ground, asbestos, a live line. | `PHAZ` |
+| `Heritage Item` | 3.8 x 3.6 | Five-point star outline. A protected heritage item such as a marker stone, a post or a plaque. | `PHIA` `PHIS` `PHNI` |
+| `Grave Marker` | 1.8 x 2.8 | Upright slab with an arched top and a small cross cut on its face. A grave headstone, shot at the middle of its base. | `PHST` |
+| `Habitat Marker` | 3.4 x 3.4 | Ring holding a leaf. A habitat or protected-species marker. | `PHEC` `PHEE` |
 
 ### Miscellaneous/General
 
 | Symbol | Size (mm) | What it looks like and when to use it | Used by |
 |---|---|---|---|
-| `Generic Point` | 2.0 x 2.0 | Plus. A point that no other symbol describes; the code and notes say what it is. | `XGP` |
-| `Query Point` | 3.4 x 3.4 | Ring holding a question mark. A point whose identity is in doubt and must be checked in the field. | `XGQ` |
+| `Generic Point` | 2.0 x 2.0 | Plus. A point that no other symbol describes; the code and notes say what it is. | `PVID` |
 
 ## The codes
 
-245 codes by class and subgroup. *Draws* is the linestyle or symbol, the colour and the pen weight; the text says what the code is and how to shoot it, and an example is the code field of consecutive points, separated by commas. Where a code draws the plain continuous line, Katana's own word `continuous` is its linestyle.
+632 codes by class and group. *Label* is the code's legend label, the name a plot legend prints in capitals and `CODE LIST` shows as the rule's comment; a key that draws nothing of its own (a surface flag, a text size, the bare `*`) has none. *Draws* is the linestyle or symbol, the colour and the pen weight; *Also* is what the code does besides drawing: whether its points join a surface, and the attributes it applies (in backticks) or asks the surveyor for. Where a code draws the plain continuous line, Katana's own word `continuous` is its linestyle. A field-book code is a key and a string number, `WM1 ST, WM1, WM1 END`. To find a code from what it is called, use [the index by label](#the-codes-by-label); from its key, [the index by key](#the-codes-in-alphabetical-order).
+
+### Every code: the bare `*`
+
+The bare `*` matches every code, so it holds only what applies to any string.
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `*` |  | a round pipe from `Diameter (mm)` |  |  | Any string that carries a Diameter attribute is also drawn as a round pipe section, measured down from its top (the obvert). |
 
 ### Class C: Boundaries and Cadastre
 
 Where one owner's land ends and the next begins, and the marks that prove it.
 
-#### `CB` Lot Boundaries
+#### Lot Boundaries
 
-The lines of title: registered, occupied, compiled, reserve and municipal.
+Title, compiled, digital, proposed and stratum boundaries, and the lines that join them. (8 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `CBT` | Title Boundary | `Title Boundary`; `katana boundary` (#796EDA); 0.50 mm | `cadastre/lots/title` | Lot boundary as registered on the title. Shoot each boundary at the mark you found, or at the computed corner where a mark is missing (code that point CMN). One string per lot; close it with CL. Fill Plan Reference from the deposited plan. Example: `CBT1 ST, CBT1, CBT1, CBT1 CL`. |
-| `CBO` | Occupation Boundary | `Occupation Boundary`; `katana boundary` (#796EDA); 0.35 mm | `cadastre/lots/occupation` | Boundary as occupied on the ground: a fence, a wall face or a hedge. Shoot the line the owners treat as the boundary. Where it parts from the title line (CBT) code both: the gap between them is the encroachment. Example: `CBO1 ST, CBO1, CBO1 END`. |
-| `CBC` | Compiled Boundary | `Compiled Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/lots/compiled` | Boundary taken from plans and not measured on this survey. Use where you drew the line from deposited plans without measuring it, and shoot only the corners you hold. Plan Reference names the plan you compiled from. Recode as CBT once the marks are found. Example: `CBC1 ST, CBC1, CBC1 END`. |
-| `CBR` | Road Reserve Boundary | `Reserve Boundary`; `katana boundary` (#796EDA); 0.35 mm | `cadastre/lots/road-reserve` | Limit of a public road reserve. Shoot along the reserve limit from the title or the road plan, at each change of direction. Park and drainage reserves are CER, not this code. Example: `CBR1 ST, CBR1, CBR1 END`. |
-| `CBM` | Municipal Boundary | `Municipal Boundary`; `katana boundary` (#796EDA); 0.50 mm | `cadastre/lots/municipal` | Boundary between two local government areas. Shoot only where the boundary is marked or the gazetted plan gives coordinates; do not draw it from a map. It is a long, quiet line: one point at each change of direction is enough. Example: `CBM1 ST, CBM1, CBM1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `BC*` | Compiled boundary | line `Compiled Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/lots/compiled` |  | A cadastral boundary compiled from plans and positioned to about one metre. |
+| `BM*` | Digital boundary | line `Digital Boundary`; `katana boundary` (#796EDA); 0.18 mm | `cadastre/lots/compiled` |  | A boundary taken from the digital cadastral map, whose position can be anywhere from one to twenty metres out. |
+| `BN*` | Boundary good to 0.5 m | line `Estimated Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/lots/compiled` |  | A cadastral boundary whose position is good to about half a metre. |
+| `BO*` | Boundary good to 0.1 m | line `continuous`; `katana boundary` (#796EDA); 0.35 mm | `cadastre/lots/title` |  | A cadastral boundary whose position is good to about a tenth of a metre. |
+| `BT*` | Surveyed title boundary | line `Surveyed Boundary`; `katana boundary` (#796EDA); 0.50 mm | `cadastre/lots/title` |  | A title boundary measured on the ground and good to about two centimetres. |
+| `BY*` | Boundary to be acquired | line `Acquisition Boundary`; `katana boundary` (#796EDA); 0.35 mm | `cadastre/lots/special` |  | A proposed boundary that marks land to be acquired. |
+| `BZ*` | Parcel stratum limit | line `Stratum Parcel Edge`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/lots/special` |  | The limit of a stratum parcel, which is fixed by a height or depth and not only by a line on the ground. |
+| `JL*` | Boundary join line | line `Survey Join Line`; `katana boundary` (#796EDA); 0.13 mm | `cadastre/lots/join` |  | A join line between two boundary points, giving a bearing and distance; it is not itself a boundary. |
 
-#### `CE` Easements and Reserves
+#### Easements and Reserves
 
-Land that carries another party's right or a public purpose.
+Land that carries another party's right or a public purpose. (1 code)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `CEA` | Access Easement | `Easement Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/easements/access` | Right of way over a lot for access. Shoot both edges of the easement from the registered plan, one string per side. Close with CL when it is a block, and END when it runs off the lot. Plan Reference is the plan that created it. Example: `CEA1 ST, CEA1, CEA1 END`. |
-| `CED` | Drainage Easement | `Easement Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/easements/drainage` | Easement that carries a drain or an overland flow path. Shoot both edges from the plan. Pipes and channels inside it are shot with their own codes (KCP, KWD); this code only says where the easement lies. Example: `CED1 ST, CED1, CED1 END`. |
-| `CES` | Services Easement | `Easement Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/easements/services` | Easement for pipes or cables, including pipeline easements. Shoot both edges from the plan. Owner is the authority the easement benefits and Plan Reference the plan that created it. The buried service itself gets its own U code. Example: `CES1 ST, CES1, CES1 END`. |
-| `CEG` | General Easement | `Easement Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/easements/general` | Easement whose purpose is not recorded. Use only when the plan shows an easement and gives no purpose. Say what you know in Plan Reference and flag it for the drafter; replace it with CEA, CED or CES once the purpose is found. Example: `CEG1 ST, CEG1, CEG1 END`. |
-| `CER` | Public Reserve Boundary | `Reserve Boundary`; `katana boundary` (#796EDA); 0.35 mm | `cadastre/easements/reserve` | Limit of a park, a reserve or other public land. Shoot along the reserve limit from the title, at each change of direction. Road reserves are CBR. Example: `CER1 ST, CER1, CER1 END`. |
-| `CEV` | Covenant Area | `Easement Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/easements/general` | Area restricted by a covenant or a restriction on use. Shoot the outline of the restricted area from the plan or the covenant text and close with CL. Plan Reference points to the instrument. Example: `CEV1 ST, CEV1, CEV1, CEV1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `BE*` | Easement boundary | line `Easement Boundary`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/easements/general` |  | The limit of an easement, land that carries another party's right of use. |
 
-#### `CM` Boundary Marks
+#### Boundary Marks
 
-Pegs, pins, spikes and crosses found or placed at corners.
+Pegs, pins, nails and the other marks found or placed at corners, and the marks that witness them. (21 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `CMP` | Corner Peg | symbol `Corner Peg`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | Peg found or placed at a boundary corner. Shoot the top centre of the peg. Mark Number is the plan's number for it; Condition says sound, leaning or disturbed. A nail or spike in hard ground is CMS. |
-| `CMI` | Iron Pin | symbol `Iron Pin`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | Iron pin found or placed at a boundary corner. Shoot the top centre of the pin. Condition records whether it stands proud, is flush, bent or rusted. |
-| `CMT` | Iron Pipe | symbol `Iron Pipe`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | Iron pipe found or placed at a boundary corner. Shoot the centre of the pipe's mouth, not its rim. Mark Number and Condition as for any mark. |
-| `CMS` | Survey Spike | symbol `Survey Spike`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | Spike or nail in a road, a kerb or concrete. Shoot the centre of the head, or of the washer when there is one. A drilled hole is CMD and a cut cross is CMX. |
-| `CMD` | Drilled Hole | symbol `Drilled Hole`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | Hole drilled in rock or concrete. Shoot the centre of the hole at the surface. When it holds a lead plug or a pin, the plug centre is the mark. |
-| `CMX` | Chiselled Cross | symbol `Chiselled Cross`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | Cross cut in rock, a kerb or concrete. Shoot the intersection of the two arms, not the end of either. Note in Condition if the arms are worn or the cross is not square. |
-| `CMN` | Mark Not Found | symbol `Mark Not Found`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/not-found` | Boundary mark searched for and not found. Shoot the computed position of the missing mark, never a guess. Search Note says how long you looked and what you dug. It is the evidence behind any mark you later reinstate. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PBDY` | Cadastral corner mark | point, symbol `Iron Pin` (hidden); `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A boundary mark of any kind, shot as a point. |
+| `PBPG` | Peg at a boundary corner | point, symbol `Corner Peg`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A peg set at a boundary corner, shot at its top. |
+| `PBPG*` |  | nothing |  | kept out of surfaces | Keeps boundary pegs out of the ground surface. |
+| `PCRM` | Survey reference mark | point, symbol `Fixed Survey Mark` (hidden); `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A mark set to reference cadastral corners, so that the corners can be re-established if their own marks are lost. |
+| `PDHL` | Winged drill hole | point, symbol `Winged Drill Hole`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A hole drilled in rock or concrete, with a chiselled wing cut beside it to make it easy to find. |
+| `PDHL*` |  | nothing |  | kept out of surfaces | Keeps winged drill holes out of the ground surface. |
+| `PGIN` | Galvanised iron nail | point, symbol `Survey Spike`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A galvanised iron nail driven into a hard surface as a survey mark. |
+| `PGIN*` |  | nothing |  | kept out of surfaces | Keeps galvanised nails out of the ground surface. |
+| `PGPI` | Galvanised iron pipe | point, symbol `Iron Pipe`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A galvanised iron pipe driven in as a survey mark. |
+| `PGPI*` |  | nothing |  | kept out of surfaces | Keeps galvanised pipes out of the ground surface. |
+| `PMSM` | Other survey mark | point, symbol `Fixed Survey Mark`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A survey mark of a kind no other code covers, shot at its centre. |
+| `PMSM*` |  | nothing |  | kept out of surfaces | Keeps miscellaneous survey marks out of the ground surface. |
+| `PNAL` | Survey nail | point, symbol `Survey Spike`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | each point `Point Code=PNAL` | A nail driven into a hard surface as a survey mark; each shot also records its code. |
+| `POCP` | Fence corner post | point; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A post standing at a boundary corner, taken as the corner mark. |
+| `PPMK` | Permanent ground mark | point, symbol `Fixed Survey Mark`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A permanent mark set in the ground to last, which later surveys can rely on to find a position. |
+| `PRMB` | Concrete reference block | point, symbol `Corner Peg`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/reference` |  | A reference mark set in a concrete block, used to re-establish a survey mark if it is lost. |
+| `PRMB*` |  | nothing |  | kept out of surfaces | Keeps concrete reference blocks out of the ground surface, since they fix a position and not the ground. |
+| `PRTR` | Witness tree | point; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/reference` |  | A tree used as a witness to a survey mark or a boundary corner, shown as a plain point. |
+| `PSKI` | Survey spike | point, symbol `Survey Spike`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A spike or nail driven into a hard surface and used as a survey mark. |
+| `PSTA` | Star picket mark | point, symbol `Steel Picket`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A star picket, a steel picket with a star-shaped section, driven in as a survey mark. |
+| `PSTA*` |  | nothing |  | kept out of surfaces | Keeps star pickets out of the ground surface, since they mark a position and not the ground. |
 
 ### Class R: Roads and Pavements
 
 The made surface: its edges, its paint and the paths beside it.
 
-#### `RC` Carriageway
+#### Carriageway
 
-Edges, shoulders, centreline and islands of the road itself.
+The centre, the edges and the offsets of the road itself, sealed or not. (9 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `RCE` | Sealed Road Edge | `continuous`; `katana pavement` (#789295); 0.35 mm | `roads/carriageway/edge` | Outer edge of a sealed carriageway that has no kerb. Shoot the edge of the seal at each change of direction, and every 10 m on a curve, with a level at each point. A kerbed street is shot as kerb (KKT, KKL) and this code is left out. Example: `RCE1 ST, RCE1, RCE1 END`. |
-| `RCU` | Unsealed Road Edge | `Unsealed Road Edge`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/edge` | Edge of the formed gravel or earth running surface. Shoot the edge of the formed surface, not the edge of the verge. Where the edge wanders or is soft, take a point every 5 m. Example: `RCU1 ST, RCU1, RCU1 END`. |
-| `RCS` | Shoulder Edge | `Shoulder Edge`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/edge` | Outer edge of the road shoulder, where it meets the verge. Shoot where the shoulder ends and the verge begins. The edge of the lane is RCE and is shot as its own string. Example: `RCS1 ST, RCS1, RCS1 END`. |
-| `RCL` | Road Centreline | `Road Centreline`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/centreline` | Centre of the carriageway, shot at the crown. Shoot the crown of the road, not the painted line, with a level at each point: alignments and long sections are cut from this string. Walk in the direction of chainage. Example: `RCL1 ST, RCL1, RCL1 END`. |
-| `RCJ` | Pavement Joint | `continuous`; `katana pavement` (#789295); 0.13 mm | `roads/carriageway/joint` | Construction or expansion joint in a concrete pavement. Shoot both ends of the joint and any bend in it, one string per joint. Needed only on concrete pavements where the jointing pattern matters. Example: `RCJ1 ST, RCJ1 END`. |
-| `RCI` | Traffic Island Edge | `continuous`; `katana pavement` (#789295); 0.35 mm | `roads/carriageway/edge` | Edge of a raised or painted traffic island. Shoot the top front edge of a raised island, or the painted outline of a flush one, and close with CL. Example: `RCI1 ST, RCI1, RCI1, RCI1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `EJ*` | Formation edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/edge` |  | Outer edge of the graded formation that carries a road or track, before any pavement is laid. |
+| `EK*` | Track edge | line `Unsealed Road Edge`; `katana pavement` (#789295); 0.18 mm | `roads/carriageway/edge` |  | Edge of a vehicle track, worn or cut into the ground and not made up as a road. |
+| `EM*` | Edge of a median strip | line `continuous`; `katana pavement` (#789295); 0.35 mm | `roads/carriageway/edge` | sets `Check Zone=1` | Edge of the central median that separates opposing lanes of traffic. |
+| `EP*` | Pavement edge | line `continuous`; `katana pavement` (#789295); 0.35 mm | `roads/carriageway/edge` |  | Outer edge of the sealed road surface, shot where the seal meets the shoulder or kerb. |
+| `OF*` | Surveyed offset crown | line `Road Centreline`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/centreline` | sets `Check Zone=1` | Crown of a carriageway shot where it is offset from the road centreline, checked in model zone 1. |
+| `RC*` | Carriageway centre | line `Road Centreline`; `katana pavement` (#789295); 0.18 mm | `roads/carriageway/centreline` |  | Centre of the road, shot along the middle of the carriageway. |
+| `SG*` | Cattle grid outline | line `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/grid` |  | Grid of bars across a road or gateway that stops stock but lets vehicles through. |
+| `UR*` | Gravel road edge | line `Unsealed Road Edge`; `katana pavement` (#789295); 0.25 mm | `roads/carriageway/edge` |  | Edge of the formed surface of an unsealed road. |
+| `VT*` | Vehicle track edge | line `Unsealed Road Edge`; `katana pavement` (#789295); 0.18 mm | `roads/carriageway/track` |  | Edge of a track that vehicles use, formed by wheels and not built. |
 
-#### `RM` Markings
+#### Markings
 
-Painted lines, crossings, hatching and arrows.
+Painted lines, arrows, crossings and chevrons, and the raised markers set in the road. (24 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `RMD` | Dashed Lane Line | `Dashed Lane Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | Dashed painted line between traffic lanes. Shoot along the middle of the dashes at each change of direction, and every 10 m on a curve. The dash pattern is drawn for you, so do not shoot each dash. Example: `RMD1 ST, RMD1, RMD1 END`. |
-| `RMB` | Barrier Line | `Double Barrier Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | Double continuous painted line, as at a no-overtaking section. Shoot along the middle of the pair of lines. The second line is drawn beside the first for you. Example: `RMB1 ST, RMB1, RMB1 END`. |
-| `RMS` | Stop Line | `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/markings/line` | Painted bar where traffic must stop. Shoot the two ends of the bar on its leading edge, the side traffic reaches first. Two points only. Example: `RMS1 ST, RMS1 END`. |
-| `RMZ` | Zebra Crossing | `Zebra Crossing Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | Zebra crossing, shown as a row of stripes. Shoot the middle of the outer stripe at each end of the crossing, walking across the road. The stripes are drawn along the traffic direction for you. Example: `RMZ1 ST, RMZ1 END`. |
-| `RMH` | Painted Hatch Area | `continuous`; `katana pavement` (#789295); 0.13 mm | `roads/markings/line` | Outline of a painted hatched or chevron area. Shoot each corner of the painted area and close with CL. The hatching itself is not shot. Example: `RMH1 ST, RMH1, RMH1, RMH1 CL`. |
-| `RME` | Edge Line | `continuous`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | Painted line along the edge of the carriageway. Shoot along the middle of the painted line. It is rarely the same line as the edge of the seal (RCE), so shoot both when both matter. Example: `RME1 ST, RME1, RME1 END`. |
-| `RMP` | Parking Bay Line | `continuous`; `katana pavement` (#789295); 0.13 mm | `roads/markings/line` | Painted line that marks out a parking bay. Shoot the two ends of each painted line, or one closed string round a single marked bay. Example: `RMP1 ST, RMP1 END`. |
-| `RMA` | Road Arrow | symbol `Road Arrow Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/arrow` | Painted direction arrow on the carriageway. Shoot the middle of the arrow. The symbol is drawn pointing east and Katana does not yet turn symbols, so write the real direction in a drafting note. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AE*` | Straight-and-left arrow | line `Straight and Left Arrow Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/arrow` | kept out of surfaces | A painted pavement arrow for a lane that goes straight on or turns left, shot along its axis. |
+| `AI*` | Straight-and-right arrow | line `Straight and Right Arrow Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/arrow` | kept out of surfaces | A painted pavement arrow for a lane that goes straight on or turns right, shot along its axis. |
+| `AL*` | Left-turn arrow | line `Left Turn Arrow Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/arrow` | kept out of surfaces | A painted pavement arrow for traffic that turns left, shot along its axis. |
+| `AR*` | Right-turn arrow | line `Right Turn Arrow Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/arrow` | kept out of surfaces | A painted pavement arrow for traffic that turns right, shot along its axis. |
+| `AS*` | Straight-ahead arrow | line `Straight Ahead Arrow Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/arrow` | kept out of surfaces | A painted pavement arrow for traffic that goes straight on, shot along its axis. |
+| `BS*` | Barrier beside broken line | line `Left Broken Barrier Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | A painted double line with an unbroken barrier line on one side and a broken separation line on the other. |
+| `CA*` | Zigzag approach marking | line `Crossing Approach Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/crossing` | kept out of surfaces | The zigzag line painted along the approach to a pedestrian crossing. |
+| `CC*` | Lane continuity line | line `Lane Continuity Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | sets `Check Zone=1` | A short-dash line that carries a lane through a junction, checked in check zone 1 (roads, bridges and drainage). |
+| `CD*` | Solid painted line | line `continuous`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | An unbroken painted line on the pavement. |
+| `CG*` | Give-way line | line `Give Way Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | The give-way line painted across a turning lane. |
+| `CN*` | Lane separation line | line `Equal Dash Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | sets `Check Zone=1` | A lane separation line with dashes and gaps of equal length, checked in check zone 1 (roads, bridges and drainage). |
+| `CV*` | Left-hand chevrons | line `Left Chevron Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | A row of painted chevrons that point to the left of travel, used to fill a painted island. |
+| `CW*` | Clearway edge line | line `Equal Dash Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | The painted edge of a clearway, drawn as dashes and gaps of equal length. |
+| `CX*` | Signalised crossing | line `Signal Crossing Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/crossing` |  | The painted lines that bound a pedestrian crossing controlled by traffic signals. |
+| `CY*` | Right-hand chevrons | line `Right Chevron Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | A row of painted chevrons that point to the right of travel, used to fill a painted island. |
+| `CZ*` | Zebra crossing | line `Zebra Crossing Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | kept out of surfaces | Painted zebra stripes where pedestrians have right of way across the carriageway. |
+| `DA*` | Teeth, points left | line `Left Dragons Teeth Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | Row of painted dragon's teeth with the points standing to the left of the way the line is shot. |
+| `DB*` | Double barrier line | line `Double Barrier Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` | sets `Check Zone=1` | Pair of unbroken painted lines down a road that forbids crossing in either direction. |
+| `DC*` | Teeth, points right | line `Right Dragons Teeth Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | Row of painted dragon's teeth with the points standing to the right of the way the line is shot. |
+| `LL*` | Lane line, long gap | line `Dashed Lane Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | Lane line painted in 3 metre dashes with 9 metre gaps, shot as built. |
+| `PTMX` | Domed pavement marker | point, symbol `Raised Pavement Marker`; `katana pavement` (#789295); 0.25 mm | `roads/markings/stud` |  | Raised domed marker fixed to the road, called a silent cop, that guides traffic. |
+| `PTMX*` |  | nothing |  | kept out of surfaces | Keeps silent-cop road markers out of the ground surface. |
+| `SB*` | Separation and barrier lines | line `Right Broken Barrier Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/line` |  | A painted double line with a broken separation line on one side and an unbroken barrier line on the other, the barrier on the right. |
+| `TL*` | Rumble strip line | line `Zebra Crossing Marking`; `katana pavement` (#789295); 0.18 mm | `roads/markings/tactile` |  | Raised bars painted across the edge of a lane that rattle a tyre and warn a driver who drifts. |
 
-#### `RP` Paths and Access
+#### Paths and Access
 
-Footpaths, cycleways, driveways, kerb ramps and tactile paving.
+Footpath and driveway edges, and the ramps beside them. (3 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `RPF` | Footpath Edge | `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/paths/edge` | Edge of a paved footpath. Shoot each edge where the paving meets the kerb, the verge or the property, with a level at each point. One string per side. Example: `RPF1 ST, RPF1, RPF1 END`. |
-| `RPC` | Cycleway Edge | `Cycleway Edge`; `katana pavement` (#789295); 0.25 mm | `roads/paths/edge` | Edge of a cycleway or a shared path. Shoot each edge of the path. The bead in the gap tells a cycleway from a footpath on the plan at a glance. Example: `RPC1 ST, RPC1, RPC1 END`. |
-| `RPD` | Driveway Edge | `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/paths/edge` | Edge of a driveway, from the gutter to the boundary. Shoot each edge of the driveway from the gutter crossing to the property boundary, one string per side. Example: `RPD1 ST, RPD1, RPD1 END`. |
-| `RPR` | Kerb Ramp | symbol `Kerb Ramp`; `katana pavement` (#789295); 0.25 mm | `roads/paths/ramp` | Pedestrian ramp cut down to the road at a kerb. Shoot the middle of the ramp where it meets the gutter. The footpath edges either side are shot as RPF. |
-| `RPT` | Tactile Paving | symbol `Tactile Paving`; `katana pavement` (#789295); 0.25 mm | `roads/paths/ramp` | Patch of tactile ground surface indicators. Shoot the middle of each patch, one point per patch. A long strip is a point at each end. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DW*` | Driveway edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/paths/edge` |  | Edge of a driveway that gives a lot access across the footpath to the road. |
+| `FP*` | Footpath edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/paths/edge` | sets `Check Zone=3` | Edge of a footpath for pedestrians beside the road. |
+| `KR*` | Pedestrian ramp outline | line `continuous`; `katana pavement` (#789295); 0.25 mm | `roads/paths/ramp` |  | A pedestrian kerb ramp, or pram ramp, shot as a line along its edge. |
 
 ### Class S: Street Furniture and Signs
 
 What people read, sit on, light their way by or steer round.
 
-#### `SS` Signs
+#### Signs
 
-Regulatory, warning, guide and information signs.
+Sign posts and sign outlines, and the lines that carry a speed limit. (12 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `SSR` | Regulatory Sign | symbol `Regulatory Sign`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` | Sign that gives an order, such as a speed limit or a stop. Shoot the foot of the post, or the middle of the face when it is fixed to another structure. Sign Code is the code printed on the sign's standard; Face Text is the wording as it reads. |
-| `SSW` | Warning Sign | symbol `Warning Sign`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` | Sign that warns of a hazard ahead. Shoot the foot of the post. Sign Code and Face Text as for a regulatory sign; a supplementary plate is noted in Face Text. |
-| `SSG` | Guide Sign | symbol `Guide Sign`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` | Sign that gives a direction, a distance or a street name. Shoot the foot of the post. Put the wording in Face Text, one line per plate, so the sign can be checked without a site visit. |
-| `SSI` | Information Sign | symbol `Information Sign`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` | Sign that informs, such as parking or a facility. Shoot the foot of the post. Face Text carries the message or the restriction times. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PSDS` | Double-faced sign post | point, symbol `Double Sided Sign Post`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` |  | A post that carries a sign face on each of its two sides. |
+| `PSIN` | Single-faced sign post | point, symbol `Plain Sign Post`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` |  | A post that carries a single sign face. |
+| `S1*` | Speed limit 100 km/h | line `Hundred Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 100 km/h; the string runs along the zone. |
+| `S2*` | Speed limit 110 km/h | line `Hundred and Ten Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 110 km/h; the string runs along the zone. |
+| `S4*` | Speed limit 40 km/h | line `Forty Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 40 km/h; the string runs along the zone. |
+| `S5*` | Speed limit 50 km/h | line `Fifty Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 50 km/h; the string runs along the zone. |
+| `S6*` | Speed limit 60 km/h | line `Sixty Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 60 km/h; the string runs along the zone. |
+| `S7*` | Speed limit 70 km/h | line `Seventy Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 70 km/h; the string runs along the zone. |
+| `S8*` | Speed limit 80 km/h | line `Eighty Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 80 km/h; the string runs along the zone. |
+| `S9*` | Speed limit 90 km/h | line `Ninety Speed Zone Line`; `katana street` (#A2759D); 0.25 mm | `street/signs/speed-zone` | kept out of surfaces | Stretch of road signed with a speed limit of 90 km/h; the string runs along the zone. |
+| `SI*` | Large sign outline | line `continuous`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` |  | Plan outline of a large sign face, such as a gantry or hoarding. |
+| `SX*` | Cantilever sign outline | line `continuous`; `katana street` (#A2759D); 0.25 mm | `street/signs/sign` | kept out of surfaces | Plan outline of a sign carried on an arm that reaches out over the road. |
 
-#### `SL` Lighting
+#### Lighting
 
-Street lights and bollard lights.
+Street, garden and hanging lights, and the arms that reach out to them. (4 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `SLS` | Street Light | symbol `Street Light`; `katana street` (#A2759D); 0.25 mm | `street/lighting/light` | Street light on its own pole, apart from the power network. Shoot the middle of the pole at ground level. Height (m) is to the lamp, Material is the pole's, and Owner is the lighting authority. A light on a power pole is coded UEP, not this. |
-| `SLB` | Bollard Light | symbol `Bollard Light`; `katana street` (#A2759D); 0.25 mm | `street/lighting/light` | Low light on a bollard or a short post. Shoot the middle of the base. A bollard with no light is SBB. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `LI*` | Light outreach arm | line `continuous`; `katana street` (#A2759D); 0.18 mm | `street/lighting/light` | kept out of surfaces | Outreach arm of a street light, shot from the pole to the lantern; it is kept out of the ground surface. |
+| `PLGN` | Low garden light | point, symbol `Bollard Light`; `katana street` (#A2759D); 0.25 mm | `street/lighting/light` |  | A low light standing in a garden bed or on a lawn, shot at its base. |
+| `PLPL` | Light pole | point, symbol `Street Light`; `katana street` (#A2759D); 0.25 mm | `street/lighting/light` |  | A pole that carries a light, shot at the centre of the pole at ground level. |
+| `PLSU` | Hanging light | point, symbol `Hanging Light`; `katana street` (#A2759D); 0.25 mm | `street/lighting/light` |  | A light hung from an overhead wire or bracket, shot on the ground directly below it. |
 
-#### `SB` Posts and Barriers
+#### Posts and Barriers
 
-Bollards, delineators and guard rail.
+Bollards, guard rails, and cable and concrete barriers. (5 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `SBB` | Bollard | symbol `Bollard`; `katana street` (#A2759D); 0.25 mm | `street/barriers/post` | Fixed bollard that stops vehicles and cannot be moved. Shoot the middle of the top of the bollard. For a closely spaced row shoot every bollard, not the ends. |
-| `SBR` | Removable Bollard | symbol `Removable Bollard`; `katana street` (#A2759D); 0.25 mm | `street/barriers/post` | Bollard that lifts out of a socket to let vehicles through. Shoot the middle of the socket cover; if the bollard is standing, the middle of its top. |
-| `SBG` | Delineator Post | symbol `Delineator Post`; `katana street` (#A2759D); 0.25 mm | `street/barriers/post` | Roadside delineator: a reflective marker post at the edge of the road. Shoot the middle of the post at ground level. Shoot every post of a run, not the first and last. |
-| `SBL` | Guard Rail | `Guard Rail Line`; `katana street` (#A2759D); 0.35 mm | `street/barriers/guard-rail` | Roadside guard rail or crash barrier. Shoot the front face of the rail at each end and at each change of direction. The posts are drawn along the line at their usual spacing, so you do not shoot them. Example: `SBL1 ST, SBL1, SBL1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AC*` | Fixed bollard | point, symbol `Bollard Post`; `katana street` (#A2759D); 0.25 mm | `street/barriers/post` |  | A fixed bollard, shot as a single point and drawn with the bollard symbol. |
+| `FG*` | Roadside guard fence | line `Guard Rail Line`; `katana street` (#A2759D); 0.35 mm | `street/barriers/guard-rail` |  | Steel beam barrier on posts that guards the edge of a road. |
+| `FW*` | Cable safety barrier | line `Wire Rope Barrier Line`; `katana street` (#A2759D); 0.35 mm | `street/barriers/guard-rail` |  | Safety barrier of tensioned steel cables on posts beside or between traffic lanes. |
+| `KJ*` | Concrete safety barrier | line `Concrete Barrier Line`; `katana street` (#A2759D); 0.35 mm | `street/barriers/guard-rail` |  | A concrete safety barrier of the F-shaped profile, shot as a line along its base. |
+| `TG*` | Guard rail crest | line `Guard Rail Line`; `katana street` (#A2759D); 0.25 mm | `street/barriers/guard-rail` |  | Line along the top of a guard rail. |
 
-#### `SA` Amenities
+#### Amenities
 
-Benches, bins, fountains and shelters.
+Bins, seats, tables, shelters, letterboxes, parking meters and fireplaces. (9 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `SAB` | Bench | symbol `Bench`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` | Park or street bench, fixed or loose. Shoot the middle of the seat. A long bench is one point at its middle, not one at each end. |
-| `SAR` | Litter Bin | symbol `Litter Bin`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` | Litter bin, free-standing or fixed to a post. Shoot the middle of the bin. A bin fixed to a post is shot at the post. |
-| `SAF` | Drinking Fountain | symbol `Drinking Fountain`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` | Public drinking fountain. Shoot the middle of the fountain's base. Its feed is a water service and is shot as UWB. |
-| `SAS` | Bus Stop Shelter | symbol `Bus Stop Shelter`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` | Bus shelter or other roofed waiting area. Shoot the middle of the roof outline. A shelter that needs its exact footprint is outlined with BBW. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `BH*` | Bus shelter roof | line `continuous`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` | kept out of surfaces | The roof outline of a bus shelter, shot round its edge. |
+| `BI*` | Bulk bin | line `continuous`; symbol `Litter Bin` at every vertex; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | A large waste bin such as a skip, shot round its outline and marked with the bin symbol. |
+| `PBIN` | Litter bin | point, symbol `Litter Bin`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | A rubbish bin, shot at its centre. |
+| `PBUS` | Bus stop position | point, symbol `Bus Stop Sign`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | The position of a bus stop, shot at the foot of its sign post. |
+| `PFPL` | Outdoor fireplace | point, symbol `Barbecue Hearth`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | A built fireplace, such as a barbecue hearth, in a park, camp or picnic area. |
+| `PKME` | Kerbside meter | point, symbol `Kerbside Meter`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | A kerbside meter that collects the fee for a parking bay. |
+| `PMBX` | Letterbox | point, symbol `Letterbox`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | A letterbox at the property frontage, shot at the middle of its base. |
+| `SE*` | Seat outline | line `continuous`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` | kept out of surfaces | Plan outline of a fixed seat or bench. |
+| `TA*` | Picnic table outline | line `continuous`; `katana street` (#A2759D); 0.25 mm | `street/amenities/furniture` |  | Plan outline of a picnic table. |
 
-#### `ST` Traffic Control
+#### Traffic Control
 
-Signal poles, cameras and controller cabinets.
+Signal posts and controller cabinets, and enforcement cameras. (6 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `STS` | Signal Pole | symbol `Signal Pole`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` | Traffic signal pole that carries the lanterns, with or without a mast arm. Shoot the middle of the pole at ground level. Height (m) is to the top of the mast arm; Owner is the road authority. |
-| `STC` | Roadside Camera | symbol `Roadside Camera`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` | Traffic or enforcement camera on its own pole or on a signal pole. Shoot the middle of the pole's base, not the camera. The pole's other attachments are not coded. |
-| `STK` | Signal Controller Cabinet | symbol `Signal Controller Cabinet`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` | Cabinet that houses a signal controller. Shoot the middle of the cabinet's footprint. Owner is the road authority; Condition notes damage or a missing door. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PCAM` | Enforcement camera | point, symbol `Roadside Camera`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` |  | A speed, red-light or traffic enforcement camera, shot at its pole. |
+| `PCFU` | Camera flash lamp | point, symbol `Camera Strobe`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` |  | The flash lamp that lights a vehicle for an enforcement camera, shot at its pole. |
+| `PCTV` | Closed-circuit camera | point, symbol `Roadside Camera`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` |  | A closed-circuit television camera watching the road, shot at the pole that carries it. |
+| `PSCL` | Signal controller cabinet | point, symbol `Signal Controller Cabinet`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` |  | The cabinet that houses the controller of a set of traffic signals. |
+| `PSGL` | Traffic signal post | point, symbol `Signal Pole`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` |  | A traffic signal post with its lanterns, at an intersection or a crossing. |
+| `TO*` | Signal mast arm outline | line `continuous`; `katana street` (#A2759D); 0.25 mm | `street/traffic/equipment` | kept out of surfaces | Plan outline of a signal pole together with the arm that reaches out over the road. |
 
 ### Class K: Kerbs and Drainage
 
 Where the street meets the water: kerbs, pits, pipes and channels.
 
-#### `KK` Kerbs
+#### Kerbs
 
-Kerb top, gutter, back and return, and the mountable and dish forms.
+Kerb top and back, gutter lines, medians and dish drains. (6 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `KKT` | Kerb Top Edge | `continuous`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | Top front edge of a kerb, where the face meets the top. Shoot the top front arris with a level at every point: the street's design levels come from this string. Take a point at each change of direction and every 10 m on a curve. Example: `KKT1 ST, KKT1, KKT1 END`. |
-| `KKL` | Gutter Lip | `Gutter Lip Line`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/gutter` | Flow line of the gutter at the foot of the kerb face. Shoot the line water runs on, where the gutter turns up into the kerb face. Level it carefully: gutter falls are checked against it. Example: `KKL1 ST, KKL1, KKL1 END`. |
-| `KKB` | Kerb Back Edge | `Kerb Back Line`; `katana kerb` (#907368); 0.18 mm | `drainage/kerbs/back` | Back edge of the kerb top. Shoot where the kerb top meets the footpath or the verge. It is needed only when the width of the kerb matters; KKT alone is enough otherwise. Example: `KKB1 ST, KKB1, KKB1 END`. |
-| `KKR` | Kerb Return | `continuous`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | Kerb round a street corner, shot as a curve. Shoot the straight kerb up to the curve, then BC at its first point, one point near the middle, and EC at its last. Three points fix the arc, so make the middle one a true midpoint. Example: `KKR1 ST, KKR1 BC, KKR1, KKR1 EC, KKR1 END`. |
-| `KKM` | Mountable Kerb | `Mountable Kerb Edge`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | Low kerb that a vehicle can drive over. Shoot the top front edge. Walk with the carriageway on your left, so the bump in the line falls on the road side. Example: `KKM1 ST, KKM1, KKM1 END`. |
-| `KKD` | Shallow Dish Drain | `Dish Drain Edge`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/dish-drain` | Shallow V-shaped concrete drain. Shoot the invert, the lowest line of the dish, with a level at each point. The V falls on the left of travel. Example: `KKD1 ST, KKD1, KKD1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `BK*` | Kerb back | line `Kerb Back Line`; `katana kerb` (#907368); 0.18 mm | `drainage/kerbs/back` |  | The back edge of a kerb, where it meets the verge or the footpath. |
+| `DD*` | V-shaped concrete drain | line `Dish Drain Edge`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/dish-drain` |  | Shallow V-shaped concrete drain beside a road, shot along its lowest line. |
+| `FI*` | Gutter invert line | line `Gutter Lip Line`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/gutter` | sets `Check Zone=3` | Lowest line of the gutter beside a kerb, along which stormwater runs. |
+| `KB*` | Kerb top edge | line `continuous`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/top` | sets `Check Zone=3` | Top edge of a kerb, shot on the road side and checked in model zone 3. |
+| `LP*` | Gutter lip | line `Gutter Lip Line`; `katana kerb` (#907368); 0.25 mm | `drainage/kerbs/gutter` | sets `Check Zone=1` | Lip of the gutter beside a kerb, shot along its line and checked in model zone 1. |
+| `TM*` | Median top edge | line `continuous`; `katana kerb` (#907368); 0.35 mm | `drainage/kerbs/median` |  | Top edge of a raised median or traffic island. |
 
-#### `KP` Pits and Structures
+#### Pits and Structures
 
-Pits, manholes, traps, headwalls and culvert ends.
+Gully, junction and subsoil pits, headwalls and wing walls, and the lines that outline them. (17 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `KPG` | Grated Gully Pit | symbol `Gully Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Grated pit that takes surface water. Shoot the middle of the grate. Pit Size (mm) is the clear opening of the pit; Depth (m) is from the grate to the invert. Level the invert separately as GPI. |
-| `KPK` | Kerb Inlet Pit | symbol `Kerb Inlet Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Pit with its opening in the kerb face. Shoot the middle of the kerb opening on the kerb line. The notch is drawn on the symbol's left and is not turned to follow the kerb. |
-| `KPJ` | Junction Pit | symbol `Junction Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Pit where pipes meet, with a solid lid. Shoot the middle of the lid. Depth (m) is from the lid to the lowest invert, which is levelled as GPI. |
-| `KPH` | Stormwater Manhole | symbol `Stormwater Manhole`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/manhole` | Round access cover over a stormwater pipe. Shoot the middle of the cover. Lid Size (mm) is the clear diameter of the opening. Sewer covers are USH, not this. |
-| `KPT` | Gross Pollutant Trap | symbol `Gross Pollutant Trap`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | Structure that traps litter and sediment before an outfall. Shoot the middle of the access lid. A trap large enough to need an outline is outlined with a generic line (XGL) and a note. |
-| `KPW` | Headwall | symbol `Headwall`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | Concrete wall round the end of a pipe or culvert. Shoot the middle of the top of the wall, on the face where the pipe passes through, then code the pipe itself. The symbol is drawn open to the west and is not turned. |
-| `KPC` | Culvert End | symbol `Culvert End`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | Open end of a culvert barrel. Shoot the middle of the mouth at the invert. Shoot both ends of the culvert so its length and fall are known. |
-| `KPS` | Subsoil Inspection Point | symbol `Subsoil Inspection Point`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | Inspection opening on a subsoil drain. Shoot the middle of the cap on the inspection riser. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DP*` | Drainage pit outline | line `continuous`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | Outline of a stormwater pit, drawn at its true size on the plan. |
+| `DX*` | Drainage box outline | line `continuous`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | Outline of a rectangular box in the drainage system, such as a junction or inlet box. |
+| `HB*` | Headwall base | line `continuous`; `katana stormwater` (#00A800); 0.18 mm | `drainage/structures/outlet` | sets `utility.type=stormwater`; asks Owner, Condition | Line along the foot of a headwall where it meets the ground or the pipe invert. |
+| `HW*` | Headwall crest | line `continuous`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | sets `utility.type=stormwater`; asks Owner, Condition | Line along the top of a headwall that surrounds the end of a pipe or culvert. |
+| `IP*` | Gully pit outline | line `continuous`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | Outline of a stormwater gully pit shot as a closed line instead of a single point. |
+| `KI*` | Kerb inlet opening | line `continuous`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | A kerb inlet shot as a line along the kerb: the opening where gutter water enters the stormwater system. |
+| `PDJM` | Junction manhole | point, symbol `Stormwater Manhole`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/manhole` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | A stormwater maintenance hole at the point where two or more drainage lines meet. |
+| `PEWW` | Wingwall end | point, symbol `Wingwall End`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | sets `utility.type=stormwater`; asks Owner, Condition | The free end of a wing wall that flanks a culvert or a drain outlet. |
+| `PGUL` | Stormwater gully pit | point, symbol `Gully Grate`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | A stormwater gully pit that takes surface runoff, shot at the middle of its grate. |
+| `PHWB` | Headwall foot | point, symbol `Pipe Headwall`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | sets `utility.type=stormwater`; asks Owner, Condition | The foot of a pipe headwall, shot where the wall meets the pipe or the ground. |
+| `PHWT` | Headwall crest point | point, symbol `Pipe Headwall`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | sets `utility.type=stormwater`; asks Owner, Condition | The top edge of a pipe headwall, shot on its coping. |
+| `PILT` | Sump inlet | point, symbol `Sump Inlet`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | The point where drainage flows into a sump, shot at the mouth of the inlet. |
+| `PJBX` | Concrete junction box | point, symbol `Junction Pit`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | The top of a concrete junction box on a stormwater line, where pipes meet. |
+| `PSDO` | Subsoil drain outlet level | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/outlet` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | The invert level where a subsoil drain discharges at its outlet. |
+| `PSDO*` |  | nothing |  | kept out of surfaces | Keeps subsoil drain outlet levels out of the ground surface, since an invert is not the ground. |
+| `PSFP` | Subsoil flushing point | point, symbol `Subsoil Inspection Point`; `katana stormwater` (#00A800); 0.25 mm | `drainage/structures/pit` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition | The flushing point of a subsoil drain, a riser through which the pipe can be cleared. |
+| `PSFP*` |  | nothing |  | kept out of surfaces | Keeps subsoil flushing points out of the ground surface. |
 
-#### `KC` Pipes and Culverts
+#### Pipes and Culverts
 
-Stormwater pipes, box culverts and subsoil drains.
+Stormwater pipes and box culverts by size, and the inverts and obverts shot in them. (55 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `KCP` | Stormwater Pipe | `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe` | Stormwater pipe, shot pit to pit. Shoot the invert at every pit and manhole it passes through: the rule reads the level you shoot as the bottom of the pipe. Give Diameter (mm) and Material. Example: `KCP1 ST, KCP1, KCP1 END`. |
-| `KCB` | Box Culvert | `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | Rectangular culvert, drawn as a pair of walls. Shoot the invert along the middle of the culvert and at both ends. Width (mm) and Height (mm) are the clear opening, not the outside size. Example: `KCB1 ST, KCB1 END`. |
-| `KCS` | Subsoil Drain | `Subsoil Drain Line`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/subsoil` | Perforated drain buried beside a road or a wall. Shoot along the drain at each inspection point and bend. Depth (m) is to the invert, and Condition says whether it was found blocked. Example: `KCS1 ST, KCS1, KCS1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `B0*` | Box culvert, 150 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=150`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 150 mm high, drawn as its outline in plan. |
+| `B1*` | Box culvert, 225 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=225`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 225 mm high, drawn as its outline in plan. |
+| `B2*` | Box culvert, 300 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=300`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 300 mm high, drawn as its outline in plan. |
+| `B3*` | Box culvert, 375 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=375`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 375 mm high, drawn as its outline in plan. |
+| `B4*` | Box culvert, 450 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=450`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 450 mm high, drawn as its outline in plan. |
+| `B6*` | Box culvert, 600 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=600`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 600 mm high, drawn as its outline in plan. |
+| `B7*` | Box culvert, 750 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=750`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 750 mm high, drawn as its outline in plan. |
+| `B9*` | Box culvert, 900 mm | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=900`; asks Owner, Depth (m), Condition, Material, Width (mm) | A box culvert 900 mm high, drawn as its outline in plan. |
+| `BX*` | Box culvert, other height | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Width (mm), Height (mm) | A box culvert of any height, drawn as its outline in plan. |
+| `D0*` | Culvert, 1050 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=1050`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 1050 mm high. |
+| `D1*` | Culvert, 1200 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=1200`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 1200 mm high. |
+| `D2*` | Culvert, 1500 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=1500`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 1500 mm high. |
+| `D3*` | Culvert, 1800 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=1800`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 1800 mm high. |
+| `D4*` | Culvert, 2100 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=2100`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 2100 mm high. |
+| `D5*` | Culvert, 2400 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=2400`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 2400 mm high. |
+| `D6*` | Culvert, 2700 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=2700`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 2700 mm high. |
+| `D7*` | Culvert, 3000 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=3000`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 3000 mm high. |
+| `D8*` | Culvert, 3300 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=3300`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 3300 mm high. |
+| `D9*` | Culvert, 3600 mm high | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`, `Height (mm)=3600`; asks Owner, Depth (m), Condition, Material, Width (mm) | Rectangular box culvert with a clear opening 3600 mm high. |
+| `DZ*` | Digitised box culvert | line `Culvert Outline`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/culvert` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Width (mm), Height (mm) | Box culvert traced from imagery and not measured on the ground. |
+| `PI01` | Pipe invert, 225 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`, `Diameter (mm)=225`; asks Owner, Depth (m), Condition, Material | The invert of a 225 mm stormwater pipe, shot at its lowest inside point. |
+| `PI02` | Pipe invert, 300 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`, `Diameter (mm)=300`; asks Owner, Depth (m), Condition, Material | The invert of a 300 mm stormwater pipe, shot at its lowest inside point. |
+| `PI03` | Pipe invert, 375 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`, `Diameter (mm)=375`; asks Owner, Depth (m), Condition, Material | The invert of a 375 mm stormwater pipe, shot at its lowest inside point. |
+| `PI04` | Pipe invert, 450 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`, `Diameter (mm)=450`; asks Owner, Depth (m), Condition, Material | The invert of a 450 mm stormwater pipe, shot at its lowest inside point. |
+| `PI05` | Pipe invert, 525 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`, `Diameter (mm)=525`; asks Owner, Depth (m), Condition, Material | The invert of a 525 mm stormwater pipe, shot at its lowest inside point. |
+| `PI06` | Pipe invert, 600 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`, `Diameter (mm)=600`; asks Owner, Depth (m), Condition, Material | The invert of a 600 mm stormwater pipe, shot at its lowest inside point. |
+| `PI07` | Pipe invert, 750 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=750`; asks Owner, Depth (m), Condition, Material | The invert of a 750 mm stormwater pipe, shot at its lowest inside point. |
+| `PI09` | Pipe invert, 900 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=900`; asks Owner, Depth (m), Condition, Material | The invert of a 900 mm stormwater pipe, shot at its lowest inside point. |
+| `PI10` | Pipe invert, 1050 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=1050`; asks Owner, Depth (m), Condition, Material | The invert of a 1050 mm stormwater pipe, shot at its lowest inside point. |
+| `PI12` | Pipe invert, 1200 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=1200`; asks Owner, Depth (m), Condition, Material | The invert of a 1200 mm stormwater pipe, shot at its lowest inside point. |
+| `PI13` | Pipe invert, 1350 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=1350`; asks Owner, Depth (m), Condition, Material | The invert of a 1350 mm stormwater pipe, shot at its lowest inside point. |
+| `PI15` | Pipe invert, 1500 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=1500`; asks Owner, Depth (m), Condition, Material | The invert of a 1500 mm stormwater pipe, shot at its lowest inside point. |
+| `PI16` | Pipe invert, 1650 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=1650`; asks Owner, Depth (m), Condition, Material | The invert of a 1650 mm stormwater pipe, shot at its lowest inside point. |
+| `PI18` | Pipe invert, 1800 mm | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-large` | sets `utility.type=stormwater`, `Diameter (mm)=1800`; asks Owner, Depth (m), Condition, Material | The invert of a 1800 mm stormwater pipe, shot at its lowest inside point. |
+| `PINV` | Pipe invert | point, symbol `Invert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/invert-small` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | The lowest inside point of a stormwater pipe, shot where it meets a pit; the diameter is asked for. |
+| `POBV` | Pipe obvert | point, symbol `Obvert Level`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/pipe` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | The obvert of a stormwater pipe, the highest point on its inside, shot at the crown. |
+| `POBV*` |  | nothing |  | kept out of surfaces | Keeps pipe obvert shots out of the ground surface, since they lie below it. |
+| `U1*` | Stormwater pipe, 225 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/pipe-small` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=225`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 225 mm across, shot as a line along its route. |
+| `U2*` | Stormwater pipe, 300 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/pipe-small` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=300`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 300 mm across, shot as a line along its route. |
+| `U3*` | Stormwater pipe, 375 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/pipe-small` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=375`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 375 mm across, shot as a line along its route. |
+| `U4*` | Stormwater pipe, 450 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/pipe-small` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=450`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 450 mm across, shot as a line along its route. |
+| `U5*` | Stormwater pipe, 525 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-small` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=525`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 525 mm across, shot as a line along its route. |
+| `U6*` | Stormwater pipe, 600 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-small` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=600`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 600 mm across, shot as a line along its route. |
+| `U7*` | Stormwater pipe, 750 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=750`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 750 mm across, shot as a line along its route. |
+| `U9*` | Stormwater pipe, 900 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=900`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 900 mm across, shot as a line along its route. |
+| `UB*` | Culvert, height unstated | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/culvert` | kept out of surfaces; sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Width (mm), Height (mm) | Rectangular box culvert whose height was not measured. |
+| `UU*` | Stormwater pipe, size unstated | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/pipe` | kept out of surfaces; sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Stormwater pipe whose diameter was not measured. |
+| `UX*` | Stormwater pipe, any size | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.25 mm | `drainage/pipes/pipe` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Stormwater pipe of any diameter, for a pipe whose size is given in its attributes. |
+| `UZ*` | Digitised stormwater pipe | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.18 mm | `drainage/pipes/pipe` | sets `utility.type=stormwater`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Stormwater pipe traced from imagery or plans and not located on the ground. |
+| `V1*` | Stormwater pipe, 1050 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=1050`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 1050 mm across, shot as a line along its route. |
+| `V2*` | Stormwater pipe, 1200 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=1200`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 1200 mm across, shot as a line along its route. |
+| `V3*` | Stormwater pipe, 1350 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=1350`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 1350 mm across, shot as a line along its route. |
+| `V5*` | Stormwater pipe, 1500 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=1500`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 1500 mm across, shot as a line along its route. |
+| `V6*` | Stormwater pipe, 1650 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=1650`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 1650 mm across, shot as a line along its route. |
+| `V8*` | Stormwater pipe, 1800 mm | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `drainage/pipes/pipe-large` | kept out of surfaces; sets `utility.type=stormwater`, `Diameter (mm)=1800`; asks Owner, Depth (m), Condition, Material | Stormwater pipe 1800 mm across, shot as a line along its route. |
 
-#### `KW` Channels and Waterways
+#### Channels and Waterways
 
-Open drains, swales, flow paths and creeks.
+Open drains, flumes, fords and watercourses. (4 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `KWD` | Open Drain Invert | `Open Drain Invert`; `katana waterway` (#6399BE); 0.25 mm | `drainage/channels/drain` | Lowest line of an open drain or a lined channel. Shoot the invert from upstream to downstream, with a level on every point. The chevrons point the way you walked, so walking with the water keeps them honest. Example: `KWD1 ST, KWD1, KWD1 END`. |
-| `KWC` | Creek Centreline | `Creek Centreline`; `katana waterway` (#6399BE); 0.25 mm | `drainage/channels/creek` | Middle of a creek or river bed, drawn as a wave. Shoot the middle of the bed from upstream to downstream, a point at every bend and every riffle. The banks are GBT and GBB, and the water's edge is GWE. Example: `KWC1 ST, KWC1, KWC1 END`. |
-| `KWS` | Swale Centreline | `Open Drain Invert`; `katana waterway` (#6399BE); 0.18 mm | `drainage/channels/flow` | Lowest line of a grassed swale. Shoot the lowest line of the swale from upstream to downstream. The top edges of the swale are shot as banks (GBT), not with this code. Example: `KWS1 ST, KWS1, KWS1 END`. |
-| `KWF` | Overland Flow Path | `Open Drain Invert`; `katana waterway` (#6399BE); 0.13 mm | `drainage/channels/flow` | Route that water takes over the ground in a storm. Shoot the route from upstream to downstream, taking it from the survey or the flood study. It is a line of intent rather than a feature, so say so in the drafting note. Example: `KWF1 ST, KWF1, KWF1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DF*` | Batter flume | line `Open Drain Invert`; `katana waterway` (#6399BE); 0.25 mm | `drainage/channels/drain` |  | Galvanised iron flume that carries water down a batter, shot along its floor. |
+| `DT*` | Roadside table drain | line `Open Drain Invert`; `katana waterway` (#6399BE); 0.25 mm | `drainage/channels/drain` |  | Broad shallow channel beside the road shoulder that collects runoff, shot along its floor. |
+| `FO*` | Ford crossing | line `continuous`; `katana waterway` (#6399BE); 0.25 mm | `drainage/channels/creek` |  | Place where a road or track runs through a watercourse without a bridge or culvert. |
+| `WC*` | Watercourse centre | line `Creek Centreline`; `katana waterway` (#6399BE); 0.25 mm | `drainage/channels/creek` |  | Centre of a natural watercourse. |
 
 ### Class T: Rail and Transit
 
-Track, the wires above it and the platforms beside it.
+Track, the lineside fittings and the platforms beside it.
 
-#### `TT` Track
+#### Track
 
-Running rails, centreline, ballast, crossings and track fittings.
+Rails, centreline, formation edge, and the boxes and troughs beside the track. (8 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `TTR` | Running Rail | `Running Rail`; `katana rail` (#816FA3); 0.35 mm | `rail/track/rail` | Head of a running rail, drawn as a ladder of sleepers. Shoot the top centre of the rail head every 10 m on the straight and every 5 m on a curve. One string per rail, and give the two rails separate numbers (TTR1, TTR2). Example: `TTR1 ST, TTR1, TTR1 END`. |
-| `TTC` | Track Centreline | `Track Centreline`; `katana rail` (#816FA3); 0.18 mm | `rail/track/centreline` | Centre of the track, halfway between the rails. Shoot the point halfway between the running rails at the same stations as the rails. The rails are the evidence and this is the computed alignment. Example: `TTC1 ST, TTC1, TTC1 END`. |
-| `TTB` | Ballast Edge | `Ballast Edge`; `katana rail` (#816FA3); 0.35 mm | `rail/track/ballast` | Shoulder of the ballast, where the stone meets the formation. Shoot the shoulder of the ballast at each change of direction, one string per side. Example: `TTB1 ST, TTB1, TTB1 END`. |
-| `TTL` | Level Crossing | `continuous`; `katana rail` (#816FA3); 0.35 mm | `rail/track/crossing` | Outline of a road and rail level crossing. Shoot each corner of the crossing deck and close with CL. Example: `TTL1 ST, TTL1, TTL1, TTL1 CL`. |
-| `TTX` | Turnout Marker | symbol `Turnout Marker`; `katana rail` (#816FA3); 0.35 mm | `rail/track/fitting` | Toe of a set of points, where the switch blade starts. Shoot the point where the switch blade begins. The heel and the crossing are shot as running rail. |
-| `TTE` | Buffer Stop | symbol `Buffer Stop`; `katana rail` (#816FA3); 0.35 mm | `rail/track/fitting` | End of track, where a buffer stop stands. Shoot the middle of the buffer face, between the rails. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PRAL` | Rail head level | point, symbol `Spot Level`; `katana rail` (#816FA3); 0.35 mm | `rail/track/rail` |  | A level taken on the top of the head of a running rail. |
+| `PRAL*` |  | nothing |  | kept out of surfaces | Keeps rail head levels out of the ground surface, so the track does not distort the terrain model. |
+| `PRBX` | Lineside control box | point, symbol `Trackside Control Box`; `katana rail` (#816FA3); 0.25 mm | `rail/track/lineside` |  | A box beside the track that houses railway control equipment. |
+| `PRCC` | Signalling cable trough | point, symbol `Rail Cable Trough`; `katana rail` (#816FA3); 0.25 mm | `rail/track/lineside` |  | A trough beside the track that carries signalling cables, taken as a single point. |
+| `PRTM` | Track survey monument | point, symbol `Fixed Survey Mark`; `katana rail` (#816FA3); 0.25 mm | `rail/track/lineside` |  | A survey monument set beside the track as a lasting reference for its alignment. |
+| `RA*` | Rail head | line `Running Rail`; `katana rail` (#816FA3); 0.35 mm | `rail/track/rail` |  | Top of a running rail, shot along the middle of the rail head. |
+| `RF*` | Track formation edge | line `Track Formation Edge`; `katana rail` (#816FA3); 0.25 mm | `rail/track/formation` |  | Edge of the railway formation, the shaped earth platform that carries the ballast. |
+| `RT*` | Track centreline | line `Track Centreline`; `katana rail` (#816FA3); 0.18 mm | `rail/track/centreline` |  | Centre of a railway track, midway between its two rails. |
 
-#### `TO` Overhead and Signals
+#### Overhead and Signals
 
-Contact wire, masts and signals.
+Signals, overhead wire stanchions and signal cable troughs. (3 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `TOW` | Contact Wire | `Contact Wire Line`; `katana rail` (#816FA3); 0.18 mm | `rail/overhead/wire` | Overhead contact wire that powers electric trains or trams. Shoot the wire's position under each mast and at each change of direction. Its height above the rail is measured separately and written on the plan. Example: `TOW1 ST, TOW1, TOW1 END`. |
-| `TOM` | Overhead Mast | symbol `Overhead Mast`; `katana rail` (#816FA3); 0.18 mm | `rail/overhead/mast` | Mast that carries the overhead wire. Shoot the middle of the mast base. Height (m) is to the top, Material is steel or concrete, Owner is the rail operator. |
-| `TOS` | Signal Mast | symbol `Signal Mast`; `katana rail` (#816FA3); 0.18 mm | `rail/overhead/mast` | Signal carried on a mast. Shoot the middle of the mast base. A signal fixed to a gantry is shot at the gantry leg. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PRSG` | Lineside signal | point, symbol `Signal Mast`; `katana rail` (#816FA3); 0.18 mm | `rail/overhead/mast` |  | A railway signal on its mast or post beside the track. |
+| `PSTR` | Overhead wire stanchion | point, symbol `Overhead Mast`; `katana rail` (#816FA3); 0.18 mm | `rail/overhead/mast` |  | A steel stanchion beside the track that carries the overhead wires or a signal. |
+| `RS*` | Signal cable trough | line `Buried Duct`; `katana rail` (#816FA3); 0.18 mm | `rail/overhead/trough` |  | Trough beside the track that carries signalling cable. |
 
-#### `TP` Platforms
+#### Platforms
 
-Platform edges.
+Platform edges and ramps. (2 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `TPE` | Platform Edge | `Platform Edge Line`; `katana rail` (#816FA3); 0.35 mm | `rail/platforms/edge` | Coping edge of a platform, nearest the track. Shoot the coping edge nearest the track. Walk with the platform on your left, so the tick falls on the platform side. Example: `TPE1 ST, TPE1, TPE1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `RP*` | Platform top edge | line `Platform Edge Line`; `katana rail` (#816FA3); 0.35 mm | `rail/platforms/edge` |  | Top edge of a railway platform, on the side nearest the track. |
+| `RR*` | Platform ramp edge | line `continuous`; `katana rail` (#816FA3); 0.25 mm | `rail/platforms/edge` |  | Edge of a ramp that rises to a railway platform. |
 
 ### Class U: Utilities
 
 Everything buried or strung that carries a service, one family per service.
 
-#### `UW` Water
+#### Water
 
-Drinking water mains, connections, valves, pits and tanks.
+Drinking water mains, connections, valves, hydrants, meters and pits. (16 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UWM` | Water Supply Pipe | `Water Supply Pipe`; `katana water` (#2F80ED); 0.35 mm | `utilities/water/main` | Pressure main that carries drinking water. Shoot the centre of the main at every fitting and bend, and where a locator or a pothole places it. Diameter (mm), Material and Depth (m) to the top of the pipe are the three that matter. Example: `UWM1 ST, UWM1, UWM1 END`. |
-| `UWB` | Water Service Connection | `Service Connection Line`; `katana water` (#2F80ED); 0.18 mm | `utilities/water/main` | Small pipe from a main to a property meter. Shoot from the tee on the main to the meter at the boundary. The string ends at the meter, which is coded UWX. Example: `UWB1 ST, UWB1 END`. |
-| `UWD` | Disused Water Main | `Disused Service Line`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/disused` | Water main that is no longer in service. Shoot it as carefully as a live main: it is still in the ground. Disused status is set for you. If it is cut and capped, say where in Condition. Example: `UWD1 ST, UWD1, UWD1 END`. |
-| `UWV` | Water Isolation Valve | symbol `Water Isolation Valve`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | Isolating valve on a water main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main it controls. |
-| `UWX` | Water Flow Meter | symbol `Water Flow Meter`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | Meter that records water supplied. Shoot the middle of the meter lid. A meter in a pit is shot at the lid; the pit is not coded again. |
-| `UWP` | Water Pit | symbol `Water Pit`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | Pit or chamber on a water service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UWT` | Water Tank | symbol `Water Tank`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | Tank or reservoir that stores water. Shoot the middle of the tank's footprint. Capacity (kL) is the rated volume in kilolitres. |
-| `UWU` | Water Pumping Station | symbol `Pumping Station`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | Pump station on a water main. Shoot the middle of the pump house, or the wet well lid when there is no building. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PWAV` | Air release valve | point, symbol `Air Release Valve`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Valve at a high point of a water main that lets trapped air escape. |
+| `PWCP` | Main test point | point, symbol `Pipeline Test Point`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Fitting on a water main where pressure or electrical readings are taken. |
+| `PWEP` | Water pump | point, symbol `Pumping Station`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | sets `utility.type=water`; asks Owner, Condition | Pump that lifts or boosts water, shot as a point. |
+| `PWET` | Main earthing point | point, symbol `Earthing Point`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Terminal that connects a water main to an electrical earth. |
+| `PWHY` | Mains water hydrant | point, symbol `Fire Service Hydrant`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Condition | Hydrant on a drinking water main, used for flushing and for fire fighting. |
+| `PWMM` | Water main marker post | point, symbol `Marker Post`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Condition | Post or plate that shows the route of a water main. |
+| `PWMR` | Connection meter | point, symbol `Water Flow Meter`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Meter that records the water passing through a connection. |
+| `PWSR` | Drain-off valve | point, symbol `Washout Valve`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Valve at a low point of a main that empties it for cleaning or repair. |
+| `PWSV` | Isolating valve | point, symbol `Water Isolation Valve`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Valve that shuts off the flow in a water main. |
+| `PWTP` | Water supply tap | point, symbol `Standpipe Tap`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/fitting` | sets `utility.type=water`; asks Owner, Condition | Tap on a water supply, such as a standpipe or a garden tap. |
+| `RE*` | Reservoir outline | line `continuous`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/structure` | sets `utility.type=water`; asks Owner, Condition | Outline of a water storage reservoir, traced round its walls. |
+| `UO*` | Raised water pipeline | line `Water Supply Pipe`; `katana water` (#2F80ED); 0.25 mm | `utilities/water/overhead` | kept out of surfaces; sets `utility.type=water`; asks Owner, Height (m), Condition, Material, Diameter (mm) | Water pipeline that runs above ground on supports. |
+| `WI*` | Irrigation pipe | line `Water Supply Pipe`; `katana water` (#2F80ED); 0.18 mm | `utilities/water/irrigation` | sets `utility.type=water`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Pipe that carries water for irrigation, shot as a line along its route. |
+| `WM*` | Drinking water main | line `Water Supply Pipe`; `katana water` (#2F80ED); 0.35 mm | `utilities/water/main` | sets `utility.type=water`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Water main, shot as a line along its route. |
+| `WY*` | Water property connection | line `Service Connection Line`; `katana water` (#2F80ED); 0.18 mm | `utilities/water/connection` | sets `utility.type=water`; asks Owner, Depth (m), Condition | Small pipe that joins a property to the water main, shot as a line along its route. |
+| `WZ*` | Digitised water main | line `Water Supply Pipe`; `katana water` (#2F80ED); 0.18 mm | `utilities/water/main` | sets `utility.type=water`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Water main traced from imagery or plans and not located on the ground. |
 
-#### `US` Sewer
+#### Sewer
 
-Gravity and pressure sewers, branches, maintenance holes and pump stations.
+Gravity and pressure sewers, connections, maintenance holes, vents and pump stations. (13 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `USM` | Sewer Gravity Pipe | `Sewer Gravity Pipe`; `katana sewer` (#F0E2B0); 0.35 mm | `utilities/sewer/main` | Gravity sewer; the level that matters is the invert. Shoot the invert at every maintenance hole, walking downstream: the chevron points the way you shot. Diameter (mm) and Material are read at the hole. Example: `USM1 ST, USM1, USM1 END`. |
-| `USR` | Sewer Pressure Pipe | `Sewer Pressure Pipe`; `katana sewer` (#F0E2B0); 0.35 mm | `utilities/sewer/main` | Pressure sewer that carries flow under pump. Shoot the centre of the pipe from the pump toward the discharge. Unlike a gravity sewer it need not fall, so depth and diameter are the data. Example: `USR1 ST, USR1, USR1 END`. |
-| `USB` | Sewer Branch | `Service Connection Line`; `katana sewer` (#F0E2B0); 0.18 mm | `utilities/sewer/main` | Property connection to a sewer main. Shoot from the junction on the main to the property inspection opening. Depth (m) at the junction is the useful one. Example: `USB1 ST, USB1 END`. |
-| `USD` | Disused Sewer Main | `Disused Service Line`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/disused` | Sewer that is no longer in service. Shoot as a live sewer, at each maintenance hole and bend. Disused status is set for you; say in Condition if it is sealed or flowing. Example: `USD1 ST, USD1, USD1 END`. |
-| `USH` | Sewer Maintenance Hole | symbol `Sewer Maintenance Hole`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | Man-entry chamber on a sewer. Shoot the middle of the cover. Depth (m) is cover to lowest invert, Invert Level (m) is the outlet pipe's, Lid Size (mm) is the clear opening. Stormwater manholes are KPH. |
-| `USE` | Sewer Vent | symbol `Sewer Vent`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/fitting` | Vent stack on a sewer that lets gas out and air in. Shoot the middle of the stack at ground level. Height (m) is to the top of the vent. |
-| `UST` | Septic System Tank | symbol `Septic System Tank`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | Septic or other on-site treatment tank. Shoot the middle of the tank's access lid. Several lids on one tank are shot at the largest. |
-| `USP` | Sewage Pumping Station | symbol `Pumping Station`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | Pump station on a sewer that lifts flow to the next gravity run. Shoot the middle of the wet well lid. The control cabinet is not shot separately. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PSLH` | Sewer inspection lamphole | point, symbol `Sewer Inspection Opening`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | A lamphole: a small opening in a sewer for looking along the pipe with a lamp. |
+| `PSMH` | Sewer maintenance hole | point, symbol `Sewer Maintenance Hole`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | The cover of a sewer maintenance hole, taken at the centre of the lid. |
+| `PSMM` | Sewer route marker | point, symbol `Marker Post`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/fitting` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | A marker that shows where a sewer main runs. |
+| `PSPS` | Sewage pumping station | point, symbol `Pumping Station`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | A pumping station on a sewer, taken at the lid of the wet well. |
+| `PSSV` | Sewer isolation valve | point, symbol `Sewer Isolation Valve`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/fitting` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | A stop valve that shuts off flow in a sewer line, taken at its cover. |
+| `PSVP` | Sewer vent stack | point, symbol `Sewer Vent`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/fitting` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | A vent pipe that lets air into a sewer and gas out of it. |
+| `SM*` | Gravity sewer main | line `Sewer Gravity Pipe`; `katana sewer` (#F0E2B0); 0.35 mm | `utilities/sewer/main` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Gravity sewer main, shot as a line along its route. |
+| `SP*` | Sewage pond outline | line `continuous`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | sets `utility.type=sewer`; asks Owner, Condition | Outline of a sewage pond or lagoon. |
+| `SQ*` | Pump-out station outline | line `continuous`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | sets `utility.type=sewer`; asks Owner, Condition | Outline of a station that pumps sewage or water out of a low point. |
+| `SR*` | Pumped sewer line | line `Sewer Pressure Pipe`; `katana sewer` (#F0E2B0); 0.35 mm | `utilities/sewer/main` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Pressure sewer, the rising main that carries pumped flow uphill, shot as a line along its route. |
+| `ST*` | Septic tank outline | line `continuous`; `katana sewer` (#F0E2B0); 0.25 mm | `utilities/sewer/structure` | sets `utility.type=sewer`; asks Owner, Condition | Outline of a septic tank. |
+| `SY*` | Sewer property connection | line `Service Connection Line`; `katana sewer` (#F0E2B0); 0.18 mm | `utilities/sewer/connection` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition | Small branch that joins a property to the sewer main, shot as a line along its route. |
+| `SZ*` | Digitised sewer main | line `Sewer Gravity Pipe`; `katana sewer` (#F0E2B0); 0.18 mm | `utilities/sewer/main` | sets `utility.type=sewer`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Gravity sewer traced from imagery or plans and not located on the ground. |
 
-#### `UG` Gas
+#### Gas
 
-Gas mains, services, valves, regulators and meters.
+Gas mains, regulators, meters, valve pits, vents and markers. (15 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UGM` | Gas Supply Pipe | `Gas Supply Pipe`; `katana gas` (#FFD500); 0.35 mm | `utilities/gas/main` | Pipe that carries natural gas. Shoot the centre of the pipe at every fitting and bend. Pressure is the class the owner states (low, medium or high), never a guess. Diameter (mm), Material and Depth (m) as for any main. Example: `UGM1 ST, UGM1, UGM1 END`. |
-| `UGB` | Gas Service | `Service Connection Line`; `katana gas` (#FFD500); 0.18 mm | `utilities/gas/main` | Property connection to a gas main. Shoot from the tee on the main to the meter. The string ends at the meter, which is coded UGX. Example: `UGB1 ST, UGB1 END`. |
-| `UGD` | Disused Gas Main | `Disused Service Line`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/disused` | Gas main that is no longer in service. Shoot as a live main. A disused gas main may still hold gas, so say in Condition if it is purged or capped. Disused status is set for you. Example: `UGD1 ST, UGD1, UGD1 END`. |
-| `UGV` | Gas Isolation Valve | symbol `Gas Isolation Valve`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Isolating valve on a gas main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main. |
-| `UGR` | Gas Pressure Regulator | symbol `Gas Pressure Regulator`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Pressure regulator, where gas pressure steps down. Shoot the middle of the regulator, in its pit or on its pad. |
-| `UGX` | Gas Flow Meter | symbol `Gas Flow Meter`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Meter that records gas supplied. Shoot the middle of the meter housing or its lid. Meters usually sit at the property boundary, where the gas service (UGB) ends. |
-| `UGP` | Gas Pit | symbol `Gas Pit`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/structure` | Pit or valve box on a gas service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UGK` | Gas Marker Post | symbol `Marker Post`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | Post that marks the route of a gas pipeline. Shoot the middle of the post at ground level. The pipeline is not necessarily directly beneath it. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DG*` | Gas property connection | line `Service Connection Line`; `katana gas` (#FFD500); 0.18 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition | Small gas pipe that runs from the street main to a property. |
+| `HA*` | Ethane main | line `Gas Supply Pipe`; `katana gas` (#FFD500); 0.35 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Buried pipeline that carries ethane. |
+| `HG*` | High pressure gas main | line `Gas Supply Pipe`; `katana gas` (#FFD500); 0.35 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Gas main that works at high pressure. |
+| `LG*` | Low-pressure gas main | line `Gas Supply Pipe`; `katana gas` (#FFD500); 0.35 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | A buried gas main that works at low pressure, shot as a line along its route. |
+| `NG*` | Nylon gas main | line `Gas Supply Pipe`; `katana gas` (#FFD500); 0.35 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | A buried gas main laid in nylon pipe, shot as a line along its route. |
+| `PGAS` | Gas valve pit | point, symbol `Gas Pit`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/structure` | sets `utility.type=gas`; asks Owner, Depth (m), Condition | The box over a gas valve, shot at its lid. |
+| `PGHL` | Gas maintenance hole | point, symbol `Gas Maintenance Hole`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/structure` | sets `utility.type=gas`; asks Owner, Depth (m), Condition | A manhole giving access to a gas main, shot at its cover. |
+| `PGHM` | High-pressure gas marker | point, symbol `High Pressure Marker Post`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | sets `utility.type=gas`; asks Owner, Condition | A marker on the surface showing the route of a high-pressure gas main. |
+| `PGMR` | Gas flow meter | point, symbol `Gas Flow Meter`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | sets `utility.type=gas`; asks Owner, Depth (m), Condition | A gas meter, shot at its centre. |
+| `PGPM` | Gas line marker | point, symbol `Marker Post`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | sets `utility.type=gas`; asks Owner, Condition | A marker on the surface showing the route of a buried gas main. |
+| `PGRB` | Gas regulator cabinet | point, symbol `Gas Pressure Regulator`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | sets `utility.type=gas`; asks Owner, Condition | The cabinet that houses a gas pressure regulator, shot at the middle of the box. |
+| `PGTP` | Gas test terminal | point, symbol `Pipeline Test Point`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | sets `utility.type=gas`; asks Owner, Condition | A surface fitting on a gas pipeline where its protection or pressure can be tested. |
+| `PGVP` | Gas vent riser | point, symbol `Gas Vent`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/fitting` | sets `utility.type=gas`; asks Owner, Condition | A vent riser on a gas main or casing that lets gas escape safely to the open air. |
+| `YG*` | Plastic gas main | line `Gas Supply Pipe`; `katana gas` (#FFD500); 0.25 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Polyethylene gas main, shot as a line along its route. |
+| `ZG*` | Digitised gas main | line `Gas Supply Pipe`; `katana gas` (#FFD500); 0.18 mm | `utilities/gas/main` | sets `utility.type=gas`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Gas main traced from imagery or plans and not located on the ground. |
 
-#### `UE` Electricity
+#### Electricity
 
-Cables, overhead lines, ducts, poles, transformers and pillars.
+Cables, overhead lines, ducts, poles, transformers, pillars and pits. (23 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UEC` | Underground Cable | `Underground Cable`; `katana electricity` (#E07000); 0.35 mm | `utilities/electricity/main` | Buried electricity cable. Shoot the centre of the cable, or of the duct bank that holds it. Voltage (V) is in whole volts and Ducts is the number of ducts. Assume every unlabelled cable is live. Example: `UEC1 ST, UEC1, UEC1 END`. |
-| `UEO` | Overhead Line | `Overhead Line`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/overhead` | Overhead power line, shot under each pole. Shoot the ground under the line at each pole and at each change of direction. Height (m) is the lowest wire above ground at the middle of a span. Example: `UEO1 ST, UEO1, UEO1 END`. |
-| `UED` | Disused Cable | `Disused Service Line`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/disused` | Cable that is no longer in service. Shoot as a live cable. A disused cable may still be live, so say what you know in Condition. Disused status is set for you. Example: `UED1 ST, UED1, UED1 END`. |
-| `UEN` | Electrical Duct | `Buried Duct`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/main` | Duct or conduit that carries electricity cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UEN1 ST, UEN1, UEN1 END`. |
-| `UEP` | Power Pole | symbol `Power Pole`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Pole that carries power lines. Shoot the middle of the pole at ground level. Height (m) is the pole's height above ground, and Material is timber, concrete or steel. A street light on its own pole is SLS. |
-| `UEY` | Pole Guy | symbol `Guy Anchor`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/fitting` | Anchor of a stay wire that braces a pole. Shoot the anchor where it enters the ground. The wire itself is not shot. The symbol is drawn pointing west and is not turned. |
-| `UET` | Transformer | symbol `Transformer`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Transformer on a pole or on the ground. Shoot the middle of a ground unit, or the pole that carries a pole-mounted unit. Rating (kVA) is read from the nameplate. |
-| `UEK` | Electrical Pillar | symbol `Electrical Pillar`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Street pillar or cabinet of the electricity network. Shoot the middle of the pillar's footprint. Condition notes damage or a missing door. |
-| `UEJ` | Electrical Pit | symbol `Electrical Pit`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | Pit or chamber on an electricity cable. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `EA*` | Earthing conductor | line `Underground Cable`; `katana electricity` (#E07000); 0.18 mm | `utilities/electricity/main` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | Buried conductor that bonds electrical equipment to the earth. |
+| `EC*` | Transformer cabinet outline | line `continuous`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Condition | Plan outline of the cabinet that houses a transformer. |
+| `ED*` | Electrical conduit | line `Buried Duct`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/main` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | Buried conduit that carries electrical cable. |
+| `EL*` | Pylon leg footing | line `continuous`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Condition | Outline of the footing under one leg of a transmission pylon. |
+| `EN*` | Electrical sump outline | line `continuous`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | Outline of a sump that collects water or oil at an electricity installation. |
+| `EU*` | Buried power line | line `Underground Cable`; `katana electricity` (#E07000); 0.35 mm | `utilities/electricity/main` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | Buried electricity line, located by locator or from records. |
+| `EY*` | Electrical property connection | line `Service Connection Line`; `katana electricity` (#E07000); 0.18 mm | `utilities/electricity/main` | kept out of surfaces; sets `utility.type=electricity`; asks Owner, Depth (m), Condition | Small electricity cable from the street network to a property. |
+| `EZ*` | Digitised power line | line `Underground Cable`; `katana electricity` (#E07000); 0.18 mm | `utilities/electricity/main` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | Electricity line traced from imagery or plans and not located on the ground. |
+| `PECM` | Power cable marker | point, symbol `Marker Post`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/fitting` | sets `utility.type=electricity`; asks Owner, Condition | A marker on the surface showing the route of a buried power cable. |
+| `PEFP` | Distribution fuse | point, symbol `Electrical Fuse`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/fitting` | sets `utility.type=electricity`; asks Owner, Condition | A point where a fuse protects a distribution cable, on a pole or in a cabinet. |
+| `PEJB` | Electrical junction box | point, symbol `Electrical Pit`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | A box in which electricity cables are joined, shot at its lid. |
+| `PEMH` | Power cable manhole | point, symbol `Electrical Maintenance Hole`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | A manhole giving access to underground electricity cables, shot at its cover. |
+| `PETC` | Ground transformer | point, symbol `Transformer`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Condition | The centre of a ground-mounted cabinet that houses an electricity transformer. |
+| `PEUP` | Power service pillar | point, symbol `Electrical Pillar`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Condition | A pillar above ground where a customer is supplied from the underground power cable. |
+| `PHTT` | Transmission pylon | point, symbol `Transmission Pylon`; `katana electricity` (#E07000); 0.35 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Condition | A steel lattice tower that carries high-voltage lines, shot at the centre of its footprint. |
+| `PPLP` | Power pole with light | point, symbol `Power and Light Pole`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | A pole that carries power lines and also a street light. |
+| `PPPL` | Power pole | point, symbol `Power Pole`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | A pole that carries power lines and nothing else. |
+| `PPTR` | Power pole with transformer | point, symbol `Transformer`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | A pole that carries power lines and has a transformer mounted on it. |
+| `PSAP` | Pole stay anchor | point, symbol `Guy Anchor`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/fitting` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | The ground anchor of the stay wire that braces a pole. |
+| `PSPL` | Short bracing pole | point, symbol `Stay Wire Pole`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/structure` | sets `utility.type=electricity`; asks Owner, Depth (m), Condition | A short pole that carries the stay wire bracing another pole. |
+| `SC*` | Pole stay wire | line `Overhead Line`; `katana electricity` (#E07000); 0.18 mm | `utilities/electricity/overhead` | kept out of surfaces; sets `utility.type=electricity`; asks Owner, Condition | Stay wire that braces a pole or mast, drawn from the pole to its ground anchor. |
+| `UE*` | High voltage overhead line | line `Overhead Line`; `katana electricity` (#E07000); 0.35 mm | `utilities/electricity/overhead` | kept out of surfaces; sets `utility.type=electricity`; asks Owner, Height (m), Condition | Main overhead power line that carries bulk supply between substations. |
+| `UL*` | Local overhead line | line `Overhead Line`; `katana electricity` (#E07000); 0.25 mm | `utilities/electricity/overhead` | kept out of surfaces; sets `utility.type=electricity`; asks Owner, Height (m), Condition | Overhead power line of the local network, below the major transmission lines. |
 
-#### `UC` Communications
+#### Communications
 
-Telephone, data and fibre cables, ducts, pits and pillars.
+Telephone, data and fibre cables, ducts, pits, pillars, poles and masts. (23 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UCC` | Communications Cable | `Communications Cable`; `katana telecom` (#FFFFFF); 0.35 mm | `utilities/telecommunications/main` | Buried telephone, data or fibre cable. Shoot the centre of the cable, or of the duct it runs in, at each pit and bend. Ducts is the number of ducts. Owner matters most here: several carriers share one route. Example: `UCC1 ST, UCC1, UCC1 END`. |
-| `UCN` | Communications Duct | `Buried Duct`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/main` | Duct or conduit that carries communications cable. Shoot the centre of the duct at each pit and bend. Ducts is the number of ducts in the bank. Example: `UCN1 ST, UCN1, UCN1 END`. |
-| `UCO` | Overhead Communications Cable | `Overhead Line`; `katana telecom` (#FFFFFF); 0.18 mm | `utilities/telecommunications/overhead` | Aerial communications cable. Shoot the ground under the cable at each pole. Height (m) is the lowest point of the span above ground. Example: `UCO1 ST, UCO1, UCO1 END`. |
-| `UCD` | Disused Communications Cable | `Disused Service Line`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/disused` | Communications cable that is no longer in service. Shoot as a live cable; owners often leave old cable in place. Disused status is set for you. Example: `UCD1 ST, UCD1, UCD1 END`. |
-| `UCP` | Communications Pit | symbol `Communications Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | Pit on a communications route. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UCH` | Communications Maintenance Hole | symbol `Communications Maintenance Hole`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | Man-entry chamber on a communications route. Shoot the middle of the cover. Lid Size (mm) is the clear opening; Depth (m) is from the cover to the floor. |
-| `UCK` | Communications Pillar | symbol `Communications Pillar`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | Street pillar or cabinet of the communications network. Shoot the middle of the pillar's footprint. Owner is the carrier named on the door. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `OA*` | Overhead optical fibre | line `Overhead Line`; `katana telecom` (#FFFFFF); 0.18 mm | `utilities/telecommunications/fibre` | kept out of surfaces; sets `utility.type=telecommunications`; asks Owner, Height (m), Condition | Optical fibre cable strung above ground on poles, shot as a line along its route. |
+| `OD*` | Fibre duct | line `Buried Duct`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/fibre` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | A conduit that carries optical fibre cable, shot as a line along its route. |
+| `OU*` | Buried optical fibre | line `Communications Cable`; `katana telecom` (#FFFFFF); 0.35 mm | `utilities/telecommunications/fibre` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Optical fibre cable buried in the ground, shot as a line along its route. |
+| `OZ*` | Digitised optical fibre | line `Communications Cable`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/fibre` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | An optical fibre route digitised from records and not located on site. |
+| `PMPT` | Mobile phone mast | point, symbol `Mast`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Condition | A transmitter mast or tower of the mobile telephone network, shot at its base. |
+| `POFJ` | Fibre junction box | point, symbol `Communications Pillar`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Condition | A junction box on an optical fibre route where cables are joined or split. |
+| `POFM` | Fibre route marker | point, symbol `Marker Post`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Condition | A marker that shows where an optical fibre cable runs underground. |
+| `POFP` | Fibre cable pit | point, symbol `Communications Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | A pit on an optical fibre route, shot at the middle of its lid. |
+| `PT3P` | Triple communications pit | point, symbol `Communications Triple Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Concrete telephone pit with three lids in a row, where cable is joined and drawn in. |
+| `PTBX` | Telephone booth | point, symbol `Public Telephone`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Condition | Public telephone box or booth standing on the footpath. |
+| `PTCM` | Communications cable marker | point, symbol `Marker Post`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/fitting` | sets `utility.type=telecommunications`; asks Owner, Condition | Marker that shows the route of a buried telephone cable. |
+| `PTDP` | Cable distribution pillar | point, symbol `Communications Pillar`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Condition | Street cabinet from which telephone cable is distributed to nearby customers. |
+| `PTJP` | Cable joint post | point, symbol `Marker Post`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/fitting` | sets `utility.type=telecommunications`; asks Owner, Condition | Post standing above ground at a joint in a telephone cable. |
+| `PTMP` | Communications main pit | point, symbol `Communications Main Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Large main pit, about 1.1 m square, at a major telephone cable junction. |
+| `PTPL` | Communications pole | point, symbol `Power Pole`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/overhead` | sets `utility.type=telecommunications`; asks Owner, Condition | Pole that carries telephone cable overhead. |
+| `PTSP` | Single communications pit | point, symbol `Communications Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Concrete telephone pit with a single lid. |
+| `PTTP` | Twin communications pit | point, symbol `Communications Twin Pit`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Concrete telephone pit with two lids side by side. |
+| `TD*` | Phone cable duct | line `Buried Duct`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/duct` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Conduit that carries telephone cable, shot as a line along its route. |
+| `TN*` | Buried phone line | line `Communications Cable`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/copper` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Buried telephone line, shot as a line along its route. |
+| `TS*` | Telephone sump outline | line `continuous`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `Check Zone=3` | Outline of a telephone sump, checked in the third model zone (road side). |
+| `TX*` | Telephone box outline | line `continuous`; `katana telecom` (#FFFFFF); 0.25 mm | `utilities/telecommunications/structure` | sets `utility.type=telecommunications`; asks Owner, Condition | Plan outline of a public telephone box. |
+| `TY*` | Telephone property connection | line `Service Connection Line`; `katana telecom` (#FFFFFF); 0.18 mm | `utilities/telecommunications/connection` | kept out of surfaces; sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Small cable that joins a property to the telephone network, shot as a line along its route. |
+| `TZ*` | Digitised telephone line | line `Communications Cable`; `katana telecom` (#FFFFFF); 0.18 mm | `utilities/telecommunications/copper` | sets `utility.type=telecommunications`; asks Owner, Depth (m), Condition | Telephone line traced from imagery or plans and not located on the ground. |
 
-#### `UR` Recycled Water
+#### Recycled Water
 
-Recycled water mains, connections, valves and pits.
+Recycled water mains, valves, meters, hydrants and markers. (8 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `URM` | Recycled Water Pipe | `Recycled Water Pipe`; `katana recycled` (#9B59D0); 0.35 mm | `utilities/recycled-water/main` | Main that carries recycled water. Shoot the centre of the main at every fitting and bend. Never assume it is drinking water: purple pipe and a purple lid are the clues. Diameter (mm), Material and Depth (m) as for any main. Example: `URM1 ST, URM1, URM1 END`. |
-| `URB` | Recycled Water Connection | `Service Connection Line`; `katana recycled` (#9B59D0); 0.18 mm | `utilities/recycled-water/main` | Property connection to a recycled water main. Shoot from the tee on the main to the property meter. The string ends at the meter. Example: `URB1 ST, URB1 END`. |
-| `URD` | Disused Recycled Main | `Disused Service Line`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/disused` | Recycled water main that is no longer in service. Shoot as a live main: it is still in the ground and still in the way. Disused status is set for you. Example: `URD1 ST, URD1, URD1 END`. |
-| `URV` | Recycled Isolation Valve | symbol `Recycled Isolation Valve`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | Isolating valve on a recycled water main. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the main. |
-| `URP` | Recycled Water Pit | symbol `Recycled Water Pit`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/structure` | Pit or chamber on a recycled water service. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PRAV` | Recycled air valve | point, symbol `Air Release Valve`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | An air valve on a recycled water main, which lets trapped air out at a high point. |
+| `PRET` | Recycled earth terminal | point, symbol `Earthing Point`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | An earth terminal on a recycled water main, the point where the main is bonded to earth. |
+| `PRHY` | Recycled hydrant | point, symbol `Fire Service Hydrant`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | A hydrant on a recycled water main. |
+| `PRMM` | Recycled main marker | point, symbol `Marker Post`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | A marker that shows where a recycled water main runs. |
+| `PRMR` | Recycled water meter | point, symbol `Recycled Flow Meter`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | A meter on a recycled water supply. |
+| `PRSV` | Recycled stop valve | point, symbol `Recycled Isolation Valve`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | A stop valve that shuts off a length of recycled water main. |
+| `PRTP` | Recycled tap | point, symbol `Standpipe Tap`; `katana recycled` (#9B59D0); 0.25 mm | `utilities/recycled-water/fitting` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition | A tap on a recycled water supply, such as an outlet or a standpipe. |
+| `RM*` | Recycled water main | line `Recycled Water Pipe`; `katana recycled` (#9B59D0); 0.35 mm | `utilities/recycled-water/main` | sets `utility.type=recycled-water`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Main that carries recycled water, shot along its centre. |
 
-#### `UF` Fire Service
+#### Fire Service
 
-Fire mains, hydrants, boosters and valves.
+Fire hydrants. (1 code)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UFM` | Fire Service Pipe | `Fire Service Pipe`; `katana fire` (#E53935); 0.35 mm | `utilities/fire-service/main` | Main that feeds hydrants and sprinkler systems. Shoot the centre of the main at every fitting and bend. A fire main inside a building boundary is usually private: say so in Owner. Example: `UFM1 ST, UFM1, UFM1 END`. |
-| `UFH` | Fire Hydrant | symbol `Fire Hydrant`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | Fire hydrant, standing or underground. Shoot the middle of the hydrant, or of the lid of an underground one. Hydrant Type says pillar or underground. |
-| `UFB` | Booster Connection | symbol `Booster Connection`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | Connection where the fire brigade boosts a building's supply. Shoot the middle of the cabinet or the pad that carries the booster outlets. |
-| `UFV` | Fire Isolation Valve | symbol `Fire Isolation Valve`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | Isolating valve on a fire service. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the pipe. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PWFB` | Fire service hydrant | point, symbol `Fire Service Hydrant`; `katana fire` (#E53935); 0.25 mm | `utilities/fire-service/fitting` | sets `utility.type=fire-service`; asks Owner, Condition | Hydrant on a fire service main, for the fire brigade's hoses. |
 
-#### `UP` Fuel
+#### Fuel
 
-Fuel pipelines, valves, markers and tanks.
+Fuel pipelines, markers, dispensers and tanks. (7 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UPM` | Fuel Supply Pipe | `Fuel Supply Pipe`; `katana fuel` (#A36215); 0.35 mm | `utilities/fuel/main` | Pipeline for fuel or oil. Shoot the centre of the pipe at every fitting and bend. Product is what it carries (petrol, diesel, jet fuel, oil). Treat an unlabelled steel line in a fuel precinct as fuel until proved otherwise. Example: `UPM1 ST, UPM1, UPM1 END`. |
-| `UPV` | Fuel Isolation Valve | symbol `Fuel Isolation Valve`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/fitting` | Isolating valve on a fuel pipeline. Shoot the middle of the valve box lid. Depth (m) is from the lid to the top of the pipe. |
-| `UPK` | Fuel Marker Post | symbol `Marker Post`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/fitting` | Post that marks the route of a fuel pipeline. Shoot the middle of the post at ground level. The pipeline is not necessarily directly beneath it. |
-| `UPT` | Fuel Tank | symbol `Storage Tank`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/structure` | Underground or surface fuel tank. Shoot the middle of the tank, or of the fill point of an underground one. Capacity (kL) and Product from the label or the owner. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `FU*` | Other fuel pipeline | line `Fuel Supply Pipe`; `katana fuel` (#A36215); 0.35 mm | `utilities/fuel/main` | sets `utility.type=fuel`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Buried pipeline for a fuel that has no code of its own. |
+| `FZ*` | Digitised fuel pipeline | line `Fuel Supply Pipe`; `katana fuel` (#A36215); 0.18 mm | `utilities/fuel/main` | sets `utility.type=fuel`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Fuel pipeline of an unlisted kind, traced from imagery and not located on the ground. |
+| `HO*` | Pressurised oil line | line `Fuel Supply Pipe`; `katana fuel` (#A36215); 0.35 mm | `utilities/fuel/main` | sets `utility.type=fuel`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Pipeline that carries oil at high pressure. |
+| `HZ*` | Digitised oil line | line `Fuel Supply Pipe`; `katana fuel` (#A36215); 0.18 mm | `utilities/fuel/main` | sets `utility.type=fuel`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | High pressure oil pipeline traced from imagery and not located on the ground. |
+| `PFPM` | Fuel line marker | point, symbol `Marker Post`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/fitting` | sets `utility.type=fuel`; asks Owner, Condition | A marker on the surface showing the route of a buried fuel pipeline. |
+| `POHM` | Oil pipeline marker | point, symbol `Marker Post`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/fitting` | sets `utility.type=fuel`; asks Owner, Condition | A sign or post that marks the route of a high-pressure oil pipeline. |
+| `PPET` | Fuel dispenser | point, symbol `Fuel Dispenser`; `katana fuel` (#A36215); 0.25 mm | `utilities/fuel/structure` | sets `utility.type=fuel`; asks Owner, Condition | A petrol pump at a service station, shot at the middle of its base. |
 
-#### `UI` Traffic Systems
+#### Traffic Systems
 
-Conduits, pits and detector loops for signals and cameras.
+Cables, detectors and junction boxes for signals and cameras. (4 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UIC` | Traffic Systems Conduit | `Buried Duct`; `katana its` (#0B9BA8); 0.25 mm | `utilities/its/main` | Conduit for signal, camera or sensor cable. Shoot the centre of the conduit at each pit and bend. Ducts is the number of ducts. Example: `UIC1 ST, UIC1, UIC1 END`. |
-| `UIP` | Traffic Systems Pit | symbol `Traffic Systems Pit`; `katana its` (#0B9BA8); 0.25 mm | `utilities/its/structure` | Pit on a traffic systems route. Shoot the middle of the lid. Lid Size (mm) is the clear opening; Depth (m) is from the lid to the floor. |
-| `UIL` | Loop Detector | symbol `Loop Detector`; `katana its` (#0B9BA8); 0.25 mm | `utilities/its/fitting` | Vehicle detector loop cut into the road. Shoot the middle of the loop, or of its saw cut. Shoot its lead-in cable with UIC. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `IT*` | Traffic systems cable | line `Traffic Systems Cable`; `katana its` (#0B9BA8); 0.25 mm | `utilities/its/main` | sets `utility.type=its`; asks Owner, Depth (m), Condition | A cable of a road traffic management system, such as signals or cameras, shot as a line along its route. |
+| `PSDR` | Signal vehicle detector | point, symbol `Loop Detector`; `katana its` (#0B9BA8); 0.25 mm | `utilities/its/fitting` | sets `utility.type=its`; asks Owner, Depth (m), Condition | A detector for a set of traffic signals, such as a vehicle loop in the road. |
+| `PSJX` | Signal junction box | point, symbol `Traffic Systems Pit`; `katana its` (#0B9BA8); 0.25 mm | `utilities/its/structure` | sets `utility.type=its`; asks Owner, Depth (m), Condition | A junction box in the ground where traffic signal cables are joined. |
+| `SD*` | Detector loop | line `Traffic Systems Cable`; `katana its` (#0B9BA8); 0.18 mm | `utilities/its/loop` | sets `utility.type=its`; asks Owner, Depth (m), Condition | Loop cut into the road surface that detects vehicles for a traffic signal, drawn along the loop. |
 
-#### `UX` Unknown Services
+#### Unknown Services
 
-What is there and has not been named: lines, pits, covers and paint.
+What is there and has not been named: lines, pits, covers and poles. (8 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `UXL` | Unknown Service | `Unknown Service Line`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/main` | Buried line whose service has not been established. Shoot a line you can see or detect but cannot name. Locate Method says how you found it (locator, radar, potholed). Recode it as soon as the owner replies; an unknown line is a question, not a fact. Example: `UXL1 ST, UXL1, UXL1 END`. |
-| `UXP` | Unknown Pit | symbol `Unknown Pit`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | Pit whose service has not been established. Shoot the middle of the lid. Lid Size (mm) is the clear opening. Lift the lid if it is safe to, and recode the pit if it says what it is. |
-| `UXH` | Unknown Maintenance Hole | symbol `Unknown Maintenance Hole`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | Man-entry chamber whose service has not been established. Shoot the middle of the cover. Lid Size (mm) is the clear opening. Do not open an unknown cover without a gas test. |
-| `UXM` | Surface Paint Mark | symbol `Paint Mark`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/marking` | Spray-paint mark that locates a service from the surface. Shoot the middle of the mark. Paint Colour is the colour you see, which names the service when the locator used the usual convention. Locate Method is who painted it and how. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `CB*` | Chamber base edge | line `Hidden Outline`; `katana unknown` (#F2559B); 0.13 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition | The bottom outline of an underground utility chamber, drawn as a hidden edge. |
+| `CT*` | Chamber top edge | line `continuous`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition | The top outline of an underground utility chamber. |
+| `PGAT` | Cover lid, service unknown | point, symbol `Unknown Pit`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition | The lid of a recessed access cover that serves a service nobody has identified. |
+| `PPOL` | Pole of unknown use | point, symbol `Query Point`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition | A pole that has not been identified as power, telephone or lighting. |
+| `PUSR` | Unknown service point | point, symbol `Query Point`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition | Surface sign of a service that has not been identified, such as an unmarked cover or stub. |
+| `PUTP` | Buried tank, contents unknown | point, symbol `Storage Tank`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition | Buried tank whose contents are not known, shot at its lid or filler. |
+| `UP*` | Pipeline, service unknown | line `Unknown Service Line`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/line` | sets `utility.type=unknown`; asks Owner, Depth (m), Condition, Material, Diameter (mm) | Pipeline whose service has not been identified. |
+| `US*` | Junction box outline | line `continuous`; `katana unknown` (#F2559B); 0.25 mm | `utilities/unknown/structure` | sets `utility.type=unknown`; asks Owner, Condition | Plan outline of a box where service lines are joined, whose service is not known. |
 
 ### Class V: Vegetation and Landscape
 
-Trees, shrubs and the edges of planted and natural ground cover.
+Trees and the edges of planted and natural ground cover.
 
-#### `VT` Trees
+#### Trees
 
-Trees by kind, stumps, tree rows and canopy outlines.
+Trunks by diameter, canopies by spread, and outlines of foliage. (51 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `VTB` | Broadleaf Tree | symbol `Broadleaf Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Tree with a broad, leafy canopy. Shoot the middle of the trunk at ground level. Species is the common name; Height (m) and Canopy Diameter (m) are estimated to the nearest half metre; Trunk Diameter (mm) is taken 1.4 m above ground. |
-| `VTC` | Conifer Tree | symbol `Conifer Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Pine, cypress or other cone-bearing tree. Shoot the middle of the trunk at ground level. Species, Height (m), Canopy Diameter (m) and Trunk Diameter (mm) as for any tree. |
-| `VTP` | Palm Tree | symbol `Palm Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Palm: a single unbranched trunk with a crown of fronds. Shoot the middle of the trunk at ground level. A palm's canopy is its frond spread, taken as Canopy Diameter (m). |
-| `VTG` | Native Gum Tree | symbol `Native Gum Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/tree` | Eucalypt or other native gum. Shoot the middle of the trunk at ground level. Gums often fork low: measure Trunk Diameter (mm) below the fork and say so in the species note. |
-| `VTD` | Dead Tree | symbol `Dead Tree`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/dead` | Standing dead tree: bare, but still a hazard and often a habitat. Shoot the middle of the trunk at ground level. A dead tree with hollows is a habitat: add an XHH point beside it. |
-| `VTS` | Tree Stump | symbol `Tree Stump`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/dead` | Stump of a felled tree, cut at or near ground level. Shoot the middle of the stump. Trunk Diameter (mm) is taken across the cut face. |
-| `VTR` | Tree Row | `continuous`; symbol `Broadleaf Tree`; `katana tree` (#5C8627); 0.13 mm | `vegetation/trees/line` | Line of trees, with a tree symbol at every point. Shoot the middle of each trunk in order. A tree is drawn at every point and the line is drawn through them, so a row of 30 trees is 30 points. Species applies to the whole row. Example: `VTR1 ST, VTR1, VTR1 END`. |
-| `VTK` | Tree Canopy Outline | `continuous`; `katana tree` (#5C8627); 0.13 mm | `vegetation/trees/line` | Drip line of a large canopy, drawn as an outline. Shoot the edge of the canopy at a point every 2 m round it, and close with CL. The outline helps where the canopy matters more than the trunk, as in a tree protection zone. Example: `VTK1 ST, VTK1, VTK1, VTK1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PF01` | Canopy, 1 m spread | point, symbol `Tiny Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about one metre across, drawn as a canopy ring of that size. |
+| `PF01*` |  | nothing |  | kept out of surfaces | Keeps the one-metre canopy marks out of the ground surface. |
+| `PF02` | Canopy, 2 m spread | point, symbol `Tiny Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about two metres across, drawn as a canopy ring of that size. |
+| `PF02*` |  | nothing |  | kept out of surfaces | Keeps the two-metre canopy marks out of the ground surface. |
+| `PF03` | Canopy, 3 m spread | point, symbol `Small Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about three metres across, drawn as a canopy ring of that size. |
+| `PF03*` |  | nothing |  | kept out of surfaces | Keeps the three-metre canopy marks out of the ground surface. |
+| `PF04` | Canopy, 4 m spread | point, symbol `Small Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about four metres across, drawn as a canopy ring of that size. |
+| `PF04*` |  | nothing |  | kept out of surfaces | Keeps the four-metre canopy marks out of the ground surface. |
+| `PF05` | Canopy, 5 m spread | point, symbol `Medium Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about five metres across, drawn as a canopy ring of that size. |
+| `PF05*` |  | nothing |  | kept out of surfaces | Keeps the five-metre canopy marks out of the ground surface. |
+| `PF06` | Canopy, 6 m spread | point, symbol `Medium Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about six metres across, drawn as a canopy ring of that size. |
+| `PF06*` |  | nothing |  | kept out of surfaces | Keeps the six-metre canopy marks out of the ground surface. |
+| `PF07` | Canopy, 7 m spread | point, symbol `Large Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about seven metres across, drawn as a canopy ring of that size. |
+| `PF07*` |  | nothing |  | kept out of surfaces | Keeps the seven-metre canopy marks out of the ground surface. |
+| `PF08` | Canopy, 8 m spread | point, symbol `Large Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about eight metres across, drawn as a canopy ring of that size. |
+| `PF08*` |  | nothing |  | kept out of surfaces | Keeps the eight-metre canopy marks out of the ground surface. |
+| `PF09` | Canopy, 9 m spread | point, symbol `Broad Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about nine metres across, drawn as a canopy ring of that size. |
+| `PF09*` |  | nothing |  | kept out of surfaces | Keeps the nine-metre canopy marks out of the ground surface. |
+| `PF10` | Canopy, 10 m spread | point, symbol `Broad Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about ten metres across, drawn as a canopy ring of that size. |
+| `PF10*` |  | nothing |  | kept out of surfaces | Keeps the ten-metre canopy marks out of the ground surface. |
+| `PF12` | Canopy, 12 m spread | point, symbol `Giant Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about twelve metres across, drawn as a canopy ring of that size. |
+| `PF12*` |  | nothing |  | kept out of surfaces | Keeps the twelve-metre canopy marks out of the ground surface. |
+| `PF15` | Canopy, 15 m spread | point, symbol `Giant Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about fifteen metres across, drawn as a canopy ring of that size. |
+| `PF15*` |  | nothing |  | kept out of surfaces | Keeps the fifteen-metre canopy marks out of the ground surface. |
+| `PT01` | Trunk 100 mm across | point, symbol `Hundred Millimetre Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | A tree whose trunk is about 100 mm across, taken at the trunk. |
+| `PT01*` |  | nothing |  | kept out of surfaces | Keeps 100 mm tree trunks out of the ground surface, since a trunk is not the ground. |
+| `PT02` | Trunk 200 mm across | point, symbol `Two Hundred Millimetre Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | A tree whose trunk is about 200 mm across, taken at the trunk. |
+| `PT02*` |  | nothing |  | kept out of surfaces | Keeps 200 mm tree trunks out of the ground surface, since a trunk is not the ground. |
+| `PT03` | Trunk 300 mm across | point, symbol `Three Hundred Millimetre Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | A tree whose trunk is about 300 mm across, taken at the trunk. |
+| `PT03*` |  | nothing |  | kept out of surfaces | Keeps 300 mm tree trunks out of the ground surface, since a trunk is not the ground. |
+| `PT04` | Trunk 400 mm across | point, symbol `Narrow Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 400 mm across, shot at the middle of the trunk. |
+| `PT04*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 400 mm trees out of the ground surface. |
+| `PT05` | Trunk 500 mm across | point, symbol `Narrow Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 500 mm across, shot at the middle of the trunk. |
+| `PT05*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 500 mm trees out of the ground surface. |
+| `PT06` | Trunk 600 mm across | point, symbol `Narrow Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 600 mm across, shot at the middle of the trunk. |
+| `PT06*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 600 mm trees out of the ground surface. |
+| `PT07` | Trunk 700 mm across | point, symbol `Medium Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 700 mm across, shot at the middle of the trunk. |
+| `PT07*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 700 mm trees out of the ground surface. |
+| `PT08` | Trunk 800 mm across | point, symbol `Medium Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 800 mm across, shot at the middle of the trunk. |
+| `PT08*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 800 mm trees out of the ground surface. |
+| `PT09` | Trunk 900 mm across | point, symbol `Medium Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 900 mm across, shot at the middle of the trunk. |
+| `PT09*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 900 mm trees out of the ground surface. |
+| `PT10` | Trunk 1000 mm across | point, symbol `Wide Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 1000 mm across, shot at the middle of the trunk. |
+| `PT10*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 1000 mm trees out of the ground surface. |
+| `PT12` | Trunk 1200 mm across | point, symbol `Wide Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 1200 mm across, shot at the middle of the trunk. |
+| `PT12*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 1200 mm trees out of the ground surface. |
+| `PT15` | Trunk 1500 mm across | point, symbol `Wide Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk about 1500 mm across, shot at the middle of the trunk. |
+| `PT15*` |  | nothing |  | kept out of surfaces | Keeps trunk points of 1500 mm trees out of the ground surface. |
+| `PTRE` | Trunk of unrecorded size | point, symbol `Unmeasured Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | Tree trunk whose diameter was not measured, shot at the middle of the trunk. |
+| `PTRE*` |  | nothing |  | kept out of surfaces | Keeps trunk points of unmeasured trees out of the ground surface. |
+| `TR*` | Tree foliage outline | line `continuous`; `katana tree` (#5C8627); 0.13 mm | `vegetation/trees/foliage` |  | Outline of the foliage of a tree or a stand of trees, drawn along its drip line. |
 
-#### `VS` Shrubs and Plants
+#### Ground Cover
 
-Shrubs, clusters, tussocks and hedges.
+The edges of timber, scrub, grass, crops, orchards and garden beds. (7 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `VSS` | Shrub | symbol `Shrub`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/plant` | Single shrub: a woody plant with no main trunk, big enough to matter. Shoot the middle of the plant. Use for shrubs big enough to matter; low planting is a garden bed edge (VGM). |
-| `VSC` | Shrub Cluster | symbol `Shrub Cluster`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/plant` | Group of shrubs too close together to shoot one by one. Shoot the middle of the group. For a large group, outline it with VGB instead. |
-| `VST` | Tussock | symbol `Tussock`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/plant` | Tussock or clump of grass. Shoot the middle of the clump. Use it only for tussocks big enough to matter, such as a pampas or lomandra clump; ordinary grass is not coded. |
-| `VSH` | Hedge | `Hedge Line`; `katana planting` (#779624); 0.18 mm | `vegetation/shrubs/hedge` | Clipped hedge, shot along its face. Shoot along the face of the hedge nearest you. Walk with the hedge on your left, so the bumps fall on the hedge side. Height (m) and Species apply to the whole length. Example: `VSH1 ST, VSH1, VSH1 END`. |
-
-#### `VG` Ground Cover
-
-The edges of lawn, bush, garden beds and crops.
-
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `VGL` | Lawn Edge | `Grass Edge`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of mown grass, where lawn meets paving, garden or bush. Shoot where the lawn meets paving, garden or bush. Walk with the lawn on your left so the fan falls on the grass. Example: `VGL1 ST, VGL1, VGL1 END`. |
-| `VGB` | Bush Edge | `Bush Edge Line`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of scrub or bush: the outer limit of dense growth. Shoot the outer edge of the bush at each change of direction. Walk with the bush on your left so the tufts fall on the bush side. Example: `VGB1 ST, VGB1, VGB1 END`. |
-| `VGM` | Garden Bed Edge | `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of a garden bed, where planting meets lawn or paving. Shoot the edge of the bed where it meets lawn or paving. Close with CL for an island bed. Example: `VGM1 ST, VGM1, VGM1, VGM1 CL`. |
-| `VGC` | Crop Edge | `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` | Edge of a cropped paddock. Shoot the edge of the crop at each corner and close with CL. Cropped land changes season by season, so date it in the job notes. Example: `VGC1 ST, VGC1, VGC1, VGC1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `EG*` | Garden bed boundary | line `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Edge of a garden bed where planting meets lawn or paving. |
+| `JC*` | Cultivated land or pasture | line `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Edge of cultivated land or pasture, shot as a line round the paddock. |
+| `JD*` | Dense timber or scrub edge | line `Bush Edge Line`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Edge of dense timber or scrub, shot along the line of the outermost trunks. |
+| `JG*` | Grassland edge | line `Grass Edge`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Edge of grassland, shot as a line round the grassed area. |
+| `JM*` | Medium timber or scrub edge | line `Medium Bush Edge`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Edge of medium-density timber or scrub, where the trees stand more widely spaced than in dense bush. |
+| `JO*` | Orchard outline | line `continuous`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Outline of an orchard, shot round the outer rows of trees. |
+| `JS*` | Scattered timber or scrub edge | line `Scattered Bush Edge`; `katana planting` (#779624); 0.18 mm | `vegetation/ground/edge` |  | Edge of scattered timber or scrub, where single trees stand well apart. |
 
 ### Class B: Buildings and Structures
 
 What stands on the ground: buildings, bridges, masts, tanks and steps.
 
-#### `BB` Buildings
+#### Buildings
 
-Walls, eaves, verandahs, hidden edges and doors.
+Walls, eaves, awnings, doors, slabs and floor levels. (14 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `BBW` | Building Wall Face | `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/wall` | Outer face of a building wall at ground level. Shoot the outside face corner to corner. Close with CL, or finish a rectangular building with RECT on its third corner and Katana builds the fourth. Name, Floors and Roof Material go with the string. Example: `BBW1 ST, BBW1, BBW1 RECT`. |
-| `BBE` | Eave Line | `Eave Line`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/roof` | Edge of the roof overhang, seen from above. Shoot the outer edge of the eave or gutter, as the roof looks on a plan. Close with CL where it goes round the building. Example: `BBE1 ST, BBE1, BBE1, BBE1 CL`. |
-| `BBV` | Verandah Line | `Eave Line`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/roof` | Edge of a verandah or awning roof. Shoot the outer edge of the verandah roof. The posts that hold it are coded SBB or FGF as they stand. Example: `BBV1 ST, BBV1, BBV1 END`. |
-| `BBH` | Hidden Outline | `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/hidden` | Building edge that shows on a plan but not above ground. Shoot an edge you know is there but cannot see, such as a basement wall from a plan. Say in the drafting note where you took it from. Example: `BBH1 ST, BBH1, BBH1 END`. |
-| `BBU` | Building Under Construction | `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/hidden` | Outline of a building that is not yet finished. Shoot the outline as it stands at the time of survey. Recode as BBW at the next survey once the walls are complete. Example: `BBU1 ST, BBU1, BBU1, BBU1 CL`. |
-| `BBC` | Building Corner | symbol `Building Corner`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/detail` | Building corner shot where a line cannot be strung. Shoot a corner you can reach but cannot string to its neighbours, for example behind a fence. Join it into the outline later with a JPN control. |
-| `BBD` | Doorway | symbol `Doorway`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/detail` | Door in a wall, at ground level. Shoot the middle of the threshold. The swing arc in the symbol is for reading only and is not to scale. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AW*` | Awning edge | line `Eave Line`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/roof` | kept out of surfaces | The outer edge of an awning that projects over a footpath or a frontage. |
+| `BU*` | Building wall face | line `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/wall` |  | The outer face of a building wall. |
+| `BV*` | Eave line | line `Eave Line`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/roof` | kept out of surfaces | The edge of a roof where it overhangs the wall. |
+| `BW*` | Wall base | line `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/wall` |  | The foot of a wall where it meets the ground, drawn as a hidden edge. |
+| `DO*` | Door opening | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/detail` |  | Opening of a door in a building wall, drawn as a short line across the wall. |
+| `LB*` | Loading dock edge | line `Platform Edge Line`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/detail` |  | Edge of a loading bay or loading dock, shot as a line along the raised platform. |
+| `OR*` | Ruin outline | line `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/hidden` |  | Outline of a ruin, the remains of a building that is no longer whole. |
+| `PAWN` | Point on an awning | point, symbol `Awning Mark`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/roof` |  | A survey point on the edge of an awning. |
+| `PAWN*` |  | nothing |  | kept out of surfaces | Keeps awning points out of the ground surface. |
+| `PCBU` | Building corner at ground | point, symbol `Building Corner`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/detail` |  | A building corner shot at natural surface level, where the wall meets the ground. |
+| `PFLR` | Finished floor level | point, symbol `Spot Level`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/detail` |  | A spot level taken on the finished floor of a building. |
+| `PFLR*` |  | nothing |  | kept out of surfaces | Keeps floor levels out of the ground surface. |
+| `TW*` | Wall top edge | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/wall` |  | Line along the top of a wall. |
+| `VE*` | Ground slab edge | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/slab` |  | Edge of a concrete slab laid flat on the ground. |
 
-#### `BS` Structures
+#### Structures
 
-Bridges, masts, tanks, flagpoles and monuments.
+Bridge parts, piers, tanks, silos, pools and other built outlines. (20 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `BSB` | Bridge Deck Edge | `continuous`; `katana building` (#627B8C); 0.50 mm | `buildings/structures/bridge` | Edge of a bridge deck, taken at the kerb or the parapet. Shoot the deck edge at the kerb or parapet, at each pier and each change of direction. One string per side. Example: `BSB1 ST, BSB1, BSB1 END`. |
-| `BSP` | Bridge Column | symbol `Bridge Column`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` | Pier or column of a bridge. Shoot the middle of the column at ground level. A wide pier is outlined with a generic line (XGL). |
-| `BST` | Mast | symbol `Mast`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Mast, tower or antenna that stands on its own. Shoot the middle of the base. Height (m) is to the top of the structure; Owner is the carrier or authority. |
-| `BSK` | Storage Tank | symbol `Storage Tank`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Tank or silo above ground. Shoot the middle of the base. Contents says what it holds. A large tank is outlined with a generic line (XGL). |
-| `BSF` | Flagpole | symbol `Flagpole`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Flagpole standing alone, as at a school, an office or a park. Shoot the middle of the pole at ground level. The pennant in the symbol is for reading only. |
-| `BSM` | Monument | symbol `Monument`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` | Monument, statue or memorial. Shoot the middle of the base. Name is the inscription or the common name of the monument. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AB*` | Abutment foot | line `Abutment Foot Line`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` |  | Foot of a bridge abutment, where its face meets the ground. |
+| `AT*` | Abutment crest | line `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` |  | The upper edge of a bridge abutment, shot along its crest. |
+| `BP*` | Pier or column outline | line `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` |  | The plan outline of a bridge pier or column. |
+| `BR*` | Deck edge | line `continuous`; `katana building` (#627B8C); 0.50 mm | `buildings/structures/bridge` |  | The edge of a bridge deck. |
+| `HS*` | Pier headstock | line `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` |  | Beam across the top of a bridge pier or pile that carries the girders. |
+| `OM*` | Other structure outline | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/structure` |  | Outline of a structure that no other code names. |
+| `OS*` | Silo or tank outline | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/structure` |  | Outline of a silo or tank, seen from above. |
+| `OT*` | Swimming pool outline | line `continuous`; `katana waterway` (#6399BE); 0.25 mm | `buildings/structures/structure` |  | Outline of a swimming pool. |
+| `OW*` | Windmill outline | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/structure` |  | Outline of a windmill, shot round its base. |
+| `PABB` | Abutment base point | point, symbol `Bottom Abutment Point`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/bridge` |  | Survey point on the bottom of a bridge abutment. |
+| `PABT` | Point on top of abutment | point, symbol `Top Abutment Point`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/bridge` |  | Survey point on the top of a bridge abutment. |
+| `PBCP` | Pile cap point | point, symbol `Pile Cap`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/bridge` |  | Point where a bridge pile meets its cap. |
+| `PBPI` | Bridge pier or column | point, symbol `Bridge Column`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` |  | The centre of a bridge pier or column, shot where it meets the ground. |
+| `PFLG` | Flag mast | point, symbol `Flagstaff`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/structure` |  | A flagpole, shot at its base. |
+| `PWML` | Windmill tower | point, symbol `Windmill Tower`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/structure` |  | Windmill, usually one that pumps water, shot at the middle of its tower. |
+| `UC*` | Bridge clearance limit | line `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/structures/bridge` | kept out of surfaces | Line on the ground under a bridge that marks the limit of its clearance overhead. |
+| `UT*` | Buried tank outline | line `Hidden Outline`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/tank` |  | Plan outline of a tank buried in the ground. |
+| `WW*` | Abutment wing wall | line `continuous`; `katana building` (#627B8C); 0.35 mm | `buildings/structures/bridge` |  | Wall that flares out from the end of a bridge abutment to hold back the embankment. |
+| `XJ*` | Deck joint line | line `continuous`; `katana building` (#627B8C); 0.13 mm | `buildings/structures/joint` |  | Line of a joint that lets a bridge deck expand. |
+| `XP*` | Joint cover plate | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/structures/joint` |  | Edge of a steel plate that covers an expansion joint. |
 
-#### `BA` Steps and Access
+#### Steps and Access
 
-Steps and handrails.
+Outside stairs. (1 code)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `BAS` | Steps | `Steps Edge`; `katana building` (#627B8C); 0.25 mm | `buildings/access/access` | Flight of steps, shot along the top nosing. Shoot the top nosing of the flight from one side to the other. The treads are drawn across the line for you. Shoot the bottom nosing with a second string. Example: `BAS1 ST, BAS1 END`. |
-| `BAH` | Handrail | `continuous`; `katana building` (#627B8C); 0.13 mm | `buildings/access/access` | Handrail or balustrade beside steps, a ramp or a drop. Shoot along the top of the rail at each post and at each change of direction. Example: `BAH1 ST, BAH1, BAH1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `SO*` | External stair nosing | line `Steps Edge`; `katana building` (#627B8C); 0.25 mm | `buildings/access/steps` | kept out of surfaces | Outside stairs of a building, shot along the nosing of the treads. |
 
 ### Class F: Fences and Walls
 
 What divides land: fences, walls, and the posts and gates between.
 
-#### `FF` Fences
+#### Fences
 
-Chain mesh, paling, rail, wire, barbed, electric and palisade.
+Fences of every kind, general, security and safety. (5 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `FFC` | Chain Mesh Fence | `Chain Mesh Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/chain-mesh` | Wire mesh fence on steel posts. Shoot the centre of each post in order. A post is drawn at every point, so shoot posts and corners, never mid-span. Height (m), Material and Condition apply to the string. Example: `FFC1 ST, FFC1, FFC1 END`. |
-| `FFP` | Paling Fence | `Paling Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/timber` | Timber paling fence: upright boards nailed to rails between posts. Shoot each post in order. Height (m) is to the top of the palings. Note a lapped or capped fence in Condition. Example: `FFP1 ST, FFP1, FFP1 END`. |
-| `FFR` | Post and Rail Fence | `Post and Rail Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/timber` | Timber or steel post and rail fence. Shoot each post in order. Height (m) is to the top rail. Example: `FFR1 ST, FFR1, FFR1 END`. |
-| `FFW` | Post and Wire Fence | `Post and Wire Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/wire` | Rural fence of plain wire on posts. Shoot each strainer and corner post, and posts along long runs. Height (m) is to the top wire. Example: `FFW1 ST, FFW1, FFW1 END`. |
-| `FFB` | Barbed Wire Fence | `Barbed Wire Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/wire` | Rural fence with barbed wire. Shoot each strainer and corner post, and posts along long runs. Height (m) is to the top wire; the barbs are drawn on both sides. Example: `FFB1 ST, FFB1, FFB1 END`. |
-| `FFE` | Electric Fence | `Electric Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/wire` | Fence with an electrified wire. Shoot each post in order. Treat it as live until the owner says otherwise, and say so in Condition. Example: `FFE1 ST, FFE1, FFE1 END`. |
-| `FFM` | Metal Palisade Fence | `Metal Palisade Fence`; symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/palisade` | Steel palisade or pool-style fence. Shoot each post in order. Height (m) is to the top of the palings. A pool fence's gate is FGP. Example: `FFM1 ST, FFM1, FFM1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `FC*` | Other fence | line `continuous`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/general` |  | Fence of a construction that no other fence code covers. |
+| `FE*` | General fence | line `Post and Wire Fence`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/general` | sets `Check Zone=2` | Ordinary fence of a property or a paddock, whatever it is built of; drawn as posts on a wire. |
+| `FL*` | Fence, type unstated | line `continuous`; `katana fence` (#A18C65); 0.18 mm | `fences/fence/general` |  | Fence of unrecorded construction, shot as a plain line. |
+| `FM*` | Security fence | line `Metal Palisade Fence`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/palisade` |  | Fence built to keep people out, too high or too close in its mesh to climb. |
+| `SF*` | Fence guarding a hazard | line `Metal Palisade Fence`; `katana fence` (#A18C65); 0.25 mm | `fences/fence/general` |  | Fence put up to keep people away from a drop, a pool or another danger. |
 
-#### `FW` Walls
+#### Walls
 
-Masonry, concrete and retaining walls.
+Retaining walls. (1 code)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `FWB` | Brick Wall | `Brick Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/masonry` | Brick wall, shot along the face on the lower side. Shoot the face on the lower-ground side at its base, then the top with a second string if its height matters. Height (m) is the height from the lower ground. Example: `FWB1 ST, FWB1, FWB1 END`. |
-| `FWK` | Block Wall | `Brick Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/masonry` | Concrete or masonry block wall. Shoot the face on the lower-ground side. Height (m) is from the lower ground. A rendered block wall is still a block wall: note the render in Material. Example: `FWK1 ST, FWK1, FWK1 END`. |
-| `FWS` | Stone Wall | `Stone Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/masonry` | Dry or mortared stone wall. Shoot the face on the lower-ground side. Say dry or mortared in Material; a dry wall is often a heritage item (XHT). Example: `FWS1 ST, FWS1, FWS1 END`. |
-| `FWC` | Concrete Wall | `continuous`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/concrete` | Poured or precast concrete wall. Shoot the face on the lower-ground side. Height (m) is from the lower ground. Example: `FWC1 ST, FWC1, FWC1 END`. |
-| `FWR` | Earth Retaining Wall | `Earth Retaining Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/retaining` | Wall that holds back earth; the triangles point downhill. Shoot the top of the wall face. Walk with the retained, higher ground on your RIGHT, so the triangles fall to the lower side on your left. Height (m) is the greatest retained height. Example: `FWR1 ST, FWR1, FWR1 END`. |
-| `FWT` | Sleeper Retaining Wall | `Earth Retaining Wall`; `katana wall` (#BA5556); 0.25 mm | `fences/wall/retaining` | Retaining wall of sleepers or logs. Shoot the top of the wall face, walking with the retained ground on your right, as for any retaining wall. Material says timber, steel or concrete sleeper. Example: `FWT1 ST, FWT1, FWT1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `RW*` | Earth retaining wall | line `Earth Retaining Wall`; `katana wall` (#BA5556); 0.35 mm | `fences/wall/retaining` |  | Wall built to hold back earth, shot along its base. |
 
-#### `FG` Gates and Posts
+#### Gates and Posts
 
-Gates, strainer posts and lone fence posts.
+Gate leaves and fence or guide markers. (2 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `FGP` | Pedestrian Gate | symbol `Pedestrian Gate`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/gate` | Gate for people: a pedestrian opening in a fence or a wall. Shoot the middle of the opening at the gate's line. The two posts are shot as FGF or FGS. |
-| `FGV` | Vehicle Gate | symbol `Vehicle Gate`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/gate` | Gate wide enough for a vehicle. Shoot the middle of the opening at the gate's line. The posts either side are shot as FGS. |
-| `FGS` | Strainer Post | symbol `Strainer Post`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/post` | Braced corner or end post. Shoot the middle of the post. Strainers carry the tension of a wire fence and are shot at every corner, end and gate. |
-| `FGF` | Fence Post | symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/post` | Single fence post standing alone, not part of a fence string. Shoot the middle of the post. A post that belongs to a fence string is shot as part of it; use this code for a lone post. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AG*` | Gate leaf | line `Gate Leaf Outline`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/gate` |  | A gate leaf between two posts, shot as a line from its hinge to its latch. |
+| `POST` | Fence or guide marker | point, symbol `Fence Post`; `katana fence` (#A18C65); 0.25 mm | `fences/gate/post` |  | A single fence post or roadside guide post, shot at its centre. |
 
 ### Class G: Terrain and Breaklines
 
 The shape of the ground: shots, breaklines, contours, water edges and rock.
 
-#### `GP` Ground Points
+#### Ground Points
 
-Ground shots and levels, highs, lows and inverts.
+Natural ground shots and spot heights. (2 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `GPG` | Ground Shot | symbol `Ground Shot`; `katana ground` (#688F68); 0.18 mm | `terrain/points/ground` | Level on natural ground: the height is what matters, the mark is a tiny plus. Use for every ordinary shot on natural ground. The rule marks it hidden, so a surface of ten thousand shots does not bury the plan; Katana does not yet apply hide, so for now a 1 mm plus shows. |
-| `GPS` | Spot Level | symbol `Spot Level`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Level on a feature, shown with its mark so it can be checked. Use for a level on something that is not natural ground, such as a step, a slab corner or a floor level. It stays visible so the checker can find it. |
-| `GPH` | High Point | symbol `High Point`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Local high point of the ground. Shoot the highest point of a mound, a crest or a hilltop, and only when it is a real feature of the ground. |
-| `GPL` | Low Point | symbol `Low Point`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Local low point of the ground. Shoot the lowest point of a sag, a hollow or a sump. A low point that drains to a pit is coded GPI at the pit. |
-| `GPR` | Road Surface Level | symbol `Ground Shot`; `katana ground` (#688F68); 0.18 mm | `terrain/points/ground` | Level on a paved surface: the height is what matters, the mark is a tiny plus. Use for ordinary shots on a sealed surface, a slab or a car park. The rule marks it hidden like GPG; Katana does not yet apply hide, so for now a 1 mm plus shows. |
-| `GPI` | Invert Level | symbol `Invert Level`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` | Level at the bottom of a pipe, a pit or a drain. Shoot the invert, the lowest inside point of the pipe or pit, with a staff or a depth gauge held on it. Record the pit or pipe with its own code beside it. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PNSS` | Natural ground shot | point, symbol `Ground Shot`; `katana ground` (#688F68); 0.18 mm | `terrain/points/ground` |  | A shot on the natural ground surface, used as a point of the terrain model. |
+| `PSHT` | Spot level on ground | point, symbol `Spot Level`; `katana ground` (#688F68); 0.18 mm | `terrain/points/spot` |  | A spot height: a single level taken at a point and kept visible on the plan. |
 
-#### `GB` Breaklines
+#### Breaklines
 
-Banks, ridges, gullies and the hard and soft lines that shape a surface.
+Banks, cuttings, ridges, scarps and the soft lines that shape a surface. (7 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `GBT` | Bank Top Edge | `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Top edge of a slope; the ticks point downhill. Shoot along the top of the slope with the slope falling away on your LEFT, so the ticks fall downhill. Take a point at every change of grade. Example: `GBT1 ST, GBT1, GBT1 END`. |
-| `GBB` | Bank Toe Edge | `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Bottom edge of a slope; the short ticks point downhill. Shoot along the toe of the slope with the slope rising on your RIGHT, so the short ticks fall away from the bank, downhill. Take a point at every change of grade. Example: `GBB1 ST, GBB1, GBB1 END`. |
-| `GBK` | Cutting Top Edge | `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Top edge of an excavated slope. Shoot along the top of the cut with the cutting on your LEFT, so the ticks fall down into it. A natural bank is GBT. Example: `GBK1 ST, GBK1, GBK1 END`. |
-| `GBF` | Fill Toe Edge | `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` | Bottom edge of an embankment. Shoot along the toe of the fill with the embankment on your RIGHT, so the short ticks fall away from it, downhill. A natural bank toe is GBB. Example: `GBF1 ST, GBF1, GBF1 END`. |
-| `GBR` | Ridge Line | `Ridge Line`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/ridge-gully` | Line along a crest, where ground falls away on both sides. Shoot along the crest of the ridge, with a level at each point. The carets point up to say it is a high line. Example: `GBR1 ST, GBR1, GBR1 END`. |
-| `GBG` | Gully Line | `Gully Line`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/ridge-gully` | Line along the bottom of a gully. Shoot along the lowest line of the gully, with a level at each point. The inverted carets point down to say it is a low line. Example: `GBG1 ST, GBG1, GBG1 END`. |
-| `GBH` | Hard Breakline | `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/general` | Sharp change of grade that a surface must not smooth over. Use where grade changes abruptly and a surface must keep the edge, such as the back of a kerb or the lip of a slab. Take a point at every change of direction and level each one. Example: `GBH1 ST, GBH1, GBH1 END`. |
-| `GBS` | Soft Breakline | `Soft Breakline`; `katana breakline` (#BE7D83); 0.13 mm | `terrain/breaklines/general` | Gentle change of grade that a surface may soften. Use where grade changes gradually and the surface may round it off. Level each point. When in doubt about hard or soft, choose hard. Example: `GBS1 ST, GBS1, GBS1 END`. |
-| `GBX` | Surface Exclusion Boundary | `Exclusion Boundary`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/exclusion` | Area that a surface must leave out, such as a building or a lake. Shoot the outline of the area where no ground model should exist and close with CL. The surface builder leaves out everything inside it. It does not take part in the surface itself. Example: `GBX1 ST, GBX1, GBX1, GBX1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `BB*` | Bank toe | line `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` |  | The bottom edge of a bank, where the slope meets the flat ground below. |
+| `CU*` | Cutting crest | line `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` |  | The top edge of a cutting, where the ground begins to fall into the cut. |
+| `NB*` | Ridge or crest line | line `Ridge Line`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/ridge-gully` |  | A breakline or ridge, shot as a line that the surface model must follow. |
+| `NS*` | Natural ground line | line `Soft Breakline`; `katana ground` (#688F68); 0.18 mm | `terrain/breaklines/general` | sets `Check Zone=2` | A line of ground shots along the natural surface where there is no sharper break, checked in model zone 2. |
+| `PBRK` | Breakline point | point, symbol `Breakline Point`; `katana breakline` (#BE7D83); 0.18 mm | `terrain/breaklines/general` |  | A ground point lying on a breakline, shot where the grade changes so that the surface model can join it to its neighbours. |
+| `TC*` | Bank crest | line `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/bank` |  | Top edge of a bank or batter, with the ticks pointing downhill. |
+| `VL*` | Slip scarp | line `Bank Top Edge`; `katana breakline` (#BE7D83); 0.25 mm | `terrain/breaklines/erosion` |  | Scarp left by a landslide or by water eating into a bank. |
 
-#### `GC` Contours
+#### Contours
 
-Index, intermediate and depression contours.
+Index, regular and extra contours, and their depression forms. (7 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `GCI` | Index Contour | `Index Contour`; `katana contour` (#B9704F); 0.35 mm | `terrain/contours/index` | Every fifth contour, drawn heavier and marked with a bead. Code a contour you were given, such as supplied mapping, and set Level (m) to its height. Contours made from your own surface are drawn from the model and need no code. Example: `GCI1 ST, GCI1, GCI1 END`. |
-| `GCM` | Intermediate Contour | `continuous`; `katana contour` (#B9704F); 0.18 mm | `terrain/contours/intermediate` | Ordinary contour between the index contours. Code a contour you were given and set Level (m) to its height. One string per contour. Example: `GCM1 ST, GCM1, GCM1 END`. |
-| `GCD` | Depression Contour | `Depression Contour`; `katana contour` (#B9704F); 0.18 mm | `terrain/contours/depression` | Contour round a hollow; the ticks point downhill. Follow the contour with the hollow on your LEFT, so the ticks fall downhill into it. Set Level (m) to its height. Example: `GCD1 ST, GCD1, GCD1, GCD1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `X0*` | Regular contour | line `continuous`; `katana contour` (#B9704F); 0.18 mm | `terrain/contours/intermediate` |  | Contour at the regular interval between index contours. |
+| `XQ*` | Regular depression contour | line `Depression Contour`; `katana contour` (#B9704F); 0.18 mm | `terrain/contours/depression` |  | Contour round a hollow at the regular interval, with the ticks pointing downhill. |
+| `Y0*` | Whole-metre extra contour | line `continuous`; `katana contour` (#B9704F); 0.13 mm | `terrain/contours/auxiliary` |  | Extra contour drawn at each whole metre between the regular ones. |
+| `YQ*` | Tenth-metre extra contour | line `continuous`; `katana contour` (#B9704F); 0.13 mm | `terrain/contours/auxiliary` |  | Extra contour drawn at each tenth of a metre, for flat ground. |
+| `Z*` | Heavy contour | line `Index Contour`; `katana contour` (#B9704F); 0.35 mm | `terrain/contours/index` |  | Index contour, the heavier line drawn at every fifth contour. |
+| `Z0*` | Index contour, regular | line `Index Contour`; `katana contour` (#B9704F); 0.35 mm | `terrain/contours/index` |  | Index contour at the regular index interval. |
+| `ZQ*` | Index depression contour | line `Depression Contour`; `katana contour` (#B9704F); 0.35 mm | `terrain/contours/depression` |  | Index contour round a hollow, with the ticks pointing downhill. |
 
-#### `GW` Water Edges
+#### Water Edges
 
-Water's edge and the high water mark.
+Shorelines, bank edges, swamps and water levels. (7 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `GWE` | Water Edge | `Water Edge`; `katana waterway` (#6399BE); 0.25 mm | `terrain/water/edge` | Edge of water at the time of survey. Shoot where the water meets the bank and set Water Level (m) when you have a level for it. Water moves: date the shot in the job notes. Example: `GWE1 ST, GWE1, GWE1 END`. |
-| `GWH` | High Water Mark | `Water Edge`; `katana waterway` (#6399BE); 0.25 mm | `terrain/water/edge` | Line of the highest recent water. Shoot the wrack line or stain left by the highest recent water, which is usually above the present edge. Example: `GWH1 ST, GWH1, GWH1 END`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `JW*` | Marsh boundary | line `Marsh Edge`; `katana waterway` (#6399BE); 0.18 mm | `terrain/water/edge` |  | Outline of a swamp or marsh, shot along the edge of the wet ground. |
+| `PFHT` | Flood level mark | point, symbol `Water Level Mark`; `katana waterway` (#6399BE); 0.25 mm | `terrain/water/edge` |  | The level that a flood is known to have reached, shot at the mark it left. |
+| `PSWA` | Swamp or marsh | point, symbol `Swamp`; `katana waterway` (#6399BE); 0.18 mm | `terrain/water/wetland` |  | A swamp or marsh: a patch of wet, reedy ground marked by a point. |
+| `PWLP` | Water surface level | point, symbol `Water Level Mark`; `katana waterway` (#6399BE); 0.18 mm | `terrain/water/level` |  | Point where the level of a water surface was read. |
+| `WE*` | Waterline with level | line `Water Edge`; `katana waterway` (#6399BE); 0.25 mm | `terrain/water/edge` |  | Edge of water, with a level taken on it. |
+| `WL*` | Lake shoreline | line `Water Edge`; `katana waterway` (#6399BE); 0.25 mm | `terrain/water/lake` |  | Shoreline of a lake. |
+| `WR*` | River bank edge | line `Water Edge`; `katana waterway` (#6399BE); 0.25 mm | `terrain/water/river` |  | Bank edge of a river or creek. |
 
-#### `GR` Rock and Cliff
+#### Rock and Cliff
 
-Rock outcrops, cliff edges and boulders.
+Rock outcrops and escarpment crests. (2 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `GRO` | Rock Outcrop Edge | `Rock Outcrop Edge`; `katana contour` (#B9704F); 0.18 mm | `terrain/rock/edge` | Edge of exposed rock where it meets soil, grass or water. Shoot the edge of the outcrop where the rock meets soil or grass, at each change of direction. Close with CL for an isolated outcrop. Example: `GRO1 ST, GRO1, GRO1, GRO1 CL`. |
-| `GRC` | Cliff Edge | `Cliff Edge`; `katana contour` (#B9704F); 0.25 mm | `terrain/rock/edge` | Top edge of a cliff; the ticks point over the edge. Shoot along the top edge of the cliff with the drop on your LEFT, so the ticks fall over the edge. Stand well back and shoot it reflectorless. Example: `GRC1 ST, GRC1, GRC1 END`. |
-| `GRB` | Boulder | symbol `Boulder`; `katana contour` (#B9704F); 0.18 mm | `terrain/rock/boulder` | Boulder too large to move. Shoot the middle of the top of the boulder. A boulder that is a landmark is recorded as a heritage item as well (XHT). |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `JR*` | Rock area outline | line `Rock Outcrop Edge`; `katana contour` (#B9704F); 0.18 mm | `terrain/rock/edge` |  | Outline of an area of exposed rock, shot along its edge. |
+| `VC*` | Escarpment crest | line `Cliff Edge`; `katana contour` (#B9704F); 0.25 mm | `terrain/rock/edge` |  | Top edge of a cliff or escarpment, with the ticks pointing over the drop. |
 
 ### Class M: Survey Control and Annotation
 
 The survey's own marks, its investigations and the words on the plan.
 
-#### `MC` Control Marks
+#### Control Marks
 
-Trigonometric stations, benchmarks and the marks a job sets and uses.
+Bench marks, survey marks, stations, pegs, bolts and the marks a job sets and uses. (28 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `MCT` | Trigonometric Station | symbol `Trigonometric Station`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` | Trigonometric station of a national or state network. Shoot the centre of the mark in its cap. Mark Number is the register number; Order is its class in the network. Do not disturb it. |
-| `MCC` | Control Mark | symbol `Control Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` | Ground mark whose coordinates the project holds. Shoot the centre of the mark. Mark Number is the project's number for it and Order is its class. Say in Condition if it was reoccupied. |
-| `MCB` | Level Benchmark | symbol `Level Benchmark`; `katana control` (#0999C9); 0.25 mm | `control/marks/level` | Mark with a published level. Shoot the point the level is quoted to, which is usually the top of the mark. Level (m) is the published level. Check your own against it. |
-| `MCP` | Fixed Survey Mark | symbol `Fixed Survey Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` | Mark set to last, such as a pin in concrete. Shoot the centre of the mark. A mark set for the life of the project is coded here; one set for the job only is MCW. |
-| `MCG` | GNSS Base | symbol `GNSS Base`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` | Mark where a GNSS base receiver was set up. Shoot the point the base antenna's height is measured to, and record Mark Number. The rays in the symbol suggest satellites. |
-| `MCW` | Temporary Control | symbol `Temporary Control`; `katana control` (#0999C9); 0.25 mm | `control/marks/temporary` | Temporary mark set for this job. Shoot the centre of the mark. Remove it or hand it over at the end of the job, and say which in Condition. |
-| `MCI` | Instrument Station | symbol `Instrument Station`; `katana control` (#0999C9); 0.25 mm | `control/marks/temporary` | Position of the total station for one set-up. Shoot the centre of the instrument's mark. Station Name is the set-up's name and Instrument Height (m) is to the trunnion axis. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PAPN` | Pin on a design alignment | point, symbol `Setting Out Pin`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | An alignment pin: a pin set in the ground to mark a design alignment for setting out. |
+| `PAPN*` |  | nothing |  | kept out of surfaces | Keeps alignment pins out of the ground surface. |
+| `PBLT` | Survey bolt | point, symbol `Survey Spike`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A bolt set in concrete or rock as a survey mark, shot at the centre of its head. |
+| `PBLT*` |  | nothing |  | kept out of surfaces | Keeps survey bolts out of the ground surface. |
+| `PBMK` | Levelling bench mark | point, symbol `Level Benchmark`; `katana control` (#0999C9); 0.25 mm | `control/marks/level` |  | A bench mark: a mark of known height that levelling is run from. |
+| `PBMZ` | Bench mark, separate list | point, symbol `Level Benchmark` (hidden); `katana control` (#0999C9); 0.25 mm | `control/marks/level` |  | A bench mark kept under its own separate code so it can be listed and checked on its own. |
+| `PCMK` | Road authority control mark | point, symbol `Traverse Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A permanent control mark of the road authority, used to tie road work into the survey network. |
+| `PCMK*` |  | nothing |  | kept out of surfaces | Keeps the road authority's control marks out of the ground surface. |
+| `PDPY` | Levelling peg | point, symbol `Temporary Control`; `katana control` (#0999C9); 0.25 mm | `control/marks/temporary` |  | A temporary peg driven into the ground to carry a height for a dumpy level. |
+| `PDPY*` |  | nothing |  | kept out of surfaces | Keeps levelling pegs out of the ground surface. |
+| `PDSM` | Water authority mark | point, symbol `Fixed Survey Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A permanent survey mark placed by the water authority and used as a height or position reference. |
+| `PDSM*` |  | nothing |  | kept out of surfaces | Keeps the water authority's survey marks out of the ground surface. |
+| `PHCP` | Plan-only control mark | point, symbol `Traverse Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A control point held in plan only, with no level, used to control photogrammetry. |
+| `PMCP` | Supplementary control mark | point, symbol `Traverse Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A minor control point set to support the main control network. |
+| `PPCN` | Photo centre mark | point, symbol `Aerial Photo Centre`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | The ground point at the centre of an aerial photograph, used to position and orient the image. |
+| `PPSM` | Coordinated survey mark | point, symbol `Fixed Survey Mark` (hidden); `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A permanent survey mark with coordinates, which the survey can be tied to. |
+| `PSS*` |  | nothing |  | kept out of surfaces | Keeps every station mark out of the ground surface: control marks fix positions and are not terrain. |
+| `PSSA` | Survey mark, type unstated | point, symbol `Traverse Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A survey mark of unspecified type, used when the kind of mark is not given. |
+| `PSSB` | Broad arrow bench mark | point, symbol `Level Benchmark`; `katana control` (#0999C9); 0.25 mm | `control/marks/level` |  | The broad arrow cut in stone or a kerb to mark a bench level. |
+| `PSSC` | Station peg | point, symbol `Temporary Control`; `katana control` (#0999C9); 0.25 mm | `control/marks/temporary` |  | A peg driven in as a station for the job. |
+| `PSSD` | Plug, pipe or block station | point, symbol `Fixed Survey Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A station marked by a plug, a drill hole, an iron pipe or a reference block. |
+| `PSSE` | Bolt, nail or spike station | point, symbol `Survey Spike`; `katana control` (#0999C9); 0.25 mm | `control/marks/temporary` |  | A station marked by a bolt, a nail, a spike or a similar small metal fixing. |
+| `PSSF` | Trigonometric station | point, symbol `Trigonometric Station`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A trigonometric station, a primary control mark of the geodetic network. |
+| `PSSG` | Network control mark | point, symbol `Traverse Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A mark of the permanent, state or project control networks, used as a survey station. |
+| `PSSM` | State geodetic mark | point, symbol `Traverse Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A mark of the state geodetic network, with published coordinates and heights. |
+| `PTSS` | Concrete survey pillar | point, symbol `Trigonometric Station`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | Trigonometric station built as a concrete pillar. |
+| `PTSS*` |  | nothing |  | kept out of surfaces | Keeps concrete trig pillar points out of the ground surface. |
+| `PVCP` | Height control point | point, symbol `Level Benchmark`; `katana control` (#0999C9); 0.25 mm | `control/marks/level` |  | Point whose height alone is held as control, such as a target for aerial photo mapping. |
 
-#### `MI` Investigation Points
+#### Investigation Points
 
-Boreholes, test pits and potholes.
+Boreholes, test pits, potholes, seismic shots and trenches. (9 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `MIB` | Borehole | symbol `Borehole`; `katana control` (#0999C9); 0.25 mm | `control/investigation/ground` | Drilled hole for ground investigation. Shoot the centre of the borehole collar. Hole Number is the geotechnical report's number and Depth (m) is the final depth drilled. |
-| `MIT` | Test Pit | symbol `Test Pit`; `katana control` (#0999C9); 0.25 mm | `control/investigation/ground` | Excavated pit for ground investigation. Shoot the centre of the test pit. Hole Number is the report's number and Depth (m) is the final depth dug. |
-| `MIP` | Pothole | symbol `Pothole`; `katana control` (#0999C9); 0.25 mm | `control/investigation/pothole` | Hole dug to expose a buried service. Shoot the middle of the pothole, and the top of the service it exposed with that service's own code. Service Found names it, Depth to Top (m) is surface to the top of the pipe or cable. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PBHX` | Borehole point | point, symbol `Investigation Bore`; `katana control` (#0999C9); 0.25 mm | `control/investigation/ground` |  | A borehole, shot at the centre of its collar. |
+| `PGEO` | Geotechnical test pit | point, symbol `Trial Pit`; `katana control` (#0999C9); 0.25 mm | `control/investigation/ground` |  | A pit excavated to inspect the ground or to expose a buried service, shot at its centre. |
+| `PHNL` | Pothole, no level | point, symbol `Pothole`; `katana control` (#0999C9); 0.25 mm | `control/investigation/pothole` |  | A pothole dug to expose a service, recorded without a level on the service. |
+| `PHNL*` |  | nothing |  | kept out of surfaces | Keeps pothole points without a level out of the ground surface. |
+| `PHRL` | Pothole with level | point, symbol `Pothole`; `katana control` (#0999C9); 0.25 mm | `control/investigation/pothole` |  | A pothole dug to expose a service, with the level of the exposed service recorded. |
+| `PSTS` | Seismic shot point | point, symbol `Seismic Shot Point`; `katana control` (#0999C9); 0.25 mm | `control/investigation/ground` |  | A seismic test shot: the point where a charge was fired for a seismic survey. |
+| `SL*` | Seismic survey line | line `Hidden Outline`; `katana control` (#0999C9); 0.18 mm | `control/investigation/geophysics` |  | Line followed by a seismic survey, along which shots and receivers are set. |
+| `XB*` | Trench floor edge | line `Hidden Outline`; `katana control` (#0999C9); 0.18 mm | `control/investigation/trench` |  | Bottom edge of a trench dug to expose buried services. |
+| `XT*` | Trench top edge | line `continuous`; `katana control` (#0999C9); 0.25 mm | `control/investigation/trench` |  | Top edge of a trench dug to expose buried services. |
 
-#### `MT` Text and Notes
+#### Text and Notes
 
-Six looks of text: label, note, heading, level, road name and contour value.
+Seven text sizes and the layer that holds them. (14 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `MTL` | Label Text | text, normal; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` | Short label for a feature, 2.0 mm high. Shoot the insertion point of the label. Katana stores this look (2.0 mm, left, on the baseline) but does not yet apply it, so the point shows as a plus and you place the words with TEXT. |
-| `MTN` | Note Text | text, normal; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` | Note on the plan, 2.5 mm high. Shoot the insertion point of the note. Katana stores this look (2.5 mm, left, on the baseline) but does not yet apply it, so the point shows as a plus and you place the words with TEXT. |
-| `MTH` | Heading Text | text, bold; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` | Heading, 5.0 mm high and bold. Shoot the insertion point of the heading. Katana stores this look (5.0 mm, bold) but does not yet apply it, so the point shows as a plus and you place the words with TEXT. |
-| `MTS` | Spot Level Text | text, normal; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` | Level written beside a point, 2.0 mm italic. Shoot the point the level belongs beside. Katana stores this look (2.0 mm, italic, left) but does not yet apply it, so the point shows as a plus and you place the level with TEXT. |
-| `MTR` | Road Name Text | text, normal; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` | Road name, 3.0 mm italic and centred. Shoot the middle of the road name's position along the road. Katana stores this look (3.0 mm, italic, centred) but does not yet apply it, so the point shows as a plus and you place the name with TEXT. |
-| `MTC` | Contour Value Text | text, normal; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` | Contour level, 1.8 mm italic and centred. Shoot the middle of the contour value's position. Katana stores this look (1.8 mm, italic, centred) but does not yet apply it, so the point shows as a plus and you place the value with TEXT. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `1` |  | text 1.5 mm; `katana note` (#9A8EA4) |  |  | Plan text 1.5 mm high on paper, the finest size, for crowded detail. |
+| `1*` | Finest text | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for 1.5 mm plan text, so it can be switched off with the other notes. |
+| `2` |  | text 2.5 mm; `katana note` (#9A8EA4) |  |  | Plan text 2.5 mm high on paper, the everyday size for notes and labels. |
+| `2*` | Small text | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for 2.5 mm plan text, so it can be switched off with the other notes. |
+| `3` |  | text 3.5 mm; `katana note` (#9A8EA4) |  |  | Plan text 3.5 mm high on paper, for prominent notes and sub-headings. |
+| `3*` | Medium text | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for 3.5 mm plan text, so it can be switched off with the other notes. |
+| `4` |  | text 5 mm; `katana note` (#9A8EA4) |  |  | Plan text 5 mm high on paper, large enough for headings. |
+| `4*` | Large text | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for 5.0 mm plan text, so it can be switched off with the other notes. |
+| `5` |  | text 7 mm; `katana note` (#9A8EA4) |  |  | Plan text 7 mm high on paper, for titles and major headings. |
+| `5*` | Extra large text | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for 7.0 mm plan text, so it can be switched off with the other notes. |
+| `7` |  | text 10 mm; `katana note` (#9A8EA4) |  |  | Plan text 10 mm high on paper, the largest size, for sheet titles. |
+| `7*` | Display text | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for 10.0 mm plan text, so it can be switched off with the other notes. |
+| `8` |  | text 2.5 mm; `katana note` (#9A8EA4) |  |  | Parcel label text 2.5 mm high on paper: the lot number and the deposited plan number. |
+| `8*` | Lot and plan labels | the layer of the text; `katana note` (#9A8EA4); 0.13 mm | `control/annotation/text` |  | Layer and pen for parcel label text, so lot and plan numbers can be switched off together. |
 
-#### `MM` Plan Marks
+#### Plan Marks
 
-North arrow, leader, limit of survey and revision cloud.
+The limits of a survey and of the detail taken from photographs. (3 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `MMN` | North Arrow | symbol `North Arrow`; `katana note` (#9A8EA4); 0.13 mm | `control/plan/furniture` | North arrow placed on the plan. Shoot the point where the arrow should stand, in a clear part of the sheet. It is a symbol of the plan, not a feature of the site, so it carries no level. |
-| `MML` | Leader Line | `continuous`; symbol `Leader Dot`; `katana note` (#9A8EA4); 0.13 mm | `control/plan/furniture` | Leader that runs from a note to the feature it names. Shoot the note first, then the feature: two points, a dot at each end. Do not run a leader through other features. Example: `MML1 ST, MML1 END`. |
-| `MMS` | Limit of Survey | `Limit of Survey Line`; `katana note` (#9A8EA4); 0.50 mm | `control/plan/limit` | Edge of the area that was surveyed. Shoot the limit of the survey at each corner and close with CL. It tells the reader where the survey stops and nothing beyond it can be trusted. Example: `MMS1 ST, MMS1, MMS1, MMS1 CL`. |
-| `MMV` | Revision Cloud | `Revision Cloud Edge`; `katana note` (#9A8EA4); 0.25 mm | `control/plan/furniture` | Cloud drawn round an area that has changed. Shoot round the changed area walking CLOCKWISE, so the scallops bulge outward. Close with CL. Example: `MMV1 ST, MMV1, MMV1, MMV1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DE*` | Photo digitising limit | line `Photo Detail Boundary`; `katana note` (#9A8EA4); 0.35 mm | `control/plan/limit` |  | Outer limit of the area digitised from aerial photography, where detail comes from the photo and not the field. |
+| `FS*` | Field survey limit | line `Limit of Survey Line`; `katana note` (#9A8EA4); 0.50 mm | `control/plan/limit` |  | Outer limit of the ground that was surveyed in the field, drawn over a photo base. |
+| `NF*` | Photo completion limit | line `Limit of Survey Line`; `katana note` (#9A8EA4); 0.25 mm | `control/plan/limit` |  | Limit of an area where photo-based mapping was completed or checked by survey in the field. |
 
 ### Class X: Miscellaneous
 
-Hazards, heritage, temporary works and the catch-alls.
+Hazards, heritage, land use and the catch-alls.
 
-#### `XH` Hazards and Heritage
+#### Hazards and Heritage
 
-Hazards, heritage items and habitat markers.
+Hazards, heritage items, habitat and threatened communities. (12 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `XHZ` | Hazard Point | symbol `Hazard Point`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/hazards/hazard` | Point hazard, such as an open hole or exposed wire. Shoot the middle of the hazard. Hazard Type names it and Note says what to do about it. Tell the client at once if it is dangerous. |
-| `XHB` | Hazard Boundary | `Hazard Boundary`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/hazards/hazard` | Outline of a hazardous area. Shoot the outline of the area, such as contaminated ground or a drop, and close with CL. Hazard Type and Note as for a point hazard. Example: `XHB1 ST, XHB1, XHB1, XHB1 CL`. |
-| `XHT` | Heritage Item | symbol `Heritage Item`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` | Item of heritage value: a feature protected by a listing or an overlay. Shoot the middle of the item, or its base. Name is the common name and Listing is the register entry. Do not disturb it. |
-| `XHH` | Habitat Marker | symbol `Habitat Marker`; `katana tree` (#5C8627); 0.25 mm | `miscellaneous/hazards/habitat` | Nest, burrow or other habitat feature. Shoot the middle of the nest, the hollow or the burrow mouth. Habitat Type says which. Keep clear of it and leave it as you found it. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `PHAZ` | Site that endangers people | point, symbol `Hazard Point`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/hazards/hazard` |  | A site that endangers people or later works, such as contaminated or unstable ground. |
+| `PHAZ*` |  | nothing |  | kept out of surfaces | Keeps hazardous-site points out of the ground surface. |
+| `PHEC` | Threatened community | point, symbol `Habitat Marker`; `katana tree` (#5C8627); 0.25 mm | `miscellaneous/hazards/habitat` |  | A point inside a plant or animal community recorded as endangered, to be avoided by works. |
+| `PHEC*` |  | nothing |  | kept out of surfaces | Keeps endangered-community points out of the ground surface. |
+| `PHEE` | Listed ecological community | point, symbol `Habitat Marker`; `katana tree` (#5C8627); 0.25 mm | `miscellaneous/hazards/habitat` |  | A point inside a vegetation community listed by law as an endangered ecological community. |
+| `PHEE*` |  | nothing |  | kept out of surfaces | Keeps listed ecological community points out of the ground surface. |
+| `PHIA` | Indigenous cultural site | point, symbol `Heritage Item`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` |  | A place of Indigenous cultural heritage, marked so that works can keep clear of it. |
+| `PHIA*` |  | nothing |  | kept out of surfaces | Keeps Indigenous heritage points out of the ground surface. |
+| `PHIS` | Historic interest point | point, symbol `Heritage Item`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` |  | A point of historic interest, such as a plaque, a marker stone or an old relic. |
+| `PHNI` | Other heritage site | point, symbol `Heritage Item`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` |  | A heritage site without Indigenous significance, such as a historic ruin, relic or building remnant. |
+| `PHNI*` |  | nothing |  | kept out of surfaces | Keeps non-Indigenous heritage points out of the ground surface. |
+| `PHST` | Grave headstone | point, symbol `Grave Marker`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/hazards/heritage` |  | A grave headstone in a cemetery, shot at the middle of its base. |
 
-#### `XG` General
+#### General
 
-A generic point and line, and the query point.
+A point to attend to, a crossing of two lines, and the survey check line. (3 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `XGP` | Generic Point | symbol `Generic Point`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/general/generic` | Point that has no better code. Shoot a point that fits no other code and say what it is in Note. If the same thing appears more than once, ask for a code for it. |
-| `XGL` | Generic Line | `continuous`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/general/generic` | Line that has no better code. Shoot a line that fits no other code and say what it is in Note. If the same thing appears more than once, ask for a code for it. Example: `XGL1 ST, XGL1, XGL1 END`. |
-| `XGQ` | Query Point | symbol `Query Point`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/general/query` | Point the surveyor is not sure of; check before issue. Shoot a point you cannot name or place with confidence, and say why in Note. Every query point must be resolved or explained before the plan goes out. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `HP*` | Area for attention | line `continuous`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/general/generic` | kept out of surfaces | Outline of an area singled out for attention; the code does not say why. |
+| `PVID` | Crossing of two lines | point, symbol `Generic Point`; `katana note` (#9A8EA4); 0.25 mm | `miscellaneous/general/generic` |  | Point where two surveyed lines meet, usually worked out by calculation. |
+| `QQ*` | Survey check line | line `continuous`; `katana control` (#0999C9); 0.13 mm | `miscellaneous/general/check` | kept out of surfaces | Line of check shots used to test the survey or the model, kept out of the ground surface. |
 
-#### `XT` Temporary Works
+#### Land Use Areas
 
-Temporary fences and work zones.
+The outlines of land by its use: built-up areas, cemeteries, golf courses, parks, sporting arenas and stockpiles. (6 codes)
 
-| Code | Name | Draws | Layer | What it is and how to shoot it |
-|---|---|---|---|---|
-| `XTF` | Temporary Fence | `Temporary Works Line`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/temporary/temporary` | Temporary fence or hoarding. Shoot the line of the temporary fence at each change of direction. It will be gone when the work is done, so date it in the job notes. Example: `XTF1 ST, XTF1, XTF1 END`. |
-| `XTW` | Work Zone Edge | `Temporary Works Line`; `katana hazard` (#FF5A37); 0.25 mm | `miscellaneous/temporary/temporary` | Edge of a work zone: a temporary limit of cones, barriers or tape. Shoot the edge of the work zone at each change of direction and close with CL when it encloses an area. Example: `XTW1 ST, XTW1, XTW1, XTW1 CL`. |
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `OB*` | Built-up area | line `continuous`; `katana building` (#627B8C); 0.13 mm | `miscellaneous/land-use/area` |  | General outline of a built-up area, drawn as one extent and not building by building. |
+| `OC*` | Cemetery outline | line `continuous`; `katana note` (#9A8EA4); 0.18 mm | `miscellaneous/land-use/area` |  | Outline of a cemetery or burial ground. |
+| `OG*` | Golf course outline | line `Grass Edge`; `katana planting` (#779624); 0.18 mm | `miscellaneous/land-use/area` |  | Outline of a golf course. |
+| `OH*` | Stockpile outline | line `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.18 mm | `miscellaneous/land-use/area` |  | Outline of a stockpile of loose material, shot round its toe. |
+| `OO*` | Sporting arena outline | line `continuous`; `katana building` (#627B8C); 0.18 mm | `miscellaneous/land-use/area` |  | Outline of a sporting arena, such as a stadium, an oval or a court. |
+| `OP*` | Park or open space outline | line `Grass Edge`; `katana planting` (#779624); 0.18 mm | `miscellaneous/land-use/area` |  | Outline of a park or other open space. |
+
+### Class D: Design and Setting Out
+
+Strings that carry a design, not a survey: set out from them, do not read the ground from them.
+
+#### Road Design Strings
+
+Design strings of a road that the file does not name for any purpose. (27 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `BD*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `C9*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CL*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CM*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CR*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CS*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E0*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E3*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E4*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E5*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E6*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E7*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `EB*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `EF*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `ER*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `ET*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-e` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I0*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I1*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I2*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I3*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I4*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I5*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I6*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I7*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified-i` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I8*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I9*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/road-design-strings/unclassified` |  | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `R*` | Unclassified road string | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/road-design-strings/unclassified` |  | Road design string starting with R that no more specific code claims. |
+
+#### Lane Marking Design
+
+The designed lines of lanes, edges and junctions, to be painted. (25 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `L0*` | Bike path separation, type 4 | line `Bicycle Lane Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/dividing` |  | Separation line along a bicycle path, design type S4. |
+| `L2*` | Multi-lane dividing line | line `Dividing Line Marking`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/dividing` |  | Dividing line between opposing lanes of a multi-lane road, design type S2. |
+| `L3*` | Multi-lane lane line, type 1 | line `Dashed Lane Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/lane-lines` |  | Lane line between lanes travelling the same way on a multi-lane road, design type L1. |
+| `L4*` | Roundabout lane line | line `Dashed Lane Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/lane-lines` |  | Lane line between the lanes of a multi-lane roundabout, design type L4. |
+| `L5*` | Bike path separation, type 5 | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/dividing` |  | Separation line along a bicycle path, design type S5. |
+| `L6*` | Bus lane line | line `Dashed Lane Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/lane-lines` |  | Lane line beside a bus lane, design type L6. |
+| `L7*` | Bike lane line | line `Bicycle Lane Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/lane-lines` |  | Lane line beside a bicycle lane, design type L7. |
+| `L8*` | Two-lane dividing line, type 1 | line `Dividing Line Marking`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/dividing` |  | Dividing line between opposing lanes of a two-lane road, design type S1. |
+| `L9*` | Two-lane dividing line, type 3 | line `Dividing Line Marking`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/dividing` |  | Dividing line between opposing lanes of a two-lane road, design type S3. |
+| `LA*` | Continuity line, type 1 | line `Lane Continuity Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/intersection` |  | Continuity line, design type C1, that carries a lane edge across a junction. |
+| `LD*` | Designed double barrier | line `Double Barrier Marking`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/dividing` |  | Double barrier line, design type BB: two unbroken lines that forbid crossing in either direction. |
+| `LE*` | General edge line | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/edge-lines` |  | Edge line along the side of the carriageway, in its general form. |
+| `LF*` | Bike lane continuity line | line `Lane Continuity Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/intersection` |  | Continuity line, design type C4, that carries a bicycle lane across a junction. |
+| `LH*` | Barrier and separation, type 1 | line `Left Broken Barrier Marking`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/dividing` |  | Combined barrier and separation line, design type BS1: an unbroken line beside a broken one. |
+| `LJ*` | Clearway kerbside line | line `Lane Continuity Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/edge-lines` |  | Kerbside line marking a clearway along the kerb, design type C2. |
+| `LK*` | No-stopping kerbside line | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/edge-lines` |  | Kerbside line marking a no-stopping length of kerb, design type C3. |
+| `LM*` | Painted median edge line | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/edge-lines` |  | Edge line round a painted median, design type E5. |
+| `LN*` | Multi-lane lane line, type 3 | line `Dashed Lane Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/lane-lines` |  | Lane line between lanes travelling the same way on a multi-lane road, design type L3. |
+| `LR*` | Barrier and separation, type 2 | line `Right Broken Barrier Marking`; `katana pavement` (#789295); 0.25 mm | `design/lane-marking-design/dividing` |  | Combined barrier and separation line, design type BS2, the mirror form of BS1. |
+| `LS*` | Signal stop line | line `continuous`; `katana pavement` (#789295); 0.35 mm | `design/lane-marking-design/intersection` |  | Stop line at traffic signals, design type TF. |
+| `LT*` | Turn guide line | line `Lane Continuity Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/intersection` |  | Turn line, design type T1, that guides turning traffic through a junction. |
+| `LU*` | Plain unbroken line | line `continuous`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/edge-lines` |  | A plain unbroken painted line that fits none of the named types. |
+| `LW*` | Give way line | line `Lane Continuity Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/intersection` |  | Give way line, design type TB, painted across the approach to a junction. |
+| `LY*` | Bicycle crossing | line `Bicycle Crossing Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/intersection` |  | A bicycle crossing painted across the carriageway. |
+| `LZ*` | Designed zebra crossing | line `Zebra Crossing Marking`; `katana pavement` (#789295); 0.18 mm | `design/lane-marking-design/intersection` |  | A zebra pedestrian crossing painted across the carriageway. |
+
+#### Earthworks Design
+
+Batters, formation, interfaces and the design edges of cut and fill. (14 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DJ*` | Table drain, far edge | line `continuous`; `katana waterway` (#6399BE); 0.25 mm | `design/earthworks-design/table-drain` |  | Design edge of a table drain on the side furthest from the road. |
+| `DK*` | Table drain, near edge | line `continuous`; `katana waterway` (#6399BE); 0.25 mm | `design/earthworks-design/table-drain` |  | Design edge of a table drain on the side nearest the road. |
+| `DM*` | Sunken median | line `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `design/earthworks-design/formation` |  | Line along a median designed to sit lower than the carriageways beside it. |
+| `E1*` | Bench outer edge | line `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `design/earthworks-design/batter` |  | Outer, downslope edge of a bench cut into a slope in the earthworks design. |
+| `E2*` | Bench inner edge | line `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `design/earthworks-design/batter` |  | Inner edge of a bench, where it meets the rising slope behind. |
+| `EH*` | Batter hinge line | line `continuous`; `katana breakline` (#BE7D83); 0.18 mm | `design/earthworks-design/batter` |  | Line where the formation turns into the batter slope, the hinge of the cross-section. |
+| `EV*` | Verge outer edge | line `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `design/earthworks-design/formation` |  | Outer edge of the verge as designed, on the side furthest from the road. |
+| `EW*` | Footpath near edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/earthworks-design/formation` |  | Edge of a designed footpath on the side nearest the road. |
+| `EX*` | Footway far edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/earthworks-design/formation` |  | Edge of a designed footway on the side furthest from the road. |
+| `IA*` | Batter meets ground | line `Bank Toe Edge`; `katana breakline` (#BE7D83); 0.18 mm | `design/earthworks-design/interface` |  | Design line where an earthworks batter meets the existing ground, the catch point of a cut or a fill. |
+| `IB*` | Bench front edge | line `Bank Top Edge`; `katana breakline` (#BE7D83); 0.18 mm | `design/earthworks-design/interface` |  | Design line along the front edge of a bench cut into an earthworks batter. |
+| `IC*` | Bench front edge, plain | line `continuous`; `katana breakline` (#BE7D83); 0.18 mm | `design/earthworks-design/interface` |  | A second design string for the front edge of an earthworks bench, drawn as a plain line. |
+| `ID*` | Table drain, road side | line `Dish Drain Edge`; `katana breakline` (#BE7D83); 0.18 mm | `design/earthworks-design/interface` |  | Design line along the front edge of a table drain, the side nearest the road, where it meets the earthworks. |
+| `IE*` | Table drain, far side | line `continuous`; `katana breakline` (#BE7D83); 0.18 mm | `design/earthworks-design/interface` |  | Design line along the back edge of a table drain, on the side away from the road. |
+
+#### Kerb and Carriageway Design
+
+The designed lines of kerbs, gutters, hinges and carriageway edges. (15 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `C0*` | Median edge design | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/kerb-and-carriageway-design/carriageway` |  | Design line for the edge of a median. |
+| `C1*` | Kerb base, first | line `continuous`; `katana kerb` (#907368); 0.25 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the first base line of a kerb, at its foot. |
+| `C2*` | Kerb base, second | line `continuous`; `katana kerb` (#907368); 0.25 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the second base line of a kerb, at its foot. |
+| `C3*` | Kerb hinge, first | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the first hinge of a kerb, a break in its cross-section. |
+| `C4*` | Kerb hinge, second | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the second hinge of a kerb, a break in its cross-section. |
+| `C5*` | Kerb hinge, third | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the third hinge of a kerb, a break in its cross-section. |
+| `C6*` | Kerb hinge, fourth | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the fourth hinge of a kerb, a break in its cross-section. |
+| `C7*` | Kerb hinge, fifth | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the fifth hinge of a kerb, a break in its cross-section. |
+| `C8*` | Kerb hinge, sixth | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/kerb` |  | Design line for the sixth hinge of a kerb, a break in its cross-section. |
+| `CE*` | Bituminous edge design | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/kerb-and-carriageway-design/carriageway` |  | Design line for the edge of the sealed carriageway surface. |
+| `CF*` | Gutter flow line design | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/carriageway` |  | Design line along the flow line of a gutter. |
+| `CH*` | Gutter lip design | line `continuous`; `katana kerb` (#907368); 0.18 mm | `design/kerb-and-carriageway-design/carriageway` |  | Design line along the lip of the gutter at the edge of the through lane. |
+| `ES*` | Shoulder outer edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/kerb-and-carriageway-design/carriageway` |  | Outer edge of the road shoulder as designed, on the side away from the traffic lanes. |
+| `NJ*` | Pavement interface joint | line `continuous`; `katana pavement` (#789295); 0.13 mm | `design/kerb-and-carriageway-design/carriageway` |  | Design line along the joint between two pavement areas, such as new work meeting existing. |
+| `NL*` | Offset carriageway crown | line `Road Centreline`; `katana pavement` (#789295); 0.25 mm | `design/kerb-and-carriageway-design/carriageway` |  | Design line for the crown of a carriageway that is offset from the road's master alignment. |
+
+#### Bridge Design
+
+The designed lines of abutments and piers. (6 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AU*` | Abutment hinge, first | line `continuous`; `katana building` (#627B8C); 0.25 mm | `design/bridge-design/substructure` |  | Design line for the first hinge of a bridge abutment, a break in its cross-section. |
+| `AV*` | Abutment hinge, second | line `continuous`; `katana building` (#627B8C); 0.25 mm | `design/bridge-design/substructure` |  | Design line for the second hinge of a bridge abutment, a break in its cross-section. |
+| `AY*` | Abutment hinge, third | line `continuous`; `katana building` (#627B8C); 0.25 mm | `design/bridge-design/substructure` |  | Design line for the third hinge of a bridge abutment, a break in its cross-section. |
+| `AZ*` | Abutment hinge, fourth | line `continuous`; `katana building` (#627B8C); 0.25 mm | `design/bridge-design/substructure` |  | Design line for the fourth hinge of a bridge abutment, a break in its cross-section. |
+| `BA*` | Abutment design line | line `continuous`; `katana building` (#627B8C); 0.35 mm | `design/bridge-design/substructure` |  | Design line along the face of a bridge abutment. |
+| `BQ*` | Pier design line | line `continuous`; `katana building` (#627B8C); 0.35 mm | `design/bridge-design/substructure` |  | Design line for the outline of a bridge pier. |
+
+#### Drainage Design
+
+Designed pipes, culverts, channels, drains and structures. (6 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DH*` | Designed headwall | line `continuous`; `katana stormwater` (#00A800); 0.25 mm | `design/drainage-design/structure` |  | Design line for the wall that surrounds the end of a drain or culvert. |
+| `DI*` | Designed drain pipe | line `Stormwater Pipe Line`; `katana stormwater` (#00A800); 0.35 mm | `design/drainage-design/pipe` |  | Design line for a stormwater drainage pipe. |
+| `DL*` | Lined catch drain | line `Open Drain Invert`; `katana waterway` (#6399BE); 0.35 mm | `design/drainage-design/channel` |  | Design line for a concrete or otherwise lined drain that catches runoff above a cutting. |
+| `DU*` | Unlined catch drain | line `Open Drain Invert`; `katana waterway` (#6399BE); 0.18 mm | `design/drainage-design/channel` |  | Design line for an earth drain with no lining that catches runoff above a cutting. |
+| `DV*` | Designed culvert | line `Culvert Outline`; `katana stormwater` (#00A800); 0.35 mm | `design/drainage-design/pipe` |  | Design line for a culvert that carries water under a road or embankment. |
+| `SH*` | Designed subsoil drain edge | line `Subsoil Drain Line`; `katana stormwater` (#00A800); 0.18 mm | `design/drainage-design/subsoil` |  | Design line along the edge of a subsoil drain. |
+
+#### Barrier and Fence Design
+
+Designed guard rails, fences and bollards. (5 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `AD*` | Designed bollard | point, symbol `Bollard Post`; `katana street` (#A2759D); 0.25 mm | `design/barrier-and-fence-design/barrier` |  | Intended position of a bollard on a design, set out as a point and drawn with the bollard symbol. |
+| `BF*` | Left guard rail design | line `Guard Rail Line`; `katana street` (#A2759D); 0.35 mm | `design/barrier-and-fence-design/barrier` |  | Design line for a W-beam or thrie-beam guard rail on the left-hand side of the alignment. |
+| `BG*` | Right guard rail design | line `Guard Rail Line`; `katana street` (#A2759D); 0.35 mm | `design/barrier-and-fence-design/barrier` |  | Design line for a W-beam or thrie-beam guard rail on the right-hand side of the alignment. |
+| `FN*` | Designed boundary fence | line `Chain Mesh Fence`; `katana fence` (#A18C65); 0.25 mm | `design/barrier-and-fence-design/fence` |  | Design line for a fence along a property boundary. |
+| `SA*` | Designed pedestrian rail | line `Post and Rail Fence`; `katana fence` (#A18C65); 0.25 mm | `design/barrier-and-fence-design/fence` |  | Design line for the rail of a pedestrian fence along a footpath or a bridge. |
+
+#### Master Strings
+
+The master lines of a design that the others are built from. (10 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `MA*` | Median edge master string | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/master-strings/carriageway` |  | Master string for the edge of a median, one of the strings that control the road model. |
+| `MC*` | Master control string | line `continuous`; `katana pavement` (#789295); 0.35 mm | `design/master-strings/carriageway` |  | Master control string, the main alignment from which the other road model strings are built. |
+| `MD*` | Driveway master string | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/master-strings/carriageway` |  | Master string for the edge of a driveway. |
+| `ME*` | Earthworks master string | line `continuous`; `katana breakline` (#BE7D83); 0.25 mm | `design/master-strings/works` |  | Master string for the earthworks of the road model, such as batters and benching. |
+| `MK*` | Sealed edge master string | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/master-strings/carriageway` |  | Master string for the edge of the sealed bitumen surface. |
+| `MP*` | Off-road path master string | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/master-strings/carriageway` |  | Master string for the edge of an off-road path. |
+| `MS*` | Safety barrier master string | line `Guard Rail Line`; `katana street` (#A2759D); 0.25 mm | `design/master-strings/works` |  | Master string for a safety barrier along the road. |
+| `MT*` | Island or turn head string | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/master-strings/carriageway` |  | Master string for the edge of a traffic island or a turning head. |
+| `MW*` | Retaining wall master string | line `Earth Retaining Wall`; `katana wall` (#BA5556); 0.25 mm | `design/master-strings/works` |  | Master string for a retaining wall beside the road. |
+| `MX*` | Temporary works master string | line `Temporary Works Line`; `katana hazard` (#FF5A37); 0.25 mm | `design/master-strings/works` |  | Master string for temporary works that the finished road does not keep. |
+
+#### Design General
+
+Designed paths, lights, walls and hazards that fit no other design group. (7 codes)
+
+| Code | Label | Draws | Layer | Also | What it is |
+|---|---|---|---|---|---|
+| `DY*` | Designed driveway | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/design-general/path` |  | Design edge of a driveway. |
+| `E8*` | Path near edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/design-general/path` |  | Edge of a designed path on the side nearest the road. |
+| `E9*` | Path far edge | line `continuous`; `katana pavement` (#789295); 0.25 mm | `design/design-general/path` |  | Edge of a designed path on the side furthest from the road. |
+| `HE*` | Left wall face hatching | line `Left Wall Face Hatch Line`; `katana wall` (#BA5556); 0.13 mm | `design/design-general/wall-hatch` |  | Hatch ticks on the left of the line, showing which side of a designed wall is its face. |
+| `HL*` | Designed hazard edge | line `Hazard Boundary`; `katana hazard` (#FF5A37); 0.25 mm | `design/design-general/hazard` |  | Design line that marks the edge of a hazard area. |
+| `HR*` | Right wall face hatching | line `Right Wall Face Hatch Line`; `katana wall` (#BA5556); 0.13 mm | `design/design-general/wall-hatch` |  | Hatch ticks on the right of the line, showing which side of a designed wall is its face. |
+| `PLIG*` | Designed lighting pole | point; `katana street` (#A2759D); 0.25 mm | `design/design-general/lighting` |  | The designed position of a road lighting pole, for setting out. |
 
 ### The codes in alphabetical order
 
-Every code once, for looking one up: the key, its name, where it is catalogued and what it is.
+Every code once, for looking one up by its key: the key, its legend label, where it is catalogued and what it is.
 
-| Code | Name | Class and subgroup | Meaning |
+| Code | Label | Class and group | Meaning |
 |---|---|---|---|
-| `BAH` | Handrail | Buildings and Structures/Steps and Access | Handrail or balustrade beside steps, a ramp or a drop. |
-| `BAS` | Steps | Buildings and Structures/Steps and Access | Flight of steps, shot along the top nosing. |
-| `BBC` | Building Corner | Buildings and Structures/Buildings | Building corner shot where a line cannot be strung. |
-| `BBD` | Doorway | Buildings and Structures/Buildings | Door in a wall, at ground level. |
-| `BBE` | Eave Line | Buildings and Structures/Buildings | Edge of the roof overhang, seen from above. |
-| `BBH` | Hidden Outline | Buildings and Structures/Buildings | Building edge that shows on a plan but not above ground. |
-| `BBU` | Building Under Construction | Buildings and Structures/Buildings | Outline of a building that is not yet finished. |
-| `BBV` | Verandah Line | Buildings and Structures/Buildings | Edge of a verandah or awning roof. |
-| `BBW` | Building Wall Face | Buildings and Structures/Buildings | Outer face of a building wall at ground level. |
-| `BSB` | Bridge Deck Edge | Buildings and Structures/Structures | Edge of a bridge deck, taken at the kerb or the parapet. |
-| `BSF` | Flagpole | Buildings and Structures/Structures | Flagpole standing alone, as at a school, an office or a park. |
-| `BSK` | Storage Tank | Buildings and Structures/Structures | Tank or silo above ground. |
-| `BSM` | Monument | Buildings and Structures/Structures | Monument, statue or memorial. |
-| `BSP` | Bridge Column | Buildings and Structures/Structures | Pier or column of a bridge. |
-| `BST` | Mast | Buildings and Structures/Structures | Mast, tower or antenna that stands on its own. |
-| `CBC` | Compiled Boundary | Boundaries and Cadastre/Lot Boundaries | Boundary taken from plans and not measured on this survey. |
-| `CBM` | Municipal Boundary | Boundaries and Cadastre/Lot Boundaries | Boundary between two local government areas. |
-| `CBO` | Occupation Boundary | Boundaries and Cadastre/Lot Boundaries | Boundary as occupied on the ground: a fence, a wall face or a hedge. |
-| `CBR` | Road Reserve Boundary | Boundaries and Cadastre/Lot Boundaries | Limit of a public road reserve. |
-| `CBT` | Title Boundary | Boundaries and Cadastre/Lot Boundaries | Lot boundary as registered on the title. |
-| `CEA` | Access Easement | Boundaries and Cadastre/Easements and Reserves | Right of way over a lot for access. |
-| `CED` | Drainage Easement | Boundaries and Cadastre/Easements and Reserves | Easement that carries a drain or an overland flow path. |
-| `CEG` | General Easement | Boundaries and Cadastre/Easements and Reserves | Easement whose purpose is not recorded. |
-| `CER` | Public Reserve Boundary | Boundaries and Cadastre/Easements and Reserves | Limit of a park, a reserve or other public land. |
-| `CES` | Services Easement | Boundaries and Cadastre/Easements and Reserves | Easement for pipes or cables, including pipeline easements. |
-| `CEV` | Covenant Area | Boundaries and Cadastre/Easements and Reserves | Area restricted by a covenant or a restriction on use. |
-| `CMD` | Drilled Hole | Boundaries and Cadastre/Boundary Marks | Hole drilled in rock or concrete. |
-| `CMI` | Iron Pin | Boundaries and Cadastre/Boundary Marks | Iron pin found or placed at a boundary corner. |
-| `CMN` | Mark Not Found | Boundaries and Cadastre/Boundary Marks | Boundary mark searched for and not found. |
-| `CMP` | Corner Peg | Boundaries and Cadastre/Boundary Marks | Peg found or placed at a boundary corner. |
-| `CMS` | Survey Spike | Boundaries and Cadastre/Boundary Marks | Spike or nail in a road, a kerb or concrete. |
-| `CMT` | Iron Pipe | Boundaries and Cadastre/Boundary Marks | Iron pipe found or placed at a boundary corner. |
-| `CMX` | Chiselled Cross | Boundaries and Cadastre/Boundary Marks | Cross cut in rock, a kerb or concrete. |
-| `FFB` | Barbed Wire Fence | Fences and Walls/Fences | Rural fence with barbed wire. |
-| `FFC` | Chain Mesh Fence | Fences and Walls/Fences | Wire mesh fence on steel posts. |
-| `FFE` | Electric Fence | Fences and Walls/Fences | Fence with an electrified wire. |
-| `FFM` | Metal Palisade Fence | Fences and Walls/Fences | Steel palisade or pool-style fence. |
-| `FFP` | Paling Fence | Fences and Walls/Fences | Timber paling fence: upright boards nailed to rails between posts. |
-| `FFR` | Post and Rail Fence | Fences and Walls/Fences | Timber or steel post and rail fence. |
-| `FFW` | Post and Wire Fence | Fences and Walls/Fences | Rural fence of plain wire on posts. |
-| `FGF` | Fence Post | Fences and Walls/Gates and Posts | Single fence post standing alone, not part of a fence string. |
-| `FGP` | Pedestrian Gate | Fences and Walls/Gates and Posts | Gate for people: a pedestrian opening in a fence or a wall. |
-| `FGS` | Strainer Post | Fences and Walls/Gates and Posts | Braced corner or end post. |
-| `FGV` | Vehicle Gate | Fences and Walls/Gates and Posts | Gate wide enough for a vehicle. |
-| `FWB` | Brick Wall | Fences and Walls/Walls | Brick wall, shot along the face on the lower side. |
-| `FWC` | Concrete Wall | Fences and Walls/Walls | Poured or precast concrete wall. |
-| `FWK` | Block Wall | Fences and Walls/Walls | Concrete or masonry block wall. |
-| `FWR` | Earth Retaining Wall | Fences and Walls/Walls | Wall that holds back earth; the triangles point downhill. |
-| `FWS` | Stone Wall | Fences and Walls/Walls | Dry or mortared stone wall. |
-| `FWT` | Sleeper Retaining Wall | Fences and Walls/Walls | Retaining wall of sleepers or logs. |
-| `GBB` | Bank Toe Edge | Terrain and Breaklines/Breaklines | Bottom edge of a slope; the short ticks point downhill. |
-| `GBF` | Fill Toe Edge | Terrain and Breaklines/Breaklines | Bottom edge of an embankment. |
-| `GBG` | Gully Line | Terrain and Breaklines/Breaklines | Line along the bottom of a gully. |
-| `GBH` | Hard Breakline | Terrain and Breaklines/Breaklines | Sharp change of grade that a surface must not smooth over. |
-| `GBK` | Cutting Top Edge | Terrain and Breaklines/Breaklines | Top edge of an excavated slope. |
-| `GBR` | Ridge Line | Terrain and Breaklines/Breaklines | Line along a crest, where ground falls away on both sides. |
-| `GBS` | Soft Breakline | Terrain and Breaklines/Breaklines | Gentle change of grade that a surface may soften. |
-| `GBT` | Bank Top Edge | Terrain and Breaklines/Breaklines | Top edge of a slope; the ticks point downhill. |
-| `GBX` | Surface Exclusion Boundary | Terrain and Breaklines/Breaklines | Area that a surface must leave out, such as a building or a lake. |
-| `GCD` | Depression Contour | Terrain and Breaklines/Contours | Contour round a hollow; the ticks point downhill. |
-| `GCI` | Index Contour | Terrain and Breaklines/Contours | Every fifth contour, drawn heavier and marked with a bead. |
-| `GCM` | Intermediate Contour | Terrain and Breaklines/Contours | Ordinary contour between the index contours. |
-| `GPG` | Ground Shot | Terrain and Breaklines/Ground Points | Level on natural ground: the height is what matters, the mark is a tiny plus. |
-| `GPH` | High Point | Terrain and Breaklines/Ground Points | Local high point of the ground. |
-| `GPI` | Invert Level | Terrain and Breaklines/Ground Points | Level at the bottom of a pipe, a pit or a drain. |
-| `GPL` | Low Point | Terrain and Breaklines/Ground Points | Local low point of the ground. |
-| `GPR` | Road Surface Level | Terrain and Breaklines/Ground Points | Level on a paved surface: the height is what matters, the mark is a tiny plus. |
-| `GPS` | Spot Level | Terrain and Breaklines/Ground Points | Level on a feature, shown with its mark so it can be checked. |
-| `GRB` | Boulder | Terrain and Breaklines/Rock and Cliff | Boulder too large to move. |
-| `GRC` | Cliff Edge | Terrain and Breaklines/Rock and Cliff | Top edge of a cliff; the ticks point over the edge. |
-| `GRO` | Rock Outcrop Edge | Terrain and Breaklines/Rock and Cliff | Edge of exposed rock where it meets soil, grass or water. |
-| `GWE` | Water Edge | Terrain and Breaklines/Water Edges | Edge of water at the time of survey. |
-| `GWH` | High Water Mark | Terrain and Breaklines/Water Edges | Line of the highest recent water. |
-| `KCB` | Box Culvert | Kerbs and Drainage/Pipes and Culverts | Rectangular culvert, drawn as a pair of walls. |
-| `KCP` | Stormwater Pipe | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe, shot pit to pit. |
-| `KCS` | Subsoil Drain | Kerbs and Drainage/Pipes and Culverts | Perforated drain buried beside a road or a wall. |
-| `KKB` | Kerb Back Edge | Kerbs and Drainage/Kerbs | Back edge of the kerb top. |
-| `KKD` | Shallow Dish Drain | Kerbs and Drainage/Kerbs | Shallow V-shaped concrete drain. |
-| `KKL` | Gutter Lip | Kerbs and Drainage/Kerbs | Flow line of the gutter at the foot of the kerb face. |
-| `KKM` | Mountable Kerb | Kerbs and Drainage/Kerbs | Low kerb that a vehicle can drive over. |
-| `KKR` | Kerb Return | Kerbs and Drainage/Kerbs | Kerb round a street corner, shot as a curve. |
-| `KKT` | Kerb Top Edge | Kerbs and Drainage/Kerbs | Top front edge of a kerb, where the face meets the top. |
-| `KPC` | Culvert End | Kerbs and Drainage/Pits and Structures | Open end of a culvert barrel. |
-| `KPG` | Grated Gully Pit | Kerbs and Drainage/Pits and Structures | Grated pit that takes surface water. |
-| `KPH` | Stormwater Manhole | Kerbs and Drainage/Pits and Structures | Round access cover over a stormwater pipe. |
-| `KPJ` | Junction Pit | Kerbs and Drainage/Pits and Structures | Pit where pipes meet, with a solid lid. |
-| `KPK` | Kerb Inlet Pit | Kerbs and Drainage/Pits and Structures | Pit with its opening in the kerb face. |
-| `KPS` | Subsoil Inspection Point | Kerbs and Drainage/Pits and Structures | Inspection opening on a subsoil drain. |
-| `KPT` | Gross Pollutant Trap | Kerbs and Drainage/Pits and Structures | Structure that traps litter and sediment before an outfall. |
-| `KPW` | Headwall | Kerbs and Drainage/Pits and Structures | Concrete wall round the end of a pipe or culvert. |
-| `KWC` | Creek Centreline | Kerbs and Drainage/Channels and Waterways | Middle of a creek or river bed, drawn as a wave. |
-| `KWD` | Open Drain Invert | Kerbs and Drainage/Channels and Waterways | Lowest line of an open drain or a lined channel. |
-| `KWF` | Overland Flow Path | Kerbs and Drainage/Channels and Waterways | Route that water takes over the ground in a storm. |
-| `KWS` | Swale Centreline | Kerbs and Drainage/Channels and Waterways | Lowest line of a grassed swale. |
-| `MCB` | Level Benchmark | Survey Control and Annotation/Control Marks | Mark with a published level. |
-| `MCC` | Control Mark | Survey Control and Annotation/Control Marks | Ground mark whose coordinates the project holds. |
-| `MCG` | GNSS Base | Survey Control and Annotation/Control Marks | Mark where a GNSS base receiver was set up. |
-| `MCI` | Instrument Station | Survey Control and Annotation/Control Marks | Position of the total station for one set-up. |
-| `MCP` | Fixed Survey Mark | Survey Control and Annotation/Control Marks | Mark set to last, such as a pin in concrete. |
-| `MCT` | Trigonometric Station | Survey Control and Annotation/Control Marks | Trigonometric station of a national or state network. |
-| `MCW` | Temporary Control | Survey Control and Annotation/Control Marks | Temporary mark set for this job. |
-| `MIB` | Borehole | Survey Control and Annotation/Investigation Points | Drilled hole for ground investigation. |
-| `MIP` | Pothole | Survey Control and Annotation/Investigation Points | Hole dug to expose a buried service. |
-| `MIT` | Test Pit | Survey Control and Annotation/Investigation Points | Excavated pit for ground investigation. |
-| `MML` | Leader Line | Survey Control and Annotation/Plan Marks | Leader that runs from a note to the feature it names. |
-| `MMN` | North Arrow | Survey Control and Annotation/Plan Marks | North arrow placed on the plan. |
-| `MMS` | Limit of Survey | Survey Control and Annotation/Plan Marks | Edge of the area that was surveyed. |
-| `MMV` | Revision Cloud | Survey Control and Annotation/Plan Marks | Cloud drawn round an area that has changed. |
-| `MTC` | Contour Value Text | Survey Control and Annotation/Text and Notes | Contour level, 1.8 mm italic and centred. |
-| `MTH` | Heading Text | Survey Control and Annotation/Text and Notes | Heading, 5.0 mm high and bold. |
-| `MTL` | Label Text | Survey Control and Annotation/Text and Notes | Short label for a feature, 2.0 mm high. |
-| `MTN` | Note Text | Survey Control and Annotation/Text and Notes | Note on the plan, 2.5 mm high. |
-| `MTR` | Road Name Text | Survey Control and Annotation/Text and Notes | Road name, 3.0 mm italic and centred. |
-| `MTS` | Spot Level Text | Survey Control and Annotation/Text and Notes | Level written beside a point, 2.0 mm italic. |
-| `RCE` | Sealed Road Edge | Roads and Pavements/Carriageway | Outer edge of a sealed carriageway that has no kerb. |
-| `RCI` | Traffic Island Edge | Roads and Pavements/Carriageway | Edge of a raised or painted traffic island. |
-| `RCJ` | Pavement Joint | Roads and Pavements/Carriageway | Construction or expansion joint in a concrete pavement. |
-| `RCL` | Road Centreline | Roads and Pavements/Carriageway | Centre of the carriageway, shot at the crown. |
-| `RCS` | Shoulder Edge | Roads and Pavements/Carriageway | Outer edge of the road shoulder, where it meets the verge. |
-| `RCU` | Unsealed Road Edge | Roads and Pavements/Carriageway | Edge of the formed gravel or earth running surface. |
-| `RMA` | Road Arrow | Roads and Pavements/Markings | Painted direction arrow on the carriageway. |
-| `RMB` | Barrier Line | Roads and Pavements/Markings | Double continuous painted line, as at a no-overtaking section. |
-| `RMD` | Dashed Lane Line | Roads and Pavements/Markings | Dashed painted line between traffic lanes. |
-| `RME` | Edge Line | Roads and Pavements/Markings | Painted line along the edge of the carriageway. |
-| `RMH` | Painted Hatch Area | Roads and Pavements/Markings | Outline of a painted hatched or chevron area. |
-| `RMP` | Parking Bay Line | Roads and Pavements/Markings | Painted line that marks out a parking bay. |
-| `RMS` | Stop Line | Roads and Pavements/Markings | Painted bar where traffic must stop. |
-| `RMZ` | Zebra Crossing | Roads and Pavements/Markings | Zebra crossing, shown as a row of stripes. |
-| `RPC` | Cycleway Edge | Roads and Pavements/Paths and Access | Edge of a cycleway or a shared path. |
-| `RPD` | Driveway Edge | Roads and Pavements/Paths and Access | Edge of a driveway, from the gutter to the boundary. |
-| `RPF` | Footpath Edge | Roads and Pavements/Paths and Access | Edge of a paved footpath. |
-| `RPR` | Kerb Ramp | Roads and Pavements/Paths and Access | Pedestrian ramp cut down to the road at a kerb. |
-| `RPT` | Tactile Paving | Roads and Pavements/Paths and Access | Patch of tactile ground surface indicators. |
-| `SAB` | Bench | Street Furniture and Signs/Amenities | Park or street bench, fixed or loose. |
-| `SAF` | Drinking Fountain | Street Furniture and Signs/Amenities | Public drinking fountain. |
-| `SAR` | Litter Bin | Street Furniture and Signs/Amenities | Litter bin, free-standing or fixed to a post. |
-| `SAS` | Bus Stop Shelter | Street Furniture and Signs/Amenities | Bus shelter or other roofed waiting area. |
-| `SBB` | Bollard | Street Furniture and Signs/Posts and Barriers | Fixed bollard that stops vehicles and cannot be moved. |
-| `SBG` | Delineator Post | Street Furniture and Signs/Posts and Barriers | Roadside delineator: a reflective marker post at the edge of the road. |
-| `SBL` | Guard Rail | Street Furniture and Signs/Posts and Barriers | Roadside guard rail or crash barrier. |
-| `SBR` | Removable Bollard | Street Furniture and Signs/Posts and Barriers | Bollard that lifts out of a socket to let vehicles through. |
-| `SLB` | Bollard Light | Street Furniture and Signs/Lighting | Low light on a bollard or a short post. |
-| `SLS` | Street Light | Street Furniture and Signs/Lighting | Street light on its own pole, apart from the power network. |
-| `SSG` | Guide Sign | Street Furniture and Signs/Signs | Sign that gives a direction, a distance or a street name. |
-| `SSI` | Information Sign | Street Furniture and Signs/Signs | Sign that informs, such as parking or a facility. |
-| `SSR` | Regulatory Sign | Street Furniture and Signs/Signs | Sign that gives an order, such as a speed limit or a stop. |
-| `SSW` | Warning Sign | Street Furniture and Signs/Signs | Sign that warns of a hazard ahead. |
-| `STC` | Roadside Camera | Street Furniture and Signs/Traffic Control | Traffic or enforcement camera on its own pole or on a signal pole. |
-| `STK` | Signal Controller Cabinet | Street Furniture and Signs/Traffic Control | Cabinet that houses a signal controller. |
-| `STS` | Signal Pole | Street Furniture and Signs/Traffic Control | Traffic signal pole that carries the lanterns, with or without a mast arm. |
-| `TOM` | Overhead Mast | Rail and Transit/Overhead and Signals | Mast that carries the overhead wire. |
-| `TOS` | Signal Mast | Rail and Transit/Overhead and Signals | Signal carried on a mast. |
-| `TOW` | Contact Wire | Rail and Transit/Overhead and Signals | Overhead contact wire that powers electric trains or trams. |
-| `TPE` | Platform Edge | Rail and Transit/Platforms | Coping edge of a platform, nearest the track. |
-| `TTB` | Ballast Edge | Rail and Transit/Track | Shoulder of the ballast, where the stone meets the formation. |
-| `TTC` | Track Centreline | Rail and Transit/Track | Centre of the track, halfway between the rails. |
-| `TTE` | Buffer Stop | Rail and Transit/Track | End of track, where a buffer stop stands. |
-| `TTL` | Level Crossing | Rail and Transit/Track | Outline of a road and rail level crossing. |
-| `TTR` | Running Rail | Rail and Transit/Track | Head of a running rail, drawn as a ladder of sleepers. |
-| `TTX` | Turnout Marker | Rail and Transit/Track | Toe of a set of points, where the switch blade starts. |
-| `UCC` | Communications Cable | Utilities/Communications | Buried telephone, data or fibre cable. |
-| `UCD` | Disused Communications Cable | Utilities/Communications | Communications cable that is no longer in service. |
-| `UCH` | Communications Maintenance Hole | Utilities/Communications | Man-entry chamber on a communications route. |
-| `UCK` | Communications Pillar | Utilities/Communications | Street pillar or cabinet of the communications network. |
-| `UCN` | Communications Duct | Utilities/Communications | Duct or conduit that carries communications cable. |
-| `UCO` | Overhead Communications Cable | Utilities/Communications | Aerial communications cable. |
-| `UCP` | Communications Pit | Utilities/Communications | Pit on a communications route. |
-| `UEC` | Underground Cable | Utilities/Electricity | Buried electricity cable. |
-| `UED` | Disused Cable | Utilities/Electricity | Cable that is no longer in service. |
-| `UEJ` | Electrical Pit | Utilities/Electricity | Pit or chamber on an electricity cable. |
-| `UEK` | Electrical Pillar | Utilities/Electricity | Street pillar or cabinet of the electricity network. |
-| `UEN` | Electrical Duct | Utilities/Electricity | Duct or conduit that carries electricity cable. |
-| `UEO` | Overhead Line | Utilities/Electricity | Overhead power line, shot under each pole. |
-| `UEP` | Power Pole | Utilities/Electricity | Pole that carries power lines. |
-| `UET` | Transformer | Utilities/Electricity | Transformer on a pole or on the ground. |
-| `UEY` | Pole Guy | Utilities/Electricity | Anchor of a stay wire that braces a pole. |
-| `UFB` | Booster Connection | Utilities/Fire Service | Connection where the fire brigade boosts a building's supply. |
-| `UFH` | Fire Hydrant | Utilities/Fire Service | Fire hydrant, standing or underground. |
-| `UFM` | Fire Service Pipe | Utilities/Fire Service | Main that feeds hydrants and sprinkler systems. |
-| `UFV` | Fire Isolation Valve | Utilities/Fire Service | Isolating valve on a fire service. |
-| `UGB` | Gas Service | Utilities/Gas | Property connection to a gas main. |
-| `UGD` | Disused Gas Main | Utilities/Gas | Gas main that is no longer in service. |
-| `UGK` | Gas Marker Post | Utilities/Gas | Post that marks the route of a gas pipeline. |
-| `UGM` | Gas Supply Pipe | Utilities/Gas | Pipe that carries natural gas. |
-| `UGP` | Gas Pit | Utilities/Gas | Pit or valve box on a gas service. |
-| `UGR` | Gas Pressure Regulator | Utilities/Gas | Pressure regulator, where gas pressure steps down. |
-| `UGV` | Gas Isolation Valve | Utilities/Gas | Isolating valve on a gas main. |
-| `UGX` | Gas Flow Meter | Utilities/Gas | Meter that records gas supplied. |
-| `UIC` | Traffic Systems Conduit | Utilities/Traffic Systems | Conduit for signal, camera or sensor cable. |
-| `UIL` | Loop Detector | Utilities/Traffic Systems | Vehicle detector loop cut into the road. |
-| `UIP` | Traffic Systems Pit | Utilities/Traffic Systems | Pit on a traffic systems route. |
-| `UPK` | Fuel Marker Post | Utilities/Fuel | Post that marks the route of a fuel pipeline. |
-| `UPM` | Fuel Supply Pipe | Utilities/Fuel | Pipeline for fuel or oil. |
-| `UPT` | Fuel Tank | Utilities/Fuel | Underground or surface fuel tank. |
-| `UPV` | Fuel Isolation Valve | Utilities/Fuel | Isolating valve on a fuel pipeline. |
-| `URB` | Recycled Water Connection | Utilities/Recycled Water | Property connection to a recycled water main. |
-| `URD` | Disused Recycled Main | Utilities/Recycled Water | Recycled water main that is no longer in service. |
-| `URM` | Recycled Water Pipe | Utilities/Recycled Water | Main that carries recycled water. |
-| `URP` | Recycled Water Pit | Utilities/Recycled Water | Pit or chamber on a recycled water service. |
-| `URV` | Recycled Isolation Valve | Utilities/Recycled Water | Isolating valve on a recycled water main. |
-| `USB` | Sewer Branch | Utilities/Sewer | Property connection to a sewer main. |
-| `USD` | Disused Sewer Main | Utilities/Sewer | Sewer that is no longer in service. |
-| `USE` | Sewer Vent | Utilities/Sewer | Vent stack on a sewer that lets gas out and air in. |
-| `USH` | Sewer Maintenance Hole | Utilities/Sewer | Man-entry chamber on a sewer. |
-| `USM` | Sewer Gravity Pipe | Utilities/Sewer | Gravity sewer; the level that matters is the invert. |
-| `USP` | Sewage Pumping Station | Utilities/Sewer | Pump station on a sewer that lifts flow to the next gravity run. |
-| `USR` | Sewer Pressure Pipe | Utilities/Sewer | Pressure sewer that carries flow under pump. |
-| `UST` | Septic System Tank | Utilities/Sewer | Septic or other on-site treatment tank. |
-| `UWB` | Water Service Connection | Utilities/Water | Small pipe from a main to a property meter. |
-| `UWD` | Disused Water Main | Utilities/Water | Water main that is no longer in service. |
-| `UWM` | Water Supply Pipe | Utilities/Water | Pressure main that carries drinking water. |
-| `UWP` | Water Pit | Utilities/Water | Pit or chamber on a water service. |
-| `UWT` | Water Tank | Utilities/Water | Tank or reservoir that stores water. |
-| `UWU` | Water Pumping Station | Utilities/Water | Pump station on a water main. |
-| `UWV` | Water Isolation Valve | Utilities/Water | Isolating valve on a water main. |
-| `UWX` | Water Flow Meter | Utilities/Water | Meter that records water supplied. |
-| `UXH` | Unknown Maintenance Hole | Utilities/Unknown Services | Man-entry chamber whose service has not been established. |
-| `UXL` | Unknown Service | Utilities/Unknown Services | Buried line whose service has not been established. |
-| `UXM` | Surface Paint Mark | Utilities/Unknown Services | Spray-paint mark that locates a service from the surface. |
-| `UXP` | Unknown Pit | Utilities/Unknown Services | Pit whose service has not been established. |
-| `VGB` | Bush Edge | Vegetation and Landscape/Ground Cover | Edge of scrub or bush: the outer limit of dense growth. |
-| `VGC` | Crop Edge | Vegetation and Landscape/Ground Cover | Edge of a cropped paddock. |
-| `VGL` | Lawn Edge | Vegetation and Landscape/Ground Cover | Edge of mown grass, where lawn meets paving, garden or bush. |
-| `VGM` | Garden Bed Edge | Vegetation and Landscape/Ground Cover | Edge of a garden bed, where planting meets lawn or paving. |
-| `VSC` | Shrub Cluster | Vegetation and Landscape/Shrubs and Plants | Group of shrubs too close together to shoot one by one. |
-| `VSH` | Hedge | Vegetation and Landscape/Shrubs and Plants | Clipped hedge, shot along its face. |
-| `VSS` | Shrub | Vegetation and Landscape/Shrubs and Plants | Single shrub: a woody plant with no main trunk, big enough to matter. |
-| `VST` | Tussock | Vegetation and Landscape/Shrubs and Plants | Tussock or clump of grass. |
-| `VTB` | Broadleaf Tree | Vegetation and Landscape/Trees | Tree with a broad, leafy canopy. |
-| `VTC` | Conifer Tree | Vegetation and Landscape/Trees | Pine, cypress or other cone-bearing tree. |
-| `VTD` | Dead Tree | Vegetation and Landscape/Trees | Standing dead tree: bare, but still a hazard and often a habitat. |
-| `VTG` | Native Gum Tree | Vegetation and Landscape/Trees | Eucalypt or other native gum. |
-| `VTK` | Tree Canopy Outline | Vegetation and Landscape/Trees | Drip line of a large canopy, drawn as an outline. |
-| `VTP` | Palm Tree | Vegetation and Landscape/Trees | Palm: a single unbranched trunk with a crown of fronds. |
-| `VTR` | Tree Row | Vegetation and Landscape/Trees | Line of trees, with a tree symbol at every point. |
-| `VTS` | Tree Stump | Vegetation and Landscape/Trees | Stump of a felled tree, cut at or near ground level. |
-| `XGL` | Generic Line | Miscellaneous/General | Line that has no better code. |
-| `XGP` | Generic Point | Miscellaneous/General | Point that has no better code. |
-| `XGQ` | Query Point | Miscellaneous/General | Point the surveyor is not sure of; check before issue. |
-| `XHB` | Hazard Boundary | Miscellaneous/Hazards and Heritage | Outline of a hazardous area. |
-| `XHH` | Habitat Marker | Miscellaneous/Hazards and Heritage | Nest, burrow or other habitat feature. |
-| `XHT` | Heritage Item | Miscellaneous/Hazards and Heritage | Item of heritage value: a feature protected by a listing or an overlay. |
-| `XHZ` | Hazard Point | Miscellaneous/Hazards and Heritage | Point hazard, such as an open hole or exposed wire. |
-| `XTF` | Temporary Fence | Miscellaneous/Temporary Works | Temporary fence or hoarding. |
-| `XTW` | Work Zone Edge | Miscellaneous/Temporary Works | Edge of a work zone: a temporary limit of cones, barriers or tape. |
+| `*` |  | (no class) | Any string that carries a Diameter attribute is also drawn as a round pipe section, measured down from its top (the obvert). |
+| `1` |  | Survey Control and Annotation/Text and Notes | Plan text 1.5 mm high on paper, the finest size, for crowded detail. |
+| `1*` | Finest text | Survey Control and Annotation/Text and Notes | Layer and pen for 1.5 mm plan text, so it can be switched off with the other notes. |
+| `2` |  | Survey Control and Annotation/Text and Notes | Plan text 2.5 mm high on paper, the everyday size for notes and labels. |
+| `2*` | Small text | Survey Control and Annotation/Text and Notes | Layer and pen for 2.5 mm plan text, so it can be switched off with the other notes. |
+| `3` |  | Survey Control and Annotation/Text and Notes | Plan text 3.5 mm high on paper, for prominent notes and sub-headings. |
+| `3*` | Medium text | Survey Control and Annotation/Text and Notes | Layer and pen for 3.5 mm plan text, so it can be switched off with the other notes. |
+| `4` |  | Survey Control and Annotation/Text and Notes | Plan text 5 mm high on paper, large enough for headings. |
+| `4*` | Large text | Survey Control and Annotation/Text and Notes | Layer and pen for 5.0 mm plan text, so it can be switched off with the other notes. |
+| `5` |  | Survey Control and Annotation/Text and Notes | Plan text 7 mm high on paper, for titles and major headings. |
+| `5*` | Extra large text | Survey Control and Annotation/Text and Notes | Layer and pen for 7.0 mm plan text, so it can be switched off with the other notes. |
+| `7` |  | Survey Control and Annotation/Text and Notes | Plan text 10 mm high on paper, the largest size, for sheet titles. |
+| `7*` | Display text | Survey Control and Annotation/Text and Notes | Layer and pen for 10.0 mm plan text, so it can be switched off with the other notes. |
+| `8` |  | Survey Control and Annotation/Text and Notes | Parcel label text 2.5 mm high on paper: the lot number and the deposited plan number. |
+| `8*` | Lot and plan labels | Survey Control and Annotation/Text and Notes | Layer and pen for parcel label text, so lot and plan numbers can be switched off together. |
+| `AB*` | Abutment foot | Buildings and Structures/Structures | Foot of a bridge abutment, where its face meets the ground. |
+| `AC*` | Fixed bollard | Street Furniture and Signs/Posts and Barriers | A fixed bollard, shot as a single point and drawn with the bollard symbol. |
+| `AD*` | Designed bollard | Design and Setting Out/Barrier and Fence Design | Intended position of a bollard on a design, set out as a point and drawn with the bollard symbol. |
+| `AE*` | Straight-and-left arrow | Roads and Pavements/Markings | A painted pavement arrow for a lane that goes straight on or turns left, shot along its axis. |
+| `AG*` | Gate leaf | Fences and Walls/Gates and Posts | A gate leaf between two posts, shot as a line from its hinge to its latch. |
+| `AI*` | Straight-and-right arrow | Roads and Pavements/Markings | A painted pavement arrow for a lane that goes straight on or turns right, shot along its axis. |
+| `AL*` | Left-turn arrow | Roads and Pavements/Markings | A painted pavement arrow for traffic that turns left, shot along its axis. |
+| `AR*` | Right-turn arrow | Roads and Pavements/Markings | A painted pavement arrow for traffic that turns right, shot along its axis. |
+| `AS*` | Straight-ahead arrow | Roads and Pavements/Markings | A painted pavement arrow for traffic that goes straight on, shot along its axis. |
+| `AT*` | Abutment crest | Buildings and Structures/Structures | The upper edge of a bridge abutment, shot along its crest. |
+| `AU*` | Abutment hinge, first | Design and Setting Out/Bridge Design | Design line for the first hinge of a bridge abutment, a break in its cross-section. |
+| `AV*` | Abutment hinge, second | Design and Setting Out/Bridge Design | Design line for the second hinge of a bridge abutment, a break in its cross-section. |
+| `AW*` | Awning edge | Buildings and Structures/Buildings | The outer edge of an awning that projects over a footpath or a frontage. |
+| `AY*` | Abutment hinge, third | Design and Setting Out/Bridge Design | Design line for the third hinge of a bridge abutment, a break in its cross-section. |
+| `AZ*` | Abutment hinge, fourth | Design and Setting Out/Bridge Design | Design line for the fourth hinge of a bridge abutment, a break in its cross-section. |
+| `B0*` | Box culvert, 150 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 150 mm high, drawn as its outline in plan. |
+| `B1*` | Box culvert, 225 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 225 mm high, drawn as its outline in plan. |
+| `B2*` | Box culvert, 300 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 300 mm high, drawn as its outline in plan. |
+| `B3*` | Box culvert, 375 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 375 mm high, drawn as its outline in plan. |
+| `B4*` | Box culvert, 450 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 450 mm high, drawn as its outline in plan. |
+| `B6*` | Box culvert, 600 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 600 mm high, drawn as its outline in plan. |
+| `B7*` | Box culvert, 750 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 750 mm high, drawn as its outline in plan. |
+| `B9*` | Box culvert, 900 mm | Kerbs and Drainage/Pipes and Culverts | A box culvert 900 mm high, drawn as its outline in plan. |
+| `BA*` | Abutment design line | Design and Setting Out/Bridge Design | Design line along the face of a bridge abutment. |
+| `BB*` | Bank toe | Terrain and Breaklines/Breaklines | The bottom edge of a bank, where the slope meets the flat ground below. |
+| `BC*` | Compiled boundary | Boundaries and Cadastre/Lot Boundaries | A cadastral boundary compiled from plans and positioned to about one metre. |
+| `BD*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `BE*` | Easement boundary | Boundaries and Cadastre/Easements and Reserves | The limit of an easement, land that carries another party's right of use. |
+| `BF*` | Left guard rail design | Design and Setting Out/Barrier and Fence Design | Design line for a W-beam or thrie-beam guard rail on the left-hand side of the alignment. |
+| `BG*` | Right guard rail design | Design and Setting Out/Barrier and Fence Design | Design line for a W-beam or thrie-beam guard rail on the right-hand side of the alignment. |
+| `BH*` | Bus shelter roof | Street Furniture and Signs/Amenities | The roof outline of a bus shelter, shot round its edge. |
+| `BI*` | Bulk bin | Street Furniture and Signs/Amenities | A large waste bin such as a skip, shot round its outline and marked with the bin symbol. |
+| `BK*` | Kerb back | Kerbs and Drainage/Kerbs | The back edge of a kerb, where it meets the verge or the footpath. |
+| `BM*` | Digital boundary | Boundaries and Cadastre/Lot Boundaries | A boundary taken from the digital cadastral map, whose position can be anywhere from one to twenty metres out. |
+| `BN*` | Boundary good to 0.5 m | Boundaries and Cadastre/Lot Boundaries | A cadastral boundary whose position is good to about half a metre. |
+| `BO*` | Boundary good to 0.1 m | Boundaries and Cadastre/Lot Boundaries | A cadastral boundary whose position is good to about a tenth of a metre. |
+| `BP*` | Pier or column outline | Buildings and Structures/Structures | The plan outline of a bridge pier or column. |
+| `BQ*` | Pier design line | Design and Setting Out/Bridge Design | Design line for the outline of a bridge pier. |
+| `BR*` | Deck edge | Buildings and Structures/Structures | The edge of a bridge deck. |
+| `BS*` | Barrier beside broken line | Roads and Pavements/Markings | A painted double line with an unbroken barrier line on one side and a broken separation line on the other. |
+| `BT*` | Surveyed title boundary | Boundaries and Cadastre/Lot Boundaries | A title boundary measured on the ground and good to about two centimetres. |
+| `BU*` | Building wall face | Buildings and Structures/Buildings | The outer face of a building wall. |
+| `BV*` | Eave line | Buildings and Structures/Buildings | The edge of a roof where it overhangs the wall. |
+| `BW*` | Wall base | Buildings and Structures/Buildings | The foot of a wall where it meets the ground, drawn as a hidden edge. |
+| `BX*` | Box culvert, other height | Kerbs and Drainage/Pipes and Culverts | A box culvert of any height, drawn as its outline in plan. |
+| `BY*` | Boundary to be acquired | Boundaries and Cadastre/Lot Boundaries | A proposed boundary that marks land to be acquired. |
+| `BZ*` | Parcel stratum limit | Boundaries and Cadastre/Lot Boundaries | The limit of a stratum parcel, which is fixed by a height or depth and not only by a line on the ground. |
+| `C0*` | Median edge design | Design and Setting Out/Kerb and Carriageway Design | Design line for the edge of a median. |
+| `C1*` | Kerb base, first | Design and Setting Out/Kerb and Carriageway Design | Design line for the first base line of a kerb, at its foot. |
+| `C2*` | Kerb base, second | Design and Setting Out/Kerb and Carriageway Design | Design line for the second base line of a kerb, at its foot. |
+| `C3*` | Kerb hinge, first | Design and Setting Out/Kerb and Carriageway Design | Design line for the first hinge of a kerb, a break in its cross-section. |
+| `C4*` | Kerb hinge, second | Design and Setting Out/Kerb and Carriageway Design | Design line for the second hinge of a kerb, a break in its cross-section. |
+| `C5*` | Kerb hinge, third | Design and Setting Out/Kerb and Carriageway Design | Design line for the third hinge of a kerb, a break in its cross-section. |
+| `C6*` | Kerb hinge, fourth | Design and Setting Out/Kerb and Carriageway Design | Design line for the fourth hinge of a kerb, a break in its cross-section. |
+| `C7*` | Kerb hinge, fifth | Design and Setting Out/Kerb and Carriageway Design | Design line for the fifth hinge of a kerb, a break in its cross-section. |
+| `C8*` | Kerb hinge, sixth | Design and Setting Out/Kerb and Carriageway Design | Design line for the sixth hinge of a kerb, a break in its cross-section. |
+| `C9*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CA*` | Zigzag approach marking | Roads and Pavements/Markings | The zigzag line painted along the approach to a pedestrian crossing. |
+| `CB*` | Chamber base edge | Utilities/Unknown Services | The bottom outline of an underground utility chamber, drawn as a hidden edge. |
+| `CC*` | Lane continuity line | Roads and Pavements/Markings | A short-dash line that carries a lane through a junction, checked in check zone 1 (roads, bridges and drainage). |
+| `CD*` | Solid painted line | Roads and Pavements/Markings | An unbroken painted line on the pavement. |
+| `CE*` | Bituminous edge design | Design and Setting Out/Kerb and Carriageway Design | Design line for the edge of the sealed carriageway surface. |
+| `CF*` | Gutter flow line design | Design and Setting Out/Kerb and Carriageway Design | Design line along the flow line of a gutter. |
+| `CG*` | Give-way line | Roads and Pavements/Markings | The give-way line painted across a turning lane. |
+| `CH*` | Gutter lip design | Design and Setting Out/Kerb and Carriageway Design | Design line along the lip of the gutter at the edge of the through lane. |
+| `CL*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CM*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CN*` | Lane separation line | Roads and Pavements/Markings | A lane separation line with dashes and gaps of equal length, checked in check zone 1 (roads, bridges and drainage). |
+| `CR*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CS*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `CT*` | Chamber top edge | Utilities/Unknown Services | The top outline of an underground utility chamber. |
+| `CU*` | Cutting crest | Terrain and Breaklines/Breaklines | The top edge of a cutting, where the ground begins to fall into the cut. |
+| `CV*` | Left-hand chevrons | Roads and Pavements/Markings | A row of painted chevrons that point to the left of travel, used to fill a painted island. |
+| `CW*` | Clearway edge line | Roads and Pavements/Markings | The painted edge of a clearway, drawn as dashes and gaps of equal length. |
+| `CX*` | Signalised crossing | Roads and Pavements/Markings | The painted lines that bound a pedestrian crossing controlled by traffic signals. |
+| `CY*` | Right-hand chevrons | Roads and Pavements/Markings | A row of painted chevrons that point to the right of travel, used to fill a painted island. |
+| `CZ*` | Zebra crossing | Roads and Pavements/Markings | Painted zebra stripes where pedestrians have right of way across the carriageway. |
+| `D0*` | Culvert, 1050 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 1050 mm high. |
+| `D1*` | Culvert, 1200 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 1200 mm high. |
+| `D2*` | Culvert, 1500 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 1500 mm high. |
+| `D3*` | Culvert, 1800 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 1800 mm high. |
+| `D4*` | Culvert, 2100 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 2100 mm high. |
+| `D5*` | Culvert, 2400 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 2400 mm high. |
+| `D6*` | Culvert, 2700 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 2700 mm high. |
+| `D7*` | Culvert, 3000 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 3000 mm high. |
+| `D8*` | Culvert, 3300 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 3300 mm high. |
+| `D9*` | Culvert, 3600 mm high | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert with a clear opening 3600 mm high. |
+| `DA*` | Teeth, points left | Roads and Pavements/Markings | Row of painted dragon's teeth with the points standing to the left of the way the line is shot. |
+| `DB*` | Double barrier line | Roads and Pavements/Markings | Pair of unbroken painted lines down a road that forbids crossing in either direction. |
+| `DC*` | Teeth, points right | Roads and Pavements/Markings | Row of painted dragon's teeth with the points standing to the right of the way the line is shot. |
+| `DD*` | V-shaped concrete drain | Kerbs and Drainage/Kerbs | Shallow V-shaped concrete drain beside a road, shot along its lowest line. |
+| `DE*` | Photo digitising limit | Survey Control and Annotation/Plan Marks | Outer limit of the area digitised from aerial photography, where detail comes from the photo and not the field. |
+| `DF*` | Batter flume | Kerbs and Drainage/Channels and Waterways | Galvanised iron flume that carries water down a batter, shot along its floor. |
+| `DG*` | Gas property connection | Utilities/Gas | Small gas pipe that runs from the street main to a property. |
+| `DH*` | Designed headwall | Design and Setting Out/Drainage Design | Design line for the wall that surrounds the end of a drain or culvert. |
+| `DI*` | Designed drain pipe | Design and Setting Out/Drainage Design | Design line for a stormwater drainage pipe. |
+| `DJ*` | Table drain, far edge | Design and Setting Out/Earthworks Design | Design edge of a table drain on the side furthest from the road. |
+| `DK*` | Table drain, near edge | Design and Setting Out/Earthworks Design | Design edge of a table drain on the side nearest the road. |
+| `DL*` | Lined catch drain | Design and Setting Out/Drainage Design | Design line for a concrete or otherwise lined drain that catches runoff above a cutting. |
+| `DM*` | Sunken median | Design and Setting Out/Earthworks Design | Line along a median designed to sit lower than the carriageways beside it. |
+| `DO*` | Door opening | Buildings and Structures/Buildings | Opening of a door in a building wall, drawn as a short line across the wall. |
+| `DP*` | Drainage pit outline | Kerbs and Drainage/Pits and Structures | Outline of a stormwater pit, drawn at its true size on the plan. |
+| `DT*` | Roadside table drain | Kerbs and Drainage/Channels and Waterways | Broad shallow channel beside the road shoulder that collects runoff, shot along its floor. |
+| `DU*` | Unlined catch drain | Design and Setting Out/Drainage Design | Design line for an earth drain with no lining that catches runoff above a cutting. |
+| `DV*` | Designed culvert | Design and Setting Out/Drainage Design | Design line for a culvert that carries water under a road or embankment. |
+| `DW*` | Driveway edge | Roads and Pavements/Paths and Access | Edge of a driveway that gives a lot access across the footpath to the road. |
+| `DX*` | Drainage box outline | Kerbs and Drainage/Pits and Structures | Outline of a rectangular box in the drainage system, such as a junction or inlet box. |
+| `DY*` | Designed driveway | Design and Setting Out/Design General | Design edge of a driveway. |
+| `DZ*` | Digitised box culvert | Kerbs and Drainage/Pipes and Culverts | Box culvert traced from imagery and not measured on the ground. |
+| `E0*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E1*` | Bench outer edge | Design and Setting Out/Earthworks Design | Outer, downslope edge of a bench cut into a slope in the earthworks design. |
+| `E2*` | Bench inner edge | Design and Setting Out/Earthworks Design | Inner edge of a bench, where it meets the rising slope behind. |
+| `E3*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E4*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E5*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E6*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E7*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `E8*` | Path near edge | Design and Setting Out/Design General | Edge of a designed path on the side nearest the road. |
+| `E9*` | Path far edge | Design and Setting Out/Design General | Edge of a designed path on the side furthest from the road. |
+| `EA*` | Earthing conductor | Utilities/Electricity | Buried conductor that bonds electrical equipment to the earth. |
+| `EB*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `EC*` | Transformer cabinet outline | Utilities/Electricity | Plan outline of the cabinet that houses a transformer. |
+| `ED*` | Electrical conduit | Utilities/Electricity | Buried conduit that carries electrical cable. |
+| `EF*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `EG*` | Garden bed boundary | Vegetation and Landscape/Ground Cover | Edge of a garden bed where planting meets lawn or paving. |
+| `EH*` | Batter hinge line | Design and Setting Out/Earthworks Design | Line where the formation turns into the batter slope, the hinge of the cross-section. |
+| `EJ*` | Formation edge | Roads and Pavements/Carriageway | Outer edge of the graded formation that carries a road or track, before any pavement is laid. |
+| `EK*` | Track edge | Roads and Pavements/Carriageway | Edge of a vehicle track, worn or cut into the ground and not made up as a road. |
+| `EL*` | Pylon leg footing | Utilities/Electricity | Outline of the footing under one leg of a transmission pylon. |
+| `EM*` | Edge of a median strip | Roads and Pavements/Carriageway | Edge of the central median that separates opposing lanes of traffic. |
+| `EN*` | Electrical sump outline | Utilities/Electricity | Outline of a sump that collects water or oil at an electricity installation. |
+| `EP*` | Pavement edge | Roads and Pavements/Carriageway | Outer edge of the sealed road surface, shot where the seal meets the shoulder or kerb. |
+| `ER*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `ES*` | Shoulder outer edge | Design and Setting Out/Kerb and Carriageway Design | Outer edge of the road shoulder as designed, on the side away from the traffic lanes. |
+| `ET*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `EU*` | Buried power line | Utilities/Electricity | Buried electricity line, located by locator or from records. |
+| `EV*` | Verge outer edge | Design and Setting Out/Earthworks Design | Outer edge of the verge as designed, on the side furthest from the road. |
+| `EW*` | Footpath near edge | Design and Setting Out/Earthworks Design | Edge of a designed footpath on the side nearest the road. |
+| `EX*` | Footway far edge | Design and Setting Out/Earthworks Design | Edge of a designed footway on the side furthest from the road. |
+| `EY*` | Electrical property connection | Utilities/Electricity | Small electricity cable from the street network to a property. |
+| `EZ*` | Digitised power line | Utilities/Electricity | Electricity line traced from imagery or plans and not located on the ground. |
+| `FC*` | Other fence | Fences and Walls/Fences | Fence of a construction that no other fence code covers. |
+| `FE*` | General fence | Fences and Walls/Fences | Ordinary fence of a property or a paddock, whatever it is built of; drawn as posts on a wire. |
+| `FG*` | Roadside guard fence | Street Furniture and Signs/Posts and Barriers | Steel beam barrier on posts that guards the edge of a road. |
+| `FI*` | Gutter invert line | Kerbs and Drainage/Kerbs | Lowest line of the gutter beside a kerb, along which stormwater runs. |
+| `FL*` | Fence, type unstated | Fences and Walls/Fences | Fence of unrecorded construction, shot as a plain line. |
+| `FM*` | Security fence | Fences and Walls/Fences | Fence built to keep people out, too high or too close in its mesh to climb. |
+| `FN*` | Designed boundary fence | Design and Setting Out/Barrier and Fence Design | Design line for a fence along a property boundary. |
+| `FO*` | Ford crossing | Kerbs and Drainage/Channels and Waterways | Place where a road or track runs through a watercourse without a bridge or culvert. |
+| `FP*` | Footpath edge | Roads and Pavements/Paths and Access | Edge of a footpath for pedestrians beside the road. |
+| `FS*` | Field survey limit | Survey Control and Annotation/Plan Marks | Outer limit of the ground that was surveyed in the field, drawn over a photo base. |
+| `FU*` | Other fuel pipeline | Utilities/Fuel | Buried pipeline for a fuel that has no code of its own. |
+| `FW*` | Cable safety barrier | Street Furniture and Signs/Posts and Barriers | Safety barrier of tensioned steel cables on posts beside or between traffic lanes. |
+| `FZ*` | Digitised fuel pipeline | Utilities/Fuel | Fuel pipeline of an unlisted kind, traced from imagery and not located on the ground. |
+| `HA*` | Ethane main | Utilities/Gas | Buried pipeline that carries ethane. |
+| `HB*` | Headwall base | Kerbs and Drainage/Pits and Structures | Line along the foot of a headwall where it meets the ground or the pipe invert. |
+| `HE*` | Left wall face hatching | Design and Setting Out/Design General | Hatch ticks on the left of the line, showing which side of a designed wall is its face. |
+| `HG*` | High pressure gas main | Utilities/Gas | Gas main that works at high pressure. |
+| `HL*` | Designed hazard edge | Design and Setting Out/Design General | Design line that marks the edge of a hazard area. |
+| `HO*` | Pressurised oil line | Utilities/Fuel | Pipeline that carries oil at high pressure. |
+| `HP*` | Area for attention | Miscellaneous/General | Outline of an area singled out for attention; the code does not say why. |
+| `HR*` | Right wall face hatching | Design and Setting Out/Design General | Hatch ticks on the right of the line, showing which side of a designed wall is its face. |
+| `HS*` | Pier headstock | Buildings and Structures/Structures | Beam across the top of a bridge pier or pile that carries the girders. |
+| `HW*` | Headwall crest | Kerbs and Drainage/Pits and Structures | Line along the top of a headwall that surrounds the end of a pipe or culvert. |
+| `HZ*` | Digitised oil line | Utilities/Fuel | High pressure oil pipeline traced from imagery and not located on the ground. |
+| `I0*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I1*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I2*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I3*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I4*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I5*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I6*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I7*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I8*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `I9*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string of a kind that has no recorded purpose, kept so that a design file still plots. |
+| `IA*` | Batter meets ground | Design and Setting Out/Earthworks Design | Design line where an earthworks batter meets the existing ground, the catch point of a cut or a fill. |
+| `IB*` | Bench front edge | Design and Setting Out/Earthworks Design | Design line along the front edge of a bench cut into an earthworks batter. |
+| `IC*` | Bench front edge, plain | Design and Setting Out/Earthworks Design | A second design string for the front edge of an earthworks bench, drawn as a plain line. |
+| `ID*` | Table drain, road side | Design and Setting Out/Earthworks Design | Design line along the front edge of a table drain, the side nearest the road, where it meets the earthworks. |
+| `IE*` | Table drain, far side | Design and Setting Out/Earthworks Design | Design line along the back edge of a table drain, on the side away from the road. |
+| `IP*` | Gully pit outline | Kerbs and Drainage/Pits and Structures | Outline of a stormwater gully pit shot as a closed line instead of a single point. |
+| `IT*` | Traffic systems cable | Utilities/Traffic Systems | A cable of a road traffic management system, such as signals or cameras, shot as a line along its route. |
+| `JC*` | Cultivated land or pasture | Vegetation and Landscape/Ground Cover | Edge of cultivated land or pasture, shot as a line round the paddock. |
+| `JD*` | Dense timber or scrub edge | Vegetation and Landscape/Ground Cover | Edge of dense timber or scrub, shot along the line of the outermost trunks. |
+| `JG*` | Grassland edge | Vegetation and Landscape/Ground Cover | Edge of grassland, shot as a line round the grassed area. |
+| `JL*` | Boundary join line | Boundaries and Cadastre/Lot Boundaries | A join line between two boundary points, giving a bearing and distance; it is not itself a boundary. |
+| `JM*` | Medium timber or scrub edge | Vegetation and Landscape/Ground Cover | Edge of medium-density timber or scrub, where the trees stand more widely spaced than in dense bush. |
+| `JO*` | Orchard outline | Vegetation and Landscape/Ground Cover | Outline of an orchard, shot round the outer rows of trees. |
+| `JR*` | Rock area outline | Terrain and Breaklines/Rock and Cliff | Outline of an area of exposed rock, shot along its edge. |
+| `JS*` | Scattered timber or scrub edge | Vegetation and Landscape/Ground Cover | Edge of scattered timber or scrub, where single trees stand well apart. |
+| `JW*` | Marsh boundary | Terrain and Breaklines/Water Edges | Outline of a swamp or marsh, shot along the edge of the wet ground. |
+| `KB*` | Kerb top edge | Kerbs and Drainage/Kerbs | Top edge of a kerb, shot on the road side and checked in model zone 3. |
+| `KI*` | Kerb inlet opening | Kerbs and Drainage/Pits and Structures | A kerb inlet shot as a line along the kerb: the opening where gutter water enters the stormwater system. |
+| `KJ*` | Concrete safety barrier | Street Furniture and Signs/Posts and Barriers | A concrete safety barrier of the F-shaped profile, shot as a line along its base. |
+| `KR*` | Pedestrian ramp outline | Roads and Pavements/Paths and Access | A pedestrian kerb ramp, or pram ramp, shot as a line along its edge. |
+| `L0*` | Bike path separation, type 4 | Design and Setting Out/Lane Marking Design | Separation line along a bicycle path, design type S4. |
+| `L2*` | Multi-lane dividing line | Design and Setting Out/Lane Marking Design | Dividing line between opposing lanes of a multi-lane road, design type S2. |
+| `L3*` | Multi-lane lane line, type 1 | Design and Setting Out/Lane Marking Design | Lane line between lanes travelling the same way on a multi-lane road, design type L1. |
+| `L4*` | Roundabout lane line | Design and Setting Out/Lane Marking Design | Lane line between the lanes of a multi-lane roundabout, design type L4. |
+| `L5*` | Bike path separation, type 5 | Design and Setting Out/Lane Marking Design | Separation line along a bicycle path, design type S5. |
+| `L6*` | Bus lane line | Design and Setting Out/Lane Marking Design | Lane line beside a bus lane, design type L6. |
+| `L7*` | Bike lane line | Design and Setting Out/Lane Marking Design | Lane line beside a bicycle lane, design type L7. |
+| `L8*` | Two-lane dividing line, type 1 | Design and Setting Out/Lane Marking Design | Dividing line between opposing lanes of a two-lane road, design type S1. |
+| `L9*` | Two-lane dividing line, type 3 | Design and Setting Out/Lane Marking Design | Dividing line between opposing lanes of a two-lane road, design type S3. |
+| `LA*` | Continuity line, type 1 | Design and Setting Out/Lane Marking Design | Continuity line, design type C1, that carries a lane edge across a junction. |
+| `LB*` | Loading dock edge | Buildings and Structures/Buildings | Edge of a loading bay or loading dock, shot as a line along the raised platform. |
+| `LD*` | Designed double barrier | Design and Setting Out/Lane Marking Design | Double barrier line, design type BB: two unbroken lines that forbid crossing in either direction. |
+| `LE*` | General edge line | Design and Setting Out/Lane Marking Design | Edge line along the side of the carriageway, in its general form. |
+| `LF*` | Bike lane continuity line | Design and Setting Out/Lane Marking Design | Continuity line, design type C4, that carries a bicycle lane across a junction. |
+| `LG*` | Low-pressure gas main | Utilities/Gas | A buried gas main that works at low pressure, shot as a line along its route. |
+| `LH*` | Barrier and separation, type 1 | Design and Setting Out/Lane Marking Design | Combined barrier and separation line, design type BS1: an unbroken line beside a broken one. |
+| `LI*` | Light outreach arm | Street Furniture and Signs/Lighting | Outreach arm of a street light, shot from the pole to the lantern; it is kept out of the ground surface. |
+| `LJ*` | Clearway kerbside line | Design and Setting Out/Lane Marking Design | Kerbside line marking a clearway along the kerb, design type C2. |
+| `LK*` | No-stopping kerbside line | Design and Setting Out/Lane Marking Design | Kerbside line marking a no-stopping length of kerb, design type C3. |
+| `LL*` | Lane line, long gap | Roads and Pavements/Markings | Lane line painted in 3 metre dashes with 9 metre gaps, shot as built. |
+| `LM*` | Painted median edge line | Design and Setting Out/Lane Marking Design | Edge line round a painted median, design type E5. |
+| `LN*` | Multi-lane lane line, type 3 | Design and Setting Out/Lane Marking Design | Lane line between lanes travelling the same way on a multi-lane road, design type L3. |
+| `LP*` | Gutter lip | Kerbs and Drainage/Kerbs | Lip of the gutter beside a kerb, shot along its line and checked in model zone 1. |
+| `LR*` | Barrier and separation, type 2 | Design and Setting Out/Lane Marking Design | Combined barrier and separation line, design type BS2, the mirror form of BS1. |
+| `LS*` | Signal stop line | Design and Setting Out/Lane Marking Design | Stop line at traffic signals, design type TF. |
+| `LT*` | Turn guide line | Design and Setting Out/Lane Marking Design | Turn line, design type T1, that guides turning traffic through a junction. |
+| `LU*` | Plain unbroken line | Design and Setting Out/Lane Marking Design | A plain unbroken painted line that fits none of the named types. |
+| `LW*` | Give way line | Design and Setting Out/Lane Marking Design | Give way line, design type TB, painted across the approach to a junction. |
+| `LY*` | Bicycle crossing | Design and Setting Out/Lane Marking Design | A bicycle crossing painted across the carriageway. |
+| `LZ*` | Designed zebra crossing | Design and Setting Out/Lane Marking Design | A zebra pedestrian crossing painted across the carriageway. |
+| `MA*` | Median edge master string | Design and Setting Out/Master Strings | Master string for the edge of a median, one of the strings that control the road model. |
+| `MC*` | Master control string | Design and Setting Out/Master Strings | Master control string, the main alignment from which the other road model strings are built. |
+| `MD*` | Driveway master string | Design and Setting Out/Master Strings | Master string for the edge of a driveway. |
+| `ME*` | Earthworks master string | Design and Setting Out/Master Strings | Master string for the earthworks of the road model, such as batters and benching. |
+| `MK*` | Sealed edge master string | Design and Setting Out/Master Strings | Master string for the edge of the sealed bitumen surface. |
+| `MP*` | Off-road path master string | Design and Setting Out/Master Strings | Master string for the edge of an off-road path. |
+| `MS*` | Safety barrier master string | Design and Setting Out/Master Strings | Master string for a safety barrier along the road. |
+| `MT*` | Island or turn head string | Design and Setting Out/Master Strings | Master string for the edge of a traffic island or a turning head. |
+| `MW*` | Retaining wall master string | Design and Setting Out/Master Strings | Master string for a retaining wall beside the road. |
+| `MX*` | Temporary works master string | Design and Setting Out/Master Strings | Master string for temporary works that the finished road does not keep. |
+| `NB*` | Ridge or crest line | Terrain and Breaklines/Breaklines | A breakline or ridge, shot as a line that the surface model must follow. |
+| `NF*` | Photo completion limit | Survey Control and Annotation/Plan Marks | Limit of an area where photo-based mapping was completed or checked by survey in the field. |
+| `NG*` | Nylon gas main | Utilities/Gas | A buried gas main laid in nylon pipe, shot as a line along its route. |
+| `NJ*` | Pavement interface joint | Design and Setting Out/Kerb and Carriageway Design | Design line along the joint between two pavement areas, such as new work meeting existing. |
+| `NL*` | Offset carriageway crown | Design and Setting Out/Kerb and Carriageway Design | Design line for the crown of a carriageway that is offset from the road's master alignment. |
+| `NS*` | Natural ground line | Terrain and Breaklines/Breaklines | A line of ground shots along the natural surface where there is no sharper break, checked in model zone 2. |
+| `OA*` | Overhead optical fibre | Utilities/Communications | Optical fibre cable strung above ground on poles, shot as a line along its route. |
+| `OB*` | Built-up area | Miscellaneous/Land Use Areas | General outline of a built-up area, drawn as one extent and not building by building. |
+| `OC*` | Cemetery outline | Miscellaneous/Land Use Areas | Outline of a cemetery or burial ground. |
+| `OD*` | Fibre duct | Utilities/Communications | A conduit that carries optical fibre cable, shot as a line along its route. |
+| `OF*` | Surveyed offset crown | Roads and Pavements/Carriageway | Crown of a carriageway shot where it is offset from the road centreline, checked in model zone 1. |
+| `OG*` | Golf course outline | Miscellaneous/Land Use Areas | Outline of a golf course. |
+| `OH*` | Stockpile outline | Miscellaneous/Land Use Areas | Outline of a stockpile of loose material, shot round its toe. |
+| `OM*` | Other structure outline | Buildings and Structures/Structures | Outline of a structure that no other code names. |
+| `OO*` | Sporting arena outline | Miscellaneous/Land Use Areas | Outline of a sporting arena, such as a stadium, an oval or a court. |
+| `OP*` | Park or open space outline | Miscellaneous/Land Use Areas | Outline of a park or other open space. |
+| `OR*` | Ruin outline | Buildings and Structures/Buildings | Outline of a ruin, the remains of a building that is no longer whole. |
+| `OS*` | Silo or tank outline | Buildings and Structures/Structures | Outline of a silo or tank, seen from above. |
+| `OT*` | Swimming pool outline | Buildings and Structures/Structures | Outline of a swimming pool. |
+| `OU*` | Buried optical fibre | Utilities/Communications | Optical fibre cable buried in the ground, shot as a line along its route. |
+| `OW*` | Windmill outline | Buildings and Structures/Structures | Outline of a windmill, shot round its base. |
+| `OZ*` | Digitised optical fibre | Utilities/Communications | An optical fibre route digitised from records and not located on site. |
+| `PABB` | Abutment base point | Buildings and Structures/Structures | Survey point on the bottom of a bridge abutment. |
+| `PABT` | Point on top of abutment | Buildings and Structures/Structures | Survey point on the top of a bridge abutment. |
+| `PAPN` | Pin on a design alignment | Survey Control and Annotation/Control Marks | An alignment pin: a pin set in the ground to mark a design alignment for setting out. |
+| `PAPN*` |  | Survey Control and Annotation/Control Marks | Keeps alignment pins out of the ground surface. |
+| `PAWN` | Point on an awning | Buildings and Structures/Buildings | A survey point on the edge of an awning. |
+| `PAWN*` |  | Buildings and Structures/Buildings | Keeps awning points out of the ground surface. |
+| `PBCP` | Pile cap point | Buildings and Structures/Structures | Point where a bridge pile meets its cap. |
+| `PBDY` | Cadastral corner mark | Boundaries and Cadastre/Boundary Marks | A boundary mark of any kind, shot as a point. |
+| `PBHX` | Borehole point | Survey Control and Annotation/Investigation Points | A borehole, shot at the centre of its collar. |
+| `PBIN` | Litter bin | Street Furniture and Signs/Amenities | A rubbish bin, shot at its centre. |
+| `PBLT` | Survey bolt | Survey Control and Annotation/Control Marks | A bolt set in concrete or rock as a survey mark, shot at the centre of its head. |
+| `PBLT*` |  | Survey Control and Annotation/Control Marks | Keeps survey bolts out of the ground surface. |
+| `PBMK` | Levelling bench mark | Survey Control and Annotation/Control Marks | A bench mark: a mark of known height that levelling is run from. |
+| `PBMZ` | Bench mark, separate list | Survey Control and Annotation/Control Marks | A bench mark kept under its own separate code so it can be listed and checked on its own. |
+| `PBPG` | Peg at a boundary corner | Boundaries and Cadastre/Boundary Marks | A peg set at a boundary corner, shot at its top. |
+| `PBPG*` |  | Boundaries and Cadastre/Boundary Marks | Keeps boundary pegs out of the ground surface. |
+| `PBPI` | Bridge pier or column | Buildings and Structures/Structures | The centre of a bridge pier or column, shot where it meets the ground. |
+| `PBRK` | Breakline point | Terrain and Breaklines/Breaklines | A ground point lying on a breakline, shot where the grade changes so that the surface model can join it to its neighbours. |
+| `PBUS` | Bus stop position | Street Furniture and Signs/Amenities | The position of a bus stop, shot at the foot of its sign post. |
+| `PCAM` | Enforcement camera | Street Furniture and Signs/Traffic Control | A speed, red-light or traffic enforcement camera, shot at its pole. |
+| `PCBU` | Building corner at ground | Buildings and Structures/Buildings | A building corner shot at natural surface level, where the wall meets the ground. |
+| `PCFU` | Camera flash lamp | Street Furniture and Signs/Traffic Control | The flash lamp that lights a vehicle for an enforcement camera, shot at its pole. |
+| `PCMK` | Road authority control mark | Survey Control and Annotation/Control Marks | A permanent control mark of the road authority, used to tie road work into the survey network. |
+| `PCMK*` |  | Survey Control and Annotation/Control Marks | Keeps the road authority's control marks out of the ground surface. |
+| `PCRM` | Survey reference mark | Boundaries and Cadastre/Boundary Marks | A mark set to reference cadastral corners, so that the corners can be re-established if their own marks are lost. |
+| `PCTV` | Closed-circuit camera | Street Furniture and Signs/Traffic Control | A closed-circuit television camera watching the road, shot at the pole that carries it. |
+| `PDHL` | Winged drill hole | Boundaries and Cadastre/Boundary Marks | A hole drilled in rock or concrete, with a chiselled wing cut beside it to make it easy to find. |
+| `PDHL*` |  | Boundaries and Cadastre/Boundary Marks | Keeps winged drill holes out of the ground surface. |
+| `PDJM` | Junction manhole | Kerbs and Drainage/Pits and Structures | A stormwater maintenance hole at the point where two or more drainage lines meet. |
+| `PDPY` | Levelling peg | Survey Control and Annotation/Control Marks | A temporary peg driven into the ground to carry a height for a dumpy level. |
+| `PDPY*` |  | Survey Control and Annotation/Control Marks | Keeps levelling pegs out of the ground surface. |
+| `PDSM` | Water authority mark | Survey Control and Annotation/Control Marks | A permanent survey mark placed by the water authority and used as a height or position reference. |
+| `PDSM*` |  | Survey Control and Annotation/Control Marks | Keeps the water authority's survey marks out of the ground surface. |
+| `PECM` | Power cable marker | Utilities/Electricity | A marker on the surface showing the route of a buried power cable. |
+| `PEFP` | Distribution fuse | Utilities/Electricity | A point where a fuse protects a distribution cable, on a pole or in a cabinet. |
+| `PEJB` | Electrical junction box | Utilities/Electricity | A box in which electricity cables are joined, shot at its lid. |
+| `PEMH` | Power cable manhole | Utilities/Electricity | A manhole giving access to underground electricity cables, shot at its cover. |
+| `PETC` | Ground transformer | Utilities/Electricity | The centre of a ground-mounted cabinet that houses an electricity transformer. |
+| `PEUP` | Power service pillar | Utilities/Electricity | A pillar above ground where a customer is supplied from the underground power cable. |
+| `PEWW` | Wingwall end | Kerbs and Drainage/Pits and Structures | The free end of a wing wall that flanks a culvert or a drain outlet. |
+| `PF01` | Canopy, 1 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about one metre across, drawn as a canopy ring of that size. |
+| `PF01*` |  | Vegetation and Landscape/Trees | Keeps the one-metre canopy marks out of the ground surface. |
+| `PF02` | Canopy, 2 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about two metres across, drawn as a canopy ring of that size. |
+| `PF02*` |  | Vegetation and Landscape/Trees | Keeps the two-metre canopy marks out of the ground surface. |
+| `PF03` | Canopy, 3 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about three metres across, drawn as a canopy ring of that size. |
+| `PF03*` |  | Vegetation and Landscape/Trees | Keeps the three-metre canopy marks out of the ground surface. |
+| `PF04` | Canopy, 4 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about four metres across, drawn as a canopy ring of that size. |
+| `PF04*` |  | Vegetation and Landscape/Trees | Keeps the four-metre canopy marks out of the ground surface. |
+| `PF05` | Canopy, 5 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about five metres across, drawn as a canopy ring of that size. |
+| `PF05*` |  | Vegetation and Landscape/Trees | Keeps the five-metre canopy marks out of the ground surface. |
+| `PF06` | Canopy, 6 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about six metres across, drawn as a canopy ring of that size. |
+| `PF06*` |  | Vegetation and Landscape/Trees | Keeps the six-metre canopy marks out of the ground surface. |
+| `PF07` | Canopy, 7 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about seven metres across, drawn as a canopy ring of that size. |
+| `PF07*` |  | Vegetation and Landscape/Trees | Keeps the seven-metre canopy marks out of the ground surface. |
+| `PF08` | Canopy, 8 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about eight metres across, drawn as a canopy ring of that size. |
+| `PF08*` |  | Vegetation and Landscape/Trees | Keeps the eight-metre canopy marks out of the ground surface. |
+| `PF09` | Canopy, 9 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about nine metres across, drawn as a canopy ring of that size. |
+| `PF09*` |  | Vegetation and Landscape/Trees | Keeps the nine-metre canopy marks out of the ground surface. |
+| `PF10` | Canopy, 10 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about ten metres across, drawn as a canopy ring of that size. |
+| `PF10*` |  | Vegetation and Landscape/Trees | Keeps the ten-metre canopy marks out of the ground surface. |
+| `PF12` | Canopy, 12 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about twelve metres across, drawn as a canopy ring of that size. |
+| `PF12*` |  | Vegetation and Landscape/Trees | Keeps the twelve-metre canopy marks out of the ground surface. |
+| `PF15` | Canopy, 15 m spread | Vegetation and Landscape/Trees | A tree whose crown spreads about fifteen metres across, drawn as a canopy ring of that size. |
+| `PF15*` |  | Vegetation and Landscape/Trees | Keeps the fifteen-metre canopy marks out of the ground surface. |
+| `PFHT` | Flood level mark | Terrain and Breaklines/Water Edges | The level that a flood is known to have reached, shot at the mark it left. |
+| `PFLG` | Flag mast | Buildings and Structures/Structures | A flagpole, shot at its base. |
+| `PFLR` | Finished floor level | Buildings and Structures/Buildings | A spot level taken on the finished floor of a building. |
+| `PFLR*` |  | Buildings and Structures/Buildings | Keeps floor levels out of the ground surface. |
+| `PFPL` | Outdoor fireplace | Street Furniture and Signs/Amenities | A built fireplace, such as a barbecue hearth, in a park, camp or picnic area. |
+| `PFPM` | Fuel line marker | Utilities/Fuel | A marker on the surface showing the route of a buried fuel pipeline. |
+| `PGAS` | Gas valve pit | Utilities/Gas | The box over a gas valve, shot at its lid. |
+| `PGAT` | Cover lid, service unknown | Utilities/Unknown Services | The lid of a recessed access cover that serves a service nobody has identified. |
+| `PGEO` | Geotechnical test pit | Survey Control and Annotation/Investigation Points | A pit excavated to inspect the ground or to expose a buried service, shot at its centre. |
+| `PGHL` | Gas maintenance hole | Utilities/Gas | A manhole giving access to a gas main, shot at its cover. |
+| `PGHM` | High-pressure gas marker | Utilities/Gas | A marker on the surface showing the route of a high-pressure gas main. |
+| `PGIN` | Galvanised iron nail | Boundaries and Cadastre/Boundary Marks | A galvanised iron nail driven into a hard surface as a survey mark. |
+| `PGIN*` |  | Boundaries and Cadastre/Boundary Marks | Keeps galvanised nails out of the ground surface. |
+| `PGMR` | Gas flow meter | Utilities/Gas | A gas meter, shot at its centre. |
+| `PGPI` | Galvanised iron pipe | Boundaries and Cadastre/Boundary Marks | A galvanised iron pipe driven in as a survey mark. |
+| `PGPI*` |  | Boundaries and Cadastre/Boundary Marks | Keeps galvanised pipes out of the ground surface. |
+| `PGPM` | Gas line marker | Utilities/Gas | A marker on the surface showing the route of a buried gas main. |
+| `PGRB` | Gas regulator cabinet | Utilities/Gas | The cabinet that houses a gas pressure regulator, shot at the middle of the box. |
+| `PGTP` | Gas test terminal | Utilities/Gas | A surface fitting on a gas pipeline where its protection or pressure can be tested. |
+| `PGUL` | Stormwater gully pit | Kerbs and Drainage/Pits and Structures | A stormwater gully pit that takes surface runoff, shot at the middle of its grate. |
+| `PGVP` | Gas vent riser | Utilities/Gas | A vent riser on a gas main or casing that lets gas escape safely to the open air. |
+| `PHAZ` | Site that endangers people | Miscellaneous/Hazards and Heritage | A site that endangers people or later works, such as contaminated or unstable ground. |
+| `PHAZ*` |  | Miscellaneous/Hazards and Heritage | Keeps hazardous-site points out of the ground surface. |
+| `PHCP` | Plan-only control mark | Survey Control and Annotation/Control Marks | A control point held in plan only, with no level, used to control photogrammetry. |
+| `PHEC` | Threatened community | Miscellaneous/Hazards and Heritage | A point inside a plant or animal community recorded as endangered, to be avoided by works. |
+| `PHEC*` |  | Miscellaneous/Hazards and Heritage | Keeps endangered-community points out of the ground surface. |
+| `PHEE` | Listed ecological community | Miscellaneous/Hazards and Heritage | A point inside a vegetation community listed by law as an endangered ecological community. |
+| `PHEE*` |  | Miscellaneous/Hazards and Heritage | Keeps listed ecological community points out of the ground surface. |
+| `PHIA` | Indigenous cultural site | Miscellaneous/Hazards and Heritage | A place of Indigenous cultural heritage, marked so that works can keep clear of it. |
+| `PHIA*` |  | Miscellaneous/Hazards and Heritage | Keeps Indigenous heritage points out of the ground surface. |
+| `PHIS` | Historic interest point | Miscellaneous/Hazards and Heritage | A point of historic interest, such as a plaque, a marker stone or an old relic. |
+| `PHNI` | Other heritage site | Miscellaneous/Hazards and Heritage | A heritage site without Indigenous significance, such as a historic ruin, relic or building remnant. |
+| `PHNI*` |  | Miscellaneous/Hazards and Heritage | Keeps non-Indigenous heritage points out of the ground surface. |
+| `PHNL` | Pothole, no level | Survey Control and Annotation/Investigation Points | A pothole dug to expose a service, recorded without a level on the service. |
+| `PHNL*` |  | Survey Control and Annotation/Investigation Points | Keeps pothole points without a level out of the ground surface. |
+| `PHRL` | Pothole with level | Survey Control and Annotation/Investigation Points | A pothole dug to expose a service, with the level of the exposed service recorded. |
+| `PHST` | Grave headstone | Miscellaneous/Hazards and Heritage | A grave headstone in a cemetery, shot at the middle of its base. |
+| `PHTT` | Transmission pylon | Utilities/Electricity | A steel lattice tower that carries high-voltage lines, shot at the centre of its footprint. |
+| `PHWB` | Headwall foot | Kerbs and Drainage/Pits and Structures | The foot of a pipe headwall, shot where the wall meets the pipe or the ground. |
+| `PHWT` | Headwall crest point | Kerbs and Drainage/Pits and Structures | The top edge of a pipe headwall, shot on its coping. |
+| `PI01` | Pipe invert, 225 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 225 mm stormwater pipe, shot at its lowest inside point. |
+| `PI02` | Pipe invert, 300 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 300 mm stormwater pipe, shot at its lowest inside point. |
+| `PI03` | Pipe invert, 375 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 375 mm stormwater pipe, shot at its lowest inside point. |
+| `PI04` | Pipe invert, 450 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 450 mm stormwater pipe, shot at its lowest inside point. |
+| `PI05` | Pipe invert, 525 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 525 mm stormwater pipe, shot at its lowest inside point. |
+| `PI06` | Pipe invert, 600 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 600 mm stormwater pipe, shot at its lowest inside point. |
+| `PI07` | Pipe invert, 750 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 750 mm stormwater pipe, shot at its lowest inside point. |
+| `PI09` | Pipe invert, 900 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 900 mm stormwater pipe, shot at its lowest inside point. |
+| `PI10` | Pipe invert, 1050 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 1050 mm stormwater pipe, shot at its lowest inside point. |
+| `PI12` | Pipe invert, 1200 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 1200 mm stormwater pipe, shot at its lowest inside point. |
+| `PI13` | Pipe invert, 1350 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 1350 mm stormwater pipe, shot at its lowest inside point. |
+| `PI15` | Pipe invert, 1500 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 1500 mm stormwater pipe, shot at its lowest inside point. |
+| `PI16` | Pipe invert, 1650 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 1650 mm stormwater pipe, shot at its lowest inside point. |
+| `PI18` | Pipe invert, 1800 mm | Kerbs and Drainage/Pipes and Culverts | The invert of a 1800 mm stormwater pipe, shot at its lowest inside point. |
+| `PILT` | Sump inlet | Kerbs and Drainage/Pits and Structures | The point where drainage flows into a sump, shot at the mouth of the inlet. |
+| `PINV` | Pipe invert | Kerbs and Drainage/Pipes and Culverts | The lowest inside point of a stormwater pipe, shot where it meets a pit; the diameter is asked for. |
+| `PJBX` | Concrete junction box | Kerbs and Drainage/Pits and Structures | The top of a concrete junction box on a stormwater line, where pipes meet. |
+| `PKME` | Kerbside meter | Street Furniture and Signs/Amenities | A kerbside meter that collects the fee for a parking bay. |
+| `PLGN` | Low garden light | Street Furniture and Signs/Lighting | A low light standing in a garden bed or on a lawn, shot at its base. |
+| `PLIG*` | Designed lighting pole | Design and Setting Out/Design General | The designed position of a road lighting pole, for setting out. |
+| `PLPL` | Light pole | Street Furniture and Signs/Lighting | A pole that carries a light, shot at the centre of the pole at ground level. |
+| `PLSU` | Hanging light | Street Furniture and Signs/Lighting | A light hung from an overhead wire or bracket, shot on the ground directly below it. |
+| `PMBX` | Letterbox | Street Furniture and Signs/Amenities | A letterbox at the property frontage, shot at the middle of its base. |
+| `PMCP` | Supplementary control mark | Survey Control and Annotation/Control Marks | A minor control point set to support the main control network. |
+| `PMPT` | Mobile phone mast | Utilities/Communications | A transmitter mast or tower of the mobile telephone network, shot at its base. |
+| `PMSM` | Other survey mark | Boundaries and Cadastre/Boundary Marks | A survey mark of a kind no other code covers, shot at its centre. |
+| `PMSM*` |  | Boundaries and Cadastre/Boundary Marks | Keeps miscellaneous survey marks out of the ground surface. |
+| `PNAL` | Survey nail | Boundaries and Cadastre/Boundary Marks | A nail driven into a hard surface as a survey mark; each shot also records its code. |
+| `PNSS` | Natural ground shot | Terrain and Breaklines/Ground Points | A shot on the natural ground surface, used as a point of the terrain model. |
+| `POBV` | Pipe obvert | Kerbs and Drainage/Pipes and Culverts | The obvert of a stormwater pipe, the highest point on its inside, shot at the crown. |
+| `POBV*` |  | Kerbs and Drainage/Pipes and Culverts | Keeps pipe obvert shots out of the ground surface, since they lie below it. |
+| `POCP` | Fence corner post | Boundaries and Cadastre/Boundary Marks | A post standing at a boundary corner, taken as the corner mark. |
+| `POFJ` | Fibre junction box | Utilities/Communications | A junction box on an optical fibre route where cables are joined or split. |
+| `POFM` | Fibre route marker | Utilities/Communications | A marker that shows where an optical fibre cable runs underground. |
+| `POFP` | Fibre cable pit | Utilities/Communications | A pit on an optical fibre route, shot at the middle of its lid. |
+| `POHM` | Oil pipeline marker | Utilities/Fuel | A sign or post that marks the route of a high-pressure oil pipeline. |
+| `POST` | Fence or guide marker | Fences and Walls/Gates and Posts | A single fence post or roadside guide post, shot at its centre. |
+| `PPCN` | Photo centre mark | Survey Control and Annotation/Control Marks | The ground point at the centre of an aerial photograph, used to position and orient the image. |
+| `PPET` | Fuel dispenser | Utilities/Fuel | A petrol pump at a service station, shot at the middle of its base. |
+| `PPLP` | Power pole with light | Utilities/Electricity | A pole that carries power lines and also a street light. |
+| `PPMK` | Permanent ground mark | Boundaries and Cadastre/Boundary Marks | A permanent mark set in the ground to last, which later surveys can rely on to find a position. |
+| `PPOL` | Pole of unknown use | Utilities/Unknown Services | A pole that has not been identified as power, telephone or lighting. |
+| `PPPL` | Power pole | Utilities/Electricity | A pole that carries power lines and nothing else. |
+| `PPSM` | Coordinated survey mark | Survey Control and Annotation/Control Marks | A permanent survey mark with coordinates, which the survey can be tied to. |
+| `PPTR` | Power pole with transformer | Utilities/Electricity | A pole that carries power lines and has a transformer mounted on it. |
+| `PRAL` | Rail head level | Rail and Transit/Track | A level taken on the top of the head of a running rail. |
+| `PRAL*` |  | Rail and Transit/Track | Keeps rail head levels out of the ground surface, so the track does not distort the terrain model. |
+| `PRAV` | Recycled air valve | Utilities/Recycled Water | An air valve on a recycled water main, which lets trapped air out at a high point. |
+| `PRBX` | Lineside control box | Rail and Transit/Track | A box beside the track that houses railway control equipment. |
+| `PRCC` | Signalling cable trough | Rail and Transit/Track | A trough beside the track that carries signalling cables, taken as a single point. |
+| `PRET` | Recycled earth terminal | Utilities/Recycled Water | An earth terminal on a recycled water main, the point where the main is bonded to earth. |
+| `PRHY` | Recycled hydrant | Utilities/Recycled Water | A hydrant on a recycled water main. |
+| `PRMB` | Concrete reference block | Boundaries and Cadastre/Boundary Marks | A reference mark set in a concrete block, used to re-establish a survey mark if it is lost. |
+| `PRMB*` |  | Boundaries and Cadastre/Boundary Marks | Keeps concrete reference blocks out of the ground surface, since they fix a position and not the ground. |
+| `PRMM` | Recycled main marker | Utilities/Recycled Water | A marker that shows where a recycled water main runs. |
+| `PRMR` | Recycled water meter | Utilities/Recycled Water | A meter on a recycled water supply. |
+| `PRSG` | Lineside signal | Rail and Transit/Overhead and Signals | A railway signal on its mast or post beside the track. |
+| `PRSV` | Recycled stop valve | Utilities/Recycled Water | A stop valve that shuts off a length of recycled water main. |
+| `PRTM` | Track survey monument | Rail and Transit/Track | A survey monument set beside the track as a lasting reference for its alignment. |
+| `PRTP` | Recycled tap | Utilities/Recycled Water | A tap on a recycled water supply, such as an outlet or a standpipe. |
+| `PRTR` | Witness tree | Boundaries and Cadastre/Boundary Marks | A tree used as a witness to a survey mark or a boundary corner, shown as a plain point. |
+| `PSAP` | Pole stay anchor | Utilities/Electricity | The ground anchor of the stay wire that braces a pole. |
+| `PSCL` | Signal controller cabinet | Street Furniture and Signs/Traffic Control | The cabinet that houses the controller of a set of traffic signals. |
+| `PSDO` | Subsoil drain outlet level | Kerbs and Drainage/Pits and Structures | The invert level where a subsoil drain discharges at its outlet. |
+| `PSDO*` |  | Kerbs and Drainage/Pits and Structures | Keeps subsoil drain outlet levels out of the ground surface, since an invert is not the ground. |
+| `PSDR` | Signal vehicle detector | Utilities/Traffic Systems | A detector for a set of traffic signals, such as a vehicle loop in the road. |
+| `PSDS` | Double-faced sign post | Street Furniture and Signs/Signs | A post that carries a sign face on each of its two sides. |
+| `PSFP` | Subsoil flushing point | Kerbs and Drainage/Pits and Structures | The flushing point of a subsoil drain, a riser through which the pipe can be cleared. |
+| `PSFP*` |  | Kerbs and Drainage/Pits and Structures | Keeps subsoil flushing points out of the ground surface. |
+| `PSGL` | Traffic signal post | Street Furniture and Signs/Traffic Control | A traffic signal post with its lanterns, at an intersection or a crossing. |
+| `PSHT` | Spot level on ground | Terrain and Breaklines/Ground Points | A spot height: a single level taken at a point and kept visible on the plan. |
+| `PSIN` | Single-faced sign post | Street Furniture and Signs/Signs | A post that carries a single sign face. |
+| `PSJX` | Signal junction box | Utilities/Traffic Systems | A junction box in the ground where traffic signal cables are joined. |
+| `PSKI` | Survey spike | Boundaries and Cadastre/Boundary Marks | A spike or nail driven into a hard surface and used as a survey mark. |
+| `PSLH` | Sewer inspection lamphole | Utilities/Sewer | A lamphole: a small opening in a sewer for looking along the pipe with a lamp. |
+| `PSMH` | Sewer maintenance hole | Utilities/Sewer | The cover of a sewer maintenance hole, taken at the centre of the lid. |
+| `PSMM` | Sewer route marker | Utilities/Sewer | A marker that shows where a sewer main runs. |
+| `PSPL` | Short bracing pole | Utilities/Electricity | A short pole that carries the stay wire bracing another pole. |
+| `PSPS` | Sewage pumping station | Utilities/Sewer | A pumping station on a sewer, taken at the lid of the wet well. |
+| `PSS*` |  | Survey Control and Annotation/Control Marks | Keeps every station mark out of the ground surface: control marks fix positions and are not terrain. |
+| `PSSA` | Survey mark, type unstated | Survey Control and Annotation/Control Marks | A survey mark of unspecified type, used when the kind of mark is not given. |
+| `PSSB` | Broad arrow bench mark | Survey Control and Annotation/Control Marks | The broad arrow cut in stone or a kerb to mark a bench level. |
+| `PSSC` | Station peg | Survey Control and Annotation/Control Marks | A peg driven in as a station for the job. |
+| `PSSD` | Plug, pipe or block station | Survey Control and Annotation/Control Marks | A station marked by a plug, a drill hole, an iron pipe or a reference block. |
+| `PSSE` | Bolt, nail or spike station | Survey Control and Annotation/Control Marks | A station marked by a bolt, a nail, a spike or a similar small metal fixing. |
+| `PSSF` | Trigonometric station | Survey Control and Annotation/Control Marks | A trigonometric station, a primary control mark of the geodetic network. |
+| `PSSG` | Network control mark | Survey Control and Annotation/Control Marks | A mark of the permanent, state or project control networks, used as a survey station. |
+| `PSSM` | State geodetic mark | Survey Control and Annotation/Control Marks | A mark of the state geodetic network, with published coordinates and heights. |
+| `PSSV` | Sewer isolation valve | Utilities/Sewer | A stop valve that shuts off flow in a sewer line, taken at its cover. |
+| `PSTA` | Star picket mark | Boundaries and Cadastre/Boundary Marks | A star picket, a steel picket with a star-shaped section, driven in as a survey mark. |
+| `PSTA*` |  | Boundaries and Cadastre/Boundary Marks | Keeps star pickets out of the ground surface, since they mark a position and not the ground. |
+| `PSTR` | Overhead wire stanchion | Rail and Transit/Overhead and Signals | A steel stanchion beside the track that carries the overhead wires or a signal. |
+| `PSTS` | Seismic shot point | Survey Control and Annotation/Investigation Points | A seismic test shot: the point where a charge was fired for a seismic survey. |
+| `PSVP` | Sewer vent stack | Utilities/Sewer | A vent pipe that lets air into a sewer and gas out of it. |
+| `PSWA` | Swamp or marsh | Terrain and Breaklines/Water Edges | A swamp or marsh: a patch of wet, reedy ground marked by a point. |
+| `PT01` | Trunk 100 mm across | Vegetation and Landscape/Trees | A tree whose trunk is about 100 mm across, taken at the trunk. |
+| `PT01*` |  | Vegetation and Landscape/Trees | Keeps 100 mm tree trunks out of the ground surface, since a trunk is not the ground. |
+| `PT02` | Trunk 200 mm across | Vegetation and Landscape/Trees | A tree whose trunk is about 200 mm across, taken at the trunk. |
+| `PT02*` |  | Vegetation and Landscape/Trees | Keeps 200 mm tree trunks out of the ground surface, since a trunk is not the ground. |
+| `PT03` | Trunk 300 mm across | Vegetation and Landscape/Trees | A tree whose trunk is about 300 mm across, taken at the trunk. |
+| `PT03*` |  | Vegetation and Landscape/Trees | Keeps 300 mm tree trunks out of the ground surface, since a trunk is not the ground. |
+| `PT04` | Trunk 400 mm across | Vegetation and Landscape/Trees | Tree trunk about 400 mm across, shot at the middle of the trunk. |
+| `PT04*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 400 mm trees out of the ground surface. |
+| `PT05` | Trunk 500 mm across | Vegetation and Landscape/Trees | Tree trunk about 500 mm across, shot at the middle of the trunk. |
+| `PT05*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 500 mm trees out of the ground surface. |
+| `PT06` | Trunk 600 mm across | Vegetation and Landscape/Trees | Tree trunk about 600 mm across, shot at the middle of the trunk. |
+| `PT06*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 600 mm trees out of the ground surface. |
+| `PT07` | Trunk 700 mm across | Vegetation and Landscape/Trees | Tree trunk about 700 mm across, shot at the middle of the trunk. |
+| `PT07*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 700 mm trees out of the ground surface. |
+| `PT08` | Trunk 800 mm across | Vegetation and Landscape/Trees | Tree trunk about 800 mm across, shot at the middle of the trunk. |
+| `PT08*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 800 mm trees out of the ground surface. |
+| `PT09` | Trunk 900 mm across | Vegetation and Landscape/Trees | Tree trunk about 900 mm across, shot at the middle of the trunk. |
+| `PT09*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 900 mm trees out of the ground surface. |
+| `PT10` | Trunk 1000 mm across | Vegetation and Landscape/Trees | Tree trunk about 1000 mm across, shot at the middle of the trunk. |
+| `PT10*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 1000 mm trees out of the ground surface. |
+| `PT12` | Trunk 1200 mm across | Vegetation and Landscape/Trees | Tree trunk about 1200 mm across, shot at the middle of the trunk. |
+| `PT12*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 1200 mm trees out of the ground surface. |
+| `PT15` | Trunk 1500 mm across | Vegetation and Landscape/Trees | Tree trunk about 1500 mm across, shot at the middle of the trunk. |
+| `PT15*` |  | Vegetation and Landscape/Trees | Keeps trunk points of 1500 mm trees out of the ground surface. |
+| `PT3P` | Triple communications pit | Utilities/Communications | Concrete telephone pit with three lids in a row, where cable is joined and drawn in. |
+| `PTBX` | Telephone booth | Utilities/Communications | Public telephone box or booth standing on the footpath. |
+| `PTCM` | Communications cable marker | Utilities/Communications | Marker that shows the route of a buried telephone cable. |
+| `PTDP` | Cable distribution pillar | Utilities/Communications | Street cabinet from which telephone cable is distributed to nearby customers. |
+| `PTJP` | Cable joint post | Utilities/Communications | Post standing above ground at a joint in a telephone cable. |
+| `PTMP` | Communications main pit | Utilities/Communications | Large main pit, about 1.1 m square, at a major telephone cable junction. |
+| `PTMX` | Domed pavement marker | Roads and Pavements/Markings | Raised domed marker fixed to the road, called a silent cop, that guides traffic. |
+| `PTMX*` |  | Roads and Pavements/Markings | Keeps silent-cop road markers out of the ground surface. |
+| `PTPL` | Communications pole | Utilities/Communications | Pole that carries telephone cable overhead. |
+| `PTRE` | Trunk of unrecorded size | Vegetation and Landscape/Trees | Tree trunk whose diameter was not measured, shot at the middle of the trunk. |
+| `PTRE*` |  | Vegetation and Landscape/Trees | Keeps trunk points of unmeasured trees out of the ground surface. |
+| `PTSP` | Single communications pit | Utilities/Communications | Concrete telephone pit with a single lid. |
+| `PTSS` | Concrete survey pillar | Survey Control and Annotation/Control Marks | Trigonometric station built as a concrete pillar. |
+| `PTSS*` |  | Survey Control and Annotation/Control Marks | Keeps concrete trig pillar points out of the ground surface. |
+| `PTTP` | Twin communications pit | Utilities/Communications | Concrete telephone pit with two lids side by side. |
+| `PUSR` | Unknown service point | Utilities/Unknown Services | Surface sign of a service that has not been identified, such as an unmarked cover or stub. |
+| `PUTP` | Buried tank, contents unknown | Utilities/Unknown Services | Buried tank whose contents are not known, shot at its lid or filler. |
+| `PVCP` | Height control point | Survey Control and Annotation/Control Marks | Point whose height alone is held as control, such as a target for aerial photo mapping. |
+| `PVID` | Crossing of two lines | Miscellaneous/General | Point where two surveyed lines meet, usually worked out by calculation. |
+| `PWAV` | Air release valve | Utilities/Water | Valve at a high point of a water main that lets trapped air escape. |
+| `PWCP` | Main test point | Utilities/Water | Fitting on a water main where pressure or electrical readings are taken. |
+| `PWEP` | Water pump | Utilities/Water | Pump that lifts or boosts water, shot as a point. |
+| `PWET` | Main earthing point | Utilities/Water | Terminal that connects a water main to an electrical earth. |
+| `PWFB` | Fire service hydrant | Utilities/Fire Service | Hydrant on a fire service main, for the fire brigade's hoses. |
+| `PWHY` | Mains water hydrant | Utilities/Water | Hydrant on a drinking water main, used for flushing and for fire fighting. |
+| `PWLP` | Water surface level | Terrain and Breaklines/Water Edges | Point where the level of a water surface was read. |
+| `PWML` | Windmill tower | Buildings and Structures/Structures | Windmill, usually one that pumps water, shot at the middle of its tower. |
+| `PWMM` | Water main marker post | Utilities/Water | Post or plate that shows the route of a water main. |
+| `PWMR` | Connection meter | Utilities/Water | Meter that records the water passing through a connection. |
+| `PWSR` | Drain-off valve | Utilities/Water | Valve at a low point of a main that empties it for cleaning or repair. |
+| `PWSV` | Isolating valve | Utilities/Water | Valve that shuts off the flow in a water main. |
+| `PWTP` | Water supply tap | Utilities/Water | Tap on a water supply, such as a standpipe or a garden tap. |
+| `QQ*` | Survey check line | Miscellaneous/General | Line of check shots used to test the survey or the model, kept out of the ground surface. |
+| `R*` | Unclassified road string | Design and Setting Out/Road Design Strings | Road design string starting with R that no more specific code claims. |
+| `RA*` | Rail head | Rail and Transit/Track | Top of a running rail, shot along the middle of the rail head. |
+| `RC*` | Carriageway centre | Roads and Pavements/Carriageway | Centre of the road, shot along the middle of the carriageway. |
+| `RE*` | Reservoir outline | Utilities/Water | Outline of a water storage reservoir, traced round its walls. |
+| `RF*` | Track formation edge | Rail and Transit/Track | Edge of the railway formation, the shaped earth platform that carries the ballast. |
+| `RM*` | Recycled water main | Utilities/Recycled Water | Main that carries recycled water, shot along its centre. |
+| `RP*` | Platform top edge | Rail and Transit/Platforms | Top edge of a railway platform, on the side nearest the track. |
+| `RR*` | Platform ramp edge | Rail and Transit/Platforms | Edge of a ramp that rises to a railway platform. |
+| `RS*` | Signal cable trough | Rail and Transit/Overhead and Signals | Trough beside the track that carries signalling cable. |
+| `RT*` | Track centreline | Rail and Transit/Track | Centre of a railway track, midway between its two rails. |
+| `RW*` | Earth retaining wall | Fences and Walls/Walls | Wall built to hold back earth, shot along its base. |
+| `S1*` | Speed limit 100 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 100 km/h; the string runs along the zone. |
+| `S2*` | Speed limit 110 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 110 km/h; the string runs along the zone. |
+| `S4*` | Speed limit 40 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 40 km/h; the string runs along the zone. |
+| `S5*` | Speed limit 50 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 50 km/h; the string runs along the zone. |
+| `S6*` | Speed limit 60 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 60 km/h; the string runs along the zone. |
+| `S7*` | Speed limit 70 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 70 km/h; the string runs along the zone. |
+| `S8*` | Speed limit 80 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 80 km/h; the string runs along the zone. |
+| `S9*` | Speed limit 90 km/h | Street Furniture and Signs/Signs | Stretch of road signed with a speed limit of 90 km/h; the string runs along the zone. |
+| `SA*` | Designed pedestrian rail | Design and Setting Out/Barrier and Fence Design | Design line for the rail of a pedestrian fence along a footpath or a bridge. |
+| `SB*` | Separation and barrier lines | Roads and Pavements/Markings | A painted double line with a broken separation line on one side and an unbroken barrier line on the other, the barrier on the right. |
+| `SC*` | Pole stay wire | Utilities/Electricity | Stay wire that braces a pole or mast, drawn from the pole to its ground anchor. |
+| `SD*` | Detector loop | Utilities/Traffic Systems | Loop cut into the road surface that detects vehicles for a traffic signal, drawn along the loop. |
+| `SE*` | Seat outline | Street Furniture and Signs/Amenities | Plan outline of a fixed seat or bench. |
+| `SF*` | Fence guarding a hazard | Fences and Walls/Fences | Fence put up to keep people away from a drop, a pool or another danger. |
+| `SG*` | Cattle grid outline | Roads and Pavements/Carriageway | Grid of bars across a road or gateway that stops stock but lets vehicles through. |
+| `SH*` | Designed subsoil drain edge | Design and Setting Out/Drainage Design | Design line along the edge of a subsoil drain. |
+| `SI*` | Large sign outline | Street Furniture and Signs/Signs | Plan outline of a large sign face, such as a gantry or hoarding. |
+| `SL*` | Seismic survey line | Survey Control and Annotation/Investigation Points | Line followed by a seismic survey, along which shots and receivers are set. |
+| `SM*` | Gravity sewer main | Utilities/Sewer | Gravity sewer main, shot as a line along its route. |
+| `SO*` | External stair nosing | Buildings and Structures/Steps and Access | Outside stairs of a building, shot along the nosing of the treads. |
+| `SP*` | Sewage pond outline | Utilities/Sewer | Outline of a sewage pond or lagoon. |
+| `SQ*` | Pump-out station outline | Utilities/Sewer | Outline of a station that pumps sewage or water out of a low point. |
+| `SR*` | Pumped sewer line | Utilities/Sewer | Pressure sewer, the rising main that carries pumped flow uphill, shot as a line along its route. |
+| `ST*` | Septic tank outline | Utilities/Sewer | Outline of a septic tank. |
+| `SX*` | Cantilever sign outline | Street Furniture and Signs/Signs | Plan outline of a sign carried on an arm that reaches out over the road. |
+| `SY*` | Sewer property connection | Utilities/Sewer | Small branch that joins a property to the sewer main, shot as a line along its route. |
+| `SZ*` | Digitised sewer main | Utilities/Sewer | Gravity sewer traced from imagery or plans and not located on the ground. |
+| `TA*` | Picnic table outline | Street Furniture and Signs/Amenities | Plan outline of a picnic table. |
+| `TC*` | Bank crest | Terrain and Breaklines/Breaklines | Top edge of a bank or batter, with the ticks pointing downhill. |
+| `TD*` | Phone cable duct | Utilities/Communications | Conduit that carries telephone cable, shot as a line along its route. |
+| `TG*` | Guard rail crest | Street Furniture and Signs/Posts and Barriers | Line along the top of a guard rail. |
+| `TL*` | Rumble strip line | Roads and Pavements/Markings | Raised bars painted across the edge of a lane that rattle a tyre and warn a driver who drifts. |
+| `TM*` | Median top edge | Kerbs and Drainage/Kerbs | Top edge of a raised median or traffic island. |
+| `TN*` | Buried phone line | Utilities/Communications | Buried telephone line, shot as a line along its route. |
+| `TO*` | Signal mast arm outline | Street Furniture and Signs/Traffic Control | Plan outline of a signal pole together with the arm that reaches out over the road. |
+| `TR*` | Tree foliage outline | Vegetation and Landscape/Trees | Outline of the foliage of a tree or a stand of trees, drawn along its drip line. |
+| `TS*` | Telephone sump outline | Utilities/Communications | Outline of a telephone sump, checked in the third model zone (road side). |
+| `TW*` | Wall top edge | Buildings and Structures/Buildings | Line along the top of a wall. |
+| `TX*` | Telephone box outline | Utilities/Communications | Plan outline of a public telephone box. |
+| `TY*` | Telephone property connection | Utilities/Communications | Small cable that joins a property to the telephone network, shot as a line along its route. |
+| `TZ*` | Digitised telephone line | Utilities/Communications | Telephone line traced from imagery or plans and not located on the ground. |
+| `U1*` | Stormwater pipe, 225 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 225 mm across, shot as a line along its route. |
+| `U2*` | Stormwater pipe, 300 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 300 mm across, shot as a line along its route. |
+| `U3*` | Stormwater pipe, 375 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 375 mm across, shot as a line along its route. |
+| `U4*` | Stormwater pipe, 450 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 450 mm across, shot as a line along its route. |
+| `U5*` | Stormwater pipe, 525 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 525 mm across, shot as a line along its route. |
+| `U6*` | Stormwater pipe, 600 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 600 mm across, shot as a line along its route. |
+| `U7*` | Stormwater pipe, 750 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 750 mm across, shot as a line along its route. |
+| `U9*` | Stormwater pipe, 900 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 900 mm across, shot as a line along its route. |
+| `UB*` | Culvert, height unstated | Kerbs and Drainage/Pipes and Culverts | Rectangular box culvert whose height was not measured. |
+| `UC*` | Bridge clearance limit | Buildings and Structures/Structures | Line on the ground under a bridge that marks the limit of its clearance overhead. |
+| `UE*` | High voltage overhead line | Utilities/Electricity | Main overhead power line that carries bulk supply between substations. |
+| `UL*` | Local overhead line | Utilities/Electricity | Overhead power line of the local network, below the major transmission lines. |
+| `UO*` | Raised water pipeline | Utilities/Water | Water pipeline that runs above ground on supports. |
+| `UP*` | Pipeline, service unknown | Utilities/Unknown Services | Pipeline whose service has not been identified. |
+| `UR*` | Gravel road edge | Roads and Pavements/Carriageway | Edge of the formed surface of an unsealed road. |
+| `US*` | Junction box outline | Utilities/Unknown Services | Plan outline of a box where service lines are joined, whose service is not known. |
+| `UT*` | Buried tank outline | Buildings and Structures/Structures | Plan outline of a tank buried in the ground. |
+| `UU*` | Stormwater pipe, size unstated | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe whose diameter was not measured. |
+| `UX*` | Stormwater pipe, any size | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe of any diameter, for a pipe whose size is given in its attributes. |
+| `UZ*` | Digitised stormwater pipe | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe traced from imagery or plans and not located on the ground. |
+| `V1*` | Stormwater pipe, 1050 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 1050 mm across, shot as a line along its route. |
+| `V2*` | Stormwater pipe, 1200 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 1200 mm across, shot as a line along its route. |
+| `V3*` | Stormwater pipe, 1350 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 1350 mm across, shot as a line along its route. |
+| `V5*` | Stormwater pipe, 1500 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 1500 mm across, shot as a line along its route. |
+| `V6*` | Stormwater pipe, 1650 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 1650 mm across, shot as a line along its route. |
+| `V8*` | Stormwater pipe, 1800 mm | Kerbs and Drainage/Pipes and Culverts | Stormwater pipe 1800 mm across, shot as a line along its route. |
+| `VC*` | Escarpment crest | Terrain and Breaklines/Rock and Cliff | Top edge of a cliff or escarpment, with the ticks pointing over the drop. |
+| `VE*` | Ground slab edge | Buildings and Structures/Buildings | Edge of a concrete slab laid flat on the ground. |
+| `VL*` | Slip scarp | Terrain and Breaklines/Breaklines | Scarp left by a landslide or by water eating into a bank. |
+| `VT*` | Vehicle track edge | Roads and Pavements/Carriageway | Edge of a track that vehicles use, formed by wheels and not built. |
+| `WC*` | Watercourse centre | Kerbs and Drainage/Channels and Waterways | Centre of a natural watercourse. |
+| `WE*` | Waterline with level | Terrain and Breaklines/Water Edges | Edge of water, with a level taken on it. |
+| `WI*` | Irrigation pipe | Utilities/Water | Pipe that carries water for irrigation, shot as a line along its route. |
+| `WL*` | Lake shoreline | Terrain and Breaklines/Water Edges | Shoreline of a lake. |
+| `WM*` | Drinking water main | Utilities/Water | Water main, shot as a line along its route. |
+| `WR*` | River bank edge | Terrain and Breaklines/Water Edges | Bank edge of a river or creek. |
+| `WW*` | Abutment wing wall | Buildings and Structures/Structures | Wall that flares out from the end of a bridge abutment to hold back the embankment. |
+| `WY*` | Water property connection | Utilities/Water | Small pipe that joins a property to the water main, shot as a line along its route. |
+| `WZ*` | Digitised water main | Utilities/Water | Water main traced from imagery or plans and not located on the ground. |
+| `X0*` | Regular contour | Terrain and Breaklines/Contours | Contour at the regular interval between index contours. |
+| `XB*` | Trench floor edge | Survey Control and Annotation/Investigation Points | Bottom edge of a trench dug to expose buried services. |
+| `XJ*` | Deck joint line | Buildings and Structures/Structures | Line of a joint that lets a bridge deck expand. |
+| `XP*` | Joint cover plate | Buildings and Structures/Structures | Edge of a steel plate that covers an expansion joint. |
+| `XQ*` | Regular depression contour | Terrain and Breaklines/Contours | Contour round a hollow at the regular interval, with the ticks pointing downhill. |
+| `XT*` | Trench top edge | Survey Control and Annotation/Investigation Points | Top edge of a trench dug to expose buried services. |
+| `Y0*` | Whole-metre extra contour | Terrain and Breaklines/Contours | Extra contour drawn at each whole metre between the regular ones. |
+| `YG*` | Plastic gas main | Utilities/Gas | Polyethylene gas main, shot as a line along its route. |
+| `YQ*` | Tenth-metre extra contour | Terrain and Breaklines/Contours | Extra contour drawn at each tenth of a metre, for flat ground. |
+| `Z*` | Heavy contour | Terrain and Breaklines/Contours | Index contour, the heavier line drawn at every fifth contour. |
+| `Z0*` | Index contour, regular | Terrain and Breaklines/Contours | Index contour at the regular index interval. |
+| `ZG*` | Digitised gas main | Utilities/Gas | Gas main traced from imagery or plans and not located on the ground. |
+| `ZQ*` | Index depression contour | Terrain and Breaklines/Contours | Index contour round a hollow, with the ticks pointing downhill. |
 
-## Originality
+### The codes by label
 
-The NSW customisation of this repository, the alternate built-in, was converted from a third party's files, and Katana Standard was made so that nothing of them is in it. Its authors were given that built-in's structure and its statistics (how many groups, codes and strokes, which kinds of rule it uses and where it is weak) to know what a full survey library covers, and were forbidden to copy or paraphrase any name, group, layer, code key, comment, stroke, text or colour of it. They were not to read its contents, but in one exploratory run some of its names were printed in a terminal; none of them was written to a file of this library. The library was written from a specification that fixes its own taxonomy, its own vocabulary and its own palette; every stroke was drawn from a short written brief and looked at, in Katana's own renderer, before it was kept. Reviewers then compared every definition name, group path, layer, survey code key, comment and colour with the built-in's, and every stroke list by exact, translated and scaled match, and found no exact match of a name, key or colour and no stroke list beyond a single dash; what overlaps is single generic words and names of real objects that any survey library has to use (a bollard, a fire hydrant, a retaining wall, layer words such as `water`), which cannot be avoided without being wrong. The test `KatanaStandard.*` repeats the name, key and colour comparison at run time, by count. The library is licensed with the rest of the repository (`LICENSING.md`).
+Every legend label once, in alphabetical order, for looking a code up by what it is called: 546 labels for the 572 keys that have one. A label that several keys share is listed once with all of them.
+
+| Label | Code | Class and group |
+|---|---|---|
+| Abutment base point | `PABB` | Buildings and Structures/Structures |
+| Abutment crest | `AT*` | Buildings and Structures/Structures |
+| Abutment design line | `BA*` | Design and Setting Out/Bridge Design |
+| Abutment foot | `AB*` | Buildings and Structures/Structures |
+| Abutment hinge, first | `AU*` | Design and Setting Out/Bridge Design |
+| Abutment hinge, fourth | `AZ*` | Design and Setting Out/Bridge Design |
+| Abutment hinge, second | `AV*` | Design and Setting Out/Bridge Design |
+| Abutment hinge, third | `AY*` | Design and Setting Out/Bridge Design |
+| Abutment wing wall | `WW*` | Buildings and Structures/Structures |
+| Air release valve | `PWAV` | Utilities/Water |
+| Area for attention | `HP*` | Miscellaneous/General |
+| Awning edge | `AW*` | Buildings and Structures/Buildings |
+| Bank crest | `TC*` | Terrain and Breaklines/Breaklines |
+| Bank toe | `BB*` | Terrain and Breaklines/Breaklines |
+| Barrier and separation, type 1 | `LH*` | Design and Setting Out/Lane Marking Design |
+| Barrier and separation, type 2 | `LR*` | Design and Setting Out/Lane Marking Design |
+| Barrier beside broken line | `BS*` | Roads and Pavements/Markings |
+| Batter flume | `DF*` | Kerbs and Drainage/Channels and Waterways |
+| Batter hinge line | `EH*` | Design and Setting Out/Earthworks Design |
+| Batter meets ground | `IA*` | Design and Setting Out/Earthworks Design |
+| Bench front edge | `IB*` | Design and Setting Out/Earthworks Design |
+| Bench front edge, plain | `IC*` | Design and Setting Out/Earthworks Design |
+| Bench inner edge | `E2*` | Design and Setting Out/Earthworks Design |
+| Bench mark, separate list | `PBMZ` | Survey Control and Annotation/Control Marks |
+| Bench outer edge | `E1*` | Design and Setting Out/Earthworks Design |
+| Bicycle crossing | `LY*` | Design and Setting Out/Lane Marking Design |
+| Bike lane continuity line | `LF*` | Design and Setting Out/Lane Marking Design |
+| Bike lane line | `L7*` | Design and Setting Out/Lane Marking Design |
+| Bike path separation, type 4 | `L0*` | Design and Setting Out/Lane Marking Design |
+| Bike path separation, type 5 | `L5*` | Design and Setting Out/Lane Marking Design |
+| Bituminous edge design | `CE*` | Design and Setting Out/Kerb and Carriageway Design |
+| Bolt, nail or spike station | `PSSE` | Survey Control and Annotation/Control Marks |
+| Borehole point | `PBHX` | Survey Control and Annotation/Investigation Points |
+| Boundary good to 0.1 m | `BO*` | Boundaries and Cadastre/Lot Boundaries |
+| Boundary good to 0.5 m | `BN*` | Boundaries and Cadastre/Lot Boundaries |
+| Boundary join line | `JL*` | Boundaries and Cadastre/Lot Boundaries |
+| Boundary to be acquired | `BY*` | Boundaries and Cadastre/Lot Boundaries |
+| Box culvert, 150 mm | `B0*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 225 mm | `B1*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 300 mm | `B2*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 375 mm | `B3*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 450 mm | `B4*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 600 mm | `B6*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 750 mm | `B7*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, 900 mm | `B9*` | Kerbs and Drainage/Pipes and Culverts |
+| Box culvert, other height | `BX*` | Kerbs and Drainage/Pipes and Culverts |
+| Breakline point | `PBRK` | Terrain and Breaklines/Breaklines |
+| Bridge clearance limit | `UC*` | Buildings and Structures/Structures |
+| Bridge pier or column | `PBPI` | Buildings and Structures/Structures |
+| Broad arrow bench mark | `PSSB` | Survey Control and Annotation/Control Marks |
+| Building corner at ground | `PCBU` | Buildings and Structures/Buildings |
+| Building wall face | `BU*` | Buildings and Structures/Buildings |
+| Built-up area | `OB*` | Miscellaneous/Land Use Areas |
+| Bulk bin | `BI*` | Street Furniture and Signs/Amenities |
+| Buried optical fibre | `OU*` | Utilities/Communications |
+| Buried phone line | `TN*` | Utilities/Communications |
+| Buried power line | `EU*` | Utilities/Electricity |
+| Buried tank outline | `UT*` | Buildings and Structures/Structures |
+| Buried tank, contents unknown | `PUTP` | Utilities/Unknown Services |
+| Bus lane line | `L6*` | Design and Setting Out/Lane Marking Design |
+| Bus shelter roof | `BH*` | Street Furniture and Signs/Amenities |
+| Bus stop position | `PBUS` | Street Furniture and Signs/Amenities |
+| Cable distribution pillar | `PTDP` | Utilities/Communications |
+| Cable joint post | `PTJP` | Utilities/Communications |
+| Cable safety barrier | `FW*` | Street Furniture and Signs/Posts and Barriers |
+| Cadastral corner mark | `PBDY` | Boundaries and Cadastre/Boundary Marks |
+| Camera flash lamp | `PCFU` | Street Furniture and Signs/Traffic Control |
+| Canopy, 1 m spread | `PF01` | Vegetation and Landscape/Trees |
+| Canopy, 10 m spread | `PF10` | Vegetation and Landscape/Trees |
+| Canopy, 12 m spread | `PF12` | Vegetation and Landscape/Trees |
+| Canopy, 15 m spread | `PF15` | Vegetation and Landscape/Trees |
+| Canopy, 2 m spread | `PF02` | Vegetation and Landscape/Trees |
+| Canopy, 3 m spread | `PF03` | Vegetation and Landscape/Trees |
+| Canopy, 4 m spread | `PF04` | Vegetation and Landscape/Trees |
+| Canopy, 5 m spread | `PF05` | Vegetation and Landscape/Trees |
+| Canopy, 6 m spread | `PF06` | Vegetation and Landscape/Trees |
+| Canopy, 7 m spread | `PF07` | Vegetation and Landscape/Trees |
+| Canopy, 8 m spread | `PF08` | Vegetation and Landscape/Trees |
+| Canopy, 9 m spread | `PF09` | Vegetation and Landscape/Trees |
+| Cantilever sign outline | `SX*` | Street Furniture and Signs/Signs |
+| Carriageway centre | `RC*` | Roads and Pavements/Carriageway |
+| Cattle grid outline | `SG*` | Roads and Pavements/Carriageway |
+| Cemetery outline | `OC*` | Miscellaneous/Land Use Areas |
+| Chamber base edge | `CB*` | Utilities/Unknown Services |
+| Chamber top edge | `CT*` | Utilities/Unknown Services |
+| Clearway edge line | `CW*` | Roads and Pavements/Markings |
+| Clearway kerbside line | `LJ*` | Design and Setting Out/Lane Marking Design |
+| Closed-circuit camera | `PCTV` | Street Furniture and Signs/Traffic Control |
+| Communications cable marker | `PTCM` | Utilities/Communications |
+| Communications main pit | `PTMP` | Utilities/Communications |
+| Communications pole | `PTPL` | Utilities/Communications |
+| Compiled boundary | `BC*` | Boundaries and Cadastre/Lot Boundaries |
+| Concrete junction box | `PJBX` | Kerbs and Drainage/Pits and Structures |
+| Concrete reference block | `PRMB` | Boundaries and Cadastre/Boundary Marks |
+| Concrete safety barrier | `KJ*` | Street Furniture and Signs/Posts and Barriers |
+| Concrete survey pillar | `PTSS` | Survey Control and Annotation/Control Marks |
+| Connection meter | `PWMR` | Utilities/Water |
+| Continuity line, type 1 | `LA*` | Design and Setting Out/Lane Marking Design |
+| Coordinated survey mark | `PPSM` | Survey Control and Annotation/Control Marks |
+| Cover lid, service unknown | `PGAT` | Utilities/Unknown Services |
+| Crossing of two lines | `PVID` | Miscellaneous/General |
+| Cultivated land or pasture | `JC*` | Vegetation and Landscape/Ground Cover |
+| Culvert, 1050 mm high | `D0*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 1200 mm high | `D1*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 1500 mm high | `D2*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 1800 mm high | `D3*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 2100 mm high | `D4*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 2400 mm high | `D5*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 2700 mm high | `D6*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 3000 mm high | `D7*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 3300 mm high | `D8*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, 3600 mm high | `D9*` | Kerbs and Drainage/Pipes and Culverts |
+| Culvert, height unstated | `UB*` | Kerbs and Drainage/Pipes and Culverts |
+| Cutting crest | `CU*` | Terrain and Breaklines/Breaklines |
+| Deck edge | `BR*` | Buildings and Structures/Structures |
+| Deck joint line | `XJ*` | Buildings and Structures/Structures |
+| Dense timber or scrub edge | `JD*` | Vegetation and Landscape/Ground Cover |
+| Designed bollard | `AD*` | Design and Setting Out/Barrier and Fence Design |
+| Designed boundary fence | `FN*` | Design and Setting Out/Barrier and Fence Design |
+| Designed culvert | `DV*` | Design and Setting Out/Drainage Design |
+| Designed double barrier | `LD*` | Design and Setting Out/Lane Marking Design |
+| Designed drain pipe | `DI*` | Design and Setting Out/Drainage Design |
+| Designed driveway | `DY*` | Design and Setting Out/Design General |
+| Designed hazard edge | `HL*` | Design and Setting Out/Design General |
+| Designed headwall | `DH*` | Design and Setting Out/Drainage Design |
+| Designed lighting pole | `PLIG*` | Design and Setting Out/Design General |
+| Designed pedestrian rail | `SA*` | Design and Setting Out/Barrier and Fence Design |
+| Designed subsoil drain edge | `SH*` | Design and Setting Out/Drainage Design |
+| Designed zebra crossing | `LZ*` | Design and Setting Out/Lane Marking Design |
+| Detector loop | `SD*` | Utilities/Traffic Systems |
+| Digital boundary | `BM*` | Boundaries and Cadastre/Lot Boundaries |
+| Digitised box culvert | `DZ*` | Kerbs and Drainage/Pipes and Culverts |
+| Digitised fuel pipeline | `FZ*` | Utilities/Fuel |
+| Digitised gas main | `ZG*` | Utilities/Gas |
+| Digitised oil line | `HZ*` | Utilities/Fuel |
+| Digitised optical fibre | `OZ*` | Utilities/Communications |
+| Digitised power line | `EZ*` | Utilities/Electricity |
+| Digitised sewer main | `SZ*` | Utilities/Sewer |
+| Digitised stormwater pipe | `UZ*` | Kerbs and Drainage/Pipes and Culverts |
+| Digitised telephone line | `TZ*` | Utilities/Communications |
+| Digitised water main | `WZ*` | Utilities/Water |
+| Display text | `7*` | Survey Control and Annotation/Text and Notes |
+| Distribution fuse | `PEFP` | Utilities/Electricity |
+| Domed pavement marker | `PTMX` | Roads and Pavements/Markings |
+| Door opening | `DO*` | Buildings and Structures/Buildings |
+| Double barrier line | `DB*` | Roads and Pavements/Markings |
+| Double-faced sign post | `PSDS` | Street Furniture and Signs/Signs |
+| Drain-off valve | `PWSR` | Utilities/Water |
+| Drainage box outline | `DX*` | Kerbs and Drainage/Pits and Structures |
+| Drainage pit outline | `DP*` | Kerbs and Drainage/Pits and Structures |
+| Drinking water main | `WM*` | Utilities/Water |
+| Driveway edge | `DW*` | Roads and Pavements/Paths and Access |
+| Driveway master string | `MD*` | Design and Setting Out/Master Strings |
+| Earth retaining wall | `RW*` | Fences and Walls/Walls |
+| Earthing conductor | `EA*` | Utilities/Electricity |
+| Earthworks master string | `ME*` | Design and Setting Out/Master Strings |
+| Easement boundary | `BE*` | Boundaries and Cadastre/Easements and Reserves |
+| Eave line | `BV*` | Buildings and Structures/Buildings |
+| Edge of a median strip | `EM*` | Roads and Pavements/Carriageway |
+| Electrical conduit | `ED*` | Utilities/Electricity |
+| Electrical junction box | `PEJB` | Utilities/Electricity |
+| Electrical property connection | `EY*` | Utilities/Electricity |
+| Electrical sump outline | `EN*` | Utilities/Electricity |
+| Enforcement camera | `PCAM` | Street Furniture and Signs/Traffic Control |
+| Escarpment crest | `VC*` | Terrain and Breaklines/Rock and Cliff |
+| Ethane main | `HA*` | Utilities/Gas |
+| External stair nosing | `SO*` | Buildings and Structures/Steps and Access |
+| Extra large text | `5*` | Survey Control and Annotation/Text and Notes |
+| Fence corner post | `POCP` | Boundaries and Cadastre/Boundary Marks |
+| Fence guarding a hazard | `SF*` | Fences and Walls/Fences |
+| Fence or guide marker | `POST` | Fences and Walls/Gates and Posts |
+| Fence, type unstated | `FL*` | Fences and Walls/Fences |
+| Fibre cable pit | `POFP` | Utilities/Communications |
+| Fibre duct | `OD*` | Utilities/Communications |
+| Fibre junction box | `POFJ` | Utilities/Communications |
+| Fibre route marker | `POFM` | Utilities/Communications |
+| Field survey limit | `FS*` | Survey Control and Annotation/Plan Marks |
+| Finest text | `1*` | Survey Control and Annotation/Text and Notes |
+| Finished floor level | `PFLR` | Buildings and Structures/Buildings |
+| Fire service hydrant | `PWFB` | Utilities/Fire Service |
+| Fixed bollard | `AC*` | Street Furniture and Signs/Posts and Barriers |
+| Flag mast | `PFLG` | Buildings and Structures/Structures |
+| Flood level mark | `PFHT` | Terrain and Breaklines/Water Edges |
+| Footpath edge | `FP*` | Roads and Pavements/Paths and Access |
+| Footpath near edge | `EW*` | Design and Setting Out/Earthworks Design |
+| Footway far edge | `EX*` | Design and Setting Out/Earthworks Design |
+| Ford crossing | `FO*` | Kerbs and Drainage/Channels and Waterways |
+| Formation edge | `EJ*` | Roads and Pavements/Carriageway |
+| Fuel dispenser | `PPET` | Utilities/Fuel |
+| Fuel line marker | `PFPM` | Utilities/Fuel |
+| Galvanised iron nail | `PGIN` | Boundaries and Cadastre/Boundary Marks |
+| Galvanised iron pipe | `PGPI` | Boundaries and Cadastre/Boundary Marks |
+| Garden bed boundary | `EG*` | Vegetation and Landscape/Ground Cover |
+| Gas flow meter | `PGMR` | Utilities/Gas |
+| Gas line marker | `PGPM` | Utilities/Gas |
+| Gas maintenance hole | `PGHL` | Utilities/Gas |
+| Gas property connection | `DG*` | Utilities/Gas |
+| Gas regulator cabinet | `PGRB` | Utilities/Gas |
+| Gas test terminal | `PGTP` | Utilities/Gas |
+| Gas valve pit | `PGAS` | Utilities/Gas |
+| Gas vent riser | `PGVP` | Utilities/Gas |
+| Gate leaf | `AG*` | Fences and Walls/Gates and Posts |
+| General edge line | `LE*` | Design and Setting Out/Lane Marking Design |
+| General fence | `FE*` | Fences and Walls/Fences |
+| Geotechnical test pit | `PGEO` | Survey Control and Annotation/Investigation Points |
+| Give way line | `LW*` | Design and Setting Out/Lane Marking Design |
+| Give-way line | `CG*` | Roads and Pavements/Markings |
+| Golf course outline | `OG*` | Miscellaneous/Land Use Areas |
+| Grassland edge | `JG*` | Vegetation and Landscape/Ground Cover |
+| Grave headstone | `PHST` | Miscellaneous/Hazards and Heritage |
+| Gravel road edge | `UR*` | Roads and Pavements/Carriageway |
+| Gravity sewer main | `SM*` | Utilities/Sewer |
+| Ground slab edge | `VE*` | Buildings and Structures/Buildings |
+| Ground transformer | `PETC` | Utilities/Electricity |
+| Guard rail crest | `TG*` | Street Furniture and Signs/Posts and Barriers |
+| Gully pit outline | `IP*` | Kerbs and Drainage/Pits and Structures |
+| Gutter flow line design | `CF*` | Design and Setting Out/Kerb and Carriageway Design |
+| Gutter invert line | `FI*` | Kerbs and Drainage/Kerbs |
+| Gutter lip | `LP*` | Kerbs and Drainage/Kerbs |
+| Gutter lip design | `CH*` | Design and Setting Out/Kerb and Carriageway Design |
+| Hanging light | `PLSU` | Street Furniture and Signs/Lighting |
+| Headwall base | `HB*` | Kerbs and Drainage/Pits and Structures |
+| Headwall crest | `HW*` | Kerbs and Drainage/Pits and Structures |
+| Headwall crest point | `PHWT` | Kerbs and Drainage/Pits and Structures |
+| Headwall foot | `PHWB` | Kerbs and Drainage/Pits and Structures |
+| Heavy contour | `Z*` | Terrain and Breaklines/Contours |
+| Height control point | `PVCP` | Survey Control and Annotation/Control Marks |
+| High pressure gas main | `HG*` | Utilities/Gas |
+| High voltage overhead line | `UE*` | Utilities/Electricity |
+| High-pressure gas marker | `PGHM` | Utilities/Gas |
+| Historic interest point | `PHIS` | Miscellaneous/Hazards and Heritage |
+| Index contour, regular | `Z0*` | Terrain and Breaklines/Contours |
+| Index depression contour | `ZQ*` | Terrain and Breaklines/Contours |
+| Indigenous cultural site | `PHIA` | Miscellaneous/Hazards and Heritage |
+| Irrigation pipe | `WI*` | Utilities/Water |
+| Island or turn head string | `MT*` | Design and Setting Out/Master Strings |
+| Isolating valve | `PWSV` | Utilities/Water |
+| Joint cover plate | `XP*` | Buildings and Structures/Structures |
+| Junction box outline | `US*` | Utilities/Unknown Services |
+| Junction manhole | `PDJM` | Kerbs and Drainage/Pits and Structures |
+| Kerb back | `BK*` | Kerbs and Drainage/Kerbs |
+| Kerb base, first | `C1*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb base, second | `C2*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb hinge, fifth | `C7*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb hinge, first | `C3*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb hinge, fourth | `C6*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb hinge, second | `C4*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb hinge, sixth | `C8*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb hinge, third | `C5*` | Design and Setting Out/Kerb and Carriageway Design |
+| Kerb inlet opening | `KI*` | Kerbs and Drainage/Pits and Structures |
+| Kerb top edge | `KB*` | Kerbs and Drainage/Kerbs |
+| Kerbside meter | `PKME` | Street Furniture and Signs/Amenities |
+| Lake shoreline | `WL*` | Terrain and Breaklines/Water Edges |
+| Lane continuity line | `CC*` | Roads and Pavements/Markings |
+| Lane line, long gap | `LL*` | Roads and Pavements/Markings |
+| Lane separation line | `CN*` | Roads and Pavements/Markings |
+| Large sign outline | `SI*` | Street Furniture and Signs/Signs |
+| Large text | `4*` | Survey Control and Annotation/Text and Notes |
+| Left guard rail design | `BF*` | Design and Setting Out/Barrier and Fence Design |
+| Left wall face hatching | `HE*` | Design and Setting Out/Design General |
+| Left-hand chevrons | `CV*` | Roads and Pavements/Markings |
+| Left-turn arrow | `AL*` | Roads and Pavements/Markings |
+| Letterbox | `PMBX` | Street Furniture and Signs/Amenities |
+| Levelling bench mark | `PBMK` | Survey Control and Annotation/Control Marks |
+| Levelling peg | `PDPY` | Survey Control and Annotation/Control Marks |
+| Light outreach arm | `LI*` | Street Furniture and Signs/Lighting |
+| Light pole | `PLPL` | Street Furniture and Signs/Lighting |
+| Lined catch drain | `DL*` | Design and Setting Out/Drainage Design |
+| Lineside control box | `PRBX` | Rail and Transit/Track |
+| Lineside signal | `PRSG` | Rail and Transit/Overhead and Signals |
+| Listed ecological community | `PHEE` | Miscellaneous/Hazards and Heritage |
+| Litter bin | `PBIN` | Street Furniture and Signs/Amenities |
+| Loading dock edge | `LB*` | Buildings and Structures/Buildings |
+| Local overhead line | `UL*` | Utilities/Electricity |
+| Lot and plan labels | `8*` | Survey Control and Annotation/Text and Notes |
+| Low garden light | `PLGN` | Street Furniture and Signs/Lighting |
+| Low-pressure gas main | `LG*` | Utilities/Gas |
+| Main earthing point | `PWET` | Utilities/Water |
+| Main test point | `PWCP` | Utilities/Water |
+| Mains water hydrant | `PWHY` | Utilities/Water |
+| Marsh boundary | `JW*` | Terrain and Breaklines/Water Edges |
+| Master control string | `MC*` | Design and Setting Out/Master Strings |
+| Median edge design | `C0*` | Design and Setting Out/Kerb and Carriageway Design |
+| Median edge master string | `MA*` | Design and Setting Out/Master Strings |
+| Median top edge | `TM*` | Kerbs and Drainage/Kerbs |
+| Medium text | `3*` | Survey Control and Annotation/Text and Notes |
+| Medium timber or scrub edge | `JM*` | Vegetation and Landscape/Ground Cover |
+| Mobile phone mast | `PMPT` | Utilities/Communications |
+| Multi-lane dividing line | `L2*` | Design and Setting Out/Lane Marking Design |
+| Multi-lane lane line, type 1 | `L3*` | Design and Setting Out/Lane Marking Design |
+| Multi-lane lane line, type 3 | `LN*` | Design and Setting Out/Lane Marking Design |
+| Natural ground line | `NS*` | Terrain and Breaklines/Breaklines |
+| Natural ground shot | `PNSS` | Terrain and Breaklines/Ground Points |
+| Network control mark | `PSSG` | Survey Control and Annotation/Control Marks |
+| No-stopping kerbside line | `LK*` | Design and Setting Out/Lane Marking Design |
+| Nylon gas main | `NG*` | Utilities/Gas |
+| Off-road path master string | `MP*` | Design and Setting Out/Master Strings |
+| Offset carriageway crown | `NL*` | Design and Setting Out/Kerb and Carriageway Design |
+| Oil pipeline marker | `POHM` | Utilities/Fuel |
+| Orchard outline | `JO*` | Vegetation and Landscape/Ground Cover |
+| Other fence | `FC*` | Fences and Walls/Fences |
+| Other fuel pipeline | `FU*` | Utilities/Fuel |
+| Other heritage site | `PHNI` | Miscellaneous/Hazards and Heritage |
+| Other structure outline | `OM*` | Buildings and Structures/Structures |
+| Other survey mark | `PMSM` | Boundaries and Cadastre/Boundary Marks |
+| Outdoor fireplace | `PFPL` | Street Furniture and Signs/Amenities |
+| Overhead optical fibre | `OA*` | Utilities/Communications |
+| Overhead wire stanchion | `PSTR` | Rail and Transit/Overhead and Signals |
+| Painted median edge line | `LM*` | Design and Setting Out/Lane Marking Design |
+| Parcel stratum limit | `BZ*` | Boundaries and Cadastre/Lot Boundaries |
+| Park or open space outline | `OP*` | Miscellaneous/Land Use Areas |
+| Path far edge | `E9*` | Design and Setting Out/Design General |
+| Path near edge | `E8*` | Design and Setting Out/Design General |
+| Pavement edge | `EP*` | Roads and Pavements/Carriageway |
+| Pavement interface joint | `NJ*` | Design and Setting Out/Kerb and Carriageway Design |
+| Pedestrian ramp outline | `KR*` | Roads and Pavements/Paths and Access |
+| Peg at a boundary corner | `PBPG` | Boundaries and Cadastre/Boundary Marks |
+| Permanent ground mark | `PPMK` | Boundaries and Cadastre/Boundary Marks |
+| Phone cable duct | `TD*` | Utilities/Communications |
+| Photo centre mark | `PPCN` | Survey Control and Annotation/Control Marks |
+| Photo completion limit | `NF*` | Survey Control and Annotation/Plan Marks |
+| Photo digitising limit | `DE*` | Survey Control and Annotation/Plan Marks |
+| Picnic table outline | `TA*` | Street Furniture and Signs/Amenities |
+| Pier design line | `BQ*` | Design and Setting Out/Bridge Design |
+| Pier headstock | `HS*` | Buildings and Structures/Structures |
+| Pier or column outline | `BP*` | Buildings and Structures/Structures |
+| Pile cap point | `PBCP` | Buildings and Structures/Structures |
+| Pin on a design alignment | `PAPN` | Survey Control and Annotation/Control Marks |
+| Pipe invert | `PINV` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 1050 mm | `PI10` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 1200 mm | `PI12` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 1350 mm | `PI13` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 1500 mm | `PI15` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 1650 mm | `PI16` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 1800 mm | `PI18` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 225 mm | `PI01` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 300 mm | `PI02` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 375 mm | `PI03` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 450 mm | `PI04` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 525 mm | `PI05` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 600 mm | `PI06` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 750 mm | `PI07` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe invert, 900 mm | `PI09` | Kerbs and Drainage/Pipes and Culverts |
+| Pipe obvert | `POBV` | Kerbs and Drainage/Pipes and Culverts |
+| Pipeline, service unknown | `UP*` | Utilities/Unknown Services |
+| Plain unbroken line | `LU*` | Design and Setting Out/Lane Marking Design |
+| Plan-only control mark | `PHCP` | Survey Control and Annotation/Control Marks |
+| Plastic gas main | `YG*` | Utilities/Gas |
+| Platform ramp edge | `RR*` | Rail and Transit/Platforms |
+| Platform top edge | `RP*` | Rail and Transit/Platforms |
+| Plug, pipe or block station | `PSSD` | Survey Control and Annotation/Control Marks |
+| Point on an awning | `PAWN` | Buildings and Structures/Buildings |
+| Point on top of abutment | `PABT` | Buildings and Structures/Structures |
+| Pole of unknown use | `PPOL` | Utilities/Unknown Services |
+| Pole stay anchor | `PSAP` | Utilities/Electricity |
+| Pole stay wire | `SC*` | Utilities/Electricity |
+| Pothole with level | `PHRL` | Survey Control and Annotation/Investigation Points |
+| Pothole, no level | `PHNL` | Survey Control and Annotation/Investigation Points |
+| Power cable manhole | `PEMH` | Utilities/Electricity |
+| Power cable marker | `PECM` | Utilities/Electricity |
+| Power pole | `PPPL` | Utilities/Electricity |
+| Power pole with light | `PPLP` | Utilities/Electricity |
+| Power pole with transformer | `PPTR` | Utilities/Electricity |
+| Power service pillar | `PEUP` | Utilities/Electricity |
+| Pressurised oil line | `HO*` | Utilities/Fuel |
+| Pump-out station outline | `SQ*` | Utilities/Sewer |
+| Pumped sewer line | `SR*` | Utilities/Sewer |
+| Pylon leg footing | `EL*` | Utilities/Electricity |
+| Rail head | `RA*` | Rail and Transit/Track |
+| Rail head level | `PRAL` | Rail and Transit/Track |
+| Raised water pipeline | `UO*` | Utilities/Water |
+| Recycled air valve | `PRAV` | Utilities/Recycled Water |
+| Recycled earth terminal | `PRET` | Utilities/Recycled Water |
+| Recycled hydrant | `PRHY` | Utilities/Recycled Water |
+| Recycled main marker | `PRMM` | Utilities/Recycled Water |
+| Recycled stop valve | `PRSV` | Utilities/Recycled Water |
+| Recycled tap | `PRTP` | Utilities/Recycled Water |
+| Recycled water main | `RM*` | Utilities/Recycled Water |
+| Recycled water meter | `PRMR` | Utilities/Recycled Water |
+| Regular contour | `X0*` | Terrain and Breaklines/Contours |
+| Regular depression contour | `XQ*` | Terrain and Breaklines/Contours |
+| Reservoir outline | `RE*` | Utilities/Water |
+| Retaining wall master string | `MW*` | Design and Setting Out/Master Strings |
+| Ridge or crest line | `NB*` | Terrain and Breaklines/Breaklines |
+| Right guard rail design | `BG*` | Design and Setting Out/Barrier and Fence Design |
+| Right wall face hatching | `HR*` | Design and Setting Out/Design General |
+| Right-hand chevrons | `CY*` | Roads and Pavements/Markings |
+| Right-turn arrow | `AR*` | Roads and Pavements/Markings |
+| River bank edge | `WR*` | Terrain and Breaklines/Water Edges |
+| Road authority control mark | `PCMK` | Survey Control and Annotation/Control Marks |
+| Roadside guard fence | `FG*` | Street Furniture and Signs/Posts and Barriers |
+| Roadside table drain | `DT*` | Kerbs and Drainage/Channels and Waterways |
+| Rock area outline | `JR*` | Terrain and Breaklines/Rock and Cliff |
+| Roundabout lane line | `L4*` | Design and Setting Out/Lane Marking Design |
+| Ruin outline | `OR*` | Buildings and Structures/Buildings |
+| Rumble strip line | `TL*` | Roads and Pavements/Markings |
+| Safety barrier master string | `MS*` | Design and Setting Out/Master Strings |
+| Scattered timber or scrub edge | `JS*` | Vegetation and Landscape/Ground Cover |
+| Sealed edge master string | `MK*` | Design and Setting Out/Master Strings |
+| Seat outline | `SE*` | Street Furniture and Signs/Amenities |
+| Security fence | `FM*` | Fences and Walls/Fences |
+| Seismic shot point | `PSTS` | Survey Control and Annotation/Investigation Points |
+| Seismic survey line | `SL*` | Survey Control and Annotation/Investigation Points |
+| Separation and barrier lines | `SB*` | Roads and Pavements/Markings |
+| Septic tank outline | `ST*` | Utilities/Sewer |
+| Sewage pond outline | `SP*` | Utilities/Sewer |
+| Sewage pumping station | `PSPS` | Utilities/Sewer |
+| Sewer inspection lamphole | `PSLH` | Utilities/Sewer |
+| Sewer isolation valve | `PSSV` | Utilities/Sewer |
+| Sewer maintenance hole | `PSMH` | Utilities/Sewer |
+| Sewer property connection | `SY*` | Utilities/Sewer |
+| Sewer route marker | `PSMM` | Utilities/Sewer |
+| Sewer vent stack | `PSVP` | Utilities/Sewer |
+| Short bracing pole | `PSPL` | Utilities/Electricity |
+| Shoulder outer edge | `ES*` | Design and Setting Out/Kerb and Carriageway Design |
+| Signal cable trough | `RS*` | Rail and Transit/Overhead and Signals |
+| Signal controller cabinet | `PSCL` | Street Furniture and Signs/Traffic Control |
+| Signal junction box | `PSJX` | Utilities/Traffic Systems |
+| Signal mast arm outline | `TO*` | Street Furniture and Signs/Traffic Control |
+| Signal stop line | `LS*` | Design and Setting Out/Lane Marking Design |
+| Signal vehicle detector | `PSDR` | Utilities/Traffic Systems |
+| Signalised crossing | `CX*` | Roads and Pavements/Markings |
+| Signalling cable trough | `PRCC` | Rail and Transit/Track |
+| Silo or tank outline | `OS*` | Buildings and Structures/Structures |
+| Single communications pit | `PTSP` | Utilities/Communications |
+| Single-faced sign post | `PSIN` | Street Furniture and Signs/Signs |
+| Site that endangers people | `PHAZ` | Miscellaneous/Hazards and Heritage |
+| Slip scarp | `VL*` | Terrain and Breaklines/Breaklines |
+| Small text | `2*` | Survey Control and Annotation/Text and Notes |
+| Solid painted line | `CD*` | Roads and Pavements/Markings |
+| Speed limit 100 km/h | `S1*` | Street Furniture and Signs/Signs |
+| Speed limit 110 km/h | `S2*` | Street Furniture and Signs/Signs |
+| Speed limit 40 km/h | `S4*` | Street Furniture and Signs/Signs |
+| Speed limit 50 km/h | `S5*` | Street Furniture and Signs/Signs |
+| Speed limit 60 km/h | `S6*` | Street Furniture and Signs/Signs |
+| Speed limit 70 km/h | `S7*` | Street Furniture and Signs/Signs |
+| Speed limit 80 km/h | `S8*` | Street Furniture and Signs/Signs |
+| Speed limit 90 km/h | `S9*` | Street Furniture and Signs/Signs |
+| Sporting arena outline | `OO*` | Miscellaneous/Land Use Areas |
+| Spot level on ground | `PSHT` | Terrain and Breaklines/Ground Points |
+| Star picket mark | `PSTA` | Boundaries and Cadastre/Boundary Marks |
+| State geodetic mark | `PSSM` | Survey Control and Annotation/Control Marks |
+| Station peg | `PSSC` | Survey Control and Annotation/Control Marks |
+| Stockpile outline | `OH*` | Miscellaneous/Land Use Areas |
+| Stormwater gully pit | `PGUL` | Kerbs and Drainage/Pits and Structures |
+| Stormwater pipe, 1050 mm | `V1*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 1200 mm | `V2*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 1350 mm | `V3*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 1500 mm | `V5*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 1650 mm | `V6*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 1800 mm | `V8*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 225 mm | `U1*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 300 mm | `U2*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 375 mm | `U3*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 450 mm | `U4*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 525 mm | `U5*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 600 mm | `U6*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 750 mm | `U7*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, 900 mm | `U9*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, any size | `UX*` | Kerbs and Drainage/Pipes and Culverts |
+| Stormwater pipe, size unstated | `UU*` | Kerbs and Drainage/Pipes and Culverts |
+| Straight-ahead arrow | `AS*` | Roads and Pavements/Markings |
+| Straight-and-left arrow | `AE*` | Roads and Pavements/Markings |
+| Straight-and-right arrow | `AI*` | Roads and Pavements/Markings |
+| Subsoil drain outlet level | `PSDO` | Kerbs and Drainage/Pits and Structures |
+| Subsoil flushing point | `PSFP` | Kerbs and Drainage/Pits and Structures |
+| Sump inlet | `PILT` | Kerbs and Drainage/Pits and Structures |
+| Sunken median | `DM*` | Design and Setting Out/Earthworks Design |
+| Supplementary control mark | `PMCP` | Survey Control and Annotation/Control Marks |
+| Survey bolt | `PBLT` | Survey Control and Annotation/Control Marks |
+| Survey check line | `QQ*` | Miscellaneous/General |
+| Survey mark, type unstated | `PSSA` | Survey Control and Annotation/Control Marks |
+| Survey nail | `PNAL` | Boundaries and Cadastre/Boundary Marks |
+| Survey reference mark | `PCRM` | Boundaries and Cadastre/Boundary Marks |
+| Survey spike | `PSKI` | Boundaries and Cadastre/Boundary Marks |
+| Surveyed offset crown | `OF*` | Roads and Pavements/Carriageway |
+| Surveyed title boundary | `BT*` | Boundaries and Cadastre/Lot Boundaries |
+| Swamp or marsh | `PSWA` | Terrain and Breaklines/Water Edges |
+| Swimming pool outline | `OT*` | Buildings and Structures/Structures |
+| Table drain, far edge | `DJ*` | Design and Setting Out/Earthworks Design |
+| Table drain, far side | `IE*` | Design and Setting Out/Earthworks Design |
+| Table drain, near edge | `DK*` | Design and Setting Out/Earthworks Design |
+| Table drain, road side | `ID*` | Design and Setting Out/Earthworks Design |
+| Teeth, points left | `DA*` | Roads and Pavements/Markings |
+| Teeth, points right | `DC*` | Roads and Pavements/Markings |
+| Telephone booth | `PTBX` | Utilities/Communications |
+| Telephone box outline | `TX*` | Utilities/Communications |
+| Telephone property connection | `TY*` | Utilities/Communications |
+| Telephone sump outline | `TS*` | Utilities/Communications |
+| Temporary works master string | `MX*` | Design and Setting Out/Master Strings |
+| Tenth-metre extra contour | `YQ*` | Terrain and Breaklines/Contours |
+| Threatened community | `PHEC` | Miscellaneous/Hazards and Heritage |
+| Track centreline | `RT*` | Rail and Transit/Track |
+| Track edge | `EK*` | Roads and Pavements/Carriageway |
+| Track formation edge | `RF*` | Rail and Transit/Track |
+| Track survey monument | `PRTM` | Rail and Transit/Track |
+| Traffic signal post | `PSGL` | Street Furniture and Signs/Traffic Control |
+| Traffic systems cable | `IT*` | Utilities/Traffic Systems |
+| Transformer cabinet outline | `EC*` | Utilities/Electricity |
+| Transmission pylon | `PHTT` | Utilities/Electricity |
+| Tree foliage outline | `TR*` | Vegetation and Landscape/Trees |
+| Trench floor edge | `XB*` | Survey Control and Annotation/Investigation Points |
+| Trench top edge | `XT*` | Survey Control and Annotation/Investigation Points |
+| Trigonometric station | `PSSF` | Survey Control and Annotation/Control Marks |
+| Triple communications pit | `PT3P` | Utilities/Communications |
+| Trunk 100 mm across | `PT01` | Vegetation and Landscape/Trees |
+| Trunk 1000 mm across | `PT10` | Vegetation and Landscape/Trees |
+| Trunk 1200 mm across | `PT12` | Vegetation and Landscape/Trees |
+| Trunk 1500 mm across | `PT15` | Vegetation and Landscape/Trees |
+| Trunk 200 mm across | `PT02` | Vegetation and Landscape/Trees |
+| Trunk 300 mm across | `PT03` | Vegetation and Landscape/Trees |
+| Trunk 400 mm across | `PT04` | Vegetation and Landscape/Trees |
+| Trunk 500 mm across | `PT05` | Vegetation and Landscape/Trees |
+| Trunk 600 mm across | `PT06` | Vegetation and Landscape/Trees |
+| Trunk 700 mm across | `PT07` | Vegetation and Landscape/Trees |
+| Trunk 800 mm across | `PT08` | Vegetation and Landscape/Trees |
+| Trunk 900 mm across | `PT09` | Vegetation and Landscape/Trees |
+| Trunk of unrecorded size | `PTRE` | Vegetation and Landscape/Trees |
+| Turn guide line | `LT*` | Design and Setting Out/Lane Marking Design |
+| Twin communications pit | `PTTP` | Utilities/Communications |
+| Two-lane dividing line, type 1 | `L8*` | Design and Setting Out/Lane Marking Design |
+| Two-lane dividing line, type 3 | `L9*` | Design and Setting Out/Lane Marking Design |
+| Unclassified road string | `BD*` `C9*` `CL*` `CM*` `CR*` `CS*` `E0*` `E3*` `E4*` `E5*` `E6*` `E7*` `EB*` `EF*` `ER*` `ET*` `I0*` `I1*` `I2*` `I3*` `I4*` `I5*` `I6*` `I7*` `I8*` `I9*` `R*` | Design and Setting Out/Road Design Strings |
+| Unknown service point | `PUSR` | Utilities/Unknown Services |
+| Unlined catch drain | `DU*` | Design and Setting Out/Drainage Design |
+| V-shaped concrete drain | `DD*` | Kerbs and Drainage/Kerbs |
+| Vehicle track edge | `VT*` | Roads and Pavements/Carriageway |
+| Verge outer edge | `EV*` | Design and Setting Out/Earthworks Design |
+| Wall base | `BW*` | Buildings and Structures/Buildings |
+| Wall top edge | `TW*` | Buildings and Structures/Buildings |
+| Water authority mark | `PDSM` | Survey Control and Annotation/Control Marks |
+| Water main marker post | `PWMM` | Utilities/Water |
+| Water property connection | `WY*` | Utilities/Water |
+| Water pump | `PWEP` | Utilities/Water |
+| Water supply tap | `PWTP` | Utilities/Water |
+| Water surface level | `PWLP` | Terrain and Breaklines/Water Edges |
+| Watercourse centre | `WC*` | Kerbs and Drainage/Channels and Waterways |
+| Waterline with level | `WE*` | Terrain and Breaklines/Water Edges |
+| Whole-metre extra contour | `Y0*` | Terrain and Breaklines/Contours |
+| Windmill outline | `OW*` | Buildings and Structures/Structures |
+| Windmill tower | `PWML` | Buildings and Structures/Structures |
+| Winged drill hole | `PDHL` | Boundaries and Cadastre/Boundary Marks |
+| Wingwall end | `PEWW` | Kerbs and Drainage/Pits and Structures |
+| Witness tree | `PRTR` | Boundaries and Cadastre/Boundary Marks |
+| Zebra crossing | `CZ*` | Roads and Pavements/Markings |
+| Zigzag approach marking | `CA*` | Roads and Pavements/Markings |
 
 ## Decisions, and what was rejected
 
+- **The keys are the NSW customisation's.** The owner ruled that Katana Standard has the same survey codes as the NSW one, with different symbols and linestyles, so that a field file works with either. The library began with a vocabulary of its own, 245 codes of three capital letters each; it is gone, with its documents, tests and pictures, since the library is new and nothing but those depended on it. Rejected: keeping both vocabularies, which would double the codes a surveyor learns and leave two answers to one field file.
+- **The structure follows the keys, the look does not.** A key makes the same kinds of entity in both libraries because the rule kinds, the draw mode, the text and pipe rules and the surface and hide flags are the other's; every visible choice is Katana's. Rejected: copying a look that a person could copy back, and a looser match (the same key but another draw mode), under which the same field file would make a point in one library and a line in the other.
+- **One clean rule set per key.** The other library repeats and shadows rules, names pen colours that resolve to nothing, draws a symbol through a linestyle slot and applies the attributes of its `*` pipe rules to every code. Reproducing that would give `CODE CHECK` hundreds of warnings on a new library and put those attributes on whatever is coded; each difference is a counted exception that `parity.py` holds.
+- **A service code asks for its service's attributes.** Where the other library has no attributes rule for a service key, one is added last (grammar rule 9), so that `UTILITY DRAW` reads a coded string as a typed service. Rejected: strict equality of the rule kinds, which would drop the typing the utility tools read and leave every coded service "unknown".
 - **Paper units for every definition, no `twoPoint`.** Measured in the engine, a stretched definition scales its marks with the line's length, so an arrowhead grows with the leader. Rejected: `world` units, whose marks would change size with the zoom and be unreadable at plan scale.
-- **Three-letter keys, digits never part of one.** `UWM`, `UWM1` and `UWM01` are the same code; the digits are the string number, which the linework already reads. A key written with a digit before its `*` would match only numbered names. Rejected: two-letter keys, which leave no room for a family of services under one class.
-- **No left or right suffix.** The rule engine matches a key exactly or by prefix and has no other form, so handedness is by direction of travel: ticks, barbs and chevrons fall to the LEFT, and each code says which way to walk.
-- **Every code owns its `KEY*` rule.** A typo (`UWQ`) is then reported as a code no rule answers. Rejected: a family rule per class, which would swallow a mistyped code and style it as something else.
+- **No left or right suffix.** The rule engine matches a key exactly or by prefix and has no other form, so a handed pair is two keys (`CV*` and `CY*`, `DA*` and `DC*`, `LH*` and `LR*`, `HE*` and `HR*`) and otherwise handedness is by direction of travel: ticks, barbs and chevrons fall to the LEFT.
+- **Every key is matched as written.** A typo is then reported as a code no rule answers, unless some prefix key fits it by chance; the invented field file's `PWSW` is none of the 632 keys' prefixes.
 - **The library says nothing of linework spellings or automation.** Loading it onto a session must not reset a colleague's control words, so `linework` and `automation` are absent from the file, not written at their defaults.
 - **A dot is a short dash.** Katana draws a `dot` stroke as one pen-width point whatever its radius: a speck a third of the line's weight on a plot and one pixel on screen. Dash-dot lines and the centres of symbols are therefore drawn with 0.6 mm dashes and a very small ring, measured in the renderer, and the definitions say so.
-- **Layers are what one switches on and off together.** One per family, three levels, never one per code and never one per lifecycle: a disused service is an attribute, `utility.status`, and its own layer only in the utility group where the state is itself something one switches off.
-- **Edges that are one hard line stay plain.** 24 of the 123 line codes use Katana's plain continuous line, since a solid line is the right drawing for a hard edge: the carriageway and path edges, the building wall, the kerb top and return (one feature, straight and curved), concrete walls, the bridge deck and the hairline detail. Where pens are applied the weight tells them apart; until then they differ by layer alone. Where two lines of one class are NOT the same thing they have a pattern each: the gutter lip is `Gutter Lip Line` and the back of the kerb `Kerb Back Line`, so a kerb reads as three lines on a plan whether or not the weights are applied.
-- **Stormwater pits and pipes are typed for the utility tools.** The pits and structures (`KP`) and the pipes and culverts (`KC`) of class K set `utility.type` to `stormwater`, though they are catalogued as drainage; the kerbs, channels and creeks do not. Rejected: leaving them untyped, which makes `UTILITY DRAW` read a coded stormwater pipe as an unknown service.
+- **Layers are what one switches on and off together.** One per family, three levels, never one per code: 160 layers for 632 codes.
+- **Edges that are one hard line stay plain.** 143 of the 360 line codes use Katana's plain continuous line, since a solid line is the right drawing for a hard edge or a design string; where two lines of one class are NOT the same thing they have a pattern each.
+- **Stormwater pits and pipes are typed for the utility tools.** The pits and structures and the pipes and culverts of class K set `utility.type` to `stormwater`, though they are catalogued as drainage; the kerbs, channels and creeks do not. Rejected: leaving them untyped, which makes `UTILITY DRAW` read a coded stormwater pipe as an unknown service.
+- **A size a key stands for is applied.** The key itself states none: a pipe `U3*` is 375 mm, an invert `PI04` is in a 450 mm pipe and a box culvert `D1*` is 1200 mm high because the other library's labels for those keys say so ("What is shared and what is not"). Each applies `Diameter (mm)` or `Height (mm)`, so the surveyor is not asked what the code already means.
 
 ## How it is made and held
 
-- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` and `codes.py`, each importing nothing of the outside and each with its own `--check`; the check of `colours.py` also reads `kNearWhiteChannel` from `include/katana/cad/plot.hpp`, so the white rule it prints by is the plot's. `make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, `--docs` this document, `--check` exits 1 when either committed output differs from what the data makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.
+- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` and `codes.py`, each importing nothing of the outside and each with its own `--check`; the check of `colours.py` also reads `kNearWhiteChannel` from `include/katana/cad/plot.hpp`, so the white rule it prints by is the plot's. `codes.py --check` also holds that every definition is named by a code and every colour of the palette is used. `make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, `--docs` this document, `--check` exits 1 when either committed output differs from what the data makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.
 - **The bytes are the writer's.** The generator writes the canonical form `customisationToJson` writes (`docs/customisation.md`, "What the writer writes"): a file loaded by `CUSTOMISE <file>` and written again by `CUSTOMISE EXPORT <out> CODES LINESTYLES SYMBOLS` comes back byte for byte, except for the one line the session adds, its record of what it was loaded from (`make_katana_standard.py --check --round-trip <katana_cli>`). The tests below check the same on the value itself.
 - **A second opinion.** `tools/katana_standard/census.py` counts the committed file with the standard `json` module and no Katana code, and `tools/customisation_census.py` counts the generic figures. The tests pin the figures those scripts gave.
-- **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed file with the strict reader and holds the counts, the grammar, every name resolved, every definition used and catalogued, the weights, the utility words, the geometry bounds of the contract and the byte-for-byte writer round trip. `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code` imports the invented field file; `cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line` strings control words, which no field-file reader carries, into a curve, a rectangle and a closed line. A counts-only test cannot see a swapped colour, weight or linestyle, so `katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each data module's own check; they exist where Python does.
-- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and `-showcase.png` are drawn by Katana itself from the committed file, headlessly (`tools/katana_standard/render_images.py`; `docs/headless.md`): the symbols are the Symbol Library's own icons, tinted with the colour of the code that uses each and laid out on one sheet; the linestyles are a 300 dpi plot; the plan is the plan view at twice the pixels, each feature named beside it by the script; the showcase is the plan view at the plot scale 1:500, in a few screenshots laid side by side. `-palette.png` is laid out from the palette's values by `palette_preview.py`, since a palette is a table and not a drawing. The images are not byte-reproducible, since fonts differ between machines, so `--check` does not compare them. Each is under 500 KB.
+- **The comparison with the other library** is `tools/katana_standard/parity.py` (keys and structure, with `parity_exceptions.json` and its own tests in `test_parity.py`) and `originality.py` (what else is shared, with its own tests in `test_originality.py`). `katana_standard_parity` and `katana_standard_originality` run them against the two tracked files, and `katana_standard_parity_script` and `katana_standard_originality_script` run the scripts' own tests on small invented libraries; `KatanaStandard.EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey` and `KatanaStandard.FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBuiltInMakes` do the same in C++, from the two files alone.
+- **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed file with the strict reader and holds the counts, the grammar, every name resolved, every definition used and catalogued, the weights, the utility words, the geometry bounds of the contract and the byte-for-byte writer round trip. `cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code` imports the invented field file; `cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line` strings control words, which no field-file reader carries, into a curve, a rectangle and a closed line; `cli.katana_standard_code_check_finds_no_problem` holds that `CODE CHECK` finds nothing. A counts-only test cannot see a swapped colour, weight or linestyle, so `katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each data module's own check; they exist where Python does.
+- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and `-showcase.png` are drawn by Katana itself from the committed file, headlessly (`tools/katana_standard/render_images.py`; `docs/headless.md`): the symbols are the Symbol Library's own icons, tinted with the colour of a code that uses each (a code of the definition's own group; what several services share takes the first that uses it) and laid out on one sheet with each symbol's size on paper under its name, since the dialog scales every icon to fill its tile; the linestyles are a 300 dpi plot, each sample drawn by such a code, the rows as far apart as their linestyles need; the plan is the plan view at twice the pixels, each feature named beside it by the script; the showcase is the plan view at the plot scale 1:500, in a few screenshots laid side by side. `-palette.png` is laid out from the palette's values by `palette_preview.py`, since a palette is a table and not a drawing. The images are not byte-reproducible, since fonts differ between machines, so `--check` does not compare them. Each is under 500 KB.
 
 ## Not done
 
 - **Yellow and cream print light.** AS 5488's gas and sewer colours are under 3:1 on white paper, and the plot has no rule that darkens a light colour: it turns only white and near-white pens black (`cad::paperColour`). A rule that did, for any pen under 3:1, would change every plot, so it is the owner's decision; until then they print light, as the palette section says.
 - **The earlier file names of an old project** belonged to the NSW customisation and are answered by it alone (`docs/customisation.md`, "Several built-ins"): opened under Katana Standard such a project lists them as not loaded, and `CUSTOMISE BUILTIN NSW` clears them. The warning does not name that verb for them, since what is missing is the old file names. Narrow: a project saved in the first days of the built-in.
-- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the project licence does not cover and says the library is covered; the library was written by AI agents under the owner's direction, and what that means for copyright is a question for the owner and a lawyer.
+- **Whether the licence reaches this library is the owner's to settle.** `LICENSING.md` lists what the project licence does not cover. The library was written by AI agents under the owner's direction, and its survey code keys are another library's identifiers, reused on the owner's decision for field-data compatibility; what either means for copyright is a question for the owner and a lawyer.
+- **The meaning of some keys is a reading.** Several dozen keys have a label in the other library and no stated purpose (the unclassified road design strings, the hinges and bases of a cross-section, a few marks and lane lines). Their meanings are worded as generally as the label allows, and the unclassified design strings share one layer family each; a surveyor who knows what one is for should say so.
 - **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's rotation, offset and raise. The library carries them for the day it does.
 - **A curve cannot come from a field file.** The readers Katana has strung points by the file's own strings and close one with opcode 20; control words (`BC`, `EC`, `ST`, `END`, `CL`, `RECT`) reach the linework only from a code kept in a point's property, so the curve and the rectangle are tested through `LINEWORK PROPERTY` and not through an import.
-- **Undo leaves the parent layers.** Katana's layer table makes every ancestor of a layer path a layer of its own, and Undo removes the layer a command made and not its ancestors: `LAYER NEW x/y/z` then `UNDO` leaves `x` and `x/y`. The library's layers are three levels deep, so one undo of the street corner's import takes the points, lines and styles and the ten layers they sit on away and leaves 15 empty parent layers. It is the layer table's behaviour, not the library's: the flat layer names of other libraries never showed it. Not changed here.
-- **Two inconsistencies** are known and left as they are, because the names are frozen: `Pit Size (mm)` is text where every other millimetre attribute is an integer, and 15 linestyles are shared by two to 6 codes, so the plot legend uses the linestyle's name for them.
-- **Some symbols sit off the centre of their box**: Booster Connection, Building Corner, Doorway and North Arrow by 0.4 to 0.6 mm, and a few others (the valves, the camera, the trigonometric station) by 0.25 to 0.35. The surveyed point is not the middle of their drawing, and each description says where the origin is. The Communications Maintenance Hole, a double ring with a C, reads as a copyright sign at small size.
+- **A control word typed alone is a code, and six of the seven are answered.** Four keys are spelled like a default control word (`BC*`, `CL*`, `EC*`, `ST*`) and two more answer one by prefix (`EN*` answers `END` and `RE*` answers `RECT`), as in the other library; only `JPN` is answered by no key. A control word is read only after the key, so a point coded `ST` is a string called ST, a septic tank, and one coded `END` an electrical sump. Nothing is lost, but a surveyor who types a control word in the code column gets a feature.
+- **A pipe is sized from this library's own attribute.** The pipe rules of the bare `*` take a size from `Diameter (mm)`. The other library's take theirs from attributes of other names (and have culvert rules sized from a width and a height, where this library keeps the one round-pipe rule its lookup resolves to), so a field file that carries those attributes will size no pipe here on the day Katana applies pipe rules, and the unit is millimetres by the attribute's name alone: nothing converts a value. Nothing differs today, since pipe rules are stored and not applied.
+- **Undo leaves the parent layers.** Katana's layer table makes every ancestor of a layer path a layer of its own, and Undo removes the layer a command made and not its ancestors: `LAYER NEW x/y/z` then `UNDO` leaves `x` and `x/y`. The library's layers are three levels deep, so one undo of the street corner's import takes the points, lines and styles and the ten layers they sit on away and leaves 15 empty parent layers. It is the layer table's behaviour, not the library's. Not changed here.
+- **39 linestyles are shared by two to 22 codes**, so the plot legend uses the linestyle's name for them and not the code's label.
+- **Some symbols sit off the centre of their box**: Winged Drill Hole, Steel Picket, Stay Wire Pole, Fuel Dispenser, Building Corner and Water Level Mark, by 0.39 to 0.60 mm. The surveyed point is not the middle of their drawing, and each description says where the origin is.

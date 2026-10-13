@@ -24,8 +24,8 @@
 //
 // Where the build has a customisation to compile in (the DEFAULT built-in: the
 // file KATANA_BUILTIN_CUSTOMISATION names, the tracked
-// resources/customisation/katana-standard.customisation.json by default - 186
-// definitions, about an eighth of the reference one's bytes; the NSW file is an
+// resources/customisation/katana-standard.customisation.json by default - 221
+// definitions, about a fifth of the reference one's bytes; the NSW file is an
 // alternate and is not measured), the same is measured on that very file, read
 // from disk here. The generated customisation stays at the REFERENCE size above,
 // so the built-in column of docs/customisation.md ("What reading and writing

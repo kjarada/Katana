@@ -26,14 +26,15 @@ file in Katana and keeps it changes nothing.
 
 What the file carries, and what it leaves out, on purpose:
 
-* `name` "Katana Standard", a description and a three-line notice, from the counts of the data.
+* `name` "Katana Standard", a description (from the counts of the data) and a three-line notice.
 * `colours`: the 28 of `colours.py`.
 * `linestyles` and `symbols`: every definition, `paper` units, in name order. The one-line `description` of a
   definition is NOT in the file (the format has no member for it); it is in the catalogue, docs/katana_standard.md.
 * `codes`: the rules of `codes.expand_rules`, a code after a code in the order of `CODES`.
 * No `linework` and no `automation`: the library says nothing about control words or about what is applied
   on import, so loading it never resets a colleague's own settings.
-* No `sources` and no `basedOn`: it was made here, from nothing.
+* No `sources` and no `basedOn`: it was converted from no file. Its survey code keys are the other built-in
+  library's, by the owner's decision (codes.py, grammar rule 1), and the notice says so.
 """
 import json
 import os
@@ -74,13 +75,15 @@ class Data:
         self.classes = len(self.codes_module.TAXONOMY)
 
     def description(self):
-        return ("%s, edition %d: an original survey feature library for Katana, with %d linestyles, %d symbols "
-                "and %d survey codes in %d classes." % (NAME, EDITION, len(self.linestyles), len(self.symbols),
-                                                         len(self.codes), self.classes))
+        return ("%s, edition %d: Katana's own linestyles, symbols, layers and colours for %d survey codes, with %d "
+                "linestyles and %d symbols. The survey code keys are the other built-in library's, for field-data "
+                "compatibility." % (NAME, EDITION, len(self.codes), len(self.linestyles), len(self.symbols)))
 
-    NOTICE = ["Katana Standard is original work made for Katana.",
-              "It contains no third-party customisation, style library or survey code file.",
-              "Its licence is that of the Katana repository."]
+    NOTICE = ["Katana Standard was made for Katana: its linestyles, symbols, layers, colours and words are Katana's "
+              "own.",
+              "Its survey code keys, what each key stands for and the kinds of rule each key has are those of the "
+              "other built-in library, kept so that the same field data works with either, on the owner's decision.",
+              "Its licence is that of the Katana repository, whose LICENSING.md says what that leaves open for the keys."]
 
 
 # ---- the writer's form ---------------------------------------------------------------------------------------
@@ -292,7 +295,7 @@ def stats(data):
             "definitions": len(data.linestyles) + len(data.symbols),
             "groups": len({d["group"] for d in data.linestyles + data.symbols}),
             "codes": len(data.codes), "rules": len(data.rules), "colours": len(data.colours.COLOURS),
-            "layers": len({c["layer"] for c in data.codes}), "classes": data.classes}
+            "layers": len({r["layer"] for r in data.rules if r["sets"] == "feature"}), "classes": data.classes}
 
 
 def main(argv):

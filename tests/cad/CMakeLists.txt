@@ -34,12 +34,16 @@ katana_add_test_suite(cad
 # The sample investigation the utility tests draw and report, the one the
 # cli.utility_* tests and docs/subsurface_utilities.md work by hand.
 target_compile_definitions(katana_cad_tests PRIVATE
-    KATANA_UTILITY_SAMPLES="${PROJECT_SOURCE_DIR}/samples/utilities")
-# Katana Standard, the original customisation under resources/customisation,
-# and the catalogue that lists every one of its definitions and codes
+    KATANA_UTILITY_SAMPLES="${PROJECT_SOURCE_DIR}/samples/utilities"
+    KATANA_UTILITY_DOC="${PROJECT_SOURCE_DIR}/docs/subsurface_utilities.md")
+# Katana Standard, the customisation under resources/customisation whose survey
+# code keys are the NSW customisation's and whose look is its own, the
+# catalogue that lists every one of its definitions and codes, and the NSW
+# file itself, tracked beside it, which the key and structure tests read
 # (tests/cad/customisation/test_katana_standard.cpp).
 target_compile_definitions(katana_cad_tests PRIVATE
     KATANA_STANDARD_JSON="${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json"
+    KATANA_NSW_JSON="${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json"
     KATANA_STANDARD_DOC="${PROJECT_SOURCE_DIR}/docs/katana_standard.md")
 # The Modify > Edit family's tests reach its internal header
 # (tools/modify_edit_support.hpp: EditSession, drawable) the way the family's

@@ -107,20 +107,43 @@ decides.
 
 The project licence applies to what the owner has the right to license. The
 other customisation in `resources/customisation/`, Katana Standard
-(`katana-standard.customisation.json`), is not in the list below. It was written
-for Katana from a specification, by AI agents under the owner's direction, with
-its generator in `tools/katana_standard/` and its catalogue in
-`docs/katana_standard.md`; none of it was converted from a third party's file
-(that document's "Originality" says how it was made and checked), and it is
-covered like the rest of the repository. What copyright means for work made by
-an AI agent is a question for a lawyer, and this page does not settle it.
+(`katana-standard.customisation.json`), is not in the list below, with one part
+excepted. It was written for Katana from a specification, by AI agents under
+the owner's direction, with its generator in `tools/katana_standard/` and its
+catalogue in `docs/katana_standard.md`. Its linestyles and symbols (every
+stroke drawn for it), its layers, colours, pen weights, text styles, group
+paths and legend labels, and the wording of its meanings, were not converted
+from a third party's file, and a scan compares them with the NSW customisation
+to hold that (`tools/katana_standard/originality.py`; that document's "What is
+shared and what is not" says what is compared and what was found). Those parts
+are covered like the rest of the repository.
+
+**The part that is not original is its survey code keys, and what each key
+stands for and does.** Three things are the NSW customisation's
+(`tools/katana_standard/parity.py` holds the first and the third):
+
+- the 632 identifiers (`AC*`, `PBMK`, `WM*` and the rest), byte for byte;
+- what each key stands for: the thing it codes, read from that file's label
+  for the key and worded anew, with the pipe diameter, the culvert height, the
+  model zone or the text size that file gives it (a key states none of these
+  by itself);
+- the kinds of rule each key makes, in order, with their draw mode, hide and
+  surface flags and the text and pipe rules' settings.
+
+They are reused, on the owner's decision, so that a field file coded for either
+customisation is read by the other and makes the same kinds of entity. They are
+the NSW file's, so what is said of that file in item 1 below applies to them;
+whether identifiers and facts reused for compatibility need anyone's permission
+is a question for a lawyer, and this page does not settle it. Nor does it
+settle what copyright means for work made by an AI agent.
 
 These are in the repository or its packages and are **not** covered by the
 project licence, or are not known to be:
 
 1. **`resources/customisation/nsw.customisation.json`**, the NSW built-in
    customisation (linestyles, symbols and survey codes), compiled in as an
-   alternate beside Katana Standard, the default, which is original to Katana. It was converted from
+   alternate beside Katana Standard, the default, whose look is Katana's own and whose survey code keys
+   are this file's (see above). It was converted from
    third-party library files that came with a notice saying they may not be
    copied or used without their authors' authorisation. The owner states that
    the information in the file is public, decided on 2026-10-08 to include the
@@ -141,7 +164,10 @@ project licence, or are not known to be:
      empty list of alternates makes a program with Katana Standard alone
      (`-DKATANA_ALTERNATE_CUSTOMISATIONS=`; `src/katana_cad/CMakeLists.txt`,
      `docs/building.md`), and a default path that names no file as well makes one
-     with no built-in at all.
+     with no built-in at all. Katana Standard alone still holds this file's
+     survey code keys and what each stands for and does, and nothing this file
+     names, draws or words (above): a build with nothing of this file in it is
+     the one with no built-in.
 2. **`samples/`**, installed in every package (`cmake/KatanaPackaging.cmake`).
    Where each file came from is not recorded in this repository, so no licence
    is granted for them here. What can be verified:

@@ -1,4 +1,4 @@
-"""Katana Standard: the 73 linestyles.
+"""Katana Standard: the 98 linestyles.
 
 Every linestyle is plain data in LINESTYLES, a list of dicts with the customisation file's own members
 (`name`, `group`, `units`, `length`, `strokes`) and one extra, `description`: a line saying what it looks
@@ -24,18 +24,22 @@ The house rules, which the check enforces:
   so read from either end it has the same marks in the same places: only where a mark stands to one side
   (a tick, a hump) does the digitising direction show, always as the LEFT.  The few patterns with a direction
   of their own (the flow chevrons, the dot-dot-dash drain) or an irregular tuft are named in SYMMETRY with
-  "none", and the lightning bolt, which leans, with "point"; the check proves the symmetry of the rest.
+  "none", and the barrier hatch, which leans, with "point"; the check proves the symmetry of the rest.
 * Katana lays a definition by giving every stroke POINT its own distance along the line, so a long straight
   stroke is a chord and cuts a corner.  Every straight run along the line is drawn in chords of at most one
   millimetre (`_Pen.run`), which keeps a dash or a baseline within about 0.35 mm of a right-angle corner.
 * A dot is a 0.6 mm dash.  Katana draws the `dot` stroke as one point the width of the pen: a speck a third
   of the line's weight on a plot and a single pixel on the screen, so that a dash-dot line reads as dashes.
 * Posts stand ON the line, which runs through them: guard rails, fence posts, chain mesh.  Beads are
-  THREADED on it, the line stopping at each side of the bead and the inside left open: the contour diamond,
-  the insulator ring, the exclusion square.  The two kinds of mark are then told apart at a glance even where
-  their outlines match.
+  THREADED on it, the line stopping at each side of the bead and the inside left open: the contour diamond
+  and the insulator ring.  The two kinds of mark are then told apart at a glance even where their outlines
+  match.
 * Letters are 2.4 mm and `middle-centre`, in a gap of 5 mm or more.  Numbers carry at most three decimals.
   No stroke names a pen: the code's rule gives the colour.
+* Paint is drawn as lines, so a "solid" shape (an arrowhead, a block) is a closed outline ruled with fine
+  lines parallel to its axis, 0.4 to 0.5 mm apart, which reads as ink at plan scale.  A road arrow lies along
+  the line and points the way you shot; a turn or a branch stands to the LEFT or RIGHT of the line, as its
+  name says.  A mark that leans (an arrow, a hatch tick) is named in SYMMETRY with "none".
 """
 import json
 import math
@@ -64,7 +68,6 @@ G_FIRE = "Utilities/Fire Service"
 G_FUEL = "Utilities/Fuel"
 G_UNKN = "Utilities/Unknown Services"
 G_ALL = "Utilities/All Services"
-G_SHRUB = "Vegetation and Landscape/Shrubs and Plants"
 G_COVER = "Vegetation and Landscape/Ground Cover"
 G_BUILD = "Buildings and Structures/Buildings"
 G_STEPS = "Buildings and Structures/Steps and Access"
@@ -76,7 +79,15 @@ G_WEDGE = "Terrain and Breaklines/Water Edges"
 G_ROCK = "Terrain and Breaklines/Rock and Cliff"
 G_PLAN = "Survey Control and Annotation/Plan Marks"
 G_HAZ = "Miscellaneous/Hazards and Heritage"
-G_TEMP = "Miscellaneous/Temporary Works"
+G_TEMP = "Design and Setting Out/Master Strings"
+G_GATE = "Fences and Walls/Gates and Posts"
+G_STRUCT = "Buildings and Structures/Structures"
+G_SIGN = "Street Furniture and Signs/Signs"
+G_ITS = "Utilities/Traffic Systems"
+G_DESIGN = "Design and Setting Out/Design General"
+G_LANE = "Design and Setting Out/Lane Marking Design"
+G_DRAIN = "Design and Setting Out/Drainage Design"
+G_BARRIER = "Design and Setting Out/Barrier and Fence Design"
 
 CHORD = 1.0  # the longest straight chord of any run of ink, in mm
 DOT = 0.6    # a dot is a dash this long, in mm
@@ -121,6 +132,17 @@ class _Pen:
 
     def tick(self, x, y0, y1):
         self.path([(x, y0), (x, y1)])
+
+    def trace(self, points, close=False):
+        """One chain of straight legs through `points` (a polyline, closed when `close`).  A leg that runs
+        further than CHORD along the line is cut into equal chords, as `run` does, so it follows a corner."""
+        points = list(points) + ([points[0]] if close else [])
+        self._move(*points[0])
+        for (xa, ya), (xb, yb) in zip(points, points[1:]):
+            parts = max(1, math.ceil(abs(xb - xa) / CHORD - 1e-9))
+            for i in range(1, parts + 1):
+                self._draw(xb if i == parts else xa + (xb - xa) * i / parts,
+                           yb if i == parts else ya + (yb - ya) * i / parts)
 
     def arc(self, cx, cy, radius, a0, a1):
         self._move(cx, cy)
@@ -178,6 +200,21 @@ def _gap_pipe(pen, length, gap, label):
     pen.text(length - gap / 2.0, 0, label)
 
 
+def _head(pen, tip, angle, length, half, step=0.5):
+    """A ruled arrowhead: a closed triangle `length` long and `2 * half` across, its tip at `tip` and its axis
+    `angle` degrees from the direction of the line, ruled parallel to the axis every `step` mm so that it reads
+    as solid.  The rule on the axis runs from the base to the tip, where the shaft arrives."""
+    ux, uy = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+    nx, ny = -uy, ux
+    bx, by = tip[0] - length * ux, tip[1] - length * uy
+    pen.trace([(bx + half * nx, by + half * ny), tip, (bx - half * nx, by - half * ny)], close=True)
+    for i in range(-int(half / step), int(half / step) + 1):
+        h = i * step
+        reach = length * (1 - abs(h) / half)
+        if abs(h) < half - 1e-9 and reach >= 0.3:
+            pen.trace([(bx + h * nx, by + h * ny), (bx + h * nx + reach * ux, by + h * ny + reach * uy)])
+
+
 def _dash(pen, length, dash, y=0.0):
     """One dash from the cell start, then a gap.  Returns the middle of the gap, where a mark stands."""
     pen.run(0, dash, y)
@@ -188,17 +225,11 @@ def _dash(pen, length, dash, y=0.0):
 # Boundaries and Cadastre
 # ---------------------------------------------------------------------------------------------------------
 
-@_style("Title Boundary", G_LOT, 25,
+@_style("Surveyed Boundary", G_LOT, 25,
         "Unbroken line crossed by a short tick every 25 mm: the registered title boundary, the firmest line in the cadastre.")
 def _(p):
     p.run(0, 25)
     p.tick(12.5, -1.6, 1.6)
-
-
-@_style("Occupation Boundary", G_LOT, 10,
-        "Even dashes, 7 on and 3 off: a boundary as occupied on the ground (a fence line, a wall face) and not as titled.")
-def _(p):
-    _dash(p, 10, 7)
 
 
 @_style("Compiled Boundary", G_LOT, 14,
@@ -208,19 +239,35 @@ def _(p):
     p.dot(11)
 
 
-@_style("Reserve Boundary", G_LOT, 18,
-        "Long dash, then two dots: the limit of a public road reserve or of a park or reserve.")
+@_style("Estimated Boundary", G_LOT, 12,
+        "Unbroken line with a small ring standing against it on the left every 12 mm: a boundary known only to about half a metre.")
 def _(p):
-    _dash(p, 18, 9)
-    p.dot(11.9)
-    p.dot(15.1)
+    p.run(0, 12)
+    p.circle(6, 0.6, 0.6)
 
 
-@_style("Municipal Boundary", G_LOT, 20,
-        "Long dash and a short dash in turn: the boundary between two local government areas.")
+@_style("Digital Boundary", G_LOT, 3.5,
+        "A sparse dotted line, one dot every 3.5 mm: a boundary read from the digital cadastre, the least certain of the boundary lines.")
 def _(p):
-    p.run(0, 11)
-    p.run(14, 17)
+    p.run(0, DOT)
+
+
+@_style("Acquisition Boundary", G_LOT, 14,
+        "Long dashes with the letter A standing in each gap: the proposed boundary of land to be acquired, not yet on title.")
+def _(p):
+    p.text(_dash(p, 14, 9), 0, "A")
+
+
+@_style("Stratum Parcel Edge", G_LOT, 6,
+        "A square wave 1.2 mm high with 3 mm steps and no baseline, like levels stacked one above the next: the limit of a stratum parcel.")
+def _(p):
+    p.trace([(0, -0.6), (3, -0.6), (3, 0.6), (6, 0.6), (6, -0.6)])
+
+
+@_style("Survey Join Line", G_LOT, 9,
+        "Fine dashes with a short bar across the line in each gap: a line that joins two points of a plan and is not itself a boundary.")
+def _(p):
+    p.tick(_dash(p, 9, 6), -1.0, 1.0)
 
 
 @_style("Easement Boundary", G_EASE, 9,
@@ -238,12 +285,6 @@ def _(p):
         "A fine stipple of short specks, like gravel thrown on the edge: the edge of an unsealed road.")
 def _(p):
     p.run(0, 0.8)
-
-
-@_style("Shoulder Edge", G_CARR, 8,
-        "Dashes, 6 on and 2 off: the outer edge of the road shoulder.")
-def _(p):
-    _dash(p, 8, 6)
 
 
 @_style("Road Centreline", G_CARR, 14,
@@ -270,11 +311,145 @@ def _(p):
 def _(p):
     p.tick(1.5, -1.8, 1.8)
 
-
-@_style("Cycleway Edge", G_PATH, 10,
-        "Dashes with a small bead in each gap: the edge of a cycleway or a shared path.")
+@_style("Lane Continuity Marking", G_MARK, 8,
+        "Short paint dashes, 2 on and 6 off: the broken line that carries a lane, a turn or a give-way line through a junction.")
 def _(p):
-    p.circle(_dash(p, 10, 6), 0, 0.5)
+    _dash(p, 8, 2)
+
+
+@_style("Equal Dash Marking", G_MARK, 10,
+        "Paint dashes and gaps of equal length, 5 on and 5 off: the broken line of separation and clearway marking.")
+def _(p):
+    _dash(p, 10, 5)
+
+
+@_style("Dividing Line Marking", G_LANE, 12,
+        "Long paint dashes, 9 on and 3 off: the broken line that divides opposing traffic, told from the lane line by its long dash.")
+def _(p):
+    _dash(p, 12, 9)
+
+
+@_style("Give Way Marking", G_MARK, 4,
+        "Unbroken line with a row of small triangles standing on it to the left, one every 4 mm: the give-way line across a turning lane.")
+def _(p):
+    p.run(0, 4)
+    p.trace([(0.8, 0), (2, 1.8), (3.2, 0)])
+
+
+@_style("Left Chevron Marking", G_MARK, 5,
+        "A row of open chevrons 3 mm wide centred on the line, each with its point to the left of travel: painted hatching on an island or gore.")
+def _(p):
+    p.trace([(1, -1.5), (2.5, 1.5), (4, -1.5)])
+
+
+@_style("Right Chevron Marking", G_MARK, 5,
+        "A row of open chevrons 3 mm wide centred on the line, each with its point to the right of travel: painted hatching on an island or gore.")
+def _(p):
+    p.trace([(1, 1.5), (2.5, -1.5), (4, 1.5)])
+
+
+@_style("Crossing Approach Marking", G_MARK, 8,
+        "A sharp zigzag 3 mm high and 8 mm long with no baseline: the zigzag painted along the approach to a pedestrian crossing.")
+def _(p):
+    p.trace([(0, -1.5), (2, 1.5), (4, -1.5), (6, 1.5), (8, -1.5)])
+
+
+@_style("Signal Crossing Marking", G_MARK, 8,
+        "Two parallel rows of dashes 4 mm apart, 4 on and 4 off: the lines that bound a pedestrian crossing controlled by signals.")
+def _(p):
+    _dash(p, 8, 4, 2.0)
+    _dash(p, 8, 4, -2.0)
+
+
+@_style("Left Broken Barrier Marking", G_MARK, 9,
+        "An unbroken line with a broken line 1 mm to its left, 6 on and 3 off: a barrier line on one side and a separation line on the other.")
+def _(p):
+    p.run(0, 9)
+    _dash(p, 9, 6, 1.0)
+
+
+@_style("Right Broken Barrier Marking", G_MARK, 9,
+        "An unbroken line with a broken line 1 mm to its right, 6 on and 3 off: the mirror of the left broken barrier marking.")
+def _(p):
+    p.run(0, 9)
+    _dash(p, 9, 6, -1.0)
+
+
+@_style("Left Dragons Teeth Marking", G_MARK, 6,
+        "A row of painted triangles 4 mm along the line and 3 mm deep, standing to its left, one every 6 mm, with no baseline: dragons teeth.")
+def _(p):
+    p.run(1, 5)
+    p.trace([(5, 0), (3, 3), (1, 0)])
+
+
+@_style("Right Dragons Teeth Marking", G_MARK, 6,
+        "A row of painted triangles 4 mm along the line and 3 mm deep, standing to its right, one every 6 mm, with no baseline: dragons teeth.")
+def _(p):
+    p.run(1, 5)
+    p.trace([(5, 0), (3, -3), (1, 0)])
+
+
+@_style("Bicycle Lane Marking", G_LANE, 10,
+        "Dashes with a pair of small rings, like bicycle wheels, in each gap: the broken line beside a bicycle lane or along a bicycle path.")
+def _(p):
+    x = _dash(p, 10, 5)
+    p.circle(x - 0.95, 0, 0.5)
+    p.circle(x + 0.95, 0, 0.5)
+
+
+@_style("Bicycle Crossing Marking", G_LANE, 2.4,
+        "Two rows of small squares 3 mm apart with no baseline, the line running between them: a bicycle crossing painted across the carriageway.")
+def _(p):
+    p.square(1.2, 1.5, 1.2)
+    p.square(1.2, -1.5, 1.2)
+
+
+@_style("Straight Ahead Arrow Marking", G_MARK, 22,
+        "A painted lane arrow along the line, a shaft ending in a ruled arrowhead, one every 22 mm and pointing the way you shot.", "none")
+def _(p):
+    p.run(0, 14)
+    _head(p, (18, 0), 0, 4.0, 1.4)
+
+
+@_style("Left Turn Arrow Marking", G_MARK, 14,
+        "A painted lane arrow along the line: a shaft that turns 90 degrees to the left into a ruled arrowhead, one every 14 mm.", "none")
+def _(p):
+    p.run(0, 8)
+    p.tick(8, 0, 0.9)
+    _head(p, (8, 3.3), 90, 2.4, 1.3)
+
+
+@_style("Right Turn Arrow Marking", G_MARK, 14,
+        "A painted lane arrow along the line: a shaft that turns 90 degrees to the right into a ruled arrowhead, one every 14 mm.", "none")
+def _(p):
+    p.run(0, 8)
+    p.tick(8, 0, -0.9)
+    _head(p, (8, -3.3), -90, 2.4, 1.3)
+
+
+def _arrow_with_branch(p, side):
+    """The straight-ahead arrow with a second, smaller arrow peeling off it at 45 degrees; side is 1 to the left
+    and -1 to the right."""
+    p.run(0, 14)
+    _head(p, (18, 0), 0, 4.0, 1.4)
+    reach = 4.6
+    foot = (5.5, 0)
+    tip = (foot[0] + reach * math.cos(math.radians(45)), side * reach * math.sin(math.radians(45)))
+    back = 1.8
+    p.trace([foot, (tip[0] - back * math.cos(math.radians(45)), tip[1] - side * back * math.sin(math.radians(45)))])
+    _head(p, tip, 45 * side, back, 0.8, 0.4)
+
+
+@_style("Straight and Left Arrow Marking", G_MARK, 22,
+        "A painted lane arrow along the line: a straight arrow with a second, smaller arrow branching to the left, one every 22 mm.", "none")
+def _(p):
+    _arrow_with_branch(p, 1)
+
+
+@_style("Straight and Right Arrow Marking", G_MARK, 22,
+        "A painted lane arrow along the line: a straight arrow with a second, smaller arrow branching to the right, one every 22 mm.", "none")
+def _(p):
+    _arrow_with_branch(p, -1)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -286,6 +461,60 @@ def _(p):
 def _(p):
     p.run(0, 12)
     p.square(6, 0, 1.4)
+
+@_style("Wire Rope Barrier Line", G_POST, 3,
+        "Two fine waves in opposite phase that cross every 1.5 mm like a twisted rope, with no posts: a safety barrier of tensioned cable.")
+def _(p):
+    for sign in (1, -1):
+        p.path([(0.25 * i, sign * 0.45 * math.sin(2 * math.pi * 0.25 * i / 3.0)) for i in range(13)])
+
+
+@_style("Concrete Barrier Line", G_POST, 2.4,
+        "Two parallel lines 1.6 mm apart ruled with a close diagonal hatch, like concrete in section: a solid safety barrier, shot along its base.", "point")
+def _(p):
+    p.run(0, 2.4, 0.8)
+    p.run(0, 2.4, -0.8)
+    p.path([(0.4, -0.8), (2.0, 0.8)])
+
+@_style("Hundred Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 100: a stretch of road signed with a speed limit of 100 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "100")
+
+@_style("Hundred and Ten Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 110: a stretch of road signed with a speed limit of 110 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "110")
+
+@_style("Forty Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 40: a stretch of road signed with a speed limit of 40 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "40")
+
+@_style("Fifty Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 50: a stretch of road signed with a speed limit of 50 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "50")
+
+@_style("Sixty Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 60: a stretch of road signed with a speed limit of 60 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "60")
+
+@_style("Seventy Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 70: a stretch of road signed with a speed limit of 70 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "70")
+
+@_style("Eighty Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 80: a stretch of road signed with a speed limit of 80 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "80")
+
+@_style("Ninety Speed Zone Line", G_SIGN, 30,
+        "Unbroken line broken every 30 mm by the number 90: a stretch of road signed with a speed limit of 90 km/h.")
+def _(p):
+    _gap_pipe(p, 30, 8, "90")
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -304,13 +533,6 @@ def _(p):
     _dash(p, 3.3, 2.2)
 
 
-@_style("Mountable Kerb Edge", G_KERB, 6,
-        "Unbroken line with a rounded hump to the left every 6 mm: a low kerb a vehicle can drive over.")
-def _(p):
-    p.run(0, 6)
-    p.arc(3, 0, 1.5, 0, 180)
-
-
 @_style("Dish Drain Edge", G_KERB, 8,
         "Unbroken line with a shallow V standing to its left every 8 mm: a V-shaped concrete dish drain.")
 def _(p):
@@ -324,7 +546,7 @@ def _(p):
     _gap_pipe(p, 16, 5, "D")
 
 
-@_style("Subsoil Drain Line", G_PIPE, 9,
+@_style("Subsoil Drain Line", G_DRAIN, 9,
         "Two dots and a dash in turn, written in the digitising direction: a perforated subsoil drain.", "none")
 def _(p):
     p.run(0, DOT)
@@ -370,19 +592,12 @@ def _(p):
     p.square(_dash(p, 14, 10), 0, 1.0)
 
 
-@_style("Ballast Edge", G_TRACK, 3,
-        "Two rows of tiny dashes, one 1 mm above the other and staggered, like stones: the shoulder of the ballast.")
+@_style("Track Formation Edge", G_TRACK, 7,
+        "Unbroken line with a pair of close short ticks to the left every 7 mm: the edge of the formation that carries the ballast.")
 def _(p):
-    p.run(0.55, 0.95, 0.5)
-    p.run(2.05, 2.45, -0.5)
-
-
-@_style("Contact Wire Line", G_OVER, 12,
-        "Unbroken line with a tick to the left, then a tick to the right: the overhead contact wire, shot at each mast.")
-def _(p):
-    p.run(0, 12)
-    p.tick(3, 0, 1.6)
-    p.tick(9, 0, -1.6)
+    p.run(0, 7)
+    p.tick(3.1, 0, 1.2)
+    p.tick(3.9, 0, 1.2)
 
 
 @_style("Platform Edge Line", G_PLAT, 5,
@@ -447,16 +662,15 @@ def _(p):
     _gap_pipe(p, 16, 5, "R")
 
 
-@_style("Fire Service Pipe", G_FIRE, 16,
-        "A line broken by the letter F every 16 mm: a main that serves hydrants and sprinklers.")
-def _(p):
-    _gap_pipe(p, 16, 5, "F")
-
-
 @_style("Fuel Supply Pipe", G_FUEL, 16,
         "A line broken by the letter P every 16 mm: a pipeline for fuel or oil.")
 def _(p):
     _gap_pipe(p, 16, 5, "P")
+
+@_style("Traffic Systems Cable", G_ITS, 18,
+        "A line broken by the letters TS every 18 mm: a buried cable of the traffic systems service, which serves signals and cameras.")
+def _(p):
+    _gap_pipe(p, 18, 7, "TS")
 
 
 @_style("Unknown Service Line", G_UNKN, 12,
@@ -478,21 +692,9 @@ def _(p):
     _dash(p, 6, 3)
 
 
-@_style("Disused Service Line", G_ALL, 8,
-        "Dashes with a small cross in each gap: a service that is no longer in use, whatever its kind.")
-def _(p):
-    p.cross(_dash(p, 8, 4), 0, 0.9)
-
-
 # ---------------------------------------------------------------------------------------------------------
 # Vegetation
 # ---------------------------------------------------------------------------------------------------------
-
-@_style("Hedge Line", G_SHRUB, 2.4,
-        "A row of small round scallops to the left with no baseline: a clipped hedge, shot along its face.")
-def _(p):
-    p.arc(1.2, 0, 1.2, 0, 180)
-
 
 @_style("Bush Edge Line", G_COVER, 7,
         "Unbroken line with three uneven ticks to the left, like a tuft: the edge of scrub or bush.", "none")
@@ -501,6 +703,20 @@ def _(p):
     p.tick(1.5, 0, 0.8)
     p.tick(3.5, 0, 1.6)
     p.tick(5.5, 0, 1.0)
+
+@_style("Medium Bush Edge", G_COVER, 12,
+        "Unbroken line with one tuft of three uneven ticks to its left every 12 mm: the edge of medium-density timber or scrub.", "none")
+def _(p):
+    p.run(0, 12)
+    p.tick(4, 0, 0.8)
+    p.tick(6, 0, 1.6)
+    p.tick(8, 0, 1.0)
+
+
+@_style("Scattered Bush Edge", G_COVER, 20,
+        "Dashes with one short tick to the left in each gap: the edge of scattered timber or scrub, the sparsest of the three bush edges.")
+def _(p):
+    p.tick(_dash(p, 20, 14), 0, 1.2)
 
 
 @_style("Grass Edge", G_COVER, 6,
@@ -534,26 +750,27 @@ def _(p):
     p.run(0, 3.5)
     p.tick(1.75, -1.2, 1.2)
 
+@_style("Abutment Foot Line", G_STRUCT, 5,
+        "Unbroken line with a small ruled block against it on the left every 5 mm, like the toe of a footing: the foot of a bridge abutment.")
+def _(p):
+    p.run(0, 5)
+    p.trace([(1.75, 0), (3.25, 0), (3.25, 1.5), (1.75, 1.5)], close=True)
+    p.trace([(1.75, 0.5), (3.25, 0.5)])
+    p.trace([(1.75, 1.0), (3.25, 1.0)])
+
 
 # ---------------------------------------------------------------------------------------------------------
 # Fences
 # ---------------------------------------------------------------------------------------------------------
 
-@_style("Chain Mesh Fence", G_FENCE, 8,
+@_style("Chain Mesh Fence", G_BARRIER, 8,
         "Unbroken line with a small cross every 8 mm: a wire mesh fence on steel posts.")
 def _(p):
     p.run(0, 8)
     p.cross(4, 0, 0.8)
 
 
-@_style("Paling Fence", G_FENCE, 2,
-        "Unbroken line with a close comb of ticks to the left, one every 2 mm: a timber paling fence.")
-def _(p):
-    p.run(0, 2)
-    p.tick(1, 0, 1.6)
-
-
-@_style("Post and Rail Fence", G_FENCE, 12,
+@_style("Post and Rail Fence", G_BARRIER, 12,
         "Two parallel rails 1 mm apart with a square post every 12 mm: a timber or steel post and rail fence.")
 def _(p):
     p.run(0, 12, 0.5)
@@ -568,45 +785,24 @@ def _(p):
     p.circle(5, 0, 0.5)
 
 
-@_style("Barbed Wire Fence", G_FENCE, 6,
-        "Unbroken line with a small V barb above the line, then one below it: a rural fence with barbed wire.")
-def _(p):
-    p.run(0, 6)
-    p.path([(0.9, 1.2), (1.5, 0), (2.1, 1.2)])
-    p.path([(3.9, -1.2), (4.5, 0), (5.1, -1.2)])
-
-
-@_style("Electric Fence", G_FENCE, 12,
-        "Unbroken line with a lightning bolt every 12 mm: a fence with an electrified wire.", "point")
-def _(p):
-    p.run(0, 12)
-    p.path([(6.8, 1.5), (5.4, 0.15), (6.6, -0.15), (5.2, -1.5)])
-
-
 @_style("Metal Palisade Fence", G_FENCE, 2,
         "Unbroken line crossed by a close row of short bars, one every 2 mm: a steel palisade or pool fence.")
 def _(p):
     p.run(0, 2)
     p.tick(1, -0.9, 0.9)
 
+@_style("Gate Leaf Outline", G_GATE, 4,
+        "Two close rails joined by a rung and a sloping brace, like the frame of a field gate: a gate leaf shot from its hinge to its latch.", "point")
+def _(p):
+    p.run(0, 4, 0.7)
+    p.run(0, 4, -0.7)
+    p.tick(0, -0.7, 0.7)
+    p.trace([(0, -0.7), (4, 0.7)])
+
 
 # ---------------------------------------------------------------------------------------------------------
 # Walls
 # ---------------------------------------------------------------------------------------------------------
-
-@_style("Brick Wall", G_WALL, 5,
-        "Two parallel lines 1 mm apart with a joint across them every 5 mm: a brick or block wall, shot on its lower face.")
-def _(p):
-    p.run(0, 5, 0.5)
-    p.run(0, 5, -0.5)
-    p.tick(2.5, -0.5, 0.5)
-
-
-@_style("Stone Wall", G_WALL, 2.4,
-        "A chain of separate rings, 1.6 mm across and 0.8 mm apart, centred on the line: a dry or mortared stone wall.")
-def _(p):
-    p.circle(1.2, 0, 0.8)
-
 
 @_style("Earth Retaining Wall", G_WALL, 4,
         "Unbroken line with a small triangle to the left every 4 mm: a wall that holds back earth; the barbs point to the lower side.")
@@ -640,24 +836,10 @@ def _(p):
     p.path([(x - 0.8, -0.6), (x, 0.6), (x + 0.8, -0.6)])
 
 
-@_style("Gully Line", G_BREAK, 10,
-        "Dashes with a small caret pointing to the right in each gap: a line along the bottom of a gully.")
-def _(p):
-    x = _dash(p, 10, 6)
-    p.path([(x - 0.8, 0.6), (x, -0.6), (x + 0.8, 0.6)])
-
-
 @_style("Soft Breakline", G_BREAK, 4,
         "Fine short dashes, 2.5 on and 1.5 off: a gentle change in grade that a surface should still follow.")
 def _(p):
     _dash(p, 4, 2.5)
-
-
-@_style("Exclusion Boundary", G_BREAK, 8,
-        "Unbroken line with a small hollow square threaded on it every 8 mm: an area a surface must leave out, such as a building or a lake.")
-def _(p):
-    p.thread(8, 4, 0.8)
-    p.square(4, 0, 1.6)
 
 
 @_style("Index Contour", G_CONT, 20,
@@ -678,6 +860,13 @@ def _(p):
         "Dashes with a small ripple arc to the left in each gap: the edge of water, or the line of the highest recent water.")
 def _(p):
     p.arc(_dash(p, 10, 6), 0, 1.2, 0, 180)
+
+@_style("Marsh Edge", G_WEDGE, 16,
+        "Dashes with a two-stroke reed tuft standing to the left on every second dash: the edge of a swamp or marsh.")
+def _(p):
+    p.run(0, 6)
+    p.run(8, 14)
+    p.path([(2.1, 1.7), (3, 0), (3.9, 1.7)])
 
 
 @_style("Rock Outcrop Edge", G_ROCK, 5,
@@ -705,22 +894,42 @@ def _(p):
     p.path([(x - 1.2, -1.04), (x + 1.2, -1.04), (x, 1.04)], close=True)
 
 
-@_style("Revision Cloud Edge", G_PLAN, 6,
-        "A row of large round scallops to the left with no baseline: a cloud drawn round an area that has changed.")
+@_style("Photo Detail Boundary", G_PLAN, 14,
+        "Long dashes with a small target, a ring crossed by a plus, in each gap: the limit of detail taken from photography, not the field.")
 def _(p):
-    p.arc(3, 0, 3, 0, 180)
+    x = _dash(p, 14, 9)
+    p.circle(x, 0, 1.0)
+    p.run(x - 1.0, x + 1.0)
+    p.tick(x, -1.0, 1.0)
 
 
-@_style("Hazard Boundary", G_HAZ, 10,
+@_style("Hazard Boundary", G_DESIGN, 10,
         "Dashes with an exclamation mark in each gap: the boundary of a hazardous area.")
 def _(p):
     p.text(_dash(p, 10, 6), 0, "!")
 
 
 @_style("Temporary Works Line", G_TEMP, 10,
-        "Dashes with the letter T in each gap: a temporary fence, a hoarding or the edge of a work zone.")
+        "Dashes with the letter T in each gap: temporary works, such as a hoarding or the edge of a work zone, that the finished road does not keep.")
 def _(p):
     p.text(_dash(p, 10, 6), 0, "T")
+
+# ---------------------------------------------------------------------------------------------------------
+# Design and setting out
+# ---------------------------------------------------------------------------------------------------------
+
+@_style("Left Wall Face Hatch Line", G_DESIGN, 1.5,
+        "Unbroken line with close slanting ticks to its left, leaning back along the line: shows which side is the face of a designed wall.", "none")
+def _(p):
+    p.run(0, 1.5)
+    p.path([(1.5, 0), (0.086, 1.414)])
+
+
+@_style("Right Wall Face Hatch Line", G_DESIGN, 1.5,
+        "Unbroken line with close slanting ticks to its right, leaning back along the line: shows which side is the face of a designed wall.", "none")
+def _(p):
+    p.run(0, 1.5)
+    p.path([(1.5, 0), (0.086, -1.414)])
 
 
 # ---------------------------------------------------------------------------------------------------------

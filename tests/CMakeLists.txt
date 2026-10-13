@@ -476,6 +476,26 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME katana_standard_${_ks_module}
             COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/katana_standard/${_ks_module}.py" --check)
     endforeach()
+    # Katana Standard shares the survey code KEYS of the NSW customisation, tracked beside it, with what each key
+    # stands for and does, and nothing that file names, draws or words. `katana_standard_parity` holds that the two
+    # have the same keys and, for each key, the same kinds of rule,
+    # and that every key's code resolves to the same kind of entity in both (parity.py, with its documented
+    # exceptions in parity_exceptions.json); `katana_standard_parity_script` is parity.py's own test, on small
+    # invented customisations; `katana_standard_originality` scans the two files for anything but the keys that
+    # they share (originality.py), and `katana_standard_originality_script` is that scan's own test, on two
+    # invented libraries. The scripts read the files with Python's json module alone (docs/katana_standard.md,
+    # "What is shared and what is not").
+    set(_ks_tools "${PROJECT_SOURCE_DIR}/tools/katana_standard")
+    set(_ks_nsw "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json")
+    set(_ks_own "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")
+    add_test(NAME katana_standard_parity
+        COMMAND "${KATANA_PYTHON}" "${_ks_tools}/parity.py" "${_ks_nsw}" "${_ks_own}")
+    add_test(NAME katana_standard_parity_script
+        COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_parity.py")
+    add_test(NAME katana_standard_originality
+        COMMAND "${KATANA_PYTHON}" "${_ks_tools}/originality.py" "${_ks_nsw}" "${_ks_own}")
+    add_test(NAME katana_standard_originality_script
+        COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_originality.py")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only
@@ -2128,8 +2148,8 @@ if(TARGET katana)
     # another, on a kept file of the test's own, with the seam NAMING Katana
     # Standard - the name form of KATANA_BUILTIN_CUSTOMISATION - registered
     # where the build compiled in both (KATANA_BUILTIN_FILES). By hand, from
-    # each file's census (docs/katana_standard.md: 186 definitions, 245 codes,
-    # 770 rules; tests/cad/customisation/test_builtin_census.cpp: 792, 632,
+    # each file's census (docs/katana_standard.md: 221 definitions, 632 codes,
+    # 1103 rules; tests/cad/customisation/test_builtin_census.cpp: 792, 632,
     # 1,624; the window's start-up line groups thousands, the cli's does not):
     #  1. Starts with Katana Standard, built in. Settings says the session is
     #     "Katana Standard (default)". NSW is chosen and Use pressed: the
@@ -2159,7 +2179,7 @@ if(TARGET katana)
                 "-DAPP=$<TARGET_FILE:katana>"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|settingsBuiltIn=NSW|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveName|?settingsActiveKept"
-                "-DEXPECT=Customisation: Katana Standard, 186 definitions \\([0-9,]+ symbols\\) and 770 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none[\r\n]+settingsStatus: > CUSTOMISE BUILTIN NSW used name=NSW [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveBuiltIn: NSW[\r\n]+settingsActiveName: NSW[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
+                "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1,103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none[\r\n]+settingsStatus: > CUSTOMISE BUILTIN NSW used name=NSW [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveBuiltIn: NSW[\r\n]+settingsActiveName: NSW[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_1_headless.png"
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_the_window_after_a_kept_alternate_starts_with_it_headless
@@ -2176,7 +2196,7 @@ if(TARGET katana)
                 "-DAPP=$<TARGET_FILE:katana>"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|settingsBuiltIn=Katana Standard (default)|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveOrigin"
-                "-DEXPECT=used name=\"Katana Standard\" default=yes definitions=186 codes=245 rules=770 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*qt_built_in_kept/customisation\\.json\\.bak\"?[\r\n]+settingsStatus: > CUSTOMISE BUILTIN \"Katana Standard\" used name=\"Katana Standard\" [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=no reason=the-session-is-the-built-in [^\r\n]*[\r\n]+settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
+                "-DEXPECT=used name=\"Katana Standard\" default=yes definitions=221 codes=632 rules=1103 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*qt_built_in_kept/customisation\\.json\\.bak\"?[\r\n]+settingsStatus: > CUSTOMISE BUILTIN \"Katana Standard\" used name=\"Katana Standard\" [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=no reason=the-session-is-the-built-in [^\r\n]*[\r\n]+settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_3_headless.png"
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless
@@ -2184,7 +2204,7 @@ if(TARGET katana)
                 "-DAPP=$<TARGET_FILE:katana>"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|?settingsActiveOrigin"
-                "-DEXPECT=Customisation: Katana Standard, 186 definitions \\([0-9,]+ symbols\\) and 770 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
+                "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1,103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
                 "-DFORBID=survey code rules, kept"
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_4_headless.png"
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
