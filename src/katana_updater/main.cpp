@@ -1091,6 +1091,37 @@ int runRecover(const Path& root, Rig& rig)
     return kExitOk;
 }
 
+#ifndef _WIN32
+// ---- a platform this program does not swap on ---------------------------------------------------
+//
+// Linux and macOS have no file system of the update's own yet (src/katana_update/fsops_posix.cpp:
+// every operation is one refusal, with the code Unsupported). Given that file system, apply()
+// refuses too - but as `root_not_writable`, after writing a last.json that tells the window so,
+// and without starting Katana again; and recoverInProcess answers "failed", exit 12, of an
+// install nothing here can have half swapped. So the file system is asked one question before
+// either is called, and what it says is printed as what it is:
+//
+//   outcome=refused (the swap) or recover=refused (--recover), reason=platform, exit=13, detail=
+//
+// and NOTHING is written anywhere: no last.json, no log, no folder. Where the file system is
+// written stat() does not answer Unsupported, this returns nothing, and the swap and the
+// recovery run as they do on Windows.
+std::optional<int> refusedByThePlatform(const Command& command, Rig& rig)
+{
+    const bool recovering = command.mode == Mode::Recover;
+    const core::Result<upd::EntryInfo> asked =
+        rig.fs().stat(recovering ? command.recoverRoot : command.request.root);
+    if (asked.ok() || asked.error().code != core::ErrorCode::Unsupported) {
+        return std::nullopt;
+    }
+    std::cout << (recovering ? "recover=refused" : "outcome=refused") << '\n'
+              << "reason=platform\n"
+              << "exit=" << kExitRefused << '\n'
+              << "detail=" << oneLine(asked.error().message) << std::endl;
+    return kExitRefused;
+}
+#endif
+
 // ---- main ---------------------------------------------------------------------------------------
 
 int run(int argc, char** argv)
@@ -1139,6 +1170,11 @@ int run(int argc, char** argv)
     }
 
     Rig rig(command.test, std::move(userVariables));
+#ifndef _WIN32
+    if (const std::optional<int> refused = refusedByThePlatform(command, rig)) {
+        return *refused;
+    }
+#endif
     return command.mode == Mode::Recover ? runRecover(command.recoverRoot, rig)
                                          : runApply(command.request, argv0, rig);
 }

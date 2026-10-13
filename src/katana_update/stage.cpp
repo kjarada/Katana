@@ -431,6 +431,24 @@ core::Result<PayloadSource> resolvePayloadSource(const Fetch& fetch, const FeedC
     return source;
 }
 
+#ifndef _WIN32
+// Linux and macOS have no file system of the update's own yet (fsops_posix.cpp): every operation
+// of the system's is one refusal, with the code Unsupported. Worked through, that refusal comes
+// back as `write_failed` from stage() - a folder that could not be written - and as
+// `helper_missing` from preflight(), neither of which is what is wrong. So the forms of both that
+// use the system's file system put one question to it first and hand its refusal on as it is,
+// under the token `platform`, before a folder is asked for or a request is sent. Where the file
+// system is written stat() does not answer Unsupported, and nothing here stands in the way.
+std::optional<core::Error> refusedByThePlatform(const FsOps& system, const fs::path& folder)
+{
+    const core::Result<EntryInfo> asked = system.stat(folder);
+    if (asked.ok() || asked.error().code != core::ErrorCode::Unsupported) {
+        return std::nullopt;
+    }
+    return stageError(core::ErrorCode::Unsupported, asked.error().message, "platform");
+}
+#endif
+
 } // namespace
 
 core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& manifest,
@@ -438,6 +456,11 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
                    ProgressFn progress)
 {
     const std::unique_ptr<FsOps> system = makeSystemFsOps();
+#ifndef _WIN32
+    if (const std::optional<core::Error> refused = refusedByThePlatform(*system, stageDir)) {
+        return *refused;
+    }
+#endif
     return stage(fetch, feed, manifest, plan, stageDir, std::move(stop), std::move(progress),
                  *system);
 }
@@ -687,6 +710,11 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
                                       Launcher& launcher)
 {
     const std::unique_ptr<FsOps> system = makeSystemFsOps();
+#ifndef _WIN32
+    if (const std::optional<core::Error> refused = refusedByThePlatform(*system, stateDir)) {
+        return *refused;
+    }
+#endif
     return preflight(manifest, install, stageDir, stateDir, launcher, *system);
 }
 
