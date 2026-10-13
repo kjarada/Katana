@@ -1257,7 +1257,9 @@ TEST(SettingsUpdates, WithNothingGivenThePagesControlsAreOffAndItSaysWhyNoTokenI
               QStringLiteral("This session keeps no access token; the environment variable "
                              "KATANA_UPDATE_TOKEN gives a run one."));
     EXPECT_TRUE(shown(dialog, "settingsUpdateSkipped").isEmpty());
-    EXPECT_FALSE(child<QLabel>(dialog, "settingsUpdateNote")->isVisibleTo(&dialog));
+    // Its own flag, as every check of this page's note is: the page is not
+    // the one the stack shows, so nothing on it is visible "to the dialog".
+    EXPECT_TRUE(child<QLabel>(dialog, "settingsUpdateNote")->isHidden());
     katana::qt::test::paint(dialog);
 }
 
@@ -1280,13 +1282,19 @@ TEST(SettingsUpdates, WhatTheWindowHandsOverLaterFillsThePageAndTheNoteIsShownWh
     EXPECT_TRUE(child<QCheckBox>(dialog, "settingsUpdateAuto")->isChecked());
     EXPECT_TRUE(enabled(dialog, "settingsUpdateTokenSave"));
     const auto* note = child<QLabel>(dialog, "settingsUpdateNote");
-    EXPECT_TRUE(note->isVisibleTo(&dialog));
+    EXPECT_FALSE(note->isHidden());
     EXPECT_EQ(note->text(), updates.note);
     EXPECT_TRUE(f.ran.isEmpty()) << "filling the page runs nothing";
 
     updates.note.clear();
     dialog.setUpdates(updates);
-    EXPECT_FALSE(note->isVisibleTo(&dialog));
+    EXPECT_TRUE(note->isHidden());
+
+    // And on the page as a person sees it: turned to, the note is shown.
+    updates.note = QStringLiteral("A note.");
+    dialog.setUpdates(updates);
+    child<QListWidget>(dialog, "settingsPages")->setCurrentRow(1);
+    EXPECT_TRUE(note->isVisibleTo(&dialog));
 }
 
 TEST(SettingsUpdates, ThePageWorksWithNoDrawingAndAfterOneHasClosed)
