@@ -19,6 +19,7 @@ IMAGES = "images/katana-standard-"
 # The test names the document cites; check_docs.py fails the day one is renamed away.
 CLI_IMPORT_TEST = "cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code"
 CLI_LINEWORK_TEST = "cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line"
+CLI_CHECK_TEST = "cli.katana_standard_code_check_finds_no_problem"
 REFERENCE = os.path.join("resources", "customisation", "nsw.customisation.json")
 
 
@@ -300,7 +301,7 @@ def catalogue(data, root):
     w("5. **Then work as usual.** `SURVEY IMPORT <file>` or Survey > Import Survey Points codes and strings the "
       "points by these rules in one undo step; `CODE`, `LINEWORK`, `CODE EXPLAIN <code>`, `CODE LIST` and "
       "`CODE CHECK` read them. `CODE CHECK` reports no problems on the file: %d rules checked, no error and no "
-      "warning." % n_rules)
+      "warning (`%s`)." % (n_rules, CLI_CHECK_TEST))
     w("")
     w("A worked example, run for this document and held by `" + CLI_IMPORT_TEST + "`. The invented field file "
       "`tests/data/katana_standard/street_corner.fld` has twenty entered coordinates: a lot boundary coded "
@@ -674,7 +675,8 @@ def catalogue(data, root):
       "used and catalogued, the weights, the utility words, the geometry bounds of the contract and the "
       "byte-for-byte writer round trip. `" + CLI_IMPORT_TEST + "` imports the invented field file; `" +
       CLI_LINEWORK_TEST + "` strings control words, which no field-file reader carries, into a curve, a "
-      "rectangle and a closed line. A counts-only test cannot see a swapped colour, weight or linestyle, so "
+      "rectangle and a closed line; `" + CLI_CHECK_TEST + "` holds that `CODE CHECK` finds nothing. A "
+      "counts-only test cannot see a swapped colour, weight or linestyle, so "
       "`katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document "
       "are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each "
       "data module's own check; they exist where Python does.")

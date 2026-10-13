@@ -2164,6 +2164,24 @@ if(KATANA_BUILD_TESTS)
         "loaded file=[^\r\n]*katana-standard\\.customisation\\.json\"? name=\"Katana Standard\" definitions_added=221 definitions_replaced=0 codes_added=1103 codes_replaced=0 colours_added=28 colours_replaced=0[^\r\n]*${_eol}customisation name=\"Katana Standard\" origin=loaded kept=no definitions=221 codes=632 rules=1103 colours=28${_eol}survey file=street_corner\\.fld format=opcode-field-file parser=1\\.2 read=23 skipped=0 warnings=0${_eol}content setups=0 observations=0 points=20 unpositioned=0 features=10 control=0${_eol}declared crs=\"Local grid A\" epsg=none${_eol}.*imported job=job-1 entities=20 layer=survey/points reduction_warnings=2${_eol}.*reduction_warning text=\"No rule for the code\\(s\\): PWSW\\.\"${_eol}reduction_warning text=\"5 point\\(s\\) are in no line \\(no rule for its code and no control code: 1. its code is a point code: 4\\)\\.\"${_eol}coded points=20 matched=19 unmatched_codes=1 layers=9 styles=9${_eol}unmatched_code text=PWSW${_eol}linework lines=5 unplaced=5 layers=0 styles=0${_eol}25 entities${_eol}${_ks_points_regex}${_ks_lines_regex}1 selected${_eol} *12: Condition= \\(text\\) Depth \\(m\\)= \\(text\\) Diameter \\(mm\\)= \\(text\\) Material= \\(text\\) Owner= \\(text\\) code=WM \\(text\\) [^\r\n]*utility\\.type=water \\(text\\)${_eol}1 selected${_eol} *15: Condition= \\(text\\) Depth \\(m\\)= \\(text\\) Owner= \\(text\\) code=EU \\(text\\) [^\r\n]*utility\\.type=electricity \\(text\\)${_eol}1 selected${_eol} *22: code=BT \\(text\\) elevations=24\\.1 24\\.35 25\\.02 24\\.88 \\(text\\) string=1 \\(text\\)${_eol}1 selected${_eol} *23: Check Zone=3 \\(text\\) code=KB \\(text\\) elevations=23\\.9 23\\.95 24\\.01 \\(text\\) string=1 \\(text\\)${_eol}0 selected${_eol}${_ks_styles_regex}1 undone${_eol}.*Entities: 0 "
         FAIL_REGULAR_EXPRESSION "error")
 
+    # CODE CHECK, the lint of the loaded codes. The library keeps one clean rule
+    # set per key, so the lint has nothing to report: 1103 is the number of
+    # rules tools/katana_standard/census.py counts in the file, and "no
+    # problems" is what tools/katana_standard/parity.py finds when it reads the
+    # file for the same eleven kinds of fault (`candidate_defects total=0`). One
+    # duplicate, shadowed or unresolved rule and the reply is a count of errors
+    # and warnings instead.
+    add_test(NAME cli.katana_standard_code_check_finds_no_problem
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE REPLACE \"${_ks_json}\"" -c "CODE CHECK")
+    set_tests_properties(cli.katana_standard_code_check_finds_no_problem
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "customisation name=\"Katana Standard\" origin=loaded kept=no definitions=221 codes=632 rules=1103 colours=28${_eol}.*1103 rules checked: no problems found"
+        FAIL_REGULAR_EXPRESSION "error")
+
     # CONTROL WORDS. No field-file reader Katana has carries `ST`, `BC`, `CL`
     # or `RECT` (the file strings by its own number and opcode 20), so these
     # reach the linework as a code kept in a point's property - here "fcode",
