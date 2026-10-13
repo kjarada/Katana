@@ -36,8 +36,11 @@
 
 #include "katana/core/path_text.hpp"
 #include "katana/update/install.hpp"
+#include "katana/update/manifest.hpp"
 #include "katana/update/registry.hpp"
 #include "katana/update/state.hpp"
+#include "katana/update/trust.hpp"
+#include "katana/update/version.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -647,6 +650,128 @@ TEST(InstallRecords, VersionsOfFourComponentsAndSequencesBeyondTwoToTheFiftyThir
     EXPECT_EQ(install->version, versionOf(1, 2, 3, 4, 4));
     EXPECT_EQ(update::toString(install->version), "1.2.3.4") << "== ignores how many were written";
     EXPECT_EQ(install->sequence, UINT64_MAX);
+}
+
+// ---- the installed version is the higher of the record's and the program's own ------------
+//
+// The program's own version is KATANA_EXPECTED_VERSION: the version this build was configured
+// as, handed to the suite by tests/update/CMakeLists.txt from project(Katana VERSION) and not
+// by the library under test (test_version.cpp holds programVersion() to it). A record is placed
+// below it as 0.1.0, which the project's version left behind for good, and above it by raising
+// its first number, so these stay the same cases when the project's version moves on.
+
+namespace {
+
+update::Version theProgramsOwnVersion()
+{
+    return update::parseVersion(KATANA_EXPECTED_VERSION).value();
+}
+
+// The program's own version with its first number raised by one, written with three numbers.
+update::Version aVersionAboveTheProgram()
+{
+    update::Version above = theProgramsOwnVersion();
+    above.components = {above.components[0] + 1, 0, 0, 0};
+    above.written = 3;
+    return above;
+}
+
+std::string installedRecordOf(const std::string& version, std::uint64_t sequence)
+{
+    return R"({"schema":1,"product":"katana","version":")" + version + R"(","sequence":)" +
+           std::to_string(sequence) + R"(,"tag":"v)" + version + R"(","target":"win64"})";
+}
+
+update::Manifest aReleaseOf(const update::Version& version, std::uint64_t sequence)
+{
+    update::Manifest manifest;
+    manifest.version = version;
+    manifest.sequence = sequence;
+    return manifest;
+}
+
+} // namespace
+
+TEST(InstallRecords, ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion)
+{
+    // What a zip unpacked by hand over a copy that had updated itself leaves: the programs of
+    // the newer version, and the helper's record of the older one.
+    ASSERT_LT(versionOf(0, 1, 0, 0, 3), theProgramsOwnVersion());
+    Root world;
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    world.installedJson(installedRecordOf("0.1.0", 1790000000));
+    FakeRegistry registry;
+    const auto install = update::readInstall(world.root, registry);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(install->version, theProgramsOwnVersion());
+    EXPECT_EQ(update::toString(install->version), KATANA_EXPECTED_VERSION);
+    // The record is still a record: its sequence is the one it names.
+    EXPECT_EQ(install->sequence, 1790000000u);
+    EXPECT_TRUE(install->hasInstalledRecord);
+}
+
+TEST(InstallRecords, ARecordAtOrAboveTheProgramsOwnVersionIsTheInstalledVersion)
+{
+    FakeRegistry registry;
+    {
+        // The other order: the record names a version above this program's.
+        const update::Version above = aVersionAboveTheProgram();
+        ASSERT_GT(above, theProgramsOwnVersion());
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        world.installedJson(installedRecordOf(update::toString(above), 1790000000));
+        const auto install = update::readInstall(world.root, registry);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->version, above);
+        EXPECT_EQ(update::toString(install->version), update::toString(above));
+        EXPECT_EQ(install->sequence, 1790000000u);
+        EXPECT_TRUE(install->hasInstalledRecord);
+    }
+    {
+        // And the two the same, which is every copy the helper updated and nobody overwrote.
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        world.installedJson(installedRecordOf(KATANA_EXPECTED_VERSION, 7));
+        const auto install = update::readInstall(world.root, registry);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->version, theProgramsOwnVersion());
+        EXPECT_EQ(update::toString(install->version), KATANA_EXPECTED_VERSION);
+        EXPECT_EQ(install->sequence, 7u);
+        EXPECT_TRUE(install->hasInstalledRecord);
+    }
+}
+
+TEST(InstallRecords, TheFloorAgainstGoingBackIsTheHigherVersionAndNotAStaleRecords)
+{
+    // isNewerThan (trust.hpp) is the one place the order is written: a higher version, or the
+    // same version with a higher sequence than the record's. Each answer below is that rule
+    // applied by hand to an install whose version is this program's and whose record is build
+    // 100 of 0.1.0.
+    const update::Version program = theProgramsOwnVersion();
+    ASSERT_LT(versionOf(0, 1, 0, 0, 3), program);
+    Root world;
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    world.installedJson(installedRecordOf("0.1.0", 100));
+    FakeRegistry registry;
+    const auto install = update::readInstall(world.root, registry);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+
+    // A later build of the version the record names. Against the record alone it is newer -
+    // the same version, a higher sequence - and it is an EARLIER release than the programs
+    // that are installed: the way back that the record must not open.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 1, 0, 0, 3), 200), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 1, 0, 0, 3), 100), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 0, 9, 0, 3), 300), *install));
+
+    // What is above the programs is above the install, whatever its sequence.
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(aVersionAboveTheProgram(), 1), *install));
+
+    // The programs' own version: the sequences decide, and the record's is the one there is.
+    // (The helper of a release that brings its own helper is that release's version, and must
+    // still find the release above the build the record names: state.cpp, readInstall.)
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(program, 200), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(program, 100), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(program, 99), *install));
 }
 
 TEST(InstallRecords, TheInstalledManifestCountsOnlyWithItsSignatureBesideIt)

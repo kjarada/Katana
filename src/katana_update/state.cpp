@@ -506,6 +506,27 @@ core::Result<Install> readInstall(const stdfs::path& root, const RegistryOps& re
         install.version = *version;
         install.sequence = sequence->get<std::uint64_t>();
         install.hasInstalledRecord = true;
+        // THE FLOOR AGAINST GOING BACK is the higher of what the record says and what this
+        // program was built as. The record is the helper's, written when an update commits, and
+        // nothing else keeps it true: a newer zip unpacked by hand over a copy that had updated
+        // itself leaves it saying the older version, and read alone it would let an earlier
+        // signed release pass for a newer one (isNewerThan, trust.hpp) and be installed over
+        // the programs that are there. A program is never older than itself.
+        //
+        // Only the version is raised. The sequence and `hasInstalledRecord` stay the record's:
+        // with the versions equal isNewerThan compares the sequences, and the helper that
+        // installs a release may be that release's own (stage.hpp, preflight: a manifest whose
+        // `applier` is above what the installed helper speaks) - its version is then the
+        // version it is installing, and it must still find the release above the build the
+        // record names. So a copy overwritten by hand is offered its own release once, which
+        // changes no file and writes the records that were stale.
+        const core::Result<Version> program = programVersion();
+        if (!program) {
+            return program.error();
+        }
+        if (*program > install.version) {
+            install.version = *program;
+        }
     } else if (const core::Status built = builtVersion(); !built) {
         return built.error(); // a fresh install: the version it was built as, sequence 0
     }
