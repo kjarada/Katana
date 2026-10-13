@@ -10,8 +10,11 @@
 //   KATANA_STUB_LOG              file to append one line to for every start (what ran, with what)
 //   KATANA_STUB_MODE             for --update-health: healthy (default: write the marker, exit 0),
 //                                exit1 (exit 1 without the marker), exit0 (exit 0 without it: a
-//                                start that ends well and never says it started), delay_exit1 (exit 1
-//                                after 1.5 s, time for a test to do something to the install),
+//                                start that ends well and never says it started), exit1_when_told
+//                                (exit 1 without the marker once the test has made the file
+//                                <KATANA_STUB_LOG>.go: until then the new version is running, and
+//                                the test can do something to the install for as long as it needs -
+//                                a pause of a fixed length would be a race against a busy machine),
 //                                marker_then_exit3, silent (never write it and never return: the
 //                                helper's timeout ends it)
 //   KATANA_UPDATE_STATE_DIR      where the marker goes, <dir>\healthy-<tx> (state.hpp)
@@ -54,6 +57,15 @@
 #include <vector>
 
 namespace {
+
+// The longest a health check of this program stays when nothing ends it (the modes silent and
+// exit1_when_told), in milliseconds: two minutes, which is what a test gives a whole run of the
+// helper (tests/update/test_helper.cpp, kPatience). A test that passes never sees them out: the
+// helper's health wait ends a silent start, and the test's file ends the other. They are for
+// the run that went wrong, so that a stub nobody waits for any more still goes.
+constexpr DWORD kLongestStay = 120'000;
+// How often exit1_when_told looks for its file, in milliseconds.
+constexpr DWORD kLookEvery = 20;
 
 std::string utf8(const std::wstring& wide)
 {
@@ -226,12 +238,21 @@ int main(int argc, char** argv)
         if (mode == "exit0") {
             return 0;
         }
-        if (mode == "delay_exit1") {
-            Sleep(1500);
+        if (mode == "exit1_when_told") {
+            // Told by a file, which is looked for until it is there. Not for ever: a test that
+            // died before it made the file must not leave this process behind. With no log named
+            // there is no file to be told by, and the exit is at once.
+            const std::wstring told = logPath + L".go";
+            DWORD waited = 0;
+            while (!logPath.empty() && waited < kLongestStay &&
+                   GetFileAttributesW(told.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                Sleep(kLookEvery);
+                waited += kLookEvery;
+            }
             return 1;
         }
         if (mode == "silent") {
-            Sleep(120'000);
+            Sleep(kLongestStay);
             return 0;
         }
         const std::wstring state = environment(L"KATANA_UPDATE_STATE_DIR");

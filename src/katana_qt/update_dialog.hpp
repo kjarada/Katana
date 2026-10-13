@@ -102,7 +102,10 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include <QDialog>
 #include <QString>
@@ -226,11 +229,12 @@ updateFilesOfProgressLine(const QString& line);
 //
 // What the dialog's owner decides from the update engine's records: which view
 // an answer is, what is offered when the window starts, when the window checks
-// by itself, what the log may show. They are here - beside the dialog, in the
-// library the widget tests link - because their owner in the program
-// (UpdateWorkbench) needs the whole window and cannot be built in a test. Each
-// is a function of its arguments: the owner gathers the facts (the disk, the
-// clock, the environment) and decides nothing of this itself.
+// by itself, what the log may show, which helper copies a start may remove.
+// They are here - beside the dialog, in the library the widget tests link -
+// because their owner in the program (UpdateWorkbench) needs the whole window
+// and cannot be built in a test. Each is a function of its arguments: the
+// owner gathers the facts (the disk, the clock, the environment) and decides
+// nothing of this itself.
 
 // "0.3" and "0.3.0" are one release (update/version.hpp); text that is no
 // version is the same only as itself.
@@ -350,6 +354,45 @@ struct UpdateAutoCheckFacts {
 [[nodiscard]] bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
                                              const katana::update::UpdateState& state,
                                              std::int64_t nowEpoch, std::chrono::seconds jitter);
+
+// The transactions whose helper copy U/run-<tx> the window's start lists for
+// removal (update/state.hpp, cleanup.list). A swap that ends lists its own
+// copy. One that a crash ended, or whose rollback failed, is put right later
+// by `katana_updater --recover`, which writes nothing per user
+// (update/recover.hpp), so nothing in U names its copy. The INSTALL names it:
+// every run of --recover that found something appends a line
+//   <UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>
+// to R/.update/recovery.log. `recoveryLog` is that file's text, and the answer
+// is each id of a `found=` list, once, in the order first named, for which
+// `isOver(id)` holds - the install has no folder R/.update/<id> any more. A
+// transaction that a recovery found and whose folder is gone is over, rolled
+// back or healthy, and nothing starts its helper again. One whose folder is
+// still there keeps its copy: a rollback that failed runs from it at the next
+// try. `isOver` is asked once for an id however often it is named, and with
+// none given nothing is known to be over.
+//
+// WHY THE INSTALL'S LOG AND NOT THE NAMES IN U. U is one folder for every copy
+// of Katana a person runs, and a `run-<tx>` with no transaction folder in THIS
+// install is also what UPDATE APPLY CONFIRM has just made, here or in another
+// install, for a helper that has not started yet. Only an id that this
+// install's own recovery named is known to be this install's, and begun.
+// (What defeats it is a COPY of an install folder made while an update in it
+// was half done: the copy carries the transaction with it, and putting the
+// copy right removes the helper copy the original would have run. The
+// original then runs its own bin/katana_updater, as update::recover does
+// whenever that copy is gone.)
+//
+// THE LOG IS NOT TRUSTED: a process of the same user can write R/.update. A
+// line counts only when it is whole - ended by its line feed, so a torn last
+// write names nothing - and has the form above: its second word `recover`, its
+// third `found=...`, its fourth `result=...`. The same file quotes journal
+// records a rollback refused (`<tx> journal record refused: ...`), whose text
+// is anybody's and therefore names nothing. And an id counts only when
+// update::isValidTransactionId says it is one, so it names no place but
+// U/run-<id>.
+[[nodiscard]] std::vector<std::string>
+updateRecoveredTransactions(std::string_view recoveryLog,
+                            const std::function<bool(const std::string& transaction)>& isOver);
 
 class UpdateDialog final : public QDialog {
   public:

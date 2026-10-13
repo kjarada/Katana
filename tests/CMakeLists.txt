@@ -468,8 +468,11 @@ if(Python3_Interpreter_FOUND)
     # Katana Standard is generated from the data modules in tools/katana_standard/, and the committed customisation
     # file and catalogue are what the generator makes. `katana_standard_current` fails the day either is edited by
     # hand, or the data changes and they are not regenerated (a counts-only test cannot see a swapped colour, weight
-    # or linestyle); the four others run each data module's own check of its grammar. Python is a convenience, so
-    # without it there are no such tests (docs/katana_standard.md, "How it is made and held").
+    # or linestyle), and it fails when a picture of the catalogue was drawn from another edition: each picture
+    # carries, in the text of its PNG, the SHA-256 of each thing it was drawn from, and the check compares that with
+    # the same digests of what is committed now. The four others run each data module's own check of its grammar.
+    # Python is a convenience, so without it there are no such tests (docs/katana_standard.md, "How it is made and
+    # held").
     add_test(NAME katana_standard_current
         COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/katana_standard/make_katana_standard.py" --check)
     foreach(_ks_module IN ITEMS colours linestyles symbols codes)
@@ -496,6 +499,9 @@ if(Python3_Interpreter_FOUND)
         COMMAND "${KATANA_PYTHON}" "${_ks_tools}/originality.py" "${_ks_nsw}" "${_ks_own}")
     add_test(NAME katana_standard_originality_script
         COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_originality.py")
+    # `katana_standard_pictures_script` is the test of how `katana_standard_current` holds the catalogue's pictures
+    # (test_pictures.py), on one-pixel pictures it writes itself in a scratch folder.
+    add_test(NAME katana_standard_pictures_script COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_pictures.py")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only

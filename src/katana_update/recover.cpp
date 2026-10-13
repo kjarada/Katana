@@ -26,7 +26,9 @@
 // U/cleanup.list. A folder under R/.update that would not go needs no list: it keeps its
 // journal (remove_tree.hpp) and is found and swept again at the next start. The copy is left
 // for a program that may write per-user state, and NOTHING REMOVES IT YET: one helper's size
-// stays in U for each update that a crash interrupted.
+// stays in U for each update that needed a recovery - one that a crash interrupted, and one
+// whose rollback failed and which `--recover` put right later (Applier::finish, apply.cpp,
+// keeps that copy off cleanup.list because the RunOnce entry runs `--recover` from it).
 
 #include "katana/update/recover.hpp"
 

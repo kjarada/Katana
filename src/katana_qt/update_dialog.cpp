@@ -3,6 +3,11 @@
 #include "update_dialog.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include <QFont>
 #include <QHBoxLayout>
@@ -15,6 +20,7 @@
 #include <QVBoxLayout>
 
 #include "katana/core/error.hpp"
+#include "katana/update/apply.hpp"
 #include "katana/update/check.hpp"
 #include "katana/update/manifest.hpp"
 #include "theme.hpp"
@@ -663,6 +669,58 @@ bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
         return false;
     }
     return katana::update::checkIsDue(state, nowEpoch, jitter);
+}
+
+std::vector<std::string>
+updateRecoveredTransactions(std::string_view recoveryLog,
+                            const std::function<bool(const std::string& transaction)>& isOver)
+{
+    // A line of `katana_updater --recover` after its first word, the time, and
+    // the word that follows its list of ids (update/recover.hpp).
+    constexpr std::string_view kFound = "recover found=";
+    constexpr std::string_view kResult = "result=";
+    std::vector<std::string> over;
+    if (!isOver) {
+        return over;
+    }
+    // Every id met so far: a recovery that failed and the one that then put the
+    // install right both name the transaction, and it is asked about once.
+    std::vector<std::string> met;
+    // Line by line, each ended by its line feed: what is left after the last
+    // one is a write that was cut short, and is not read.
+    for (std::size_t lineEnd = recoveryLog.find('\n'); lineEnd != std::string_view::npos;
+         lineEnd = recoveryLog.find('\n')) {
+        std::string_view line = recoveryLog.substr(0, lineEnd);
+        recoveryLog.remove_prefix(lineEnd + 1);
+        const std::size_t timeEnd = line.find(' ');
+        if (timeEnd == std::string_view::npos) {
+            continue;
+        }
+        line.remove_prefix(timeEnd + 1);
+        if (!line.starts_with(kFound)) {
+            continue;
+        }
+        line.remove_prefix(kFound.size());
+        const std::size_t listEnd = line.find(' ');
+        if (listEnd == std::string_view::npos || !line.substr(listEnd + 1).starts_with(kResult)) {
+            continue;
+        }
+        std::string_view list = line.substr(0, listEnd);
+        while (!list.empty()) {
+            const std::size_t comma = list.find(',');
+            std::string id(list.substr(0, comma));
+            list.remove_prefix(comma == std::string_view::npos ? list.size() : comma + 1);
+            if (!katana::update::isValidTransactionId(id) ||
+                std::find(met.begin(), met.end(), id) != met.end()) {
+                continue;
+            }
+            if (isOver(id)) {
+                over.push_back(id);
+            }
+            met.push_back(std::move(id));
+        }
+    }
+    return over;
 }
 
 // ---- the dialog --------------------------------------------------------------------------------

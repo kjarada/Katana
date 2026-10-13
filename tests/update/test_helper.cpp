@@ -78,6 +78,18 @@ namespace {
 
 using namespace std::chrono_literals;
 
+// How long a test waits for a program: for a run to end (runProgram), and for a program that was
+// started and left running to say that it is there (Sleeper, World::waitForLog). ONE figure for
+// all of them, and a generous one, because what it bounds is the machine and not the helper: a
+// program is read by the virus scanner the first time it is started, every test process here
+// makes programs of its own (a copy of the helper, the stubs of an install), and ctest runs a
+// dozen such processes at once. The integration run of 2026-10-14, 14 tests at a time: the cases
+// that only start the two freshly built helpers a few times took 23 s each (0.7 s for two
+// starts on the machine at rest), and one swap took 31 s, with every outcome right - while two
+// cases that gave such a thing 30 s failed. A wait ends the moment what it waits for happens, so
+// the figure costs a passing test nothing; it is how long a test that is going to fail takes.
+constexpr std::chrono::seconds kPatience{120};
+
 // ---- small helpers --------------------------------------------------------------------------------
 
 std::wstring toWide(std::string_view utf8)
@@ -204,7 +216,7 @@ class ScopedEnvironment {
 
 // Runs a program to its end with the system Launcher: its exit code and what it printed.
 SpawnResult runProgram(const Path& executable, std::vector<std::string> arguments,
-                       const Path& workingDirectory = {}, std::chrono::milliseconds timeout = 120s)
+                       const Path& workingDirectory = {}, std::chrono::milliseconds timeout = kPatience)
 {
     const std::unique_ptr<Launcher> launcher = makeSystemLauncher();
     SpawnRequest request;
@@ -254,7 +266,7 @@ class Sleeper {
         }
         // The stub writes the digits and a line feed in one write, first thing.
         std::string text;
-        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        const auto end = std::chrono::steady_clock::now() + kPatience;
         while (std::chrono::steady_clock::now() < end) {
             text = readText(note);
             if (!text.empty() && text.back() == '\n') {
@@ -566,6 +578,27 @@ constexpr std::string_view kTransaction = "a1b2c3d4e5f60718";
 // health wait, rename retry - milliseconds.
 constexpr std::string_view kTimings = "500,1500,50,20000,30000";
 
+// A health wait that no run can be taken to have sat out: ten minutes, where a shipped helper
+// waits one (apply.hpp, ApplyTimings) and a test gives a whole run of the helper two (kPatience).
+// It is for the cases whose point is that the helper does NOT wait - for a new version that has
+// ended, for one that could not be started - and for the one that holds the new version in its
+// health check until the test is ready. What they must tell apart is "the helper went on when
+// the program ended" and "the helper waited the time out", and against a wait of 60 s that took
+// a limit on the whole run below 60 s: a bet that everything else in a swap - starting two
+// programs for the first time, hashing, copying, the journal - takes less than the limit on a
+// machine doing a dozen other things, which the run kPatience tells of lost by a second (31.04 s
+// against a limit of 30 s). With this wait the two are five limits apart: a helper that sits the
+// wait out is still running when the test's limit ends it (SpawnResult::timedOut), and a slow
+// machine has that whole limit, the same as in every other case here.
+constexpr std::chrono::milliseconds kLongHealthWait = 10min;
+static_assert(kLongHealthWait >= 5 * kPatience, "a run must end, or be ended, long before this wait could");
+
+// kTimings with that health wait, and with the rename retry of a case that asks for another.
+std::string timingsWithALongHealthWait(std::chrono::milliseconds renameRetry = 30s)
+{
+    return "500,1500,50," + std::to_string(kLongHealthWait.count()) + "," + std::to_string(renameRetry.count());
+}
+
 // A release of the stub's: v1 and v2 differ in the programs (the tag), one library, one data file,
 // and each has a file the other lacks. The seed differs too, and an update must leave v1's.
 ReleaseSpec stubRelease(std::string_view tag, std::string_view version, std::uint64_t sequence)
@@ -725,7 +758,7 @@ class World {
     }
 
     SpawnResult runHelper(std::vector<std::string> arguments, const std::string& transaction = std::string(kTransaction),
-                          std::chrono::milliseconds timeout = 120s)
+                          std::chrono::milliseconds timeout = kPatience)
     {
         return runProgram(helperPath(transaction), std::move(arguments), helperPath(transaction).parent_path(),
                           timeout);
@@ -758,7 +791,7 @@ class World {
     [[nodiscard]] std::string stubLog() const { return logOf(log); }
     [[nodiscard]] bool logHas(std::string_view part) const { return contains(stubLog(), part); }
     // The stub the helper starts last is detached: wait for its line.
-    bool waitForLog(std::string_view part, std::chrono::milliseconds limit = 30s) const
+    bool waitForLog(std::string_view part, std::chrono::milliseconds limit = kPatience) const
     {
         const auto end = std::chrono::steady_clock::now() + limit;
         while (std::chrono::steady_clock::now() < end) {
@@ -769,6 +802,9 @@ class World {
         }
         return logHas(part);
     }
+    // Lets a stub started in the mode exit1_when_told go: the file it looks for, the log's name
+    // with ".go" after it (updater_stub.cpp).
+    void tellTheStubToExit() const { writeText(Path(log.native() + L".go"), "go\n"); }
 
     void expectV1()
     {
@@ -1753,8 +1789,10 @@ TEST(HelperProgram, TheCopyRunsFromAFolderOfItsOwnWithNothingOfTheToolchainOnPat
         std::wstring(windows, length) + L"\\System32;" + std::wstring(windows, length);
     ScopedEnvironment environment;
     environment.set(L"PATH", systemFolders);
-    // A self-test takes a moment; half a minute is a virus scanner's first look at a new file.
-    const SpawnResult ran = runProgram(copy, {"--selftest"}, copy.parent_path(), std::chrono::seconds(30));
+    // A self-test takes a moment. The limit is the one every run here has (kPatience): what it
+    // has to cover is a virus scanner's first look at a program just written, on a machine that
+    // may be running a dozen other tests.
+    const SpawnResult ran = runProgram(copy, {"--selftest"}, copy.parent_path());
     EXPECT_FALSE(ran.timedOut) << describe(ran);
     EXPECT_EQ(ran.exitCode, 0) << describe(ran);
     EXPECT_EQ(valueOf(ran.output, "selftest"), "ok");
@@ -2057,17 +2095,17 @@ TEST(HelperSwap, ANewVersionThatCannotBeStartedAtAllIsRolledBackAtOnceAndNotOffe
     // started by a test.)
     FixtureWorld world("swap-unstartable");
     const Path missing = world.top / "not here" / "katana.exe";
-    std::vector<std::string> arguments = world.applyArguments("500,1500,50,60000,30000");
+    // "At once" is: not after the health wait. The wait of this run is one that a run which sat it
+    // out could not have ended within the test's limit for a run (kLongHealthWait).
+    std::vector<std::string> arguments = world.applyArguments(timingsWithALongHealthWait());
     arguments.push_back("--stand-in");
     arguments.push_back(toUtf8(missing.native()));
-    const auto begin = std::chrono::steady_clock::now();
     const SpawnResult ran = world.run(arguments);
-    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    EXPECT_FALSE(ran.timedOut) << "the health wait was sat out for a program that was never started";
     EXPECT_EQ(ran.exitCode, 11) << describe(ran);
     EXPECT_EQ(valueOf(ran.output, "outcome"), "rolled_back");
     EXPECT_EQ(valueOf(ran.output, "reason"), "health_exit");
     EXPECT_EQ(treeHash(world.s.root), world.s.v1Hash) << difference(world.s.v1Snapshot, snapshot(world.s.root));
-    EXPECT_LT(elapsed, 30s) << "the 60 s health wait must not have been spent";
     EXPECT_TRUE(leftoversInUpdate(world.s.root).empty());
     EXPECT_FALSE(world.runOnceIsSet());
     const core::Result<std::optional<LastResult>> last = readLastResult(world.s.state);
@@ -2160,18 +2198,18 @@ TEST(HelperSwap, ANewVersionThatEndsWellWithoutSayingItStartedIsRolledBackAndNot
     // never got to its first idle turn - a release whose katana does not know the switch and
     // leaves at once, say. "A start that ... never writes it means rollback" (apply.hpp, step 7):
     // a clean exit alone proves nothing. It ended, so the helper has no wait to sit out: the
-    // reason is the exit, not the time, and the 60 s of this run's health wait are not spent.
+    // reason is the exit, not the time, and this run's health wait is not spent - a wait so long
+    // (kLongHealthWait) that a helper which spent it would still be running when the test's
+    // limit for a run ended it.
     World world("swap-health-exit0");
     world.arrangeEnvironment("exit0");
     world.registerAsInstaller();
-    const auto begin = std::chrono::steady_clock::now();
     const SpawnResult ran =
-        world.runHelper(world.applyArguments(std::string(kTransaction), 0, "500,1500,50,60000,30000"));
-    const auto elapsed = std::chrono::steady_clock::now() - begin;
+        world.runHelper(world.applyArguments(std::string(kTransaction), 0, timingsWithALongHealthWait()));
+    ASSERT_FALSE(ran.timedOut) << "the health wait was sat out for a program that had ended";
     ASSERT_EQ(ran.exitCode, 11) << describe(ran);
     EXPECT_EQ(valueOf(ran.output, "outcome"), "rolled_back");
     EXPECT_EQ(valueOf(ran.output, "reason"), "health_exit");
-    EXPECT_LT(elapsed, 30s) << "the health wait must not have been sat out for a program that had ended";
     world.expectV1();
     EXPECT_EQ(world.displayVersion(), std::wstring(L"0.9.0")) << "a release that did not prove itself is never shown";
     EXPECT_TRUE(leftoversInUpdate(world.root).empty());
@@ -2290,23 +2328,48 @@ TEST(HelperSwap, ARollbackThatCannotFinishExitsWithCode12AndRecoverByHandPutsThe
 {
     REQUIRE_CAN_SIGN();
     World world("swap-rollback-incomplete");
-    // The new version starts, waits 1.5 s and exits 1; in that time this test holds a file of the
-    // new version open with no sharing for deletion, so the rollback cannot move it back.
-    world.arrangeEnvironment("delay_exit1");
+    // The new version starts and stays in its health check until this test lets it go, and then
+    // exits 1; in that time the test holds a file of the new version open with no sharing for
+    // deletion, so the rollback cannot move it back. No step of that is a bet on how fast the
+    // machine is: the stub waits for the test (a pause of a fixed length in the stub is one a
+    // busy machine outlasts), the test waits for the stub's line for as long as the helper runs
+    // (the helper, started at the same moment, has a limit of its own; on a busy machine it was
+    // not yet at the health check after the 30 s this wait once had, and went on to it), and the
+    // helper's health wait is one no run sits out (kLongHealthWait). The rename retry is 1 s: how
+    // long the rollback tries the file this test holds before it gives up.
+    world.arrangeEnvironment("exit1_when_told");
     std::optional<SpawnResult> ran;
+    std::atomic<bool> ended{false};
     std::thread helper([&] {
-        ran = world.runHelper(world.applyArguments(std::string(kTransaction), 0, "500,1500,50,20000,1000"));
+        ran = world.runHelper(world.applyArguments(std::string(kTransaction), 0, timingsWithALongHealthWait(1s)));
+        ended = true;
     });
-    const bool started = world.waitForLog("health tag=v2 ");
+    bool started = false;
+    while (!started) {
+        // Asked before the log is read: a line the helper's run wrote is then seen, whenever it ended.
+        const bool helperEnded = ended;
+        started = world.logHas("health tag=v2 ");
+        if (helperEnded) {
+            break;
+        }
+        if (!started) {
+            std::this_thread::sleep_for(20ms);
+        }
+    }
     HANDLE held = INVALID_HANDLE_VALUE;
+    DWORD holdError = ERROR_SUCCESS;
     if (started) {
         const std::wstring library = (world.root / "bin" / "libcore-1.dll").native();
         held = CreateFileW(library.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
+        holdError = GetLastError();
     }
+    // Whatever came of that, the stub is let go and the helper's thread joined before anything is
+    // judged: a judgement that left the test with the thread still running would end the program.
+    world.tellTheStubToExit();
     helper.join();
     ASSERT_TRUE(started) << "the new version never started: " << (ran ? describe(*ran) : std::string());
-    ASSERT_NE(held, INVALID_HANDLE_VALUE) << "the new library could not be held: " << GetLastError();
+    ASSERT_NE(held, INVALID_HANDLE_VALUE) << "the new library could not be held: " << holdError;
     ASSERT_TRUE(ran.has_value());
 
     EXPECT_EQ(ran->exitCode, 12) << describe(*ran);

@@ -71,7 +71,13 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     begun. What a sweep of R/.update/<tx> could not delete is found there
 //     again at the next start. The copy stays: removing it is for a program
 //     that may write per-user state, and none does yet, so one helper's size
-//     is left in U for each update a crash interrupted.
+//     is left in U for each update that needed a recovery. That is an update
+//     a crash interrupted (its helper died before it could list its own
+//     copy), and equally one whose rollback failed and which `--recover` put
+//     right later: Applier::finish (apply.cpp) keeps the copy off
+//     cleanup.list after a rollback that failed, because the RunOnce entry
+//     runs `--recover` from that very copy, and the recovery then lists
+//     nothing.
 [[nodiscard]] core::Status recover(const std::filesystem::path& root);
 
 // Roll back every transaction under R/.update whose journal needs it, in

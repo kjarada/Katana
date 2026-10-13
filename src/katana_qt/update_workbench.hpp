@@ -42,15 +42,20 @@
 //     request to start the helper with, after the event loop has ended;
 //   - what the last apply ended as (U/last.json), shown once at the next start
 //     and then cleared; and a release downloaded in an earlier session offered
-//     again as ready - unless it was skipped since, or rolled back here.
+//     again as ready - unless it was skipped since, or rolled back here;
+//   - THE SWEEP at a start, on Windows, where an update can have run: what a
+//     lock kept an earlier update from deleting (U/cleanup.list), and with it
+//     the helper's copy U/run-<tx> of each update of THIS install that needed
+//     a recovery and is over - which only the install's own
+//     R/.update/recovery.log names, since a recovery writes nothing per user.
 //
 // WHAT IT DECIDES IS NOT HERE. Which view an answer is, what is offered at a
 // start, when the automatic check is due, what its answer does to what is
-// shown and what the log may show are functions of their arguments beside the
-// dialog (update_dialog.hpp, "THE DECISIONS"), where the widget tests drive
-// them: this object needs the whole window and is built in no test. It
-// gathers the facts - the disk, the clock, the environment, the job runner -
-// and does what they say.
+// shown, what the log may show and which helper copies a start may remove are
+// functions of their arguments beside the dialog (update_dialog.hpp, "THE
+// DECISIONS"), where the widget tests drive them: this object needs the whole
+// window and is built in no test. It gathers the facts - the disk, the clock,
+// the environment, the job runner - and does what they say.
 //
 // A HEADLESS RUN (docs/headless.md): no automatic check, no per-user state
 // read or written (the context has no state folder), nothing shown unless
@@ -120,9 +125,10 @@ class UpdateWorkbench {
     bool runLine(const QString& line);
 
     // What an interactive window does about updates as it starts, once, after
-    // it is shown: the leftovers of an earlier update removed, the last
-    // apply's result shown and cleared, a release already downloaded offered
-    // again, and the automatic check when one is due. Nothing in a headless
+    // it is shown: the leftovers of an earlier update removed - the helper's
+    // copy of one that a recovery put right among them - the last apply's
+    // result shown and cleared, a release already downloaded offered again,
+    // and the automatic check when one is due. Nothing in a headless
     // run, and nothing for a development copy, which shares the per-user
     // update folder with an installed copy and must leave it alone.
     void start();

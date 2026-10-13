@@ -49,9 +49,19 @@
 // 0.2.0 and 0.3.0, its sequence 1792312800, its `expires` of
 // 2027-04-18T08:00:00Z - which is 1 808 035 200 seconds after 1970 (20 926
 // days: 57 years of 365, 14 leap days, 31 + 28 + 31 + 17; and 8 hours).
+//
+// The recovery log's lines (the last UpdateDecisions tests) are written by hand
+// in the two forms the engine states: include/katana/update/recover.hpp for a
+// run of `katana_updater --recover` - "<UTC time> recover found=<tx,...>
+// result=ok|failed left=<tx,...>", and `detail=` after a failure - and
+// src/katana_update/apply.cpp (reportRefusals) for a journal record a
+// rollback would not follow, "<tx> journal record refused: <record>".
+// A transaction id is 1 to 64 characters, each 0-9 or a-f
+// (include/katana/update/apply.hpp, isValidTransactionId).
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -1489,6 +1499,177 @@ TEST(UpdateDecisions, WhatTheVerbsSayBackToALineWithATokenTypedOnItIsHiddenInAny
               QStringLiteral("skipped=0.3.0"));
     EXPECT_EQ(updateLoggedReply(QStringLiteral("update=current"), QString()),
               QStringLiteral("update=current"));
+}
+
+namespace {
+
+using Ids = std::vector<std::string>;
+
+// Two transaction ids of the length update::newTransactionId gives them, 32
+// characters of lower-case hex, written by hand.
+const std::string kCrashed = "0123456789abcdef0123456789abcdef";
+const std::string kPowerCut = "fedcba9876543210fedcba9876543210";
+
+// The line a run of `katana_updater --recover` appends, by recover.hpp's form.
+std::string recoveryLine(const std::string& found, const char* result, const std::string& left)
+{
+    return "2026-10-13T08:40:00Z recover found=" + found + " result=" + result + " left=" + left +
+           "\n";
+}
+
+// An install as updateRecoveredTransactions asks about it: whether the folder
+// R/.update/<id> is gone, for the ids in `gone`; and which ids it was asked
+// about, in the order it was asked.
+struct AskedInstall {
+    Ids gone;
+    Ids asked;
+
+    [[nodiscard]] std::function<bool(const std::string&)> isOver()
+    {
+        return [this](const std::string& id) {
+            asked.push_back(id);
+            return std::find(gone.begin(), gone.end(), id) != gone.end();
+        };
+    }
+};
+
+} // namespace
+
+TEST(UpdateDecisions, TheHelperCopyOfARecoveredUpdateIsListedOnlyOnceItsTransactionIsOver)
+{
+    using katana::qt::updateRecoveredTransactions;
+    // An update that a crash interrupted, put right at the next start: the
+    // recovery found its folder and left none.
+    const std::string log = recoveryLine(kCrashed, "ok", "");
+
+    // The folder R/.update/<tx> is gone: the transaction is over, and its
+    // helper copy U/run-<tx> is one to remove.
+    AskedInstall recovered;
+    recovered.gone = {kCrashed};
+    EXPECT_EQ(updateRecoveredTransactions(log, recovered.isOver()), Ids{kCrashed});
+    EXPECT_EQ(recovered.asked, Ids{kCrashed});
+
+    // The folder is still there - the rollback failed, and the next try runs
+    // from that very copy: it is not one to remove.
+    AskedInstall halfSwapped;
+    EXPECT_TRUE(updateRecoveredTransactions(recoveryLine(kCrashed, "failed", kCrashed),
+                                            halfSwapped.isOver())
+                    .empty());
+    EXPECT_EQ(halfSwapped.asked, Ids{kCrashed});
+}
+
+TEST(UpdateDecisions, ATransactionIsAskedAboutOnceHoweverManyRecoveriesNamedIt)
+{
+    using katana::qt::updateRecoveredTransactions;
+    // A recovery that failed, the one that then put the install right and found
+    // a second interrupted update beside it, and a third run that names the
+    // second again: two transactions, the first one named first.
+    const std::string log =
+        "2026-10-13T08:40:00Z recover found=" + kCrashed + " result=failed left=" + kCrashed +
+        " detail=InvalidState: an interrupted update could not be put back\n" +
+        recoveryLine(kCrashed + "," + kPowerCut, "ok", "") + recoveryLine(kPowerCut, "ok", "");
+
+    AskedInstall bothOver;
+    bothOver.gone = {kPowerCut, kCrashed};
+    EXPECT_EQ(updateRecoveredTransactions(log, bothOver.isOver()), (Ids{kCrashed, kPowerCut}));
+    EXPECT_EQ(bothOver.asked, (Ids{kCrashed, kPowerCut}));
+
+    // Only the second is over: only its copy is one to remove.
+    AskedInstall oneOver;
+    oneOver.gone = {kPowerCut};
+    EXPECT_EQ(updateRecoveredTransactions(log, oneOver.isOver()), Ids{kPowerCut});
+    EXPECT_EQ(oneOver.asked, (Ids{kCrashed, kPowerCut}));
+
+    // A long log is no more questions: 2000 lines naming one transaction ask
+    // about it once and name it once.
+    std::string longLog;
+    for (int line = 0; line < 2000; ++line) {
+        longLog += recoveryLine(kCrashed, "ok", "");
+    }
+    AskedInstall often;
+    often.gone = {kCrashed};
+    EXPECT_EQ(updateRecoveredTransactions(longLog, often.isOver()), Ids{kCrashed});
+    EXPECT_EQ(often.asked, Ids{kCrashed});
+}
+
+TEST(UpdateDecisions, OnlyAWholeLineThatARecoveryWroteNamesATransaction)
+{
+    using katana::qt::updateRecoveredTransactions;
+    const std::string stamp = "2026-10-13T08:40:00Z ";
+    const std::pair<const char*, std::string> lines[] = {
+        // The log quotes a journal record that a rollback refused, and a
+        // journal is anybody's text: its second word is `journal`, whatever
+        // the record goes on to say.
+        {"a refused journal record",
+         kCrashed + " journal record refused: REPLACE x recover found=" + kPowerCut +
+             " result=ok left=: outside the install\n"},
+        // `recover` is the SECOND word and `found=` the third.
+        {"no time", "recover found=" + kCrashed + " result=ok left=\n"},
+        {"found= is not the third word",
+         stamp + "recover result=ok found=" + kCrashed + " left=\n"},
+        {"another mode's line", stamp + "apply found=" + kCrashed + " result=ok left=\n"},
+        // `result=` is the fourth: it is what says the list before it is whole.
+        {"the list ends the line", stamp + "recover found=" + kCrashed + "\n"},
+        {"no result", stamp + "recover found=" + kCrashed + " left=\n"},
+        // A write that was cut short has no line feed, and is not read though
+        // every word of it is there...
+        {"no line feed", stamp + "recover found=" + kCrashed + " result=ok left="},
+        // ...and one cut inside its list ends in what is left of an id, which
+        // is still hex and would name a folder of its own.
+        {"cut inside the id", stamp + "recover found=" + kCrashed.substr(0, 12)},
+    };
+    for (const auto& [what, line] : lines) {
+        AskedInstall install;
+        install.gone = {kCrashed, kPowerCut, kCrashed.substr(0, 12)};
+        EXPECT_TRUE(updateRecoveredTransactions(line, install.isOver()).empty()) << what;
+        EXPECT_TRUE(install.asked.empty()) << what;
+    }
+
+    // A whole line before a torn one still counts, and the torn one does not.
+    AskedInstall install;
+    install.gone = {kCrashed, kPowerCut};
+    EXPECT_EQ(updateRecoveredTransactions(recoveryLine(kCrashed, "ok", "") + stamp +
+                                              "recover found=" + kPowerCut + " result=ok left=",
+                                          install.isOver()),
+              Ids{kCrashed});
+    EXPECT_EQ(install.asked, Ids{kCrashed});
+}
+
+TEST(UpdateDecisions, WhatIsNoTransactionIdInARecoveryLineNamesNoFolder)
+{
+    using katana::qt::updateRecoveredTransactions;
+    // Beside one real id: a way out of the folder, a drive, upper-case hex,
+    // nothing at all between two commas, 65 characters, and a folder's own name.
+    // None is 1 to 64 characters of 0-9 and a-f, so none is asked about - an
+    // id is joined to U/run- and to R/.update/ as it stands.
+    const std::string list = "../../outside,C:/Windows,0123456789ABCDEF,," +
+                             std::string(65, 'f') + ",run-" + kCrashed + "," + kPowerCut;
+    AskedInstall install;
+    install.gone = {"../../outside",      "C:/Windows",      "0123456789ABCDEF", "",
+                    std::string(65, 'f'), "run-" + kCrashed, kPowerCut};
+    EXPECT_EQ(updateRecoveredTransactions(recoveryLine(list, "ok", ""), install.isOver()),
+              Ids{kPowerCut});
+    EXPECT_EQ(install.asked, Ids{kPowerCut});
+}
+
+TEST(UpdateDecisions, ARecoveryLogThatNamesNothingListsNothing)
+{
+    using katana::qt::updateRecoveredTransactions;
+    AskedInstall install;
+    install.gone = {kCrashed};
+    // No log, empty lines, and the line of a run that failed before it found
+    // anything (an empty list).
+    EXPECT_TRUE(updateRecoveredTransactions("", install.isOver()).empty());
+    EXPECT_TRUE(updateRecoveredTransactions("\n\n\n", install.isOver()).empty());
+    EXPECT_TRUE(updateRecoveredTransactions(
+                    "2026-10-13T08:40:00Z recover found= result=failed left= detail=Internal: "
+                    "looking for an interrupted update stopped on an unexpected error\n",
+                    install.isOver())
+                    .empty());
+    EXPECT_TRUE(install.asked.empty());
+
+    // With nobody to say whether a transaction is over, none is known to be.
+    EXPECT_TRUE(updateRecoveredTransactions(recoveryLine(kCrashed, "ok", ""), {}).empty());
 }
 
 // ---- Settings > Updates -------------------------------------------------------------------------

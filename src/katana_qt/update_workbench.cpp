@@ -16,11 +16,13 @@
 #include <QUrl>
 
 #include <atomic>
+#include <cstdint>
 #include <random>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "katana/core/path_text.hpp"
 #include "katana/update/check.hpp"
@@ -73,6 +75,16 @@ constexpr std::chrono::minutes kDueProbe{60};
 constexpr std::chrono::milliseconds kProgressTick{250};
 // How often a close that waits for a job looks again.
 constexpr std::chrono::milliseconds kJobPoll{250};
+// The install's own record of its recoveries, R/.update/recovery.log
+// (update/recover.hpp, "WHAT RECOVERY WRITES, AND WHERE").
+constexpr std::string_view kRecoveryLogName = "recovery.log";
+// The most of that record a start reads. A recovery's line is its time, a few
+// words and the ids it found and left, 32 characters each (update/apply.hpp,
+// newTransactionId): about a hundred bytes, written once for an update that a
+// crash interrupted. A megabyte is some ten thousand of them, and what
+// cleanup.list is held to (src/katana_update/state.cpp); a file beyond it is
+// not one the helper wrote, and is not read.
+constexpr std::uint64_t kRecoveryLogLimit = 1024 * 1024;
 
 QString qs(const std::string& text)
 {
@@ -149,6 +161,75 @@ QString discardPrepared(const katana::update::ApplyRequest& request)
         request.stateDirectory,
         katana::update::runPath(request.stateDirectory, request.transaction), *files);
     return listed ? QString() : qs(listed.error().message);
+}
+
+// Lists for the same sweep the helper's copy of each update of THIS install
+// that needed a recovery and is over. `katana_updater --recover` writes
+// nothing per user, whoever started it (update/recover.hpp), so nothing in the
+// update folder names that copy: unlisted, one helper's size would stay there
+// for every update a crash interrupted. Which transactions those are is
+// updateRecoveredTransactions' (update_dialog.hpp), which also says why no
+// other `run-<tx>` is touched: the update folder is every install's.
+//
+// The record is read as recovery reads the folder it lies in - never through a
+// link - and a copy that is gone already, which is every start but the first
+// after a recovery, is not listed again. Empty when there was nothing to list
+// or it is listed; else why it could not be.
+QString listRecoveredCopies(const std::filesystem::path& stateDirectory,
+                            const std::filesystem::path& root, katana::update::FsOps& files)
+{
+    using katana::update::EntryInfo;
+    using katana::update::EntryKind;
+    if (root.empty()) {
+        return {};
+    }
+    const std::filesystem::path work = katana::update::updateWorkDirectory(root);
+    const Result<EntryInfo> folder = files.stat(work);
+    if (!folder) {
+        return qs(folder.error().message);
+    }
+    if (folder->kind != EntryKind::Directory || folder->reparsePoint) {
+        // A copy that was never updated, or a folder that is not the install's own.
+        return {};
+    }
+    const std::filesystem::path record = work / katana::core::pathFromUtf8(kRecoveryLogName);
+    const Result<EntryInfo> written = files.stat(record);
+    if (!written) {
+        return qs(written.error().message);
+    }
+    if (written->kind != EntryKind::File || written->reparsePoint ||
+        written->size > kRecoveryLogLimit) {
+        // No record: no recovery has run here, which is every install but the
+        // few a crash caught. Or one the helper did not write - a link, a
+        // folder, a file too long: not read.
+        return {};
+    }
+    const Result<std::string> text = files.readFile(record);
+    if (!text) {
+        return qs(text.error().message);
+    }
+    const std::vector<std::string> over =
+        updateRecoveredTransactions(*text, [&files, &work](const std::string& transaction) {
+            // A folder that cannot be examined is not a folder that is gone.
+            const Result<EntryInfo> left =
+                files.stat(work / katana::core::pathFromUtf8(transaction));
+            return left && left->kind == EntryKind::Missing;
+        });
+    QString failed;
+    for (const std::string& transaction : over) {
+        const std::filesystem::path copy = katana::update::runPath(stateDirectory, transaction);
+        if (const Result<EntryInfo> there = files.stat(copy);
+            there && there->kind == EntryKind::Missing) {
+            continue;
+        }
+        // Everything that can be listed is; the first refusal is the one said.
+        if (const katana::core::Status listed =
+                katana::update::appendCleanup(stateDirectory, copy, files);
+            !listed && failed.isEmpty()) {
+            failed = qs(listed.error().message);
+        }
+    }
+    return failed;
 }
 
 } // namespace
@@ -911,6 +992,17 @@ void UpdateWorkbench::start()
         // only where an update can have run at all. A leftover that stays is
         // tried again at the next start: said, not an error of this session.
         const std::unique_ptr<katana::update::FsOps> files = katana::update::makeSystemFsOps();
+        // First what no list names yet - the helper's copy of an update that a
+        // recovery put right (listRecoveredCopies) - so that the sweep below
+        // takes it at this start with the rest.
+        if (const QString failed =
+                listRecoveredCopies(made.stateDirectory, made.install.root, *files);
+            !failed.isEmpty()) {
+            log(QStringLiteral("Update: the helper's copy that a recovered update left behind "
+                               "could not be listed for removal (%1); the next start tries "
+                               "again.")
+                    .arg(failed));
+        }
         if (const katana::core::Status swept = katana::update::processCleanupList(
                 made.stateDirectory, made.install.root, *files);
             !swept) {
