@@ -314,7 +314,8 @@ class FakeStore final : public update::CredentialStore {
 // self-test ended as `exitCode`.
 class FakeLauncher final : public update::Launcher {
   public:
-    [[nodiscard]] core::Result<update::SpawnResult> run(const update::SpawnRequest& request) override
+    [[nodiscard]] core::Result<update::SpawnResult>
+    run(const update::SpawnRequest& request) override
     {
         runs.push_back(request);
         update::SpawnResult result;
@@ -418,6 +419,11 @@ bool contains(const std::string& text, std::string_view words)
     return text.find(words) != std::string::npos;
 }
 
+bool startsWith(const std::string& text, std::string_view words)
+{
+    return std::string_view(text).starts_with(words);
+}
+
 // std::cout and std::cerr into strings while it lives: what a session prints.
 class Captured {
   public:
@@ -440,7 +446,7 @@ class Captured {
     std::streambuf* cerr_;
 };
 
-// ---- the line ------------------------------------------------------------------------------------
+// ---- the line -----------------------------------------------------------------------------------
 
 TEST(UpdateVerbs, ALineIsAnUpdateLineByItsFirstWordInAnyCase)
 {
@@ -625,8 +631,8 @@ TEST(UpdateVerbs, CheckSaysUnreachableWhenTheSignatureIsNotTheReleaseKeys)
     rig.feed.serve(kManifestUrl, bytesOf(release / "Katana-update-win64.json"));
     const core::Result<UpdateReply> reply = runUpdateLine(rig.context(), "UPDATE CHECK");
     ASSERT_TRUE(reply.ok()) << said(reply);
-    EXPECT_EQ(firstLineOf(reply).rfind("update=unreachable installed=0.9.0 reason=untrusted_key", 0),
-              0u)
+    EXPECT_TRUE(startsWith(firstLineOf(reply),
+                           "update=unreachable installed=0.9.0 reason=untrusted_key"))
         << said(reply);
     EXPECT_FALSE(contains(reply->text, "latest=")) << "nothing of an unverified manifest is said";
     EXPECT_FALSE(fs::exists(rig.state / "state.json"));
@@ -640,8 +646,8 @@ TEST(UpdateVerbs, CheckWithNoTransportSaysSoAndAsksNobody)
     context.fetch = {};
     const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE CHECK");
     ASSERT_TRUE(reply.ok()) << said(reply);
-    EXPECT_EQ(reply->text.rfind("update=unreachable installed=0.9.0 reason=no_transport detail=", 0),
-              0u)
+    EXPECT_TRUE(startsWith(reply->text,
+                           "update=unreachable installed=0.9.0 reason=no_transport detail="))
         << reply->text;
     EXPECT_TRUE(rig.feed.requests.empty());
     EXPECT_FALSE(fs::exists(rig.state));
@@ -1067,8 +1073,9 @@ TEST(UpdateVerbs, TokenClearSaysWhenTheEnvironmentStillGivesOne)
 TEST(UpdateVerbs, ATokenTypedOnALineIsRefusedAndNeverRepeated)
 {
     Rig rig;
-    for (const char* line : {"UPDATE TOKEN SET ghp_TYPED-ON-A-LINE", "UPDATE TOKEN ghp_TYPED-ON-A-LINE",
-                             "UPDATE TOKEN STATUS ghp_TYPED-ON-A-LINE"}) {
+    for (const char* line :
+         {"UPDATE TOKEN SET ghp_TYPED-ON-A-LINE", "UPDATE TOKEN ghp_TYPED-ON-A-LINE",
+          "UPDATE TOKEN STATUS ghp_TYPED-ON-A-LINE"}) {
         const core::Result<UpdateReply> reply = runUpdateLine(rig.context(), line);
         ASSERT_FALSE(reply.ok()) << line;
         EXPECT_EQ(reply.error().code, core::ErrorCode::InvalidArgument) << line;
@@ -1115,7 +1122,7 @@ TEST(UpdateVerbs, TheTokenIsInNothingThatIsSaidWhateverATransportOrAStoreSays)
     }
 }
 
-// ---- what a surface may not run ------------------------------------------------------------------
+// ---- what a surface may not run -----------------------------------------------------------------
 
 TEST(UpdateVerbs, AHeadlessWindowChecksAndReportsWhenAskedAndKeepsNothing)
 {
@@ -1218,7 +1225,7 @@ TEST(UpdateVerbs, KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse)
     EXPECT_FALSE(fs::exists(rig.state)) << "an agent's check keeps nothing";
 }
 
-// ---- katana_mcp's tool ---------------------------------------------------------------------------
+// ---- katana_mcp's tool --------------------------------------------------------------------------
 
 TEST(UpdateVerbs, TheCheckUpdateToolGivesTheTwoRecordsAsTextAndAsObjects)
 {
@@ -1263,7 +1270,7 @@ TEST(UpdateVerbs, TheCheckUpdateToolGivesAFailuresSentenceUnquoted)
     EXPECT_FALSE(reply.structured["check"].contains("latest"));
 }
 
-// ---- the running program's context ---------------------------------------------------------------
+// ---- the running program's context --------------------------------------------------------------
 
 TEST(UpdateVerbs, TheContextOfAProgramInNoInstallIsADevelopmentCopys)
 {
@@ -1319,7 +1326,7 @@ TEST(UpdateVerbs, AHeadlessContextHasNoTokenWithoutTheVariable)
     }
 }
 
-// ---- the help, and the session -------------------------------------------------------------------
+// ---- the help, and the session ------------------------------------------------------------------
 
 TEST(UpdateVerbs, TheHelpNamesEveryLineOfTheGrammarAndIsInTheSessionsHelp)
 {
@@ -1393,7 +1400,7 @@ TEST(UpdateVerbs, TheLineAFrontEndMustRunLastIsUpdateApply)
     }
 }
 
-// ---- UPDATE DOWNLOAD CONFIRM and UPDATE APPLY CONFIRM ---------------------------------------------
+// ---- UPDATE DOWNLOAD CONFIRM and UPDATE APPLY CONFIRM -------------------------------------------
 
 #ifndef _WIN32
 
