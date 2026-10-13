@@ -843,11 +843,11 @@ def catalogue(data, root):
     w("- **What the comparison of shapes does not see.** `originality.py` holds two definitions to be one shape "
       "when their drawings have the same marks at any place and size, turned by quarter turns or mirrored. A "
       "drawing turned by another angle or stretched one way, a circle drawn as arcs or as a ring of short "
-      "lines, an arc cut in two, and a text set from another corner of its box make other marks and are another "
-      "shape to it. A drawing that five strokes or fewer make is not compared at all, and that is %d of the %d "
-      "linestyles, most of them one or two lines, or a line and a letter: of a linestyle the comparison holds "
-      "the motif and not its period, and a plain motif is anybody's. No C++ test repeats the comparison, so it "
-      "is held where Python is (`katana_standard_originality`)."
+      "lines, an arc cut in two or laid over a ring, and a text set from another corner of its box make other "
+      "marks and are another shape to it. A drawing that five strokes or fewer make is not compared at all, "
+      "and that is %d of the %d linestyles, most of them one or two lines, or a line and a letter: of a "
+      "linestyle the comparison holds the motif and not its period, and a plain motif is anybody's. No C++ "
+      "test repeats the comparison, so it is held where Python is (`katana_standard_originality`)."
       % (n_ls - len(originality.compared({"linestyles": data.linestyles})), n_ls))
     w("- **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's "
       "rotation, offset and raise. The library carries them for the day it does.")
