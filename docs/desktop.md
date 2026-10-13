@@ -2963,11 +2963,32 @@ downloaded, or waiting for other programs to close. Both open the dialog.
 **Two classes.** `UpdateDialog` (`src/katana_qt/update_dialog.hpp`) shows and
 asks; `UpdateWorkbench` (`src/katana_qt/update_workbench.hpp`) owns it and
 does everything else, built as the geoprocessing and utility workbenches are.
-The dialog needs no window and no engine: it is given an `UpdateView` - plain
-data - and a context of callbacks, so the widget tests drive it alone
+The dialog needs no window and reads no engine: it is given an `UpdateView` -
+plain data - and a context of callbacks, so the widget tests drive it alone
 (`tests/qt_widgets/test_update_dialog.cpp`). A press changes no text in it:
 what a line did comes back as the next view, never as a guess of the
 dialog's (`APressChangesNoSentenceByItselfTheNextViewDoes`).
+
+**What the workbench decides is not in the workbench.** It needs the whole
+window, so no test can build it; a decision written inside it is run by
+nothing. So each one is a function of its arguments beside the dialog
+(`update_dialog.hpp`, "THE DECISIONS"), in the library the widget tests link,
+and the workbench only gathers the facts - the disk, the clock, the
+environment, the job runner - and does what they say:
+
+| Function | Decides |
+|---|---|
+| `updateViewOfOffer` | which state `UPDATE CHECK`'s answer is: Available, or Ready when that version is already downloaded; Current; NotOffered; CheckFailed; Unsupported |
+| `updateQuietAnswer` | what the AUTOMATIC check does with its answer: announce it, show it without a word, or drop it |
+| `updateStagedToOffer` | whether the release `UPDATE STATUS` says is downloaded is offered as Ready when the window starts |
+| `updateStagedAfter` | whether a downloaded release is still one to install after a check answered |
+| `updateViewOfLastResult` | how the last apply's result is shown at the next start |
+| `updateAutomaticCheckIsDue` | whether the window checks by itself now |
+| `updateStatusButtonText` | the status-bar button's words, and that it is hidden |
+| `updateReplyValue`, `updateStagedOfReply` | a record of a reply, by its key |
+| `updateLoggedLine`, `updateLoggedReply` | what the log may show of a line, and of the verbs' answer to it |
+
+Their tests are `UpdateDecisions`, with records written by hand.
 
 **The states.** The first sentence is `updateStateText`, the rest
 `updateDetailText`, and exactly these buttons are shown; the others are
@@ -2993,9 +3014,13 @@ one is on its way, and `UPDATE CHECK` has two answers that name a newer
 release without offering it. The reason in a sentence is a person's words for
 the engine's token (`updateReasonWords`: `offline` is "this computer is
 offline, or the release server did not answer", `http_503` "the release
-server answered with error 503"; a token it does not know is shown as it
-came, and `EveryReasonTheEngineGivesHasWordsOfItsOwn` holds the table to the
-tokens the engine's headers list). A megabyte is a million bytes, rounded to
+server answered with error 503", `html_page` - a hotel's or a site office's
+sign-in page where the release server should have answered - "a web page
+answered in the place of the release server; this network may want you to
+sign in first"; a token it does not know is shown as it came, and
+`EveryReasonTheEngineGivesHasWordsOfItsOwn` holds the table to the tokens the
+engine's headers list: a check's, the transport's, a download's, the helper's
+preflight's and an apply's). A megabyte is a million bytes, rounded to
 the nearest, and a download is never said to be 0 MB. The files of
 "12 of 23 files" are said only when the download's progress says how many are
 staged - a word `files=<done>/<all>` in a progress line - and left out
@@ -3026,7 +3051,8 @@ calls one callback (`EachButtonBuildsExactlyItsLineOrCallsExactlyItsCallback`):
 A line the executor refused is said under the two sentences, in the error
 colour (`updateProblemText`), and so is what the workbench could not do at
 the last press ("The download did not finish: this network does not allow
-partial downloads."); both go with the next view. No button is a default.
+partial downloads."), an Update that was refused before it began included;
+both go with the next view. No button is a default.
 
 **The lines that take time are jobs.** `UPDATE CHECK`, `UPDATE DOWNLOAD
 CONFIRM` and `UPDATE APPLY CONFIRM` - whose preflight copies the helper and
@@ -3037,7 +3063,12 @@ and their reply is logged on the interface thread when they end, as a typed
 line's is. Nothing of the workbench goes to the worker. `STATUS`, `SKIP`,
 `SET` and `TOKEN` read and write small files and are answered at once; while
 a job runs, every line but `STATUS` is refused, because a check records when
-it ran in the state file those lines write. `MainWindow::runWorkbenchLine`
+it ran in the state file those lines write. One exception, so that nobody is
+refused for a job they never started: a check asked for - typed, Check now,
+or Help > Check for Updates with nothing known yet - while the AUTOMATIC
+check is on its way takes that one over. It is not started twice; the dialog
+says Checking, and its answer is logged and shown as a typed check's is.
+`MainWindow::runWorkbenchLine`
 takes `UPDATE` lines before every other family, as the session does, so a
 `DOWNLOAD` or an `APPLY` typed on the command line goes exactly the way the
 buttons go - the buttons build those very lines. `HELP UPDATE` prints the
@@ -3058,12 +3089,19 @@ headless); the copy was installed by packaging (a build tree, which has no
 install record, stays offline - so does a `--command` run in one); the
 state's automatic flag is on; `update::checkIsDue` says so (every 24 hours and
 up to 2 more, the jitter drawn once per process); and the environment
-variable `KATANA_UPDATE_DISABLE` is not set to anything. It is QUIET: when it
-learns nothing - offline, a 404, a signature that does not verify - nothing
-is logged and nothing shown. A release the person skipped, or one that was
-rolled back here, is not offered (`update::applyUpdateState`). When there is
-news, the line and its reply are logged as a typed check's are and the
-status-bar button appears; the dialog is not opened unasked.
+variable `KATANA_UPDATE_DISABLE` is not set to anything
+(`updateAutomaticCheckIsDue`; `TheWindowChecksByItselfOnlyWhenEveryConditionHolds`
+takes each condition away in turn). It is QUIET: when it learns nothing -
+offline, a 404, a signature that does not verify - nothing is logged and
+nothing shown. A release the person skipped, or one that was rolled back
+here, is not offered (`update::applyUpdateState`) - and if the window still
+offered it, as Available or Ready, the offer is taken back without a word,
+as it is when the feed no longer has the release at all. When there is news,
+the line and its reply are logged as a typed check's are and the status-bar
+button appears; the dialog is not opened unasked. A release the window
+already offers is no news, and what must stay until it is read - how the
+last update ended - is not replaced
+(`TheAutomaticChecksAnswerIsAnnouncedShownWithoutAWordOrDropped`).
 
 **One click.** Update is `UPDATE DOWNLOAD CONFIRM`, then - when its reply says
 the release is staged - `UPDATE APPLY CONFIRM`, then the window's ordinary
@@ -3074,11 +3112,20 @@ Quit makes, so the Format managers' unapplied edits and the unsaved-changes
 question are asked as ever:
 
 - **Cancel there**, and the window stays, the request is dropped, and the
-  dialog says Ready with the release still downloaded.
+  dialog says Ready with the release still downloaded. The copy of the helper
+  that `APPLY CONFIRM` made for the request (`run-<transaction>` in the update
+  state folder) is listed for the sweep the next start makes; so it is after
+  Later, and when the person closes the window themselves while the close
+  for the update is waiting.
 - **A job is running** - a geoprocessing run, say - and the close waits for
   it, since a window that closes stops its jobs: the dialog says "Katana will
   close when the running job has finished, then update and reopen.", and
   Later takes the press back.
+- **A modal dialog is open** - a file dialog the person opened while the
+  release was downloading - and the close waits for that too: it comes from a
+  timer, not from a press, and would close the program around the dialog.
+  The update dialog says "Katana will close when the dialog that is open has
+  been closed, then update and reopen."
 - **The close succeeds**, and only then does
   `MainWindow::takePendingUpdate` hand `main()` the request, after the event
   loop has ended; `main()` calls `update::launchApply` as its last act, and
@@ -3091,10 +3138,26 @@ it, and - unless it was a success, which is one line in the log - opens the
 dialog on it: Rolled back, or Blocked with the programs to close and a Retry
 that applies the still-downloaded release again. It also removes what an
 earlier update could not delete, and offers again, as Ready, a release that
-was downloaded in an earlier session and not installed. A development copy
-does none of this: a build run from a build tree shares the per-user update
-folder with an installed copy on the same machine, and would otherwise show -
-and clear - how THAT copy's last update ended.
+was downloaded in an earlier session and not installed - with two
+exceptions, which are the rule that a skipped or blocked release is not
+offered (`updateStagedToOffer`):
+
+- one the person **skipped** since it was downloaded;
+- one that was **rolled back here**. A release that was installed and did
+  not start is put on the state's blocked list, and its downloaded files are
+  KEPT (only a healthy update deletes them), so `UPDATE STATUS` goes on
+  naming it as downloaded - by version, which says nothing of which build.
+  Offered as Ready, Restart and update would install the release known not
+  to start here, and after each rollback it would be offered again. So the
+  workbench reads the blocked list from the state file and looks in the
+  update folder: while the complete download of a blocked build is there,
+  nothing is offered as Ready at a start
+  (`AReleaseThatWasRolledBackHereIsNotOfferedAsReadyAtTheNextStart`). A later
+  build of the release, once downloaded, replaces that folder and is offered.
+
+A development copy does none of this: a build run from a build tree shares
+the per-user update folder with an installed copy on the same machine, and
+would otherwise show - and clear - how THAT copy's last update ended.
 
 **`main()`** (`src/katana_qt/main.cpp`) does three things for updates: before
 Qt is started, `update::recover` for the install the program is in, so that
@@ -3126,24 +3189,32 @@ Decisions, and what was rejected:
   a minute later. The health run is therefore a window that is built, never
   shown, and gone again; the helper then starts Katana as a person would.
 
-Tested in `tests/qt_widgets/test_update_dialog.cpp` (the dialog and the
-words) and in the real window by `tests/update/headless/update_window.cmake`:
+Tested in `tests/qt_widgets/test_update_dialog.cpp` (the dialog, the words
+and the decisions) and in the real window by
+`tests/update/headless/update_window.cmake`:
 `qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless`,
-`qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless`
-and `qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_its_own_headless`
-(`--check-menus` and `--check-shortcuts` with the item in the menu).
+`qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless`,
+`qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_its_own_headless`
+(`--check-menus` and `--check-shortcuts` with the item in the menu) and
+`qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the_dialog_shows_headless`,
+which is the one run of the job's whole way - the line, the worker, the wait,
+the reply in the log and the view it becomes - that a build tree allows.
 
 Not done:
 
-- **The workbench has no test of its own.** It needs the window, so it is
-  not in the widget tests' library; the headless checks reach what a build
-  tree can reach - a development copy, which never checks, downloads or
-  applies. The jobs, the one click, the close and the last result are
-  exercised only by the update system's end-to-end tests and by a release.
-- **A cancelled close leaves the helper's copy behind.** `APPLY CONFIRM` has
-  copied the helper by the time the unsaved-changes question is asked; Cancel
-  there drops the request, and the folder stays until the engine's own
-  clean-up finds it.
+- **The workbench's wiring has no test of its own.** What it DECIDES is
+  tested (`UpdateDecisions`); what it DOES with a decision is not, beyond the
+  one job a build tree allows: it needs the window, so it is not in the
+  widget tests' library, and a development copy never asks a server,
+  downloads or applies. A download's job and its progress, the order of the
+  one click, the close that waits and the close that is cancelled, the
+  request handed to `main()`, the automatic check starting and being taken
+  over, and the last result being cleared are exercised only by the update
+  system's end-to-end tests and by a release.
+- **A typed check that fails while a release is Ready** leaves the dialog on
+  "Could not check for updates" with Retry; the downloaded release is not
+  forgotten, and is Ready again after a check that succeeds or at the next
+  start, but nothing in the dialog installs it meanwhile.
 - **No "Open Releases" button** for a network that does not allow partial
   downloads: the sentence says why the download did not finish, and Release
   notes, in the Available state, is the way to the page.
@@ -4041,8 +4112,12 @@ A person may still TYPE a line that carries one, expecting it to work
 refuses it. So the echo shows every word after `UPDATE TOKEN` that is not
 `STATUS` or `CLEAR` as `***` (`updateLoggedLine`, in both of the window's
 echoes; `WhatIsTypedWhereATokenWasHopedToGoIsNeverEchoed`), and what the
-verbs say back about such a line is logged with those words taken out. The
-line itself still reaches the verbs as typed, and is refused.
+verbs say back about such a line is logged with those words taken out IN ANY
+CASE (`updateLoggedReply`): a refusal may quote the line it refuses, and may
+have folded its case to find the verb
+(`WhatTheVerbsSayBackToALineWithATokenTypedOnItIsHiddenInAnyCase`; in the
+real window, `qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless`).
+The line itself still reaches the verbs as typed, and is refused.
 
 **How the page gets what it shows.** The Format workbench makes the Settings
 dialog and knows nothing of updates, so the page's services

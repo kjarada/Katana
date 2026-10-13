@@ -510,7 +510,11 @@ starting the window:
   once and clears. Settings > Updates says so, shows its box off and
   disabled, and has Save disabled: a headless run writes no credential store
   (`qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless`,
-  `qt_a_headless_run_saves_no_access_token_headless`).
+  `qt_a_headless_run_saves_no_access_token_headless`). It is held to the
+  disk: the window's update checks are all given ONE state folder, removed
+  before the first of them, and after the last of them it must not be there
+  at all (`update_headless_checks_leave_no_update_state_folder_behind`, the
+  cleanup of a fixture every one of them requires).
 - **No dialog unless asked.** `@updateDialog` - or `@helpCheckForUpdates`,
   the menu item - opens it, and opening it checks nothing. A development
   copy, which is every build tree, is told it cannot update, from its own
@@ -521,8 +525,18 @@ starting the window:
   (`qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless`).
 - **`UPDATE CHECK` and `UPDATE STATUS` when typed.** `>UPDATE CHECK` waits
   for its job, as a geoprocessing line does, so its reply is logged before
-  the next step; in a build tree both answer without asking any server
-  (`qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless`).
+  the next step, and a dialog opened after it shows what the answer made of
+  the view; in a build tree both answer without asking any server
+  (`qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless`,
+  `qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the_dialog_shows_headless`:
+  `update=unsupported`, `reason=development_tree`, then the dialog's
+  sentence).
+- **A word typed after `UPDATE TOKEN` is shown nowhere.** No line takes an
+  access token; one typed all the same is echoed as `***`, and what the verbs
+  say back to it is logged without the word, in any case
+  (`qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless`:
+  the whole command log is reported, and the word must be in nothing the run
+  prints).
 - **`UPDATE DOWNLOAD CONFIRM` and `UPDATE APPLY CONFIRM` reply
   `reason=headless`.** They are handed to the verbs as they are, which
   refuse them for this surface: a headless run never downloads and never
@@ -556,9 +570,11 @@ run exits"). `KATANA_UPDATE_STATE_DIR` names the state folder for a test
 that empties the folder and one that reads the marker; a TX that is no id is
 refused, `qt_a_health_run_given_no_transaction_id_is_refused_headless`).
 
-The checks are `tests/update/headless/update_window.cmake`. Each run is given
-an update state folder of its own and no `KATANA_UPDATE_TOKEN`, so that
-nothing of the person running the suite is read.
+The checks are `tests/update/headless/update_window.cmake`. The window's
+checks are given one update state folder of the tests' own - which none of
+them may make - the health run another, and every run no
+`KATANA_UPDATE_TOKEN`, so that nothing of the person running the suite is
+read.
 
 ## A headless session never opens a modal box
 
@@ -621,9 +637,11 @@ A modal box in a headless run is a hang until the test's timeout. So
 
 - No headless run reaches the update dialog's states past "cannot update":
   every run here starts from a build tree, which is a development copy and
-  never checks, downloads or applies. Those states are the widget tests'
-  (`tests/qt_widgets/test_update_dialog.cpp`), and the way from a check to a
-  swap is the update system's own end-to-end tests'.
+  never asks a server, downloads or applies. Those states, and what the
+  window decides from a check's answer, the update folder and the last
+  result, are the widget tests' (`tests/qt_widgets/test_update_dialog.cpp`,
+  `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
+  the update system's own end-to-end tests'.
 - No step presses a key into a view (`&KEY` was proposed for a view's own
   keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
   through `>` alone; the rest is tested in `tests/qt_widgets` with real key
