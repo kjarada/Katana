@@ -2078,7 +2078,8 @@ granted a permission, and none is claimed here. The libraries' notice still
 exists in the reference files, and anyone who relies on this file in a build
 they pass on should make their own assessment first (a build without it is
 possible, and has Katana Standard alone: `-DKATANA_ALTERNATE_CUSTOMISATIONS=`,
-the list empty). Committed, the file stays in the history even if a later commit
+the list empty; Katana Standard still holds this file's survey code keys, and
+nothing else of it, `LICENSING.md`). Committed, the file stays in the history even if a later commit
 removes it. It is compiled into every program as an ALTERNATE built-in now, not
 as the one a program starts with; it is in the binary all the same.
 

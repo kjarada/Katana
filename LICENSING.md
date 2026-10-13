@@ -155,7 +155,9 @@ project licence, or are not known to be:
      empty list of alternates makes a program with Katana Standard alone
      (`-DKATANA_ALTERNATE_CUSTOMISATIONS=`; `src/katana_cad/CMakeLists.txt`,
      `docs/building.md`), and a default path that names no file as well makes one
-     with no built-in at all.
+     with no built-in at all. Katana Standard alone still holds this file's
+     survey code keys, and nothing else of it (above): a build with nothing of
+     this file in it is the one with no built-in.
 2. **`samples/`**, installed in every package (`cmake/KatanaPackaging.cmake`).
    Where each file came from is not recorded in this repository, so no licence
    is granted for them here. What can be verified:
