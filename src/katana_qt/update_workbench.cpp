@@ -116,7 +116,8 @@ QString replyValue(const std::string& text, const char* key)
             }
         }
     }
-    if (value.size() >= 2 && value.startsWith(QLatin1Char('"')) && value.endsWith(QLatin1Char('"'))) {
+    if (value.size() >= 2 && value.startsWith(QLatin1Char('"')) &&
+        value.endsWith(QLatin1Char('"'))) {
         value = value.mid(1, value.size() - 2);
     }
     return value;
@@ -366,13 +367,14 @@ bool UpdateWorkbench::runLine(const QString& line)
     return true;
 }
 
-void UpdateWorkbench::logReply(const Result<katana::app::UpdateReply>& reply) const
+void UpdateWorkbench::logReply(const Result<katana::app::UpdateReply>& reply,
+                               const QStringList& secrets) const
 {
-    if (!reply) {
-        log(qs(reply.error().describe()), true);
-        return;
+    std::string said = reply ? reply->text : reply.error().describe();
+    for (const QString& secret : secrets) {
+        said = katana::update::redactToken(said, secret.toStdString());
     }
-    log(replyText(reply->text), false);
+    log(replyText(said), !reply);
 }
 
 bool UpdateWorkbench::mayStart(const QString& line)
@@ -380,9 +382,11 @@ bool UpdateWorkbench::mayStart(const QString& line)
     if (running_ == JobKind::None) {
         return true;
     }
+    // The line as the log may show it: never what was typed after UPDATE TOKEN.
     log(qs(makeError(ErrorCode::InvalidState,
                      "an update job is still running; wait for it to end, or cancel it",
-                     (line.simplified() + QStringLiteral(" while ") + jobTitle_).toStdString())
+                     (updateLoggedLine(line.simplified()) + QStringLiteral(" while ") + jobTitle_)
+                         .toStdString())
                .describe()),
         true);
     return false;
@@ -398,9 +402,21 @@ void UpdateWorkbench::runNow(const QString& line)
     if (action != QLatin1String("STATUS") && !mayStart(line)) {
         return;
     }
+    // No UPDATE line takes a token, and a person may type one that does all
+    // the same. The verbs refuse it; whatever they say back is logged without
+    // the words that may be one (updateLoggedLine hides them in the echo).
+    QStringList secrets;
+    if (action == QLatin1String("TOKEN")) {
+        for (qsizetype at = 2; at < words.size(); ++at) {
+            if (words[at].compare(QLatin1String("STATUS"), Qt::CaseInsensitive) != 0 &&
+                words[at].compare(QLatin1String("CLEAR"), Qt::CaseInsensitive) != 0) {
+                secrets << words[at];
+            }
+        }
+    }
     const Result<katana::app::UpdateReply> reply =
         katana::app::runUpdateLine(context(), line.trimmed().toStdString());
-    logReply(reply);
+    logReply(reply, secrets);
     if (!reply) {
         return;
     }
@@ -848,7 +864,15 @@ void UpdateWorkbench::start()
     }
     started_ = true;
     const katana::app::UpdateContext& made = context();
-    if (kAppliesHere && !made.stateDirectory.empty()) {
+    // A development copy is never updated, and it shares the per-user update
+    // folder with an installed copy on the same machine: it must not show -
+    // and clear - how THAT copy's last update ended, nor sweep what its helper
+    // left to be swept. It does nothing here, and asks nobody anything.
+    if (made.install.kind == katana::update::InstallKind::Development ||
+        made.stateDirectory.empty()) {
+        return;
+    }
+    if (kAppliesHere) {
         // What a lock kept an earlier update from deleting (update/state.hpp);
         // only where an update can have run at all. A leftover that stays is
         // tried again at the next start: said, not an error of this session.
@@ -861,12 +885,8 @@ void UpdateWorkbench::start()
                     .arg(qs(swept.error().message)));
         }
     }
-    if (made.install.kind != katana::update::InstallKind::Development) {
-        restoreStaged();
-    }
-    if (!made.stateDirectory.empty()) {
-        showLastResult();
-    }
+    restoreStaged();
+    showLastResult();
     dueTimer_->start();
     // On the first idle turn, so that the window is up before anything is asked.
     QTimer::singleShot(0, scope_.get(), [this] { checkIfDue(); });

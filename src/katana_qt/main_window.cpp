@@ -3070,11 +3070,14 @@ void MainWindow::typeLinesIntoTool(const QString& text)
 
 void MainWindow::runTypedLine(const QString& line)
 {
-    // What is typed is echoed - but an ONLINE KEY's value never is, and a
-    // ZOOM typed while a tool runs is echoed by the executor that runs it
-    // (ViewWorkspace::runsTransparently): echoed here as well, it showed twice.
+    // What is typed is echoed - but an ONLINE KEY's value never is, nor what
+    // stands where someone hoped UPDATE TOKEN would take a token
+    // (updateLoggedLine) - and a ZOOM typed while a tool runs is echoed by the
+    // executor that runs it (ViewWorkspace::runsTransparently): echoed here as
+    // well, it showed twice.
     if (!views_->runsTransparently(line)) {
-        commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+        commandLog_->appendPlainText(
+            "> " + updateLoggedLine(OnlineDataWorkbench::loggedLine(line)));
     }
     // A tool waiting for typed text - a Text's string, a count - takes the
     // whole line before any verb below, as a transparent ZOOM gives way to it
@@ -3153,7 +3156,8 @@ VerbOutcome MainWindow::runVerbLine(const QString& line)
         // to press, so for it an empty line is a line it failed to build.
         return {false, {}, "there is no command to run"};
     }
-    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(trimmed));
+    commandLog_->appendPlainText("> " +
+                                 updateLoggedLine(OnlineDataWorkbench::loggedLine(trimmed)));
     VerbCapture capture;
     VerbCapture* const outer = std::exchange(capture_, &capture);
     const int errorsBefore = errorsLogged_;

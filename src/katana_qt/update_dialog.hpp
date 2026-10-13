@@ -175,6 +175,15 @@ inline constexpr const char* kUpdateApplyLine = "UPDATE APPLY CONFIRM";
 // "UPDATE SKIP 0.3.0"
 [[nodiscard]] QString updateSkipLine(const QString& version);
 
+// `line` as the command log may show it. There is no UPDATE line that carries
+// an access token - the verbs have STATUS and CLEAR under TOKEN and nothing
+// else - but a person may type one that does, expecting it to work (UPDATE
+// TOKEN ghp_..., UPDATE TOKEN SET ghp_...), and a typed line is echoed in the
+// log before any verb sees it. So every word after UPDATE TOKEN that is not
+// STATUS or CLEAR is shown as "***"; the verbs are still handed the line as it
+// was typed, and refuse it. Any other line comes back unchanged.
+[[nodiscard]] QString updateLoggedLine(const QString& line);
+
 // A person's words for a reason token of the update engine, to stand after a
 // colon and before a full stop: "offline" is "this computer is offline, or the
 // release server did not answer"; "http_503" is "the release server answered

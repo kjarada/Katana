@@ -462,7 +462,8 @@ TEST(UpdateDialog, RolledBackSaysWhatWasRestoredAndWhy)
     EXPECT_EQ(shown(dialog, "updateStateText"),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored."));
     // It is read and closed: nothing here tries the same release again.
-    EXPECT_TRUE(shownButtons(dialog).isEmpty()) << shownButtons(dialog).join(QLatin1Char(' ')).toStdString();
+    EXPECT_TRUE(shownButtons(dialog).isEmpty())
+        << shownButtons(dialog).join(QLatin1Char(' ')).toStdString();
 }
 
 TEST(UpdateDialog, AnApplyThatChangedNothingAndOneThatCouldNotBePutBackAreNotCalledRestored)
@@ -536,7 +537,8 @@ TEST(UpdateDialog, UnsupportedSaysWhyThisCopyCannotUpdateAndOffersNothing)
     EXPECT_EQ(said(dialog),
               QStringLiteral("Updates are not available for this copy of Katana: it is a "
                              "development build, not an installed release."));
-    EXPECT_TRUE(shownButtons(dialog).isEmpty()) << shownButtons(dialog).join(QLatin1Char(' ')).toStdString();
+    EXPECT_TRUE(shownButtons(dialog).isEmpty())
+        << shownButtons(dialog).join(QLatin1Char(' ')).toStdString();
 
     view.reason = QStringLiteral("root_not_writable");
     dialog.setView(view);
@@ -851,6 +853,28 @@ TEST(UpdateWords, TheSkipLineNamesTheVersion)
 {
     EXPECT_EQ(katana::qt::updateSkipLine(QStringLiteral("0.3.0")),
               QStringLiteral("UPDATE SKIP 0.3.0"));
+}
+
+TEST(UpdateWords, WhatIsTypedWhereATokenWasHopedToGoIsNeverEchoed)
+{
+    // The verbs have UPDATE TOKEN STATUS and UPDATE TOKEN CLEAR and no line
+    // that takes a token (update_verbs.hpp): a typed line is echoed in the
+    // command log before any verb refuses it, so the echo hides every other
+    // word after TOKEN.
+    using katana::qt::updateLoggedLine;
+    const QString token = QStringLiteral("ghp_NotARealTokenOnlyATestsWord0123456789");
+    EXPECT_EQ(updateLoggedLine(QStringLiteral("UPDATE TOKEN ") + token),
+              QStringLiteral("UPDATE TOKEN ***"));
+    EXPECT_EQ(updateLoggedLine(QStringLiteral("update token SET ") + token),
+              QStringLiteral("update token *** ***"));
+    EXPECT_EQ(updateLoggedLine(QStringLiteral("  UPDATE   TOKEN CLEAR ") + token),
+              QStringLiteral("UPDATE TOKEN CLEAR ***"));
+    // The two lines there are, and every other line, are echoed as typed.
+    for (const char* line : {"UPDATE TOKEN STATUS", "update token clear", "UPDATE TOKEN",
+                             "UPDATE CHECK", "UPDATE SKIP 0.3.0", "UPDATE  SET AUTO  ON",
+                             "ONLINE KEY provider secret", "TOKEN one two", "LINE 0,0 10,0", ""}) {
+        EXPECT_EQ(updateLoggedLine(QString::fromLatin1(line)), QString::fromLatin1(line)) << line;
+    }
 }
 
 // ---- Settings > Updates -------------------------------------------------------------------------

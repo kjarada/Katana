@@ -11,6 +11,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QVBoxLayout>
 
 #include "theme.hpp"
@@ -191,6 +192,25 @@ QString updateSkipLine(const QString& version)
     return QStringLiteral("UPDATE SKIP ") + version;
 }
 
+QString updateLoggedLine(const QString& line)
+{
+    const QStringList words = line.simplified().split(QChar::Space, Qt::SkipEmptyParts);
+    if (words.size() < 3 || words[0].compare(QLatin1String("UPDATE"), Qt::CaseInsensitive) != 0 ||
+        words[1].compare(QLatin1String("TOKEN"), Qt::CaseInsensitive) != 0) {
+        return line;
+    }
+    QStringList shown{words[0], words[1]};
+    bool hidden = false;
+    for (qsizetype at = 2; at < words.size(); ++at) {
+        const bool known = words[at].compare(QLatin1String("STATUS"), Qt::CaseInsensitive) == 0 ||
+                           words[at].compare(QLatin1String("CLEAR"), Qt::CaseInsensitive) == 0;
+        shown << (known ? words[at] : QStringLiteral("***"));
+        hidden = hidden || !known;
+    }
+    // A line with nothing to hide is echoed as it was typed, blanks and all.
+    return hidden ? shown.join(QChar::Space) : line;
+}
+
 QString updateReasonWords(const QString& token)
 {
     for (const ReasonWords& entry : kReasonWords) {
@@ -300,8 +320,9 @@ QString updateDetailText(const UpdateView& view)
     case UpdateDialogState::Downloading:
         return QStringLiteral("You can keep working.");
     case UpdateDialogState::Current:
-        return view.lastChecked.isEmpty() ? QString()
-                                          : QStringLiteral("Last checked %1.").arg(view.lastChecked);
+        return view.lastChecked.isEmpty()
+                   ? QString()
+                   : QStringLiteral("Last checked %1.").arg(view.lastChecked);
     case UpdateDialogState::NotOffered:
         return view.reason == QLatin1String("blocked_before")
                    ? QStringLiteral("A later release will be offered.")

@@ -48,6 +48,7 @@
 
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 
 #include <chrono>
 #include <cstdint>
@@ -110,7 +111,8 @@ class UpdateWorkbench {
     // it is shown: the leftovers of an earlier update removed, the last
     // apply's result shown and cleared, a release already downloaded offered
     // again, and the automatic check when one is due. Nothing in a headless
-    // run.
+    // run, and nothing for a development copy, which shares the per-user
+    // update folder with an installed copy and must leave it alone.
     void start();
 
     // The dialog, made the first time it is asked for.
@@ -148,7 +150,11 @@ class UpdateWorkbench {
 
     // A line that answers at once, on the interface thread.
     void runNow(const QString& line);
-    void logReply(const katana::core::Result<katana::app::UpdateReply>& reply) const;
+    // The reply, or the refusal, in the log - with each of `secrets` shown as
+    // "***" wherever the verbs' words repeat it: what was typed where someone
+    // hoped UPDATE TOKEN would take a token.
+    void logReply(const katana::core::Result<katana::app::UpdateReply>& reply,
+                  const QStringList& secrets = {}) const;
     // False, said in the log, while another update job runs.
     [[nodiscard]] bool mayStart(const QString& line);
     void startCheck(bool automatic);
