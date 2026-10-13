@@ -27,12 +27,25 @@
 // is not a ready stage: it is resumed (stage() skips what is already verified), never
 // applied.
 //
+// ONE stage() AT A TIME PER FOLDER. Two programs of one install - the window and katana_cli -
+// are given the same folder for the same release, and two runs filling it at once would share
+// its temporary files. So stage() holds a lock for as long as it runs: FsOps::tryLock on
+// stageLockPath(stageDir), a file BESIDE the folder (U/stage-<sequence>.lock), so that the
+// folder itself holds the release's files, the two records and nothing else. A second stage()
+// of the same folder is refused at once with `stage_busy`: it asks the network for nothing and
+// touches nothing. The lock's file stays when the lock is let go; a later release's stage()
+// removes it together with the folder it belonged to.
+//
 // preflight(): copies the helper (the staged one when its manifest `applier`
 // is newer than the installed helper speaks, else R/bin/katana_updater) into
 // <U>/run-<tx>/ and runs `--selftest` there with the Launcher. The copy is
 // what runs the swap, so at commit nothing under R is loaded and no loaded
 // file is renamed; and running it now makes Defender scan it early, and proves
-// it starts, before the window closes.
+// it starts, before the window closes. A staged helper is held to its signed
+// hash twice: where it lies in the stage folder, before anything is created,
+// and again as the COPY in run-<tx>, which is the file that will run - so
+// what is started is what the release signed, whatever happened to the staged
+// file between the first look and the copy.
 
 #include <filesystem>
 #include <stop_token>
@@ -64,11 +77,22 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
     return stageDir / kStagedSignatureName;
 }
 
+// The file stage() locks while it fills `stageDir` (see "ONE stage() AT A TIME"): the folder's
+// own name with ".lock" after it, beside the folder - U/stage-<sequence>.lock.
+[[nodiscard]] inline std::filesystem::path stageLockPath(const std::filesystem::path& stageDir)
+{
+    // "U/stage-5/" names the same folder as "U/stage-5".
+    std::filesystem::path lock = stageDir.has_filename() ? stageDir : stageDir.parent_path();
+    lock += ".lock";
+    return lock;
+}
+
 // Fetches and stages every changed file of `plan` into `stageDir`, then writes the staged
 // manifest and signature (see above).
 // InvalidState "cancelled"; the transport's errors; InvalidArgument for a
 // member that fails its hash or its size; FileExportFailure when the disk
-// refuses. Progress is bytes of the compressed payload fetched over the total
+// refuses; AlreadyExists when another stage() is filling the same folder.
+// Progress is bytes of the compressed payload fetched over the total
 // to fetch, counting what a previous run already staged as fetched.
 //
 // The Error of a failure carries a machine-readable token, `reason=<token>` first in
@@ -78,6 +102,8 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 //   staged_corrupt   a member could not be unpacked, or is not the signed length
 //   write_failed     the stage folder could not be written; the file system's own
 //                    `os_error=<n>` and path follow the token (fsops.hpp)
+//   stage_busy       another stage() holds the folder's lock (stageLockPath): nothing was
+//                    fetched or touched; the other run finishes, or this one is tried again
 //   low_disk_space   the volume has less than the plan's requiredFreeBytes (less what is staged)
 //   short_range      the transport handed over a body that is not the range's length (a Fetch
 //                    of makeFetch refuses that itself, as bad_range: feed.hpp)
@@ -91,7 +117,15 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 // What is asked for is not Plan::ranges as it stands: the changed files that are not staged
 // yet are merged again (mergeRanges), so a resumed stage asks for less than the plan lists.
 // Folders `stage-<n>` beside `stageDir` with n below the manifest's sequence are removed (the
-// stage of a release this one outranks); nothing else beside it is touched.
+// stage of a release this one outranks) with their lock files `stage-<n>.lock` - unless
+// another program holds that lock, which means it is filling the folder now; nothing else
+// beside `stageDir` is touched.
+//
+// Inside `stageDir` a name on the way to a staged file is the stage's to use: a folder (or a
+// link to one) that stands where a file belongs, and a file or a link that stands where a
+// folder belongs, is removed - a link itself, never what it points at - and the file is staged.
+// So nothing somebody left in the folder stops a stage for good, and a member is not written
+// through a link that was lying there to somewhere outside it.
 [[nodiscard]] core::Status stage(const Fetch& fetch, const FeedConfig& feed,
                                  const Manifest& manifest, const Plan& plan,
                                  const std::filesystem::path& stageDir, std::stop_token stop,

@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -252,9 +253,14 @@ class PayloadServer {
                    -> core::Result<HttpHopReply> {
             const std::size_t index = hops.size();
             hops.push_back(one);
-            const std::optional<Range> range = rangeOf(one);
-            if (range) {
-                ranges.push_back(*range);
+            // Taken out of the optional here, once: the build is -O3 -Werror, and an optional
+            // of a plain type that is read after calls the optimiser cannot see through is
+            // where -Wmaybe-uninitialized fires.
+            const std::optional<Range> named = rangeOf(one);
+            const bool ranged = named.has_value();
+            const Range range = named.value_or(Range{0, 0});
+            if (ranged) {
+                ranges.push_back(range);
             }
             if (before) {
                 before(index);
@@ -268,15 +274,15 @@ class PayloadServer {
                 }
             }
             HttpHopReply reply;
-            if (!range || ignoreRange) {
+            if (!ranged || ignoreRange) {
                 reply.status = 200;
                 reply.body = payload_;
             } else {
                 const std::uint64_t last =
-                    std::min<std::uint64_t>(range->start + range->length, payload_.size());
+                    std::min<std::uint64_t>(range.start + range.length, payload_.size());
                 reply.status = 206;
-                reply.body = payload_.substr(range->start, last - range->start);
-                reply.contentRange = "bytes " + std::to_string(range->start) + "-" +
+                reply.body = payload_.substr(range.start, last - range.start);
+                reply.contentRange = "bytes " + std::to_string(range.start) + "-" +
                                      std::to_string(last - 1) + "/" +
                                      std::to_string(payload_.size());
             }
@@ -284,10 +290,12 @@ class PayloadServer {
             if (mutate) {
                 mutate(reply.body);
             }
-            // The real hop abandons a transfer at maxBytes.
+            // The real hop abandons a transfer at maxBytes, keeps none of it, and says what the
+            // answer was (HttpHopReply::overran).
             if (reply.body.size() > one.maxBytes) {
-                return core::makeError(core::ErrorCode::Unsupported,
-                                       "the answer is larger than allowed");
+                reply.body.clear();
+                reply.overran = true;
+                return reply;
             }
             if (progress) {
                 progress(reply.body.size() / 2, reply.body.size());
@@ -1112,6 +1120,80 @@ TEST(Stage, AnEmptyFileIsStagedLikeAnyOther)
     EXPECT_EQ(h::readText(rig.stageDir / "share/one.txt"), "x");
 }
 
+// ---- one stage at a time ---------------------------------------------------------------------------------------------------------------
+
+TEST(Stage, TheLockOfAStageFolderIsAFileBesideIt)
+{
+    // stage.hpp: the folder's own name with ".lock" after it, beside the folder - so the folder
+    // holds the release's files and the two records, and nothing else.
+    EXPECT_EQ(stageLockPath(fs::path("U") / "stage-2000000000"),
+              fs::path("U") / "stage-2000000000.lock");
+    EXPECT_EQ(stageLockPath(fs::path("U/stage-5/")), fs::path("U/stage-5.lock"))
+        << "a trailing separator names the same folder";
+}
+
+TEST(Stage, ASecondStageOfTheSameFolderIsRefusedAsBusyAndTouchesNothing)
+{
+    Rig rig("stage_busy");
+    const Built built = build(threeRanges());
+    rig.use(built);
+    // What another run - the window's, while katana_cli starts this one - has in the folder: a
+    // member it is writing, and the record of an earlier complete run.
+    h::writeText(rig.stageDir / ".partial" / "2", "another run's half file");
+    h::writeText(rig.stageDir / "manifest.json", "another run's record");
+    // That run holds the folder's lock. (The harness's file system keeps a lock exclusive
+    // between holders, as the real one does between processes.)
+    core::Result<std::unique_ptr<FileLock>> other = rig.disk.tryLock(stageLockPath(rig.stageDir));
+    ASSERT_TRUE(other.ok()) << other.error().describe();
+
+    PayloadServer server(built.payload);
+    const core::Status status = rig.run(makeFetch(server.hop()));
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, core::ErrorCode::AlreadyExists);
+    EXPECT_EQ(reasonOf(status), "stage_busy");
+    EXPECT_TRUE(server.hops.empty()) << "nothing is asked of the network";
+    // Neither the other run's temporary file nor its record was deleted or rewritten.
+    EXPECT_EQ(filesUnder(rig.stageDir), names({".partial/2", "manifest.json"}));
+    EXPECT_EQ(h::readText(rig.stageDir / ".partial" / "2"), "another run's half file");
+    EXPECT_EQ(h::readText(rig.stageDir / "manifest.json"), "another run's record");
+
+    // The other run ends. The same call now goes through and leaves a complete stage ...
+    other.value().reset();
+    PayloadServer second(built.payload);
+    const core::Status again = rig.run(makeFetch(second.hop()));
+    ASSERT_TRUE(again.ok()) << again.error().describe();
+    EXPECT_EQ(second.ranges.size(), 3u);
+    EXPECT_EQ(h::readText(rig.stageDir / "manifest.json"), built.json);
+    EXPECT_FALSE(h::isPresent(rig.stageDir / ".partial"));
+    // ... and so does one straight after it: the lock is let go when stage() returns.
+    PayloadServer third(built.payload);
+    EXPECT_TRUE(rig.run(makeFetch(third.hop())).ok());
+}
+
+TEST(Stage, WhatStandsInAStagedFilesWayIsRemovedAndTheFileIsStaged)
+{
+    // Somebody left a folder, with files in it, where bin/b.dll goes, and a file where the
+    // folder `share` goes. A stage that stopped at either would stop at it on every later run
+    // as well; the names under the stage folder are the stage's (stage.hpp), so they go and
+    // every name under the folder is again a verified file.
+    Rig rig("stage_in_the_way");
+    const Built built = build(threeRanges());
+    rig.use(built);
+    h::writeText(rig.stageDir / "bin/b.dll" / "inner" / "x.txt", "in the way");
+    h::writeText(rig.stageDir / "bin/b.dll" / "y.txt", "in the way too");
+    h::writeText(rig.stageDir / "share", "a file named like a folder");
+
+    PayloadServer server(built.payload);
+    const core::Status status = rig.run(makeFetch(server.hop()));
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    EXPECT_EQ(filesUnder(rig.stageDir),
+              names({"bin/a.dll", "bin/b.dll", "share/big.bin", "share/c.txt", "manifest.json",
+                     "manifest.json.sig"}));
+    for (const Placed& placed : built.placed) {
+        EXPECT_EQ(h::readText(rig.stageDir / placed.path), placed.content) << placed.path;
+    }
+}
+
 // ---- older stage folders ---------------------------------------------------------------------------------------------------------------
 
 TEST(Stage, FoldersOfOlderReleasesAreSweptAndNothingElseIs)
@@ -1144,6 +1226,43 @@ TEST(Stage, FoldersOfOlderReleasesAreSweptAndNothingElseIs)
     EXPECT_TRUE(h::isPresent(other / "katana_updater.exe"));
     EXPECT_TRUE(h::isPresent(aFile)) << "only folders are swept";
     EXPECT_TRUE(h::isPresent(rig.stageDir / "bin/a.dll"));
+}
+
+TEST(Stage, AnOlderFolderThatAnotherProgramIsFillingIsLeftAndTheLockFilesGoWithTheirFolders)
+{
+    Rig rig("stage_sweep_locked");
+    const Built built = build({{"bin/a.dll", pattern(100, 1), FileClass::Lib, 0}});
+    rig.use(built);
+    const h::Path busy = rig.stateDir / "stage-7";
+    const h::Path idle = rig.stateDir / "stage-8";
+    // The helper deletes the folder of a release it installed, and not the lock beside it.
+    const h::Path orphanLock = rig.stateDir / "stage-9.lock";
+    const h::Path newerLock = rig.stateDir / "stage-2000000001.lock";
+    h::writeText(busy / "bin/half.dll", "being downloaded");
+    h::writeText(idle / "bin/old.dll", "old");
+    h::writeText(stageLockPath(idle), "");
+    h::writeText(orphanLock, "");
+    h::writeText(newerLock, "");
+    core::Result<std::unique_ptr<FileLock>> filling = rig.disk.tryLock(stageLockPath(busy));
+    ASSERT_TRUE(filling.ok()) << filling.error().describe();
+
+    PayloadServer server(built.payload);
+    ASSERT_TRUE(rig.run(makeFetch(server.hop())).ok());
+    EXPECT_TRUE(h::isPresent(busy / "bin/half.dll")) << "another program holds its lock";
+    EXPECT_TRUE(h::isPresent(stageLockPath(busy)));
+    EXPECT_FALSE(h::isPresent(idle));
+    EXPECT_FALSE(h::isPresent(stageLockPath(idle)));
+    EXPECT_FALSE(h::isPresent(orphanLock));
+    EXPECT_TRUE(h::isPresent(newerLock)) << "a newer release's is not this one's to delete";
+    EXPECT_TRUE(h::isPresent(stageLockPath(rig.stageDir)))
+        << "the lock's file stays when the lock is let go";
+
+    // That program ends: the next stage sweeps its folder as well.
+    filling.value().reset();
+    PayloadServer second(built.payload);
+    ASSERT_TRUE(rig.run(makeFetch(second.hop())).ok());
+    EXPECT_FALSE(h::isPresent(busy));
+    EXPECT_FALSE(h::isPresent(stageLockPath(busy)));
 }
 
 // ---- the private-repository route -----------------------------------------------------------------------------------------------------------
@@ -1359,6 +1478,34 @@ TEST(Preflight, ANewerProtocolRunsTheStagedHelperAfterItsHashIsChecked)
     ASSERT_EQ(launcher.ran.size(), 1u);
     EXPECT_EQ(launcher.ran[0].executable, prepared->helper);
     EXPECT_EQ(h::readText(rig.helperPath), "INSTALLED HELPER, protocol 1") << "the install is untouched";
+}
+
+TEST(Preflight, AStagedHelperThatChangesBetweenTheCheckAndTheCopyIsNotRun)
+{
+    // The stage folder is the user's to write. Here the staged helper is the signed one when it
+    // is hashed there, and another file by the time it is copied: it is swapped at the last
+    // moment there is, as the copy begins. What must be the signed helper is the COPY in the run
+    // folder - the file that would run. First a swap that changes the length, then one that
+    // keeps it (24 bytes each): it is the hash that is held, not the size.
+    for (const std::string swapped : {"ANOTHER PROGRAM ALTOGETHER", "STAGED HELPER protocol 3"}) {
+        PreflightRig rig("preflight_swapped");
+        h::FakeLauncher launcher;
+        const Manifest manifest =
+            manifestWithHelper(kApplierProtocol + 1, "STAGED HELPER protocol 2", rig.root);
+        h::writeText(rig.stageDir / "bin" / rig.helperPath.filename(), "STAGED HELPER protocol 2");
+        rig.hooked.beforeCopy = [&](const h::Path& from,
+                                    const h::Path&) -> std::optional<core::Status> {
+            h::writeText(from, swapped);
+            return std::nullopt; // and the copy is made, of what is there now
+        };
+        const auto prepared =
+            preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
+        ASSERT_FALSE(prepared.ok()) << swapped;
+        EXPECT_EQ(prepared.error().code, core::ErrorCode::InvalidState) << swapped;
+        EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_missing") << swapped;
+        EXPECT_TRUE(launcher.ran.empty()) << "what was copied is not the signed helper: " << swapped;
+        EXPECT_TRUE(rig.runFolders().empty()) << swapped;
+    }
 }
 
 TEST(Preflight, ANewerProtocolWithNoHelperInTheManifestIsRefused)

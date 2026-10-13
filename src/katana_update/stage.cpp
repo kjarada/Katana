@@ -26,6 +26,7 @@
 #include <charconv>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -109,9 +110,34 @@ bool isVerified(const FsOps& fsOps, const fs::path& path, const ManifestFile& fi
     return hash.ok() && hash.value() == file.sha256;
 }
 
+// What FsOps::tryLock answers when another holder has the lock (fsops.hpp).
+bool isHeld(const core::Error& error)
+{
+    return error.code == core::ErrorCode::InvalidState && error.message == "held";
+}
+
+// `name` is "stage-<n>" with n a number below `sequence`: the folder of a release this one
+// outranks.
+bool isOlderStageName(std::string_view name, std::uint64_t sequence)
+{
+    constexpr std::string_view kPrefix = "stage-";
+    if (!name.starts_with(kPrefix) || name.size() == kPrefix.size() || name.size() > 40) {
+        return false;
+    }
+    const std::string_view digits = name.substr(kPrefix.size());
+    if (!std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+        return false;
+    }
+    std::uint64_t older = 0;
+    const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), older);
+    return parsed.ec == std::errc{} && older < sequence;
+}
+
 // Removes the folders `stage-<n>` beside the one being filled whose n is below this release's
-// sequence: what a helper that died left, and the stage of every release this one outranks. A
-// folder of a newer sequence, or any other name, is not touched. Best effort.
+// sequence - what a helper that died left, and the stage of every release this one outranks -
+// and the lock file of each (stageLockPath). A folder whose lock another program holds is
+// being filled by it now, and is left. A folder of a newer sequence, or any other name, is not
+// touched. Best effort.
 void sweepOlderStages(FsOps& fsOps, const fs::path& stageDir, std::uint64_t sequence)
 {
     const fs::path parent = stageDir.parent_path();
@@ -122,32 +148,92 @@ void sweepOlderStages(FsOps& fsOps, const fs::path& stageDir, std::uint64_t sequ
     if (!children.ok()) {
         return;
     }
-    constexpr std::string_view kPrefix = "stage-";
+    // The folders to sweep, each once: named by themselves, or by a lock file that outlived its
+    // folder (the helper deletes the folder of a release it installed, not the lock beside it).
+    constexpr std::string_view kLockSuffix = ".lock";
+    std::vector<fs::path> folders;
     for (const fs::path& child : children.value()) {
-        if (child == stageDir) {
+        std::string name = core::pathToUtf8(child.filename());
+        if (name.ends_with(kLockSuffix)) {
+            name.resize(name.size() - kLockSuffix.size());
+        }
+        if (!isOlderStageName(name, sequence)) {
             continue;
         }
-        const std::string name = core::pathToUtf8(child.filename());
-        if (!name.starts_with(kPrefix) || name.size() == kPrefix.size() || name.size() > 40) {
-            continue;
+        fs::path folder = parent / core::pathFromUtf8(name);
+        if (folder != stageDir && std::find(folders.begin(), folders.end(), folder) == folders.end()) {
+            folders.push_back(std::move(folder));
         }
-        const std::string_view digits = std::string_view(name).substr(kPrefix.size());
-        if (!std::all_of(digits.begin(), digits.end(),
-                         [](char c) { return c >= '0' && c <= '9'; })) {
-            continue;
+    }
+    for (const fs::path& folder : folders) {
+        const fs::path lockPath = stageLockPath(folder);
+        {
+            const core::Result<std::unique_ptr<FileLock>> lock = fsOps.tryLock(lockPath);
+            if (!lock.ok() && isHeld(lock.error())) {
+                continue;
+            }
+            // Only a folder: a file somebody named like one is not this program's.
+            const core::Result<EntryInfo> info = fsOps.stat(folder);
+            if (info.ok() && info.value().kind == EntryKind::Directory) {
+                std::vector<fs::path> leftovers;
+                detail::removeTree(fsOps, folder, leftovers);
+            }
         }
-        std::uint64_t older = 0;
-        const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), older);
-        if (parsed.ec != std::errc{} || older >= sequence) {
-            continue;
+        // Let go first: a lock that is held cannot be deleted, by its holder either.
+        (void)fsOps.removeFile(lockPath);
+    }
+}
+
+// Whatever stands in a staged file's place goes: nothing (the usual case), a file that failed
+// its hash, or a folder somebody put there, with all that is in it. A link is removed, never
+// entered (removeTree).
+core::Status clearPlace(FsOps& fsOps, const fs::path& place)
+{
+    const core::Result<EntryInfo> there = fsOps.stat(place);
+    if (!there.ok() || there.value().kind != EntryKind::Directory) {
+        return fsOps.removeFile(place); // success when nothing is there
+    }
+    std::vector<fs::path> leftovers;
+    detail::removeTree(fsOps, place, leftovers);
+    if (!leftovers.empty()) {
+        return core::makeError(core::ErrorCode::FileExportFailure,
+                               "a folder in a staged file's place could not be removed",
+                               "os_error=0 " + core::pathToUtf8(leftovers.front()));
+    }
+    return {};
+}
+
+// The names between the stage folder and a staged file must be folders of the stage. One that
+// is something else - a file, or a link, which would send the member to wherever it points -
+// goes, so that the folder can be made. Only names INSIDE `stageDir` are looked at: the walk
+// is over the manifest path's own parts, never upwards from the file.
+core::Status clearParents(FsOps& fsOps, const fs::path& stageDir, const ManifestFile& file)
+{
+    const fs::path relative = core::pathFromUtf8(file.path);
+    fs::path folder = stageDir;
+    for (auto part = relative.begin(); part != relative.end(); ++part) {
+        if (std::next(part) == relative.end()) {
+            break; // the file's own name
         }
-        const core::Result<EntryInfo> info = fsOps.stat(child);
-        if (!info.ok() || info.value().kind != EntryKind::Directory) {
+        folder /= *part;
+        const core::Result<EntryInfo> info = fsOps.stat(folder);
+        if (!info.ok() || info.value().kind == EntryKind::Missing) {
+            break; // nothing below it either; making the folders says what is wrong, if anything
+        }
+        if (info.value().kind == EntryKind::Directory && !info.value().reparsePoint) {
             continue;
         }
         std::vector<fs::path> leftovers;
-        detail::removeTree(fsOps, child, leftovers);
+        detail::removeTree(fsOps, folder, leftovers);
+        if (!leftovers.empty()) {
+            return core::makeError(core::ErrorCode::FileExportFailure,
+                                   "what stands where a folder of the stage belongs could not "
+                                   "be removed",
+                                   "os_error=0 " + core::pathToUtf8(leftovers.front()));
+        }
+        break;
     }
+    return {};
 }
 
 // The scratch folder goes however stage() ends: on success it is empty, on failure it holds the
@@ -232,12 +318,17 @@ core::Status stageMember(FsOps& fsOps, const fs::path& scratch, const fs::path& 
                           "path=" + file.path);
     }
 
+    if (core::Status cleared = clearParents(fsOps, stageDir, file); !cleared.ok()) {
+        (void)fsOps.removeFile(temporary);
+        return writeFailed("the stage folder could not be prepared", cleared.error(), file.path);
+    }
     if (core::Status made = fsOps.makeDirectories(target.parent_path()); !made.ok()) {
         (void)fsOps.removeFile(temporary);
         return writeFailed("the stage folder could not be prepared", made.error(), file.path);
     }
-    // A rename never replaces (fsops.hpp); what is there is a file that failed its hash.
-    if (core::Status removed = fsOps.removeFile(target); !removed.ok()) {
+    // A rename never replaces (fsops.hpp). What is there is a file that failed its hash, or
+    // something that was never the stage's - a folder, a link: whatever it is, it goes.
+    if (core::Status removed = clearPlace(fsOps, target); !removed.ok()) {
         (void)fsOps.removeFile(temporary);
         return writeFailed("what is in a staged file's place could not be removed",
                            removed.error(), file.path);
@@ -378,6 +469,19 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
 
     if (core::Status made = fsOps.makeDirectories(stageDir); !made.ok()) {
         return writeFailed("the stage folder could not be created", made.error());
+    }
+    // One stage() at a time in this folder (stage.hpp): two would share its temporary files, and
+    // each would delete the other's. Taken before anything in the folder is touched, and held to
+    // the end of this function - it is declared before the scratch folder, which is therefore
+    // emptied while the lock is still held.
+    const core::Result<std::unique_ptr<FileLock>> lock = fsOps.tryLock(stageLockPath(stageDir));
+    if (!lock.ok()) {
+        if (isHeld(lock.error())) {
+            return stageError(core::ErrorCode::AlreadyExists,
+                              "another copy of Katana is downloading this update",
+                              "stage_busy");
+        }
+        return writeFailed("the stage folder could not be locked", lock.error());
     }
     // A staged manifest says "complete" (stage.hpp); this run has not completed yet, so a
     // record of an earlier one must not keep saying so if this one fails.
@@ -594,6 +698,9 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
     // hash is checked against the signed one (the stage folder is user-writable).
     const fs::path installedHelper = installedProgram(install.root, "katana_updater");
     fs::path source = installedHelper;
+    // The manifest's entry of the helper, when it is the staged one that runs: what its copy is
+    // held to, below.
+    const ManifestFile* signedHelper = nullptr;
     if (manifest.applier > kApplierProtocol) {
         const std::string wanted = "bin/" + core::pathToUtf8(installedHelper.filename());
         const auto at = std::find_if(manifest.files.begin(), manifest.files.end(),
@@ -604,12 +711,15 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
                               "and does not carry one",
                               "helper_missing");
         }
-        source = finalPathOf(stageDir, *at);
-        if (!isVerified(fsOps, source, *at)) {
+        signedHelper = &*at;
+        source = finalPathOf(stageDir, *signedHelper);
+        // Before anything is created: a helper that is not there, or not the signed one, is
+        // found without leaving a run folder to clear away.
+        if (!isVerified(fsOps, source, *signedHelper)) {
             return stageError(core::ErrorCode::InvalidState,
                               "the release's update helper is not staged, or is not the one the "
                               "release signed",
-                              "helper_missing", "path=" + at->path);
+                              "helper_missing", "path=" + signedHelper->path);
         }
     } else {
         const core::Result<EntryInfo> info = fsOps.stat(source);
@@ -629,6 +739,16 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
     if (core::Status copied = fsOps.copyFile(source, helper); !copied.ok()) {
         removeRunFolder(fsOps, stateDir, runDir);
         return writeFailed("the update helper could not be copied", copied.error());
+    }
+    // The copy is the file that will run, so the copy is what must be the signed helper. The
+    // stage folder is user-writable: the file that was hashed there a moment ago and the file
+    // that was just copied from there need not be the same bytes.
+    if (signedHelper != nullptr && !isVerified(fsOps, helper, *signedHelper)) {
+        removeRunFolder(fsOps, stateDir, runDir);
+        return stageError(core::ErrorCode::InvalidState,
+                          "the release's update helper changed while it was being copied; the "
+                          "copy is not the one the release signed",
+                          "helper_missing", "path=" + signedHelper->path);
     }
     if (core::Status marked = fsOps.setExecutable(helper); !marked.ok()) {
         removeRunFolder(fsOps, stateDir, runDir);

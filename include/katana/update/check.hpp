@@ -59,14 +59,16 @@ struct CheckResult {
     std::string latestVersion;           // when a manifest was read, even if not newer
     std::string notesUrl;
     std::string reason;
-    // The failure's own sentence (the transport's or the verifier's message, never a URL with a
-    // query and never the token), for "Could not check for updates: <detail>". Empty on success.
-    std::string detail;
     std::optional<Manifest> manifest;    // verified; set for Available and Current
     // The route the answer came by (feed.hpp, "THE PRIVATE-REPOSITORY ROUTE"). The
     // caller copies it into FeedConfig::route before stage(), so the payload is fetched
     // the same way the manifest was.
     FeedRoute route = FeedRoute::Download;
+    // The failure's own sentence (the transport's or the verifier's message, never a URL with a
+    // query and never the token), for "Could not check for updates: <detail>". Empty on success.
+    // Last in the struct: it was added after the members above were published, and a member
+    // added anywhere else would move them.
+    std::string detail;
 };
 
 // `install` says what is installed and which target to ask for; `trust` is
