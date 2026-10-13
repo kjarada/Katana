@@ -159,12 +159,41 @@ core → math → geometry → { terrain, render, entity } → commands → stor
                                            the older customisation formats' readers are src/katana_archive12d/legacy,
                                            a library no program links)
               gis, pointcloud → interop    the GDAL/PDAL adapters (katana_io) and import/export
+              update                       core alone; seen only by app and qt (the auto-update engine, and the
+                                           helper program src/katana_updater, which is of this layer too)
 ```
 
 `cad` may see neither `interop` nor `surveyio` nor `archive12d`: the
 application core builds without GDAL and PDAL (`-DKATANA_BUILD_IO=OFF`), and no
 instrument format's or archive reader's own types can reach the drawing. The
 exact lists are in the layering check and nowhere else.
+
+`update` (`include/katana/update/`, `src/katana_update`; `docs/update.md`)
+sits beside `math`, not above anything: it may include `core` and nothing
+else, and only `app` and `qt` may include it. The reason is the fourth
+program. `katana_updater` (`src/katana_updater`) replaces the files of an
+install while Katana is not running, from a copy of itself in a temporary
+folder, so it must be small and static and link no GDAL, no Qt and nothing
+of the drawing - and it is built from this layer and `katana_core` alone.
+Three consequences follow from the same rule:
+
+- **The network is injected.** The engine takes a function that fetches
+  (`update::Fetch`) as a parameter; `katana_app` makes one from the project's
+  one HTTP stack (`src/katana_app/update_transport.cpp`), and a test hands in
+  a fake. The layer never sees libcurl.
+- **The machine is behind interfaces.** Every change to the disk, every
+  process started or looked for, the registry and the credential store are
+  interfaces of the layer (`FsOps`, `Launcher`, `ProcessOps`, `RegistryOps`,
+  `CredentialStore`), with one real implementation per platform under
+  `src/`, so that the swap and its recovery are driven in process by tests.
+- **Its two libraries stay behind `src/`** like every other (Rule 4):
+  OpenSSL's libcrypto for the signature and zlib for inflating, both linked
+  statically on Windows so that the helper imports only the operating
+  system's DLLs.
+
+The verbs that drive it, `UPDATE ...`, are the session's
+(`src/katana_app/update_verbs.hpp`), not the interpreter's: `cad` cannot see
+`update`, and an update acts on the program, not on a drawing.
 
 A module may include headers from the layers it is listed as depending on in
 [`tools/check_layering.cmake`](../tools/check_layering.cmake), and from nowhere
@@ -182,8 +211,8 @@ else. Two rules are checked there and run as the `layering` test:
    check - the link closure and the install rules of the three programs
    (`docs/testing.md`).
 2. **No third-party types in public headers** (Rule 4). Eigen, CGAL, PROJ,
-   SQLite, GDAL, PDAL, Qt, Vulkan and nlohmann may appear only in `src/`, never
-   under `include/`. Each is wrapped by a Katana-owned interface -
+   SQLite, GDAL, PDAL, Qt, Vulkan, nlohmann, OpenSSL, zlib and libcurl may
+   appear only in `src/`, never under `include/`. Each is wrapped by a Katana-owned interface -
    `Result<T>`-based, using Katana's own value types - so that replacing a
    library is a change to one module rather than to the whole code base.
 
@@ -363,6 +392,8 @@ the program, and not static linking" moved there from this document.
 | Project database corrupt | detected on open by integrity check; `recover()` restores the newest sound backup and keeps the damaged file |
 | Project from a newer Katana | refused with `Unsupported` rather than guessed at |
 | Third-party library throws | converted to a `Result` at the module boundary |
+| An update of the program interrupted by a crash or a power cut | `update::recover`, the first thing `main()` does in every program, has the old version's files put back before anything else is read (`docs/update.md`, "Recovery") |
+| An updated program that does not start | the update helper puts every file back, starts the old version again, and that release is not offered a second time (`docs/update.md`, "The swap") |
 
 ## Section and phase numbers in older comments
 

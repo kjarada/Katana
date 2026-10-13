@@ -383,9 +383,10 @@ and again over the fixture releases the producer made:
    came after the journal said the swap was complete
    (`CrashingBeforeEveryOperationOfAFortyFileUpdateLeavesTheOldTreeOrTheNewNeverAMix`);
 2. the crash INSIDE the recovery: from six interrupted states - before the
-   commit, at its first rename, half way, after its last, and inside the
-   swap's own rollback - the recovery is crashed before every one of its
-   operations, and the recovery after that must still end at the old tree
+   commit is recorded, before its first rename, half way through, after its
+   last, before the swap is recorded as complete, and inside the swap's own
+   rollback - the recovery is crashed before every one of its operations,
+   and the recovery after that must still end at the old tree
    (`CrashingInsideRecoveryAtEveryOperationStillEndsAtTheOldTree`);
 3. an error 32, a locked file, at every rename of the commit: the update
    must end rolled back, with the tree exactly the old one
