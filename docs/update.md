@@ -113,8 +113,12 @@ be installed over the programs that are there. A program is never older than
 itself, so a record can raise the installed version and never lower it. Only
 the version is raised: the sequence, and that there is a record at all, stay
 the record's. With the versions equal the sequences decide, so a copy
-overwritten by hand is offered the release of its own version once more,
-which changes no program and writes the records that were stale. The rule is
+overwritten by hand is offered the release of its own version once more:
+where its files are that release's already, the update changes none of them
+and writes the records that were stale. (The other
+order is left as it is: under a record ABOVE the program - an older zip
+unpacked over a newer copy - the installed version is the record's, and only
+a release above the record is an update.) The rule is
 shown for a program below, at and above a record without a build of each
 (`detail::readInstallAs`, the same reading with the program's version handed
 in: `OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), for
@@ -329,8 +333,9 @@ install's. "Newer than what is installed" is decided after it, by
 
 **The helper trusts nobody's answer.** It verifies the staged manifest again
 with its own pinned keys before it touches a file, repeats the "newer" test
-from the install's own record, and hashes every file it is about to put in
-place. A stage folder that somebody altered is found there.
+from the install's own record - never read as less than the helper's own
+version ("The installed version") - and hashes every file it is about to
+put in place. A stage folder that somebody altered is found there.
 
 **The trust root is a parameter, never a global.** `update::productionTrust`
 is what the four programs pass. Only test executables pass a test key, the
@@ -401,16 +406,19 @@ No script and no agent makes or sees a private key. These are the steps
 3. Put the ACTIVE private key, and only that one, in the secret
    `UPDATE_SIGNING_KEY` of the GitHub environment `release` (Settings >
    Environments > New environment; add yourself under "Required reviewers"
-   so that nothing is signed before you approve the run). The spare never
-   goes to GitHub:
+   so that nothing is signed before you approve the run, and restrict the
+   environment to the default branch, so that the key reaches only what
+   `main` holds). The spare never goes to GitHub:
 
    ```sh
    gh secret set UPDATE_SIGNING_KEY --env release < update-signing.pem
    ```
 
-   The key tool's own text gives this command without `--env release` and
-   says to add it once the environment exists: make the environment first,
-   so that the secret is the environment's.
+   Make the environment first, so that the secret is the environment's and
+   not the repository's, which every workflow there can read; the key tool
+   prints the command with `--env release`, in its help and after `pub`.
+   Why the restriction, and the reads that show both settings are in place,
+   are `docs/release.md`, "Update signing", step 3.
 4. **The first updater-bearing release is installed by hand; the next one is
    the first live update.** An installed copy is updated by the helper it
    already has, which believes only manifests signed by a key it already
@@ -420,9 +428,11 @@ No script and no agent makes or sees a private key. These are the steps
 
 1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION
    X.Y.Z)`, and merge it.
-2. Actions > Release > Run workflow, with the tag `vX.Y.Z`. The Publish job
-   runs in the environment `release`; approve it on the run's page when the
-   environment names reviewers.
+2. Actions > Release > Run workflow, on `main`, with the tag `vX.Y.Z`. The
+   Publish job runs in the environment `release`; approve it on the run's
+   page when the environment names reviewers. Once the environment is
+   restricted to the default branch, a run of another branch is refused at
+   that job (`docs/release.md`, "Publishing a release").
 3. The job makes a manifest for each of the five targets and an update zip
    for each but macOS, signs each manifest with the secret, rechecks every
    hash and signature with `tools/update_verify_release.py` - which uses
@@ -804,8 +814,10 @@ its window removes the helper copy the original would have run, and the
 original's recovery then runs its own `R/bin/katana_updater` - as recovery
 does whenever that copy is gone (the table above).
 
-**The residual.** A program started during the commit - about a second -
-may fail to load, half its libraries being new; it is started again. And a
+**The residual.** A program started while the plan is made is seen by the
+second scan and blocks the update (step 4). One started after that scan,
+during the commit - about a second - may fail to load, half its libraries
+being new; it is started again. And a
 program of the install that another Windows account is running cannot be
 seen by the scan, so the update goes through under it: Windows lets the file
 of a running program be renamed, and renames are all the commit does. That
@@ -964,6 +976,7 @@ line a person would type, and `HELP UPDATE` prints the family.
 | `UPDATE DOWNLOAD CONFIRM` | `progress bytes=<done>/<total> files=<done>/<total>` lines, then `staged=<v>`. With nothing to download: `UPDATE CHECK`'s record, which says why, then `staged=none`. In a session that keeps no update folder: `staged=none reason=no_state`, and nothing is asked of the feed. A download that FAILS is an error, not a reply (below) |
 | `UPDATE APPLY CONFIRM` | `ready=<v> transaction=<tx>`; the caller then ends its session and starts the helper |
 | `UPDATE SKIP <version>`, `UPDATE SKIP NONE` | `skipped=<v\|none>` |
+| `UPDATE BLOCKED CLEAR` | `blocked=none`: the list of releases that were put back here is emptied, so the next `UPDATE CHECK` offers the release again and `UPDATE APPLY CONFIRM` applies it |
 | `UPDATE SET AUTO ON\|OFF` | `auto=on\|off` |
 | `UPDATE TOKEN STATUS`, `UPDATE TOKEN CLEAR` | `token=present\|absent`, and never the token |
 
@@ -973,7 +986,9 @@ follows its record as `warning text="..."`.
 
 A v1 install asking about the tests' second release, and then downloading it
 (the expectations of `tests/app/test_update_verbs.cpp`, worked out there from
-the fixtures):
+the fixtures; `installed=0.9.0` is the fixtures' record, which stands while
+the program that reads it is not built as a version above it - "The
+installed version"):
 
 ```
 > UPDATE STATUS
@@ -1012,10 +1027,50 @@ unchanged files between them.)
 - **`APPLY CONFIRM` changes nothing in the install.** It finds the newest
   complete download whose records verify, runs the preflight, and hands its
   caller the request to start the helper with. It is refused, with
-  `reason=` first in the error's context, as `not_staged`, `blocked_before`,
-  `development_tree`, `install_record`, `no_state`, `state_unreadable`,
-  `platform`, or with the preflight's token (`helper_missing`,
-  `helper_not_started`, `helper_timeout`, `helper_failed`, `write_failed`).
+  `reason=` first in the error's context and in this order, as `platform`,
+  `install_record`, `development_tree`, `no_state`, `not_staged`,
+  `state_unreadable`, `blocked_before`, `elevated`, or with the preflight's
+  token (`helper_missing`, `helper_not_started`, `helper_timeout`,
+  `helper_failed`, `write_failed`).
+- **A Katana that was started as administrator installs no update**
+  (`reason=elevated`, an `Unsupported` error). The helper would run with
+  those rights from its copy in the per-user folder, which the same
+  person's ordinary programs can write ("The three kinds" says which
+  processes that is). It is the last of the line's own refusals and comes
+  BEFORE the preflight, so no helper copy is made and nothing is started;
+  the sentence says to start Katana the ordinary way and update again, and
+  that the release stays downloaded
+  (`ApplyIsRefusedInAKatanaStartedAsAdministratorBeforeAnyHelperIsCopied`).
+  Being the last, it hides no other reason: a build tree says
+  `development_tree` from an administrator's prompt as from any other
+  (`TheOtherRefusalsOfApplyAreSaidBeforeTheOneForAnAdministratorsSession`).
+  `UPDATE CHECK` and `UPDATE DOWNLOAD CONFIRM` are not refused
+  (`AKatanaStartedAsAdministratorStillChecksAndDownloads`). How the process
+  was started is the context's last member, `UpdateContext::elevated`,
+  which `app::makeUpdateContext` fills from `update::processIsElevated` for
+  every surface; a test sets the member, and no test depends on how the
+  suite itself was started (`OnlyTheElevatedHalfOfASplitTokenIsAYes` puts
+  each kind of token to the one decision).
+- **A release that was put back is tried again when a person says so, and
+  not before.** One start too slow for the health check - a virus scanner
+  reading every new file is enough - blocks a release that is sound, and
+  until 2026-10-14 the only way back was deleting `state.json` by hand.
+  `UPDATE BLOCKED CLEAR` empties the state's list of blocked releases, all
+  of it: the feed offers one release, the newest, so there is no second one
+  to choose and the line takes no sequence. With no update folder it
+  answers `blocked=none reason=no_state` and keeps nothing; with a state
+  file that does not read it is refused (`InvalidState`) and the file is
+  left as it is, as `SKIP` is; `UPDATE BLOCKED` with another word, or none,
+  is `InvalidArgument` and says the one line there is. The refusal
+  `blocked_before` and `UPDATE CHECK`'s detail for `update=blocked` both
+  name the line, and Settings > Updates in the window. `UPDATE STATUS`
+  does not say what is blocked: `CHECK` does, for the release the feed
+  offers. Nothing clears the list by itself
+  (`BlockedClearEmptiesTheListAndTheNextCheckOffersTheReleaseAgain`,
+  `AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseThatWasPutBack`,
+  `BlockedClearWithNoUpdateFolderSaysSoAndWritesNoFile`,
+  `BlockedClearIsRefusedWhenTheStateFileDoesNotReadAndLeavesTheFileAsItIs`,
+  `UpdateBlockedTakesClearAndNoOtherWordAndSaysTheOneLineThereIs`).
 - **`last=`** is how the last swap ended: `committed`, `blocked`,
   `rolled_back`, `refused` or `rollback_incomplete`, with the helper's reason
   after a colon (`last=rolled_back:health_exit`).
@@ -1033,7 +1088,18 @@ prepared
 (`cli.update_apply_confirm_that_is_not_the_last_line_is_refused`); typed or
 piped on standard input, where the next line cannot be looked at without
 waiting for it, the session ends with the line and says so. How the swap
-ended is `last=` of `UPDATE STATUS` in the next run.
+ended is `last=` of `UPDATE STATUS` in the next run. A helper that cannot be
+started is said on stderr and fails the run, and its copy goes to the sweep
+(`app::abandonApply`).
+
+`UPDATE BLOCKED CLEAR` is run in the real program too
+(`src/katana_app/update_blocked.cmake`): against a state file written by
+hand with two releases blocked it prints `blocked=none`, the file is read
+back with an empty list, and the skipped version, the switch and the time of
+the last check are as they were
+(`cli.update_blocked_clear_says_none_and_keeps_the_other_settings`,
+`cli.update_blocked_clear_left_the_state_file_with_an_empty_list`,
+`cli.update_blocked_without_clear_is_refused_saying_the_one_line_there_is`).
 
 ### The window
 
@@ -1059,18 +1125,52 @@ self-test - run as background jobs.
   after the event loop has ended, and `main()` starts the helper as its last
   act. A close that was cancelled, or a window the person closes themselves,
   installs nothing, and the release stays downloaded.
+- **A helper that cannot be started** is said by `main()`, the window being
+  gone by then: on stderr ALWAYS ("the update could not be started: ..."),
+  with exit 1, the helper's copy listed for the sweep (`app::abandonApply`)
+  and the release still downloaded. It is said in a message box as well only
+  when the run was given no line to run - no `--command`, `--enter` or
+  `--run-line`: such a run is a window all the same, and may have nobody at
+  it to close a box (`updateFailureIsBoxed`,
+  `AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`).
 - **Settings > Updates** (`settingsUpdates`): "Check for updates
   automatically" (`settingsUpdateAuto`, which runs `UPDATE SET AUTO ON` or
   `OFF`), what a check sends (`settingsUpdateSends`), the access token
-  (`settingsUpdateToken`, Save and Clear), and "Offer the skipped version
-  again" (`settingsUpdateUnskip`, `UPDATE SKIP NONE`).
+  (`settingsUpdateToken`, Save and Clear), "Offer the skipped version
+  again" (`settingsUpdateUnskip`, `UPDATE SKIP NONE`) and, under it, "Offer
+  the version that was put back again" (`settingsUpdateUnblock`, which runs
+  `UPDATE BLOCKED CLEAR` through the path the other button uses; the label
+  beside it, `settingsUpdateBlocked`, says whether a version is set aside).
+  Each of the two buttons is off when its list is known to be empty, and ON
+  when nobody can say - a headless run, a state file that does not read - so
+  that the verb answers
+  (`OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse`,
+  `qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`).
+- **The dialog says where that button is.** Both sentences that tell of a
+  release that was set aside - a check's `update=blocked`, and the last
+  apply's ending when its reason is `health_exit` or `health_timeout` - end
+  "A later release will be offered, and Settings > Updates offers this one
+  again." Once the line was carried out, a dialog that still said "not
+  offered again" goes back to knowing nothing, and the next check offers
+  the release (`updateEffectOfLine`). The dialog's words for a reason now
+  include `platform`, `elevated` ("Katana was started as administrator;
+  start it the ordinary way, not as administrator, and update again - the
+  download is kept") and `interrupted_update` as "an earlier update is not
+  settled yet".
+- **The Command Reference** (Help) has an Updates section, which is
+  `app::updateHelpText` - what `HELP UPDATE` prints - and its Window list
+  names `UPDATE` (`TheUpdatesSectionIsTheUpdateVerbsOwnHelp`).
 - **At a start** an interactive window lists in `cleanup.list` the helper
   copy of each update of its install that a recovery put right
   ("Recovery"), removes what the list names, shows and clears `last.json`,
   and offers again, as Ready, a release that was downloaded in an earlier
-  session - unless it was skipped since, or rolled back here. A development
-  copy does none of this: it shares the per-user folder with an installed
-  copy on the same machine and must leave it alone.
+  session - unless it was skipped since, or rolled back here. Then, on its
+  first idle turn, it confirms an update of its install whose helper died
+  during the health check, when it is a window of the version that update
+  installed ("An update whose helper died during the health check"), and
+  only after that runs the automatic check. A development copy does none
+  of this: it shares the per-user folder with an installed copy on the same
+  machine and must leave it alone.
 
 ### katana_mcp
 
@@ -1094,16 +1194,27 @@ A headless window - a run with `--screenshot`, `--plot`, `--plot-sheets` or
 (`docs/headless.md`, "Updates in a headless run"). A run with `--command`
 alone is NOT headless: it is a window a person may use, which is why the
 automatic check also asks for an install record, and a build tree stays
-offline whatever it is started with.
+offline whatever it is started with. Such a run does download and apply;
+what it is spared is the message box when its helper cannot be started
+("The window").
 
 - no automatic check, and no dialog unless `--dialog` asks for it;
-- no per-user state read or written: its verbs' context has no state folder
-  and no credential store;
+- no per-user state read or written: its verbs' context
+  (`app::makeUpdateContext` for `UpdateSurface::HeadlessWindow`) has no
+  state folder, and for a credential store the ENVIRONMENT'S alone - the
+  variable `KATANA_UPDATE_TOKEN` of its own run, never the system's store,
+  as `katana_mcp`'s has (`AHeadlessContextHasNoTokenWithoutTheVariable`).
+  The Settings page of a headless window is handed no store at all, so Save
+  is disabled;
 - `UPDATE CHECK` and `UPDATE STATUS` are answered when typed;
 - `UPDATE DOWNLOAD CONFIRM` and `UPDATE APPLY CONFIRM` are answered
   `staged=none reason=headless` and `ready=none reason=headless`, with a
-  sentence naming who does run them; `SKIP`, `SET AUTO` and `TOKEN` are
-  refused as `Unsupported`, `reason=headless`.
+  sentence naming who does run them; `SKIP`, `BLOCKED CLEAR`, `SET AUTO`
+  and `TOKEN` are refused as `Unsupported`, `reason=headless`
+  (`AHeadlessWindowIsRefusedEveryLineThatKeepsOrReadsAPerUserThing`);
+- a start confirms nothing: settling an update whose helper died writes
+  per-user state, so a headless window never does it - the health run
+  included, which is the question and not the answer.
 
 Two things every run does, headless or not: `update::recover` first, and the
 switch `--update-health <tx>`, which is the helper's question and no
@@ -1215,8 +1326,19 @@ first real release; no agent creates a repository, a release or a secret.
 - **The helper on a real install.** The static helper on Windows ARM64; the
   copy in `U/run-<tx>` under a virus scanner and SmartScreen, unsigned as it
   is until the repository holds a code-signing certificate; the `RunOnce`
-  entry at a real logon; `katana --update-health` in an installed copy; and
-  how long the swap and the health run take.
+  entry at a real logon, and what `--recover` settles there when a helper
+  was cut off during its health run; `katana --update-health` in an
+  installed copy; and how long the swap and the health run take.
+- **A Katana really started as administrator.** Which kind of token is
+  refused is tested for every kind, and that the answer is never "yes" for
+  a token Windows calls not elevated; a "yes" itself - that
+  `update::processIsElevated` hands the decision the kind Windows gave - is
+  seen only by a run that holds the elevated half of a split token, and the
+  suite is not started that way.
+- **A window that confirms.** That the window of an installed copy, started
+  after its helper was cut off, settles the update at its first idle turn:
+  the decision and the settling are tested, the call between them is not
+  ("Not done").
 - **The installer's acceptance step**: an install, an update and an
   uninstall on a clean Windows machine, by hand (`docs/release.md`, "The
   Windows installer").
@@ -1311,6 +1433,51 @@ And the engineering decisions, each with what was rejected:
   download workers, release channels, a fallback that fetches the whole
   payload, installing at exit, and a `ROLLBACK` verb.
 
+And those of the hardening pass of 2026-10-14, which settled what the
+reviewers of the merged system had called minor (rulings H1 to H8; H7 and H8
+changed nothing and are under "Not done"):
+
+- **H1, an update whose helper died is settled from what is on the disk,
+  and no settler starts a program.** The marker, or a window of that very
+  version that has come idle, is the proof that it starts; a putting back
+  needs the marker's absence from the right folder, the very release in the
+  tree, every old file kept and nobody running. *Rejected: running the
+  health check again at the next logon.* It would have judged as strictly
+  as the swap does, but only a logon would then settle anything and a
+  working window never; a start slowed by a busy logon would put back a
+  release that had been in use for days; and for that minute the update
+  lock would be held, so an apply asked meanwhile would end `locked`, in
+  silence. *Accepted with the choice:* the exit code of the dead helper's
+  health run is lost ("Not done").
+- **H1, what `--recover` cannot record is not recorded.** The headless rule
+  stands - `--recover` writes nothing per user - so a release it puts back
+  is not added to `blocked` and is offered again. That is no loop, because
+  only a person applies an update, and then a live helper judges it.
+- **H2, the second scan is one question and not a second wait.** The first
+  look already waited for whoever was closing; a wait here would let the
+  files the plan hashed grow old under a program that is running.
+- **H3, a record never lowers the installed version.** Only the version is
+  raised to the program's own; the sequence stays the record's, because the
+  helper of a release that brings its own helper is that release's version
+  and must still find the release above the build the record names.
+- **H4, an administrator's session is refused the apply, and only that.**
+  The download is not refused, and nothing is refused where the token was
+  never split - User Account Control off, the built-in administrator -
+  since no unelevated half exists there that could interfere. A process
+  that cannot ask is "not elevated": the question guards one case, and what
+  cannot be shown to be that case is not refused an update for it.
+- **H5, a release that was put back is offered again by a deliberate step,
+  and all at once.** `UPDATE BLOCKED CLEAR` and its button in Settings;
+  `UPDATE STATUS`'s reply did not change. *Rejected: clearing one release
+  by its number* (the state keeps sequences and no version, and the feed
+  has one release to offer) *and a button in the dialog that tells of the
+  rollback*, so that no single press there installs again a release that
+  has just failed to start (`docs/desktop.md`).
+- **H6, the release workflow names every action by a commit**, and the
+  environment `release` is to take runs of the default branch only: both,
+  with how an action is moved to a newer version, are `docs/release.md`,
+  "The actions the workflow runs" and "Update signing".
+
 GitHub's own limits bound what a release may hold: "Up to 1000 release
 assets may be associated with a single release" and "Each file included in a
 release must be under 2 GiB" (GitHub Docs, "About releases", "Storage and
@@ -1369,9 +1536,15 @@ whatever more the manifest's parser allows (4 GiB).
   like the other programs.
 - **What only a window, or only an installed copy, can show has no test
   that runs it**: the workbench's wiring (`docs/desktop.md`) - what a start
-  lists from `recovery.log` and sweeps among it, which a build tree and a
-  headless run never reach - and the few lines of `katana_cli`'s `main()`
-  that start the helper (`docs/mcp.md`).
+  lists from `recovery.log` and sweeps among it, and the call that confirms
+  an update whose helper died, with its fresh read of the install record
+  and its twelve askings, all of which a build tree and a headless run
+  never reach - the window's `main()` saying that a helper could not be
+  started (stderr, exit 1, the box), and the few lines of `katana_cli`'s
+  `main()` that start the helper (`docs/mcp.md`). What each of them DECIDES
+  is a function with tests of its own (`updateStartMayConfirm`,
+  `updateFailureIsBoxed`, `updateRecoveredTransactions`), and what
+  confirming does is the engine's and tested there.
   The shipped programs cannot be given a test key, which is the point of
   them.
 - **No test in the ordinary run puts the shipped transport in front of a
@@ -1379,28 +1552,57 @@ whatever more the manifest's parser allows (4 GiB).
   on first release". A test that ran it against the fake feed would have to
   link `katana_app` and be held to the loopback by something other than its
   own construction.
-- **The Command Reference has no Updates section** (`docs/desktop.md`);
-  `HELP UPDATE` prints the text.
-- **Five things found while this document was read against the code, in
-  files it does not own, and left as they are:**
-  - `discardPrepared` in `src/katana_qt/update_workbench.cpp` is a second
-    copy of `app::abandonApply` (`src/katana_app/update_verbs.hpp`): each
-    puts `U/run-<tx>` on `cleanup.list` for a request nobody will start.
-    The window should call the one the session and `katana_cli` call.
-  - `include/katana/update/check.hpp` lists `root_not_writable` and
-    `headless` among a check's reasons, and says of `Unsupported` that it
-    covers an unwritable root. No check gives either token: the first is the
-    helper's, at the swap, and the second is what a headless window answers
-    `DOWNLOAD`, `APPLY` and the lines it refuses with.
-  - `include/katana/update/state.hpp` says `processCleanupList` is called by
-    the helper after a healthy update as well as by the window. Only the
-    window calls it, at its start; the helper appends to the list and never
-    reads it.
-  - The repository's front page, under "Licence", says the repository "is
-    not public yet", and the comment over `KATANA_UPDATE_REPO` in
-    `src/katana_update/CMakeLists.txt` says the owner "will make" it
-    public. It is public (decision D0; it answered a request without
-    credentials on 2026-10-13).
-  - `tools/update_keytool.py` prints the `gh secret set` command without
-    `--env release`, in its help as a parenthesis to add and after `pub` not
-    at all; this document and `docs/release.md` give it with.
+- **Nothing lists the releases that are blocked.** `UPDATE STATUS` does not
+  say them (its reply did not change when `UPDATE BLOCKED CLEAR` came), and
+  Settings > Updates says only that a version is set aside, not which: the
+  state keeps sequences and no version. A check that meets a blocked
+  release names it.
+
+What the hardening pass of 2026-10-14 left open, by its rulings:
+
+- **H1: the exit code of a dead helper's health run is lost.** It died with
+  the helper. A marker followed by a crash - which a helper that lives
+  rolls back as `health_exit` - therefore counts as healthy for whoever
+  settles the update later.
+- **H1: a good release can be put back at a logon.** The health run writes
+  its marker about 3 s into its start. A helper cut off before that leaves
+  none, and when the next thing to meet the update is a logon's `--recover`
+  and not a window, a release that would have started is put back. It is
+  not blocked, so it is offered again - as Ready, while its download is
+  still there.
+- **H1: the logon net has holes.** No `RunOnce` entry is registered when its
+  command is longer than the 260 characters Windows runs (the registration
+  is refused, as it is for the swap's own entry); none is left when power
+  is lost between Windows consuming the entry and `--recover` registering
+  it again; and an entry that runs puts nothing back while a program of
+  the install is running at every logon - an update with no marker is left
+  each time. A window of the new version, or step 1 of the next swap, still
+  settles a release that starts. For one that does not, what remains is
+  `katana_updater --recover` by hand with nothing of the install running,
+  which the refusal `interrupted_update` names.
+- **H1: a program started while such an update is being put back may fail
+  to load**, as one started during a commit may ("The residual").
+- **H1: two states are left as they are at every logon.** A run of
+  `--recover` whose `KATANA_UPDATE_STATE_DIR` is not the one Katana ran
+  with looks in a folder that holds no `run-<tx>`, and decides nothing; and
+  a tree changed by hand - a file edited, another zip unpacked over it - is
+  no longer that release, and is not put back. Each is settled by a window
+  that confirms; where none does, no new update starts over it
+  (`interrupted_update`).
+- **H1: what stays behind in U.** `--recover` only reads U, so after it has
+  confirmed an update the marker `healthy-<tx>` stays (the helper's copy
+  `run-<tx>` is listed by the window's next start, as a recovered one's
+  is). And the files downloaded for a release whose helper died stay in
+  `stage-<sequence>` until a later release is downloaded, which removes
+  the stage folders of earlier ones.
+- **H7: two targets of one person share a stage folder.** The folder is
+  named for the release's sequence alone, `U/stage-<sequence>`, and the
+  manifests of one release carry ONE sequence for every target, so two
+  copies of different targets that one person runs - the x64 zip beside
+  the ARM64 one - download into the same folder. NOT changed: verification
+  refuses the other target's files, and the download is made again; the
+  folder's name is pinned across the tests and the documents.
+- **H8: what `expires` does not do.** It is advisory, and no highest
+  sequence seen is kept. So whoever can move the `latest` flag without
+  holding the signing key can hold installed copies on an OLDER signed
+  release - never below what a copy has installed.
