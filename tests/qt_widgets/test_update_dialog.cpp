@@ -1661,11 +1661,12 @@ TEST(UpdateDecisions, AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInst
     // automatic check's are above; the rule is that specification's, and the
     // versions are the design's 0.2.0 and 0.3.0.
     //
-    // `installed` is install.version, which the same pass's H3 makes "the
-    // HIGHER of the record's and the program's own". So what the window hands
-    // over is never below `program`: of the two unequal cases below the
-    // first - a record above the program - is the one a window meets, and the
-    // second is the function's own rule, asked directly.
+    // `installed` is install.version, which the same pass's H3, as it was
+    // settled, makes the HIGHER of the build the helper recorded and the
+    // build the package names of itself (docs/update.md, "The installed
+    // version"). Of the two unequal cases below the first - a helper's record
+    // above the program - is the one the rule exists for, and the second is
+    // the function's own rule, asked directly.
     using katana::qt::UpdateConfirmFacts;
     using katana::qt::updateStartMayConfirm;
     using katana::update::InstallKind;
@@ -1699,10 +1700,12 @@ TEST(UpdateDecisions, AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInst
     oldWindow.program = version(2, 3);
     EXPECT_FALSE(updateStartMayConfirm(oldWindow));
     // The rule is "the program's own", so a version below the program's is
-    // refused too. No window hands that over: a record that names 0.2.0 in a
-    // copy of 0.3.0 - a newer zip unpacked by hand over a copy that had
-    // updated itself - is read as 0.3.0 (H3), which is the first case above,
-    // and that window confirms.
+    // refused too. A newer zip unpacked by hand over a copy that had updated
+    // itself does not hand that over: the helper's record names 0.2.0, the
+    // zip's own install.json names 0.3.0, and the higher is read (H3) - the
+    // first case above, and that window confirms. What does hand it over is
+    // a program of 0.3.0 put by hand into a copy whose package and record
+    // both name 0.2.0.
     UpdateConfirmFacts below = go;
     below.installed = version(2, 3);
     EXPECT_FALSE(updateStartMayConfirm(below));

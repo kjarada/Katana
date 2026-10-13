@@ -1064,9 +1064,10 @@ void UpdateWorkbench::confirmStart()
     facts.keepsState = !made.stateDirectory.empty();
     facts.kind = install->kind;
     facts.hasInstalledRecord = install->hasInstalledRecord;
-    // The reader's version: the higher of the record's and this program's
-    // own, so it is not this program's only when the record names a version
-    // above it - the window of the old files (updateStartMayConfirm).
+    // The reader's version: the higher of the helper's record and the build
+    // the package names (install.json). In a copy that packaging and updates
+    // made it is not this program's only when the helper's record names a
+    // version above it - the window of the old files (updateStartMayConfirm).
     facts.installed = install->version;
     facts.program = *program;
     if (!updateStartMayConfirm(facts)) {

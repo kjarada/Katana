@@ -98,7 +98,25 @@ SEED_GLOB = "etc/katana/*.ini"
 # of two builds a month apart.
 V1_VERSION, V1_SEQUENCE = "0.9.0", 1790000000
 V2_VERSION, V2_SEQUENCE = "0.10.0", 1792312800
-INSTALL_RECORD = b'{"schema":1,"target":"win64"}'  # install.hpp: what the CPack install writes
+# install.json of every install here (install.hpp): what the CPack install writes for a package built
+# outside the release workflow - its target and THE VERSION IT WAS BUILT AS, and no sequence.
+#
+# Why it names a version. A record that says its target and no more leaves the program that reads it to
+# stand for the copy: the installed version is then the higher of installed.json's and that program's own
+# (src/katana_update/state.cpp, readInstallAs), and the programs that read these installs -
+# katana_update_e2e and katana_updater_test - are built as the project's version. `installed` 0.9.0 would
+# then hold only while the project is not above 0.9.0, and the updates from 0.9.0 to 0.10.0 would each be
+# a `downgrade` once it is above 0.10.0: cases failing for a change of the project's version and of
+# nothing else. Where the package names its version the reading program is not asked (state.cpp,
+# packageBuild), so what is installed is what the records say, whichever build reads them.
+#
+# Why 0.1.0, and one text for both packages. An update never writes install.json: a copy keeps the record
+# of the package it CAME FROM, which is neither release's own. So make_package gives v1 and v2 the same
+# record, and the tree an update must leave has it as it was (World.after_update_to). 0.1.0 is below both
+# releases: the copy's own build is never above installed.json's, and the installed version and sequence
+# are that record's. (tests/update/apply_harness.hpp, kInstallJson, is the same record for the same
+# reason.) The producer leaves the file out of a release without reading it (update_make_manifest.py).
+INSTALL_RECORD = b'{"schema":1,"target":"win64","version":"0.1.0"}'
 INSTALLED_RECORD_PATH = "share/katana/installed.json"  # install.hpp: what the helper writes at commit
 # ranges.hpp: two members merge when the hole between them is at most this, into at most that.
 RANGE_MERGE_GAP = 1024 * 1024
@@ -162,7 +180,8 @@ def tagged(program: bytes, tag: str) -> bytes:
 
 
 def make_package(tag: str, stub: bytes, helper: bytes, big: bool) -> dict[str, bytes]:
-    """What a release installs, path to bytes, as the CPack install lays it out (install.json included).
+    """What a release installs, path to bytes, as the CPack install lays it out (install.json included:
+    INSTALL_RECORD, the same in both - see there).
 
     Between v1 and v2: both programs and one library, three data files and the seed differ; the helper, a
     data file and (with `big`) a library and a data file of 1.5 MiB each do not; a library and the only

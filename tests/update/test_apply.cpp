@@ -636,7 +636,7 @@ TEST(Apply, TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild)
     FakeRegistry registry;
     const core::Result<Install> install = readInstall(s.root, registry);
     ASSERT_TRUE(install.ok()) << install.error().describe();
-    EXPECT_EQ(toString(install->version), kOldVersion) << "read as the program's version, not the record's";
+    EXPECT_EQ(toString(install->version), kOldVersion) << "not the version installed.json records";
     EXPECT_EQ(install->sequence, 100u);
 }
 

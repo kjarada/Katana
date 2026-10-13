@@ -481,11 +481,15 @@ struct UpdateConfirmFacts {
     // update::Install::hasInstalledRecord.
     bool hasInstalledRecord = false;
     // The install's version as update::readInstall gives it (Install::version).
-    // That is the HIGHER of the version the record names and the version of
-    // the program that reads it (the hardening pass's ruling H3, 2026-10-14:
-    // a record is never taken to say less than the program is), so from the
-    // reader it is never below `program`, and differs from it only when the
-    // record names a version ABOVE the program's.
+    // That is the HIGHER of the build the helper recorded (installed.json) and
+    // the build the package names of itself (install.json): the hardening
+    // pass's ruling H3, 2026-10-14, as it was settled - the helper's record
+    // is never taken to say less than the package does (docs/update.md, "The
+    // installed version"). The program that reads is not asked; its version
+    // stands for the package's only under an install.json that says its
+    // target alone, which no package writes now. So in a copy that packaging
+    // and updates made, the reader's version differs from `program` only when
+    // the helper's record names a version ABOVE the program's.
     katana::update::Version installed;
     // The version this program was built as (update::programVersion).
     katana::update::Version program;
@@ -501,14 +505,17 @@ struct UpdateConfirmFacts {
 // version (`installed`, above) is this program's own.
 //
 // WHAT THE LAST CONDITION REFUSES, with the facts the reader gives, is a
-// record that names a version ABOVE the program's: a window of the OLD files
-// that was started while the files were being swapped. That one runs old code
-// over the new tree, its record names a version it is not, and its start
-// proves nothing about the release. It does NOT refuse a record BELOW the
-// program's - a newer copy unpacked by hand over one that had updated itself
-// - because the reader has raised that version to the program's already: such
-// a window confirms. The function itself asks for the two to be equal and
-// relies on no reader: handed a version below the program's, it refuses.
+// helper's record that names a version ABOVE the program's: a window of the
+// OLD files that was started while the files were being swapped. That one
+// runs old code over the new tree, its record names a version it is not, and
+// its start proves nothing about the release. It does NOT refuse a helper's
+// record BELOW the program's - a newer copy unpacked by hand over one that
+// had updated itself - because that copy brought its own install.json, and
+// the reader has raised the version to the package's, which is the
+// program's: such a window confirms. The function itself asks for the two to
+// be equal and relies on no reader: handed a version below the program's -
+// what the reader gives for a program put by hand into a copy whose package
+// and record both name less - it refuses.
 [[nodiscard]] bool updateStartMayConfirm(const UpdateConfirmFacts& facts);
 
 // Whether an update that could not be started - the window it closed is gone,

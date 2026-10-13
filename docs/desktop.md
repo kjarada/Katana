@@ -3302,17 +3302,24 @@ update did work.
   in an interactive window (it writes per-user state) of an installed copy
   that has an install record and whose installed version is the program's
   own (`AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled`).
-  The installed version is the HIGHER of the version the record names and
-  the program's own (`update::readInstall`), so what this refuses is a record
-  that names a version ABOVE the program's. That is the case the rule exists
-  for: a window of the OLD files that was started while the files were being
-  swapped. It runs old code over the new tree, the record names a version it
-  is not, and its start says nothing about the release. A record BELOW the
-  program's refuses nothing: a newer copy unpacked by hand over one that had
-  updated itself reads as the version that is running, and its window
-  confirms. The record is read again for this, not taken from the verbs'
-  context, which read it when the window was built - during the swap that may
-  have been the old record still.
+  The installed version is the HIGHER of two builds (`update::readInstall`;
+  `update.md`, "The installed version"): the one the helper recorded in
+  `installed.json` when an update committed, and the one the package names
+  of itself in `install.json`. The program that asks is not asked: its
+  version stands for the package's only under an `install.json` that says
+  its target alone, which no package writes now. What this refuses, then, is
+  a helper's record that names a version ABOVE the program's. That is the
+  case the rule exists for: a window of the OLD files that was started while
+  the files were being swapped. It runs old code over the new tree, the
+  record names a version it is not, and its start says nothing about the
+  release. A helper's record BELOW the package's refuses nothing: a newer
+  copy unpacked by hand over one that had updated itself brings its own
+  `install.json`, reads as the version of that package, and its window
+  confirms. A program that is above both - one put into the copy by hand,
+  without its package - is refused as well: nothing on the disk says that
+  the copy is its version. The record is read again for this, not taken from
+  the verbs' context, which read it when the window was built - during the
+  swap that may have been the old record still.
 - **A helper that is alive settles its own update.** It holds the update
   lock, and `confirmStarted` then answers that it is busy. The window asks
   again every 5 seconds, 12 times - the minute the helper waits at most - in
