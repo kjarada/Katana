@@ -1750,6 +1750,42 @@ TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
     EXPECT_EQ(checked->text, kAvailable);
 }
 
+TEST(UpdateVerbs, TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion)
+{
+    // What a newer zip unpacked by hand over a copy that had updated itself
+    // leaves: the helper's record of the older version beside the programs of
+    // the newer one. The installed version is the higher of the two
+    // (update/install.hpp, readInstall), so that the record cannot lower what
+    // a release must be above. 0.1.0 is a version this project left behind.
+    katana::app::tests::ScopedVariable token("KATANA_UPDATE_TOKEN", "ghp_from_the_environment");
+    Rig rig;
+    katana::app::tests::ScopedVariable folder("KATANA_UPDATE_STATE_DIR", rig.state);
+    const fs::path records = rig.root / "share" / "katana";
+    writeBytes(records / "install.json", "{\"schema\":1,\"target\":\"win64\"}\n");
+    writeBytes(records / "installed.json",
+               "{\"schema\":1,\"product\":\"katana\",\"version\":\"0.1.0\","
+               "\"sequence\":1700000000,\"tag\":\"v0.1.0\",\"target\":\"win64\"}\n");
+    const core::Result<update::Version> own = update::programVersion();
+    ASSERT_TRUE(own.ok());
+    ASSERT_LT(update::parseVersion("0.1.0").value(), *own);
+
+    const UpdateContext context =
+        katana::app::makeUpdateContext(UpdateSurface::Cli, rig.root / "bin" / "katana_cli.exe");
+    ASSERT_TRUE(context.installProblem.empty()) << context.installProblem;
+    EXPECT_EQ(context.install.version, *own);
+    EXPECT_EQ(update::toString(context.install.version), update::programVersionText());
+    // The record is still the record: its sequence, and that there is one.
+    EXPECT_EQ(context.install.sequence, 1700000000u);
+    EXPECT_TRUE(context.install.hasInstalledRecord);
+
+    // And it is what the lines say is installed.
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    EXPECT_TRUE(startsWith(status->text, "installed=" + std::string(update::programVersionText()) +
+                                             " target=win64 kind=archive "))
+        << status->text;
+}
+
 TEST(UpdateVerbs, TheContextOfAProgramWhoseInstallRecordDoesNotReadSaysSoAndIsAskedAboutByNobody)
 {
     katana::app::tests::ScopedVariable token("KATANA_UPDATE_TOKEN", "ghp_from_the_environment");
