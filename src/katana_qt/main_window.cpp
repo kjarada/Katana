@@ -1119,8 +1119,23 @@ void MainWindow::buildActions()
     });
     reference->setObjectName("helpCommandReference");
     about->setObjectName("helpAbout");
+    // Check for Updates, the status bar's update button and the UPDATE verbs
+    // are the update workbench's (update_workbench.hpp), made here as the
+    // other workbenches are: it is handed what only this window has. Whether
+    // the session is headless is asked each time, since main() says so after
+    // the window is built.
+    UpdateServices updateServices;
+    updateServices.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                       const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    updateServices.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    updateServices.headless = [this] { return headless_; };
+    updates_ = std::make_unique<UpdateWorkbench>(*this, std::move(updateServices));
     helpMenu->addActions({reference, sheetCommands, shortcuts});
+    // The program itself, under the reference: its updates, then what it is.
     helpMenu->addSeparator();
+    helpMenu->addAction(updates_->action());
     helpMenu->addAction(about);
 
     // ---- File, finished ---------------------------------------------------------------
@@ -1128,6 +1143,17 @@ void MainWindow::buildActions()
     // workbench's (it owns the dialog), shown above Quit; and File's two
     // submenus take File's own items and then Survey's and GIS's by name.
     fileMenu->insertAction(quitAction, format_->settingsAction());
+    // Settings' second page, Updates, is filled by the update workbench: the
+    // Format workbench, which makes the dialog, knows nothing of updates. This
+    // is connected AFTER that workbench's own slot (made with it, above), and
+    // Qt calls an action's slots in the order they were connected, so the
+    // dialog is there by now; filled again at each opening, it shows the
+    // state as it is then.
+    connect(format_->settingsAction(), &QAction::triggered, this, [this] {
+        if (SettingsDialog* settings = format_->settings()) {
+            settings->setUpdates(updates_->settingsUpdates());
+        }
+    });
     fillMenuByName(
         *importMenu,
         {{"", {"fileImport", "fileImportIfc"}},
@@ -2063,6 +2089,13 @@ void MainWindow::buildStatusBar()
     crsButton_->setAutoRaise(true);
     crsButton_->setToolTip("The project's coordinate system: click to change it");
     connect(crsButton_, &QToolButton::clicked, this, [this] { showProjectCrs(); });
+    // "Update 0.3.0", first of the permanent widgets and hidden until a newer
+    // release is known (statusUpdateAvailable; the update workbench's, which
+    // shows it and opens the dialog from it). Hidden again once it is in the
+    // bar: a status bar shows a widget it is given unless that widget was
+    // hidden on purpose, and this must not depend on which it was.
+    statusBar()->addPermanentWidget(updates_->statusButton());
+    updates_->statusButton()->hide();
     statusBar()->addPermanentWidget(crsButton_);
     statusBar()->addPermanentWidget(frameStatsLabel_);
     statusBar()->addPermanentWidget(selectionCountLabel_);
@@ -3064,6 +3097,14 @@ void MainWindow::runTypedLine(const QString& line)
 
 bool MainWindow::runWorkbenchLine(const QString& line)
 {
+    // UPDATE CHECK, STATUS, DOWNLOAD, APPLY, SKIP, SET and TOKEN: the
+    // session's verbs (update_verbs.hpp), before every other family, as in
+    // the session. The update workbench runs them - the ones that reach the
+    // network as jobs - and a DOWNLOAD or an APPLY typed here goes the way the
+    // dialog's buttons go: the buttons build these very lines.
+    if (updates_ != nullptr && updates_->runLine(line)) {
+        return true;
+    }
     // SURVEY READ and SURVEY IMPORT: the session's verb (survey_verbs.hpp),
     // so the window, katana_cli and katana_mcp read and import a field file
     // by one function and reply alike.
@@ -3142,6 +3183,16 @@ VerbOutcome MainWindow::runVerbLine(const QString& line)
 CommandRunner MainWindow::commandRunner()
 {
     return [this](const QString& line) { return runVerbLine(line); };
+}
+
+void MainWindow::startUpdates()
+{
+    updates_->start();
+}
+
+std::optional<katana::update::ApplyRequest> MainWindow::takePendingUpdate()
+{
+    return updates_->takePendingApply();
 }
 
 // The verbs taken here before the interpreter are listed for people by
@@ -3357,7 +3408,15 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     if ((verb == "HELP" || verb == "?") && words.size() == 1) {
         runInterpreterLine(line, verb);
         logMessage(QString::fromStdString(katana::app::geo::helpText()));
+        // The UPDATE verbs are the session's (update_verbs.hpp), which keeps
+        // their help: said here as katana_cli's --help says it.
+        logMessage(QString::fromUtf8(katana::app::updateHelpText()));
         logMessage(windowHelpText());
+        return;
+    }
+    // HELP UPDATE: the same text alone, as HELP SHEETS gives the sheet verbs'.
+    if ((verb == "HELP" || verb == "?") && words.size() == 2 && argument == "UPDATE") {
+        logMessage(QString::fromUtf8(katana::app::updateHelpText()));
         return;
     }
     // A bare tool word typed by a person starts the tool, as in any CAD

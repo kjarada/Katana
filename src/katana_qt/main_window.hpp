@@ -54,6 +54,9 @@
 #include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
 #include "surface_raster_dialog.hpp"
+// Whole, as the other workbenches are: updates_ is destroyed wherever the
+// window is.
+#include "update_workbench.hpp"
 #include "view_workspace.hpp"
 // Whole, for selectById_'s reason.
 #include "zoom_to_dialog.hpp"
@@ -177,6 +180,23 @@ class MainWindow final : public QMainWindow {
     // the views, the managers - follows the Document's notification, as it
     // does for every other change, so no verb has to tell it.
     void loadDefaultCustomisation();
+
+    // ---- updates (update_workbench.hpp; docs/desktop.md, "Help > Check for Updates") -----
+    //
+    // What a window a person uses does about updates as it starts: what an
+    // earlier update left behind removed, how the last one ended shown once, a
+    // release already downloaded offered again, and the automatic check when
+    // one is due. Once, by main(), after the window is shown. A headless
+    // window does none of it - no automatic check, no per-user state - so
+    // main() does not call it there, and it does nothing if it is.
+    void startUpdates();
+    // The request to start the update helper with - set by UPDATE APPLY
+    // CONFIRM, and handed over ONLY when the close the update workbench then
+    // asked this window for succeeded (the unsaved-changes question answered,
+    // not cancelled). For main(), after the event loop has ended: it calls
+    // update::launchApply and returns, and the helper swaps the files once
+    // this process has gone. nullopt at every other exit.
+    [[nodiscard]] std::optional<katana::update::ApplyRequest> takePendingUpdate();
 
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
@@ -585,8 +605,9 @@ class MainWindow final : public QMainWindow {
     // at its prompt: each typed in turn, blank lines left out, so none of
     // them is run as a command.
     void typeLinesIntoTool(const QString& text);
-    // The geoprocessing verbs (GDAL ...), the ONLINE and the UTILITY verbs,
-    // run by their workbenches; false leaves the line to whoever asked.
+    // The UPDATE verbs first, then the geoprocessing verbs (GDAL ...), the
+    // ONLINE and the UTILITY verbs, run by their workbenches; false leaves
+    // the line to whoever asked.
     bool runWorkbenchLine(const QString& line);
     // Who a line came from. Only a person's typed line starts a tool by a
     // bare word; a script's, a paste's or a dialog's is the interpreter's, as
@@ -773,6 +794,11 @@ class MainWindow final : public QMainWindow {
     // Declared after the Document, the surfaces and the reference data, which
     // its context holds, so that it goes before them.
     std::unique_ptr<GeoWorkbench> geo_;
+    // Help > Check for Updates, the status bar's update button and the UPDATE
+    // verbs (update_workbench.hpp). It holds no Document: only this window,
+    // whose job runner - a child, so alive until the window's base goes -
+    // runs its checks and downloads.
+    std::unique_ptr<UpdateWorkbench> updates_;
     // Terrain > Surface From and GIS > Export Surface as DEM, children of the
     // window made on first use and kept, non-modal.
     SurfaceFromDialog* surfaceFrom_ = nullptr;
