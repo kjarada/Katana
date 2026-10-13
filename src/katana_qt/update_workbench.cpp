@@ -200,6 +200,14 @@ UpdateWorkbench::~UpdateWorkbench()
     // not wait out a download as it joins it; its completion is dropped with
     // the runner and never reaches this object.
     cancelJob();
+    // A request that was prepared and is still here was never started: the
+    // person closed the window themselves while the close for it waited, and
+    // main() was handed nothing. The helper's copy goes to the next start's
+    // sweep, as after Later - without a word, since the log is the window's
+    // and the window is going.
+    if (pendingApply_.has_value()) {
+        (void)discardPrepared(*pendingApply_);
+    }
     // The dialog is the window's child only so that it floats over it; it
     // calls back into this object, so it goes with it.
     delete dialog_.data();
@@ -963,9 +971,15 @@ void UpdateWorkbench::restoreStaged()
         return;
     }
     const std::filesystem::path stateDirectory = context().stateDirectory;
+    katana::app::UpdateStatus status = *reply->status;
+    // The skipped version and the blocked list as the engine's own file has
+    // them, read here rather than trusted to have been copied whole into the
+    // reply: they are what this decision turns on.
+    if (Result<katana::update::UpdateState> read = katana::update::readState(stateDirectory)) {
+        status.state = std::move(*read);
+    }
     const QString staged = updateStagedToOffer(
-        *reply->status, context().install.version,
-        [&stateDirectory](std::uint64_t sequence) {
+        status, context().install.version, [&stateDirectory](std::uint64_t sequence) {
             return stageIsThere(stateDirectory, sequence);
         });
     if (staged.isEmpty()) {
