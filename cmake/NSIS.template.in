@@ -38,7 +38,10 @@
 ; Comments are whole lines only, and none names a registry hive other than HKCU: that check
 ; reads the instructions, but a reader should not have to tell them apart. None ends in a
 ; backslash either: NSIS continues a comment onto the next line as it does a command, and the
-; instruction there would be part of the comment (the check refuses such a line).
+; instruction there would be part of the comment (the check refuses such a line). Block
+; comments are not used. Conditions are of two kinds, the test for MSYS2's NSIS, which holds
+; the Target line alone, and comparisons of a value CPack filled in with a literal, and none
+; is inside another: the check reads what NSIS compiles, and refuses what it cannot tell.
 
 ;--------------------------------
 ; Values CPack supplies
