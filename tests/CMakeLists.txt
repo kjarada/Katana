@@ -29,12 +29,40 @@ add_test(NAME layering_catches_a_cad_file_including_archive12d
             -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
 set_tests_properties(layering_catches_a_cad_file_including_archive12d PROPERTIES
     PASS_REGULAR_EXPRESSION "reads_an_archive[.]cpp: layer 'cad' must not depend on 'archive12d'")
+# The update layer's rules, each on a fixture that breaks it (the real tree passes
+# `layering` above): the engine sees core and nothing else; the helper program in
+# src/katana_updater is the same layer, so it can reach nothing but that (and a
+# directory the table did not name would itself be a violation); and a public header of
+# the layer names neither OpenSSL, zlib nor libcurl, which stay behind src/. The
+# fixtures are outside src/ and include/, where the real check never looks, and are
+# never compiled.
+add_test(NAME layering_catches_the_update_layer_including_cad
+    COMMAND ${CMAKE_COMMAND}
+            -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/update_includes_cad
+            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
+set_tests_properties(layering_catches_the_update_layer_including_cad PROPERTIES
+    PASS_REGULAR_EXPRESSION "reads_a_document[.]cpp: layer 'update' must not depend on 'cad'")
+add_test(NAME layering_catches_the_updater_program_including_gis
+    COMMAND ${CMAKE_COMMAND}
+            -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/updater_includes_gis
+            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
+set_tests_properties(layering_catches_the_updater_program_including_gis PROPERTIES
+    PASS_REGULAR_EXPRESSION "reads_the_network[.]cpp: layer 'update' must not depend on 'gis'")
+foreach(_library IN ITEMS openssl zlib curl)
+    add_test(NAME layering_catches_an_update_header_exposing_${_library}
+        COMMAND ${CMAKE_COMMAND}
+                -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/update_header_exposes_${_library}
+                -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
+    set_tests_properties(layering_catches_an_update_header_exposing_${_library} PROPERTIES
+        PASS_REGULAR_EXPRESSION "exposes_${_library}[.]hpp: public header exposes a third-party header")
+endforeach()
 
 # What `cmake --install`, the bundle and the package will copy from the
 # sources: every file present, and nothing from the build's third-party inputs
 # (tools/check_install_rules.cmake says why each matters).
 add_test(NAME packaging_installs_only_present_first_party_files
     COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR} -DKATANA_BINARY=${CMAKE_BINARY_DIR}
+            -DKATANA_REQUIRE_CPACK=ON
             -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
 
 # The cache entry KATANA_BUILTIN_CUSTOMISATION, which keeps what an earlier
@@ -51,7 +79,7 @@ add_test(NAME builtin_default_moves_the_earlier_nsw_default_once_and_keeps_a_cho
 # The programs do not hold the older customisation formats. Their readers and
 # writers (src/katana_archive12d/legacy) are the converter's, and the program
 # reads one format, the Katana customisation; a reader that found its way back
-# into katana, katana_cli or katana_mcp would be a second way to load a file
+# into katana, katana_cli, katana_mcp or katana_updater would be a second way to load a file
 # that nobody had decided to keep. Two checks, each proved on a fixture below.
 #
 #   the link closure   every library a program links, however far down and
@@ -60,8 +88,10 @@ add_test(NAME builtin_default_moves_the_earlier_nsw_default_once_and_keeps_a_cho
 #                      Walked at configure time, which is when CMake knows it,
 #                      and reported by an echo test as the headless scan is.
 #   the install rules  tools/check_install_rules.cmake: the only programs
-#                      installed are katana, katana_cli and katana_mcp, so the
-#                      converter is never handed on.
+#                      installed are katana, katana_cli, katana_mcp and the
+#                      update helper katana_updater, so the converter is never
+#                      handed on, nor the two update test executables that carry
+#                      a test key.
 #
 # What a target links is its LINK_LIBRARIES (everything it was given, private
 # included) and its INTERFACE_LINK_LIBRARIES (what it hands on, and where a
@@ -176,7 +206,7 @@ function(katana_register_link_closure_checks)
         return()
     endif()
     set(_forbidden katana_legacy_customisation)
-    katana_programs_holding("katana;katana_cli;katana_mcp" "${_forbidden}" _holding _blind)
+    katana_programs_holding("katana;katana_cli;katana_mcp;katana_updater" "${_forbidden}" _holding _blind)
     foreach(_list IN ITEMS _holding _blind)
         if(${_list})
             string(JOIN ", " ${_list}_text ${${_list}})
@@ -249,19 +279,36 @@ function(katana_register_link_closure_checks)
 endfunction()
 cmake_language(DEFER CALL katana_register_link_closure_checks)
 
-# ... and the install rules, on three install scripts written here, each as
-# CMake writes one: a build's programs and nothing else; those and the converter
-# installed from a directory below (the check follows the scripts the top one
-# includes); and no program at all, which would make the check pass with
-# nothing to check. The files named are never read, only named.
+# ... and the install rules, on install scripts written here, each as CMake writes one:
+# a build's programs and nothing else; those and the converter installed from a
+# directory below (the check follows the scripts the top one includes); no program at
+# all, which would make the check pass with nothing to check; and what the update
+# system adds - the helper as the fourth program, the two update test executables
+# (they hold a test key) refused, and install.json, which only CPack may write: a plain
+# install that names it, a CPackConfig that does not run the record script, runs it
+# after the signing script, names one that is not there or one that writes nothing, a
+# build tree that holds one, and no CPackConfig where one is required. The files named
+# are never read, only named.
 set(_install_fixture_root "${CMAKE_CURRENT_BINARY_DIR}/install_fixtures")
+# CPACK, what the fixture's CPackConfig.cmake holds ("" for none):
+#   record          the record script, then the signing script; the record script writes install.json
+#   no_record       the signing script alone
+#   sign_first      the signing script, then the record script
+#   no_script       names the record script, which is not there
+#   writes_nothing  the record script is there and writes nothing
+# DEV_TREE_RECORD puts an install.json into the fixture's build tree; TOP_LINES are further
+# lines of its top install script.
 function(katana_write_install_fixture name programs below)
+    cmake_parse_arguments(ARG "DEV_TREE_RECORD" "CPACK" "TOP_LINES" ${ARGN})
     set(_dir "${_install_fixture_root}/${name}")
     file(MAKE_DIRECTORY "${_dir}/below")
     set(_top "# A top-level install script, as CMake writes it.\n")
     string(APPEND _top "file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/share\" TYPE FILE FILES \"${PROJECT_SOURCE_DIR}/README.md\")\n")
     foreach(_program IN LISTS programs)
         string(APPEND _top "file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/bin\" TYPE EXECUTABLE FILES \"${_dir}/bin/${_program}.exe\")\n")
+    endforeach()
+    foreach(_line IN LISTS ARG_TOP_LINES)
+        string(APPEND _top "${_line}\n")
     endforeach()
     if(below)
         string(APPEND _top "include(\"${_dir}/below/cmake_install.cmake\")\n")
@@ -272,24 +319,141 @@ function(katana_write_install_fixture name programs below)
         file(WRITE "${_dir}/below/cmake_install.cmake" "${_sub}")
     endif()
     file(WRITE "${_dir}/cmake_install.cmake" "${_top}")
+    if(ARG_DEV_TREE_RECORD)
+        file(WRITE "${_dir}/share/katana/install.json" "{\"schema\":1,\"target\":\"win64\"}\n")
+    endif()
+    if(ARG_CPACK)
+        set(_record "${_dir}/KatanaInstallRecord.cmake")
+        set(_sign "${PROJECT_SOURCE_DIR}/cmake/KatanaSign.cmake")
+        if(ARG_CPACK STREQUAL "no_record")
+            set(_scripts "${_sign}")
+        elseif(ARG_CPACK STREQUAL "sign_first")
+            set(_scripts "${_sign};${_record}")
+        else()
+            set(_scripts "${_record};${_sign}")
+        endif()
+        file(WRITE "${_dir}/CPackConfig.cmake"
+            "set(CPACK_POST_BUILD_SCRIPTS \"${_sign}\")\nset(CPACK_PRE_BUILD_SCRIPTS \"${_scripts}\")\n")
+        if(ARG_CPACK STREQUAL "no_script")
+            file(REMOVE "${_record}")
+        elseif(ARG_CPACK STREQUAL "writes_nothing")
+            file(WRITE "${_record}" "# a record script that writes nothing\n")
+        else()
+            file(WRITE "${_record}" "file(WRITE \"\${CPACK_TEMPORARY_INSTALL_DIRECTORY}/share/katana/install.json\" \"{}\")\n")
+        endif()
+    endif()
 endfunction()
+set(_the_four "katana;katana_cli;katana_mcp;katana_updater")
 katana_write_install_fixture(the_programs "katana;katana_cli;katana_mcp" "")
+katana_write_install_fixture(the_programs_and_the_updater "${_the_four}" "" CPACK record)
 katana_write_install_fixture(a_converter_from_a_directory_below "katana;katana_cli;katana_mcp"
     "katana_customisation_convert")
+katana_write_install_fixture(update_test_executables_from_a_directory_below "${_the_four}"
+    "katana_updater_test;katana_update_e2e")
 katana_write_install_fixture(no_program "" "")
-foreach(_fixture IN ITEMS the_programs a_converter_from_a_directory_below no_program)
+katana_write_install_fixture(a_plain_install_that_writes_the_install_record "${_the_four}" ""
+    CPACK record
+    TOP_LINES "file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/share/katana\" TYPE FILE FILES \"${_install_fixture_root}/a_plain_install_that_writes_the_install_record/install.json\")")
+katana_write_install_fixture(cpack_without_the_record_script "${_the_four}" "" CPACK no_record)
+katana_write_install_fixture(cpack_that_signs_before_it_records "${_the_four}" "" CPACK sign_first)
+katana_write_install_fixture(cpack_whose_record_script_is_missing "${_the_four}" "" CPACK no_script)
+katana_write_install_fixture(cpack_whose_record_script_writes_nothing "${_the_four}" "" CPACK writes_nothing)
+katana_write_install_fixture(a_build_tree_that_carries_the_record "${_the_four}" "" CPACK record
+    DEV_TREE_RECORD)
+katana_write_install_fixture(no_cpack_configuration "${_the_four}" "")
+# The fixtures whose CPack side is the point: with no CPackConfig.cmake the check must say
+# so, as the real build's does (-DKATANA_REQUIRE_CPACK=ON).
+set(_install_fixtures_requiring_cpack
+    the_programs_and_the_updater a_plain_install_that_writes_the_install_record
+    cpack_without_the_record_script cpack_that_signs_before_it_records
+    cpack_whose_record_script_is_missing cpack_whose_record_script_writes_nothing
+    a_build_tree_that_carries_the_record no_cpack_configuration)
+foreach(_fixture IN ITEMS the_programs the_programs_and_the_updater a_converter_from_a_directory_below
+        update_test_executables_from_a_directory_below no_program
+        a_plain_install_that_writes_the_install_record cpack_without_the_record_script
+        cpack_that_signs_before_it_records cpack_whose_record_script_is_missing
+        cpack_whose_record_script_writes_nothing a_build_tree_that_carries_the_record
+        no_cpack_configuration)
+    set(_require "")
+    if(_fixture IN_LIST _install_fixtures_requiring_cpack)
+        set(_require -DKATANA_REQUIRE_CPACK=ON)
+    endif()
     add_test(NAME packaging_check_on_fixture_${_fixture}
         COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
-                -DKATANA_BINARY=${_install_fixture_root}/${_fixture}
+                -DKATANA_BINARY=${_install_fixture_root}/${_fixture} ${_require}
                 -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
+endforeach()
+# Two tests on one fixture: each of the two update test executables is refused by name.
+foreach(_executable IN ITEMS katana_updater_test katana_update_e2e)
+    add_test(NAME packaging_check_refuses_${_executable}
+        COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
+                -DKATANA_BINARY=${_install_fixture_root}/update_test_executables_from_a_directory_below
+                -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
+    set_tests_properties(packaging_check_refuses_${_executable} PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "installs the program ${_executable}, which is not one of katana, katana_cli, katana_mcp, katana_updater")
 endforeach()
 set_tests_properties(packaging_check_on_fixture_the_programs PROPERTIES
     PASS_REGULAR_EXPRESSION "Programs installed: katana, katana_cli, katana_mcp[.]")
+set_tests_properties(packaging_check_on_fixture_the_programs_and_the_updater PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "Programs installed: katana, katana_cli, katana_mcp, katana_updater[.] Install record: no plain install writes install[.]json [(]CPack writes it before it signs[)][.]"
+    FAIL_REGULAR_EXPRESSION "Install rule problems")
 set_tests_properties(packaging_check_on_fixture_a_converter_from_a_directory_below PROPERTIES
     PASS_REGULAR_EXPRESSION
-        "installs the program katana_customisation_convert, which is not one of katana, katana_cli, katana_mcp")
+        "installs the program katana_customisation_convert, which is not one of katana, katana_cli, katana_mcp, katana_updater")
+set_tests_properties(packaging_check_on_fixture_update_test_executables_from_a_directory_below PROPERTIES
+    PASS_REGULAR_EXPRESSION "which is not one of katana, katana_cli, katana_mcp, katana_updater")
 set_tests_properties(packaging_check_on_fixture_no_program PROPERTIES
     PASS_REGULAR_EXPRESSION "No install rule for a program was found")
+set_tests_properties(packaging_check_on_fixture_a_plain_install_that_writes_the_install_record PROPERTIES
+    PASS_REGULAR_EXPRESSION "a plain install writes install[.]json")
+set_tests_properties(packaging_check_on_fixture_cpack_without_the_record_script PROPERTIES
+    PASS_REGULAR_EXPRESSION "CPACK_PRE_BUILD_SCRIPTS does not run KatanaInstallRecord[.]cmake")
+set_tests_properties(packaging_check_on_fixture_cpack_that_signs_before_it_records PROPERTIES
+    PASS_REGULAR_EXPRESSION "runs KatanaSign[.]cmake before KatanaInstallRecord[.]cmake")
+set_tests_properties(packaging_check_on_fixture_cpack_whose_record_script_is_missing PROPERTIES
+    PASS_REGULAR_EXPRESSION "KatanaInstallRecord[.]cmake named by CPACK_PRE_BUILD_SCRIPTS does not exist")
+set_tests_properties(packaging_check_on_fixture_cpack_whose_record_script_writes_nothing PROPERTIES
+    PASS_REGULAR_EXPRESSION "KatanaInstallRecord[.]cmake does not write install[.]json")
+set_tests_properties(packaging_check_on_fixture_a_build_tree_that_carries_the_record PROPERTIES
+    PASS_REGULAR_EXPRESSION "the build tree carries share/katana/install[.]json")
+set_tests_properties(packaging_check_on_fixture_no_cpack_configuration PROPERTIES
+    PASS_REGULAR_EXPRESSION "CPackConfig[.]cmake was not found")
+
+# The Unix deploy script names the programs it scans for libraries in one foreach line, and
+# the check holds that line to the installed programs (tools/check_install_rules.cmake, 5).
+# Three scripts written here stand for it - one that scans all four, one that leaves the
+# updater out, one with its list in two lines - against the otherwise correct fixture, so each
+# failure is the deploy script's alone. The real script is checked by
+# packaging_installs_only_present_first_party_files.
+set(_deploy_fixture_root "${CMAKE_CURRENT_BINARY_DIR}/deploy_script_fixtures")
+file(MAKE_DIRECTORY "${_deploy_fixture_root}")
+file(WRITE "${_deploy_fixture_root}/scans_all_four.in"
+    "# A deploy script's scan list.\nforeach(_program katana katana_cli katana_mcp katana_updater)\nendforeach()\n")
+file(WRITE "${_deploy_fixture_root}/leaves_the_updater_out.in"
+    "# A deploy script's scan list.\nforeach(_program katana katana_cli katana_mcp)\nendforeach()\n")
+file(WRITE "${_deploy_fixture_root}/lists_in_two_lines.in"
+    "foreach(_program katana katana_cli katana_mcp)\nendforeach()\nforeach(_program katana_updater)\nendforeach()\n")
+foreach(_deploy IN ITEMS scans_all_four leaves_the_updater_out lists_in_two_lines no_such_script)
+    add_test(NAME packaging_check_on_deploy_script_${_deploy}
+        COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
+                -DKATANA_BINARY=${_install_fixture_root}/the_programs_and_the_updater
+                -DKATANA_REQUIRE_CPACK=ON
+                -DKATANA_DEPLOY_UNIX_SCRIPT=${_deploy_fixture_root}/${_deploy}.in
+                -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
+endforeach()
+set_tests_properties(packaging_check_on_deploy_script_scans_all_four PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "Unix deploy script scans: katana, katana_cli, katana_mcp, katana_updater[.]"
+    FAIL_REGULAR_EXPRESSION "Install rule problems")
+set_tests_properties(packaging_check_on_deploy_script_leaves_the_updater_out PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "the Unix deploy script does not scan katana_updater for libraries [(]it scans: katana, katana_cli, katana_mcp[)]")
+set_tests_properties(packaging_check_on_deploy_script_lists_in_two_lines PROPERTIES
+    PASS_REGULAR_EXPRESSION "has 2 foreach[(]_program [.][.][.][)] lines where exactly one is expected")
+set_tests_properties(packaging_check_on_deploy_script_no_such_script PROPERTIES
+    PASS_REGULAR_EXPRESSION "no_such_script[.]in does not exist: the check of the programs it scans would pass with nothing to check")
 
 # What the documents cite exists - repository paths, Class::member names,
 # test names - no document cites the removed root plan or instructions, and
@@ -705,6 +869,19 @@ if(TARGET katana)
          "${CMAKE_CURRENT_SOURCE_DIR}/geo/headless/*.cmake")
     foreach(_geo_headless_check IN LISTS _geo_headless_checks)
         include("${_geo_headless_check}")
+    endforeach()
+endif()
+
+# The update dialog and menu item in the real window (docs/update.md): one file per
+# check in tests/update/headless/*.cmake, so the task that writes the window adds them
+# without editing this one. Included here, in this directory's scope, for the same
+# reason as the geoprocessing checks above: the scan that says what every program test
+# starts with must see their environment.
+if(TARGET katana)
+    file(GLOB _update_headless_checks CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_SOURCE_DIR}/update/headless/*.cmake")
+    foreach(_update_headless_check IN LISTS _update_headless_checks)
+        include("${_update_headless_check}")
     endforeach()
 endif()
 

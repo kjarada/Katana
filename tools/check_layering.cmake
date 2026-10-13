@@ -50,6 +50,13 @@ set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
 # gis and pointcloud are both implemented by src/katana_io.
 set(KATANA_ALLOWED_gis "core;pointcloud")
 set(KATANA_ALLOWED_pointcloud "core")
+# update: the auto-update engine (docs/update.md) and, in src/katana_updater, the helper
+# program that swaps the install's files. Core only, so that the helper links nothing
+# else - no GDAL, no Qt, no application layer - and stays small, static and able to run
+# from a temporary folder while the install it replaces is being swapped. The network
+# is injected (update/feed.hpp), so it never sees libcurl either; and its third-party
+# libraries, OpenSSL and zlib, stay behind src/ (the pattern below).
+set(KATANA_ALLOWED_update "core")
 # interop converts what gis and pointcloud read into the domain model, so it is
 # the only layer allowed to see both the external readers and the entity model.
 set(KATANA_ALLOWED_interop
@@ -69,9 +76,9 @@ set(KATANA_ALLOWED_render "core;math;geometry")
 set(KATANA_ALLOWED_cad
     "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage")
 set(KATANA_ALLOWED_app
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;update")
 set(KATANA_ALLOWED_qt
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;app;gpu")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;update;app;gpu")
 # The GPU renderer (src/katana_qt/gpu, docs/gpu.md) lives under katana_qt for
 # Qt's sake, but it is the software rasteriser's twin behind the same seam: it
 # may see a DrawList, a Camera and the point cloud's plain types, and never a
@@ -96,13 +103,17 @@ set(KATANA_SRC_LAYER_katana_storage storage)
 set(KATANA_SRC_LAYER_katana_cad cad)
 set(KATANA_SRC_LAYER_katana_io gis)
 set(KATANA_SRC_LAYER_katana_interop interop)
+set(KATANA_SRC_LAYER_katana_update update)
+# The helper program is the update layer's too: it may see core and its own library,
+# and nothing above.
+set(KATANA_SRC_LAYER_katana_updater update)
 set(KATANA_SRC_LAYER_katana_app app)
 set(KATANA_SRC_LAYER_katana_qt qt)
 # src/<directory>/<subdirectory> -> a narrower layer than its directory's.
 set(KATANA_SRC_SUBLAYERS "katana_qt/gpu=gpu")
 
 set(KATANA_THIRD_PARTY_PATTERN
-    "#[ \t]*include[ \t]*[<\"](Eigen/|CGAL/|proj\\.h|sqlite3\\.h|gdal|ogr|cpl_|pdal/|nlohmann/|Q[A-Z]|vulkan/)")
+    "#[ \t]*include[ \t]*[<\"](Eigen/|CGAL/|proj\\.h|sqlite3\\.h|gdal|ogr|cpl_|pdal/|nlohmann/|openssl/|zlib\\.h|curl/|Q[A-Z]|vulkan/)")
 
 set(_violations "")
 

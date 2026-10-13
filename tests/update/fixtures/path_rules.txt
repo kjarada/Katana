@@ -1,0 +1,69 @@
+# The path rules of include/katana/update/paths.hpp, as cases: one path per line, and whether a manifest may hold it.
+#
+#     ok<TAB>path<TAB>why        or        no<TAB>path<TAB>why
+#
+# Every consumer reads THIS file, so that no two implementations of the rules are checked against two copies of the
+# table: tools/update_make_manifest.py and tools/update_verify_release.py (tests/update/tool_tests), and the C++
+# engine and helper (tests/update/test_paths.cpp should read it too, and fail on any line it answers differently).
+#
+# The path is written with a percent escape (%XX, two upper-case hex digits, one per UTF-8 byte) for every byte
+# outside 0x21 to 0x7E and for '%' itself, so a space, a control character, DEL and a non-ASCII letter are all
+# visible here and the file itself is plain ASCII. An empty path is an empty field. A line that is empty or starts
+# with '#' is a comment. The set rules (case-folded duplicates, a file that is also a folder, the caps) are not
+# single-path rules and are tested where they are implemented.
+ok	bin/katana.exe	a plain program
+ok	bin/platforms/qwindows.dll	a plugin in a sub-folder
+ok	share/katana/readme.txt	plain data
+ok	etc/ssl/certs/ca-bundle.crt	etc is an install folder
+ok	lib/libx.so.1.2	lib is an install folder; a versioned library name
+ok	share/proj/proj.db	plain data
+ok	bin/console.exe	CON followed by letters is not CON
+ok	bin/com10.dll	only COM1 to COM9 are devices
+ok	bin/com.txt	COM without a digit is not a device
+ok	bin/a~b.dll	a tilde without a digit is not 8.3
+ok	share/katana/installed.json.bak	starts like a record name but is not one
+ok	share/katana/install.json.txt	starts like a record name but is not one
+ok	share/.updated/x	.updated is not .update
+ok	bin/.hidden	a dot file
+ok	bin/a%20b.txt	a space inside a name
+ok	share/katana/news-0.10.0.txt	dots and digits
+no		empty
+no	/bin/a	absolute
+no	C:/bin/a	drive
+no	C:bin/a	drive relative
+no	bin\a.dll	backslash
+no	bin/a:stream	colon (an NTFS stream)
+no	bin/../etc/x	.. component
+no	bin/./a	. component
+no	bin//a	empty component
+no	bin/	empty last component
+no	other/a.txt	first component not bin share etc lib
+no	LICENSE	first component, and no folder level
+no	bin	an install folder with nothing below it
+no	share/caf%C3%A9.txt	non-ASCII
+no	bin/a%09b	control character (tab)
+no	bin/a%7Fb	DEL
+no	bin/a*b	wildcard
+no	bin/a?b	wildcard
+no	bin/a"b	double quote
+no	bin/a<b	angle bracket
+no	bin/a>b	angle bracket
+no	bin/a|b	pipe
+no	bin/a.	Windows drops a trailing dot
+no	bin/a%20	Windows drops a trailing space
+no	share/dir./x	a folder with a trailing dot
+no	bin/con	device name
+no	bin/NUL.txt	device name with an extension
+no	bin/Com1.dll	device name, any case
+no	bin/lpt9	device name LPT9
+no	bin/PRN	device name PRN
+no	bin/PROGRA~1.DLL	8.3 short name
+no	share/KATANA~12/x	8.3 short name, two digits
+no	share/katana/install.json	the updater's own record
+no	share/katana/INSTALL.JSON	the updater's own record, any case
+no	share/katana/installed.json	the updater's own record
+no	share/katana/installed.manifest.json	the updater's own record
+no	share/katana/installed.manifest.json.sig	the updater's own record
+no	share/.update/x	the updater's working folder
+no	share/.UPDATE/x	the updater's working folder, any case
+no	bin/.update	the updater's working folder as a file name

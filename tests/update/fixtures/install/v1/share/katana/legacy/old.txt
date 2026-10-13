@@ -1,0 +1,2 @@
+The only file of share/katana/legacy.
+0.10.0 removes it, and with it the folder.

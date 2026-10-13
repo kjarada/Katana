@@ -1,0 +1,10 @@
+
+katana_updater.exe:     file format pei-x86-64
+
+The Import Tables (interpreted .idata section contents)
+
+	DLL Name: KERNEL32.dll
+	DLL Name: libgcc_s_seh-1.dll
+	DLL Name: libstdc++-6.dll
+	DLL Name: libwinpthread-1.dll
+	DLL Name: api-ms-win-crt-runtime-l1-1-0.dll

@@ -262,11 +262,21 @@ that finds none (`tests/CMakeLists.txt`):
   must be reported, and one that links only the archive module and must not.
 - the install rules. `tools/check_install_rules.cmake` reads the install
   scripts CMake wrote (the top one and those it includes) and fails on any
-  program but `katana`, `katana_cli` and `katana_mcp`, and on a build that
-  installs no program at all. `packaging_check_on_fixture_*` run it on three
-  install scripts written at configure time: the three programs (passes), those
-  and the converter installed from a directory below (must name the converter),
-  and none (must say there is nothing to check).
+  program but `katana`, `katana_cli`, `katana_mcp` and the update helper
+  `katana_updater` (the two executables the update tests build with a test key
+  are refused by name), and on a build that installs no program at all. It
+  also fails if `share/katana/install.json`, the file that makes an install a
+  release, is written by anything but CPack's pre-build script, and if the one
+  `foreach(_program ...)` line of `cmake/KatanaDeployUnix.cmake.in` that lists
+  the programs scanned for libraries leaves out an installed program: a Windows
+  build never runs that script, so nothing else would notice.
+  `packaging_check_on_fixture_*` run the check on install scripts written at
+  configure time (the programs, with and without the helper; the converter and
+  the test executables installed from a directory below, which must be named;
+  none, which must say there is nothing to check; and the install-record
+  cases), and `packaging_check_on_deploy_script_*` on deploy scripts written
+  there (one that scans all four, one that leaves the helper out, one whose list
+  is split over two lines, and a missing one).
 
 **No test needs the network.** The online import's tests answer every request
 from fixtures (`tests/interop/data/online/`) through
