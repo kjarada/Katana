@@ -23,6 +23,28 @@
 // back from the disk (apply.hpp, step 6); the helper's --recover mode calls it
 // and the fault loops call it with a clean FsOps after a simulated crash, and
 // again after a crash INSIDE a recovery.
+//
+// AN UPDATE THAT IS INSTALLED AND WAS NEVER SAID TO START. A helper that dies while
+// the new version is proving that it starts (apply.hpp, step 7: power, a shutdown,
+// the process ended) leaves a journal that says COMMITTED_PENDING_HEALTH for good.
+// That is none of the states above: the tree is a whole version, so recover() and
+// recoverInProcess leave it exactly as it is, take no lock for it and start
+// nothing - which is what keeps the health run's own recover() from waiting on,
+// or starting again, the helper that started it. Three other callers settle it,
+// each under the update lock, which a helper that is alive and waiting holds:
+//
+//   settleUnproved   `katana_updater --recover R` - the RunOnce entry at the next
+//                    logon, or a person. Healthy when the marker U/healthy-<tx> is
+//                    there; else PUT BACK, when the tree is still that release and
+//                    no program of the install is running; else left for a start
+//                    that can decide.
+//   confirmStarted   the window of the new version, on its first idle turn: it IS
+//                    the proof, so it writes the marker and settles it healthy.
+//   the next swap    Applier::begin (apply.cpp): healthy when the marker is there;
+//                    otherwise no new update is started over one that is not
+//                    settled ("interrupted_update").
+//
+// None of them starts a program. What they may each write is said at the function.
 
 #include <chrono>
 #include <filesystem>
@@ -45,9 +67,12 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 // (docs/headless.md). So the rule, which src/katana_updater/main.cpp keeps and
 // tests/update/test_helper.cpp holds it to:
 //   - `katana_updater --recover <R>` - what this function runs, what the RunOnce
-//     entry runs and what a person types - is given no state folder and writes
-//     NOTHING per-user, whoever started it: no last.json, no state.json, no
-//     cleanup.list, no health marker, and KATANA_UPDATE_STATE_DIR is not read.
+//     entry runs and what a person types - writes NOTHING per-user, whoever
+//     started it: no last.json, no state.json, no cleanup.list, no health
+//     marker. It READS the per-user folder (stateDirectory(), so
+//     KATANA_UPDATE_STATE_DIR counts) for one thing: whether the marker
+//     U/healthy-<tx> of an update that was never said to start is there
+//     (settleUnproved, below) - and only when the install holds such an update.
 //     Its only record is in the install itself, R/.update/recovery.log: a line
 //     appended for each run that found something to put right
 //     (`<UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>`, and
@@ -77,9 +102,10 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     from katana_cli or katana_mcp leaves the per-user folder byte for byte
 //     as it found it, the helper copy it ran included, and no cleanup.list is
 //     begun. What a sweep of R/.update/<tx> could not delete is found there
-//     again at the next start. The copy stays, here: removing it is for a
-//     program that may write per-user state, and that is the window a person
-//     uses. Its start (UpdateWorkbench::start,
+//     again at the next start. The copy stays, here: removing it is for the
+//     program that sweeps U, and that is the window a person uses - katana_cli
+//     keeps per-user state too, and sweeps nothing. Its start
+//     (UpdateWorkbench::start,
 //     src/katana_qt/update_workbench.cpp: on Windows, not a headless run, not
 //     a development tree) reads THIS install's recovery.log, puts on
 //     U/cleanup.list the copy U/run-<tx> of each transaction a recovery found
@@ -97,8 +123,96 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 [[nodiscard]] core::Status recover(const std::filesystem::path& root);
 
 // Roll back every transaction under R/.update whose journal needs it, in
-// process. Idempotent. OK when none needed it.
+// process. Idempotent. OK when none needed it. A transaction whose journal says
+// COMMITTED_PENDING_HEALTH is not one of them (see the top): it is left as it
+// is, and with nothing else to do no lock is taken.
 [[nodiscard]] core::Status recoverInProcess(const std::filesystem::path& root,
                                             const ApplyServices& services);
+
+// ---- settling an update that was never said to start --------------------------------------
+
+// How settleUnproved ended. With several such updates under one install - a swap
+// refuses to start beside one, so there is one at most - the answer is the first
+// of RollbackIncomplete, Left, RolledBack, Healthy that fits any of them.
+enum class Settled {
+    Nothing,            // the install holds no such update; no lock was taken, nothing written
+    Healthy,            // the marker was there: the update stands, and its folder is gone
+    RolledBack,         // no marker, and it could be put back: the old version is in place
+    Left,               // it could not be decided in this run; it is as it was
+    Busy,               // the update lock stayed held: a helper is alive. Nothing was written
+    RollbackIncomplete, // putting it back did not finish: the tree may be half swapped
+};
+
+// What `katana_updater --recover R` does once recoverInProcess has returned OK, with
+// the helper's seams. `helper` is the running helper's own file, and
+// `evidenceDirectory` the per-user folder U.
+//
+// With no folder under R/.update whose journal says COMMITTED_PENDING_HEALTH:
+// Nothing, and the lock is not asked for. Otherwise the lock is taken, polled the
+// way recoverInProcess polls it (kRecoverWait, shortened by the timings); a lock
+// that stays held is Busy, with nothing written, the registry included. Then:
+//
+//   1. FIRST the RunOnce entry is registered again, `<helper> --recover <R>` (the
+//      text the swap registered). Windows removes an entry before it runs it, so a
+//      run that lost power here would otherwise leave no logon to come back at.
+//   2. Each such transaction is settled by the one rule (recover_internal.hpp,
+//      settlePending), rollback allowed:
+//        - U/healthy-<tx> is a file: the new version said that it starts. HEALTHY
+//          is written and the folder deleted. Evidence, not assumption: it is the
+//          proof the swap itself asks for - without the exit code of the health
+//          run, which died with the helper.
+//        - no marker, the tree is still that release, and no program of the
+//          install is running (asked before the files are hashed and again as the
+//          last thing): the update is put back by rollback() (apply.hpp). Nothing
+//          is rolled back under a running program.
+//        - otherwise it is left, and nothing is written for it.
+//   3. The RunOnce entry is removed when no transaction folder is left under
+//      R/.update. Left, or a rollback that did not finish, keeps it: the next
+//      logon comes here again.
+//
+// WHAT IT WRITES: the install (the journal, the files a rollback moves, the
+// folder it deletes) and the RunOnce value. U is only READ - the marker stays
+// where it is - so the rule of recover() holds for the headless programs that
+// start `--recover`. And what such a run CANNOT record is NOT recorded: a
+// rollback made here writes no last.json and does not add the release to
+// `blocked` (state.hpp), so the next check offers that release again. No
+// apply-and-put-back loop follows from that: nothing applies an update but a
+// person asking for it, and an update a person applies runs under a live helper,
+// whose own health check blocks a release that does not start.
+//
+// Starts no program. Idempotent, and safe to cut off anywhere: before HEALTHY is
+// on disk the next run decides again from the same evidence, after it any start
+// sweeps the folder, and a rollback that was cut off is finished by every start
+// (journal.hpp, needsRecovery).
+[[nodiscard]] Settled settleUnproved(const std::filesystem::path& root,
+                                     const std::filesystem::path& helper,
+                                     const std::filesystem::path& evidenceDirectory,
+                                     const ApplyServices& services);
+
+enum class Confirmed {
+    Nothing, // the install holds no update that was never said to start
+    Done,    // it is settled healthy
+    Busy,    // not now - the update lock is held (a helper is alive), or the marker could
+             // not be written: nothing is settled, and the caller asks again later
+};
+
+// What the window of a NEW version does on its first idle turn, when its install
+// may hold an update that was never said to start. THE CALLER has made sure that
+// it is that version (the install has a record of its own, and the version it
+// names is the program's own: a window of the OLD files, started during the
+// commit, proves nothing), that the run is interactive, and that the tree is an
+// install: UpdateWorkbench::start, src/katana_qt/update_workbench.cpp.
+//
+// A window that has reached its first idle turn is what the health run exists to
+// show, so: with no such update, Nothing. One attempt at the lock - a window does
+// not wait - and Busy when it is held. Else, for each: the marker
+// `stateDirectory`/healthy-<tx> is written (so a crash from here on is settled
+// healthy by the next `--recover` too), the rule settles it healthy, the marker
+// and the dead helper's copy U/run-<tx> are removed (what stays goes on
+// U/cleanup.list), and the RunOnce entry is removed. It never rolls back, never
+// starts a program, and writes per-user state: it is for an interactive window,
+// never for a headless program.
+[[nodiscard]] Confirmed confirmStarted(const std::filesystem::path& root,
+                                       const std::filesystem::path& stateDirectory);
 
 } // namespace katana::update

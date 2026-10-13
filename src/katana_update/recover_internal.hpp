@@ -4,17 +4,22 @@
 // and never installed.
 
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "command_line.hpp"
 #include "katana/core/error.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/update/apply.hpp"
 #include "katana/update/fsops.hpp"
 #include "katana/update/process.hpp"
+#include "katana/update/recover.hpp"
+#include "katana/update/registry.hpp"
 
 namespace katana::update::detail {
 
@@ -64,6 +69,19 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
     return out;
 }
 
+// The RunOnce command that runs recovery at the next logon: `"<helper>" --recover <R>`, both
+// paths with the native separators, because it is the shell that parses it then. The ONE place
+// it is written: the swap registers it when its journal says COMMITTING (apply.cpp), and
+// settleUnproved registers it again before it settles anything (recover.cpp) - Windows takes
+// the entry away before it runs the command, so the run that is to keep the logon net has to
+// put the very same text back.
+[[nodiscard]] inline std::string runOnceCommand(std::filesystem::path helper,
+                                                std::filesystem::path root)
+{
+    return commandLine(core::pathToUtf8(helper.make_preferred()),
+                       {"--recover", core::pathToUtf8(root.make_preferred())});
+}
+
 // A state.json that could not be read, and whether the helper may write the defaults over it
 // (it records a release whose health check failed). One that is not JSON of ours (ParseFailure)
 // is carried on from with the defaults, as state.hpp says: it is already lost. Any other failure
@@ -80,6 +98,8 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
 // `except` (the caller's own, which may not exist yet). The CALLER HOLDS THE UPDATE LOCK.
 // `stateDirectory` (U, or empty) is where what a lock keeps from being deleted is queued.
 // An error is the first rollback that failed; the others were still tried.
+// A folder whose journal says COMMITTED_PENDING_HEALTH is neither: it is not looked at here
+// (settlePending, below, is what decides one).
 [[nodiscard]] core::Status recoverLocked(const std::filesystem::path& root,
                                          const ApplyServices& services, std::string_view except,
                                          const std::filesystem::path& stateDirectory);
@@ -92,5 +112,72 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
                                        Launcher& launcher,
                                        const std::filesystem::path& stateDirectory,
                                        std::chrono::milliseconds lockWait);
+
+// ---- an update that is installed and was never said to start ------------------------------------
+//
+// A helper that dies between its COMMITTED_PENDING_HEALTH record and its HEALTHY one (power, a
+// shutdown, the process ended) leaves a tree that is a whole new version and a folder that
+// nothing ever finished. recover() leaves both alone (recover.hpp). What settles them is ONE
+// rule, settlePending, with three callers that differ only in what they may do:
+// `katana_updater --recover` (settleUnproved, recover.hpp), the window of the new version
+// (confirmStartedWith) and the next swap (Applier::begin, apply.cpp).
+
+// What settlePending did, by transaction id, in the order of the names.
+struct PendingOutcome {
+    std::vector<std::string> healthy;    // proved: HEALTHY written, its folder deleted
+    std::vector<std::string> rolledBack; // never proved and put back: the tree is the old version's
+    std::vector<std::string> left;       // could not be decided now: nothing was written for it
+    std::vector<std::string> incomplete; // put back in part: the rollback did not finish
+    // What a lock kept from being deleted under R/.update (each such folder keeps its journal,
+    // which says HEALTHY, so every later start sweeps it: remove_tree.hpp). Reported, not
+    // queued: of the three callers one may not write the per-user folder.
+    std::vector<std::filesystem::path> leftovers;
+};
+
+// THE RULE. For every folder under R/.update whose journal says COMMITTED_PENDING_HEALTH, but
+// the one named `except` (the caller's own). THE CALLER HOLDS THE UPDATE LOCK, which is how it
+// knows that no helper is alive and waiting on any of them.
+//
+//   HEALTHY      when U/healthy-<tx> is a file - the proof the swap itself accepts (apply.hpp,
+//                step 7), whoever wrote it. For an installer-kind install the version Settings >
+//                Apps shows is rewritten (the swap does that only once the proof is there, and
+//                it may have died before); then HEALTHY is appended, one flushed record; then
+//                the folder is deleted, its journal last.
+//   ROLLED_BACK  when `mayRollBack`, and there is no marker, and the tree is still that release
+//                (treeIsRelease, with the `toSequence` of the journal's PLAN record), and the
+//                process scan - asked before the hashing, and again as the last thing - answers
+//                and names nobody but this process: rollback() (apply.hpp), as it is.
+//   left         in every other case - a marker that cannot be looked for, a scan that fails,
+//                a tree somebody changed, a program of the install running - and then NOTHING
+//                is written: not a journal record, not a file, not a registry value.
+//
+// `stateDirectory` (U, or empty: then there is no evidence, and nothing is decided) is only
+// READ. Starts no program. Throws nothing but a FaultFs's SimulatedCrash.
+[[nodiscard]] PendingOutcome settlePending(const std::filesystem::path& root,
+                                           const ApplyServices& services, std::string_view except,
+                                           const std::filesystem::path& stateDirectory,
+                                           bool mayRollBack);
+
+// What a caller that MAY write the per-user folder does once the rule has spoken: for each
+// transaction settled HEALTHY its marker U/healthy-<tx> and the helper copy U/run-<tx> are
+// deleted - the helper that ran from the copy is dead, and nothing starts it again - and what
+// would not go, with `outcome.leftovers`, is put on U/cleanup.list for the window's next start.
+void forgetSettled(FsOps& fs, const std::filesystem::path& stateDirectory,
+                   const PendingOutcome& outcome);
+
+// confirmStarted (recover.hpp) with its seams given.
+[[nodiscard]] Confirmed confirmStartedWith(const std::filesystem::path& root,
+                                           const std::filesystem::path& stateDirectory, FsOps& fs,
+                                           RegistryOps& registry);
+
+// Whether the tree under `root` is still the release whose manifest sequence is `sequence`:
+// share/katana/installed.manifest.json verifies against its signature with `services.trust`
+// (and names this install's product and target), its sequence is `sequence`, and every file it
+// lists that is not a seed is an ordinary file whose SHA-256 is the listed one. A seed is left
+// out because the swap never replaces one that is there: the person's edit of it is not a
+// changed release. False for whatever cannot be read. Changes nothing; in apply.cpp, beside the
+// hashing it shares with the plan.
+[[nodiscard]] bool treeIsRelease(const std::filesystem::path& root, std::uint64_t sequence,
+                                 const ApplyServices& services);
 
 } // namespace katana::update::detail

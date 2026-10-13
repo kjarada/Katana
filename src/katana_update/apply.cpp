@@ -30,7 +30,6 @@
 #include <thread>
 #include <utility>
 
-#include "command_line.hpp"
 #include "long_path.hpp"
 #include "recover_internal.hpp"
 #include "remove_tree.hpp"
@@ -198,6 +197,18 @@ Failure refuse(std::string reason, std::string detail)
 Failure refuse(std::string reason, const std::string& what, const core::Error& error)
 {
     return refuse(std::move(reason), what + ": " + error.describe());
+}
+
+// Programs of the install are running and the update gives way to them: the Blocked outcome,
+// the same whichever of step 2's two looks found them.
+Failure blockedBy(std::vector<RunningProgram> holders)
+{
+    Failure blocked;
+    blocked.outcome = ApplyOutcome::Blocked;
+    blocked.reason = "blocked";
+    blocked.detail = "Close these first: " + holderText(holders) + ". Then press Retry.";
+    blocked.holders = std::move(holders);
+    return blocked;
 }
 
 // ---- keeping every write inside the install ---------------------------------------------
@@ -654,6 +665,7 @@ class Applier {
     std::optional<Failure> waitForQuiet();
     std::optional<Failure> plan();
     std::optional<Failure> writeJournalPlan();
+    std::optional<Failure> lookAgainForHolders();
     std::optional<Failure> commit();
     std::optional<Failure> watchHealth();
 
@@ -663,7 +675,9 @@ class Applier {
     ApplyResult finish(ApplyResult result, bool silent = false);
     void discardWork();
     void finishHealthy();
-    void sweepSuperseded(std::vector<Path>& leftovers);
+
+    // Every process but this one that was started from a file under R (step 2 asks, twice).
+    [[nodiscard]] core::Result<std::vector<RunningProgram>> othersUnderRoot() const;
 
     [[nodiscard]] bool cancelled() const { return stop_.stop_requested(); }
     void pause() const { std::this_thread::sleep_for(services_.timings.pollInterval); }
@@ -814,6 +828,25 @@ std::optional<Failure> Applier::begin()
                           "\"",
                       settled.error());
     }
+
+    // An earlier update that is in place and was never settled - its helper died while the new
+    // version was proving that it starts - is settled BEFORE this one too, by the one rule
+    // (recover_internal.hpp, settlePending), and never by putting it back: a swap is not the
+    // place to judge a release that somebody may be running from. With its marker there it is
+    // healthy, and what its dead helper left in U goes. Without, nothing is touched and no new
+    // update is started: over a release that was never shown to start, a failure of this one
+    // would put back a tree nobody proved, and its folder - the old files of the release before
+    // - would have no owner. So one such folder exists at most.
+    const detail::PendingOutcome earlier = detail::settlePending(
+        root_, services_, request_.transaction, request_.stateDirectory, false);
+    detail::forgetSettled(fs_, request_.stateDirectory, earlier);
+    if (!earlier.left.empty()) {
+        return refuse("interrupted_update",
+                      "an earlier update is in place and has not been confirmed to start, so no "
+                      "new one is started over it. Open Katana's window, which confirms it - or "
+                      "run: katana_updater --recover \"" + core::pathToUtf8(root_) +
+                          "\", which confirms it or puts it back - and update again");
+    }
     // What is installed may be another version now (the rollback put it back).
     return readInstallRecord();
 }
@@ -912,33 +945,56 @@ std::optional<Failure> Applier::waitForQuiet()
     }
     const Clock::time_point start = Clock::now();
     while (true) {
-        const core::Result<std::vector<RunningProgram>> scanned =
-            services_.processes.holdersUnder(root_);
-        if (!scanned.ok()) {
-            return refuse("scan_failed", "the running programs cannot be listed", scanned.error());
+        core::Result<std::vector<RunningProgram>> holders = othersUnderRoot();
+        if (!holders.ok()) {
+            return refuse("scan_failed", "the running programs cannot be listed", holders.error());
         }
-        std::vector<RunningProgram> holders;
-        for (const RunningProgram& program : scanned.value()) {
-            if (program.pid != services_.processes.currentPid()) {
-                holders.push_back(program);
-            }
-        }
-        if (holders.empty()) {
+        if (holders->empty()) {
             return std::nullopt;
         }
         if (cancelled()) {
             return refuse("cancelled", "the update was cancelled");
         }
         if (Clock::now() - start >= timings.waitForHolders) {
-            Failure blocked;
-            blocked.outcome = ApplyOutcome::Blocked;
-            blocked.reason = "blocked";
-            blocked.detail = "Close these first: " + holderText(holders) + ". Then press Retry.";
-            blocked.holders = std::move(holders);
-            return blocked;
+            return blockedBy(std::move(holders).value());
         }
         pause();
     }
+}
+
+core::Result<std::vector<RunningProgram>> Applier::othersUnderRoot() const
+{
+    core::Result<std::vector<RunningProgram>> scanned = services_.processes.holdersUnder(root_);
+    if (!scanned.ok()) {
+        return scanned.error();
+    }
+    std::vector<RunningProgram> others;
+    for (RunningProgram& program : scanned.value()) {
+        if (program.pid != services_.processes.currentPid()) {
+            others.push_back(std::move(program));
+        }
+    }
+    return others;
+}
+
+// Step 2's second look, at the last moment an update can still end with nothing touched. The
+// first look is over before the plan, and the plan hashes and copies every changed file of a
+// release: seconds, in which a person starts Katana again or a script runs katana_cli. A program
+// started then is seen by nobody and goes on running old code over the new tree. So the question
+// is asked once more, with the PLAN on disk and COMMITTING not yet: a holder now is the same
+// Blocked as a holder then. It is ONE question and not a second wait: the first look already
+// waited for whoever was closing, and a wait here would let the files the plan hashed grow old
+// under a program that is running.
+std::optional<Failure> Applier::lookAgainForHolders()
+{
+    core::Result<std::vector<RunningProgram>> holders = othersUnderRoot();
+    if (!holders.ok()) {
+        return refuse("scan_failed", "the running programs cannot be listed", holders.error());
+    }
+    if (holders->empty()) {
+        return std::nullopt;
+    }
+    return blockedBy(std::move(holders).value());
 }
 
 // Step 3: hash, decide, copy. Nothing under the install changes; what is written goes to
@@ -1197,8 +1253,8 @@ std::optional<Failure> Applier::plan()
     return std::nullopt;
 }
 
-// Step 4: the PLAN group, then COMMITTING, and the RunOnce entry that re-runs recovery at the
-// next logon should the machine die from here.
+// Step 4: the PLAN group, step 2's second look, then COMMITTING, and the RunOnce entry that
+// re-runs recovery at the next logon should the machine die from here.
 std::optional<Failure> Applier::writeJournalPlan()
 {
     journal_.emplace(fs_, work_ / core::pathFromUtf8(kJournalName));
@@ -1227,18 +1283,23 @@ std::optional<Failure> Applier::writeJournalPlan()
         journalWritten_ = false;
         return refuse("cancelled", "the update was cancelled");
     }
+    // Nothing has moved yet, so whoever is found now is given way to as at the first look: the
+    // folder of copies goes, the install is as it was, and the stage - the download - stays for
+    // the Retry.
+    if (std::optional<Failure> late = lookAgainForHolders()) {
+        discardWork();
+        journalWritten_ = false;
+        return late;
+    }
     const JournalRecord committing{JournalOp::Committing, {}};
     if (const core::Status written = journal_->append(std::span(&committing, 1)); !written.ok()) {
         return refuse("journal", "the journal cannot be written", written.error());
     }
     if (!request_.helper.empty()) {
-        // Native separators: the command is parsed by the shell at the next logon.
-        Path helper = request_.helper;
-        Path root = root_;
-        const std::string command = detail::commandLine(
-            core::pathToUtf8(helper.make_preferred()), {"--recover", core::pathToUtf8(root.make_preferred())});
         // Best effort: it is a second safety net behind the next start of any program.
-        runOnceSet_ = services_.registry.setRunOnce(kRunOnceName, command).ok();
+        runOnceSet_ = services_.registry
+                          .setRunOnce(kRunOnceName, detail::runOnceCommand(request_.helper, root_))
+                          .ok();
     }
     return std::nullopt;
 }
@@ -1369,7 +1430,6 @@ void Applier::finishHealthy()
 
     std::vector<Path> leftovers;
     detail::removeTree(fs_, work_, leftovers, kJournalName);
-    sweepSuperseded(leftovers);
 
     const Path stage = request_.stageDirectory;
     for (const ManifestFile& file : manifest_->files) {
@@ -1393,41 +1453,6 @@ void Applier::finishHealthy()
         for (const Path& leftover : leftovers) {
             (void)appendCleanup(request_.stateDirectory, leftover, fs_);
         }
-    }
-}
-
-// An earlier transaction whose helper died after it committed and before its health check was
-// over is left in COMMITTED_PENDING_HEALTH for ever: recovery leaves such a folder as it is,
-// because the tree is a whole version and the folder is what a health rollback would need. Once
-// a LATER update has proved healthy the folder is of no use any more - the window that asked for
-// this update was running the version that update installed, so that version starts, and its old
-// files are older than what is installed now - so its copies (the size of the release), the
-// helper copy it ran from and its marker are deleted. Nothing is removed that the journal does
-// not call COMMITTED_PENDING_HEALTH, and never a link.
-void Applier::sweepSuperseded(std::vector<Path>& leftovers)
-{
-    const core::Result<std::vector<Path>> entries = fs_.listDirectory(updateDir_);
-    if (!entries.ok()) {
-        return;
-    }
-    for (const Path& entry : entries.value()) {
-        const std::optional<std::string> name = detail::nameAsText(entry);
-        if (!name || *name == request_.transaction || !isValidTransactionId(*name)) {
-            continue;
-        }
-        const core::Result<EntryInfo> info = fs_.stat(entry);
-        if (!info.ok() || info->kind != EntryKind::Directory || info->reparsePoint) {
-            continue;
-        }
-        const core::Result<std::string> text =
-            fs_.readFile(entry / core::pathFromUtf8(kJournalName));
-        if (!text.ok() ||
-            parseJournal(text.value()).state != JournalState::CommittedPendingHealth) {
-            continue;
-        }
-        detail::removeTree(fs_, entry, leftovers, kJournalName);
-        detail::removeTree(fs_, runPath(request_.stateDirectory, *name), leftovers);
-        (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, *name));
     }
 }
 
@@ -1771,6 +1796,62 @@ core::Status rollback(const Path& rootGiven, const std::string& transaction,
                                "the rollback stopped on an unexpected error", error.what());
     }
 }
+
+namespace detail {
+
+// recover_internal.hpp says what this answers and who asks: the rule that settles an update
+// whose helper died before the new version was proved, before it puts that update back. A
+// rollback moves the files the journal names whatever they hold now, so a tree that somebody
+// has since changed - another zip unpacked over it, a file edited - is not put back: only the
+// very release the transaction installed is.
+bool treeIsRelease(const Path& rootGiven, std::uint64_t sequence, const ApplyServices& services)
+{
+    try {
+        FsOps& fs = services.fs;
+        const Path root = normalizedRoot(rootGiven);
+        if (root.empty()) {
+            return false;
+        }
+        // What the install is decides which manifest it may carry (product and target), as
+        // for the manifest a swap is asked to install.
+        const core::Result<Install> install = readInstall(root, services.registry);
+        if (!install.ok()) {
+            return false;
+        }
+        const Path directory = installRecordDirectory(root);
+        const core::Result<std::string> json =
+            fs.readFile(directory / core::pathFromUtf8("installed.manifest.json"));
+        const core::Result<std::string> signature =
+            fs.readFile(directory / core::pathFromUtf8("installed.manifest.json.sig"));
+        if (!json.ok() || !signature.ok()) {
+            return false;
+        }
+        const core::Result<Manifest> manifest =
+            verifyManifest(json.value(), signature.value(), services.trust, install.value());
+        if (!manifest.ok() || manifest->sequence != sequence) {
+            return false;
+        }
+        for (const ManifestFile& file : manifest->files) {
+            if (file.fileClass == FileClass::Seed) {
+                continue; // written only when absent: what is there is the person's
+            }
+            const Path target = under(root, file.path);
+            const core::Result<EntryInfo> info = fs.stat(target);
+            if (!info.ok() || info->kind != EntryKind::File || info->reparsePoint) {
+                return false;
+            }
+            const core::Result<std::string> hash = hashFile(target);
+            if (!hash.ok() || hash.value() != file.sha256) {
+                return false;
+            }
+        }
+        return true;
+    } catch (const std::exception&) {
+        return false; // what cannot be read is not known to be the release
+    }
+}
+
+} // namespace detail
 
 core::Status launchApply(const ApplyRequest& request)
 {
