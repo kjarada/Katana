@@ -15,7 +15,10 @@
 //   holdersUnder  REFUSES, with the code Unsupported. Which programs run from an install is the
 //                 question the scan answers, and "none" from a function that did not look would
 //                 be read as "nothing is running, go on". apply() takes the refusal for what it
-//                 is: `scan_failed`, nothing touched.
+//                 is: `scan_failed`, nothing touched. Its context begins `reason=platform`, so
+//                 that a caller of runningPrograms() reads the reason stage() and preflight()
+//                 give here (fetchFailureReason, feed.hpp) and not `too_large`, which is what
+//                 that function makes of an Unsupported with no token.
 
 #include "katana/update/process.hpp"
 
@@ -64,7 +67,7 @@ class PosixProcessOps final : public ProcessOps {
         return core::makeError(core::ErrorCode::Unsupported,
                                "the programs running from an install cannot be listed on this "
                                "system yet",
-                               "os_error=0 ProcessOps::holdersUnder");
+                               "reason=platform; os_error=0 ProcessOps::holdersUnder");
     }
 };
 

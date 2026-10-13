@@ -8,6 +8,11 @@
 // startDetached() that returned success would let a window close for a helper that never ran.
 // (The file system of these platforms refuses first in every real path - fsops_posix.cpp - so
 // this is reached only by a caller that holds a launcher and no file system: launchApply.)
+//
+// The refusal's context begins `reason=platform`, the token stage() and preflight() refuse under
+// here (stage.cpp), so that launchApply's caller reads the same reason with fetchFailureReason
+// (feed.hpp) as theirs. Without the token that function reads an Unsupported as `too_large`, a
+// download that was too big, which is nothing a launcher can mean.
 
 #include "katana/update/process.hpp"
 
@@ -26,7 +31,7 @@ core::Error refusal(std::string_view operation)
     return core::makeError(core::ErrorCode::Unsupported,
                            "Katana does not start its update helper on this system: updates are "
                            "checked for here, and installed by hand",
-                           "os_error=0 Launcher::" + std::string(operation));
+                           "reason=platform; os_error=0 Launcher::" + std::string(operation));
 }
 
 class NoLauncher final : public Launcher {
