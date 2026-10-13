@@ -1538,6 +1538,66 @@ TEST(SettleUnproved, APuttingBackThatCannotFinishSaysSoAndTheNextRecoveryFinishe
     EXPECT_TRUE(leftoversInUpdate(s.root).empty());
 }
 
+TEST(SettleUnproved, TheProcessThatSettlesIsNotAProgramItGivesWayTo)
+{
+    // `katana_updater --recover` may be the install's own bin/katana_updater: recover() falls back
+    // to it when the copy in U is gone, and it is what a person types. The scan then names this
+    // very process, at both of its questions, and nobody else: that is "nobody is running".
+    Unproved u("settle-self");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker);
+    StdFs disk;
+    Rig rig(s, disk, "eeeeeeee");
+    rig.processes.pid = 999;
+    rig.processes.holders = {RunningProgram{999, core::pathFromUtf8("C:/k/bin/katana_updater.exe")}};
+    rig.processes.holdersFor = -1; // whenever it is asked
+    EXPECT_EQ(settle(u, rig.services()), Settled::RolledBack);
+    EXPECT_EQ(rig.processes.scans.load(), 2);
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(SettleUnproved, AFolderThatWouldNotGoKeepsItsJournalAndTheLogonEntryAndNothingIsQueuedPerUser)
+{
+    Unproved u("settle-held-file");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    StdFs disk;
+    // A scanner is reading one of the old files in the transaction's folder: it cannot be deleted.
+    class Holding final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Status removeFile(const Path& path) override
+        {
+            if (path.filename() == "katana.exe" && path.string().find(".update") != std::string::npos) {
+                return osError(core::ErrorCode::FileExportFailure, "sharing violation", path, 32);
+            }
+            return inner_.removeFile(path);
+        }
+    } holding(disk);
+    Rig rig(s, holding, "eeeeeeee");
+    EXPECT_EQ(settle(u, rig.services()), Settled::Healthy)
+        << "the update is settled: a folder that will not go is not an update that is not";
+    EXPECT_EQ(treeHash(s.root), s.v2Hash);
+    // The journal is the last thing to go, and something stayed: the folder still says what it is.
+    EXPECT_EQ(leftoversInUpdate(s.root), std::vector<std::string>{u.transaction});
+    EXPECT_EQ(journalStateOf(s.root), JournalState::Healthy);
+    // A transaction folder is left, so the logon entry is: that logon sweeps it. And what would
+    // not go is NOT queued in U/cleanup.list - this run only reads the per-user folder.
+    EXPECT_EQ(rig.registry.runOnce, armed(u));
+    EXPECT_EQ(rig.registry.runOnceCleared, 0);
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    EXPECT_FALSE(isPresent(s.state / "cleanup.list"));
+
+    // The next start of anything, with the file free, sweeps what is left.
+    ASSERT_TRUE(recoverClean(s).ok());
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_EQ(treeHash(s.root), s.v2Hash);
+}
+
 TEST(SettleUnproved, WithNoSuchUpdateItAsksForNoLockAndWritesNothing)
 {
     {
