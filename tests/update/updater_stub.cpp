@@ -20,9 +20,16 @@
 //   --sleep <ms>                 stay running that long: a process whose image is under the
 //                                install, for the helper's scan to find
 //
-// Each log line is `<kind> tag=<tag> exe=<path> OPENSSL_CONF=<value or -> [runonce=<value or ->]`,
-// UTF-8. The tag is read from the end of this very file: the text KATANA-STUB-TAG= and what follows
-// it, the LAST occurrence (the first is this program's own string literal).
+// Each log line is
+//   <kind> tag=<tag> exe=<path> cwd=<folder> OPENSSL_CONF=<value or -> [runonce=<value or ->]
+//   [tx=<tx> mode=<mode>]
+// UTF-8; <kind> is health, sleep or start. The tag is read from the end of this very file: the
+// text KATANA-STUB-TAG= and the letters, digits, dots and hyphens that follow it, at its LAST
+// occurrence. A copy nobody tagged finds only this program's own string literal, which nothing
+// of that kind follows: its tag is "none".
+//
+// It is a REAL program on purpose. A test must never start a file that is not one (a text file
+// named .exe): Windows answers that with a message box somebody has to click.
 
 #ifndef _WIN32
 #error "the stub is for Windows only: the helper's process scan and registry are"
@@ -78,7 +85,15 @@ std::wstring ownPath()
     return path;
 }
 
-// The text after the last KATANA-STUB-TAG= in this program's own file, up to the line end.
+std::wstring workingFolder()
+{
+    std::wstring folder(1024, L'\0');
+    const DWORD length = GetCurrentDirectoryW(static_cast<DWORD>(folder.size()), folder.data());
+    folder.resize(length < folder.size() ? length : 0);
+    return folder;
+}
+
+// The tag after the last KATANA-STUB-TAG= in this program's own file (see the top).
 std::string ownTag()
 {
     const HANDLE file = CreateFileW(ownPath().c_str(), GENERIC_READ,
@@ -100,8 +115,15 @@ std::string ownTag()
         return "none";
     }
     const std::size_t begin = at + key.size();
-    const std::size_t end = bytes.find_first_of("\r\n", begin);
-    return bytes.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    std::size_t end = begin;
+    const auto partOfATag = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+               c == '.' || c == '-';
+    };
+    while (end < bytes.size() && end - begin < 32 && partOfATag(bytes[end])) {
+        ++end;
+    }
+    return end == begin ? std::string("none") : bytes.substr(begin, end - begin);
 }
 
 void appendLine(const std::wstring& path, const std::string& line)
@@ -151,8 +173,8 @@ int main(int argc, char** argv)
     std::string line;
     const std::string first = argc > 1 ? argv[1] : "";
     line = (first == "--update-health" ? "health" : first == "--sleep" ? "sleep" : "start");
-    line += " tag=" + ownTag() + " exe=" + utf8(ownPath()) + " OPENSSL_CONF=" +
-            (openssl.empty() ? std::string("-") : utf8(openssl));
+    line += " tag=" + ownTag() + " exe=" + utf8(ownPath()) + " cwd=" + utf8(workingFolder()) +
+            " OPENSSL_CONF=" + (openssl.empty() ? std::string("-") : utf8(openssl));
     if (!registryBase.empty()) {
         line += " runonce=" + runOnceValue(registryBase);
     }
