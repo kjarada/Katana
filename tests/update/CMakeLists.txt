@@ -337,3 +337,80 @@ if(_katana_tool_tests_ready)
         COMMAND "${KATANA_PYTHON}" -I -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/rfc8032_oracle.py")
     set_tests_properties(update_tools_rfc8032_oracle PROPERTIES TIMEOUT 120)
 endif()
+
+# ---- the Windows installer is per user (cmake/NSIS.template.in) -----------------------------
+#
+# Decision D1 (docs/update.md): the installer asks for no administrator rights, installs under
+# %LOCALAPPDATA%\Programs\Katana and writes HKCU only, so that the updater can replace files in
+# it as the same user. tests/update/check_nsis_script.cmake holds the SCRIPT's text to that:
+#
+#   packaging_nsis_template_is_per_user     the template configured with sample values; on every
+#                                           host, since it needs nothing but cmake
+#   packaging_nsis_check_catches_*          the same check on that text changed in one way that
+#                                           breaks one rule: a check that cannot see a violation
+#                                           passes as quietly as one that finds none. The last
+#                                           case is CPack's own stock template, which asks for
+#                                           administrator rights and writes machine-wide
+#   packaging_nsis_installer_builds_from_the_real_configuration
+#                                           the build's real CPackConfig.cmake over a small tree,
+#                                           makensis included: the script CPack generated is
+#                                           checked and the installer is compiled (Windows with
+#                                           NSIS, which is where `package` makes an installer)
+#
+# An install and an uninstall on a clean Windows machine (silent, and as a person runs them) are
+# the acceptance step of docs/release.md, "The Windows installer"; no test here runs an
+# installer, because it writes the user's registry and Start menu.
+set(_katana_nsis_template "${PROJECT_SOURCE_DIR}/cmake/NSIS.template.in")
+set(_katana_nsis_check "${CMAKE_CURRENT_SOURCE_DIR}/check_nsis_script.cmake")
+add_test(NAME packaging_nsis_template_is_per_user
+    COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}" -P "${_katana_nsis_check}")
+set_tests_properties(packaging_nsis_template_is_per_user PROPERTIES
+    PASS_REGULAR_EXPRESSION "Installer script [(]the template with sample values[)]: per user"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+function(katana_add_nsis_mutation mutation phrase)
+    katana_phrase(_regex "${phrase}")
+    add_test(NAME packaging_nsis_check_catches_${mutation}
+        COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}" -DMUTATE=${mutation}
+                -P "${_katana_nsis_check}")
+    set_tests_properties(packaging_nsis_check_catches_${mutation} PROPERTIES
+        PASS_REGULAR_EXPRESSION "${_regex}")
+endfunction()
+katana_add_nsis_mutation(administrator "RequestExecutionLevel admin: the installer must run as the user")
+katana_add_nsis_mutation(second_level "has 2 RequestExecutionLevel instructions")
+katana_add_nsis_mutation(machine_registry "HKLM: the installer writes machine-wide")
+katana_add_nsis_mutation(shell_context "SetShellVarContext all: the Start menu")
+katana_add_nsis_mutation(program_files "[$]PROGRAMFILES: a folder only an administrator can write to")
+katana_add_nsis_mutation(no_update_folder_removal "does not remove the updater's working folder")
+katana_add_nsis_mutation(no_manifest_removal "does not remove the files the installed manifest lists")
+katana_add_nsis_mutation(install_folder_removed_recursively "RMDir /r \"[$]INSTDIR\": recursive removal")
+katana_add_nsis_mutation(install_folder_wildcard_delete "a wildcard delete in the install folder")
+katana_add_nsis_mutation(silent_prompt "no /SD, so a silent install [(]/S[)] would wait for an answer")
+katana_add_nsis_mutation(no_install_location "the entry in Settings > Apps: the script has no")
+katana_add_nsis_mutation(no_folder_record "the install folder, for the updater: the script has no")
+katana_add_nsis_mutation(ansi "a Unicode installer: the script has no")
+katana_add_nsis_mutation(keys_stay_behind "does not remove its own entry in Settings > Apps")
+# The case no mutation can stand for: the template this one replaces, as CMake ships it. It is
+# the installer Katana had (administrator rights, HKLM, Program Files); the check must refuse it
+# on its own terms. Where CMake keeps it differs between versions, so it is only looked for.
+set(_katana_cpack_stock_template "${CMAKE_ROOT}/Modules/Internal/CPack/NSIS.template.in")
+if(EXISTS "${_katana_cpack_stock_template}")
+    add_test(NAME packaging_nsis_check_catches_cpacks_own_template
+        COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_cpack_stock_template}" -P "${_katana_nsis_check}")
+    katana_phrase(_regex "RequestExecutionLevel admin: the installer must run as the user")
+    set_tests_properties(packaging_nsis_check_catches_cpacks_own_template PROPERTIES
+        PASS_REGULAR_EXPRESSION "${_regex}")
+endif()
+if(WIN32 AND KATANA_MAKENSIS)
+    add_test(NAME packaging_nsis_installer_builds_from_the_real_configuration
+        COMMAND ${CMAKE_COMMAND}
+                "-DCPACK_COMMAND=${CMAKE_CPACK_COMMAND}"
+                "-DCPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+                "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/nsis_package"
+                "-DCHECK=${_katana_nsis_check}"
+                "-DEXPECT_VERSION=${PROJECT_VERSION}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/build_nsis_package.cmake")
+    set_tests_properties(packaging_nsis_installer_builds_from_the_real_configuration PROPERTIES
+        PASS_REGULAR_EXPRESSION "Installer built from the real configuration"
+        FAIL_REGULAR_EXPRESSION "CMake Error"
+        TIMEOUT 300)
+endif()
