@@ -38,7 +38,11 @@ a tag included.
 
 3. The Publish job runs in the GitHub environment `release`, which holds the
    update signing key. When that environment names required reviewers, the
-   job waits until one of them approves it on the run's page.
+   job waits until one of them approves it on the run's page. The
+   environment takes runs of `main` only, once it is restricted as "Update
+   signing" says (step 3 there): a run with a tag that was started on
+   another branch builds and tests everything and is then refused at this
+   job.
 4. The run takes as long as its slowest job (Windows x86-64: build, the
    whole suite, the installer). When all five pass and the Publish job has
    run, release `vX.Y.Z` appears, marked as the latest, with:
@@ -202,8 +206,14 @@ left without it.
 ### To verify on the first release
 
 Nothing in the workflow has run since the update assets were added ("Not
-done"), and several things can only be seen on GitHub. In the run:
+done"), and several things can only be seen on GitHub. Before the run, the
+reads that end step 3 of "Update signing" must say that the environment
+`release` has its reviewers and takes the branch `main` and no other. In
+the run:
 
+* Every job's first step, "Set up job", lists the actions it fetched, each
+  by the 40 digits the workflow names it with ("The actions the workflow
+  runs"), and no job stops there for an action GitHub could not find.
 * The Version job's step "Update keys" ends `Update keys: pinned, active
   <key id>, spare <key id>`, with no warning: the key check ran under the
   runner's own CMake. The job's first step prints the run's sequence.
@@ -325,6 +335,82 @@ architecture: its `SNAPSHOT` and `SPECS` fix every version. MSYS2 is not
 frozen: it installs whatever the rolling distribution has that day, so a
 Windows release records the compiler's version in its log (the "Toolchain"
 step).
+
+### The actions the workflow runs
+
+The jobs run six actions: code of other repositories, which the runner
+fetches when a job starts. Each `uses:` line names its action by the 40
+digits of a commit, with the tag that commit was read from as a comment on
+the same line:
+
+```yaml
+- uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+```
+
+Until 2026-10-14 every line named a tag (`@v4`). A tag is whatever its
+publisher points it at on the day of the run: one that is moved - by a new
+release, or by whoever has taken over the publisher's account - changes
+the code every job runs without one line changing here, and two of the
+actions run in the Publish job, which is where the update signing key is.
+A commit cannot be moved: what runs is what was read. The comment is for
+the reader; GitHub runs the commit.
+
+| Action | Tag | The release that tag stood at when it was read, 2026-10-14 | Jobs |
+|---|---|---|---|
+| `actions/checkout` | `v4` | 4.4.0 | all four |
+| `msys2/setup-msys2` | `v2` | 2.33.0 | the Windows jobs |
+| `actions/upload-artifact` | `v4` | 4.6.2 | the Windows, Linux and macOS jobs |
+| `actions/setup-python` | `v5` | 5.6.0 | the Linux and macOS jobs |
+| `actions/cache` | `v4` | 4.3.0 | the Linux and macOS jobs |
+| `actions/download-artifact` | `v4` | 4.3.0 | Publish |
+
+The commits themselves are in the workflow and not repeated here.
+
+**Moving an action to a newer version.** Nothing moves by itself any more,
+so an action stays at its commit until somebody moves it: when a runner
+image retires what an action needs, when an action's publisher reports a
+fault, or before a release, as part of getting ready for it. One action at
+a time:
+
+1. Read the commit its tag names now. These are reads of GitHub and change
+   nothing there:
+
+   ```sh
+   gh api repos/actions/checkout/git/ref/tags/v4 --jq '.object.type + " " + .object.sha'
+   ```
+
+   `commit` and 40 digits: those digits are the commit. `tag` and 40 digits:
+   the tag is an annotated one and the digits are the tag's own, not a
+   commit's; follow it, and take what this prints:
+
+   ```sh
+   gh api repos/actions/checkout/git/tags/<those digits> --jq '.object.type + " " + .object.sha'
+   ```
+
+   (All six were plain tags, `commit`, when they were read.) A newer major
+   version is the same read with the other tag, `v5` for `v4`.
+2. Read what changed between the commit the workflow names and the new one,
+   `https://github.com/actions/checkout/compare/<old>...<new>`, and the
+   action's release notes: a major version may rename an input or need a
+   newer runner.
+3. Put the new digits on EVERY line that names the action - one action,
+   one commit, in all jobs - and change the comment if the tag changed.
+4. Run the workflow with the tag left empty. It builds, tests and
+   publishes nothing, which tries the new commit before a release depends
+   on it. `actions/download-artifact` is the exception: it runs only in
+   the Publish job, which such a run skips, so a new commit of it is first
+   tried by a release itself. Should it fail there, nothing has been
+   published; the line is put right on `main` and the release is started
+   again as a new run, because a job run again from the run's page runs
+   the workflow as that run's commit has it.
+
+A `uses:` line added later is written the same way, by the same read.
+GitHub can be told to refuse any other: the repository's Actions
+permissions (Settings > Actions > General) hold a requirement that actions
+be pinned to a full-length commit SHA, which
+`gh api repos/kjarada/Katana/actions/permissions` shows as
+`sha_pinning_required` (`false` on 2026-10-14). It has not been turned on,
+and what it does to a run was not tried ("Not done").
 
 ### The whole suite, on the machine the package is for
 
@@ -746,18 +832,56 @@ gives the same steps).
    From that commit on, the key check in the release workflow's first job
    passes, and prints the two key ids.
 3. On GitHub, Settings > Environments > New environment, named `release`.
-   Under "Required reviewers" add yourself, so that nothing is signed before
-   you have approved the run. Then give that environment the ACTIVE key, and
-   only that one; the spare never goes to GitHub:
+   Two settings on its page, before it is given anything:
+
+   * **Required reviewers:** add yourself, so that nothing is signed before
+     you have approved the run.
+   * **Deployment branches and tags** (Settings > Environments > release >
+     Deployment branches): in place of "No restriction" choose "Selected
+     branches and tags" and add one rule, the branch `main`, which is the
+     default branch. No rule for a tag: a tag can be put on any commit.
+
+   Why the restriction. An environment gives its secrets to any job that
+   names it, and what a job does is what the workflow file says ON THE
+   BRANCH THE RUN IS OF: a run started by hand takes `release.yml` as the
+   chosen branch has it, and a new workflow file on a branch runs when the
+   branch is pushed. Unrestricted, the environment would therefore hand the
+   key to a branch whose Publish job had been edited to print it, or to
+   sign other files, as soon as that branch was run - after one approval,
+   where there are reviewers, asked on a page that names the branch and
+   shows nothing of what it changed. Restricted, GitHub refuses such a job
+   before it starts, so the key reaches only the workflow as `main` has it:
+   the one that was read when it was merged. The cost is that a release is
+   started on `main`, as "Publishing a release" already says. A run without
+   a tag works on any branch as before: its Publish job is skipped and
+   never asks for the environment.
+
+   Then give the environment the ACTIVE key, and only that one; the spare
+   never goes to GitHub:
 
    ```sh
    gh secret set UPDATE_SIGNING_KEY --env release < update-signing.pem
    ```
 
-   (The Publish job names the environment, and GitHub makes one of that
-   name, with no reviewers, the first time a run asks for it. A secret set
-   on the repository - the same command without `--env release` - reaches
-   the job too, but then every workflow of the repository can read it.)
+   (Make the environment first. The Publish job names it, and GitHub makes
+   one of that name, with no reviewers and no restriction, the first time a
+   run asks for it. A secret set on the repository - the same command
+   without `--env release` - reaches the job too, but then every workflow
+   of the repository can read it. `tools/update_keytool.py` prints the
+   command with `--env release`, in its help and after `pub`.)
+
+   Both settings are GitHub's, where nothing in the repository can see
+   them, so read them back:
+
+   ```sh
+   gh api repos/kjarada/Katana/environments/release --jq '[.protection_rules[].type]'
+       # ["branch_policy","required_reviewers"]: both names, in either order
+   gh api repos/kjarada/Katana/environments/release --jq .deployment_branch_policy
+       # {"custom_branch_policies":true,"protected_branches":false}
+   gh api repos/kjarada/Katana/environments/release/deployment-branch-policies \
+     --jq '.branch_policies[] | .type + " " + .name'
+       # branch main, and no other line
+   ```
 4. Publish a release and install it by hand ("The first release that carries
    the updater").
 
@@ -851,17 +975,34 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   repository, the second installed as an update of the first - is the
   owner's acceptance step and the gate for the first real release ("To
   verify on the first release").
+* **Nor has it run since its actions were named by commit** (2026-10-14,
+  "The actions the workflow runs"). The six commits were read from GitHub,
+  each two ways that agree, and every `uses:` line was held to them by a
+  script of that session; the edit is those lines and a comment. The file
+  was not put through a YAML parser again (the machine had none), and no
+  runner has yet fetched an action by these digits: the first run shows it,
+  in each job's "Set up job" step.
 * **Nothing in the repository holds the workflow.** The checks above were
-  made with scripts of the session that wrote the workflow; they are not in
-  the repository and not in ctest. So no test fails if a later edit gives
-  the workflow a second trigger, takes the Publish job out of the
-  environment `release`, or drops `-DKATANA_REQUIRE_UPDATE_KEYS=ON` from a
-  configure, which is what keeps a release from being built with the
-  placeholder keys. A check of the file's shape that needs only Python's
-  standard library, with a list of breaks it must notice, was written for
-  this and is not yet in the tree.
+  made with scripts of the sessions that wrote and changed the workflow;
+  they are not in the repository and not in ctest. So no test fails if a
+  later edit gives the workflow a second trigger, takes the Publish job out
+  of the environment `release`, names an action by a tag again, or drops
+  `-DKATANA_REQUIRE_UPDATE_KEYS=ON` from a configure, which is what keeps a
+  release from being built with the placeholder keys. A check of the file's
+  shape that needs only Python's standard library, with a list of breaks it
+  must notice, was written for this and is not yet in the tree; when it is,
+  a `uses:` that does not end in 40 hexadecimal digits belongs among what
+  it refuses. For that one break GitHub has a setting of its own, which is
+  off ("The actions the workflow runs", at its end).
+* **Nothing says when a pinned action has a newer version.** An action
+  stays at its commit until it is moved by hand ("The actions the workflow
+  runs"), and the repository has no `.github/dependabot.yml`, which would
+  propose each move as a pull request.
 * **The update keys are placeholders** until the owner's key steps ("Update
-  signing"); until then the workflow stops in its first job.
+  signing"); until then the workflow stops in its first job. The
+  environment `release` of those steps, with its reviewers and its
+  restriction to `main`, did not exist on 2026-10-14 either: GitHub would
+  make one with neither the first time a run reached the Publish job.
 * **No program says which repository it asks for updates,** so the jobs
   prove `-DKATANA_UPDATE_REPO` only as far as the update library's compile
   line ("What each job does"). Were `UPDATE STATUS` to name the feed, the
