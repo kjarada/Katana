@@ -136,9 +136,13 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 // of RollbackIncomplete, Left, RolledBack, Healthy that fits any of them.
 enum class Settled {
     Nothing,            // the install holds no such update; no lock was taken, nothing written
-    Healthy,            // the marker was there: the update stands, and its folder is gone
+    Healthy,            // the marker was there: the update stands (its folder is deleted, or
+                        // kept under a journal that says HEALTHY while a file in it is held)
     RolledBack,         // no marker, and it could be put back: the old version is in place
-    Left,               // it could not be decided in this run; it is as it was
+    // It could not be decided in this run - a program of the install is running, the files
+    // are no longer that release's, the scan or the marker could not be asked, the lock could
+    // not be taken for a reason other than a holder - and it is as it was.
+    Left,
     Busy,               // the update lock stayed held: a helper is alive. Nothing was written
     RollbackIncomplete, // putting it back did not finish: the tree may be half swapped
 };
@@ -190,10 +194,14 @@ enum class Settled {
                                      const ApplyServices& services);
 
 enum class Confirmed {
-    Nothing, // the install holds no update that was never said to start
+    Nothing, // nothing to confirm: the install holds no update that was never said to
+             // start (or its folder could not be looked at, which asking again does not mend)
     Done,    // it is settled healthy
-    Busy,    // not now - the update lock is held (a helper is alive), or the marker could
-             // not be written: nothing is settled, and the caller asks again later
+    // Not now: the update lock is held - a helper is alive, or a scanner has the lock file
+    // for a moment - or the marker or the record could not be written. Nothing is settled,
+    // the RunOnce entry is as it was, and the caller asks again later (the window: every
+    // 5 s, 12 times).
+    Busy,
 };
 
 // What the window of a NEW version does on its first idle turn, when its install

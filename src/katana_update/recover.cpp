@@ -609,12 +609,14 @@ Confirmed confirmStartedUnguarded(const Path& rootGiven, const Path& stateDirect
     const ApplyServices services{fs, processes, launcher, registry, nobody, ApplyTimings{}};
     const PendingOutcome outcome = settlePending(root, services, {}, stateDirectory, false);
     forgetSettled(fs, stateDirectory, outcome);
-    if (!outcome.left.empty()) {
-        return Confirmed::Busy; // the marker or the record could not be written just now
+    if (!outcome.left.empty() || outcome.healthy.empty()) {
+        // The marker or the record could not be written just now, or the folder could not be
+        // read again: nothing is settled, so the logon entry stays, and the window asks again.
+        return Confirmed::Busy;
     }
     // The command it names runs the helper copy that has just been deleted.
     (void)registry.clearRunOnce(kRunOnceName);
-    return outcome.healthy.empty() ? Confirmed::Nothing : Confirmed::Done;
+    return Confirmed::Done;
 }
 
 } // namespace
