@@ -101,9 +101,12 @@
 //   --recover:   nothing in U, ever, and no last.json: recover() is called first by katana_cli
 //                and katana_mcp too, and a headless program writes no per-user state
 //                (docs/headless.md). It writes only R/.update/recovery.log, one line for each
-//                run that found something to put right. The window learns from the install
-//                itself (installed.json says which version is there), and from last.json when
-//                the swap's own helper got to write one.
+//                run that found something to put right - and that only where R/.update is a
+//                folder of the install itself: a link of that name (a junction somebody put
+//                there) is neither listed nor written through, as recovery itself reads
+//                nothing through one. The window learns from the install itself
+//                (installed.json says which version is there), and from last.json when the
+//                swap's own helper got to write one.
 //
 // TRUST. The keys come from trustForThisBuild() and from nowhere else:
 //   - katana_updater (installed) passes productionTrust(), the keys pinned at build time.
@@ -979,11 +982,39 @@ int runApply(upd::ApplyRequest request, const std::string& argv0, Rig& rig)
 
 // ---- --recover ----------------------------------------------------------------------------------
 
+// What R/.update is. Recovery works in it only when it is an ordinary folder of the install
+// (src/katana_update/recover.cpp reads nothing through a link), and this file holds itself to
+// the same rule with the same question - FsOps::stat, which describes the entry itself: a
+// junction named .update would otherwise have the folder it points to listed as this install's
+// transactions, and be handed the recovery log, somewhere outside R.
+enum class WorkFolder {
+    Missing,  // an install that was never updated
+    Ordinary, // a folder of the install's own
+    Foreign,  // a link, a file, or something that cannot be examined: not looked into
+};
+
+WorkFolder workFolderOf(const upd::FsOps& fs, const Path& root)
+{
+    const core::Result<upd::EntryInfo> info = fs.stat(upd::updateWorkDirectory(root));
+    if (!info.ok()) {
+        return WorkFolder::Foreign;
+    }
+    if (info->kind == upd::EntryKind::Missing) {
+        return WorkFolder::Missing;
+    }
+    return info->kind == upd::EntryKind::Directory && !info->reparsePoint ? WorkFolder::Ordinary
+                                                                          : WorkFolder::Foreign;
+}
+
 // The names of the transaction folders under R/.update: what an interrupted update leaves, and
 // what recovery clears. A folder is looked at by name only; recoverInProcess reads the journals.
+// None when R/.update is not an ordinary folder (see above).
 std::vector<std::string> transactionFolders(const upd::FsOps& fs, const Path& root)
 {
     std::vector<std::string> names;
+    if (workFolderOf(fs, root) != WorkFolder::Ordinary) {
+        return names;
+    }
     const core::Result<std::vector<Path>> entries =
         fs.listDirectory(upd::updateWorkDirectory(root));
     if (!entries.ok()) {
@@ -1010,6 +1041,7 @@ std::string joined(const std::vector<std::string>& names)
 
 int runRecover(const Path& root, Rig& rig)
 {
+    const WorkFolder before = workFolderOf(rig.fs(), root);
     const std::vector<std::string> found = transactionFolders(rig.fs(), root);
     const core::Status status = upd::recoverInProcess(root, rig.services());
     const std::vector<std::string> left = transactionFolders(rig.fs(), root);
@@ -1017,7 +1049,11 @@ int runRecover(const Path& root, Rig& rig)
     // One line for a run that had something to put right, in the install's own folder and
     // nowhere else (see the top). A run that found nothing writes nothing: it is what the
     // RunOnce entry does at every logon after a clean update, and a log is not a clock.
-    if (!found.empty() || !status.ok()) {
+    // Asked again now, because the line goes into the folder as it is at this moment: where
+    // it is not an ordinary folder there is no place in R to keep a line, and what happened
+    // is on standard output alone.
+    if ((!found.empty() || !status.ok()) &&
+        workFolderOf(rig.fs(), root) == WorkFolder::Ordinary) {
         std::string line = utcNow() + " recover found=" + joined(found) +
                            " result=" + (status.ok() ? "ok" : "failed") + " left=" + joined(left);
         if (!status.ok()) {
@@ -1035,7 +1071,11 @@ int runRecover(const Path& root, Rig& rig)
     // OK is also what a live update holding the lock gets (recover.hpp: not ours to touch), and a
     // finished transaction's folder is kept for its health check: say what stays.
     std::string detail = "nothing was interrupted";
-    if (!found.empty()) {
+    if (before == WorkFolder::Foreign) {
+        // Nothing of an update can be in it: the swap refuses to work through a link too.
+        detail = "the install's .update is not a folder of its own (a link, or a file): nothing "
+                 "in it was read or changed";
+    } else if (!found.empty()) {
         detail = left.empty() ? "the install is whole"
                               : "left alone (another update holds the lock, or its health check "
                                 "is not over): " +
