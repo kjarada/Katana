@@ -2,9 +2,10 @@
 # (decision D1, docs/release.md "The Windows installer", cmake/NSIS.template.in), without
 # running it:
 #
-#   cmake -DTEMPLATE=<cmake/NSIS.template.in> [-DMUTATE=<name>] -P check_nsis_script.cmake
-#   cmake -DSCRIPT=<project.nsi> [-DEXPECT_VERSION=0.2.0] [-DEXPECT_FILES=bin/katana.exe;...]
+#   cmake -DTEMPLATE=<cmake/NSIS.template.in> [-DREGISTRY_HEADER=<include/katana/update/registry.hpp>]
 #         [-DMUTATE=<name>] -P check_nsis_script.cmake
+#   cmake -DSCRIPT=<project.nsi> [-DEXPECT_VERSION=0.2.0] [-DEXPECT_FILES=bin/katana.exe;...]
+#         [-DREGISTRY_HEADER=...] [-DMUTATE=<name>] -P check_nsis_script.cmake
 #
 # TEMPLATE is configured here with sample values for the variables CPack supplies (what
 # KatanaPackaging.cmake sets, and what the generator derives from a staged tree), so it runs
@@ -15,13 +16,22 @@
 #     other hive but HKCU, no "all users" shell context, no Program Files or system folder;
 #   * the folder is %LOCALAPPDATA%\Programs\Katana, and the registry holds what the updater
 #     reads and Settings > Apps shows (include/katana/update/registry.hpp);
+#   * installed over a copy of Katana, it clears the updater's record of that copy's version
+#     and the working folder of an update that was cut short;
 #   * the uninstaller removes the updater's working folder .update and every file the
 #     installed manifest lists, and never removes the install folder recursively, so what a
-#     person put there stays;
+#     person put there stays; outside it, it clears the updater's state folder and no other,
+#     keeps the person's choices about updating, and removes the helper's RunOnce value under
+#     the name the helper gives it (REGISTRY_HEADER, when given, is where that name is read);
 #   * a silent run never waits for an answer; the text is Unicode.
 #
 # Comments are removed before anything is looked at: the template explains in them what it
-# does not do, and a word in a comment is not an instruction.
+# does not do, and a word in a comment is not an instruction. NSIS continues a line that ends
+# in a backslash onto the next one, and a comment as well as a command (its manual, "Long
+# commands"), so the line after such a comment is part of the comment to NSIS and would be an
+# instruction to this check, which takes comments out a line at a time. A line that has a
+# comment character in it and ends in a backslash is therefore refused, not interpreted.
+# Instruction names are read in the case the template writes them; NSIS itself takes any.
 #
 # -DMUTATE=<name> changes the text first in one way that breaks one rule (a check that cannot
 # see a violation passes as quietly as one that finds none); the tests that use it expect the
@@ -66,16 +76,8 @@ else()
     message(FATAL_ERROR "Pass -DTEMPLATE=<NSIS.template.in> or -DSCRIPT=<project.nsi>")
 endif()
 
-# ---- the text, as instructions ----------------------------------------------------------
-string(REPLACE "\r\n" "\n" _text "${_text}")
-# Whole-line comments out (a line continuation inside one is not a continuation)...
-string(REGEX REPLACE "(^|\n)[ \t]*[;#][^\n]*" "\\1" _text "${_text}")
-# ...a backslash that ends a line joins the next one to it, as NSIS reads it...
-string(REGEX REPLACE "\\\\\n[ \t]*" " " _text "${_text}")
-# ...and a semicolon is only text, not a list separator.
-string(REPLACE ";" "<semicolon>" _text "${_text}")
-
 # ---- the mutations, for the tests of this check ---------------------------------------------
+# Every occurrence of `old`.
 function(katana_mutate old new)
     string(FIND "${_text}" "${old}" _at)
     if(_at EQUAL -1)
@@ -84,8 +86,44 @@ function(katana_mutate old new)
     string(REPLACE "${old}" "${new}" _changed "${_text}")
     set(_text "${_changed}" PARENT_SCOPE)
 endfunction()
+# The first occurrence only. The installer's section comes before the uninstaller's, so of an
+# instruction both have, this changes the installer's.
+function(katana_mutate_first old new)
+    string(FIND "${_text}" "${old}" _at)
+    if(_at EQUAL -1)
+        message(FATAL_ERROR "mutation ${MUTATE} does not apply: the text has no  ${old}")
+    endif()
+    string(LENGTH "${old}" _length)
+    math(EXPR _rest "${_at} + ${_length}")
+    string(SUBSTRING "${_text}" 0 ${_at} _before)
+    string(SUBSTRING "${_text}" ${_rest} -1 _after)
+    set(_text "${_before}${new}${_after}" PARENT_SCOPE)
+endfunction()
 
-if(MUTATE STREQUAL "administrator")
+# ---- the text, as instructions ----------------------------------------------------------
+string(REPLACE "\r\n" "\n" _text "${_text}")
+# One mutation is of the text as it is written, comments and all, because the comment is what
+# it breaks: the folder's removal, behind a comment that takes it.
+if(MUTATE STREQUAL "comment_takes_the_next_line")
+    katana_mutate([=[  RMDir /r "$INSTDIR\.update"]=]
+                  "  ; the updater's working folder \\\n  RMDir /r \"$INSTDIR\\.update\"")
+endif()
+# A line with a comment character in it that ends in a backslash (see the top of this file):
+# kept here, reported with the other problems below.
+set(_continued_comment "")
+if("${_text}\n" MATCHES "(^|\n)([^\n]*[;#][^\n]*\\\\)[ \t]*\n")
+    set(_continued_comment "${CMAKE_MATCH_2}")
+endif()
+# Whole-line comments out...
+string(REGEX REPLACE "(^|\n)[ \t]*[;#][^\n]*" "\\1" _text "${_text}")
+# ...a backslash that ends a line joins the next one to it, as NSIS reads it...
+string(REGEX REPLACE "\\\\\n[ \t]*" " " _text "${_text}")
+# ...and a semicolon is only text, not a list separator.
+string(REPLACE ";" "<semicolon>" _text "${_text}")
+
+if(MUTATE STREQUAL "comment_takes_the_next_line")
+    # Applied above, to the text with its comments.
+elseif(MUTATE STREQUAL "administrator")
     katana_mutate([=[RequestExecutionLevel user]=] [=[RequestExecutionLevel admin]=])
 elseif(MUTATE STREQUAL "second_level")
     katana_mutate([=[RequestExecutionLevel user]=] "RequestExecutionLevel user\nRequestExecutionLevel highest")
@@ -114,6 +152,17 @@ elseif(MUTATE STREQUAL "ansi")
     katana_mutate([=[Unicode true]=] "")
 elseif(MUTATE STREQUAL "keys_stay_behind")
     katana_mutate([=[DeleteRegKey HKCU "${KATANA_UNINSTALL_KEY}"]=] "")
+elseif(MUTATE STREQUAL "stale_record_survives_a_reinstall")
+    katana_mutate_first([=[Delete "$INSTDIR\share\katana\installed.json"]=] "")
+elseif(MUTATE STREQUAL "stale_journal_survives_a_reinstall")
+    katana_mutate_first([=[RMDir /r "$INSTDIR\.update"]=] "")
+elseif(MUTATE STREQUAL "state_folder_is_another_folder")
+    katana_mutate([=[!define KATANA_UPDATE_STATE "$LOCALAPPDATA\Katana\update"]=]
+                  [=[!define KATANA_UPDATE_STATE "$LOCALAPPDATA\Katana"]=])
+elseif(MUTATE STREQUAL "update_choices_removed")
+    katana_mutate([=[StrCmp $1 "state.json" state_skip]=] "")
+elseif(MUTATE STREQUAL "run_once_under_another_name")
+    katana_mutate([=["KatanaUpdateRecover"]=] [=["KatanaRecover"]=])
 elseif(MUTATE)
     message(FATAL_ERROR "unknown mutation '${MUTATE}'")
 endif()
@@ -130,6 +179,12 @@ function(katana_require what literal)
         katana_problem("${what}: the script has no  ${literal}")
     endif()
 endfunction()
+
+# 0. Nothing hides an instruction from this check.
+if(NOT _continued_comment STREQUAL "")
+    string(STRIP "${_continued_comment}" _continued_comment)
+    katana_problem("a line with a comment character in it ends in a backslash: NSIS continues a comment onto the next line, so the instruction there may be none, and this check would still read it as one. The line:  ${_continued_comment}")
+endif()
 
 # 1. No elevation: exactly one RequestExecutionLevel, and it is user.
 string(REGEX MATCHALL "(^|\n)[ \t]*RequestExecutionLevel[^\n]*" _levels "${_text}")
@@ -184,6 +239,37 @@ if(EXPECT_VERSION)
         "WriteRegStr HKCU \"\${KATANA_UNINSTALL_KEY}\" \"DisplayVersion\" \"${EXPECT_VERSION}\"")
 endif()
 
+# 3a. Installed over a copy of Katana that was not uninstalled first, the installer clears what
+# the updater left that would be wrong about the new files: its record of the version (the
+# engine reads installed.json as the installed version, include/katana/update/install.hpp) and
+# the working folder of an update that was cut short (its recovery would put old files back).
+# Only in a folder that holds a packaged Katana, which install.json says.
+string(FIND "${_text}" [=[Section "-Core installation"]=] _install_start)
+if(_install_start EQUAL -1)
+    katana_problem("the script has no installer section  Section \"-Core installation\"")
+    set(_install "")
+else()
+    string(SUBSTRING "${_text}" ${_install_start} -1 _install)
+    string(FIND "${_install}" "SectionEnd" _install_end)
+    if(_install_end EQUAL -1)
+        katana_problem("the installer section does not end")
+    else()
+        string(SUBSTRING "${_install}" 0 ${_install_end} _install)
+    endif()
+endif()
+function(katana_require_in_installer what literal)
+    string(FIND "${_install}" "${literal}" _at)
+    if(_at EQUAL -1)
+        katana_problem("the installer does not ${what}: its section has no  ${literal}")
+    endif()
+endfunction()
+katana_require_in_installer("clear the updater's record of the version of a copy it installs over"
+    [=[Delete "$INSTDIR\share\katana\installed.json"]=])
+katana_require_in_installer("clear the working folder of an update that was cut short in a copy it installs over"
+    [=[RMDir /r "$INSTDIR\.update"]=])
+katana_require_in_installer("keep that clearing to a folder that holds a packaged Katana"
+    [=[IfFileExists "$INSTDIR\share\katana\install.json" 0 previous_copy_done]=])
+
 # 4. Silent: every MessageBox has a default answer (/SD), or a silent install waits for ever.
 string(REGEX MATCHALL "(^|\n)[ \t]*MessageBox[^\n]*" _boxes "${_text}")
 list(LENGTH _boxes _box_count)
@@ -227,6 +313,27 @@ katana_require_in_uninstaller("remove the folder record" [=[DeleteRegKey HKCU "$
 katana_require_in_uninstaller("remove the folder only if it is empty" [=[RMDir "$INSTDIR"]=])
 katana_require_in_uninstaller("remove itself" [=[Delete "$INSTDIR\Uninstall.exe"]=])
 katana_require("the installed manifest, read by the uninstaller" [=["$INSTDIR\share\katana\installed.manifest.json" r]=])
+# Outside the install folder: the updater's state folder (include/katana/update/state.hpp) and
+# no other is cleared - the define is the root of the one recursive removal there, so it is
+# held to the letter - and state.json, the person's choices about updating, stays in it.
+katana_require("the updater's state folder, which is the only one outside the install folder that the uninstaller clears"
+    [=[!define KATANA_UPDATE_STATE "$LOCALAPPDATA\Katana\update"]=])
+katana_require_in_uninstaller("clear what the updater staged outside the install folder" [=[Call un.RemoveUpdateState]=])
+katana_require("the person's choices about updating, which the uninstaller keeps" [=[StrCmp $1 "state.json" state_skip]=])
+# The command the helper registers to run at the next logon (registry.hpp): removed under the
+# name the helper gives it, read from that header when it is given, so that the two cannot
+# come to differ unnoticed.
+set(_run_once_name "")
+if(REGISTRY_HEADER)
+    file(READ "${REGISTRY_HEADER}" _registry_header)
+    if(_registry_header MATCHES "kRunOnceName = \"([A-Za-z0-9_]+)\"")
+        set(_run_once_name "${CMAKE_MATCH_1}\"")
+    else()
+        katana_problem("${REGISTRY_HEADER} has no  kRunOnceName = \"<name>\": the name of the helper's RunOnce value cannot be read from it")
+    endif()
+endif()
+katana_require_in_uninstaller("remove the helper's RunOnce value under the name the helper gives it"
+    "DeleteRegValue HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce\" \"${_run_once_name}")
 # The path rules of the manifest reader (paths.hpp, in the part that keeps a delete inside the folder).
 foreach(_rule IN ITEMS [=[StrCmp $R1 "bin\" listed_folder_ok]=] [=[StrCmp $R1 "share\" listed_folder_ok listed_done]=]
         [=[Push "\..\"]=] [=[Push "\.\"]=] [=[Push "\\"]=])
@@ -273,4 +380,5 @@ if(_problems)
 endif()
 message(STATUS "Installer script (${_what}): per user. RequestExecutionLevel user; ${_hive_count} registry hive "
     "references, all HKCU; ${_box_count} MessageBox, all with /SD; the uninstaller removes .update and the "
-    "files the installed manifest lists, and no folder recursively but the updater's.")
+    "files the installed manifest lists, and no folder recursively but the updater's; the installer clears "
+    "the updater's record and working folder of a copy it installs over.")
