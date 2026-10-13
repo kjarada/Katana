@@ -27,9 +27,9 @@ keys for, and publishes them.
 
 | File | What it is |
 |---|---|
-| `Katana-X.Y.Z-win64.exe` | Windows x86-64 installer (NSIS), with an uninstaller |
+| `Katana-X.Y.Z-win64.exe` | Windows x86-64 installer (NSIS), per user, with no administrator prompt (see "The Windows installer"), with an uninstaller |
 | `Katana-X.Y.Z-win64.zip` | the same tree to unzip anywhere; run `bin/katana.exe` |
-| `Katana-X.Y.Z-win-arm64.exe` | Windows 11 on ARM64 installer (NSIS), with an uninstaller |
+| `Katana-X.Y.Z-win-arm64.exe` | Windows 11 on ARM64 installer (NSIS), per user, with an uninstaller |
 | `Katana-X.Y.Z-win-arm64.zip` | the same tree to unzip anywhere |
 | `Katana-X.Y.Z-linux-x86_64.tar.gz` | Linux x86-64, glibc 2.28 or later; run `bin/katana` |
 | `Katana-X.Y.Z-linux-aarch64.tar.gz` | Linux on 64-bit ARM, glibc 2.28 or later |
@@ -124,11 +124,114 @@ and `Katana.app` copied out of it as a user drags it; `Info.plist` must parse,
 the icon must be there, and `codesign --verify --deep --strict` must accept
 the bundle's seal before the programs in `Contents/MacOS` run.
 
-**The installers.** Each Windows installer is then run as an administrator's
-deployment runs it: `/S /D=<folder>`, silently, into a folder of its own. The
-installed `katana_cli` must name `EPSG:32630` as above, and the uninstaller
+**The installers.** Each Windows installer is then run as a deployment script
+runs it, as the user the job runs as (the installer asks for no administrator
+rights): `/S /D=<folder>`, silently, into a folder of its own. The installed
+`katana_cli` must name `EPSG:32630` as above, and the uninstaller
 (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
 remove `bin\katana_cli.exe`.
+
+## The Windows installer
+
+The installer is PER USER (decision D1 of the update system).
+It asks for no administrator rights and shows no UAC prompt, installs for the
+account that runs it, and writes the registry under `HKCU` only. Why: the
+updater replaces files inside the install as that same user; a per-machine
+install in `C:\Program Files` would need an elevation on every update, and
+every elevated step is one more way for an update to go wrong. No release
+had been made when this was decided, so nothing was migrated from the older
+per-machine installer.
+
+* **Where.** `%LOCALAPPDATA%\Programs\Katana` unless the person chooses another
+  folder they can write to; a folder that cannot be written to is refused with
+  a message (a silent run exits with code 2 and writes nothing). A copy that is
+  already installed is offered again as the folder, and `/D=` beats both.
+* **What it records.** `HKCU\Software\Jarada\Katana`, default value: the install
+  folder, which is how Katana and the updater tell an installed copy from an
+  unpacked archive. `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Katana`:
+  the entry in **Settings > Apps** (`DisplayName`, `DisplayVersion`, `Publisher`
+  Jarada, `UninstallString`, `InstallLocation`, `DisplayIcon`, `EstimatedSize`,
+  `NoModify`, `NoRepair`), which the updater rewrites after an update. The
+  Start-menu folder and its shortcuts are the current user's.
+* **What the uninstaller removes.** The files the installer put down; every file
+  the installed manifest lists (`share/katana/installed.manifest.json`: an update
+  adds files that the uninstaller, built before them, has never heard of); the
+  updater's records and its working folder `.update`; what the updater staged in
+  `%LOCALAPPDATA%\Katana\update` (not `state.json`, the person's choices about
+  updating); the registry keys and shortcuts above, and the command the update
+  helper registers under `HKCU\...\RunOnce` to recover at the next logon. A path
+  read from the manifest is held to the updater's rules first (one of `bin`,
+  `share`, `etc`, `lib` first, no `.` or `..` component, no wildcard, printable
+  ASCII, at most 240 characters), so a manifest that has been tampered with
+  cannot send a delete outside the folder.
+* **What it leaves.** Anything else in the install folder, and the folder with it
+  (the folder is removed only when empty and nothing in it is removed
+  recursively but `.update`); the settings under `HKCU\Software\Katana` and
+  everything else under `%LOCALAPPDATA%\Katana`.
+* **Silent.** `/S` and `/D=<folder>` (last, unquoted) work as in any NSIS
+  installer, and no question is asked without a default answer. Installing over
+  an installed copy asks whether to uninstall the old one first, and a silent
+  run does so without asking; that is also the way to repair a copy. An entry
+  in **Settings > Apps** whose uninstaller is no longer there, because the
+  folder was deleted by hand, is no installed copy: nothing is asked, nothing
+  is run, and the install goes ahead and writes the entry anew.
+* **Over a copy that was not uninstalled first** (the answer to that question
+  was No, or the registry does not know the copy in the chosen folder) the
+  installer removes `share/katana/installed.json` and `.update` before it puts
+  its files down. The first is the updater's record of the version the folder
+  holds, which would go on naming the old one; the second can hold the journal
+  of an update that was cut short, whose recovery at the next start would put
+  files of the old version back over the new ones. The installed manifest is
+  kept: it is how the next update and the uninstaller find the files an earlier
+  update added. A folder without `share/katana/install.json`, which is what
+  says a packaged Katana is in it, is not touched.
+* **A file in use** (a program of Katana's that is still running) stops the
+  install: the installer offers Retry and Cancel, never the skip that NSIS
+  offers by default, which would leave the old program among the new libraries
+  (`AllowSkipFiles off`).
+* **NSIS.** The template, `cmake/NSIS.template.in`, replaces CPack's: CPack's asks
+  for administrator rights, writes `HKLM` and installs to Program Files. It has no
+  components, no "add to PATH" and no Install Options page (Katana has never
+  changed `PATH`), and it is a Unicode installer, because the default folder is
+  under the user's profile, whose name can hold any character. MSYS2's NSIS
+  (3.13) is built for x86-64 only and keeps its plugins where the default target
+  does not look, so for it the template says `Target amd64-unicode`; CPack's own
+  template stops there with "Plugin not found". The official and Chocolatey builds
+  (the ARM64 job) are x86 and need nothing said. A missing template is not an
+  error to CPack, only another installer, so the configure fails without it.
+* **Tests.** `packaging_nsis_template_is_per_user` holds the template's text,
+  on any host, to the rules listed at the top of
+  `tests/update/check_nsis_script.cmake`: no elevation and nothing machine-wide,
+  the folder and the registry values above, the folder tried before anything is
+  cleared or written, what an install over a copy clears, an entry whose
+  uninstaller is gone, what the uninstaller removes, in which order, and what it
+  keeps, and a default answer to every question. It reads text. What only a run
+  shows (the exit code of a refused folder, the size in **Settings > Apps**, the
+  shortcuts) it does not hold; a block comment and a condition it cannot
+  evaluate it refuses, and what is inside a false condition it leaves out, as
+  NSIS does; an instruction that is compiled and never reached it cannot see.
+  Each `packaging_nsis_check_catches_*` test breaks one rule in that text and
+  requires the check to name it. Where NSIS is
+  installed, `packaging_nsis_installer_builds_from_the_real_configuration` runs
+  the build's own CPack configuration over a small tree, compiles the installer
+  with `makensis` and holds the script CPack generated to the same rules, and
+  `packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else` compiles
+  the uninstaller's own file-removal functions into a throwaway installer and
+  runs them over small trees whose manifests have hostile entries, inside the
+  build tree (no registry, no Start menu, a stand-in for `%LOCALAPPDATA%`); the
+  `packaging_nsis_uninstaller_test_catches_*` tests break one of those functions'
+  rules each, and run only where the unbroken run passes (it is their fixture).
+  Those programs are new to the machine each time, and a scanner that looks at
+  a new program before it runs takes some seconds over each: the script gives
+  each a minute and stops at the first that does not come back. (A build folder
+  with a space in its path has none of the uninstaller tests: NSIS takes the
+  folder as the unquoted end of a command line.) None of them runs Katana's
+  installer: that writes the user's registry and Start menu. **An install, an
+  update and an uninstall on a clean Windows machine, by hand, is the owner's
+  acceptance step**, and with it an install after the folder was deleted by
+  hand, which needs the registry and so has no test that runs it; the release
+  workflow's installer smoke test (above) covers the silent install and
+  uninstall only.
 
 ## How the Linux and macOS packages are made self-contained
 
@@ -347,6 +450,14 @@ without asking Apple's service, even offline.
   warns on Windows and macOS quarantines the download.
 * **The Windows ARM64 installer's own code is x86**, run emulated: NSIS has no
   ARM64 build. The programs it installs are ARM64.
+* **The per-user installer has not been through its acceptance step**: an
+  install, an update and an uninstall on a clean Windows machine, by hand
+  ("The Windows installer").
+* **Neither the installer nor its uninstaller looks for a running Katana.** The
+  installer stops at a file that is in use (Retry or Cancel; a silent run
+  fails) and never skips it, but by then it has already replaced other files;
+  the uninstaller leaves such a file behind and still removes its entry in
+  **Settings > Apps**. Close Katana first.
 * **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball.
 * **The Windows toolchain is not frozen.** MSYS2 installs what it has on the
   day; two runs a month apart may build with different GCC and Qt versions.

@@ -288,8 +288,9 @@ if(WIN32)
     # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure. MSYS2 has
     # no NSIS for ARM64; NSIS's own x86 build, which Windows on ARM runs
     # emulated, makes the same installer - pass -DKATANA_MAKENSIS=<its
-    # makensis.exe>. The installer's own code is x86 either way; what it
-    # installs is the programs built here.
+    # makensis.exe>. The installer's own code is that NSIS's: x86 for its own
+    # build, x86-64 for MSYS2's (cmake/NSIS.template.in says which to make);
+    # what it installs is the programs built here.
     set(CPACK_GENERATOR "ZIP")
     find_program(KATANA_MAKENSIS NAMES makensis HINTS "${KATANA_RUNTIME_BIN}")
     if(KATANA_MAKENSIS)
@@ -298,10 +299,31 @@ if(WIN32)
         set(CPACK_NSIS_EXECUTABLE "${KATANA_MAKENSIS}")
         set(CPACK_NSIS_DISPLAY_NAME "Katana ${PROJECT_VERSION}")
         set(CPACK_NSIS_PACKAGE_NAME "Katana")
-        # C:\Program Files, not NSIS's default of Program Files (x86): these
-        # are 64-bit programs.
-        set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
-        set(CPACK_NSIS_INSTALLED_ICON_NAME "bin/katana.exe")
+        # The installer is PER USER (docs/release.md, "The Windows installer"): it runs without
+        # administrator rights, installs into the user's own %LOCALAPPDATA%\Programs\Katana unless
+        # they choose another folder they can write to, and writes only under HKCU. That is what
+        # lets the updater (docs/update.md) replace files in the install as the same user, with no
+        # UAC prompt on every update. cmake/NSIS.template.in is what makes it so: CPack's own
+        # template is elevated and machine-wide, and CPack takes this project's in preference
+        # because cmake/ is on CPACK_MODULE_PATH. A template that went missing would not be an
+        # error to CPack, only a different installer, so it is one here.
+        if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/NSIS.template.in")
+            message(FATAL_ERROR
+                "cmake/NSIS.template.in is missing: without it CPack builds its own installer, which "
+                "asks for administrator rights and writes machine-wide, and the updater cannot update it")
+        endif()
+        # Four backslashes: CPack writes this value into CPackConfig.cmake as it is and CMake reads
+        # that file again, so the one backslash NSIS wants must survive a second unescaping (with
+        # two, cpack stops at "Invalid character escape '\P'").
+        set(CPACK_NSIS_INSTALL_ROOT "$LOCALAPPDATA\\\\Programs")
+        # The key the installer writes under HKCU Software\<vendor> and ...\Uninstall, and the
+        # updater rewrites DisplayVersion in (include/katana/update/registry.hpp): said here rather
+        # than left to CPack's default, which is the install directory's name, so that renaming one
+        # cannot move the other.
+        set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "Katana")
+        # The icon Settings > Apps shows, said with a backslash like the rest of the path (the
+        # same four as above).
+        set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\katana.exe")
         set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
         if(EXISTS "${PROJECT_SOURCE_DIR}/resources/katana.ico")
             set(CPACK_NSIS_MUI_ICON "${PROJECT_SOURCE_DIR}/resources/katana.ico")

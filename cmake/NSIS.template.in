@@ -1,0 +1,643 @@
+; Katana's Windows installer: PER-USER. CPack finds this file before its own
+; NSIS.template.in because cmake/ is on CPACK_MODULE_PATH (cmake/KatanaPackaging.cmake).
+;
+; What it is and why (docs/release.md, "The Windows installer"; docs/update.md):
+;
+;   * It installs for the person who runs it, into %LOCALAPPDATA%\Programs\Katana by default
+;     (any folder they can write to), and asks for no administrator rights. The registry is
+;     touched under HKCU only. The updater (docs/update.md) replaces files inside that folder
+;     as the same user, and a per-user install is what lets it do so without a UAC prompt.
+;   * What it writes where, and the updater reads (include/katana/update/registry.hpp):
+;       HKCU\Software\Jarada\Katana                                  the install folder
+;       HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Katana
+;                                          DisplayName DisplayVersion Publisher UninstallString
+;                                          InstallLocation DisplayIcon EstimatedSize NoModify NoRepair
+;   * Its uninstaller removes the files this installer put down, AND every file the installed
+;     manifest lists (share\katana\installed.manifest.json: an update adds files this uninstaller
+;     was not built knowing), AND the updater's records and its working folder .update. Of the
+;     folder it removes nothing else: a file the user put there stays, and so does the folder. The
+;     install folder is never removed recursively, because the user may have chosen a folder with
+;     other things in it. Outside it, what the updater staged under %LOCALAPPDATA%\Katana\update
+;     goes (not state.json, the person's choices), and the registry keys and shortcuts above.
+;   * Put down over a copy that was not uninstalled first, it removes the updater's record of that
+;     copy's version and the working folder of an update that was cut short (the installer's own
+;     section says why), and it stops at a file that is in use, never skips it.
+;   * A copy that is already installed is uninstalled first (asked; a silent run does not ask).
+;     An entry in Settings > Apps whose uninstaller is no longer there, because the folder was
+;     deleted by hand, is no such copy, and the install goes ahead.
+;   * /S (silent) and /D=<folder> work as in any NSIS installer; README.md documents them. A silent
+;     run never waits for an answer: every MessageBox has a /SD default.
+;
+; Taken from CPack's template (CMake 4.x) and cut down: its components, "add to PATH" and
+; "install options" page are gone. Katana has no components and has never changed PATH, the
+; stock PATH code wrote machine-wide settings, and the options page offered those choices. The
+; variables CPack fills in (@CPACK_NSIS_FULL_INSTALL@ and the rest) are used as it uses them,
+; so cpack's other generator settings still work. tests/update/check_nsis_script.cmake holds
+; the text this produces to the rules above; keep it in step.
+;
+; Comments are whole lines only, and none names a registry hive other than HKCU: that check
+; reads the instructions, but a reader should not have to tell them apart. None ends in a
+; backslash either: NSIS continues a comment onto the next line as it does a command, and the
+; instruction there would be part of the comment (the check refuses such a line). Block
+; comments are not used. Conditions are of two kinds, the test for MSYS2's NSIS, which holds
+; the Target line alone, and comparisons of a value CPack filled in with a literal, and none
+; is inside another: the check reads what NSIS compiles, and refuses what it cannot tell.
+
+;--------------------------------
+; Values CPack supplies
+
+  !define VERSION "@CPACK_PACKAGE_VERSION@"
+  !define PATCH  "@CPACK_PACKAGE_VERSION_PATCH@"
+  !define INST_DIR "@CPACK_TEMPORARY_DIRECTORY@"
+
+  !define KATANA_PRODUCT_KEY "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@"
+  !define KATANA_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@"
+  !define KATANA_UPDATE_STATE "$LOCALAPPDATA\Katana\update"
+
+;--------------------------------
+; Variables
+
+  Var MUI_TEMP
+  Var STARTMENU_FOLDER
+  Var START_MENU
+
+;--------------------------------
+; Which NSIS this is. The official release (and Chocolatey's, which the ARM64 job uses) builds an
+; x86 installer and keeps its plugins in Plugins\x86-unicode: the default, nothing to say. MSYS2's
+; NSIS 3.13 is built for x86-64 only and keeps them in Plugins\unicode, and for it the default
+; target finds no plugin at all (CPack's own template stops at "Plugin not found, cannot call
+; nsDialogs::Create"), so it is told to make the x86-64 installer it has stubs for.
+  !if /FileExists "${NSISDIR}\Plugins\unicode\nsDialogs.dll"
+    Target amd64-unicode
+  !endif
+
+; Text is UTF-16: the default folder is under the user's own profile, whose name can hold any
+; character, and an ANSI installer would turn the ones its code page lacks into question marks.
+
+  Unicode true
+
+;--------------------------------
+; Modern UI
+
+  !include "MUI2.nsh"
+  !include "FileFunc.nsh"
+  !insertmacro GetSize
+
+;--------------------------------
+; General
+
+  Name "@CPACK_NSIS_PACKAGE_NAME@"
+  OutFile "@CPACK_TOPLEVEL_DIRECTORY@/@CPACK_OUTPUT_FILE_NAME@"
+
+  ; %LOCALAPPDATA%\Programs\Katana unless CPACK_NSIS_INSTALL_ROOT says otherwise. A copy that is
+  ; already installed is offered again, so that a reinstall goes where the first install went;
+  ; /D= beats both.
+  InstallDir "@CPACK_NSIS_INSTALL_ROOT@\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+  InstallDirRegKey HKCU "${KATANA_PRODUCT_KEY}" ""
+
+  SetCompressor @CPACK_NSIS_COMPRESSOR@
+
+  ; No elevation, no prompt: everything below is the user's own.
+  RequestExecutionLevel user
+
+  ; A file that cannot be written, which is what a running program of Katana's is, stops the
+  ; install: Retry or Cancel, and a silent run fails. NSIS's default lets the file be skipped,
+  ; and that leaves the old program among the new libraries.
+  AllowSkipFiles off
+
+@CPACK_NSIS_DEFINES@
+@CPACK_NSIS_MANIFEST_DPI_AWARE_CODE@
+@CPACK_NSIS_BRANDING_TEXT_CODE@
+@CPACK_NSIS_CRC_CHECK_CODE@
+
+;--------------------------------
+; Interface settings
+
+  !define MUI_HEADERIMAGE
+  !define MUI_ABORTWARNING
+
+@CPACK_NSIS_INSTALLER_MUI_ICON_CODE@
+@CPACK_NSIS_INSTALLER_ICON_CODE@
+@CPACK_NSIS_INSTALLER_MUI_WELCOMEFINISH_CODE@
+@CPACK_NSIS_INSTALLER_MUI_UNWELCOMEFINISH_CODE@
+@CPACK_NSIS_INSTALLER_MUI_FINISHPAGE_RUN_CODE@
+
+;--------------------------------
+; String search, for the uninstaller's checks of a manifest path.
+;
+; Push the string to search in, then the string to search for, Call un.StrStr, Pop the result:
+; the rest of the first string from the first match, or "" for none.
+
+Function un.StrStr
+  Exch $R1
+  Exch
+  Exch $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  StrLen $R3 $R1
+  StrCpy $R4 0
+  strstr_loop:
+    StrCpy $R5 $R2 $R3 $R4
+    StrCmp $R5 $R1 strstr_done
+    StrCmp $R5 "" strstr_done
+    IntOp $R4 $R4 + 1
+    Goto strstr_loop
+  strstr_done:
+  StrCpy $R1 $R2 "" $R4
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Exch $R1
+FunctionEnd
+
+;--------------------------------
+; A folder the installer cannot write to is refused up front, with the reason, rather than
+; failing half way through the files. Run when the folder page is left and again at the start
+; of the install, which is where a silent run (no page) meets it.
+
+Function CheckInstallFolder
+  Push $0
+  ; No folder at all is refused like one that cannot be written to: every path below starts
+  ; with it, and without it would start at the top of a drive.
+  StrCmp $INSTDIR "" folder_not_writable
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  FileOpen $0 "$INSTDIR\katana-write-test.tmp" w
+  IfErrors folder_not_writable
+  FileClose $0
+  Delete "$INSTDIR\katana-write-test.tmp"
+  Pop $0
+  Return
+  folder_not_writable:
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Katana is installed for your account only, so it needs a folder you can write to.$\r$\n$\r$\n$INSTDIR is not one. Choose another folder." /SD IDOK
+    Pop $0
+    Abort
+FunctionEnd
+
+;--------------------------------
+; Pages
+
+  @CPACK_NSIS_INSTALLER_WELCOME_TITLE_CODE@
+  @CPACK_NSIS_INSTALLER_WELCOME_TITLE_3LINES_CODE@
+  !insertmacro MUI_PAGE_WELCOME
+
+  @CPACK_NSIS_LICENSE_PAGE@
+
+  !define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckInstallFolder
+  !insertmacro MUI_PAGE_DIRECTORY
+
+  ; Where the Start menu folder's name is kept, so that the uninstaller finds it.
+  !define MUI_STARTMENUPAGE_REGISTRY_ROOT "HKCU"
+  !define MUI_STARTMENUPAGE_REGISTRY_KEY "${KATANA_PRODUCT_KEY}"
+  !define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "Start Menu Folder"
+  !define MUI_STARTMENUPAGE_DEFAULTFOLDER "@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+  !insertmacro MUI_PAGE_STARTMENU Application $STARTMENU_FOLDER
+
+  !insertmacro MUI_PAGE_INSTFILES
+  @CPACK_NSIS_INSTALLER_FINISH_TITLE_CODE@
+  @CPACK_NSIS_INSTALLER_FINISH_TITLE_3LINES_CODE@
+  !insertmacro MUI_PAGE_FINISH
+
+  !insertmacro MUI_UNPAGE_CONFIRM
+  !insertmacro MUI_UNPAGE_INSTFILES
+
+;--------------------------------
+; Languages
+
+  !insertmacro MUI_LANGUAGE "English"
+  !insertmacro MUI_LANGUAGE "Afrikaans"
+  !insertmacro MUI_LANGUAGE "Albanian"
+  !insertmacro MUI_LANGUAGE "Arabic"
+  !insertmacro MUI_LANGUAGE "Asturian"
+  !insertmacro MUI_LANGUAGE "Basque"
+  !insertmacro MUI_LANGUAGE "Belarusian"
+  !insertmacro MUI_LANGUAGE "Bosnian"
+  !insertmacro MUI_LANGUAGE "Breton"
+  !insertmacro MUI_LANGUAGE "Bulgarian"
+  !insertmacro MUI_LANGUAGE "Catalan"
+  !insertmacro MUI_LANGUAGE "Corsican"
+  !insertmacro MUI_LANGUAGE "Croatian"
+  !insertmacro MUI_LANGUAGE "Czech"
+  !insertmacro MUI_LANGUAGE "Danish"
+  !insertmacro MUI_LANGUAGE "Dutch"
+  !insertmacro MUI_LANGUAGE "Esperanto"
+  !insertmacro MUI_LANGUAGE "Estonian"
+  !insertmacro MUI_LANGUAGE "Farsi"
+  !insertmacro MUI_LANGUAGE "Finnish"
+  !insertmacro MUI_LANGUAGE "French"
+  !insertmacro MUI_LANGUAGE "Galician"
+  !insertmacro MUI_LANGUAGE "German"
+  !insertmacro MUI_LANGUAGE "Greek"
+  !insertmacro MUI_LANGUAGE "Hebrew"
+  !insertmacro MUI_LANGUAGE "Hungarian"
+  !insertmacro MUI_LANGUAGE "Icelandic"
+  !insertmacro MUI_LANGUAGE "Indonesian"
+  !insertmacro MUI_LANGUAGE "Irish"
+  !insertmacro MUI_LANGUAGE "Italian"
+  !insertmacro MUI_LANGUAGE "Japanese"
+  !insertmacro MUI_LANGUAGE "Korean"
+  !insertmacro MUI_LANGUAGE "Kurdish"
+  !insertmacro MUI_LANGUAGE "Latvian"
+  !insertmacro MUI_LANGUAGE "Lithuanian"
+  !insertmacro MUI_LANGUAGE "Luxembourgish"
+  !insertmacro MUI_LANGUAGE "Macedonian"
+  !insertmacro MUI_LANGUAGE "Malay"
+  !insertmacro MUI_LANGUAGE "Mongolian"
+  !insertmacro MUI_LANGUAGE "Norwegian"
+  !insertmacro MUI_LANGUAGE "NorwegianNynorsk"
+  !insertmacro MUI_LANGUAGE "Pashto"
+  !insertmacro MUI_LANGUAGE "Polish"
+  !insertmacro MUI_LANGUAGE "Portuguese"
+  !insertmacro MUI_LANGUAGE "PortugueseBR"
+  !insertmacro MUI_LANGUAGE "Romanian"
+  !insertmacro MUI_LANGUAGE "Russian"
+  !insertmacro MUI_LANGUAGE "ScotsGaelic"
+  !insertmacro MUI_LANGUAGE "Serbian"
+  !insertmacro MUI_LANGUAGE "SerbianLatin"
+  !insertmacro MUI_LANGUAGE "SimpChinese"
+  !insertmacro MUI_LANGUAGE "Slovak"
+  !insertmacro MUI_LANGUAGE "Slovenian"
+  !insertmacro MUI_LANGUAGE "Spanish"
+  !insertmacro MUI_LANGUAGE "SpanishInternational"
+  !insertmacro MUI_LANGUAGE "Swedish"
+  !insertmacro MUI_LANGUAGE "Tatar"
+  !insertmacro MUI_LANGUAGE "Thai"
+  !insertmacro MUI_LANGUAGE "TradChinese"
+  !insertmacro MUI_LANGUAGE "Turkish"
+  !insertmacro MUI_LANGUAGE "Ukrainian"
+  !insertmacro MUI_LANGUAGE "Uzbek"
+  !insertmacro MUI_LANGUAGE "Vietnamese"
+  !insertmacro MUI_LANGUAGE "Welsh"
+
+;--------------------------------
+; Installer section
+
+Section "-Core installation"
+  Call CheckInstallFolder
+
+  ; A copy of Katana that is already in this folder and was not uninstalled first (the answer
+  ; at the start was No, or the registry does not know of it). What goes in below is this
+  ; version, so the updater's record of the version the folder holds goes: left behind, it
+  ; would still name the old one. So does the working folder of an update that was cut short:
+  ; its recovery, at the next start, would put files of the old version back over the new
+  ; ones (docs/update.md). The installed manifest stays: it is how the next update, and the
+  ; uninstaller, find the files an earlier update added. install.json is what says the folder
+  ; holds a packaged Katana, and nothing is touched in a folder without it.
+  IfFileExists "$INSTDIR\share\katana\install.json" 0 previous_copy_done
+    Delete "$INSTDIR\share\katana\installed.json"
+    RMDir /r "$INSTDIR\.update"
+  previous_copy_done:
+
+  ; The tree CPack staged: every file of the package, in the folders the programs expect.
+  SetOutPath "$INSTDIR"
+  @CPACK_NSIS_EXTRA_PREINSTALL_COMMANDS@
+  @CPACK_NSIS_FULL_INSTALL@
+
+  ; The folder, which the updater reads to tell an installed copy from an unpacked archive.
+  WriteRegStr HKCU "${KATANA_PRODUCT_KEY}" "" "$INSTDIR"
+
+  ; The uninstaller, and the entry in Settings > Apps that runs it.
+  WriteUninstaller "$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "DisplayName" "@CPACK_NSIS_DISPLAY_NAME@"
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "DisplayVersion" "@CPACK_PACKAGE_VERSION@"
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "Publisher" "@CPACK_PACKAGE_VENDOR@"
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"'
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\@CPACK_NSIS_INSTALLED_ICON_NAME@"
+  WriteRegDWORD HKCU "${KATANA_UNINSTALL_KEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${KATANA_UNINSTALL_KEY}" "NoRepair" 1
+  !if "@CPACK_NSIS_HELP_LINK@" != ""
+    WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "HelpLink" "@CPACK_NSIS_HELP_LINK@"
+  !endif
+  !if "@CPACK_NSIS_URL_INFO_ABOUT@" != ""
+    WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "URLInfoAbout" "@CPACK_NSIS_URL_INFO_ABOUT@"
+  !endif
+  !if "@CPACK_NSIS_CONTACT@" != ""
+    WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "Contact" "@CPACK_NSIS_CONTACT@"
+  !endif
+
+  ; The size Settings > Apps shows, in kilobytes, of what is in the folder now.
+  ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+  IntFmt $0 "0x%08X" $0
+  WriteRegDWORD HKCU "${KATANA_UNINSTALL_KEY}" "EstimatedSize" "$0"
+
+  !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+
+  ; The shortcuts, in the current user's Start menu.
+  CreateDirectory "$SMPROGRAMS\$STARTMENU_FOLDER"
+@CPACK_NSIS_CREATE_ICONS@
+@CPACK_NSIS_CREATE_ICONS_EXTRA@
+  CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Uninstall.lnk" "$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"
+
+  WriteRegStr HKCU "${KATANA_UNINSTALL_KEY}" "StartMenu" "$STARTMENU_FOLDER"
+
+  !insertmacro MUI_STARTMENU_WRITE_END
+
+@CPACK_NSIS_EXTRA_INSTALL_COMMANDS@
+
+SectionEnd
+
+;--------------------------------
+; Uninstaller
+
+; Deletes one file a release lists, and the folders that leaves empty.
+;
+; Push the path as the manifest writes it, with \ for /, relative to the install folder. It
+; is the same rule as the updater's (include/katana/update/paths.hpp) in the part that matters
+; here: the first folder is one a release installs into, and no component is "." or "..", so a
+; manifest that has been tampered with cannot send the delete outside the folder. A path that
+; fails is skipped, not an error: what the uninstaller cannot vouch for it leaves.
+Function un.DeleteListedFile
+  Exch $R0
+  Push $R1
+  Push $R2
+
+  StrCpy $R1 $R0 4
+  StrCmp $R1 "bin\" listed_folder_ok
+  StrCmp $R1 "etc\" listed_folder_ok
+  StrCmp $R1 "lib\" listed_folder_ok
+  StrCpy $R1 $R0 6
+  StrCmp $R1 "share\" listed_folder_ok listed_done
+  listed_folder_ok:
+
+  ; With a \ added at both ends every component, the first and the last too, has a \ on each
+  ; side, and the rules are three substrings.
+  Push "\$R0\"
+  Push "\..\"
+  Call un.StrStr
+  Pop $R1
+  StrCmp $R1 "" 0 listed_done
+  Push "\$R0\"
+  Push "\.\"
+  Call un.StrStr
+  Pop $R1
+  StrCmp $R1 "" 0 listed_done
+  Push "\$R0\"
+  Push "\\"
+  Call un.StrStr
+  Pop $R1
+  StrCmp $R1 "" 0 listed_done
+
+  Delete "$INSTDIR\$R0"
+
+  ; Each folder above it that is now empty, innermost first, up to and including the first
+  ; level (bin, share ...). Not the install folder itself: the uninstaller removes that last,
+  ; and only if nothing else is in it.
+  listed_climb:
+    StrLen $R1 $R0
+    listed_find_separator:
+      IntOp $R1 $R1 - 1
+      IntCmp $R1 0 listed_done listed_done listed_test_character
+      listed_test_character:
+      StrCpy $R2 $R0 1 $R1
+      StrCmp $R2 "\" 0 listed_find_separator
+    StrCpy $R0 $R0 $R1
+    ClearErrors
+    RMDir "$INSTDIR\$R0"
+    IfErrors listed_done listed_climb
+
+  listed_done:
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; Deletes every file the installed manifest lists. share\katana\installed.manifest.json is the
+; signed manifest of the version the updater last installed (docs/update.md): it names every
+; file that version has, the ones this installer did not put down included. Absent on a copy
+; that has never been updated, and then the installer's own list is all there is.
+;
+; JSON is read as the bytes it is, with a state machine, because NSIS has no parser and a line
+; can be longer than its strings. It looks for the member "path":" , which in a manifest is the
+; name of one file, and reads up to the closing quote. The producer escapes nothing in a path
+; (printable ASCII, none of \ " : * ? < > |, paths.hpp), so a byte outside that set, or a
+; path longer than 240 characters, marks the entry as one this will not touch.
+Function un.DeleteManifestFiles
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+
+  ClearErrors
+  FileOpen $0 "$INSTDIR\share\katana\installed.manifest.json" r
+  IfErrors manifest_done
+
+  ; $2: how many characters of  "path":"  have matched; 8 means inside the value.
+  StrCpy $2 0
+  manifest_next_byte:
+    FileReadByte $0 $1
+    IfErrors manifest_close
+    StrCmp $2 8 manifest_in_path
+    IntFmt $4 "%c" $1
+    StrCpy $5 '"path":"' 1 $2
+    StrCmpS $4 $5 manifest_matched
+    StrCpy $2 0
+    StrCmp $1 34 0 manifest_next_byte
+    StrCpy $2 1
+    Goto manifest_next_byte
+  manifest_matched:
+    IntOp $2 $2 + 1
+    StrCmp $2 8 0 manifest_next_byte
+    StrCpy $3 ""
+    StrCpy $6 0
+    Goto manifest_next_byte
+
+  manifest_in_path:
+    StrCmp $1 34 manifest_path_end
+    StrCmp $6 1 manifest_next_byte
+    IntCmp $1 32 manifest_character_ok manifest_bad_byte manifest_character_ok
+    manifest_character_ok:
+    IntCmp $1 126 manifest_character_ok_too manifest_character_ok_too manifest_bad_byte
+    manifest_character_ok_too:
+    StrCmp $1 92 manifest_bad_byte
+    StrCmp $1 58 manifest_bad_byte
+    StrCmp $1 42 manifest_bad_byte
+    StrCmp $1 63 manifest_bad_byte
+    StrCmp $1 60 manifest_bad_byte
+    StrCmp $1 62 manifest_bad_byte
+    StrCmp $1 124 manifest_bad_byte
+    ; 239 characters or fewer so far leaves room for this one; a 241st is refused.
+    StrLen $5 $3
+    IntCmp $5 239 0 0 manifest_bad_byte
+    StrCmp $1 47 0 manifest_append
+    StrCpy $3 "$3\"
+    Goto manifest_next_byte
+    manifest_append:
+    IntFmt $4 "%c" $1
+    StrCpy $3 "$3$4"
+    Goto manifest_next_byte
+  manifest_bad_byte:
+    StrCpy $6 1
+    Goto manifest_next_byte
+
+  manifest_path_end:
+    StrCpy $2 0
+    StrCmp $6 1 manifest_next_byte
+    StrCmp $3 "" manifest_next_byte
+    Push $3
+    Call un.DeleteListedFile
+    Goto manifest_next_byte
+
+  manifest_close:
+    FileClose $0
+  manifest_done:
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Removes what the updater leaves outside the install folder: the files it downloaded and
+; the copies of its helper it ran. Not state.json, the person's choices about updating
+; (automatic check, skipped version), which are settings like the ones in the registry that
+; are kept too. Whatever is in the folder, a download or a copy of the helper, is the
+; updater's, so everything else in it goes, recursively.
+Function un.RemoveUpdateState
+  Push $0
+  Push $1
+  FindFirst $0 $1 "${KATANA_UPDATE_STATE}\*.*"
+  state_next:
+    StrCmp $1 "" state_done
+    StrCmp $1 "." state_skip
+    StrCmp $1 ".." state_skip
+    StrCmp $1 "state.json" state_skip
+    IfFileExists "${KATANA_UPDATE_STATE}\$1\*.*" 0 state_file
+      RMDir /r "${KATANA_UPDATE_STATE}\$1"
+      Goto state_skip
+    state_file:
+      Delete "${KATANA_UPDATE_STATE}\$1"
+    state_skip:
+    FindNext $0 $1
+    Goto state_next
+  state_done:
+  FindClose $0
+  ; The folders above, if that left them empty.
+  RMDir "${KATANA_UPDATE_STATE}"
+  RMDir "$LOCALAPPDATA\Katana"
+  Pop $1
+  Pop $0
+FunctionEnd
+
+Section "Uninstall"
+  ; Everything below is relative to the folder the uninstaller was started for; without it
+  ; "$INSTDIR\.update" would name a folder at the top of a drive.
+  StrCmp $INSTDIR "" 0 uninstall_folder_known
+    Abort "Katana's folder is not known, so nothing was removed."
+  uninstall_folder_known:
+
+  ; The Start menu folder, before the registry that names it goes.
+  !insertmacro MUI_STARTMENU_GETFOLDER Application $MUI_TEMP
+  ReadRegStr $START_MENU HKCU "${KATANA_UNINSTALL_KEY}" "StartMenu"
+  StrCmp $MUI_TEMP "" 0 +2
+    StrCpy $MUI_TEMP "$START_MENU"
+
+@CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS@
+
+  ; The files this installer put down (CPack's list)...
+@CPACK_NSIS_DELETE_FILES@
+
+  ; ...the files an update added or replaced (the installed manifest's list)...
+  Call un.DeleteManifestFiles
+
+  ; ...the updater's own records and its working folder. The files in .update are its
+  ; journals and the old and new copies of files in the middle of a swap: nothing of the
+  ; person's, and not worth keeping once the program they belong to is gone.
+  Delete "$INSTDIR\share\katana\installed.json"
+  Delete "$INSTDIR\share\katana\installed.manifest.json"
+  Delete "$INSTDIR\share\katana\installed.manifest.json.sig"
+  RMDir /r "$INSTDIR\.update"
+  Call un.RemoveUpdateState
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\RunOnce" "KatanaUpdateRecover"
+
+  ; Folders, now that they can be empty. RMDir without /r removes an empty folder and no other.
+@CPACK_NSIS_DELETE_DIRECTORIES@
+
+  ; The shortcuts, in the folder the installer made. If it made none (the person chose not to
+  ; have any) there is no folder to name, and the clean-up below, which removes empty folders
+  ; from that one upwards, would start at the Start menu's own.
+  StrCmp $MUI_TEMP "" startMenuDeleteLoopDone
+  Delete "$SMPROGRAMS\$MUI_TEMP\Uninstall.lnk"
+@CPACK_NSIS_DELETE_ICONS@
+@CPACK_NSIS_DELETE_ICONS_EXTRA@
+  StrCpy $MUI_TEMP "$SMPROGRAMS\$MUI_TEMP"
+  startMenuDeleteLoop:
+    ClearErrors
+    RMDir $MUI_TEMP
+    GetFullPathName $MUI_TEMP "$MUI_TEMP\.."
+    IfErrors startMenuDeleteLoopDone
+    StrCmp "$MUI_TEMP" "$SMPROGRAMS" startMenuDeleteLoopDone startMenuDeleteLoop
+  startMenuDeleteLoopDone:
+
+  ; The uninstaller itself, the entry in Settings > Apps, the folder (only if it is empty:
+  ; a file the person put in it stays, and so does the folder), and the rest of the registry.
+  ; The settings under HKCU\Software\Katana are the program's and are kept.
+  Delete "$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"
+  DeleteRegKey HKCU "${KATANA_UNINSTALL_KEY}"
+  RMDir "$INSTDIR"
+  DeleteRegKey HKCU "${KATANA_PRODUCT_KEY}"
+  DeleteRegKey /ifempty HKCU "Software\@CPACK_PACKAGE_VENDOR@"
+SectionEnd
+
+;--------------------------------
+; Installer start
+
+Function .onInit
+  ; Per user and nothing else: the Start menu and the registry below are the current user's.
+  SetShellVarContext current
+
+  ; /D=C:\Folder\ leaves the backslash on; the folder is recorded without it.
+  StrCpy $0 "$INSTDIR" 1 -1
+  StrCmp $0 "\" 0 +2
+    StrCpy $INSTDIR "$INSTDIR" -1
+
+  !if "@CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL@" == "ON"
+  ; A copy of Katana already installed is uninstalled first, which is also the way to repair
+  ; one: the files, the records and anything an update left are all removed, then the new
+  ; ones are put down. A silent run does so without asking.
+  ReadRegStr $0 HKCU "${KATANA_UNINSTALL_KEY}" "UninstallString"
+  StrCmp $0 "" onInitDone
+
+  ; UninstallString is quoted; the path is wanted without the quotes.
+  StrCpy $2 $0 1 0
+  StrCmp $2 "$\"" 0 +2
+  StrCpy $0 $0 "" 1
+  StrCpy $2 $0 1 -1
+  StrCmp $2 "$\"" 0 +2
+  StrCpy $0 $0 -1
+
+  ; An entry whose uninstaller is no longer there is no installed copy: the folder was deleted
+  ; by hand, which is easy to do in one's own profile, and the entry in Settings > Apps stayed
+  ; behind. There is nothing to ask about and nothing to run, and trying to run it would fail
+  ; and stop this install, every time, and a silent one with no way round it. The install goes
+  ; ahead and writes the entry anew.
+  IfFileExists "$0" 0 onInitDone
+
+  ReadRegStr $1 HKCU "${KATANA_UNINSTALL_KEY}" "DisplayName"
+  MessageBox MB_YESNOCANCEL|MB_ICONEXCLAMATION \
+  "$1 is already installed.$\r$\n$\r$\nDo you want to uninstall the old version before installing the new one?" \
+  /SD IDYES IDYES onInitUninstall IDNO onInitDone
+  Abort
+
+  onInitUninstall:
+  ClearErrors
+  StrLen $2 "\@CPACK_NSIS_UNINSTALL_NAME@.exe"
+  StrCpy $3 $0 -$2
+  ; _?= runs the uninstaller where it is, not from a copy, so that this waits for it.
+  ExecWait '"$0" /S _?=$3'
+
+  IfErrors onInitUninstallFailed onInitDone
+  onInitUninstallFailed:
+  MessageBox MB_OK|MB_ICONSTOP "Uninstall failed." /SD IDOK
+  Abort
+
+  onInitDone:
+  !endif
+FunctionEnd
