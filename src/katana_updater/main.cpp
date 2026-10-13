@@ -8,6 +8,13 @@
 // program that imports only the operating system's DLLs (src/katana_updater/CMakeLists.txt;
 // the tests check the import table and run a copy of it with no toolchain on PATH).
 //
+// NO ELEVATION, ANYWHERE. Nothing here asks for administrator rights and no step needs them:
+// the installer is per-user (HKCU, a folder the person owns), an archive install is where the
+// person unpacked it, and an install that cannot be written as it stands is refused
+// ("root_not_writable"), never retried with more rights. (The file name holds "update", which
+// Windows' installer detection answers with an elevation prompt - for a 32-bit program that
+// carries no manifest. Katana is built for 64-bit targets only, so none appears.)
+//
 // COMMAND LINES (the arguments arrive as UTF-8, read with update::utf8Arguments and never from
 // argv, which on Windows is the ANSI code page's version of them: this is the program that is
 // always started with paths under a user profile, whose name may hold a letter that code page
@@ -23,8 +30,10 @@
 //       a person runs it by hand when the install no longer starts). R may be relative here
 //       (a person typed it) and must be a folder.
 //   katana_updater --selftest
-//       proves this binary starts, links and can verify an Ed25519 signature, prints what it
-//       found and exits 0 (below). The engine runs it on the copy before the window closes.
+//       proves this binary starts, links and can verify an Ed25519 signature: it checks a
+//       published known-answer vector (below), prints what it found with its version, and exits
+//       0 - or 21, naming each thing that is wrong. The engine runs it on the copy before the
+//       window closes.
 //   katana_updater --version
 //       one line: the version and the protocol (apply.hpp, kApplierProtocol).
 //   katana_updater --help

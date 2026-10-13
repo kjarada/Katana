@@ -1697,6 +1697,15 @@ std::unique_ptr<World> crashedMidCommit(const std::string& label, const std::fun
     return nullptr;
 }
 
+// A tree that is truly half of each: the commit moves data first and programs last (apply.hpp,
+// step 5), so there is a stretch in which the readme is the new version's and katana.exe still
+// the old one's.
+bool isHalfSwapped(World& world)
+{
+    return readText(world.root / "share" / "katana" / "readme.txt") == world.v2.find("share/katana/readme.txt")->content &&
+           readText(world.root / "bin" / "katana.exe") == world.v1.find("bin/katana.exe")->content;
+}
+
 } // namespace
 
 TEST(HelperSwap, ASignedUpdateIsAppliedByTheProgramAndTheTreeIsTheNewVersionsWithAHostileEnvironment)
@@ -2108,7 +2117,7 @@ TEST(HelperSwap, ACrashInTheMiddleOfTheCommitIsPutRightByRecoverAndLeavesOnlyThe
     REQUIRE_CAN_SIGN();
     SpawnResult crashed;
     std::uint64_t at = 0;
-    const std::unique_ptr<World> world = crashedMidCommit("swap-crash", [](World&) { return true; }, &crashed, &at);
+    const std::unique_ptr<World> world = crashedMidCommit("swap-crash", isHalfSwapped, &crashed, &at);
     ASSERT_TRUE(world != nullptr);
     SCOPED_TRACE("crashed before change " + std::to_string(at));
     EXPECT_TRUE(contains(crashed.output, "simulated crash before change " + std::to_string(at)));
@@ -2162,7 +2171,7 @@ TEST(HelperSwap, ACrashInTheMiddleOfTheCommitIsPutRightByRecoverAndLeavesOnlyThe
 TEST(HelperSwap, RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState)
 {
     REQUIRE_CAN_SIGN();
-    const std::unique_ptr<World> world = crashedMidCommit("swap-headless-recover", [](World&) { return true; });
+    const std::unique_ptr<World> world = crashedMidCommit("swap-headless-recover", isHalfSwapped);
     ASSERT_TRUE(world != nullptr);
     const std::string tx(kTransaction);
     const std::set<std::string> before = namesIn(world->state);
@@ -2201,7 +2210,7 @@ TEST(HelperSwap, RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryL
 TEST(HelperSwap, ACrashInsideRecoveryLeavesAStateThatTheNextRecoverFinishes)
 {
     REQUIRE_CAN_SIGN();
-    const std::unique_ptr<World> world = crashedMidCommit("swap-recover-crash", [](World&) { return true; });
+    const std::unique_ptr<World> world = crashedMidCommit("swap-recover-crash", isHalfSwapped);
     ASSERT_TRUE(world != nullptr);
     const std::string root = toUtf8(world->root.native());
 

@@ -89,6 +89,12 @@ endif()
 # for its health check and its relaunch (updater_stub.cpp). test_helper.cpp is part of
 # katana_update_tests, so the three are built before it. The stub is static like the helper, so
 # that it runs from an install with no toolchain on PATH. Never installed.
+#
+# The stub is a REAL program because a test must never start a file that is not one: Windows
+# answers a text file named .exe with a message box somebody has to click. Where a release's own
+# katana is such a file (the T3 fixtures'), the test helper is told to start the stub in its place
+# (--stand-in, src/katana_updater/main.cpp). And the test helper has no way to the machine's own
+# registry keys: its RunOnce entry goes under a key of the test's own, or nowhere.
 if(WIN32 AND TARGET katana_updater_test)
     add_executable(katana_updater_stub updater_stub.cpp)
     katana_target_defaults(katana_updater_stub)
