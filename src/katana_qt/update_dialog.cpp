@@ -39,8 +39,11 @@ constexpr int kProgressSteps = 1000;
 // could not do (include/katana/update/check.hpp), what the transport under it
 // and under the download refused (feed.hpp, fetchFailureReason), why a
 // download or the helper's preflight stopped (stage.hpp) and how an apply ended
-// (apply.hpp, ApplyResult::reason), with the verbs' own two (update_verbs.hpp:
-// no_transport, no_store). Each stands after a colon and before a full stop.
+// (apply.hpp, ApplyResult::reason), with the verbs' own (update_verbs.hpp:
+// no_transport, no_store, and the two refusals of a copy that may not install
+// here and now, platform and elevated). Each stands after a colon and before
+// a full stop, and where there is something a person can do about it, says
+// what.
 struct ReasonWords {
     const char* token;
     const char* words;
@@ -74,6 +77,15 @@ constexpr ReasonWords kReasonWords[] = {
     {"blocked_before", "that version could not be installed here before"},
     {"no_transport", "this build has no network access"},
     {"no_store", "this session has no credential store"},
+    // A copy that may not install: where this version installs nothing (it is
+    // written for Windows; the download, the apply and the helper refuse
+    // alike), and a Katana started as administrator, whose helper would run
+    // with those rights from a folder ordinary programs can write
+    // (update/process.hpp, processIsElevated).
+    {"platform", "this copy of Katana cannot install an update on this kind of computer; the "
+                 "release notes say where to download it"},
+    {"elevated", "Katana was started as administrator; start it the ordinary way, not as "
+                 "administrator, and update again - the download is kept"},
     // The transport, under a check and under a download.
     {"bad_range", "the release server sent another part of the download than was asked for"},
     {"bad_redirect", "the release server sent the request on to an address that cannot be used"},
@@ -95,7 +107,12 @@ constexpr ReasonWords kReasonWords[] = {
     {"helper_failed", "the update helper did not pass its own test"},
     // An apply.
     {"locked", "another update was already running"},
-    {"interrupted_update", "an earlier update was interrupted and could not be put back"},
+    // An earlier update of this install is still open: one a crash
+    // interrupted that could not be put back, or one whose helper died while
+    // the new version was proving that it starts - installed, and neither
+    // confirmed nor put back yet, which a start of the window or the next
+    // logon settles (update/recover.hpp).
+    {"interrupted_update", "an earlier update is not settled yet"},
     {"invalid_request", "the update was started with a request it could not read"},
     {"install_record", "the install record could not be read"},
     {"staged_manifest", "the downloaded update is missing or not signed by Katana's release key"},
@@ -147,6 +164,30 @@ QString with(const QString& text, const QString& sentence)
         return text + sentence;
     }
     return text + QLatin1Char(' ') + sentence;
+}
+
+// What is said of a release that is set aside because it did not start here:
+// that it is not the end of updates, and where the way back is. One start too
+// slow for the health check sets a sound release aside, so the person must be
+// told how to have it offered again: Settings > Updates has the button
+// (settingsUpdateUnblock, which runs UPDATE BLOCKED CLEAR).
+QString setAsideWords()
+{
+    return QStringLiteral("A later release will be offered, and Settings > Updates offers this "
+                          "one again.");
+}
+
+// Whether the apply this view tells of left its release set aside. The helper
+// puts a release on the state's blocked list when it was installed, did not
+// prove that it starts and was put back - a rollback for either of the health
+// check's two reasons (src/katana_update/apply.cpp, Applier::fail) - and for
+// no other ending: a swap that failed for want of disk space is offered again
+// as it was.
+bool wasSetAside(const UpdateView& view)
+{
+    return view.lastStatus == QLatin1String("rolled_back") &&
+           (view.reason == QLatin1String("health_exit") ||
+            view.reason == QLatin1String("health_timeout"));
 }
 
 // The buttons a state shows; the others are hidden.
@@ -395,7 +436,7 @@ QString updateDetailText(const UpdateView& view)
                    : QStringLiteral("Last checked %1.").arg(view.lastChecked);
     case UpdateDialogState::NotOffered:
         return view.reason == QLatin1String("blocked_before")
-                   ? QStringLiteral("A later release will be offered.")
+                   ? setAsideWords()
                    : QStringLiteral("Settings > Updates offers it again.");
     case UpdateDialogState::Available: {
         QString text = QStringLiteral("%1 (you have %2).")
@@ -435,7 +476,8 @@ QString updateDetailText(const UpdateView& view)
             return with(reason,
                         QStringLiteral("Close Katana and run: %1").arg(view.recoverCommand));
         }
-        return reason;
+        // The release that was put back is not offered again by itself.
+        return wasSetAside(view) ? with(reason, setAsideWords()) : reason;
     }
     case UpdateDialogState::CheckFailed:
         return view.reason == QLatin1String("http_404")
@@ -595,6 +637,49 @@ UpdateQuietAnswer updateQuietAnswer(const UpdateView& shown, const UpdateView& a
     return UpdateQuietAnswer::Nothing;
 }
 
+namespace {
+
+// Whether `word` is the grammar's `expected`, typed in any case.
+bool isWord(const QString& word, const char* expected)
+{
+    return word.compare(QLatin1String(expected), Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
+
+UpdateLineEffect updateEffectOfLine(const UpdateView& shown, const QString& line,
+                                    const QString& reply)
+{
+    // A reply that gives a reason is one that was not carried out.
+    if (!updateReplyValue(reply, "reason").isEmpty()) {
+        return UpdateLineEffect::Nothing;
+    }
+    // The lines read here have three words each: UPDATE SKIP NONE, UPDATE
+    // SKIP <version>, UPDATE BLOCKED CLEAR.
+    const QStringList words = line.simplified().split(QChar::Space, Qt::SkipEmptyParts);
+    if (words.size() != 3 || !isWord(words[0], "UPDATE")) {
+        return UpdateLineEffect::Nothing;
+    }
+    const bool notOffered = shown.state == UpdateDialogState::NotOffered;
+    if (isWord(words[1], "SKIP")) {
+        if (isWord(words[2], "NONE")) {
+            return notOffered && shown.reason == QLatin1String("skipped")
+                       ? UpdateLineEffect::Forgotten
+                       : UpdateLineEffect::Nothing;
+        }
+        return shown.state == UpdateDialogState::Available &&
+                       updateSameVersion(shown.latestVersion, words[2])
+                   ? UpdateLineEffect::Skipped
+                   : UpdateLineEffect::Nothing;
+    }
+    if (isWord(words[1], "BLOCKED") && isWord(words[2], "CLEAR")) {
+        return notOffered && shown.reason == QLatin1String("blocked_before")
+                   ? UpdateLineEffect::Forgotten
+                   : UpdateLineEffect::Nothing;
+    }
+    return UpdateLineEffect::Nothing;
+}
+
 QString updateStagedAfter(const QString& staged, const UpdateView& answer)
 {
     if (answer.state == UpdateDialogState::Current) {
@@ -669,6 +754,44 @@ bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
         return false;
     }
     return katana::update::checkIsDue(state, nowEpoch, jitter);
+}
+
+std::optional<QString>
+updateSkippedOfState(const katana::core::Result<katana::update::UpdateState>& state)
+{
+    if (!state) {
+        return std::nullopt; // nobody can say: never "none"
+    }
+    return QString::fromStdString(state->skippedVersion);
+}
+
+std::optional<bool>
+updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state)
+{
+    if (!state) {
+        return std::nullopt; // nobody can say: never "none"
+    }
+    return !state->blockedSequences.empty();
+}
+
+bool updateStartMayConfirm(const UpdateConfirmFacts& facts)
+{
+    if (!facts.appliesHere || facts.headless || !facts.keepsState ||
+        facts.kind == katana::update::InstallKind::Development) {
+        return false;
+    }
+    // As versions: "0.3" and "0.3.0" are one release (update/version.hpp).
+    // Equal, and not "not above": what `installed` can be is the reader's
+    // rule (update_dialog.hpp), and this one stands without it.
+    return facts.hasInstalledRecord && facts.installed == facts.program;
+}
+
+bool updateFailureIsBoxed(const QStringList& stepKinds)
+{
+    // The two kinds of step that run a line in a window that goes on to its
+    // event loop (main(): an --enter is kept as a --command).
+    return !stepKinds.contains(QStringLiteral("--command")) &&
+           !stepKinds.contains(QStringLiteral("--run-line"));
 }
 
 std::vector<std::string>

@@ -155,6 +155,29 @@ add_test(NAME qt_a_headless_run_saves_no_access_token_headless
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_settings_no_token_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
+# Settings > Updates has the button that offers again a release that was put
+# back (the hardening pass's ruling H5, 2026-10-14: object name
+# settingsUpdateUnblock, text "Offer the version that was put back again", the
+# line UPDATE BLOCKED CLEAR through the path the skipped version's button
+# uses). In the real window: the button is there by its name with those words;
+# pressed, the window's one executor is handed exactly that line - the command
+# log, reported whole, echoes it and no other UPDATE line - and the status
+# shows what the verbs answered. A headless run keeps no update state, so
+# nobody says whether a release is set aside and the button is on; and the
+# verbs refuse for this surface every line that reads or changes what Katana
+# keeps for one user, reason=headless (the same ruling: "HeadlessWindow:
+# Unsupported, reason=headless"). So nothing is cleared, and nothing is
+# written: this run is one of those the "no per-user state" check below holds.
+add_test(NAME qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless
+    COMMAND ${CMAKE_COMMAND}
+        "-DAPP=$<TARGET_FILE:katana>"
+        "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+        "-DDRIVE=@fileSettings|settingsPages=Updates|?settingsUpdateUnblock|!settingsUpdateUnblock|?settingsStatus|?commandLog"
+        "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+settingsUpdateUnblock: Offer the version that was put back again[\r\n].*settingsStatus: > UPDATE BLOCKED CLEAR Refused: [^\r\n]*reason=headless[^\r\n]*[\r\n]+commandLog: [^\r\n]*> UPDATE BLOCKED CLEAR"
+        "-DFORBID=> UPDATE (CHECK|STATUS|DOWNLOAD|APPLY|SKIP|SET|TOKEN)"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_settings_unblock_headless.png"
+        -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
 # --update-health TX: what the update helper runs to learn whether the version
 # it has just put in place starts (include/katana/update/apply.hpp, step 7:
 # "it writes the marker after its first idle turn and exits"). Three tests in
@@ -235,6 +258,7 @@ set_tests_properties(
     qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless
     qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless
     qt_a_headless_run_saves_no_access_token_headless
+    qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless
     PROPERTIES ENVIRONMENT_MODIFICATION "${_update_headless_environment}"
     FIXTURES_REQUIRED update_headless_state_absent
     TIMEOUT 180)

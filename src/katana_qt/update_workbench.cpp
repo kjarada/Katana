@@ -28,6 +28,8 @@
 #include "katana/update/check.hpp"
 #include "katana/update/fsops.hpp"
 #include "katana/update/install.hpp"
+#include "katana/update/recover.hpp"
+#include "katana/update/registry.hpp"
 #include "katana/update/stage.hpp"
 #include "katana/update/state.hpp"
 #include "katana/update/version.hpp"
@@ -75,6 +77,15 @@ constexpr std::chrono::minutes kDueProbe{60};
 constexpr std::chrono::milliseconds kProgressTick{250};
 // How often a close that waits for a job looks again.
 constexpr std::chrono::milliseconds kJobPoll{250};
+// A start that would confirm an update and finds the update lock held asks
+// again this often, this many times, and then leaves it (confirmStart). The
+// lock is held by a helper that is alive, and the longest it holds it over an
+// update it has installed is its wait for the new version's health run - a
+// minute (update/apply.hpp, ApplyTimings::healthWait), which twelve times five
+// seconds is; after that the helper has settled the update itself. The two
+// numbers are the hardening pass's specification of 2026-10-14 for this call.
+constexpr std::chrono::seconds kConfirmRetry{5};
+constexpr int kConfirmRetries = 12;
 // The install's own record of its recoveries, R/.update/recovery.log
 // (update/recover.hpp, "WHAT RECOVERY WRITES, AND WHERE").
 constexpr std::string_view kRecoveryLogName = "recovery.log";
@@ -145,26 +156,9 @@ bool stageIsThere(const std::filesystem::path& stateDirectory, std::uint64_t seq
         failed);
 }
 
-// The helper's copy that UPDATE APPLY CONFIRM made for a request nobody will
-// start (U/run-<tx>, update/stage.hpp, preflight): listed for the sweep the
-// next start makes (update/state.hpp, cleanup.list). It is a program's size,
-// and one would otherwise stay behind for every press that was taken back.
-// Empty when it is listed; else why it could not be.
-QString discardPrepared(const katana::update::ApplyRequest& request)
-{
-    if (request.stateDirectory.empty() ||
-        !katana::update::isValidTransactionId(request.transaction)) {
-        return {};
-    }
-    const std::unique_ptr<katana::update::FsOps> files = katana::update::makeSystemFsOps();
-    const katana::core::Status listed = katana::update::appendCleanup(
-        request.stateDirectory,
-        katana::update::runPath(request.stateDirectory, request.transaction), *files);
-    return listed ? QString() : qs(listed.error().message);
-}
-
-// Lists for the same sweep the helper's copy of each update of THIS install
-// that needed a recovery and is over. `katana_updater --recover` writes
+// Lists for the window's sweep (update/state.hpp, cleanup.list) the helper's
+// copy of each update of THIS install that needed a recovery and is over.
+// `katana_updater --recover` writes
 // nothing per user, whoever started it (update/recover.hpp), so nothing in the
 // update folder names that copy: unlisted, one helper's size would stay there
 // for every update a crash interrupted. Which transactions those are is
@@ -284,10 +278,10 @@ UpdateWorkbench::~UpdateWorkbench()
     // A request that was prepared and is still here was never started: the
     // person closed the window themselves while the close for it waited, and
     // main() was handed nothing. The helper's copy goes to the next start's
-    // sweep, as after Later - without a word, since the log is the window's
-    // and the window is going.
+    // sweep, as after Later (dropPrepared) - without a word, since the log is
+    // the window's and the window is going.
     if (pendingApply_.has_value()) {
-        (void)discardPrepared(*pendingApply_);
+        (void)katana::app::abandonApply(*pendingApply_);
     }
     // The dialog is the window's child only so that it floats over it; it
     // calls back into this object, so it goes with it.
@@ -463,24 +457,29 @@ void UpdateWorkbench::runNow(const QString& line)
         // next use, it reads the store as the line left it.
         context_.reset();
     }
-    // A reply that gives a reason is one that was not carried out.
-    if (action == QLatin1String("SKIP") && words.size() == 3 &&
-        updateReplyValue(qs(reply->text), "reason").isEmpty()) {
-        if (words[2].compare(QLatin1String("NONE"), Qt::CaseInsensitive) == 0) {
-            if (view_.state == UpdateDialogState::NotOffered &&
-                view_.reason == QLatin1String("skipped")) {
-                show(viewOf(UpdateDialogState::Idle));
-            }
-        } else if (view_.state == UpdateDialogState::Available &&
-                   updateSameVersion(view_.latestVersion, words[2])) {
-            // What was offered is not any more: neither the dialog nor a
-            // download typed next goes on about it.
-            offer_.reset();
-            UpdateView view = viewOf(UpdateDialogState::NotOffered);
-            view.latestVersion = view_.latestVersion;
-            view.reason = QStringLiteral("skipped");
-            show(std::move(view));
-        }
+    // What the line, carried out, does to what the dialog shows is
+    // updateEffectOfLine's (update_dialog.hpp, "THE DECISIONS").
+    switch (updateEffectOfLine(view_, line, qs(reply->text))) {
+    case UpdateLineEffect::Forgotten:
+        // UPDATE SKIP NONE or UPDATE BLOCKED CLEAR: the release the dialog
+        // says "is not offered" is set aside no longer, and a dialog that
+        // went on saying so would say what is not so. It goes back to knowing
+        // nothing, and the next check - Help > Check for Updates runs one -
+        // offers the release.
+        show(viewOf(UpdateDialogState::Idle));
+        break;
+    case UpdateLineEffect::Skipped: {
+        // What was offered is not any more: neither the dialog nor a
+        // download typed next goes on about it.
+        offer_.reset();
+        UpdateView view = viewOf(UpdateDialogState::NotOffered);
+        view.latestVersion = view_.latestVersion;
+        view.reason = QStringLiteral("skipped");
+        show(std::move(view));
+        break;
+    }
+    case UpdateLineEffect::Nothing:
+        break;
     }
 }
 
@@ -910,11 +909,16 @@ void UpdateWorkbench::later()
 
 void UpdateWorkbench::dropPrepared(const katana::update::ApplyRequest& request)
 {
-    if (const QString failed = discardPrepared(request); !failed.isEmpty()) {
+    // The one way a prepared apply is given up, which the session and
+    // katana_cli take too (app::abandonApply, update_verbs.hpp): the helper's
+    // copy U/run-<tx> goes on the list the next start sweeps. It is a
+    // program's size, and one would otherwise stay behind for every press
+    // that was taken back.
+    if (const katana::core::Status listed = katana::app::abandonApply(request); !listed) {
         // A leftover only: said, not an error of the session.
         log(QStringLiteral("Update: the helper's copy made for the update that was not started "
                            "could not be listed for removal (%1).")
-                .arg(failed));
+                .arg(qs(listed.error().message)));
     }
 }
 
@@ -1014,8 +1018,72 @@ void UpdateWorkbench::start()
     restoreStaged();
     showLastResult();
     dueTimer_->start();
-    // On the first idle turn, so that the window is up before anything is asked.
-    QTimer::singleShot(0, scope_.get(), [this] { checkIfDue(); });
+    // On the first idle turn, so that the window is up before anything is
+    // asked - and because a window that has come idle is what an update's
+    // health run exists to show: that first, then the check.
+    QTimer::singleShot(0, scope_.get(), [this] {
+        confirmStart();
+        checkIfDue();
+    });
+}
+
+void UpdateWorkbench::confirmStart()
+{
+    // An update whose helper died while it waited for the new version to
+    // prove that it starts is installed, and nothing says that it works
+    // (update/recover.hpp, "AN UPDATE THAT IS INSTALLED AND WAS NEVER SAID TO
+    // START"). This window has just proved it - if it IS that version, which
+    // updateStartMayConfirm decides. Nothing in a headless run: the
+    // confirmation writes per-user state.
+    if (headless()) {
+        return;
+    }
+    const katana::app::UpdateContext& made = context();
+    if (made.install.root.empty()) {
+        return;
+    }
+    // The install's records as they are NOW, not as the context read them
+    // when the window was built: a window of the old files that was started
+    // while an update was swapping them may have read the old record, which
+    // names the version it is. By the time the update lock can be had the
+    // record names the new one - a version above that window's own - and it
+    // confirms nothing.
+    const std::unique_ptr<katana::update::RegistryOps> registry =
+        katana::update::makeSystemRegistryOps();
+    const Result<katana::update::Install> install =
+        katana::update::readInstall(made.install.root, *registry);
+    const Result<katana::update::Version> program = katana::update::programVersion();
+    if (!install || !program) {
+        // Records that do not read prove nothing; the check says why they do
+        // not, when it is asked.
+        return;
+    }
+    UpdateConfirmFacts facts;
+    facts.appliesHere = kAppliesHere;
+    facts.headless = false;
+    facts.keepsState = !made.stateDirectory.empty();
+    facts.kind = install->kind;
+    facts.hasInstalledRecord = install->hasInstalledRecord;
+    // The reader's version: the higher of the record's and this program's
+    // own, so it is not this program's only when the record names a version
+    // above it - the window of the old files (updateStartMayConfirm).
+    facts.installed = install->version;
+    facts.program = *program;
+    if (!updateStartMayConfirm(facts)) {
+        return;
+    }
+    // With nothing to settle - every start but the one after such a death -
+    // this is a listing of one folder, and no lock is asked for.
+    if (katana::update::confirmStarted(made.install.root, made.stateDirectory) !=
+        katana::update::Confirmed::Busy) {
+        return;
+    }
+    // A helper is alive: its own health run is still being waited for, and it
+    // settles the update itself. Asked again, in case it dies instead.
+    if (confirmRetries_ < kConfirmRetries) {
+        ++confirmRetries_;
+        QTimer::singleShot(kConfirmRetry, scope_.get(), [this] { confirmStart(); });
+    }
 }
 
 void UpdateWorkbench::checkIfDue()
@@ -1145,10 +1213,17 @@ SettingsUpdates UpdateWorkbench::settingsUpdates()
                 katana::update::readState(stateDirectory);
             return state ? state->automatic : katana::update::UpdateState{}.automatic;
         };
+        // What each says of a state file that does not read - nothing, so
+        // that the page's button stays on and the verb says why it refuses -
+        // is updateSkippedOfState's and updatePutBackOfState's.
         updates.skippedVersion = [stateDirectory] {
-            const Result<katana::update::UpdateState> state =
-                katana::update::readState(stateDirectory);
-            return state ? qs(state->skippedVersion) : QString();
+            return updateSkippedOfState(katana::update::readState(stateDirectory));
+        };
+        // The releases that were put back here, as the engine's own file has
+        // them (UPDATE STATUS does not say them): any at all is what the page
+        // tells of, and what its button - UPDATE BLOCKED CLEAR - empties.
+        updates.putBack = [stateDirectory] {
+            return updatePutBackOfState(katana::update::readState(stateDirectory));
         };
     }
     updates.credentials = made.credentials;

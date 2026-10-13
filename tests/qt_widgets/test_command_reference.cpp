@@ -1,8 +1,9 @@
 // Help > Command Reference and Help > Keyboard Shortcuts
 // (src/katana_qt/command_reference_dialog.hpp, keyboard_shortcuts_dialog.hpp):
 // how a help text is read into entries, that the reference holds the
-// interpreter's, the sheets', the utilities', the online and the window's
-// verbs and the tools, and the two dialogs driven by their object names.
+// interpreter's, the sheets', the utilities', the online, the update and the
+// window's verbs and the tools, and the two dialogs driven by their object
+// names.
 //
 // The reference is built from the verbs' own help texts, so what is asserted
 // is that a command a person looks for is found, under the section it
@@ -26,6 +27,7 @@
 #include "command_reference_dialog.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "keyboard_shortcuts_dialog.hpp"
+#include "update_verbs.hpp"
 
 namespace {
 
@@ -118,7 +120,7 @@ TEST(CommandReference, TheReferenceHoldsEveryFamilyOfVerbsAndTheTools)
 {
     const auto sections = katana::qt::commandReferenceSections();
     for (const char* name : {"Commands", "Sheets", "Subsurface utilities", "Online data", "Window",
-                             "Survey field files", "Draw tools", "Modify tools"}) {
+                             "Survey field files", "Updates", "Draw tools", "Modify tools"}) {
         EXPECT_NE(sectionNamed(sections, name), nullptr) << name;
     }
     // SURVEY READ and IMPORT are the session's, and the window runs them too.
@@ -161,16 +163,69 @@ TEST(CommandReference, TheReferenceHoldsEveryFamilyOfVerbsAndTheTools)
     EXPECT_TRUE(line->text.contains("id draw.line"));
 }
 
+TEST(CommandReference, TheUpdatesSectionIsTheUpdateVerbsOwnHelp)
+{
+    // The UPDATE family is the session's (src/katana_app/update_verbs.hpp),
+    // which keeps its help; the reference shows that text and writes none of
+    // its own. The lines looked for are the grammar comment at the top of
+    // that header, and UPDATE BLOCKED CLEAR is the hardening pass's ruling H5
+    // (2026-10-14: "HELP UPDATE (updateHelpText) and the header's grammar
+    // comment carry it").
+    const auto sections = katana::qt::commandReferenceSections();
+    const ReferenceSection* updates = sectionNamed(sections, "Updates");
+    ASSERT_NE(updates, nullptr);
+    ASSERT_FALSE(updates->entries.empty());
+    // Found under the label the help gives the family, and a double-click
+    // puts the verb on the command line.
+    const ReferenceEntry* update = entryTitled(*updates, "Update");
+    ASSERT_NE(update, nullptr);
+    EXPECT_EQ(update->verb, "UPDATE");
+
+    QStringList shown;
+    for (const ReferenceEntry& entry : updates->entries) {
+        shown << entry.text;
+    }
+    const QString section = shown.join('\n');
+    for (const char* line : {"UPDATE CHECK", "UPDATE STATUS", "UPDATE DOWNLOAD CONFIRM",
+                             "UPDATE APPLY CONFIRM", "UPDATE SKIP <version> | UPDATE SKIP NONE",
+                             "UPDATE BLOCKED CLEAR", "UPDATE SET AUTO ON|OFF",
+                             "UPDATE TOKEN STATUS | UPDATE TOKEN CLEAR"}) {
+        EXPECT_TRUE(section.contains(line)) << line;
+    }
+    // Nothing is written twice: every line of the verbs' help is in the
+    // section as the help has it, and the section has no line the help lacks.
+    const QStringList sectionLines = section.split('\n');
+    const QStringList helpLines =
+        QString::fromUtf8(katana::app::updateHelpText()).split('\n', Qt::SkipEmptyParts);
+    // The family has eight lines, and the help says something of each.
+    ASSERT_GE(helpLines.size(), 8);
+    for (const QString& line : helpLines) {
+        EXPECT_TRUE(sectionLines.contains(line)) << line.toStdString();
+    }
+    EXPECT_EQ(sectionLines.size(), helpLines.size());
+}
+
 TEST(CommandReference, TheWindowSectionNamesEveryVerbTheWindowRunsItself)
 {
     // What MainWindow::dispatchLine and runWorkbenchLine take before the
-    // interpreter: the list the typed HELP adds to the interpreter's.
+    // interpreter: the list the typed HELP adds to the interpreter's. UPDATE
+    // is one of them (runWorkbenchLine hands the update workbench every line
+    // whose verb it is, before any other family) and was not named.
     const QString help = katana::qt::windowHelpText();
     for (const char* verb : {"SCRIPT", "IMPORT", "EXPORT", "INFO <file>", "REFS", "COPC",
                              "PLOTSHEETS", "PLOT <file.pdf>", "SNAPSHOT", "GRID", "SNAP", "ONLINE",
-                             "UTILITY", "QUIT", "LABELSTYLE"}) {
+                             "UTILITY", "UPDATE", "QUIT", "LABELSTYLE"}) {
         EXPECT_TRUE(help.contains(verb)) << verb;
     }
+    // It is a row of its own, found by its label, which sends the reader to
+    // the section that has every line's usage.
+    const auto rows = katana::qt::referenceEntries(help);
+    const auto row = std::ranges::find(rows, QString("Update"), &ReferenceEntry::title);
+    ASSERT_NE(row, rows.end());
+    EXPECT_EQ(row->verb, "UPDATE");
+    EXPECT_TRUE(row->text.contains("UPDATE CHECK"));
+    EXPECT_TRUE(row->text.contains("BLOCKED CLEAR"));
+    EXPECT_TRUE(row->text.contains("under Updates")) << row->text.toStdString();
     // ZOOM went to the interpreter with VIEWS (cad/view_verbs.hpp): the
     // window no longer runs it itself, and the interpreter's help says both.
     EXPECT_FALSE(help.contains("ZOOM (Z)"));
@@ -239,6 +294,34 @@ TEST(CommandReferenceDialog, ADoubleClickPutsTheVerbOnTheCommandLine)
     EXPECT_EQ(dialog.copyText(), child<QPlainTextEdit>(dialog, "commandReferenceDetail")->toPlainText());
     child<QPushButton>(dialog, "commandReferenceCopy")->click();
     EXPECT_EQ(QApplication::clipboard()->text(), dialog.copyText());
+}
+
+TEST(CommandReferenceDialog, TheUpdateVerbsAreFoundBySearchingAndPutOnTheCommandLine)
+{
+    QString inserted;
+    CommandReferenceDialog dialog(katana::qt::commandReferenceSections(),
+                                  [&inserted](const QString& verb) { inserted = verb; });
+    // A line of the family, as a person would look for it: the section that
+    // has its usage, and the Window section's row that points there.
+    dialog.setFilter("UPDATE APPLY CONFIRM");
+    const QStringList found = shownTitles(dialog);
+    EXPECT_TRUE(found.contains("Updates/Update")) << found.join(", ").toStdString();
+    EXPECT_TRUE(found.contains("Window/Update")) << found.join(", ").toStdString();
+
+    // The section by its name, its entry chosen: the detail is the verbs'
+    // help from its first line, and a double-click puts the verb on the
+    // command line, to be finished there.
+    ASSERT_TRUE(dialog.showSection("Updates"));
+    auto* tree = child<QTreeWidget>(dialog, "commandReferenceTree");
+    ASSERT_NE(tree->currentItem(), nullptr);
+    ASSERT_NE(tree->currentItem()->parent(), nullptr);
+    EXPECT_EQ(tree->currentItem()->parent()->text(0), "Updates");
+    EXPECT_EQ(tree->currentItem()->text(0), "Update");
+    EXPECT_TRUE(child<QPlainTextEdit>(dialog, "commandReferenceDetail")
+                    ->toPlainText()
+                    .startsWith("Update    UPDATE CHECK"));
+    emit tree->itemDoubleClicked(tree->currentItem(), 0);
+    EXPECT_EQ(inserted, "UPDATE ");
 }
 
 TEST(CommandReferenceDialog, TheSheetsItemOpensTheReferenceAtTheSheetVerbs)

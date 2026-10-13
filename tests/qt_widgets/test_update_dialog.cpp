@@ -27,10 +27,11 @@
 //
 // The lines are the verbs' grammar (src/katana_app/update_verbs.hpp): UPDATE
 // CHECK, UPDATE DOWNLOAD CONFIRM, UPDATE APPLY CONFIRM, UPDATE SKIP <version>,
-// UPDATE SKIP NONE, UPDATE SET AUTO ON|OFF, UPDATE TOKEN CLEAR. The words for a
-// reason token are the dialog's own table, of which the header of
-// update_dialog.cpp says the rule (a row a token of the engine's check.hpp and
-// apply.hpp); the tokens listed here are copied from those two headers.
+// UPDATE SKIP NONE, UPDATE BLOCKED CLEAR, UPDATE SET AUTO ON|OFF, UPDATE TOKEN
+// CLEAR. The words for a reason token are the dialog's own table, of which the
+// header of update_dialog.cpp says the rule (a row a token of the engine's
+// check.hpp and apply.hpp, and of the verbs' header); the tokens listed here
+// are copied from those headers.
 //
 // The numbers: 71 000 000 bytes is the design's "71 MB" and 31 000 000 its
 // "31"; 31 / 71 of the progress bar's thousand steps is 436.6, so 437.
@@ -45,8 +46,15 @@
 // jitter, or never checked, or a last check in the future), the run is not
 // headless and KATANA_UPDATE_DISABLE is not set, and is quiet when it learns
 // nothing; the status bar's button reads "Update <version>" and is hidden
-// until an update is known. The records are written by hand: the design's
-// 0.2.0 and 0.3.0, its sequence 1792312800, its `expires` of
+// until an update is known; a start confirms an update that was never said to
+// start only in a window of the version it installed (the hardening pass's
+// H1, 2026-10-14); a line that empties a list takes back what the dialog said
+// that list set aside, and no other (H5); a state file that does not read is
+// "nobody can say" and never "none" (H5: the verb refuses such a file and
+// says why, which only a button that is on lets a person read); and an update
+// that could not be started is said in a message box only in a window nobody
+// drove (the same pass, for main()). The records are written by hand: the
+// design's 0.2.0 and 0.3.0, its sequence 1792312800, its `expires` of
 // 2027-04-18T08:00:00Z - which is 1 808 035 200 seconds after 1970 (20 926
 // days: 57 years of 365, 14 leap days, 31 + 28 + 31 + 17; and 8 hours).
 //
@@ -75,9 +83,11 @@
 #include <QAbstractButton>
 #include <QCheckBox>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
+#include <QPoint>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -514,14 +524,61 @@ TEST(UpdateDialog, RolledBackSaysWhatWasRestoredAndWhy)
     view.lastStatus = QStringLiteral("rolled_back");
     view.reason = QStringLiteral("health_exit");
     dialog.setView(view);
+    // The design's sentence, and after it - the hardening pass's ruling H5 of
+    // 2026-10-14, "the dialog's sentence for a blocked release says where that
+    // button is" - where the release that was put back is offered again: a
+    // release that did not start is set aside for good otherwise.
     EXPECT_EQ(said(dialog),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored. Reason: "
-                             "the new version did not start."));
+                             "the new version did not start. A later release will be offered, "
+                             "and Settings > Updates offers this one again."));
     EXPECT_EQ(shown(dialog, "updateStateText"),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored."));
     // It is read and closed: nothing here tries the same release again.
     EXPECT_TRUE(shownButtons(dialog).isEmpty())
         << shownButtons(dialog).join(QLatin1Char(' ')).toStdString();
+}
+
+TEST(UpdateDialog, OnlyAReleaseThatWasPutBackForNotStartingIsSaidToBeOfferedAgainInSettings)
+{
+    // Which endings set a release aside is the helper's rule
+    // (src/katana_update/apply.cpp, Applier::fail: "A release that does not
+    // start must not be offered again as it was" - a rollback whose reason is
+    // health_exit or health_timeout, and no other ending). Only there is
+    // there something for Settings > Updates to offer again; said after any
+    // other ending the sentence would send the person to a button that is off.
+    DialogFixture f;
+    UpdateDialog dialog(f.context);
+    const QString again = QStringLiteral("A later release will be offered, and Settings > "
+                                         "Updates offers this one again.");
+    UpdateView view = viewOf(UpdateDialogState::RolledBack);
+    view.lastStatus = QStringLiteral("rolled_back");
+    view.reason = QStringLiteral("health_timeout");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Reason: the new version did not finish starting in time. ") + again);
+
+    // Put back because a file could not be replaced: nothing was set aside.
+    view.reason = QStringLiteral("rename_failed");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Reason: a file was in use and could not be replaced."));
+
+    // The same reasons under the two endings that put nothing back, or not
+    // all of it: no release was set aside by either.
+    for (const char* status : {"refused", "rollback_incomplete"}) {
+        view.lastStatus = QString::fromLatin1(status);
+        view.reason = QStringLiteral("health_exit");
+        dialog.setView(view);
+        EXPECT_FALSE(shown(dialog, "updateDetailText").contains(QStringLiteral("Settings")))
+            << status;
+    }
+    // And with no reason given there is no sentence to hang it on, and none
+    // that says it was the health check.
+    view.lastStatus = QStringLiteral("rolled_back");
+    view.reason.clear();
+    dialog.setView(view);
+    EXPECT_TRUE(shown(dialog, "updateDetailText").isEmpty());
 }
 
 TEST(UpdateDialog, AnApplyThatChangedNothingAndOneThatCouldNotBePutBackAreNotCalledRestored)
@@ -617,11 +674,15 @@ TEST(UpdateDialog, AReleaseThatWasSkippedOrRolledBackHereBeforeIsSaidAndNotOffer
                                            "Settings > Updates offers it again."));
     EXPECT_EQ(shownButtons(dialog), (QStringList{QStringLiteral("updateCheckNow")}));
 
+    // And, since the hardening pass's ruling H5 (2026-10-14), where the way
+    // back is: the sentence ended at "A later release will be offered." while
+    // nothing but deleting the state file by hand offered the release again.
     view.reason = QStringLiteral("blocked_before");
     dialog.setView(view);
     EXPECT_EQ(said(dialog), QStringLiteral("Katana 0.3.0 could not be installed here before, and "
                                            "is not offered again. A later release will be "
-                                           "offered."));
+                                           "offered, and Settings > Updates offers this one "
+                                           "again."));
     EXPECT_EQ(shownButtons(dialog), (QStringList{QStringLiteral("updateCheckNow")}));
 }
 
@@ -875,7 +936,13 @@ TEST(UpdateWords, EveryReasonTheEngineGivesHasWordsOfItsOwn)
     // And the tokens the network engine adds, copied from the comments of its
     // headers (branch upd-t8: check.hpp "Added by check() itself", feed.hpp
     // fetchFailureReason, stage.hpp "The Error of a failure carries a
-    // machine-readable token" and "preflight's"): the last five rows.
+    // machine-readable token" and "preflight's"): the rows from html_page to
+    // helper_failed.
+    //
+    // And the two refusals of a copy that may not install, which the verbs'
+    // header lists for UPDATE APPLY CONFIRM (update_verbs.hpp: "platform" where
+    // this version installs nothing, "elevated" - the hardening pass's ruling
+    // H4 - for a Katana started as administrator): the last row.
     for (const char* token :
          {"offline",          "http_403",        "http_404",         "http_429",
           "bad_signature",    "wrong_product",   "wrong_target",     "malformed",
@@ -893,12 +960,76 @@ TEST(UpdateWords, EveryReasonTheEngineGivesHasWordsOfItsOwn)
           "error",            "staged_corrupt",  "write_failed",     "stage_busy",
           "low_disk_space",   "short_range",     "unverified_manifest", "no_token",
           "payload_mismatch", "helper_missing",  "helper_not_started", "helper_timeout",
-          "helper_failed"}) {
+          "helper_failed",
+          "platform",         "elevated"}) {
         const QString words = katana::qt::updateReasonWords(QString::fromLatin1(token));
         EXPECT_NE(words, QString::fromLatin1(token)) << token;
         EXPECT_TRUE(words.contains(QLatin1Char(' '))) << token << ": " << words.toStdString();
         EXPECT_FALSE(words.endsWith(QLatin1Char('.'))) << token << " ends the sentence itself";
     }
+}
+
+TEST(UpdateWords, ACopyThatMayNotInstallIsToldWhatItCanDoAboutIt)
+{
+    using katana::qt::updateReasonWords;
+    // Started as administrator (the hardening pass's ruling H4: "The sentence
+    // tells the person to start Katana the ordinary way and update again; the
+    // download stays"). Each of the three things is said, in a person's
+    // words, and the token is not.
+    const QString elevated = updateReasonWords(QStringLiteral("elevated"));
+    EXPECT_EQ(elevated,
+              QStringLiteral("Katana was started as administrator; start it the ordinary way, "
+                             "not as administrator, and update again - the download is kept"));
+    for (const char* part : {"start it the ordinary way", "not as administrator", "update again",
+                             "the download is kept"}) {
+        EXPECT_TRUE(elevated.contains(QLatin1String(part))) << part;
+    }
+    EXPECT_FALSE(elevated.contains(QStringLiteral("elevated")));
+
+    // A copy on a platform this version installs nothing on (the update
+    // document's platform table: such a copy is told of a release and sent to
+    // its notes, which is the Available state's sentence for it too).
+    const QString platform = updateReasonWords(QStringLiteral("platform"));
+    EXPECT_EQ(platform,
+              QStringLiteral("this copy of Katana cannot install an update on this kind of "
+                             "computer; the release notes say where to download it"));
+    EXPECT_TRUE(platform.contains(QStringLiteral("the release notes say where to download it")));
+
+    // As the dialog says it: how the last apply ended, when the helper
+    // refused it for the platform. Of the two, only `platform` is among an
+    // apply's reasons (include/katana/update/apply.hpp, ApplyResult::reason).
+    // `elevated` is the verbs' own refusal of UPDATE APPLY CONFIRM
+    // (src/katana_app/update_verbs.hpp), made before any helper is started:
+    // it is never how an apply ended, and is said where that line's refusal
+    // is said.
+    UpdateDialog dialog(UpdateDialogContext{});
+    UpdateView view = viewOf(UpdateDialogState::RolledBack);
+    view.lastStatus = QStringLiteral("refused");
+    view.reason = QStringLiteral("platform");
+    dialog.setView(view);
+    EXPECT_EQ(said(dialog),
+              QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed. Reason: "
+                             "this copy of Katana cannot install an update on this kind of "
+                             "computer; the release notes say where to download it."));
+}
+
+TEST(UpdateWords, AnEarlierUpdateThatIsStillOpenIsSaidToBeUnsettledNotFailed)
+{
+    // The helper refuses an apply as interrupted_update while an earlier one
+    // is neither confirmed nor put back (the hardening pass's H1: an update
+    // whose helper died during the health check is settled by a later start,
+    // and until then "an earlier update is not settled yet"). The words said
+    // it "could not be put back", which is not what has happened.
+    EXPECT_EQ(katana::qt::updateReasonWords(QStringLiteral("interrupted_update")),
+              QStringLiteral("an earlier update is not settled yet"));
+    UpdateDialog dialog(UpdateDialogContext{});
+    UpdateView view = viewOf(UpdateDialogState::RolledBack);
+    view.lastStatus = QStringLiteral("refused");
+    view.reason = QStringLiteral("interrupted_update");
+    dialog.setView(view);
+    EXPECT_EQ(said(dialog),
+              QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed. Reason: "
+                             "an earlier update is not settled yet."));
 }
 
 TEST(UpdateWords, ACaptivePortalAndAFullDiskAreSaidInWordsNotAsTheirTokens)
@@ -1149,15 +1280,25 @@ TEST(UpdateDecisions, EveryOtherAnswerOfACheckIsItsOwnStateAndOffersNothing)
                                            "Settings > Updates offers it again."));
     EXPECT_TRUE(updateStatusButtonText(view).isEmpty()) << "a skipped release is not offered";
 
-    // A release that was rolled back here: `blocked`.
+    // A release that was rolled back here: `blocked`. Its sentence names the
+    // place that offers it again (ruling H5 of the hardening pass).
     UpdateOffer blocked = offerOf(CheckStatus::Blocked);
     blocked.check.reason = "blocked_before";
     view = updateViewOfOffer(blocked, factsOf());
     EXPECT_EQ(view.state, UpdateDialogState::NotOffered);
     EXPECT_EQ(saidBy(view), QStringLiteral("Katana 0.3.0 could not be installed here before, and "
                                            "is not offered again. A later release will be "
-                                           "offered."));
+                                           "offered, and Settings > Updates offers this one "
+                                           "again."));
     EXPECT_TRUE(updateStatusButtonText(view).isEmpty()) << "a blocked release is not offered";
+
+    // The verbs give that answer a sentence of their own, for a line's reply
+    // (update_verbs.hpp: CheckResult::detail of update=blocked). It changes
+    // nothing here: the dialog says where its own button is.
+    blocked.check.detail = "this release was installed here before, did not start and was put "
+                           "back, so it is not offered; UPDATE BLOCKED CLEAR (Settings > Updates "
+                           "in the window) offers it again";
+    EXPECT_EQ(saidBy(updateViewOfOffer(blocked, factsOf())), saidBy(view));
 
     // A private feed's 404.
     UpdateOffer unreachable = offerOf(CheckStatus::Unreachable);
@@ -1320,7 +1461,9 @@ TEST(UpdateDecisions, HowTheLastUpdateEndedIsItsOwnStateAndASuccessIsNone)
     last.status = "committed";
     EXPECT_FALSE(updateViewOfLastResult(last, installed, root).has_value());
 
-    // The design's sentence.
+    // The design's sentence, and where the release it tells of is offered
+    // again (ruling H5 of the hardening pass: a release that did not start is
+    // set aside, and the person is told where the way back is).
     last.status = "rolled_back";
     last.reason = "health_exit";
     std::optional<UpdateView> view = updateViewOfLastResult(last, installed, root);
@@ -1328,7 +1471,8 @@ TEST(UpdateDecisions, HowTheLastUpdateEndedIsItsOwnStateAndASuccessIsNone)
     EXPECT_EQ(view->state, UpdateDialogState::RolledBack);
     EXPECT_EQ(saidBy(*view),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored. Reason: "
-                             "the new version did not start."));
+                             "the new version did not start. A later release will be offered, "
+                             "and Settings > Updates offers this one again."));
     EXPECT_TRUE(katana::qt::updateStatusButtonText(*view).isEmpty())
         << "what was rolled back is not offered";
 
@@ -1418,6 +1562,256 @@ TEST(UpdateDecisions, TheWindowChecksByItselfOnlyWhenEveryConditionHolds)
     // A last check in the future - the clock was set back - silences nothing.
     checked.lastCheckEpoch = kNow + 3600;
     EXPECT_TRUE(updateAutomaticCheckIsDue(go, checked, kNow, noJitter));
+}
+
+TEST(UpdateDecisions, AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled)
+{
+    // The hardening pass's H1 (2026-10-14): an update whose helper died while
+    // it waited for the new version to prove that it starts is settled by "an
+    // interactive window (kAppliesHere, not headless, not development), first
+    // idle turn, only when install.hasInstalledRecord and install.version is
+    // the program's own". Each condition is taken away in turn, as the
+    // automatic check's are above; the rule is that specification's, and the
+    // versions are the design's 0.2.0 and 0.3.0.
+    //
+    // `installed` is install.version, which the same pass's H3 makes "the
+    // HIGHER of the record's and the program's own". So what the window hands
+    // over is never below `program`: of the two unequal cases below the
+    // first - a record above the program - is the one a window meets, and the
+    // second is the function's own rule, asked directly.
+    using katana::qt::UpdateConfirmFacts;
+    using katana::qt::updateStartMayConfirm;
+    using katana::update::InstallKind;
+    const auto version = [](std::uint32_t minor, std::uint8_t written) {
+        katana::update::Version made;
+        made.components = {0, minor, 0, 0};
+        made.written = written;
+        return made;
+    };
+    // 0.3.0 was installed by an update, and this window is 0.3.0.
+    UpdateConfirmFacts go;
+    go.appliesHere = true;
+    go.keepsState = true;
+    go.kind = InstallKind::Installer;
+    go.hasInstalledRecord = true;
+    go.installed = version(3, 3);
+    go.program = version(3, 3);
+    EXPECT_TRUE(updateStartMayConfirm(go));
+    UpdateConfirmFacts unpacked = go;
+    unpacked.kind = InstallKind::Archive;
+    EXPECT_TRUE(updateStartMayConfirm(unpacked)) << "an unpacked archive updates itself too";
+    // "0.3" and "0.3.0" are one version (update/version.hpp).
+    UpdateConfirmFacts shortened = go;
+    shortened.program = version(3, 2);
+    EXPECT_TRUE(updateStartMayConfirm(shortened));
+
+    // THE CASE THE RULE EXISTS FOR: a window of the old files, started while
+    // the update was swapping them. The install's record names 0.3.0 and the
+    // program running is 0.2.0: its start says nothing about 0.3.0.
+    UpdateConfirmFacts oldWindow = go;
+    oldWindow.program = version(2, 3);
+    EXPECT_FALSE(updateStartMayConfirm(oldWindow));
+    // The rule is "the program's own", so a version below the program's is
+    // refused too. No window hands that over: a record that names 0.2.0 in a
+    // copy of 0.3.0 - a newer zip unpacked by hand over a copy that had
+    // updated itself - is read as 0.3.0 (H3), which is the first case above,
+    // and that window confirms.
+    UpdateConfirmFacts below = go;
+    below.installed = version(2, 3);
+    EXPECT_FALSE(updateStartMayConfirm(below));
+
+    // Each other condition, alone, stops it.
+    UpdateConfirmFacts fresh = go;
+    fresh.hasInstalledRecord = false;
+    EXPECT_FALSE(updateStartMayConfirm(fresh)) << "no update ever committed here";
+    UpdateConfirmFacts headless = go;
+    headless.headless = true;
+    EXPECT_FALSE(updateStartMayConfirm(headless)) << "a headless run writes no per-user state";
+    UpdateConfirmFacts development = go;
+    development.kind = InstallKind::Development;
+    EXPECT_FALSE(updateStartMayConfirm(development)) << "a build tree is never updated";
+    UpdateConfirmFacts stateless = go;
+    stateless.keepsState = false;
+    EXPECT_FALSE(updateStartMayConfirm(stateless)) << "no update folder to write the proof in";
+    UpdateConfirmFacts elsewhere = go;
+    elsewhere.appliesHere = false;
+    EXPECT_FALSE(updateStartMayConfirm(elsewhere)) << "a copy that cannot replace its own files";
+    // And with nothing known, nothing is confirmed.
+    EXPECT_FALSE(updateStartMayConfirm(UpdateConfirmFacts{}));
+}
+
+TEST(UpdateDecisions, ALineThatWasCarriedOutTakesBackOnlyWhatItsOwnListSetAside)
+{
+    // What a line the window runs at once does to what the dialog shows. The
+    // lines and their replies are the verbs' grammar (update_verbs.hpp:
+    // "skipped=<v|none>", and with no update folder "the same with
+    // reason=no_state, and nothing is kept") and the hardening pass's ruling
+    // H5 (2026-10-14: "UPDATE BLOCKED CLEAR -> blocked=none", "With no update
+    // folder: blocked=none reason=no_state, nothing kept"). The rule is the
+    // window's: a dialog that says a release "is not offered again" must not
+    // go on saying so once the list that set it aside is empty - and each of
+    // the two lists is its own.
+    using katana::qt::UpdateLineEffect;
+    using katana::qt::updateEffectOfLine;
+    const QString clear = QStringLiteral("UPDATE BLOCKED CLEAR");
+    const QString cleared = QStringLiteral("blocked=none");
+    UpdateView putBack = viewOf(UpdateDialogState::NotOffered);
+    putBack.reason = QStringLiteral("blocked_before");
+    UpdateView skipped = viewOf(UpdateDialogState::NotOffered);
+    skipped.reason = QStringLiteral("skipped");
+
+    // The release that was put back is set aside no longer.
+    EXPECT_EQ(updateEffectOfLine(putBack, clear, cleared), UpdateLineEffect::Forgotten);
+    // Typed as a person types it: in any case, with any blanks.
+    EXPECT_EQ(updateEffectOfLine(putBack, QStringLiteral("  update   blocked  clear "), cleared),
+              UpdateLineEffect::Forgotten);
+    // No update folder: nothing was kept, so nothing was emptied.
+    EXPECT_EQ(updateEffectOfLine(putBack, clear, QStringLiteral("blocked=none reason=no_state")),
+              UpdateLineEffect::Nothing);
+    // The skipped version is another list: this line does not offer it again.
+    EXPECT_EQ(updateEffectOfLine(skipped, clear, cleared), UpdateLineEffect::Nothing);
+    // And a view that says nothing is set aside has nothing to take back.
+    for (const UpdateDialogState state :
+         {UpdateDialogState::Idle, UpdateDialogState::Checking, UpdateDialogState::Current,
+          UpdateDialogState::Available, UpdateDialogState::Downloading, UpdateDialogState::Ready,
+          UpdateDialogState::Blocked, UpdateDialogState::RolledBack,
+          UpdateDialogState::CheckFailed, UpdateDialogState::Unsupported}) {
+        EXPECT_EQ(updateEffectOfLine(viewOf(state), clear, cleared), UpdateLineEffect::Nothing)
+            << static_cast<int>(state);
+    }
+    // UPDATE BLOCKED has the one line (H5: "with another word or none is
+    // InvalidArgument"); nothing else under those words empties anything.
+    for (const char* line : {"UPDATE BLOCKED", "UPDATE BLOCKED LIST", "UPDATE BLOCKED CLEAR ALL",
+                             "BLOCKED CLEAR UPDATE"}) {
+        EXPECT_EQ(updateEffectOfLine(putBack, QString::fromLatin1(line), cleared),
+                  UpdateLineEffect::Nothing)
+            << line;
+    }
+
+    // UPDATE SKIP NONE does the same for its own list, and leaves the other.
+    const QString unskip = QStringLiteral("UPDATE SKIP NONE");
+    const QString unskipped = QStringLiteral("skipped=none");
+    EXPECT_EQ(updateEffectOfLine(skipped, unskip, unskipped), UpdateLineEffect::Forgotten);
+    EXPECT_EQ(updateEffectOfLine(skipped, QStringLiteral("update skip none"), unskipped),
+              UpdateLineEffect::Forgotten);
+    EXPECT_EQ(updateEffectOfLine(putBack, unskip, unskipped), UpdateLineEffect::Nothing);
+    EXPECT_EQ(updateEffectOfLine(skipped, unskip, QStringLiteral("skipped=none reason=no_state")),
+              UpdateLineEffect::Nothing);
+
+    // UPDATE SKIP <version> of the release the dialog offers: offered no more.
+    const UpdateView offered = viewOf(UpdateDialogState::Available);
+    ASSERT_EQ(offered.latestVersion, QStringLiteral("0.3.0"));
+    EXPECT_EQ(updateEffectOfLine(offered, QStringLiteral("UPDATE SKIP 0.3.0"),
+                                 QStringLiteral("skipped=0.3.0")),
+              UpdateLineEffect::Skipped);
+    // "0.3" and "0.3.0" are one release (update/version.hpp).
+    EXPECT_EQ(updateEffectOfLine(offered, QStringLiteral("UPDATE SKIP 0.3"),
+                                 QStringLiteral("skipped=0.3")),
+              UpdateLineEffect::Skipped);
+    // Another version than the one offered leaves the offer as it is.
+    EXPECT_EQ(updateEffectOfLine(offered, QStringLiteral("UPDATE SKIP 0.4.0"),
+                                 QStringLiteral("skipped=0.4.0")),
+              UpdateLineEffect::Nothing);
+    // And with no update folder the skip was not kept.
+    EXPECT_EQ(updateEffectOfLine(offered, QStringLiteral("UPDATE SKIP 0.3.0"),
+                                 QStringLiteral("skipped=none reason=no_state")),
+              UpdateLineEffect::Nothing);
+
+    // Every other line changes nothing here, whatever the view.
+    const std::pair<const char*, const char*> others[] = {
+        {"UPDATE STATUS", "installed=0.2.0 staged=none skipped=none auto=on"},
+        {"UPDATE SET AUTO OFF", "auto=off"},
+        {"UPDATE TOKEN CLEAR", "token=absent"}};
+    for (const auto& [line, reply] : others) {
+        for (const UpdateView& view : {putBack, skipped, offered}) {
+            EXPECT_EQ(updateEffectOfLine(view, QString::fromLatin1(line),
+                                         QString::fromLatin1(reply)),
+                      UpdateLineEffect::Nothing)
+                << line;
+        }
+    }
+}
+
+TEST(UpdateDecisions, AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone)
+{
+    // What Settings > Updates is told of U/state.json. The file's rule
+    // (include/katana/update/state.hpp): "absent is the defaults (not an
+    // error); unreadable or from a newer schema is ParseFailure /
+    // Unsupported". The verbs do not write over a file that does not read
+    // (update_verbs.hpp: "refused (InvalidState), and the file is left as it
+    // is"; H5 says the same of UPDATE BLOCKED CLEAR) and say why - which a
+    // person reads only when the page's button is on. So such a file is
+    // "nobody can say": told as "none", the page would say "No version was
+    // put back." and switch the button off.
+    using katana::core::ErrorCode;
+    using katana::qt::updatePutBackOfState;
+    using katana::qt::updateSkippedOfState;
+    using State = katana::core::Result<katana::update::UpdateState>;
+
+    for (const ErrorCode code : {ErrorCode::ParseFailure, ErrorCode::Unsupported}) {
+        const State unreadable =
+            katana::core::makeError(code, "the update settings could not be read");
+        EXPECT_FALSE(updateSkippedOfState(unreadable).has_value());
+        EXPECT_FALSE(updatePutBackOfState(unreadable).has_value());
+    }
+
+    // A file that is not there reads as the defaults, and those ARE known:
+    // none skipped, none put back.
+    const State defaults = katana::update::UpdateState{};
+    const std::optional<QString> noneSkipped = updateSkippedOfState(defaults);
+    ASSERT_TRUE(noneSkipped.has_value());
+    EXPECT_TRUE(noneSkipped->isEmpty());
+    const std::optional<bool> nonePutBack = updatePutBackOfState(defaults);
+    ASSERT_TRUE(nonePutBack.has_value());
+    EXPECT_FALSE(*nonePutBack);
+
+    // What the file has: the skipped version as it is written, and whether
+    // the list of blocked releases holds any - one is enough.
+    katana::update::UpdateState kept;
+    kept.skippedVersion = "0.3.0";
+    kept.blockedSequences = {kSequence};
+    const std::optional<QString> skipped = updateSkippedOfState(State(kept));
+    ASSERT_TRUE(skipped.has_value());
+    EXPECT_EQ(*skipped, QStringLiteral("0.3.0"));
+    const std::optional<bool> putBack = updatePutBackOfState(State(kept));
+    ASSERT_TRUE(putBack.has_value());
+    EXPECT_TRUE(*putBack);
+
+    // Each is its own list: a skip is no release that was put back, nor the
+    // other way about.
+    katana::update::UpdateState onlySkipped;
+    onlySkipped.skippedVersion = "0.3.0";
+    const std::optional<bool> notPutBack = updatePutBackOfState(State(onlySkipped));
+    ASSERT_TRUE(notPutBack.has_value());
+    EXPECT_FALSE(*notPutBack);
+    katana::update::UpdateState onlyPutBack;
+    onlyPutBack.blockedSequences = {kSequence, kSequence + 1};
+    const std::optional<QString> notSkipped = updateSkippedOfState(State(onlyPutBack));
+    ASSERT_TRUE(notSkipped.has_value());
+    EXPECT_TRUE(notSkipped->isEmpty());
+}
+
+TEST(UpdateDecisions, AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove)
+{
+    // The hardening pass's point for main() (2026-10-14): a helper that could
+    // not be started is said "on stderr always, and show the box only when the
+    // run was given no --command". The kinds are main()'s own: it keeps each
+    // step under its switch's name, an --enter as a --command, and a
+    // --run-line runs a line as a --command does (docs/headless.md).
+    using katana::qt::updateFailureIsBoxed;
+    // A window a person started: nobody reads a GUI program's stderr.
+    EXPECT_TRUE(updateFailureIsBoxed({}));
+    // A run that was given a line to run may have nobody at it to close a box.
+    EXPECT_FALSE(updateFailureIsBoxed({QStringLiteral("--command")}));
+    EXPECT_FALSE(updateFailureIsBoxed({QStringLiteral("--run-line")}));
+    // Wherever among its steps the line stands, and however many there are.
+    EXPECT_FALSE(updateFailureIsBoxed({QStringLiteral("--dialog"), QStringLiteral("--press"),
+                                       QStringLiteral("--command")}));
+    EXPECT_FALSE(updateFailureIsBoxed({QStringLiteral("--run-line"), QStringLiteral("--report")}));
+    EXPECT_FALSE(updateFailureIsBoxed({QStringLiteral("--command"), QStringLiteral("--command"),
+                                       QStringLiteral("--run-line")}));
+    // Steps that run no line give the run no --command: it is still boxed.
+    EXPECT_TRUE(updateFailureIsBoxed({QStringLiteral("--dialog"), QStringLiteral("--press")}));
 }
 
 TEST(UpdateDecisions, TheStatusBarButtonNamesTheReleaseAndIsHiddenUntilOneIsKnown)
@@ -1726,6 +2120,7 @@ struct UpdatesFixture {
     std::vector<std::pair<QString, bool>> logged;
     bool automatic = true;
     QString skipped;
+    bool putBack = false; // a release that did not start here is set aside
     int tokenChanges = 0;
     // What a line does and answers. Unset: nothing, and that it was carried out.
     std::function<VerbOutcome(const QString& line)> answer;
@@ -1741,6 +2136,7 @@ struct UpdatesFixture {
         };
         context.updates.automatic = [this] { return automatic; };
         context.updates.skippedVersion = [this] { return skipped; };
+        context.updates.putBack = [this] { return putBack; };
         context.updates.credentials = &store;
         context.updates.tokenChanged = [this] { ++tokenChanges; };
         context.updates.userAgent = QStringLiteral("Katana/0.2.0 (win64)");
@@ -1797,7 +2193,8 @@ TEST(SettingsUpdates, ThePageIsTheSecondOfSettingsWithANameForEveryControl)
     for (const char* name :
          {"settingsUpdateNote", "settingsUpdateAuto", "settingsUpdateSends", "settingsUpdateToken",
           "settingsUpdateTokenSave", "settingsUpdateTokenClear", "settingsUpdateTokenState",
-          "settingsUpdateSkipped", "settingsUpdateUnskip"}) {
+          "settingsUpdateSkipped", "settingsUpdateUnskip", "settingsUpdateBlocked",
+          "settingsUpdateUnblock"}) {
         EXPECT_NE(page->findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
     }
     // The words the design gives the controls.
@@ -2015,6 +2412,205 @@ TEST(SettingsUpdates, OfferTheSkippedVersionAgainRunsItsLineAndIsOffWhenNoneIsSk
     EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE SKIP NONE")}));
     EXPECT_EQ(shown(dialog, "settingsUpdateSkipped"), QStringLiteral("No version is skipped."));
     EXPECT_FALSE(enabled(dialog, "settingsUpdateUnskip")) << "nothing left to offer again";
+}
+
+// ---- the version that was put back (the hardening pass's ruling H5, 2026-10-14) -----------------
+//
+// "Window: Settings > Updates gets a button under 'Offer the skipped version
+// again': object name settingsUpdateUnblock, text 'Offer the version that was
+// put back again', which runs that line" - UPDATE BLOCKED CLEAR, whose reply
+// is blocked=none - "through the same path settingsUpdateUnskip uses". The
+// name, the words, the line and the reply below are copied from that ruling.
+
+TEST(SettingsUpdates, OfferTheVersionThatWasPutBackAgainIsAButtonUnderTheSkippedVersionsOne)
+{
+    UpdatesFixture f;
+    SettingsDialog dialog(f.context);
+    QWidget* page = child<QWidget>(dialog, "settingsUpdates");
+    ASSERT_NE(page, nullptr);
+    const auto* unblock = page->findChild<QPushButton*>(QStringLiteral("settingsUpdateUnblock"));
+    ASSERT_NE(unblock, nullptr) << "on the Updates page, by its name";
+    EXPECT_EQ(unblock->text(), QStringLiteral("Offer the version that was put back again"));
+    // It says what it does, and by which line.
+    EXPECT_TRUE(unblock->toolTip().contains(QStringLiteral("UPDATE BLOCKED CLEAR")))
+        << unblock->toolTip().toStdString();
+    // Like every button of Settings it is no default: Enter presses nothing.
+    EXPECT_FALSE(unblock->isDefault());
+    EXPECT_FALSE(unblock->autoDefault());
+    EXPECT_NE(page->findChild<QLabel*>(QStringLiteral("settingsUpdateBlocked")), nullptr);
+
+    // Under the skipped version's: each button is in a box of the page's
+    // column, and a column lays its boxes out from the top in their order.
+    const auto* unskip = child<QPushButton>(dialog, "settingsUpdateUnskip");
+    const QLayout* column = page->layout();
+    ASSERT_NE(column, nullptr);
+    const int skippedAt = column->indexOf(unskip->parentWidget());
+    const int putBackAt = column->indexOf(unblock->parentWidget());
+    ASSERT_GE(skippedAt, 0) << "the skipped version's box is one of the column's";
+    EXPECT_GT(putBackAt, skippedAt);
+    // And as a person sees the page: turned to and shown, it is the lower one.
+    child<QListWidget>(dialog, "settingsPages")->setCurrentRow(1);
+    dialog.show();
+    katana::qt::test::processEvents();
+    EXPECT_TRUE(unblock->isVisibleTo(&dialog));
+    EXPECT_GT(unblock->mapTo(&dialog, QPoint(0, 0)).y(), unskip->mapTo(&dialog, QPoint(0, 0)).y());
+
+    EXPECT_TRUE(f.ran.isEmpty()) << "showing the page runs nothing";
+    katana::qt::test::paint(dialog);
+}
+
+TEST(SettingsUpdates, OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse)
+{
+    UpdatesFixture f;
+    f.putBack = true;
+    f.skipped = QStringLiteral("0.3.0");
+    f.store.token = kToken.toStdString();
+    // The verb, as far as the page can tell: it empties the list, and answers
+    // as the ruling gives its reply.
+    f.answer = [&f](const QString&) {
+        f.putBack = false;
+        return VerbOutcome{true, QStringLiteral("blocked=none"), {}};
+    };
+    SettingsDialog dialog(f.context);
+    EXPECT_EQ(shown(dialog, "settingsUpdateBlocked"),
+              QStringLiteral("A version that was installed here did not start and was put back: "
+                             "it is not offered."));
+    ASSERT_TRUE(enabled(dialog, "settingsUpdateUnblock"));
+    EXPECT_TRUE(f.ran.isEmpty()) << "showing the state runs nothing";
+
+    press(dialog, "settingsUpdateUnblock");
+    // The one line, once, as a person would type it.
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")}));
+    // And nothing else: the dialog writes no store, tells nobody the token
+    // changed, and words nothing of its own into the log - the executor logs
+    // the line it ran.
+    EXPECT_TRUE(f.store.written.empty());
+    EXPECT_EQ(f.store.cleared, 0);
+    EXPECT_EQ(f.tokenChanges, 0);
+    EXPECT_TRUE(f.logged.empty());
+    EXPECT_EQ(status(dialog), QStringLiteral("> UPDATE BLOCKED CLEAR\nblocked=none"));
+    EXPECT_FALSE(saysARefusal(dialog));
+    // The page shows what the state has now.
+    EXPECT_EQ(shown(dialog, "settingsUpdateBlocked"), QStringLiteral("No version was put back."));
+    EXPECT_FALSE(enabled(dialog, "settingsUpdateUnblock")) << "nothing left to offer again";
+    // The skipped version is another list, and this line is not its line.
+    EXPECT_EQ(shown(dialog, "settingsUpdateSkipped"),
+              QStringLiteral("Katana 0.3.0 is skipped: it is not offered."));
+    EXPECT_TRUE(enabled(dialog, "settingsUpdateUnskip"));
+
+    // Each of the two buttons runs its own line and not the other's.
+    press(dialog, "settingsUpdateUnskip");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR"),
+                                  QStringLiteral("UPDATE SKIP NONE")}));
+}
+
+TEST(SettingsUpdates, ALineThatWasRefusedLeavesTheVersionThatWasPutBackAsTheStateHasIt)
+{
+    // The state file reads, says a release was put back, and cannot be
+    // written (the update folder allows no writing): the verb refuses the
+    // line, and the list is as it was. The refusal's words are this test's
+    // own; the page shows whatever the executor answered.
+    UpdatesFixture f;
+    f.putBack = true;
+    f.answer = [](const QString&) {
+        return VerbOutcome{false, {},
+                           QStringLiteral("InvalidState: the update settings could not be "
+                                          "written")};
+    };
+    SettingsDialog dialog(f.context);
+    press(dialog, "settingsUpdateUnblock");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")})) << "once, not again";
+    EXPECT_EQ(status(dialog),
+              QStringLiteral("> UPDATE BLOCKED CLEAR\nRefused: InvalidState: the update settings "
+                             "could not be written"));
+    EXPECT_TRUE(saysARefusal(dialog));
+    EXPECT_EQ(shown(dialog, "settingsUpdateBlocked"),
+              QStringLiteral("A version that was installed here did not start and was put back: "
+                             "it is not offered."));
+    EXPECT_TRUE(enabled(dialog, "settingsUpdateUnblock")) << "it can be tried again";
+}
+
+TEST(SettingsUpdates, TheButtonForAVersionThatWasPutBackIsOffWithNoneAndOnWhenNobodySays)
+{
+    // None was put back: nothing to do.
+    UpdatesFixture none;
+    SettingsDialog without(none.context);
+    EXPECT_EQ(shown(without, "settingsUpdateBlocked"), QStringLiteral("No version was put back."));
+    EXPECT_FALSE(enabled(without, "settingsUpdateUnblock"));
+    press(without, "settingsUpdateUnblock");
+    EXPECT_TRUE(none.ran.isEmpty()) << "a disabled button runs nothing";
+
+    // Changed elsewhere since - an update was put back, a line was typed: the
+    // page reads the state again when it is turned to, and runs nothing.
+    none.putBack = true;
+    child<QListWidget>(without, "settingsPages")->setCurrentRow(1);
+    EXPECT_TRUE(enabled(without, "settingsUpdateUnblock"));
+    EXPECT_TRUE(none.ran.isEmpty());
+
+    // Nobody says whether one was (a headless window keeps no state): the
+    // page says nothing of it, and the button stays on for the verb to answer.
+    UpdatesFixture unsaid;
+    unsaid.context.updates.putBack = {};
+    SettingsDialog asking(unsaid.context);
+    EXPECT_TRUE(shown(asking, "settingsUpdateBlocked").isEmpty());
+    ASSERT_TRUE(enabled(asking, "settingsUpdateUnblock"));
+    press(asking, "settingsUpdateUnblock");
+    EXPECT_EQ(unsaid.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")}));
+
+    // No executor: nothing can run the line, whatever the state has.
+    UpdatesFixture mute;
+    mute.putBack = true;
+    mute.context.run = {};
+    SettingsDialog silent(mute.context);
+    EXPECT_FALSE(enabled(silent, "settingsUpdateUnblock"));
+    // And with nothing given at all, as every control of the page.
+    SettingsDialog bare(SettingsContext{});
+    EXPECT_FALSE(enabled(bare, "settingsUpdateUnblock"));
+    EXPECT_TRUE(shown(bare, "settingsUpdateBlocked").isEmpty());
+}
+
+TEST(SettingsUpdates, AStateThatDoesNotReadIsNotGuessedAtAndTheButtonsLetTheVerbAnswer)
+{
+    // U/state.json is there and does not read: nobody can say what is skipped
+    // or put back, and the page is told so (nullopt; what the window gives is
+    // UpdateDecisions.AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone).
+    // It said "No version was put back." and switched the button off - a
+    // guess, and one that kept a person from the verb's refusal, which names
+    // the cause (the ruling H5: "With a state file that does not read:
+    // refused (InvalidState) and the file left as it is, as SKIP does").
+    UpdatesFixture f;
+    f.context.updates.skippedVersion = [] { return std::optional<QString>(); };
+    f.context.updates.putBack = [] { return std::optional<bool>(); };
+    f.answer = [](const QString&) {
+        return VerbOutcome{false, {},
+                           QStringLiteral("InvalidState: the update settings could not be read")};
+    };
+    SettingsDialog dialog(f.context);
+    EXPECT_TRUE(shown(dialog, "settingsUpdateBlocked").isEmpty());
+    EXPECT_TRUE(shown(dialog, "settingsUpdateSkipped").isEmpty());
+    ASSERT_TRUE(enabled(dialog, "settingsUpdateUnblock"));
+    ASSERT_TRUE(enabled(dialog, "settingsUpdateUnskip"));
+    EXPECT_TRUE(f.ran.isEmpty()) << "showing the page runs nothing";
+
+    press(dialog, "settingsUpdateUnblock");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")}));
+    EXPECT_EQ(status(dialog),
+              QStringLiteral("> UPDATE BLOCKED CLEAR\nRefused: InvalidState: the update settings "
+                             "could not be read"));
+    EXPECT_TRUE(saysARefusal(dialog));
+    // Still nothing known, and still there to press once the file is put right.
+    EXPECT_TRUE(shown(dialog, "settingsUpdateBlocked").isEmpty());
+    EXPECT_TRUE(enabled(dialog, "settingsUpdateUnblock"));
+
+    // The skipped version's button likewise, by its own line.
+    press(dialog, "settingsUpdateUnskip");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR"),
+                                  QStringLiteral("UPDATE SKIP NONE")}));
+    EXPECT_EQ(status(dialog),
+              QStringLiteral("> UPDATE SKIP NONE\nRefused: InvalidState: the update settings "
+                             "could not be read"));
+    EXPECT_TRUE(shown(dialog, "settingsUpdateSkipped").isEmpty());
+    EXPECT_TRUE(enabled(dialog, "settingsUpdateUnskip"));
 }
 
 TEST(SettingsUpdates, AStoreThatCannotBeReadSaysSoInItsOwnWords)

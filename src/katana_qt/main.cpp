@@ -56,6 +56,8 @@
 #include "render_view_widget.hpp"
 #include "script_runner.hpp"
 #include "tools/flyout_button.hpp"
+#include "update_dialog.hpp"
+#include "update_verbs.hpp"
 #include "viewport_widget.hpp"
 #if defined(KATANA_GPU_D3D11)
 #include "gpu/renderer_choice.hpp"
@@ -752,7 +754,11 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 // update was interrupted and puts the install right (recoverInterruptedUpdate,
 // above). And when the window was closed BY an update (Help > Check for
 // Updates, Restart and update), the helper that swaps the files is started as
-// the last thing main() does, after the event loop has ended.
+// the last thing main() does, after the event loop has ended. A helper that
+// could not be started is said on stderr and ends the run with exit 1; it is
+// said in a message box as well only when the run was given no line to run
+// (no --command, --enter or --run-line): such a run is a window all the same,
+// and may have nobody at it to close a box.
 int main(int argc, char* argv[])
 {
     recoverInterruptedUpdate();
@@ -1473,16 +1479,39 @@ int main(int argc, char* argv[])
     // the release stays downloaded.
     if (const std::optional<katana::update::ApplyRequest> request = window.takePendingUpdate()) {
         if (const auto launched = katana::update::launchApply(*request); !launched) {
-            // The window is gone and nothing will happen: said where a person
-            // sees it (a GUI program's stderr goes nowhere), as well as there.
+            // The window is gone and nothing will happen. On stderr ALWAYS:
+            // that is where a run started by a script, a test or an agent is
+            // read, and a failure is never only a box.
             const std::string why = launched.error().describe();
             std::fprintf(stderr, "the update could not be started: %s\n", why.c_str());
-            QMessageBox::warning(
-                nullptr, "Katana Update",
-                QString("The update could not be started, so nothing was changed.\n\n%1\n\n"
-                        "It is still downloaded: start Katana and choose Help > Check for "
-                        "Updates.")
-                    .arg(QString::fromStdString(why)));
+            // The helper's copy UPDATE APPLY CONFIRM made for this request is
+            // nobody's now: listed for the sweep the next start makes, as
+            // katana_cli lists the one it could not start (update_verbs.hpp,
+            // abandonApply).
+            (void)katana::app::abandonApply(*request);
+            // And where a person sees it - a GUI program's stderr goes nowhere
+            // - but only in a window nobody drove from its command line. A run
+            // that was given a line to run (--command, --enter, --run-line) is
+            // not headless, and still may have nobody there to close a box: it
+            // would wait on one for ever (docs/headless.md, "Updates in a
+            // headless run"). Which steps those are is updateFailureIsBoxed's
+            // (update_dialog.hpp, "THE DECISIONS"), where a test asks it.
+            QStringList stepKinds;
+            for (const auto& step : surveySteps) {
+                stepKinds << step.first;
+            }
+            if (katana::qt::updateFailureIsBoxed(stepKinds)) {
+                QMessageBox::warning(
+                    nullptr, "Katana Update",
+                    QString("The update could not be started, so nothing was changed.\n\n%1\n\n"
+                            "It is still downloaded: start Katana and choose Help > Check for "
+                            "Updates.")
+                        .arg(QString::fromStdString(why)));
+            }
+            // An update that was asked for and not started is a failed run,
+            // as it is katana_cli's (src/katana_app/main.cpp): a script reads
+            // the exit code. A window's own exit code, when it had one, stays.
+            return code != 0 ? code : 1;
         }
     }
     return code;

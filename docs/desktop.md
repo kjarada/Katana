@@ -2896,12 +2896,20 @@ own code keeps, so nothing is written twice:
   Plotting Commands, `helpSheetCommands`, opens the reference here);
 - **Subsurface utilities**: `utilities::utilityVerbHelp`;
 - **Online data**: `interop::onlineUsage`;
+- **Updates**: `app::updateHelpText`, the `UPDATE` verbs' own help, which
+  `HELP UPDATE` and `katana_cli --help` print. One text, so a line added to
+  the family is in the reference at once: `UPDATE BLOCKED CLEAR` came with
+  the verb and needed no edit here
+  (`TheUpdatesSectionIsTheUpdateVerbsOwnHelp` holds every line of the help to
+  be in the section, and the section to have no line of its own);
 - **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
   `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
   whose usage the Geoprocessing section gives - `PLOTSHEETS`, `PLOT`,
   `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
-  `QUIT`, and `HELP`, which adds this section to the interpreter's), and the rule for a bare tool
+  `UPDATE` - a row that names the family's lines and sends the reader to the
+  Updates section for their usage - `QUIT`, and `HELP`, which adds this
+  section to the interpreter's), and the rule for a bare tool
   word - with the one word that means different things on the two command
   lines: a bare `LS` starts the List tool in the window and is `LABELSTYLE`
   in `katana_cli`. `CUSTOMISE` had a block here while the window ran it
@@ -2920,8 +2928,20 @@ itself runs nothing. `windowHelpText` lives beside the reference rather than
 in `main_window.cpp` so that the widget tests search the real text; a comment
 on `dispatchLine` says a verb added there is added to it, and
 `CommandReference.TheWindowSectionNamesEveryVerbTheWindowRunsItself` checks
-the list. A typed `HELP` (or `?`) alone prints the interpreter's help and then
-`windowHelpText`; `HELP SHEETS` and `HELP UTILITY` are unchanged.
+the list. A typed `HELP` (or `?`) alone prints the interpreter's help, the
+geoprocessing verbs', the `UPDATE` verbs' and then `windowHelpText`; `HELP
+SHEETS` and `HELP UTILITY` are unchanged, and `HELP UPDATE` prints that
+family alone.
+
+The Updates section and `UPDATE` in the Window list were added on 2026-10-14.
+The update verbs had come with their own help and a `HELP UPDATE`, and the
+reference - the one place a person searches - had neither: a search for
+"update" found nothing, though the command line took every line of the
+family. *Rejected: a second description of the lines in `windowHelpText`*,
+which is how the Window section describes the verbs only the window runs:
+`UPDATE` is the session's, its help is the session's, and two texts would
+have drifted at the first line added
+(`TheUpdateVerbsAreFoundBySearchingAndPutOnTheCommandLine`).
 
 The reverse fault is fixed too: the interpreter's help listed `PLOTSHEETS`,
 which `katana_cli` refuses (it paints, and only the window can), so
@@ -2947,10 +2967,10 @@ downloads and swaps the files, the helper program that does the swap and the
 release feed are the update system's own (its document is `update.md`); the
 verbs are the session's, shared with `katana_cli`
 (`src/katana_app/update_verbs.hpp`: `UPDATE CHECK`, `STATUS`, `DOWNLOAD
-CONFIRM`, `APPLY CONFIRM`, `SKIP`, `SET AUTO`, `TOKEN`). This section is what
-the WINDOW adds: a menu item, a status-bar button, a dialog, a page of
-Settings ("The Updates page", under "Settings"), and the close that lets the
-helper run.
+CONFIRM`, `APPLY CONFIRM`, `SKIP`, `BLOCKED CLEAR`, `SET AUTO`, `TOKEN`). This
+section is what the WINDOW adds: a menu item, a status-bar button, a dialog, a
+page of Settings ("The Updates page", under "Settings"), and the close that
+lets the helper run.
 
 **Where it is.** Help > "Check for Updates..." (`helpCheckForUpdates`, the
 letter U, the icon `Icon::Download` - a cloud with the accent arrow coming
@@ -2984,10 +3004,14 @@ environment, the job runner - and does what they say:
 |---|---|
 | `updateViewOfOffer` | which state `UPDATE CHECK`'s answer is: Available, or Ready when that version is already downloaded; Current; NotOffered; CheckFailed; Unsupported |
 | `updateQuietAnswer` | what the AUTOMATIC check does with its answer: announce it, show it without a word, or drop it |
+| `updateEffectOfLine` | what a line that was run at once and carried out does to what the dialog shows: `UPDATE SKIP NONE` and `UPDATE BLOCKED CLEAR` take back what their own list set aside, `UPDATE SKIP <version>` the release that was offered |
 | `updateStagedToOffer` | whether the release `UPDATE STATUS` says is downloaded is offered as Ready when the window starts |
 | `updateStagedAfter` | whether a downloaded release is still one to install after a check answered |
 | `updateViewOfLastResult` | how the last apply's result is shown at the next start |
 | `updateAutomaticCheckIsDue` | whether the window checks by itself now |
+| `updateSkippedOfState`, `updatePutBackOfState` | what Settings > Updates is told of the state file: the skipped version, and whether a release was put back - and nothing at all for a file that does not read, never "none" ("The Updates page") |
+| `updateStartMayConfirm` | whether a window that has come idle is the proof that an update starts: only in a copy with an install record whose installed version is the program's own, which refuses a record that names a version above the program's ("An update that was never said to start", below) |
+| `updateFailureIsBoxed` | whether an update that could not be started is said in a message box as well as on stderr: only in a run that was given no line to run. It is `main()`'s decision, here with the others so that a test can ask it |
 | `updateRecoveredTransactions` | which helper copies a start may remove: those of this install's updates that a recovery put right and that are over |
 | `updateStatusButtonText` | the status-bar button's words, and that it is hidden |
 | `updateReplyValue`, `updateStagedOfReply` | a record of a reply, by its key |
@@ -3004,12 +3028,12 @@ hidden, which the headless `--press` refuses.
 | Idle | "Katana 0.2.0" / "Not checked for updates yet." | Check now |
 | Checking | "Checking for updates..." / "You can keep working." | Cancel |
 | Current | "Katana 0.2.0 is up to date." / "Last checked 14:02." | Check now |
-| NotOffered | a newer release this copy does not offer: one the person skipped ("Katana 0.3.0 is available, and you chose to skip it." / "Settings > Updates offers it again.") or one that was rolled back here ("Katana 0.3.0 could not be installed here before, and is not offered again.") | Check now |
+| NotOffered | a newer release this copy does not offer: one the person skipped ("Katana 0.3.0 is available, and you chose to skip it." / "Settings > Updates offers it again.") or one that was rolled back here ("Katana 0.3.0 could not be installed here before, and is not offered again." / "A later release will be offered, and Settings > Updates offers this one again.") | Check now |
 | Available | "Update Available" / "Katana 0.3.0 (you have 0.2.0). 23 of 411 files changed, 71 MB to download." | Update, Download only, Skip this version, Release notes, Later |
 | Downloading | "Downloading 31 of 71 MB (12 of 23 files)." / "You can keep working.", and `updateProgress` | Cancel |
 | Ready | "Katana 0.3.0 is ready." / "Katana will close, update and reopen in a few seconds." | Restart and update, Later |
 | Blocked | "Close these first: katana_mcp.exe (4412)." / "Then press Retry." | Retry |
-| RolledBack | "Katana 0.3.0 could not be installed, so 0.2.0 was restored." / "Reason: ..." | none: it is read and closed |
+| RolledBack | "Katana 0.3.0 could not be installed, so 0.2.0 was restored." / "Reason: ...", and after it, when the reason is that the new version did not start, "A later release will be offered, and Settings > Updates offers this one again." | none: it is read and closed |
 | CheckFailed | "Could not check for updates: ...", or for a feed that answers 404 "No update information found." / "If the releases are private, add an access token in Settings > Updates." | Retry |
 | Unsupported | "Updates are not available for this copy of Katana: ..." | none |
 
@@ -3036,6 +3060,49 @@ bundle, and Linux until its apply is written) is told of the release, sent to
 its notes, and offered neither Update nor Download only; and an apply that
 ended `refused` or `rollback_incomplete` is not called restored - the second
 names the command that puts the install right by hand.
+
+Where a person can do something about a reason, its words say what. A Katana
+that was started as administrator installs no update - the helper would run
+with those rights from a folder ordinary programs can write (`update.md`) -
+and `elevated` reads "Katana was started as administrator; start it the
+ordinary way, not as administrator, and update again - the download is kept".
+`platform`, where this version installs nothing, reads "this copy of Katana
+cannot install an update on this kind of computer; the release notes say
+where to download it" (`ACopyThatMayNotInstallIsToldWhatItCanDoAboutIt`). The
+verbs refuse `UPDATE APPLY CONFIRM` for either as an error, and an error is
+shown in the verbs' own sentence, which says the same; the table's words are
+for the token wherever it arrives without one. And `interrupted_update` reads
+"an earlier update is not settled yet", not that it failed: it is what the
+helper answers while an earlier update is neither confirmed nor put back
+("An update that was never said to start", below;
+`AnEarlierUpdateThatIsStillOpenIsSaidToBeUnsettledNotFailed`).
+
+**A release that was set aside says where the way back is.** A release that
+is installed, does not prove that it starts and is put back goes on the
+state's blocked list, and is neither offered nor applied again. One start too
+slow for the helper's health check - a virus scanner reading every new file -
+does that to a sound release, and until 2026-10-14 the only way back was to
+delete the state file by hand, while the dialog said "A later release will be
+offered." and stopped. Both sentences that tell of such a release now end "A
+later release will be offered, and Settings > Updates offers this one again.":
+a check's `update=blocked`, and the last apply's ending when its reason is
+`health_exit` or `health_timeout` - the two after which the helper blocks a
+release, and no others. After any other ending nothing was set aside and the
+sentence is not said: it would send the person to a button that is off
+(`OnlyAReleaseThatWasPutBackForNotStartingIsSaidToBeOfferedAgainInSettings`).
+The button is Settings > Updates' "Offer the version that was put back
+again" ("The Updates page"). Once its line was carried out, a dialog that
+still said "not offered again" goes back to "Not checked for updates yet.",
+as it does after `UPDATE SKIP NONE`, and the next check offers the release.
+Each line takes back only what its own list set aside - `BLOCKED CLEAR`
+leaves a skipped release as it is shown, `SKIP NONE` one that was put back -
+and a reply that gives a reason (`blocked=none reason=no_state`: no update
+folder, so nothing was kept) takes back nothing (`updateEffectOfLine`;
+`ALineThatWasCarriedOutTakesBackOnlyWhatItsOwnListSetAside`).
+*Rejected: a button for it in this dialog.* RolledBack is read and closed,
+with nothing to press, so that no single press there installs again a
+release that has just failed to start; the way back is a deliberate step
+somewhere else.
 
 **What each button does.** It builds the line a person would type and hands
 it to the window's one executor ("One executor: the command runner"), or
@@ -3066,7 +3133,8 @@ runs its self-test - are run by `app::runUpdateLine` on a worker thread
 status bar), with a COPY of the verbs' context taken on the interface thread,
 and their reply is logged on the interface thread when they end, as a typed
 line's is. Nothing of the workbench goes to the worker. `STATUS`, `SKIP`,
-`SET` and `TOKEN` read and write small files and are answered at once; while
+`BLOCKED CLEAR`, `SET` and `TOKEN` read and write small files and are
+answered at once; while
 a job runs, every line but `STATUS` is refused, because a check records when
 it ran in the state file those lines write. One exception, so that nobody is
 refused for a job they never started: a check asked for - typed, Check now,
@@ -3077,7 +3145,8 @@ says Checking, and its answer is logged and shown as a typed check's is.
 takes `UPDATE` lines before every other family, as the session does, so a
 `DOWNLOAD` or an `APPLY` typed on the command line goes exactly the way the
 buttons go - the buttons build those very lines. `HELP UPDATE` prints the
-verbs' own help, and `HELP` alone includes it.
+verbs' own help, `HELP` alone includes it, and Help > Command Reference shows
+it as its Updates section.
 
 **The context** (`app::UpdateContext`) is made once, at first use -
 `app::makeUpdateContext` for the surface the window turned out to be,
@@ -3121,7 +3190,10 @@ question are asked as ever:
   that `APPLY CONFIRM` made for the request (`run-<transaction>` in the update
   state folder) is listed for the sweep the next start makes; so it is after
   Later, and when the person closes the window themselves while the close
-  for the update is waiting.
+  for the update is waiting. The listing is `app::abandonApply`
+  (`src/katana_app/update_verbs.hpp`), the one way a prepared apply is given
+  up, which the session and `katana_cli` take too; the workbench had a second
+  copy of it until 2026-10-14.
 - **A job is running** - a geoprocessing run, say - and the close waits for
   it, since a window that closes stops its jobs: the dialog says "Katana will
   close when the running job has finished, then update and reopen.", and
@@ -3136,6 +3208,22 @@ question are asked as ever:
   loop has ended; `main()` calls `update::launchApply` as its last act, and
   the helper swaps the files once this process has gone. A window the PERSON
   closes while an update waits installs nothing.
+- **The helper cannot be started.** The window is gone by then, so `main()`
+  says it: on stderr ALWAYS ("the update could not be started: ..."), and the
+  run ends with exit 1, as `katana_cli`'s does; the helper's copy goes to the
+  sweep (`app::abandonApply`) and the release stays downloaded. It is said in
+  a message box as well - a GUI program's stderr goes nowhere a person looks -
+  but only when the run was given no line to run: no `--command`, `--enter`
+  or `--run-line`. A run that was given one is not headless (it is a window a
+  person may use, shown, with the automatic check), yet it is driven by
+  whoever started it - a script, a test, an agent - and nobody may be there
+  to close a box: until 2026-10-14 `katana --command "UPDATE APPLY CONFIRM"`
+  whose helper did not start waited on that box for ever. Which runs get the
+  box is `updateFailureIsBoxed`, asked with the kinds of the steps the run
+  was given (`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`).
+  *Rejected: making every `--command` run headless.* A headless window is
+  never shown, restores no session and starts nothing about updates, and a
+  run is started with `--command` precisely to set a window up for a person.
 
 **How the last one ended** is shown once. At the next interactive start the
 workbench reads the last apply's result from the update state folder, clears
@@ -3168,13 +3256,55 @@ A development copy does none of this: a build run from a build tree shares
 the per-user update folder with an installed copy on the same machine, and
 would otherwise show - and clear - how THAT copy's last update ended.
 
+**An update that was never said to start.** The helper installs a release and
+then waits, up to a minute, for the new version to prove that it starts. A
+helper that dies in that wait - power, a shutdown, the process ended - leaves
+the release installed with nothing recorded either way: not healthy, not put
+back, and no result for the next start to show. Recovery leaves such an
+update alone (the tree is a whole version), so three later events settle it
+(`include/katana/update/recover.hpp`; `update.md`): the next logon's
+`katana_updater --recover`, the next update, and - the window's part - **a
+window of that very version that has come idle**, which is exactly what the
+health run exists to show. On its first idle turn, before the automatic
+check, `UpdateWorkbench::start` asks `updateStartMayConfirm` and then calls
+`update::confirmStarted` for the install and the update state folder: with
+nothing to settle - every start but that one - it is a listing of one folder
+and takes no lock; otherwise the update is recorded healthy and the dead
+helper's copy is cleared away. Nothing is shown and nothing logged: the
+update did work.
+
+- **Only the version that was installed proves it.** The call is made only
+  in an interactive window (it writes per-user state) of an installed copy
+  that has an install record and whose installed version is the program's
+  own (`AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled`).
+  The installed version is the HIGHER of the version the record names and
+  the program's own (`update::readInstall`), so what this refuses is a record
+  that names a version ABOVE the program's. That is the case the rule exists
+  for: a window of the OLD files that was started while the files were being
+  swapped. It runs old code over the new tree, the record names a version it
+  is not, and its start says nothing about the release. A record BELOW the
+  program's refuses nothing: a newer copy unpacked by hand over one that had
+  updated itself reads as the version that is running, and its window
+  confirms. The record is read again for this, not taken from the verbs'
+  context, which read it when the window was built - during the swap that may
+  have been the old record still.
+- **A helper that is alive settles its own update.** It holds the update
+  lock, and `confirmStarted` then answers that it is busy. The window asks
+  again every 5 seconds, 12 times - the minute the helper waits at most - in
+  case the helper dies instead, and then leaves it to the next start or the
+  next logon.
+- **It never puts an update back.** A window that runs is evidence that the
+  release starts, never that it does not; putting back is for the logon's
+  `--recover`, with no program of the install running.
+
 **`main()`** (`src/katana_qt/main.cpp`) does three things for updates: before
 Qt is started, `update::recover` for the install the program is in, so that
 an update a crash interrupted is put right before anything else runs (a
 listing of one folder when there is nothing to do); the switch
 `--update-health`, by which the helper asks a version it has just put in
 place whether it starts (`docs/headless.md`, "Updates in a headless run");
-and the helper's start described above.
+and the helper's start described above, with what it says when the helper
+cannot be started.
 
 Decisions, and what was rejected:
 
@@ -3219,12 +3349,20 @@ Not done:
   one click, the close that waits and the close that is cancelled, the
   request handed to `main()`, the automatic check starting and being taken
   over, and the last result being cleared are exercised only by the update
-  system's end-to-end tests and by a release. What a start lists from the
-  install's `recovery.log` and then sweeps is reached by neither a
-  development copy nor a headless run, so by no test: which copies it may
-  list is tested (`updateRecoveredTransactions`), and the sweep is the
-  engine's and tested there (`update::processCleanupList`); reading the log
-  and listing the copies are run by a release alone.
+  system's end-to-end tests and by a release. So is the confirmation of an
+  update that was never said to start: whether a window may confirm is
+  tested (`updateStartMayConfirm`), and what confirming does is the engine's
+  and tested there; the call itself, its fresh read of the install record and
+  its twelve askings are run by an installed copy alone. And `main()`'s
+  answer to a helper that cannot be started - stderr, exit 1, the box - is
+  reached by no test: it takes an installed copy whose helper is there for
+  the preflight and gone a moment later. Which runs get the box is tested
+  (`updateFailureIsBoxed`); that `main()` asks it, and says the rest, is not.
+  What a start lists from the install's `recovery.log` and then sweeps is
+  reached by neither a development copy nor a headless run, so by no test:
+  which copies it may list is tested (`updateRecoveredTransactions`), and the
+  sweep is the engine's and tested there (`update::processCleanupList`);
+  reading the log and listing the copies are run by a release alone.
 - **A typed check that fails while a release is Ready** leaves the dialog on
   "Could not check for updates" with Retry; the downloaded release is not
   forgotten, and is Ready again after a check that succeeds or at the next
@@ -3234,10 +3372,14 @@ Not done:
   notes, in the Available state, is the way to the page.
 - **Windows only installs.** Elsewhere a release is told of and not offered
   to be installed (the design's platform table).
-- **The Command Reference has no Updates section**, and the Window section's
-  list does not name `UPDATE`: both are in
-  `src/katana_qt/command_reference_dialog.cpp`, which that change did not
-  touch. `HELP UPDATE` prints the text.
+- **A start that confirms an update says nothing.** After an update whose
+  helper died, the window that settles it logs no "Katana was updated to
+  ...", which a start after an ordinary update does from the helper's
+  result: there is no result, and the specification of the confirmation asks
+  for none. The version is in Help > About and in the update dialog.
+- **Settings does not say WHICH version was put back.** The state keeps the
+  build that was set aside, by its sequence, and no version; the page says
+  only that one is, and the update dialog names it when a check finds it.
 
 ## File > Drawing Summary
 
@@ -4107,7 +4249,53 @@ reason it exists.
 | Note | `settingsUpdateNote` | one sentence, hidden when there is nothing to say: that a headless run keeps no update settings, that a development build is never updated, or that `KATANA_UPDATE_DISABLE` is set |
 | Checking | `settingsUpdateAuto`, `settingsUpdateSends` | "Check for updates automatically": toggled, `UPDATE SET AUTO ON` or `UPDATE SET AUTO OFF`, and the box then shows what the state has - a line that was refused puts it back, as the automation boxes go back to the Document. Under it, what a check sends: only the user agent (`Katana/0.2.0 (win64)`), nothing about the person, their files or their drawings - and that the server it asks sees the computer's network address, as every website does |
 | Access token | `settingsUpdateToken`, `settingsUpdateTokenSave`, `settingsUpdateTokenClear`, `settingsUpdateTokenState` | a token for private releases, typed as dots. **Save writes the credential store directly** (`CredentialStore::write`) and runs no line. Clear runs `UPDATE TOKEN CLEAR`. The label says whether a token is stored and where, never the token |
-| Skipped version | `settingsUpdateSkipped`, `settingsUpdateUnskip` | the version `UPDATE SKIP` set aside, and "Offer the skipped version again": `UPDATE SKIP NONE`. Disabled while none is skipped |
+| Skipped version | `settingsUpdateSkipped`, `settingsUpdateUnskip` | the version `UPDATE SKIP` set aside, and "Offer the skipped version again": `UPDATE SKIP NONE`. Disabled while none is skipped; when nobody can say - a state file that does not read - the label is empty and the button stays on |
+| Version that was put back | `settingsUpdateBlocked`, `settingsUpdateUnblock` | whether a version is set aside because it was installed here, did not start and was put back ("A version that was installed here did not start and was put back: it is not offered." or "No version was put back."), and "Offer the version that was put back again": `UPDATE BLOCKED CLEAR`. Disabled while none was put back; when nobody can say, the label is empty and the button stays on |
+
+**The version that was put back** (2026-10-14). An update that is installed
+and does not prove that it starts is put back, and its release is set aside:
+no check offers it and no apply installs it. That is right for a release
+that cannot start here, and wrong for a sound one whose first start was slow
+- a virus scanner reading every new file is enough - and there was no way
+back but deleting the state file by hand. The button is that way back, built
+as the skipped version's is and under it: it hands the window's executor the
+line `UPDATE BLOCKED CLEAR` (`runUpdatesLine`, the path every line of the
+page takes), the verbs empty the list - all of it, there being one release
+to be had from the feed - and the page then shows what the state has
+(`OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse`:
+that one line, no second one, no store written, nothing logged by the
+dialog; `OfferTheVersionThatWasPutBackAgainIsAButtonUnderTheSkippedVersionsOne`
+for its name, its words and its place). The next check offers the release
+and Update installs it. Whether a version is set aside is read from the
+state file by the window (`SettingsUpdates::putBack`), since `UPDATE STATUS`
+does not say it; with nobody to say - a headless run - the page says nothing
+of it and the button stays on for the verbs to answer
+(`TheButtonForAVersionThatWasPutBackIsOffWithNoneAndOnWhenNobodySays`).
+
+**A state file that does not read is nobody to say, too.** The verbs do not
+write over such a file: `UPDATE BLOCKED CLEAR` and `UPDATE SKIP NONE` are
+refused, and the refusal is the one thing that names the cause. The window
+told the page "none" for it, so the page said "No version was put back." and
+switched the button off - a guess, and one that kept a person from that
+refusal. Both of the page's questions now answer nothing at all for a file
+that did not read (`updateSkippedOfState`, `updatePutBackOfState`:
+`AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone`; a file that is not
+there reads as the defaults, which ARE known: none skipped, none put back),
+and the page then leaves the label empty and the button on
+(`AStateThatDoesNotReadIsNotGuessedAtAndTheButtonsLetTheVerbAnswer`: the
+line is run, its refusal is shown, and the button is still there to press
+once the file is put right). The skipped version's label and button had the
+same fault and follow the same rule. The automatic box does not: a state
+file that does not read is carried on from as the defaults are, for the
+check and so for the box.
+
+The update dialog's two sentences about a release that was put back point
+here ("Help > Check for Updates", "A release that was set aside says where
+the way back is"). *Rejected: offering again only the one release, by its
+number.* The state keeps the builds that were put back by sequence, not by
+version, so there is no number to show or to ask for; and the feed has one
+release to offer, the newest, so emptying the list and offering "the"
+release are the same act.
 
 **Why Save is not a line.** Every other button in Settings builds a line so
 that it is echoed in the command log and done by the one code path a typed
@@ -4135,8 +4323,9 @@ The line itself still reaches the verbs as typed, and is refused.
 
 **How the page gets what it shows.** The Format workbench makes the Settings
 dialog and knows nothing of updates, so the page's services
-(`SettingsUpdates`: how to read the automatic flag and the skipped version,
-the credential store, the user agent, the note) are handed over by the
+(`SettingsUpdates`: how to read the automatic flag, the skipped version and
+whether a version was put back, the credential store, the user agent, the
+note) are handed over by the
 window: `SettingsDialog::setUpdates`, called each time File > Settings is
 triggered, after the workbench's own slot has made the dialog (Qt calls an
 action's slots in the order they were connected). The page is filled again
@@ -4152,12 +4341,16 @@ edited.
 **In a headless run** the page says so and keeps nothing: no state to read,
 so the box is off and disabled, and no credential store, so Save is disabled
 (`qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless`,
-`qt_a_headless_run_saves_no_access_token_headless`). Clear and the skipped
-version's button still build their lines, which the verbs answer for that
-surface.
+`qt_a_headless_run_saves_no_access_token_headless`). Clear and the two
+buttons that offer a version again still build their lines, which the verbs
+answer for that surface: the button for a version that was put back is
+pressed in the real window by
+`qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`,
+where the command log shows `UPDATE BLOCKED CLEAR` and no other `UPDATE`
+line, and the status shows the verbs' refusal, `reason=headless`.
 
 Tested in `tests/qt_widgets/test_update_dialog.cpp` (the `SettingsUpdates`
-cases).
+cases) and, in the real window, by `tests/update/headless/update_window.cmake`.
 
 ## The rules a dialog or panel follows
 

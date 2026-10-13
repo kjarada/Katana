@@ -112,15 +112,29 @@
 //   settingsUpdateTokenClear   runs UPDATE TOKEN CLEAR
 //   settingsUpdateTokenState   whether a token is stored, and where
 //   settingsUpdateSkipped      the version UPDATE SKIP set aside, or that
-//                              none is
+//                              none is; nothing when nobody can say (the
+//                              state file does not read)
 //   settingsUpdateUnskip       "Offer the skipped version again": runs UPDATE
 //                              SKIP NONE
+//   settingsUpdateBlocked      whether a version is set aside because it was
+//                              installed here, did not start and was put
+//                              back, or that none is; nothing when nobody
+//                              can say
+//   settingsUpdateUnblock      "Offer the version that was put back again":
+//                              runs UPDATE BLOCKED CLEAR, as Unskip runs its
+//                              line. One start too slow for the update's
+//                              health check sets a sound release aside, and
+//                              this is the way back
+// Each of the two buttons is off when its list is known to be empty, and ON
+// when nobody can say what the list holds: the line is then run, and the verbs
+// answer - with why they refuse it, for a state file that does not read.
 // The page is there whatever the dialog was given; with no SettingsUpdates its
 // controls are disabled, as a button with no callback is on the first page.
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <QDialog>
@@ -160,8 +174,16 @@ struct SettingsUpdates {
     // is disabled.
     std::function<bool()> automatic{};
     // The version UPDATE SKIP set aside, empty when none is. Asked likewise.
-    // Empty function: the page says nothing of it and the button stays on.
-    std::function<QString()> skippedVersion{};
+    // nullopt when nobody can say - the state file does not read - and with
+    // an empty function: the page says nothing of it and the button stays on,
+    // so that the verb answers.
+    std::function<std::optional<QString>()> skippedVersion{};
+    // Whether a version is set aside because it was installed here, did not
+    // start and was put back (the state's list of blocked releases holds one;
+    // which version is not kept, only which build). Asked likewise, and
+    // nullopt and an empty function mean the same: the page says nothing of
+    // it and the button stays on.
+    std::function<std::optional<bool>()> putBack{};
     // Where the access token is kept: Save writes it here and the page says
     // whether one is stored - never the token itself. Null: Save is disabled.
     katana::update::CredentialStore* credentials = nullptr;
@@ -336,6 +358,8 @@ class SettingsDialog final : public QDialog {
     QLabel* updateTokenState_ = nullptr;
     QLabel* updateSkipped_ = nullptr;
     QPushButton* updateUnskip_ = nullptr;
+    QLabel* updateBlocked_ = nullptr;
+    QPushButton* updateUnblock_ = nullptr;
     QPlainTextEdit* status_ = nullptr;
 
     // Last, so it is destroyed first: no delivery reaches a half-destroyed

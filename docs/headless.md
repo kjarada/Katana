@@ -510,11 +510,19 @@ starting the window:
   once and clears. Settings > Updates says so, shows its box off and
   disabled, and has Save disabled: a headless run writes no credential store
   (`qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless`,
-  `qt_a_headless_run_saves_no_access_token_headless`). It is held to the
-  disk: the window's update checks are all given ONE state folder, removed
-  before the first of them, and after the last of them it must not be there
-  at all (`update_headless_checks_leave_no_update_state_folder_behind`, the
-  cleanup of a fixture every one of them requires).
+  `qt_a_headless_run_saves_no_access_token_headless`). Its buttons that run
+  a line still build it, and the verbs refuse for this surface every line
+  that reads or changes what Katana keeps for one user: `!settingsUpdateUnblock`
+  - "Offer the version that was put back again" - hands the executor
+  `UPDATE BLOCKED CLEAR` and no other line, and `?settingsStatus` then shows
+  the refusal, `reason=headless`
+  (`qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`,
+  which reports the whole command log to show that one line and no second).
+  It is held to the disk: the window's update checks are all given ONE state
+  folder, removed before the first of them, and after the last of them it
+  must not be there at all
+  (`update_headless_checks_leave_no_update_state_folder_behind`, the cleanup
+  of a fixture every one of them requires).
 - **No dialog unless asked.** `@updateDialog` - or `@helpCheckForUpdates`,
   the menu item - opens it, and opening it checks nothing. A development
   copy, which is every build tree, is told it cannot update, from its own
@@ -543,6 +551,29 @@ starting the window:
   replaces the program
   (`qt_a_typed_update_download_and_apply_say_a_headless_run_does_neither_headless`).
 - **Release notes** open no browser: the address is logged, `notes_url=...`.
+- **A start confirms nothing.** An interactive window of an installed copy
+  settles, on its first idle turn, an update whose helper died before it was
+  told that the new version starts (`docs/desktop.md`, "An update that was
+  never said to start"). That writes per-user state, so a headless run never
+  does it - the health run below included, which is the question and not the
+  answer.
+
+**A run given `--command` is not headless, and is still shown no box when an
+update cannot be started.** `katana --command "UPDATE APPLY CONFIRM"` - with
+no `--screenshot`, no plot and no `--script` - is a window a person may use:
+shown, with the automatic check, and it does download and apply. When its
+apply was prepared the window closes, and `main()` starts the update helper
+as its last act. A helper that cannot be started is said on stderr, always:
+"the update could not be started: ...", and the run ends with exit 1, the
+release still downloaded. A window nobody drove says it in a message box as
+well, since nobody reads a GUI program's stderr; a run that was given a line
+to run - `--command`, `--enter` or `--run-line` - is shown none, because
+whoever started it may not be there to close it, and it would wait for ever
+(`src/katana_qt/main.cpp`). Which runs are shown none is a function of the
+steps the run was given, and tested (`updateFailureIsBoxed`,
+`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`); `main()`'s
+own path - stderr, exit 1, the box - is reached by no test (`docs/desktop.md`,
+"Not done" under "Help > Check for Updates").
 
 Two things every run does about updates, headless or not, both before the
 window exists:

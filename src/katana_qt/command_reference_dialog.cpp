@@ -25,6 +25,7 @@
 #include "survey_verbs.hpp"
 #include "katana/interop/online_verbs.hpp"
 #include "theme.hpp"
+#include "update_verbs.hpp"
 
 namespace katana::qt {
 
@@ -142,10 +143,10 @@ QString windowHelpText()
     // CUSTOMISE is the interpreter's verb, and the interpreter's help - which
     // the typed HELP prints first - has it, so it has no block here.
     return R"(Window    the verbs the desktop window's command line runs itself, beside the
-          interpreter's. IMPORT, EXPORT, INFO <file>, REFS and COPC are katana_cli's
-          too, and UTILITY is the interpreter's, run here through the utilities
-          workbench; the rest are the window's alone, which katana_cli and katana_mcp
-          refuse by name
+          interpreter's. IMPORT, EXPORT, INFO <file>, REFS, COPC and UPDATE are
+          katana_cli's too, and UTILITY is the interpreter's, run here through the
+          utilities workbench; the rest are the window's alone, which katana_cli and
+          katana_mcp refuse by name
 Script    SCRIPT <file.kcs> [CONTINUE]   run a katana_cli script a line at a time, stopping
           at the first line refused unless CONTINUE (File > Run Script); a line starting
           with # is a note and runs nothing; several lines pasted run as a script, but
@@ -180,6 +181,10 @@ Online    ONLINE PROVIDERS | LAYERS | INFO | IMPORT | CUSTOM | KEY   online data
           Online Data); the usage of each is under Online data
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW|REGRADE|SCHEDULE   subsurface
           utilities, on a schedule or what is drawn (HELP UTILITY)
+Update    UPDATE CHECK | STATUS | DOWNLOAD CONFIRM | APPLY CONFIRM | SKIP | BLOCKED CLEAR |
+          SET AUTO | TOKEN   a newer Katana: asked about, downloaded and installed (Help >
+          Check for Updates, and File > Settings > Updates); the usage of each is
+          under Updates (HELP UPDATE)
 Quit      QUIT | EXIT   close the window; in a script, end the script
 Tools     a bare tool word typed here starts the tool: LINE, L, C, TR, or an id such as
           draw.circle.ttr; with arguments it is the interpreter's (LINE 0,0 10,0), and so
@@ -203,6 +208,10 @@ std::vector<ReferenceSection> commandReferenceSections()
     // SURVEY READ and IMPORT, from the session's own help, as katana_help says them.
     sections.push_back(
         {"Survey field files", referenceEntries(qs(katana::app::surveyHelpText()))});
+    // The UPDATE verbs, from the session's own help: what HELP UPDATE and
+    // katana_cli --help print, so a line added to the family is here at once.
+    sections.push_back(
+        {"Updates", referenceEntries(QString::fromUtf8(katana::app::updateHelpText()))});
     sections.push_back({"Window", referenceEntries(windowHelpText())});
     // The tools, a section a menu, in the menus' order: what each is called,
     // the words that start it, its key and what it does.
