@@ -91,6 +91,25 @@ def hex_rgb(text):
     return tuple(int(text[i:i + 2], 16) for i in (1, 3, 5))
 
 
+def sample_codes(codes_module, definitions, field, usable=lambda code: True):
+    """definition name -> the code that shows it on a sheet. Several codes may draw with one definition, each in
+    its own colour: the sample is a code of the definition's OWN group when one uses it (a hidden outline is then
+    a building's and a fire hydrant the fire service's), else the first code that does. `field` is `linestyle`
+    or `symbol`; `usable` leaves out a code the sheet cannot use."""
+    group_of = {d["name"]: d["group"] for d in definitions}
+    chosen, in_group = {}, set()
+    for c in codes_module.CODES:
+        name = codes_module.styling(c)[field]
+        if not name or name not in group_of or not usable(c):
+            continue
+        own = c["group"] == group_of[name]
+        if name not in chosen or (own and name not in in_group):
+            chosen[name] = c
+            if own:
+                in_group.add(name)
+    return chosen
+
+
 def save_small(image, name):
     """Write a PNG under 500 KB: palette first, then fewer colours, then a smaller image."""
     from PIL import Image
@@ -145,11 +164,8 @@ def wrapped(draw, text, face, width):
 def draw_symbols():
     from PIL import Image, ImageDraw
     codes_module, colours_module, _, symbols_module = modules()
-    colour_of = {}
-    for c in codes_module.CODES:
-        st = codes_module.styling(c)
-        if st["symbol"] and st["symbol"] not in colour_of:
-            colour_of[st["symbol"]] = hex_rgb(colours_module.COLOURS[st["colour"]])
+    colour_of = {name: hex_rgb(colours_module.COLOURS[codes_module.styling(c)["colour"]])
+                 for name, c in sample_codes(codes_module, symbols_module.SYMBOLS, "symbol").items()}
     by_group = {}
     for d in symbols_module.SYMBOLS:
         by_group.setdefault(d["group"], []).append(d["name"])
@@ -248,14 +264,10 @@ def draw_linestyles():
     from PIL import Image
     codes_module, colours_module, linestyles_module, _ = modules()
     keys = {c["key"] for c in codes_module.CODES}
-    user = {}
-    for c in codes_module.CODES:
-        name = codes_module.styling(c)["linestyle"]
-        if name and name != "continuous" and name not in user:
-            code = field_code(c["key"])
-            # a code that the key itself answers, so the library styles the sample by that key
-            if matched_key(code, keys) == c["key"]:
-                user[name] = code
+    # a code that the key itself answers, so the library styles the sample by that key
+    user = {name: field_code(c["key"])
+            for name, c in sample_codes(codes_module, linestyles_module.LINESTYLES, "linestyle",
+                                        lambda c: matched_key(field_code(c["key"]), keys) == c["key"]).items()}
     groups = []
     for top in codes_module.TAXONOMY:
         for sub in top[4]:
