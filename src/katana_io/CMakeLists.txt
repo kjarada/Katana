@@ -1,5 +1,8 @@
 find_package(GDAL REQUIRED)
 find_package(PDAL CONFIG REQUIRED)
+# The same libcurl GDAL loads: gis::httpExchange (include/katana/gis/web_access.hpp) needs a
+# handle that does not follow a redirect, which CPLHTTPFetch cannot give (docs/update.md).
+find_package(CURL REQUIRED)
 
 # GDAL raster/vector access and PDAL point-cloud access behind Katana interfaces.
 # Failures cross the interface as Result<T> / Status: whatever GDAL reports and
@@ -25,5 +28,5 @@ target_include_directories(katana_io PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 katana_target_defaults(katana_io)
 target_link_libraries(katana_io
     PUBLIC katana_core
-    PRIVATE GDAL::GDAL pdalcpp
+    PRIVATE GDAL::GDAL pdalcpp CURL::libcurl
 )
