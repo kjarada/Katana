@@ -16,18 +16,32 @@
 # un.StrStr, un.DeleteListedFile, un.DeleteManifestFiles and un.RemoveUpdateState. Nothing is
 # paraphrased. The one change is that $LOCALAPPDATA, which an environment variable cannot
 # redirect (NSIS asks the shell), is replaced by a folder under WORK, so that no test touches
-# the folders of whoever runs it. The registry is not touched at all (the template's
-# .onInit, its RunOnce delete and the Settings > Apps entry are in the text checks instead).
+# the folders of whoever runs it. The registry is not touched at all: the throwaway script has
+# no registry instruction and neither have the four functions (the template's .onInit, its
+# RunOnce delete and the Settings > Apps entry are in the text checks instead). Every file it
+# makes or deletes is under WORK.
+#
+# WORK must have no space in it. The folder reaches the installer as /D=<folder> and the
+# uninstaller as _?=<folder>, which NSIS takes as the unquoted rest of the command line (its
+# manual, 3.2: "must not contain any quotes, even if the path contains spaces"), and CMake
+# quotes an argument that has a space. A quoted _?= is not seen at all: the uninstaller then
+# copies itself to the temporary folder, returns at once and works on behind this script's
+# back.
 #
 # -DMUTATE=<name> changes the extracted text first in one way that breaks one rule, and the
-# test that uses it expects this script to say the tree differs: a test that cannot see a
-# broken reader passes as quietly as one that finds none.
+# test that uses it expects this script to name the file that the broken rule left or took: a
+# test that cannot see a broken reader passes as quietly as one that finds none. A mutation
+# that leaves the trees as expected is an error of its own.
 
 foreach(_required TEMPLATE MAKENSIS WORK)
     if(NOT ${_required})
         message(FATAL_ERROR "Pass -D${_required}=...")
     endif()
 endforeach()
+if(WORK MATCHES " ")
+    message(FATAL_ERROR "WORK (${WORK}) has a space in it: /D= and _?= cannot carry such a folder "
+        "from CMake to an NSIS program (see the top of this file)")
+endif()
 file(READ "${TEMPLATE}" _template)
 string(REPLACE "\r\n" "\n" _template "${_template}")
 
@@ -43,6 +57,7 @@ function(katana_extract name out)
     if(_end EQUAL -1)
         message(FATAL_ERROR "Function ${name} does not end")
     endif()
+    # 12: the line break and the word FunctionEnd.
     math(EXPR _end "${_end} + 12")
     string(SUBSTRING "${_from}" 0 ${_end} _body)
     set(${out} "${_body}\n" PARENT_SCOPE)
@@ -99,13 +114,16 @@ if(NOT _real_folder EQUAL -1)
     message(FATAL_ERROR "the functions still name the real LOCALAPPDATA; refusing to run them")
 endif()
 
-# The target line is the template's own (cmake/NSIS.template.in, "Which NSIS this is").
-set(_nsi [=[Unicode true
-!if /FileExists "${NSISDIR}\Plugins\unicode\nsDialogs.dll"
+# The target and the character set are the template's own lines, in its order (cmake/
+# NSIS.template.in, "Which NSIS this is"). Silent both ways, whatever the command line says:
+# nothing here may put a window up.
+set(_nsi [=[!if /FileExists "${NSISDIR}\Plugins\unicode\nsDialogs.dll"
   Target amd64-unicode
 !endif
+Unicode true
 RequestExecutionLevel user
 SilentInstall silent
+SilentUnInstall silent
 ]=])
 string(APPEND _nsi "OutFile \"${_work}\\installer.exe\"\n")
 string(APPEND _nsi [=[
@@ -129,7 +147,6 @@ endif()
 
 # ---- one case: a tree, a manifest, the uninstaller, the tree that is left -------------------------
 set(_failures "")
-set(_dirs_to_compare "")
 # A file with content, made with its folders. Bytes outside ASCII are written as they are.
 function(katana_make_file root relative)
     file(WRITE "${root}/${relative}" "x")
@@ -139,10 +156,29 @@ endfunction()
 function(katana_entry out path)
     set(${out} "{\"class\":\"lib\",\"path\":\"${path}\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1}" PARENT_SCOPE)
 endfunction()
+# What differs between what is left and what was expected, a line an item, so that the test of
+# a mutation can name the file it expects to see here.
+function(katana_differences out where left wanted)
+    set(_lines "")
+    foreach(_item IN LISTS left)
+        list(FIND wanted "${_item}" _at)
+        if(_at EQUAL -1)
+            string(APPEND _lines "    ${where}left, should have gone: ${_item}\n")
+        endif()
+    endforeach()
+    foreach(_item IN LISTS wanted)
+        list(FIND left "${_item}" _at)
+        if(_at EQUAL -1)
+            string(APPEND _lines "    ${where}gone, should have stayed: ${_item}\n")
+        endif()
+    endforeach()
+    set(${out} "${_lines}" PARENT_SCOPE)
+endfunction()
 
-# case_name: the folder under WORK. files, entries and expect are lists (the paths have no
-# semicolons). MANIFEST_VARIABLE, instead of ENTRIES, names a variable that holds the whole file. expect lists, for
-# the folder of the case, every file and folder that must be left, relative to it, sorted.
+# case_name: the folder under WORK. FILES, ENTRIES and EXPECT are lists (the paths have no
+# semicolons). MANIFEST_VARIABLE, instead of ENTRIES, names a variable that holds the whole
+# file. EXPECT lists, for the folder of the case, every file and folder that must be left,
+# relative to it; LOCAL_EXPECT the same under the stand-in for LOCALAPPDATA (CHECK_LOCAL).
 function(katana_case case_name)
     cmake_parse_arguments(ARG "NO_MANIFEST;CHECK_LOCAL" "MANIFEST_VARIABLE" "FILES;ENTRIES;EXPECT;LOCAL_FILES;LOCAL_EXPECT" ${ARGN})
     set(_case "${WORK}/${case_name}")
@@ -151,7 +187,7 @@ function(katana_case case_name)
     file(REMOVE_RECURSE "${WORK}/localappdata")
     file(TO_NATIVE_PATH "${_root}" _native_root)
     execute_process(COMMAND "${WORK}/installer.exe" /S "/D=${_native_root}"
-        RESULT_VARIABLE _made OUTPUT_VARIABLE _o ERROR_VARIABLE _e)
+        RESULT_VARIABLE _made OUTPUT_VARIABLE _o ERROR_VARIABLE _e TIMEOUT 120)
     if(NOT _made EQUAL 0 OR NOT EXISTS "${_root}/Uninstall.exe")
         message(FATAL_ERROR "${case_name}: the throwaway installer did not write the uninstaller (${_made})")
     endif()
@@ -191,29 +227,15 @@ function(katana_case case_name)
     endif()
 
     file(GLOB_RECURSE _left LIST_DIRECTORIES true RELATIVE "${_case}" "${_case}/*")
-    list(SORT _left)
-    set(_wanted ${ARG_EXPECT})
-    list(SORT _wanted)
-    if(NOT "${_left}" STREQUAL "${_wanted}")
-        set(_extra ${_left})
-        list(REMOVE_ITEM _extra ${_wanted})
-        set(_missing ${_wanted})
-        list(REMOVE_ITEM _missing ${_left})
-        string(REPLACE ";" "\n      " _extra "${_extra}")
-        string(REPLACE ";" "\n      " _missing "${_missing}")
-        string(APPEND _failures "${case_name}: the tree that is left is not the one expected.\n"
-            "    left that should have gone:\n      ${_extra}\n    gone that should have stayed:\n      ${_missing}\n")
+    katana_differences(_differences "" "${_left}" "${ARG_EXPECT}")
+    if(NOT _differences STREQUAL "")
+        string(APPEND _failures "${case_name}: the tree that is left is not the one expected.\n${_differences}")
     endif()
     if(ARG_CHECK_LOCAL)
         file(GLOB_RECURSE _local_left LIST_DIRECTORIES true RELATIVE "${WORK}/localappdata" "${WORK}/localappdata/*")
-        set(_local_wanted ${ARG_LOCAL_EXPECT})
-        list(SORT _local_left)
-        list(SORT _local_wanted)
-        if(NOT "${_local_left}" STREQUAL "${_local_wanted}")
-            string(REPLACE ";" "\n      " _shown "${_local_left}")
-            string(REPLACE ";" "\n      " _wanted_shown "${_local_wanted}")
-            string(APPEND _failures "${case_name}: what is left under LOCALAPPDATA is not what was expected.\n"
-                "    left:\n      ${_shown}\n    expected:\n      ${_wanted_shown}\n")
+        katana_differences(_differences "under LOCALAPPDATA: " "${_local_left}" "${ARG_LOCAL_EXPECT}")
+        if(NOT _differences STREQUAL "")
+            string(APPEND _failures "${case_name}: what is left under LOCALAPPDATA is not what was expected.\n${_differences}")
         endif()
     endif()
     set(_failures "${_failures}" PARENT_SCOPE)
@@ -221,10 +243,11 @@ endfunction()
 
 # ---- case 1: a manifest of an updated install, with hostile entries among the good ------------------
 # Good entries (their files must go, with the folders they leave empty): normal names, a space,
-# a deep folder, etc\ (the certificates), a literal $R0 in a name, and a file after an over-long
-# entry (the reader must find its way back to the next entry).
-# Hostile entries (every one has a decoy file that the path would reach if it got past the filter,
-# or would be a delete through the wildcard, so the decoy must still be there afterwards):
+# a deep folder, etc\ (the certificates), a literal $R0 in a name (NSIS must not read a
+# variable out of data), a file that is not there, and a file after an over-long entry (the
+# reader must find its way back to the next entry).
+# Hostile entries (every one has a decoy file that the path would reach if it got past the
+# filter, or would be a delete through the wildcard, so the decoy must still be there afterwards):
 set(_long "")
 foreach(_i RANGE 1 30)
     string(APPEND _long "abcdefghij")   # 300 characters
@@ -295,6 +318,8 @@ katana_case(case_2
         outside.txt outside2.txt)
 
 # ---- case 3: no manifest (a copy that has never been updated); the staged download alone ------------
+# Nothing in the install folder goes (these functions delete only what a manifest lists), and
+# under LOCALAPPDATA the download goes and the two folders it leaves empty go with it.
 katana_case(case_3
     NO_MANIFEST
     FILES bin/katana.exe
@@ -305,5 +330,9 @@ katana_case(case_3
 if(_failures)
     message(FATAL_ERROR "The uninstaller's file removal is not what was expected:\n${_failures}")
 endif()
-message(STATUS "Uninstaller file removal${MUTATE}: the manifest's files and the updater's staged files went; "
+if(MUTATE)
+    message(FATAL_ERROR "The mutation ${MUTATE} went unnoticed: the trees are the ones expected of the "
+        "template as it is, so these cases cannot see the rule it breaks")
+endif()
+message(STATUS "Uninstaller file removal: the manifest's files and the updater's staged files went; "
     "hostile entries, user files and everything outside the folder stayed, in 3 cases.")

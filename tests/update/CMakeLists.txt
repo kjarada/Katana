@@ -357,20 +357,39 @@ endif()
 #                                           checked and the installer is compiled (Windows with
 #                                           NSIS, which is where `package` makes an installer)
 #
-# An install and an uninstall on a clean Windows machine (silent, and as a person runs them) are
-# the acceptance step of docs/release.md, "The Windows installer"; no test here runs an
-# installer, because it writes the user's registry and Start menu.
+# and tests/update/run_nsis_uninstaller.cmake RUNS the part of the uninstaller that the text
+# cannot vouch for, the reader of the installed manifest and the filter in front of each delete:
+#
+#   packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else
+#                                           the template's own four functions, compiled into a
+#                                           throwaway installer that writes nothing but its
+#                                           uninstaller, over three small trees with hostile
+#                                           manifest entries; the tree that is left is compared
+#                                           with the one worked out by hand (Windows with NSIS)
+#   packaging_nsis_uninstaller_test_catches_*
+#                                           the same with one rule of those functions broken: the
+#                                           test must name the file the broken rule left or took
+#
+# Those throwaway programs write under their own folder of the build tree only: no registry, no
+# Start menu, and a stand-in for LOCALAPPDATA. No test here runs Katana's installer, because that
+# writes the user's registry and Start menu; an install, an update and an uninstall on a clean
+# Windows machine (silent, and as a person runs them) are the acceptance step of
+# docs/release.md, "The Windows installer".
 set(_katana_nsis_template "${PROJECT_SOURCE_DIR}/cmake/NSIS.template.in")
 set(_katana_nsis_check "${CMAKE_CURRENT_SOURCE_DIR}/check_nsis_script.cmake")
+# Where the helper names its RunOnce value, which the uninstaller must remove under that name.
+set(_katana_nsis_registry_header "${PROJECT_SOURCE_DIR}/include/katana/update/registry.hpp")
 add_test(NAME packaging_nsis_template_is_per_user
-    COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}" -P "${_katana_nsis_check}")
+    COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}"
+            "-DREGISTRY_HEADER=${_katana_nsis_registry_header}" -P "${_katana_nsis_check}")
 set_tests_properties(packaging_nsis_template_is_per_user PROPERTIES
     PASS_REGULAR_EXPRESSION "Installer script [(]the template with sample values[)]: per user"
     FAIL_REGULAR_EXPRESSION "CMake Error")
 function(katana_add_nsis_mutation mutation phrase)
     katana_phrase(_regex "${phrase}")
     add_test(NAME packaging_nsis_check_catches_${mutation}
-        COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}" -DMUTATE=${mutation}
+        COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}"
+                "-DREGISTRY_HEADER=${_katana_nsis_registry_header}" -DMUTATE=${mutation}
                 -P "${_katana_nsis_check}")
     set_tests_properties(packaging_nsis_check_catches_${mutation} PROPERTIES
         PASS_REGULAR_EXPRESSION "${_regex}")
@@ -380,7 +399,7 @@ katana_add_nsis_mutation(second_level "has 2 RequestExecutionLevel instructions"
 katana_add_nsis_mutation(machine_registry "HKLM: the installer writes machine-wide")
 katana_add_nsis_mutation(shell_context "SetShellVarContext all: the Start menu")
 katana_add_nsis_mutation(program_files "[$]PROGRAMFILES: a folder only an administrator can write to")
-katana_add_nsis_mutation(no_update_folder_removal "does not remove the updater's working folder")
+katana_add_nsis_mutation(no_update_folder_removal "the uninstaller does not remove the updater's working folder")
 katana_add_nsis_mutation(no_manifest_removal "does not remove the files the installed manifest lists")
 katana_add_nsis_mutation(install_folder_removed_recursively "RMDir /r \"[$]INSTDIR\": recursive removal")
 katana_add_nsis_mutation(install_folder_wildcard_delete "a wildcard delete in the install folder")
@@ -389,6 +408,20 @@ katana_add_nsis_mutation(no_install_location "the entry in Settings > Apps: the 
 katana_add_nsis_mutation(no_folder_record "the install folder, for the updater: the script has no")
 katana_add_nsis_mutation(ansi "a Unicode installer: the script has no")
 katana_add_nsis_mutation(keys_stay_behind "does not remove its own entry in Settings > Apps")
+# A running program's file must stop the install, not be skipped (which a silent run would do unseen).
+katana_add_nsis_mutation(file_in_use_skipped "a file in use stops the install and is not skipped: the script has no")
+# An instruction behind a comment that ends in a backslash is no instruction to NSIS.
+katana_add_nsis_mutation(comment_takes_the_next_line "a line with a comment character in it ends in a backslash")
+# Installed over a copy that an update changed: the updater's record and working folder go.
+katana_add_nsis_mutation(stale_record_survives_a_reinstall
+    "the installer does not clear the updater's record of the version of a copy it installs over")
+katana_add_nsis_mutation(stale_journal_survives_a_reinstall
+    "the installer does not clear the working folder of an update that was cut short")
+# Outside the install folder: the updater's state folder and no other, less the person's choices.
+katana_add_nsis_mutation(state_folder_is_another_folder "the updater's state folder, which is the only one")
+katana_add_nsis_mutation(update_choices_removed "the person's choices about updating, which the uninstaller keeps")
+katana_add_nsis_mutation(run_once_under_another_name
+    "does not remove the helper's RunOnce value under the name the helper gives it")
 # The case no mutation can stand for: the template this one replaces, as CMake ships it. It is
 # the installer Katana had (administrator rights, HKLM, Program Files); the check must refuse it
 # on its own terms. Where CMake keeps it differs between versions, so it is only looked for.
@@ -400,6 +433,12 @@ if(EXISTS "${_katana_cpack_stock_template}")
     set_tests_properties(packaging_nsis_check_catches_cpacks_own_template PROPERTIES
         PASS_REGULAR_EXPRESSION "${_regex}")
 endif()
+if(WIN32)
+    # The search cmake/KatanaPackaging.cmake makes, made here too: that file is included after
+    # the tests are added, so on a first configure its answer is not in the cache yet, and the
+    # tests below would be missing from that configure without a word.
+    find_program(KATANA_MAKENSIS NAMES makensis HINTS "${KATANA_RUNTIME_BIN}")
+endif()
 if(WIN32 AND KATANA_MAKENSIS)
     add_test(NAME packaging_nsis_installer_builds_from_the_real_configuration
         COMMAND ${CMAKE_COMMAND}
@@ -407,10 +446,54 @@ if(WIN32 AND KATANA_MAKENSIS)
                 "-DCPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
                 "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/nsis_package"
                 "-DCHECK=${_katana_nsis_check}"
+                "-DREGISTRY_HEADER=${_katana_nsis_registry_header}"
                 "-DEXPECT_VERSION=${PROJECT_VERSION}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/build_nsis_package.cmake")
     set_tests_properties(packaging_nsis_installer_builds_from_the_real_configuration PROPERTIES
         PASS_REGULAR_EXPRESSION "Installer built from the real configuration"
         FAIL_REGULAR_EXPRESSION "CMake Error"
         TIMEOUT 300)
+
+    # The uninstaller's file removal, run. Each test has a folder of its own (they run side by
+    # side) and names no folder outside it. NSIS takes the folder as the unquoted end of a
+    # command line, which CMake cannot give it when the path has a space
+    # (run_nsis_uninstaller.cmake says more), so a build tree with one has no such tests, and
+    # says so here rather than failing them.
+    set(_katana_nsis_uninstaller_work "${CMAKE_CURRENT_BINARY_DIR}/nsis_uninstaller")
+    if(_katana_nsis_uninstaller_work MATCHES " ")
+        message(STATUS "Installer tests: ${_katana_nsis_uninstaller_work} has a space in it; "
+                       "the tests that run the uninstaller's file removal are not registered")
+    else()
+        set(_katana_nsis_uninstaller_run
+            ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}" "-DMAKENSIS=${KATANA_MAKENSIS}")
+        add_test(NAME packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else
+            COMMAND ${_katana_nsis_uninstaller_run} "-DWORK=${_katana_nsis_uninstaller_work}/as_it_is"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_nsis_uninstaller.cmake")
+        set_tests_properties(packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else PROPERTIES
+            PASS_REGULAR_EXPRESSION "Uninstaller file removal: the manifest's files and the updater's staged files went"
+            FAIL_REGULAR_EXPRESSION "CMake Error"
+            TIMEOUT 300)
+        # What each broken rule must be seen to do, named by the file it leaves or takes: a
+        # listed file that stays (the rule that lets a release folder through is broken) or a
+        # decoy that goes (the rule that keeps a hostile path out is).
+        function(katana_add_nsis_uninstaller_mutation mutation phrase)
+            katana_phrase(_regex "${phrase}")
+            add_test(NAME packaging_nsis_uninstaller_test_catches_${mutation}
+                COMMAND ${_katana_nsis_uninstaller_run} "-DWORK=${_katana_nsis_uninstaller_work}/${mutation}"
+                        -DMUTATE=${mutation} -P "${CMAKE_CURRENT_SOURCE_DIR}/run_nsis_uninstaller.cmake")
+            set_tests_properties(packaging_nsis_uninstaller_test_catches_${mutation} PROPERTIES
+                PASS_REGULAR_EXPRESSION "${_regex}"
+                TIMEOUT 300)
+        endfunction()
+        katana_add_nsis_uninstaller_mutation(first_folder_length "left, should have gone: install/bin/katana[.]exe")
+        katana_add_nsis_uninstaller_mutation(etc_not_accepted "left, should have gone: install/etc/ssl/certs/ca-bundle[.]crt")
+        katana_add_nsis_uninstaller_mutation(slash_kept "left, should have gone: install/lib/libx[.]a")
+        katana_add_nsis_uninstaller_mutation(no_dotdot_rule "gone, should have stayed: install/victim-dotdot[.]txt")
+        katana_add_nsis_uninstaller_mutation(no_dot_rule "gone, should have stayed: install/bin/dot-target[.]dll")
+        katana_add_nsis_uninstaller_mutation(no_empty_component_rule "gone, should have stayed: install/bin/double[.]dll")
+        katana_add_nsis_uninstaller_mutation(wildcard_allowed "gone, should have stayed: install/bin/wild2[.]txt")
+        katana_add_nsis_uninstaller_mutation(high_byte_allowed "gone, should have stayed: install/bin/hi")
+        katana_add_nsis_uninstaller_mutation(state_json_removed
+            "under LOCALAPPDATA: gone, should have stayed: Katana/update/state[.]json")
+    endif()
 endif()

@@ -163,6 +163,8 @@ elseif(MUTATE STREQUAL "update_choices_removed")
     katana_mutate([=[StrCmp $1 "state.json" state_skip]=] "")
 elseif(MUTATE STREQUAL "run_once_under_another_name")
     katana_mutate([=["KatanaUpdateRecover"]=] [=["KatanaRecover"]=])
+elseif(MUTATE STREQUAL "file_in_use_skipped")
+    katana_mutate([=[AllowSkipFiles off]=] [=[AllowSkipFiles on]=])
 elseif(MUTATE)
     message(FATAL_ERROR "unknown mutation '${MUTATE}'")
 endif()
@@ -279,6 +281,11 @@ foreach(_box IN LISTS _boxes)
         katana_problem("${_box}: no /SD, so a silent install (/S) would wait for an answer")
     endif()
 endforeach()
+
+# 4a. A file that cannot be written (a program of Katana's that is running) stops the install.
+# NSIS's default lets it be skipped, which a silent run would do without a word, leaving the
+# old program among the new libraries.
+katana_require("a file in use stops the install and is not skipped" "AllowSkipFiles off")
 
 # 5. Unicode: the default folder is under the user's profile, whose name can hold any character.
 katana_require("a Unicode installer" "Unicode true")

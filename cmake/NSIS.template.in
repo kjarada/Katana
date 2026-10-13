@@ -89,6 +89,11 @@
   ; No elevation, no prompt: everything below is the user's own.
   RequestExecutionLevel user
 
+  ; A file that cannot be written, which is what a running program of Katana's is, stops the
+  ; install: Retry or Cancel, and a silent run fails. NSIS's default lets the file be skipped,
+  ; and that leaves the old program among the new libraries.
+  AllowSkipFiles off
+
 @CPACK_NSIS_DEFINES@
 @CPACK_NSIS_MANIFEST_DPI_AWARE_CODE@
 @CPACK_NSIS_BRANDING_TEXT_CODE@

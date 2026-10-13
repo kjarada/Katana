@@ -2,7 +2,8 @@
 # tree, then holds the script CPack generated to check_nsis_script.cmake:
 #
 #   cmake -DCPACK_COMMAND=<cpack> -DCPACK_CONFIG=<build>/CPackConfig.cmake -DWORK=<folder>
-#         -DCHECK=<check_nsis_script.cmake> -DEXPECT_VERSION=<x.y.z> -P build_nsis_package.cmake
+#         -DCHECK=<check_nsis_script.cmake> -DEXPECT_VERSION=<x.y.z>
+#         [-DREGISTRY_HEADER=<include/katana/update/registry.hpp>] -P build_nsis_package.cmake
 #
 # What this proves that the sample values of check_nsis_script.cmake cannot: that CPack takes
 # cmake/NSIS.template.in and not its own (cmake/ is on CPACK_MODULE_PATH; a template that
@@ -66,9 +67,14 @@ endif()
 # CPack's own list of what the installer puts down is what its uninstaller deletes: every
 # stand-in file, and the install record the pre-build script writes into the staged tree.
 set(_expected ${_files} share/katana/install.json)
+# The header that names the helper's RunOnce value, handed on when the caller gave it.
+set(_registry_header_argument "")
+if(REGISTRY_HEADER)
+    set(_registry_header_argument "-DREGISTRY_HEADER=${REGISTRY_HEADER}")
+endif()
 execute_process(
     COMMAND "${CMAKE_COMMAND}" "-DSCRIPT=${_scripts}" "-DEXPECT_VERSION=${EXPECT_VERSION}"
-            "-DEXPECT_FILES=${_expected}" -P "${CHECK}"
+            "-DEXPECT_FILES=${_expected}" ${_registry_header_argument} -P "${CHECK}"
     RESULT_VARIABLE _check_status OUTPUT_VARIABLE _check_output ERROR_VARIABLE _check_error)
 message("${_check_output}${_check_error}")
 if(NOT _check_status EQUAL 0)
