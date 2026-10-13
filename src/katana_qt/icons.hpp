@@ -238,6 +238,10 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // Help > Check for Updates: a cloud, and in the accent the arrow that
+    // brings the new version down out of it. Not Import's tray and arrow:
+    // that is a file coming into the drawing, and this is the program itself.
+    Download,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

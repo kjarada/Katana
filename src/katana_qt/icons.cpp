@@ -385,6 +385,7 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        Icon::Download,
     };
     return icons;
 }
@@ -1333,6 +1334,18 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
         break;
+    case Icon::Download: {
+        // The cloud is left open underneath, where the arrow comes out of it,
+        // so that at 16 px the shaft does not cross a third line at its base.
+        QPainterPath cloud(QPointF(7.5, 13));
+        cloud.cubicTo(3.5, 13, 3.5, 7.5, 7.5, 7.5);
+        cloud.cubicTo(8, 3.5, 15, 3, 16, 7);
+        cloud.cubicTo(20.5, 6.5, 21, 13, 16.5, 13);
+        ink.stroke(cloud);
+        ink.line(12, 10, 12, 20.5, true);
+        ink.stroke(polyline({{8.5, 17}, {12, 20.5}, {15.5, 17}}), true);
+        break;
+    }
     }
     painter.restore();
 }
