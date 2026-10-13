@@ -34,7 +34,7 @@ a tag included.
    |---|---|---|
    | `tag` | empty | the release to publish; empty builds, tests and publishes nothing |
    | `sign` | `ci` | who signs the update manifests. `ci`: this run, with the secret `UPDATE_SIGNING_KEY`. `offline`: nobody yet - the release is left a DRAFT until the owner has signed it with `tools/update_release_sign.py` ("Update signing") |
-   | `publish_repo` | empty | `owner/name` of another repository to publish the release in, with the secret `RELEASES_REPO_TOKEN`; empty is this repository ("Update signing", at its end) |
+   | `publish_repo` | empty | `owner/name` of another repository to publish the release in, with the repository secret `RELEASES_REPO_TOKEN`; empty is this repository ("Update signing", at its end) |
 
 3. The Publish job runs in the GitHub environment `release`, which holds the
    update signing key. When that environment names required reviewers, the
@@ -73,7 +73,12 @@ version, so `v0.3.0` over a 0.2.0 build would publish files that say 0.2.0.
 Running the Publish job again for a release that already exists replaces
 its files, removes any that the new run did not make, and marks the release
 latest again, so a failed publish is fixed by re-running it ("Update assets"
-says what an installed copy meets meanwhile). To take a bad release out of
+says what an installed copy meets meanwhile). Run again by itself, from the
+run's page, the job publishes the SAME packages under the same sequence, so
+a copy that already has them is not offered them a second time; a whole new
+run for the same tag builds new packages, with a later sequence, and those
+are offered to every copy of that version an earlier run updated ("Update
+assets", `--sequence`). To take a bad release out of
 circulation, mark the one before it as the latest,
 `gh release edit vPREVIOUS --latest`: installed copies read whichever release
 is the latest, and are never offered a version below their own.
@@ -123,7 +128,7 @@ What the producer is told about a tree:
 
 | Option | Value | Why |
 |---|---|---|
-| `--sequence` | the UTC time in seconds, read once in the step: ONE value for all five manifests | it orders two builds of one version, so a later run of the Publish job outranks an earlier one; the recheck refuses a release whose manifests disagree on it |
+| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`isNewerThan`, `include/katana/update/trust.hpp`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
 | `--seed` | `share/katana/samples/*` | a seed is written only where it is absent. Opening a sample project changes it in place, so as ordinary data every update would fetch the samples again and write over what the user had done in them |
 | `--exclude` | `LICENSE`, and for Linux `ssl/*` | a manifest names files under `bin`, `share`, `etc` and `lib` and nowhere else, and the producer refuses a tree that holds anything more rather than leave it out unasked. The licence text lies beside those folders; the Linux tree keeps its certificate bundle in `ssl/`, where the bundled libcurl looks ("How the Linux and macOS packages are made self-contained"). Neither is ever updated |
 | `--version`, `--tag`, `--repo` | what is being published, and where | what a manifest offers, and its link to the release notes |
@@ -168,11 +173,12 @@ so the installer's programs differ from the zip's in the signature's time
 stamp. That costs nothing: an installed copy compares its files with the
 NEXT release's manifest, in which the programs differ anyway.
 
-**While a release is being replaced** (the Publish job run again), its files
-are uploaded one after another - the packages and the update zips first,
-then the signatures, the manifests last - so for a moment an installed copy
-may read a manifest and a signature of two different runs, or a manifest
-whose zip has already been replaced. It then verifies nothing, or a fetched
+**While a release is being replaced** (the Publish job run again, or a new
+run for the same tag), its files are uploaded one after another - the
+packages and the update zips first, then the signatures, the manifests last.
+When it is a new run that replaces them, an installed copy may for a moment
+read a manifest and a signature of two different runs, or a manifest whose
+zip has already been replaced. It then verifies nothing, or a fetched
 file fails its hash; either way it changes nothing and finds the release
 whole at its next check. Should the repository use GitHub's immutable
 releases, a published release cannot be replaced at all: make the next
@@ -192,6 +198,12 @@ left without it.
 Nothing in the workflow has run since the update assets were added ("Not
 done"), and several things can only be seen on GitHub. In the run:
 
+* The Version job's step "Update keys" ends `Update keys: pinned, active
+  <key id>, spare <key id>`, with no warning: the key check ran under the
+  runner's own CMake. The job's first step prints the run's sequence.
+* Each Configure step prints `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON` and
+  `KATANA_UPDATE_REPO:STRING=<repo>` after CMake's own output, and goes on:
+  both settings reached the project ("What each job does").
 * The Linux, macOS and Windows ARM64 jobs configure and build at all: they
   are the first places the update library, and the helper with it (not on
   macOS), meets those systems - on Linux and macOS OpenSSL and zlib as the
@@ -259,10 +271,37 @@ Two more settings make each of them a RELEASE and not a developer's build.
 program built with them can never be updated. `-DKATANA_UPDATE_REPO=<owner/name>`
 is the repository an installed copy asks for the next version: the one the
 run publishes in, which is this repository unless the input `publish_repo`
-names another. The first job, before any toolchain is installed, runs the
-key check by itself (`cmake -DKATANA_REQUIRE_UPDATE_KEYS=ON -P
-cmake/KatanaUpdateKeys.cmake`), so a tree with placeholder keys fails in the
-first minute and says what to do.
+names another.
+
+CMake takes a `-D` the project has no use for with a warning and builds
+without it, and no program says which repository it asks, so a renamed
+option would give green jobs and programs that ask the default repository
+for ever. Each Configure step therefore ends by checking that both settings
+arrived. In `CMakeCache.txt` each must stand as the option the project
+declares, `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON` and
+`KATANA_UPDATE_REPO:STRING=<owner/name>`: a `-D` nothing declares stays
+there as `UNINITIALIZED`. And in `build.ninja` the update library's compile
+line must define `KATANA_UPDATE_REPO` as that repository and as nothing
+else. The check stops at the compile line on purpose. Looking for the name
+in the built programs was considered and not done: a short text assigned to
+a string may be compiled into the instructions that store it, piece by
+piece, so its absence from the file's bytes would prove nothing and could
+stop a good release ("Not done").
+
+The first job, before any toolchain is installed, asks the keys file the
+same question the configures will: it runs `cmake/KatanaUpdateKeys.cmake`
+as a script with `KATANA_REQUIRE_UPDATE_KEYS` on, so a tree with placeholder
+keys fails in the first minute and says what to do. The file is not run
+bare. It is written for a configure, where the root `CMakeLists.txt` has
+set the policies of its minimum CMake before including it; a script starts
+with none set, and the hosted runner's own CMake (3.31.6 on the image of
+2026-10-04; the build jobs install 4.x) then refuses the file's
+`if(... IN_LIST ...)`. So the step writes a script of two lines, the same
+`cmake_minimum_required` and an `include` of the file, and runs that. Only
+a refusal the keys file itself states stops the run. If CMake stops for
+another reason, the step says so in a warning and the run goes on: each
+job's configure makes the same check, and a check that could not run is not
+a reason to refuse a release.
 
 The ARM64 jobs build natively on GitHub's ARM runners, which private
 repositories have had since 2026-01-29, rather than cross-compiling: the
@@ -568,7 +607,7 @@ only never offered as an update. How the keys are trusted and replaced is
 | Secret | What it is | Used for |
 |---|---|---|
 | `UPDATE_SIGNING_KEY` | the ACTIVE update key's private half, the file as `openssl genpkey` wrote it; a secret of the environment `release` | the `.sig` beside each update manifest |
-| `RELEASES_REPO_TOKEN` | a token that may write the releases of the repository the input `publish_repo` names | publishing there instead of here (the end of this section) |
+| `RELEASES_REPO_TOKEN` | a token that may write the releases of the repository the input `publish_repo` names; a secret of the REPOSITORY, not of the environment, so that the first job can see that it is there | publishing there instead of here (the end of this section) |
 
 **Once: the owner's key steps.** No script and no agent makes or sees a
 private key: `tools/update_keytool.py` reads the two files only to ask
@@ -592,7 +631,8 @@ gives the same steps).
    python tools/update_keytool.py pub update-signing.pem update-spare.pem
    ```
 
-   From that commit on, the release workflow gets past its first job.
+   From that commit on, the key check in the release workflow's first job
+   passes, and prints the two key ids.
 3. On GitHub, Settings > Environments > New environment, named `release`.
    Under "Required reviewers" add yourself, so that nothing is signed before
    you have approved the run. Then give that environment the ACTIVE key, and
@@ -667,7 +707,13 @@ installed copies read them without a token. The input is for a source
 repository that is private, whose packages are published from a public
 repository of releases only. That repository must exist and hold a commit (a
 release tags a branch), and the secret `RELEASES_REPO_TOKEN` must hold a
-fine-grained token with "Contents: read and write" on it alone. The run then
+fine-grained token with "Contents: read and write" on it alone. Set it on
+the repository (`gh secret set RELEASES_REPO_TOKEN`, without `--env`): a run
+with a tag and a `publish_repo` asks for it in its first job, which does not
+run in the environment `release` and sees none of that environment's
+secrets, and stops there when it is missing, before anything is built for a
+release that could not be created. (A run without a tag publishes nothing
+and needs no token.) The run then
 builds every program with `-DKATANA_UPDATE_REPO` naming it, writes it into
 the manifests' links to the release notes, and creates the release there:
 on that repository's default branch, since the commit being released does
@@ -682,15 +728,37 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   and the update tools was held to their own lists, and the scripts of the
   first job and of the Publish job (all but the OpenPGP step) were run as
   they stand on made-up packages, with a throwaway key and a stand-in for
-  `gh`. None of that is a run: nothing was tried on a runner, against the
+  `gh`. The first job's key check was run under CMake 3.31.6, the version
+  the hosted image carries, and under 4.4; the check that ends each
+  Configure step was run on cache files CMake itself wrote, for projects
+  that do and do not declare the two options. None of that is a run: nothing
+  was tried on a runner, against the
   real `gh` and GitHub, or on a file system that has execute bits (the
   Windows packages' part of "Update assets"); and the smoke tests' new lines
   need the programs. A rehearsal - two versions published in a throwaway
   repository, the second installed as an update of the first - is the
   owner's acceptance step and the gate for the first real release ("To
   verify on the first release").
+* **Nothing in the repository holds the workflow.** The checks above were
+  made with scripts of the session that wrote the workflow; they are not in
+  the repository and not in ctest. So no test fails if a later edit gives
+  the workflow a second trigger, takes the Publish job out of the
+  environment `release`, or drops `-DKATANA_REQUIRE_UPDATE_KEYS=ON` from a
+  configure, which is what keeps a release from being built with the
+  placeholder keys. A check of the file's shape that needs only Python's
+  standard library, with a list of breaks it must notice, was written for
+  this and is not yet in the tree.
 * **The update keys are placeholders** until the owner's key steps ("Update
   signing"); until then the workflow stops in its first job.
+* **No program says which repository it asks for updates,** so the jobs
+  prove `-DKATANA_UPDATE_REPO` only as far as the update library's compile
+  line ("What each job does"). Were `UPDATE STATUS` to name the feed, the
+  smoke test could prove it in the program a user runs.
+* **The keys file cannot be run bare by a CMake older than 4.0.**
+  `cmake -P cmake/KatanaUpdateKeys.cmake`, the use the file's own header
+  gives, stops there at `if(... IN_LIST ...)`, because a script has no
+  policy set (seen with CMake 3.31.6, 2026-10-13). The workflow goes round
+  it ("What each job does"); the file should state the policy itself.
 * **On macOS without a Developer ID the install record is added after the
   bundle is sealed.** Found by reading, 2026-10-13, and not yet seen on a
   Mac: `cmake --install` seals `Katana.app` ad hoc
