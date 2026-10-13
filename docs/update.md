@@ -102,29 +102,38 @@ records beside the programs say what R is (`include/katana/update/install.hpp`):
 Those four file names and the folder `.update` are reserved: no manifest may
 carry them.
 
-**The installed version** is the HIGHER of the version `installed.json` names
-and the version of the program that reads it (`update::readInstall`). The
-record is the helper's, written when an update commits, and nothing else
-keeps it true: a newer zip unpacked by hand over a copy that had updated
-itself leaves it naming the older version. Believed alone, that record would
-lower the floor against going back, and an EARLIER signed release - a later
-build of the version the record names, say - would pass for a newer one and
-be installed over the programs that are there. A program is never older than
-itself, so a record can raise the installed version and never lower it. Only
-the version is raised: the sequence, and that there is a record at all, stay
-the record's. With the versions equal the sequences decide, so a copy
+### The installed version
+
+The installed version of a copy - what a release must be above to be an
+update - is the HIGHER of the version `installed.json` names and the version
+of the program that reads it (`update::readInstall`). The record is the
+helper's, written when an update commits, and nothing else keeps it true: a
+newer zip unpacked by hand over a copy that had updated itself leaves it
+naming the older version. Believed alone, that record would lower the floor
+against going back, and an EARLIER signed release - a later build of the
+version the record names, say - would pass for a newer one and be installed
+over the programs that are there. A program is never older than itself, so
+a record can raise the installed version and never lower it.
+
+Only the version is raised: the sequence, and that there is a record at all,
+stay the record's. With the versions equal the sequences decide, so a copy
 overwritten by hand is offered the release of its own version once more:
 where its files are that release's already, the update changes none of them
-and writes the records that were stale. (The other
-order is left as it is: under a record ABOVE the program - an older zip
-unpacked over a newer copy - the installed version is the record's, and only
-a release above the record is an update.) The rule is
-shown for a program below, at and above a record without a build of each
-(`detail::readInstallAs`, the same reading with the program's version handed
-in: `OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), for
-this build's own version (`ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion`),
-against the order itself (`AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`)
-and at the verbs (`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
+and writes the records that were stale. The other order is left as it is:
+under a record ABOVE the program - an older zip unpacked over a newer copy -
+the installed version is the record's, and only a release above the record
+is an update.
+
+The rule is shown for a program below, at and above a record without a
+build of each (`detail::readInstallAs`, the same reading with the program's
+version handed in:
+`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), for
+this build's own version
+(`ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion`),
+against the order itself
+(`AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`) and at the
+verbs
+(`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
 
 ### The three kinds
 
@@ -136,7 +145,9 @@ and at the verbs (`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisPro
   for no administrator rights and writes the registry under `HKCU` only
   (decision D1), so the helper replaces its files as the same user. After an
   update that proved healthy the helper rewrites `DisplayVersion` and
-  `DisplayName` of its entry in Settings > Apps.
+  `DisplayName` of its entry in Settings > Apps - the helper that made the
+  swap, or, when that one died first, `katana_updater --recover` as it
+  settles the update healthy.
 - **`archive`** - a zip or a tarball unpacked into a folder: it has
   `install.json` and the registry does not name its folder (or there is no
   registry). It is updated exactly as an installed copy is, wherever the
@@ -708,13 +719,13 @@ swap, each on the marker; `ROLLING_BACK` and `ROLLED_BACK` by
 `katana_updater --recover` alone. So a journal reads the same way whoever
 finished it, and `update::needsRecovery` is as it was: `PLAN`, `COMMITTING`
 and `ROLLING_BACK` are what a crash left; `COMMITTED_PENDING_HEALTH` is not.
-And while a journal says `COMMITTED_PENDING_HEALTH` it is TRUE of the disk:
-the tree is the whole new version, because a rollback from that state moves
-no file before its `ROLLING_BACK` record is written; every old file is still
+And while a journal says `COMMITTED_PENDING_HEALTH` it is TRUE of the disk.
+The tree is the whole new version, because a rollback from that state moves
+no file before its `ROLLING_BACK` record is written. Every old file is still
 in the folder, and the marker is there exactly when the new version started
 well, because the folder and the marker are deleted only after `HEALTHY` is
-written, and the marker of a start that then failed before the rollback
-begins.
+written, and the marker of a start that then failed is deleted before its
+rollback begins.
 
 The journal is NOT authenticated: it lies in a folder a process of the same
 user can write, and its check finds a torn write, not a forged line. So a
@@ -817,14 +828,14 @@ does whenever that copy is gone (the table above).
 **The residual.** A program started while the plan is made is seen by the
 second scan and blocks the update (step 4). One started after that scan,
 during the commit - about a second - may fail to load, half its libraries
-being new; it is started again. And a
-program of the install that another Windows account is running cannot be
-seen by the scan, so the update goes through under it: Windows lets the file
-of a running program be renamed, and renames are all the commit does. That
-program runs on as old code until it is closed. A per-user install is a
-folder of one profile, so this takes an archive unpacked where several
-accounts reach it (`src/katana_updater/process_scan_win.cpp` gives the
-reasons the file's name alone is not held on).
+being new; it is started again. And a program of the install that another
+Windows account is running cannot be seen by either scan, so the update
+goes through under it: Windows lets the file of a running program be
+renamed, and renames are all the commit does. That program runs on as old
+code until it is closed. A per-user install is a folder of one profile, so
+this takes an archive unpacked where several accounts reach it
+(`src/katana_updater/process_scan_win.cpp` gives the reasons the file's
+name alone is not held on).
 
 ### An update whose helper died during the health check
 
