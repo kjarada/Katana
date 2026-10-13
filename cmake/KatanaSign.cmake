@@ -5,8 +5,9 @@
 # tarball and the installer are signed; and as a POST-build script, on what
 # was produced, so the Windows installer is signed too.
 #
-# Nothing is signed unless a certificate is named in the environment, so an
-# ordinary `cmake --build <build> --target package` is unchanged:
+# Nothing is signed under a name unless a certificate is named in the
+# environment, so an ordinary `cmake --build <build> --target package` is
+# unchanged:
 #
 #   Windows  KATANA_SIGN_PFX       a code-signing certificate (.pfx / PKCS#12)
 #            KATANA_SIGN_PASSWORD  its password
@@ -22,6 +23,12 @@
 #
 # Linux has no signature inside a package; the release's files are signed
 # with GPG when they are published (.github/workflows/release.yml).
+#
+# The one thing done with NO certificate named, at the foot of this file: a
+# macOS bundle is sealed again, ad hoc, as the install sealed it. Nobody's name
+# goes on it; the seal has to be made again because CPack adds the install
+# record to the bundle after the install signed it. No other package has a
+# bundle, so every other package is left as it was staged.
 #
 # A signature says who published the file; it is worth something only when
 # the certificate is one Windows or macOS trusts - a code-signing certificate
@@ -144,5 +151,26 @@ elseif(NOT "$ENV{KATANA_SIGN_IDENTITY}" STREQUAL "")
             endif()
             message(STATUS "Katana sign: ${_package} signed as $ENV{KATANA_SIGN_IDENTITY}")
         endif()
+    endforeach()
+elseif(_stage STREQUAL "pre" AND CPACK_KATANA_APP_BUNDLE)
+    # No Developer ID, and a bundle. It carries the ad hoc signature the install gave it
+    # (KatanaDeployUnix.cmake.in), whose seal lists the resources that were there THEN.
+    # CPack has since added share/katana/install.json (KatanaInstallRecord.cmake runs
+    # before this script), and a resource the seal does not list fails
+    # `codesign --verify --strict`, which the release workflow runs on the bundle it
+    # takes out of the disk image. So the bundle is sealed again, ad hoc. Only the
+    # bundle: the libraries and programs inside it were not changed, and keep the
+    # signatures they have.
+    file(GLOB _bundles "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/${CPACK_KATANA_APP_BUNDLE}"
+                       "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/${CPACK_KATANA_APP_BUNDLE}")
+    foreach(_bundle IN LISTS _bundles)
+        execute_process(COMMAND codesign --force --sign - "${_bundle}"
+            RESULT_VARIABLE _rc ERROR_VARIABLE _err OUTPUT_QUIET)
+        if(NOT _rc EQUAL 0)
+            # The result too: when codesign cannot be started at all, the reason is there
+            # and the error text is empty.
+            message(FATAL_ERROR "codesign ${_bundle} failed (${_rc}): ${_err}")
+        endif()
+        message(STATUS "Katana sign: ${_bundle} sealed again, ad hoc, with its install record")
     endforeach()
 endif()

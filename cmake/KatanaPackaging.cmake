@@ -263,7 +263,8 @@ set(CPACK_PACKAGE_EXECUTABLES "katana" "Katana")
 # Signing, between staging the tree and archiving it, so what is inside the
 # archive and the installer is signed; and the installer itself afterwards.
 # Each does nothing unless a certificate is named in the environment
-# (cmake/KatanaSign.cmake, docs/release.md "Signing").
+# (cmake/KatanaSign.cmake, docs/release.md "Signing") - but for one thing: a
+# macOS bundle is sealed again, ad hoc, when none is named.
 # The install record first, so what is signed already holds it (see "install.json" below).
 set(CPACK_PRE_BUILD_SCRIPTS
     "${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake;${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
@@ -355,7 +356,10 @@ endif()
 # anything to it and no automatic check runs. So it is written ONLY into the tree CPack
 # stages for a package - by the script below, which CPack runs before it signs (a file
 # added after the signature would break a macOS bundle's seal) - and NEVER by an install
-# rule. `cmake --install`, the `bundle` target and build/<preset>/bin are development
+# rule. The install itself has sealed a macOS bundle by then, ad hoc
+# (KatanaDeployUnix.cmake.in, step 5), and the record is a file that seal does not list:
+# that is why KatanaSign.cmake seals a bundle again even when no certificate is named.
+# `cmake --install`, the `bundle` target and build/<preset>/bin are development
 # trees and stay without it: an update there would replace a developer's build with a
 # release. tools/check_install_rules.cmake asserts both halves (no install rule names
 # the file; CPackConfig.cmake runs this script before the signing script) and the

@@ -67,10 +67,14 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/plotting/frame.cpp" PRO
 #                                     which a person picks in Settings or with
 #                                     CUSTOMISE BUILTIN <name>
 #
-# The files are in the repository - the default is original to Katana, and the
-# alternate is third-party material tracked on the owner's decision of
-# 2026-10-08 (docs/customisation.md, "Why the built-in is in the repository") -
-# so a clean checkout and every CI build have both. Unlike the plot frame's,
+# The files are in the repository, so a clean checkout and every CI build have
+# both. The default, Katana Standard, was made for Katana: what it names, draws
+# and words is Katana's own, and its survey code keys, with what each key
+# stands for and the kinds of rule it has, are the alternate's, kept on the
+# owner's decision so that the same field data works with either
+# (docs/katana_standard.md). The alternate is third-party material tracked on
+# the owner's decision of 2026-10-08 (docs/customisation.md, "Why the built-in
+# is in the repository"). Unlike the plot frame's,
 # a file's absence is still no build error: a path that names no file is not
 # offered, which is how a build is made without one. No default and no
 # alternate compiles a program with no built-in at all.

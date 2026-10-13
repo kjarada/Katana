@@ -2,9 +2,9 @@
 # the end-to-end tests drive, and the checks of the build's own promises about the
 # update system: the pinned keys and the helper's imports.
 #
-# The suite is ONE target, katana_update_tests, so that each task adds a file and no
-# list: every source below exists as a placeholder (a skipped case) or as the real thing
-# the task replaces it with.
+# The suite is ONE target, katana_update_tests, so that a task adds a file and no list.
+# Every source below is the real thing now: the placeholders the skeleton put here (a
+# skipped case each) have all been replaced.
 
 katana_add_test_suite(update
     LIBS katana_update
@@ -245,12 +245,14 @@ endif()
 
 # ---- the link, proved (tests/update/link_probe.cpp) --------------------------------------
 #
-# While katana_updater is a stub it uses neither OpenSSL nor zlib, so the import check above
-# passes on ANY link line. This executable uses what the engine will - Ed25519 through EVP,
-# raw inflate, crc32 - through the same third-party target and the same link options as the
-# helper, so the import check on IT is a check of the link line (a static OpenSSL and zlib,
-# nothing of the toolchain's DLLs), and running it is a check that the static libraries work.
-# Never installed.
+# The import check above speaks for what katana_updater CARRIES, and of the two libraries that
+# is OpenSSL alone: the helper checks signatures and never inflates (a release is inflated
+# when it is staged, by the program that downloads it), so the linker takes nothing of zlib
+# into it and its check would pass on a link line that named zlib's DLL. This executable uses
+# what the engine uses - Ed25519 through EVP, raw inflate, crc32 - through the same third-party
+# target and the same link options as the helper, so the import check on IT is a check of the
+# whole link line (a static OpenSSL and a static zlib, nothing of the toolchain's DLLs), and
+# running it is a check that the static libraries work. Never installed.
 add_executable(katana_update_link_probe link_probe.cpp)
 katana_target_defaults(katana_update_link_probe)
 target_link_libraries(katana_update_link_probe PRIVATE katana_update_third_party)

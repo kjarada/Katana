@@ -11,8 +11,9 @@
 
 # ---- what a release is built against ---------------------------------------------
 
-# Where releases are fetched from: kjarada/Katana, which the owner will make public, and
-# which needs no token then. Until then a person who holds a read-only token reaches it
+# Where releases are fetched from: kjarada/Katana, which is public (decision D0,
+# docs/update.md), so the default feed is read with no token. A build that names a PRIVATE
+# repository here can still be updated by a person who holds a read-only token for it,
 # through the REST API (include/katana/update/feed.hpp, FeedRoute::Api).
 # -DKATANA_UPDATE_FEED=https://host/dir replaces GitHub with the owner's own host; both
 # empty is a build with no auto-update.
@@ -78,15 +79,20 @@ katana_target_defaults(katana_update)
 # katana_update_link_probe, which uses Ed25519 through EVP, raw inflate and crc32 through
 # this target with the helper's link options: ADVAPI32, CRYPT32, KERNEL32, USER32, WS2_32
 # and the api-ms-win-crt set, nothing else (test katana_update_link_probe_imports_only_os_dlls).
-# The helper itself, while it is a stub, references neither library and so says nothing about
-# the link line; the probe does. (The helper adds SHELL32, for CommandLineToArgvW.)
+# The helper is held to the same list (katana_updater_imports_only_os_dlls), and its own
+# listing speaks for libcrypto, which it carries: it checks every signature itself. For zlib
+# it says nothing. The helper never inflates - a release is inflated when it is staged, by the
+# program that downloads it, and the helper moves what was staged - so the linker takes no
+# member of libz.a into it, and a link line that named zlib's DLL would pass its check all the
+# same (nm on the built helper: OpenSSL's EVP_DigestVerify is defined in it, inflate is not).
+# For zlib the probe is the only evidence. (The helper adds SHELL32, for CommandLineToArgvW.)
 #
 # The static libraries are looked for BY NAME here, not through find_package(OpenSSL)
 # with OPENSSL_USE_STATIC_LIBS: FindOpenSSL caches what it first found, and GDAL's and
 # libcurl's own configuration files ask for OpenSSL too, so which of the DLL's import
 # library and the static one the cache held would depend on who asked first. The
 # probe's import test (tests/update, katana_update_link_probe_imports_only_os_dlls; and the
-# helper's own once it uses them) is what would catch the wrong one - shown by linking the probe
+# helper's own, for libcrypto) is what would catch the wrong one - shown by linking the probe
 # against the DLLs by hand, which that check refuses, naming libcrypto-3-x64.dll and zlib1.dll.
 # Elsewhere the toolchain's own libraries are used.
 if(WIN32 AND NOT MSVC)
