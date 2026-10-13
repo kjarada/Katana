@@ -5,6 +5,7 @@
            --helper <katana_updater_test> --stub <katana_updater_stub> [--shard I/N] [--keep]
     python tests/update/update_e2e.py --list
     python tests/update/update_e2e.py --registered <case>... [--portable-only]
+    python tests/update/update_e2e.py --self-test
 
 One run is one case (tests/update/e2e.cmake registers each as a ctest). Nothing here is a fake of the code
 under test:
@@ -24,8 +25,10 @@ under test:
 WHERE THE EXPECTATIONS COME FROM (CLAUDE.md, section 4). None is copied from what the programs print:
 
   - the tree an update must leave is built here from the two packages: v2's files, the seed as v1 had it,
-    the files only v1 listed gone with their folder, and the three records the helper writes (install.hpp;
-    installed.json is `{product, schema, sequence, tag, target, version}`, keys sorted, one line feed);
+    the files only v1 listed gone with their folder, and the three records the helper writes (install.hpp).
+    The two manifest records are the signed bytes. installed.json is held to WHAT IT SAYS - schema,
+    product, version, sequence, tag, target - and not to its bytes: install.hpp gives its fields and no
+    order of keys, blanks or line end, and those are nobody's promise;
   - which files a plan must name: hashlib over the installed files and the release's (plan.hpp: absent or
     another hash; a seed only when absent);
   - which bytes may be asked of the zip: where Python's zipfile says each member's data is, merged by the
@@ -40,6 +43,14 @@ name, as a folder under a person's profile has. No registry key is read or writt
 and the test helper is given none (src/katana_updater/main.cpp: without a base it uses a registry that has
 nothing). No proxy: the engine's client speaks to a socket, and this process's own requests do not exist.
 
+A PATH IS HANDED OVER AS THE SYSTEM SPELLS IT, AND READ BACK AS A PATH. A Python from MSYS2 writes a path
+with '/' when MSYSTEM is set, and with '\\' otherwise; the programs are given '\\' on Windows either way
+(native(), below), as every path they meet in a real run has. And a path a program printed or logged is
+compared as a path, never as text: the same file has more than one spelling.
+
+--self-test runs no case: it holds the driver's own readers (the path a stub's line names, native(), the
+record installed.json holds, the port nobody listens on) to answers worked out by hand. It needs no program.
+
 The cases marked portable ask the feed and start no program of the install, so they also run where the swap
 is not written yet (Linux, macOS: T18) and without --helper and --stub. The others are Windows only.
 
@@ -51,12 +62,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import fnmatch
 import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -67,7 +80,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -86,6 +99,7 @@ SEED_GLOB = "etc/katana/*.ini"
 V1_VERSION, V1_SEQUENCE = "0.9.0", 1790000000
 V2_VERSION, V2_SEQUENCE = "0.10.0", 1792312800
 INSTALL_RECORD = b'{"schema":1,"target":"win64"}'  # install.hpp: what the CPack install writes
+INSTALLED_RECORD_PATH = "share/katana/installed.json"  # install.hpp: what the helper writes at commit
 # ranges.hpp: two members merge when the hole between them is at most this, into at most that.
 RANGE_MERGE_GAP = 1024 * 1024
 RANGE_MAX_LENGTH = 32 * 1024 * 1024
@@ -187,9 +201,25 @@ def write_tree(root: Path, files: dict[str, bytes]) -> None:
         target.write_bytes(data)
 
 
+def entry_of(relative: str, data: bytes) -> str:
+    """What a snapshot holds for a file: its SHA-256. Except installed.json, which is held to what it SAYS:
+    install.hpp gives its fields and no byte form, so two spellings of one record (another order of keys,
+    a blank, another line end) are the same entry, and the entry is the record with its keys sorted. A
+    file of that name that is not one JSON object is its hash, which is the entry of no record."""
+    if relative == INSTALLED_RECORD_PATH:
+        try:
+            record = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            record = None
+        if isinstance(record, dict):
+            return "record " + json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return sha256_hex(data)
+
+
 def snapshot(root: Path) -> dict[str, str]:
     """Every entry under `root` but the helper's own working folder .update: a folder is "dir", a file
-    its SHA-256. Two trees are the same when this is - a folder left behind empty is a difference."""
+    what entry_of says (its SHA-256; for installed.json, the record). Two trees are the same when this
+    is - a folder left behind empty is a difference."""
     entries: dict[str, str] = {}
     for folder, folders, files in os.walk(root):
         relative = Path(folder).relative_to(root)
@@ -198,7 +228,8 @@ def snapshot(root: Path) -> dict[str, str]:
         for name in folders:
             entries[(relative / name).as_posix()] = "dir"
         for name in files:
-            entries[(relative / name).as_posix()] = sha256_hex((Path(folder) / name).read_bytes())
+            entries[(relative / name).as_posix()] = entry_of((relative / name).as_posix(),
+                                                             (Path(folder) / name).read_bytes())
     return entries
 
 
@@ -206,7 +237,7 @@ def snapshot_of(files: dict[str, bytes]) -> dict[str, str]:
     """The snapshot a tree holding exactly `files` has."""
     entries: dict[str, str] = {}
     for relative, data in files.items():
-        entries[relative] = sha256_hex(data)
+        entries[relative] = entry_of(relative, data)
         parts = relative.split("/")
         for depth in range(1, len(parts)):
             entries["/".join(parts[:depth])] = "dir"
@@ -273,10 +304,46 @@ def merged_ranges(spans: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
 
 
 def installed_record(version: str, sequence: int) -> bytes:
-    """installed.json as the helper records it (install.hpp; apply.hpp, step 5): keys sorted, one LF."""
-    record = {"product": "katana", "schema": 1, "sequence": sequence, "tag": f"v{version}", "target": TARGET,
-              "version": version}
-    return (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    """installed.json for a release (install.hpp; apply.hpp, step 5): its six fields, spelled here in the
+    order install.hpp shows them. An install made by this driver holds these bytes; an install the helper
+    made is compared with them as a record (entry_of), since the helper's spelling is its own."""
+    record = {"schema": 1, "product": "katana", "version": version, "sequence": sequence, "tag": f"v{version}",
+              "target": TARGET}
+    return (json.dumps(record, separators=(",", ":")) + "\n").encode("ascii")
+
+
+def native(path: object) -> str:
+    """A path as the system spells it, for a program's command line or environment. On Windows that is
+    with backslashes whatever this Python writes: one from MSYS2 joins a path with '/' while MSYSTEM is
+    set, so the spelling would follow the shell the tests were started from. In a real run every path the
+    programs meet comes from the system (the program's own file name, a known folder) and has none."""
+    spelled = str(path)
+    return spelled.replace("/", "\\") if os.name == "nt" else spelled
+
+
+def stub_program(line: str) -> Path:
+    """The program a line of the stub's log says was started: what stands between ` exe=` and ` cwd=`
+    (updater_stub.cpp; the install's folder has a blank in its name, so the path is not one word). It is a
+    Path because it is compared as one: the stub writes what the system calls its own file, and the same
+    file as this Python spells it may differ in its separators and in the case of its letters."""
+    found = re.search(r" exe=(.*?) cwd=", line)
+    expect(found, f"the stub's line names no program (no ` exe=... cwd=`): {line}")
+    assert found is not None
+    return Path(found.group(1))
+
+
+@contextlib.contextmanager
+def reserved_port() -> Iterator[int]:
+    """A loopback port nobody listens on, for as long as the block lasts: a socket bound to it that never
+    listens. The system refuses a connection to it, and gives the port to nobody else meanwhile - which
+    the port of a feed that has just stopped is not safe from, when other tests are starting feeds on
+    port 0 beside this one."""
+    held = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        held.bind((fake.LOOPBACK, 0))
+        yield held.getsockname()[1]
+    finally:
+        held.close()
 
 
 # ---- what a program printed ---------------------------------------------------------------------
@@ -365,9 +432,12 @@ class Bench:
 
     def run(self, command: list[object], *, env: Optional[dict[str, str]] = None, cwd: Optional[Path] = None,
             timeout: float = 600.0) -> Done:
-        words = [str(word) for word in command]
+        # A Path is handed over as the system spells it (native()); every other word as it is - an
+        # address has slashes of its own.
+        words = [native(word) if isinstance(word, Path) else str(word) for word in command]
         try:
-            ran = subprocess.run(words, capture_output=True, env=self.environment(env), cwd=str(cwd) if cwd else None,
+            ran = subprocess.run(words, capture_output=True, env=self.environment(env),
+                                 cwd=native(cwd) if cwd else None,
                                  stdin=subprocess.DEVNULL, timeout=timeout, check=False)
         except subprocess.TimeoutExpired as late:
             self.transcript.append(f"$ {' '.join(words)}\n  DID NOT FINISH in {timeout} s\n"
@@ -548,8 +618,8 @@ class World:
     def environment(self) -> dict[str, str]:
         """The stub's switches (updater_stub.cpp), and the folder its health marker goes into - which is
         also where update::recover looks for the helper copy."""
-        return {"KATANA_STUB_LOG": str(self.log), "KATANA_STUB_MODE": self.stub_mode,
-                "KATANA_UPDATE_STATE_DIR": str(self.state)}
+        return {"KATANA_STUB_LOG": native(self.log), "KATANA_STUB_MODE": self.stub_mode,
+                "KATANA_UPDATE_STATE_DIR": native(self.state)}
 
     def engine(self, command: str, *args: object) -> Done:
         return self.bench.run([self.bench.engine, command, "--root", self.root, "--state", self.state, *args],
@@ -576,6 +646,17 @@ class World:
         expect_equal(prepared.helper.parent, self.state / f"run-{prepared.transaction}",
                      "the folder of the helper copy (state.hpp: U/run-<tx>)")
         return prepared
+
+    def helper_copy(self, transaction: str, stage: Path) -> Prepared:
+        """The install's helper, copied where preflight copies it (state.hpp: U/run-<tx>) - by this driver
+        and not by the engine. For a stage the engine has no way to preflight: to see what the HELPER does
+        when somebody starts it on one all the same."""
+        expect(re.fullmatch(r"[0-9a-f]{1,64}", transaction), f"not a transaction id: {transaction}")
+        run = self.state / f"run-{transaction}"
+        run.mkdir()
+        helper = run / "katana_updater.exe"
+        shutil.copyfile(self.root / "bin" / "katana_updater.exe", helper)
+        return Prepared(transaction, helper, stage)
 
     def swap(self, prepared: Prepared, *more: object, timings: str = TIMINGS, relaunch: bool = False,
              timeout: float = 600.0) -> Done:
@@ -700,13 +781,15 @@ def expect_unreachable(asked: Done, reason: str, what: str) -> None:
     expect_equal(asked.value("reason"), reason, f"{what}: reason=")
 
 
-def expect_nothing_fetched_or_staged(world: World, feed: fake.FakeFeed, release: Release, what: str) -> None:
-    """A release that was not offered is not downloaded: stage says so, the zip is never asked for, and
-    the per-user folder holds no stage."""
+def expect_nothing_fetched_or_staged(world: World, feed: fake.FakeFeed, what: str) -> None:
+    """A release that was not offered is not downloaded: stage says so, no zip is asked for - under any
+    name, since the name a manifest gives its zip is the manifest's to choose - and the per-user folder
+    holds no stage. `feed` has served this install and nothing else since it started."""
     staged = world.ask("stage", feed)
     expect_equal(staged.code, 0, f"{what}: the exit code of stage")
     expect_equal(staged.values("staged"), ["none"], f"{what}: staged=")
-    expect_equal(zip_requests(feed, release), [], f"{what}: requests for the zip")
+    expect_equal([r["path"] for r in feed.requests() if r["path"].split("?")[0].endswith(".zip")], [],
+                 f"{what}: requests for a zip, by the check and by the stage")
     expect_equal(sorted(entry.name for entry in world.state.iterdir()), [], f"{what}: what the state folder holds")
     world.expect_untouched(what)
 
@@ -811,13 +894,16 @@ def v1_to_v2(bench: Bench, args: argparse.Namespace) -> None:
     # The staged files are of no use any more (design, section 5: a healthy update deletes the stage).
     expect(staged_files(stage) == {} and not (stage / "manifest.json").exists(),
            f"a healthy update left its stage behind: {sorted(staged_files(stage))}")
-    # The new version was started for its health check from the install, and again at the end.
-    program = str(world.root / "bin" / "katana.exe")
+    # The new version was started for its health check from the install, and again at the end. Which
+    # program that was is compared as a path: the stub logs its file as the system names it.
+    program = world.root / "bin" / "katana.exe"
     health = world.wait_for_stub("health ")
-    expect(health.startswith("health tag=v2 ") and f"exe={program} " in health
-           and health.endswith(f"tx={transaction} mode=healthy"), f"the health check's start: {health}")
+    expect(health.startswith("health tag=v2 ") and health.endswith(f"tx={transaction} mode=healthy"),
+           f"the health check's start: {health}")
+    expect_equal(stub_program(health), program, "the program started for the health check")
     again = world.wait_for_stub("start ")
-    expect(again.startswith("start tag=v2 ") and f"exe={program} " in again, f"the relaunch: {again}")
+    expect(again.startswith("start tag=v2 "), f"the relaunch: {again}")
+    expect_equal(stub_program(again), program, "the program started at the end")
     expect_equal(len(world.stub_lines()), 2, f"the number of times the stub was started: {world.stub_lines()}")
 
     # And the install now IS that release: the same feed offers nothing, and no file of it differs.
@@ -866,11 +952,25 @@ def bad_member_hash(bench: Bench, args: argparse.Namespace) -> None:
     expect(not (stage / "manifest.json").exists() and not (stage / "manifest.json.sig").exists(),
            "a stage that failed says it is complete")
     world.expect_untouched("after the failed download")
-    # A stage that is not complete is never applied.
+    # A stage that is not complete is never applied. The engine program cannot even ask for it: it has no
+    # manifest to hand to update::preflight. That refusal is e2e_main.cpp's own, so all it shows is that
+    # this driver cannot start the swap of such a stage by mistake ...
     unready = world.engine("preflight", "--stage", stage)
-    expect_equal((unready.code, unready.value("error_reason")), (1, "staged_manifest"), "preflight on an incomplete stage")
+    expect_equal(unready.code, 1, "the exit code of the engine program's preflight on a stage with no manifest")
     expect_equal(sorted(entry.name for entry in world.state.iterdir() if entry.name.startswith("run-")), [],
                  "helper copies left by a preflight that refused")
+    # ... and the refusal that counts is the HELPER's, whoever starts it and however (apply.hpp, step 1:
+    # a staged manifest that is missing -> Refused "staged_manifest"; exit 21 in the table of
+    # src/katana_updater/main.cpp). Nothing was touched: not the install, and not the files the stage
+    # already holds, which the download below resumes from.
+    forced = world.helper_copy("e2e0", stage)
+    unapplied = world.swap(forced)
+    expect_equal((unapplied.code, unapplied.value("outcome"), unapplied.value("reason")),
+                 (EXIT_VERIFICATION, "refused", "staged_manifest"), "the helper, started on a stage that is not complete")
+    world.expect_untouched("after the helper refused the incomplete stage")
+    expect_equal(expect_only_verified(stage, v2, "after the helper's refusal"), before,
+                 "what the stage holds after the helper refused it")
+    shutil.rmtree(forced.helper.parent, ignore_errors=True)
 
     # The real zip: only what is still missing is asked for.
     feed.set_root(v2.folder)
@@ -1009,7 +1109,7 @@ def downgrade(bench: Bench, args: argparse.Namespace) -> None:
         asked = world.ask("check", feed)
         expect_equal((asked.code, asked.value("update"), asked.value("latest"), asked.value("sequence")),
                      (0, "current", release.version, str(release.sequence)), f"check against {what}")
-        expect_nothing_fetched_or_staged(world, feed, release, what)
+        expect_nothing_fetched_or_staged(world, feed, what)
         feed.stop()
     # The control: the same comparison does offer a build above the installed one.
     feed = bench.feed(same_built_later.folder)
@@ -1038,7 +1138,7 @@ def replayed_release(bench: Bench, args: argparse.Namespace) -> None:
         asked = world.ask("check", feed)
         expect_equal((asked.code, asked.value("update"), asked.value("latest")), (0, "current", release.version),
                      f"check against {what}")
-        expect_nothing_fetched_or_staged(world, feed, release, what)
+        expect_nothing_fetched_or_staged(world, feed, what)
         feed.stop()
 
     feed = bench.feed(v1.folder)
@@ -1073,7 +1173,7 @@ def tampered_byte(bench: Bench, args: argparse.Namespace) -> None:
     world = World(bench, "tampered_byte")
     feed = bench.feed(bad.folder)
     expect_unreachable(world.ask("check", feed), "bad_signature", "a manifest with one bit changed")
-    expect_nothing_fetched_or_staged(world, feed, bad, "a manifest with one bit changed")
+    expect_nothing_fetched_or_staged(world, feed, "a manifest with one bit changed")
 
 
 @case("swapped_signature", portable=True)
@@ -1086,7 +1186,7 @@ def swapped_signature(bench: Bench, args: argparse.Namespace) -> None:
     world = World(bench, "swapped_signature")
     feed = bench.feed(bad.folder)
     expect_unreachable(world.ask("check", feed), "bad_signature", "v2's manifest under v1's signature")
-    expect_nothing_fetched_or_staged(world, feed, bad, "v2's manifest under v1's signature")
+    expect_nothing_fetched_or_staged(world, feed, "v2's manifest under v1's signature")
 
 
 @case("other_key", portable=True)
@@ -1097,7 +1197,7 @@ def other_key(bench: Bench, args: argparse.Namespace) -> None:
     world = World(bench, "other_key")
     feed = bench.feed(foreign.folder)
     expect_unreachable(world.ask("check", feed), "untrusted_key", "a release signed by a key nobody pinned")
-    expect_nothing_fetched_or_staged(world, feed, foreign, "a release signed by a key nobody pinned")
+    expect_nothing_fetched_or_staged(world, feed, "a release signed by a key nobody pinned")
     feed.stop()
 
     # The same signature, said to be the active key's: the line `ed25519 <key id> <base64>` with the id of
@@ -1108,7 +1208,7 @@ def other_key(bench: Bench, args: argparse.Namespace) -> None:
     claimed.signature_path.write_bytes(f"{kind} {trusted_id} {signature}\n".encode("ascii"))
     feed = bench.feed(claimed.folder)
     expect_unreachable(world.ask("check", feed), "bad_signature", "another key's signature under the pinned key's id")
-    expect_nothing_fetched_or_staged(world, feed, claimed, "another key's signature under the pinned key's id")
+    expect_nothing_fetched_or_staged(world, feed, "another key's signature under the pinned key's id")
     feed.stop()
 
     # The control: it is the key that decides, not the fact that it is not the active one. A release signed
@@ -1129,14 +1229,14 @@ def wrong_target(bench: Bench, args: argparse.Namespace) -> None:
     renamed.mkdir(parents=True)
     shutil.copyfile(arm.manifest_path, renamed / f"Katana-update-{TARGET}.json")
     shutil.copyfile(arm.signature_path, renamed / f"Katana-update-{TARGET}.json.sig")
+    # The zip under the name the signed manifest gives it (...-win-arm64.update.zip): a client that went
+    # on to download would find it, and the feed's log would show the request.
     shutil.copyfile(arm.zip_path, renamed / arm.zip_path.name)
-    served = Release(renamed, V2_VERSION, V2_SEQUENCE, arm.package)
     world = World(bench, "wrong_target")
     feed = bench.feed(renamed)
     expect_unreachable(world.ask("check", feed), "wrong_target", "a win-arm64 release under the win64 names")
-    expect_equal([r["path"].split("?")[0] for r in feed.requests() if r["path"].endswith(".zip")], [],
-                 "requests for a zip of the other platform")
-    expect_nothing_fetched_or_staged(world, feed, served, "a win-arm64 release under the win64 names")
+    # No zip is asked for, by the check or by the stage that follows it, whatever the zip is called.
+    expect_nothing_fetched_or_staged(world, feed, "a win-arm64 release under the win64 names")
 
 
 @case("program_running")
@@ -1152,8 +1252,8 @@ def program_running(bench: Bench, args: argparse.Namespace) -> None:
     # The install's own katana_cli, left running: the stub, started here with the box for a file that is
     # not a program turned off (main(), below) - it IS a program, and this process holds its handle.
     program = world.root / "bin" / "katana_cli.exe"
-    sleeper = subprocess.Popen([str(program), "--sleep", "120000"], env=bench.environment(world.environment()),
-                               cwd=str(world.top), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    sleeper = subprocess.Popen([native(program), "--sleep", "120000"], env=bench.environment(world.environment()),
+                               cwd=native(world.top), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL)
     bench.children.append(sleeper)
     world.wait_for_stub("sleep tag=v1 ")
@@ -1307,10 +1407,12 @@ def feed_unreachable(bench: Bench, args: argparse.Namespace) -> None:
         expect_unreachable(world.ask("check", feed), reason, f"check against a feed that answers {rule.kind} {rule.value}")
     feed.set_rules([])
     expect_equal(world.ask("check", feed).value("update"), "available", "check once the feed answers again")
-    # Nothing listens: the port of a feed that has stopped.
-    gone = f"http://127.0.0.1:{feed.port}"
+    # Nothing listens. Not the port of the feed that has just stopped - another test's feed may be given
+    # that one before the check connects - but one held for the check by a socket that never listens.
     feed.stop()
-    expect_unreachable(world.engine("check", "--feed", gone), "offline", "check against a port nobody listens on")
+    with reserved_port() as port:
+        expect_unreachable(world.engine("check", "--feed", f"http://127.0.0.1:{port}"), "offline",
+                           "check against a port nobody listens on")
     world.expect_untouched("after the checks")
     expect_equal(sorted(entry.name for entry in world.state.iterdir()), [], "what the state folder holds after checks")
 
@@ -1318,7 +1420,8 @@ def feed_unreachable(bench: Bench, args: argparse.Namespace) -> None:
 @case("download_fails")
 def download_fails(bench: Bench, args: argparse.Namespace) -> None:
     """A network that will not give part of a file, and a connection that drops in the middle of one: the
-    download fails with its reason, nothing unverified is kept, and it succeeds once the feed behaves."""
+    download fails (the first with the reason ranges.hpp gives it), nothing unverified is kept, and it
+    succeeds once the feed behaves."""
     bench.needs_programs()
     v2 = bench.release("v2")
     world = World(bench, "download_fails")
@@ -1333,9 +1436,18 @@ def download_fails(bench: Bench, args: argparse.Namespace) -> None:
     expect(not (stage / "manifest.json").exists(), "a stage that failed says it is complete")
 
     feed.set_rules([fake.Rule("truncate", "*.zip")])
+    feed.clear_log()
     cut = world.ask("stage", feed)
-    expect_equal((cut.code, cut.value("error"), cut.value("error_reason")), (1, "FileImportFailure", "offline"),
-                 "stage when the connection drops inside a range")
+    # That it FAILS is the engine's; what the failure is called is not held here. A connection that drops
+    # inside a body is named by the hop, and the hop of this program is e2e_main.cpp's own socket client
+    # (it says "no answer", as libcurl's partial transfer is none for the hop the shipped programs use):
+    # a token asserted here would be the test's own word read back.
+    expect_equal(cut.code, 1, "the exit code of stage when the connection drops inside a range")
+    expect(cut.has("error") and not cut.has("staged"), f"a download that was cut short did not fail:\n{cut.out}")
+    # The feed's log is the proof that this is what happened: a part of the zip announced and not all sent.
+    dropped = [r for r in zip_requests(feed, v2) if r["behaviour"] == "truncate"]
+    expect(dropped and all(r["status"] == 206 and r["served"] < r["length"] for r in dropped),
+           f"no part of the zip was cut short by the feed: {zip_requests(feed, v2)}")
     expect_equal(staged_files(stage), {}, "what the stage holds after a dropped connection")
     expect(not (stage / "manifest.json").exists(), "a stage that failed says it is complete")
     world.expect_untouched("after the failed downloads")
@@ -1345,6 +1457,139 @@ def download_fails(bench: Bench, args: argparse.Namespace) -> None:
     done = world.swap(world.preflight(stage))
     expect_equal((done.code, done.value("outcome")), (EXIT_OK, "committed"), "the swap of the stage")
     world.expect_tree(world.after_update_to(v2), "after the update")
+
+
+# ---- the driver's own readers, checked (--self-test) --------------------------------------------------
+#
+# A case fails when the programs are wrong - and when this driver reads them wrongly, which no case can
+# tell apart. So the readers a verdict rests on are held here to answers worked out by hand, with no
+# program: each was once a way for a correct update to fail its test, or for a wrong one to pass.
+
+SELF_TESTS: list[Callable[[], None]] = []
+
+
+def self_test(function: Callable[[], None]) -> Callable[[], None]:
+    SELF_TESTS.append(function)
+    return function
+
+
+@self_test
+def the_program_a_stubs_line_names_is_read_as_a_path() -> None:
+    a_acute = chr(0xE1)
+    if os.name == "nt":
+        # As the stub writes it: GetModuleFileNameW's spelling, backslashes, a blank in a folder's name.
+        line = ("health tag=v2 exe=C:\\Users\\A Person\\Katan" + a_acute + " 1\\bin\\katana.exe "
+                "cwd=C:\\Users\\A Person\\AppData\\Local\\Katana\\update\\run-0a1b OPENSSL_CONF=- tx=0a1b mode=healthy")
+        # The same file as this driver names it: joined by pathlib, which writes '/' or '\\' as the shell
+        # it runs under has it, from a folder typed in another case.
+        expect_equal(stub_program(line), Path("C:/Users/A Person/Katan" + a_acute + " 1") / "bin" / "katana.exe",
+                     "the program of a line the stub wrote on Windows")
+        expect_equal(stub_program(line), Path("c:/USERS/a person/Katan" + a_acute + " 1/BIN/katana.EXE"),
+                     "the same program, typed in another case")
+        expect(stub_program(line) != Path("C:/Users/A Person/Katan" + a_acute + " 1/bin/katana_cli.exe"),
+               "another program of the same folder was taken for the one the line names")
+    else:
+        line = "start tag=v1 exe=/home/a person/Katan" + a_acute + " 1/bin/katana cwd=/home/a person OPENSSL_CONF=-"
+        expect_equal(stub_program(line), Path("/home/a person/Katan" + a_acute + " 1") / "bin" / "katana",
+                     "the program of a line the stub wrote")
+        expect(stub_program(line) != Path("/home/a person/Katan" + a_acute + " 1/bin/katana_cli"),
+               "another program of the same folder was taken for the one the line names")
+    try:
+        stub_program("start tag=v1 OPENSSL_CONF=-")
+    except Failure:
+        pass
+    else:
+        raise Failure("a line that names no program was read as naming one")
+
+
+@self_test
+def a_path_is_handed_over_as_the_system_spells_it() -> None:
+    a_acute = chr(0xE1)
+    if os.name == "nt":
+        joined = Path("C:/Users/A Person/Katan" + a_acute + " 1") / "bin" / "katana.exe"
+        expect_equal(native(joined), "C:\\Users\\A Person\\Katan" + a_acute + " 1\\bin\\katana.exe",
+                     "a path joined by pathlib, as a program is given it")
+        expect_equal(native("C:/Temp/katana-e2e-x/state"), "C:\\Temp\\katana-e2e-x\\state", "a path given as text")
+    else:
+        joined = Path("/home/a person/Katan" + a_acute + " 1") / "bin" / "katana"
+        expect_equal(native(joined), "/home/a person/Katan" + a_acute + " 1/bin/katana", "a path joined by pathlib")
+
+
+@self_test
+def installed_json_is_compared_as_the_record_it_holds() -> None:
+    # install.hpp's own example of the record, with the fixtures' v1 in it, in three spellings: the order
+    # install.hpp shows, the keys sorted with a line feed, and with blanks and a Windows line end.
+    as_shown = b'{"schema":1,"product":"katana","version":"0.9.0","sequence":1790000000,"tag":"v0.9.0","target":"win64"}'
+    as_sorted = b'{"product":"katana","schema":1,"sequence":1790000000,"tag":"v0.9.0","target":"win64","version":"0.9.0"}\n'
+    spaced = (b'{ "schema": 1, "product": "katana", "version": "0.9.0",\r\n'
+              b'  "sequence": 1790000000, "tag": "v0.9.0", "target": "win64" }\r\n')
+    record = ('record {"product":"katana","schema":1,"sequence":1790000000,"tag":"v0.9.0","target":"win64",'
+              '"version":"0.9.0"}')
+    for data in (as_shown, as_sorted, spaced):
+        expect_equal(entry_of(INSTALLED_RECORD_PATH, data), record, f"the entry of installed.json spelled {data!r}")
+    expect_equal(installed_record("0.9.0", 1790000000), as_shown + b"\n", "installed.json as this driver writes it")
+    # Another build of the same version is another record; so is a record with a field more.
+    later = as_shown.replace(b"1790000000", b"1790000001")
+    expect(entry_of(INSTALLED_RECORD_PATH, later) != record, "a record with another sequence compared equal")
+    more = as_shown.replace(b'"target":"win64"', b'"target":"win64","channel":"beta"')
+    expect(entry_of(INSTALLED_RECORD_PATH, more) != record, "a record with one more field compared equal")
+    # What is not a record is its bytes; and only the one file is read this way.
+    for data in (b"not json\n", b"[1, 2]\n", b'{"schema":1', b"\xff\xfe"):
+        expect_equal(entry_of(INSTALLED_RECORD_PATH, data), hashlib.sha256(data).hexdigest(),
+                     f"the entry of an installed.json that holds {data!r}")
+    expect_equal(entry_of("share/katana/installed.json.bak", as_shown), hashlib.sha256(as_shown).hexdigest(),
+                 "the entry of a file that is not installed.json")
+    # So two trees that differ only in how the record is spelled are one tree, and two builds are two.
+    tree = {"bin/katana.exe": b"a program\n", INSTALLED_RECORD_PATH: as_shown}
+    expect_equal(tree_hash(snapshot_of({**tree, INSTALLED_RECORD_PATH: spaced})), tree_hash(snapshot_of(tree)),
+                 "the hash of a tree whose record is spelled another way")
+    expect(tree_hash(snapshot_of({**tree, INSTALLED_RECORD_PATH: later})) != tree_hash(snapshot_of(tree)),
+           "the trees of two builds have one hash")
+    expect(tree_hash(snapshot_of({**tree, "bin/katana.exe": b"a program\r\n"})) != tree_hash(snapshot_of(tree)),
+           "a program with another line end has the hash of the first: every other file is its bytes")
+    # And a tree on the disk reads the same way as the one built in memory.
+    with tempfile.TemporaryDirectory(prefix="katana-e2e-self-") as scratch:
+        write_tree(Path(scratch), {**tree, INSTALLED_RECORD_PATH: as_sorted})
+        expect_equal(snapshot(Path(scratch)), {"bin": "dir", "bin/katana.exe": hashlib.sha256(b"a program\n").hexdigest(),
+                                               "share": "dir", "share/katana": "dir", INSTALLED_RECORD_PATH: record},
+                     "the snapshot of a tree on the disk")
+
+
+@self_test
+def a_reserved_port_refuses_a_connection_and_is_nobody_elses() -> None:
+    with reserved_port() as port:
+        expect(1 <= port <= 65535, f"not a port: {port}")
+        try:
+            socket.create_connection((fake.LOOPBACK, port), timeout=60).close()
+        except ConnectionRefusedError:
+            pass
+        else:
+            raise Failure("a connection to a port nobody listens on was accepted")
+        other = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            other.bind((fake.LOOPBACK, port))
+        except OSError:
+            pass
+        else:
+            raise Failure("a port that is held was given to a second socket")
+        finally:
+            other.close()
+
+
+def run_self_tests() -> int:
+    """0 when every reader gives its hand-worked answer; each is named, with what failed."""
+    failures = 0
+    for function in SELF_TESTS:
+        name = function.__name__.replace("_", " ")
+        try:
+            function()
+        except Failure as failure:
+            failures += 1
+            print(f"FAILED {name}: {failure}")
+        else:
+            print(f"ok {name}")
+    print(f"{len(SELF_TESTS) - failures} of {len(SELF_TESTS)} self-tests passed")
+    return 1 if failures else 0
 
 
 # ---- the command line ---------------------------------------------------------------------------
@@ -1401,6 +1646,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "(tests/update/e2e.cmake says which it registered)")
     parser.add_argument("--portable-only", action="store_true",
                         help="with --registered: only the portable cases are expected")
+    parser.add_argument("--self-test", action="store_true",
+                        help="instead of running a case: hold the driver's own readers to answers worked out by "
+                             "hand (no program is started)")
     return parser
 
 
@@ -1432,8 +1680,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
     if args.registered is not None:
         return check_registered(args.registered, args.portable_only)
+    if args.self_test:
+        return run_self_tests()
     if not args.case:
-        parser.error("give --case (or --list, or --registered)")
+        parser.error("give --case (or --list, --registered, or --self-test)")
     if not args.engine:
         parser.error("give --engine: every case asks the feed through katana_update_e2e")
     for given in (args.engine, args.helper, args.stub):

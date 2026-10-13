@@ -4,9 +4,13 @@
 #
 #   update_e2e_program_...   katana_update_e2e by itself: its usage, and that it cannot leave the machine
 #   update_tools_fake_feed   tools/update_fake_feed.py asked with urllib (tool_tests/test_fake_feed.py)
+#   update_e2e_driver_...    the driver's own readers, held to answers worked out by hand
 #   update_e2e_<sentence>    one case of tests/update/update_e2e.py each: the real producer makes and
 #                            signs two releases, the fake feed serves them on 127.0.0.1, and
 #                            katana_update_e2e and katana_updater_test are the engine and the helper
+#   update_e2e_every_case_of_the_driver_is_registered, and
+#   update_every_end_to_end_test_has_the_runtime_first_on_its_path_and_a_timeout
+#                            the two checks of this file itself
 #
 # They reach the loopback address and nothing else (CLAUDE.md, section 4: a test may start its own
 # server on 127.0.0.1, port 0, with proxies disabled), so they run without KATANA_ONLINE_TESTS. The
@@ -25,6 +29,49 @@ if(WIN32)
     target_link_libraries(katana_update_e2e PRIVATE ws2_32)
 endif()
 
+# katana_update_e2e is linked like the test suites and not like the helper: it is not static, and
+# loads the C++ runtime (libstdc++, libgcc) from the toolchain's folder. So every test that starts
+# it - by itself, below, or through the driver, which hands its own environment on to the programs
+# it runs - has that folder first on PATH, whatever shell ctest was started from. In a Git Bash
+# whose PATH puts another MinGW first the program would load the wrong runtime and die before main
+# (0xc0000139), and with none on PATH it would not start at all (tests/CMakeLists.txt says the same
+# of the application's own checks). The helper and the stand-in for Katana need nothing: they are
+# linked static (CMakeLists.txt, beside this file).
+set(_katana_e2e_runtime "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
+
+# A test added below without that passes only where the caller's own PATH happens to be right, and
+# one without a TIMEOUT holds the run for ctest's default 1,500 seconds when a program waits. So a
+# test names every `update_e2e_...` test that lacks either. The scan is deferred to the end of the
+# directory, after the last set_tests_properties - and past every `return()` of this file, which
+# leaves early where there is no Python or no openssl.
+function(katana_name_update_e2e_tests_without_their_environment)
+    get_property(_tests DIRECTORY PROPERTY TESTS)
+    set(_bare "")
+    set(_seen 0)
+    foreach(_test IN LISTS _tests)
+        if(NOT _test MATCHES "^update_e2e_")
+            continue()
+        endif()
+        math(EXPR _seen "${_seen} + 1")
+        get_test_property(${_test} ENVIRONMENT_MODIFICATION _environment)
+        get_test_property(${_test} TIMEOUT _timeout)
+        if(NOT _environment MATCHES "(^|;)PATH=path_list_prepend:" OR NOT _timeout)
+            list(APPEND _bare ${_test})
+        endif()
+    endforeach()
+    if(_bare)
+        string(JOIN ", " _named ${_bare})
+    else()
+        set(_named "none")
+    endif()
+    add_test(NAME update_every_end_to_end_test_has_the_runtime_first_on_its_path_and_a_timeout
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Of ${_seen} end-to-end tests, those without the runtime on PATH or without a timeout: ${_named}.")
+    set_tests_properties(update_every_end_to_end_test_has_the_runtime_first_on_its_path_and_a_timeout
+        PROPERTIES PASS_REGULAR_EXPRESSION "Of [1-9][0-9]* end-to-end tests, .*without a timeout: none[.]")
+endfunction()
+cmake_language(DEFER CALL katana_name_update_e2e_tests_without_their_environment)
+
 # ---- the program's own rule, with no feed and no Python ------------------------------------------
 #
 # katana_update_e2e is what every case below fetches with, so that it cannot leave the machine is a
@@ -35,7 +82,9 @@ endif()
 # T3 fixtures' (read, never written); the state folder is never made.
 add_test(NAME update_e2e_program_prints_its_usage_when_given_no_command COMMAND katana_update_e2e)
 set_tests_properties(update_e2e_program_prints_its_usage_when_given_no_command PROPERTIES
-    PASS_REGULAR_EXPRESSION "usage: katana_update_e2e check[|]plan[|]stage")
+    PASS_REGULAR_EXPRESSION "usage: katana_update_e2e check[|]plan[|]stage"
+    ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
+    TIMEOUT 300)
 set(_katana_e2e_fixture_install --root "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/install/v1"
     --state "${CMAKE_CURRENT_BINARY_DIR}/e2e-state-that-is-never-made")
 foreach(_katana_e2e_refused IN ITEMS
@@ -48,12 +97,15 @@ foreach(_katana_e2e_refused IN ITEMS
     add_test(NAME update_e2e_program_refuses_${_katana_e2e_what}
         COMMAND katana_update_e2e check ${_katana_e2e_fixture_install} --feed "${_katana_e2e_address}")
     set_tests_properties(update_e2e_program_refuses_${_katana_e2e_what} PROPERTIES
-        PASS_REGULAR_EXPRESSION "--feed is an http address on the loopback")
+        PASS_REGULAR_EXPRESSION "--feed is an http address on the loopback"
+        ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
+        TIMEOUT 300)
 endforeach()
 add_test(NAME update_e2e_program_connects_to_no_github_address_it_was_given_no_route_for
     COMMAND katana_update_e2e check ${_katana_e2e_fixture_install} --github kjarada/Katana)
 set_tests_properties(update_e2e_program_connects_to_no_github_address_it_was_given_no_route_for PROPERTIES
     PASS_REGULAR_EXPRESSION "detail=the test client reaches the loopback address only"
+    ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
     TIMEOUT 300)
 
 if(NOT Python3_Interpreter_FOUND OR Python3_VERSION VERSION_LESS 3.10)
@@ -70,6 +122,19 @@ add_test(NAME update_tools_fake_feed
 set_tests_properties(update_tools_fake_feed PROPERTIES
     ENVIRONMENT_MODIFICATION "${_katana_e2e_no_proxy}"
     TIMEOUT 1800)
+
+# The driver's own readers, held to answers worked out by hand (update_e2e.py --self-test): the path
+# a line of the stub's log names, whichever way this Python and the system spell it; a path as a
+# program is given it; installed.json compared as the record it holds; the port nobody listens on.
+# A case cannot tell a wrong program from a driver that reads a right one wrongly, so this can. It
+# starts no program and needs no openssl.
+set(_katana_e2e_driver "${CMAKE_CURRENT_SOURCE_DIR}/update_e2e.py")
+add_test(NAME update_e2e_driver_reads_a_path_and_a_record_however_they_are_spelled
+    COMMAND "${KATANA_PYTHON}" -B "${_katana_e2e_driver}" --self-test)
+set_tests_properties(update_e2e_driver_reads_a_path_and_a_record_however_they_are_spelled PROPERTIES
+    PASS_REGULAR_EXPRESSION "4 of 4 self-tests passed"
+    ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime};${_katana_e2e_no_proxy}"
+    TIMEOUT 300)
 
 # openssl 3 or later (pkeyutl -rawin), looked for here as well as further down in CMakeLists.txt:
 # this file is included before that search, and find_program keeps the one answer for both.
@@ -100,7 +165,6 @@ if(WIN32 AND TARGET katana_updater_test AND TARGET katana_updater_stub)
         --helper "$<TARGET_FILE:katana_updater_test>" --stub "$<TARGET_FILE:katana_updater_stub>")
 endif()
 
-set(_katana_e2e_driver "${CMAKE_CURRENT_SOURCE_DIR}/update_e2e.py")
 set(_katana_e2e_cases "")
 
 # katana_add_update_e2e_test(<sentence> <case> [PORTABLE] [SHARDS n])
@@ -125,9 +189,11 @@ function(katana_add_update_e2e_test sentence case)
             COMMAND "${KATANA_PYTHON}" -B "${_katana_e2e_driver}" --case ${case} ${_katana_e2e_programs})
         list(APPEND _names update_e2e_${sentence})
     endif()
-    # Generous: a case starts a dozen programs, and the whole suite runs beside it.
+    # The toolchain's folder for katana_update_e2e, which the driver starts (see the top). The
+    # timeout is generous: a case starts a dozen programs, and the whole suite runs beside it.
     set_tests_properties(${_names} PROPERTIES
-        ENVIRONMENT_MODIFICATION "KATANA_OPENSSL=set:${KATANA_OPENSSL_EXECUTABLE};${_katana_e2e_no_proxy}"
+        ENVIRONMENT_MODIFICATION
+            "${_katana_e2e_runtime};KATANA_OPENSSL=set:${KATANA_OPENSSL_EXECUTABLE};${_katana_e2e_no_proxy}"
         TIMEOUT 1800)
     set(_katana_e2e_cases ${_katana_e2e_cases} ${case} PARENT_SCOPE)
 endfunction()
@@ -161,4 +227,6 @@ if(NOT _katana_e2e_swaps)
 endif()
 add_test(NAME update_e2e_every_case_of_the_driver_is_registered
     COMMAND "${KATANA_PYTHON}" -B "${_katana_e2e_driver}" ${_katana_e2e_expected})
-set_tests_properties(update_e2e_every_case_of_the_driver_is_registered PROPERTIES TIMEOUT 300)
+set_tests_properties(update_e2e_every_case_of_the_driver_is_registered PROPERTIES
+    ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
+    TIMEOUT 300)
