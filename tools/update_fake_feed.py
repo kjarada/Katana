@@ -500,9 +500,9 @@ def rules_from_arguments(args: argparse.Namespace) -> list[Rule]:
     for text in args.truncate:
         body, port = _split_port(text)
         glob, separator, count = body.rpartition(":")
-        if not separator:
-            glob, count = body, "0"
-        if glob == "" or not count.isdigit():
+        if not separator or not count.isdigit():
+            glob, count = body, "0"  # no count: the whole text is the pattern
+        if glob == "" or glob.startswith(":"):
             raise ValueError(f"--truncate takes GLOB or GLOB:BYTES, not '{text}'")
         rules.append(Rule("truncate", glob, int(count), port))
     return rules
