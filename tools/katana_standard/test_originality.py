@@ -238,8 +238,11 @@ class StandardColours(unittest.TestCase):
             self.skipTest("no colour_names.cpp beside this script's checkout")
         with open(source, encoding="utf-8") as handle:
             text = handle.read()
+        # An entry of the table, however it is laid out: {"dark red", {139, 0, 0, 255}}.
+        number = r"\s*(\d+)\s*"
+        entry = r'\{\s*"([a-z ]+)"\s*,\s*\{' + number + "," + number + "," + number + r",\s*255\s*\}\s*\}"
         compiled = {m.group(1): "#%02x%02x%02x" % tuple(int(v) for v in m.group(2, 3, 4))
-                    for m in re.finditer(r'\{"([a-z ]+)", \{(\d+), (\d+), (\d+), 255\}\}', text)}
+                    for m in re.finditer(entry, text)}
         self.assertEqual(len(compiled), 27)
         self.assertEqual(originality.STANDARD_COLOURS, compiled)
 
