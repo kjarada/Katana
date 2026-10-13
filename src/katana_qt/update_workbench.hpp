@@ -58,10 +58,11 @@
 //     the window asks again, every five seconds for a minute, and then leaves
 //     it to the next start or the next logon.
 //
-// WHAT IT DECIDES IS NOT HERE. Which view an answer is, what is offered at a
-// start, when the automatic check is due, what its answer does to what is
-// shown, what the log may show, which helper copies a start may remove and
-// whether a start may confirm an update are
+// WHAT IT DECIDES IS NOT HERE. Which view an answer is, what a line that was
+// run at once does to what is shown, what is offered at a start, when the
+// automatic check is due, what its answer does to what is shown, what the log
+// may show, what Settings > Updates is told of the state file, which helper
+// copies a start may remove and whether a start may confirm an update are
 // functions of their arguments beside the dialog (update_dialog.hpp, "THE
 // DECISIONS"), where the widget tests drive them: this object needs the whole
 // window and is built in no test. It gathers the facts - the disk, the clock,
