@@ -187,12 +187,25 @@ using Fetch = std::function<core::Result<std::string>(const FetchRequest&, std::
 //   - A 404 is NotFound; any other status that is not 200/206 is FileImportFailure with the
 //     context `status=<n>`; a transport failure is `status=0` (the Fetch conventions above).
 //   - An answer whose content type is HTML is a web page standing in for the file (a captive
-//     portal, a proxy's sign-in): FileImportFailure, context `status=<n>; portal=html`.
+//     portal, a proxy's sign-in): FileImportFailure, context `status=<n>; reason=html_page`.
 //   - A ranged answer is held to checkRangeResponse (ranges.hpp): 206 with the Content-Range
 //     asked for, or a 200 that is the whole file when the whole file was asked for. A server that
 //     ignores `Range` and starts the whole payload is cut off at maxBytes (the hop function does
-//     that) and reported as Unsupported "this network does not allow partial downloads".
-//   - No address with a query string, and no header, is ever put in an Error: displayUrl.
+//     that) and reported as Unsupported "this network does not allow partial downloads"; a 206
+//     that is another part of the file, or of a file of another length, or a body of another
+//     length, is FileImportFailure, context `status=206; reason=bad_range`.
+//   - No address with a query string, and no header, is ever put in an Error: displayUrl. And
+//     whatever the hop function put in an Error of its own, the request's token is not in the
+//     Error the Fetch returns: its message and context pass through redactToken (credential.hpp).
+//
+// THE CONTEXT OF AN ERROR of a Fetch is written in one order, so that the token of a failure is
+// read from the part this program wrote and never from an address or a server's words:
+//
+//   status=<n>; reason=<token>; <address without its query>; <detail>
+//
+// `status=` first when an HTTP answer (or none: 0) is what failed, then `reason=` when the
+// failure has a token of its own, then the rest. fetchFailureReason reads those two leading
+// fields and nothing after them.
 
 inline constexpr std::string_view kApiHost = "api.github.com";
 inline constexpr int kMaxRedirects = 5;
@@ -261,9 +274,15 @@ using HopFn = std::function<core::Result<HttpHopReply>(const HttpHop&, std::stop
 [[nodiscard]] Fetch makeFetch(HopFn hop);
 
 // The short machine-readable token for a failure of a Fetch (or of stage(), which adds its own
-// `reason=<token>` to its contexts): "cancelled", "http_<status>" (http_404, http_403, http_429),
-// "offline" (status=0), "html_page", "partial_downloads", "too_large", or the `reason=` token
-// the Error carries; "error" for anything else. What check()'s CheckResult::reason holds.
+// `reason=<token>` to its contexts): the `reason=` token the Error carries (the transport's are
+// "html_page", "bad_range", "bad_redirect" and "too_many_redirects"), else "cancelled",
+// "http_<status>" (http_404, http_403, http_429), "offline" (status=0, or no status at all),
+// "partial_downloads", "too_large"; "error" for anything else. What check()'s
+// CheckResult::reason holds.
+//
+// A `reason=` counts only where this program writes one: at the very start of the context, or
+// straight after a leading `status=<n>; `. One further on - inside an address, in a server's
+// header - is text, not a token.
 [[nodiscard]] std::string fetchFailureReason(const core::Error& error);
 
 } // namespace katana::update

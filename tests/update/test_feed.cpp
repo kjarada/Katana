@@ -744,7 +744,9 @@ TEST(Transport, ARangeIsAnsweredByTheRangeAskedForOrItIsRefused)
     EXPECT_TRUE(oneRequest(answer(206, part, "", "", "bytes 100-149/*"), request).ok())
         << "an unknown total is allowed";
 
-    // Another part of the file, another file, no header, a short body, a long body.
+    // Another part of the file, another file, no header, a short body: each is a 206 that is not
+    // the range asked for, and says so with its own token - `http_206` would read as a status
+    // the server refused with.
     for (const auto& wrong : {
              answer(206, part, "", "", "bytes 101-150/1000"),
              answer(206, part, "", "", "bytes 100-149/999"),
@@ -753,7 +755,28 @@ TEST(Transport, ARangeIsAnsweredByTheRangeAskedForOrItIsRefused)
              answer(206, part.substr(0, 49), "", "", "bytes 100-149/1000"),
          }) {
         const auto refused = oneRequest(wrong, request);
-        EXPECT_FALSE(refused.ok()) << wrong.reply.contentRange;
+        ASSERT_FALSE(refused.ok()) << wrong.reply.contentRange;
+        EXPECT_EQ(refused.error().code, core::ErrorCode::FileImportFailure);
+        EXPECT_EQ(fetchFailureReason(refused.error()), "bad_range") << wrong.reply.contentRange;
+        EXPECT_TRUE(refused.error().context.starts_with("status=206; reason=bad_range; "))
+            << refused.error().context;
+    }
+}
+
+TEST(Transport, AServersHeaderIsShownBoundedAndPrintableAndCannotNameTheReason)
+{
+    // The Content-Range of a refused answer is quoted for a person, so it is the server's text
+    // in this program's Error: cut to a length, with nothing but printable ASCII, and after the
+    // token, where it cannot pass for one.
+    FetchRequest request = rangedRequest();
+    request.url = "https://github.com/o/r/releases/download/v1/x.zip";
+    const std::string hostile = "reason=cancelled; \x1b[31m" + std::string(5000, 'A');
+    const auto refused = oneRequest(answer(206, std::string(50, 'x'), "", "", hostile), request);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(fetchFailureReason(refused.error()), "bad_range");
+    EXPECT_LT(refused.error().context.size(), 400u);
+    for (const char c : refused.error().context) {
+        EXPECT_TRUE(c >= 0x20 && c < 0x7F) << "byte " << static_cast<int>(c);
     }
 }
 
@@ -910,6 +933,55 @@ TEST(Transport, NoErrorCarriesTheTokenAHeaderOrTheSignatureOfAStorageAddress)
     }
 }
 
+TEST(Transport, AHopThatPutsTheTokenInItsOwnErrorDoesNotGetItPastTheFetch)
+{
+    // The hop function is the caller's (katana_app's, over libcurl). Suppose it, or the library
+    // under it, quotes a request header in a failure: the Fetch still returns no token. Every
+    // code a hop may fail with (feed.hpp), with the token in the message and in the context.
+    const std::string bearer = "Authorization: Bearer " + std::string(kSecretToken);
+    for (const core::ErrorCode code :
+         {core::ErrorCode::FileImportFailure, core::ErrorCode::InvalidState,
+          core::ErrorCode::Unsupported, core::ErrorCode::InvalidArgument,
+          core::ErrorCode::Internal}) {
+        Wire wire;
+        wire.script.push_back(fail(core::makeError(code, "could not send '" + bearer + "'",
+                                                   "status=0; header " + bearer + "; " +
+                                                       std::string(kSecretToken))));
+        const auto body = makeFetch(wire.hop())(apiAsset(), {}, {});
+        ASSERT_FALSE(body.ok());
+        EXPECT_EQ(body.error().code, code) << "the failure is the hop's, less the token";
+        EXPECT_FALSE(contains(body.error().describe(), kSecretToken)) << body.error().describe();
+        // What was beside the token is still there to read.
+        EXPECT_TRUE(contains(body.error().message, "could not send")) << body.error().message;
+        EXPECT_TRUE(body.error().context.starts_with("status=0; ")) << body.error().context;
+    }
+    // The same on a later hop, where the header was never sent: the request still holds it.
+    Wire wire;
+    wire.script.push_back(answer(302, "", "", std::string(kStorage)));
+    wire.script.push_back(fail(core::makeError(core::ErrorCode::FileImportFailure,
+                                               "echo " + std::string(kSecretToken), "status=0")));
+    const auto later = makeFetch(wire.hop())(apiAsset(), {}, {});
+    ASSERT_FALSE(later.ok());
+    EXPECT_FALSE(contains(later.error().describe(), kSecretToken));
+}
+
+TEST(Transport, AnAddressCannotNameTheReasonOfAFailure)
+{
+    // A path may spell anything, `reason=` and `status=` included; it comes after the fields
+    // this program writes, and is not read as one of them. Here a server redirects to such an
+    // address, which then refuses with 403.
+    Wire wire;
+    wire.script.push_back(
+        answer(302, "", "", "https://evil.example/status=200;reason=cancelled;/portal=html"));
+    wire.script.push_back(answer(403, "no"));
+    FetchRequest request;
+    request.url = "https://github.com/o/r/releases/latest/download/x";
+    request.maxBytes = 100;
+    const auto body = makeFetch(wire.hop())(request, {}, {});
+    ASSERT_FALSE(body.ok());
+    EXPECT_EQ(fetchFailureReason(body.error()), "http_403") << body.error().context;
+}
+
 // ---- the reason tokens -------------------------------------------------------------------------------------
 
 TEST(FailureReason, EachFailureOfAFetchHasAShortMachineReadableToken)
@@ -925,15 +997,45 @@ TEST(FailureReason, EachFailureOfAFetchHasAShortMachineReadableToken)
     EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "status=503"), "http_503");
     EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "status=0; https://x/y; timeout"), "offline");
     EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "no status here"), "offline");
-    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "status=200; https://x/y; portal=html"), "html_page");
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "status=200; reason=html_page; https://x/y"),
+              "html_page");
     EXPECT_EQ(reasonOf(ErrorCode::Unsupported, std::string(kPartialDownloadsRefused), "status=200"),
               "partial_downloads");
     EXPECT_EQ(reasonOf(ErrorCode::Unsupported, "longer than allowed", "status=200"), "too_large");
-    // A reason the code that made the Error gave it wins, up to the next ';'.
+    // A reason the code that made the Error gave it wins, up to the next ';': first in the
+    // context, or straight after the status.
     EXPECT_EQ(reasonOf(ErrorCode::InvalidArgument, "m", "reason=staged_hash; path=bin/x"), "staged_hash");
     EXPECT_EQ(reasonOf(ErrorCode::FileExportFailure, "m", "reason=low_disk_space"), "low_disk_space");
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "status=302; reason=bad_redirect; https://x/y"),
+              "bad_redirect");
     EXPECT_EQ(reasonOf(ErrorCode::Internal, "m", ""), "error");
     EXPECT_EQ(reasonOf(ErrorCode::ParseFailure, "m", "reason="), "error") << "an empty token is none";
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "m", "status=403; reason=; https://x/y"), "http_403")
+        << "an empty token is none after a status too";
+}
+
+TEST(FailureReason, AReasonIsReadOnlyWhereThisProgramWritesOne)
+{
+    // feed.hpp: `status=<n>; reason=<token>; <address>; <detail>`. An address and a server's
+    // words come after the two fields, and whatever they spell is not a token.
+    using core::ErrorCode;
+    const auto reasonOf = [](ErrorCode code, std::string context) {
+        return fetchFailureReason(core::makeError(code, "m", std::move(context)));
+    };
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "status=403; https://x/reason=cancelled;y"),
+              "http_403");
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "status=429; https://x/y; reason=html_page"),
+              "http_429");
+    EXPECT_EQ(reasonOf(ErrorCode::NotFound, "status=404; https://x/y?reason=offline"), "http_404");
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "https://x/status=500; reason=cancelled"),
+              "offline")
+        << "a status is read only at the very start";
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "status=200x; reason=cancelled"), "http_200")
+        << "what follows the number must be the separator";
+    EXPECT_EQ(reasonOf(ErrorCode::FileImportFailure, "status=; reason=cancelled"), "offline")
+        << "a status with no number is not the leading field, so nothing follows it";
+    EXPECT_EQ(reasonOf(ErrorCode::InvalidState, "path=bin/x; reason=staged_hash"), "cancelled")
+        << "not first: not a token";
 }
 
 } // namespace

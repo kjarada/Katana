@@ -11,9 +11,11 @@
 
 #include <algorithm>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <utility>
 
 #include "katana/core/text.hpp"
+#include "katana/update/credential.hpp"
 #include "katana/update/ranges.hpp"
 #include "katana/update/version.hpp"
 
@@ -339,17 +341,70 @@ core::Error badRedirect(std::string_view why)
                            "reason=bad_redirect; " + std::string(why));
 }
 
-// The Error of a request that got an HTTP answer or none: `status=<n>` first (the Fetch
-// convention), then the address without its query.
+// The Error of a request that got an HTTP answer or none, its context in the one order feed.hpp
+// gives: `status=<n>`, then the failure's own token when it has one, then the address without
+// its query, then whatever else is worth saying. The token comes before the address because the
+// address is not this program's text: a path may spell anything.
 core::Error fetchError(core::ErrorCode code, std::string message, int status,
-                       std::string_view url, std::string_view extra = {})
+                       std::string_view url, std::string_view reason = {},
+                       std::string_view detail = {})
 {
-    std::string context = "status=" + std::to_string(status) + "; " + displayUrl(url);
-    if (!extra.empty()) {
+    std::string context = "status=" + std::to_string(status) + "; ";
+    if (!reason.empty()) {
+        context += "reason=";
+        context += reason;
         context += "; ";
-        context += extra;
+    }
+    context += displayUrl(url);
+    if (!detail.empty()) {
+        context += "; ";
+        context += detail;
     }
     return core::makeError(code, std::move(message), std::move(context));
+}
+
+// A server's words (a header it sent) as they may stand in an Error: printable ASCII, and no
+// more of them than a person reads.
+std::string shownServerText(std::string_view text)
+{
+    constexpr std::size_t kShown = 160;
+    std::string out;
+    for (const char c : text.substr(0, kShown)) {
+        const auto byte = static_cast<unsigned char>(c);
+        out.push_back(byte >= 0x20 && byte < 0x7F ? c : '?');
+    }
+    if (text.size() > kShown) {
+        out += "...";
+    }
+    return out;
+}
+
+// What checkRangeResponse refused, as an Error of a Fetch. A server that ignored `Range` keeps
+// its code and its sentence, which the dialog shows. A 206 that is not the range asked for is
+// given the token bad_range: its `status=206` alone would be read as "the server said 206".
+core::Error rangeRefused(const core::Error& why, const FetchRequest& request,
+                         std::string_view url, std::string_view contentRange)
+{
+    if (why.code != core::ErrorCode::FileImportFailure) {
+        return why;
+    }
+    // Written again here, not copied from `why`: its context quotes the header as it came.
+    return fetchError(core::ErrorCode::FileImportFailure, why.message, 206, url, "bad_range",
+                      "asked for " + std::to_string(request.rangeLength) + " bytes from " +
+                          std::to_string(request.rangeStart) + " of " +
+                          std::to_string(request.payloadSize) + "; Content-Range '" +
+                          shownServerText(contentRange) + "'");
+}
+
+// The request's token is in no word of an Error the Fetch returns, whoever wrote the words: the
+// hop function is the caller's, and what it says about a failure is passed on.
+core::Error withoutToken(core::Error error, std::string_view token)
+{
+    if (!token.empty()) {
+        error.message = redactToken(error.message, token);
+        error.context = redactToken(error.context, token);
+    }
+    return error;
 }
 
 core::Error cancelled(std::string_view url)
@@ -512,133 +567,167 @@ std::string displayUrl(std::string_view url)
     return shown;
 }
 
+namespace {
+
+// One request, its redirects followed here (feed.hpp, "the transport's rules").
+core::Result<std::string> followRequest(const HopFn& hop, const FetchRequest& request,
+                                        const std::stop_token& stop, const ProgressFn& progress)
+{
+    if (!hop) {
+        return core::makeError(core::ErrorCode::Internal, "no transport was given");
+    }
+    // The caller's bound is what keeps an unverified answer from filling memory or disk.
+    if (request.maxBytes == 0) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "a request must name the most bytes it accepts",
+                               displayUrl(request.url));
+    }
+    const bool ranged = request.rangeLength > 0;
+    if (ranged && request.payloadSize == 0) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "a ranged request must name the signed size of the file",
+                               displayUrl(request.url));
+    }
+    // A feed of the owner's own may be a plain-http loopback server (a test, a local mirror); a
+    // request that began on the open internet is https the whole way.
+    const bool allowLoopbackHttp = isLoopbackHttpUrl(request.url);
+    if (!isFetchableUrl(request.url, allowLoopbackHttp)) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "only https addresses are fetched", displayUrl(request.url));
+    }
+
+    std::string url = request.url;
+    for (int redirects = 0;; ++redirects) {
+        if (stop.stop_requested()) {
+            return cancelled(url);
+        }
+        HttpHop one;
+        one.url = url;
+        one.userAgent = request.userAgent;
+        one.headers = hopHeaders(request, url);
+        one.maxBytes = request.maxBytes;
+        one.timeoutSeconds = ranged ? kRangeHopTimeoutSeconds : kHopTimeoutSeconds;
+
+        core::Result<HttpHopReply> answer = hop(one, stop, progress);
+        if (!answer) {
+            const core::Error& error = answer.error();
+            if (error.code == core::ErrorCode::Unsupported && ranged) {
+                // The body outgrew the range: a server that ignored `Range` and began the whole
+                // payload.
+                return fetchError(core::ErrorCode::Unsupported,
+                                  std::string(kPartialDownloadsRefused), 200, url, {},
+                                  "exceeded=" + std::to_string(request.maxBytes) + " bytes");
+            }
+            return error;
+        }
+        HttpHopReply& reply = answer.value();
+
+        if (isRedirectStatus(reply.status)) {
+            if (redirects >= kMaxRedirects) {
+                return fetchError(core::ErrorCode::FileImportFailure,
+                                  "the server redirected too many times", reply.status, url,
+                                  "too_many_redirects");
+            }
+            core::Result<std::string> next = resolveRedirect(url, reply.location);
+            if (!next) {
+                return fetchError(core::ErrorCode::FileImportFailure, next.error().message,
+                                  reply.status, url, "bad_redirect");
+            }
+            if (!isFetchableUrl(next.value(), allowLoopbackHttp)) {
+                return fetchError(core::ErrorCode::FileImportFailure,
+                                  "the server redirected to an address that is not https",
+                                  reply.status, url, "bad_redirect");
+            }
+            url = std::move(next).value();
+            continue;
+        }
+
+        if (reply.status == 404) {
+            return fetchError(core::ErrorCode::NotFound,
+                              "the server has nothing at this address (404)", 404, url);
+        }
+        if (reply.status != 200 && reply.status != 206) {
+            return fetchError(core::ErrorCode::FileImportFailure, messageForStatus(reply.status),
+                              reply.status, url);
+        }
+        if (contentTypeIsHtml(reply.contentType)) {
+            return fetchError(core::ErrorCode::FileImportFailure,
+                              "the network answered with a web page instead of the file "
+                              "(a sign-in page?)",
+                              reply.status, url, "html_page");
+        }
+        if (reply.body.size() > request.maxBytes) {
+            return fetchError(core::ErrorCode::Unsupported,
+                              ranged ? std::string(kPartialDownloadsRefused)
+                                     : "the answer is longer than this request allows",
+                              reply.status, url);
+        }
+        if (ranged) {
+            const core::Status held =
+                checkRangeResponse(reply.status, reply.contentRange, reply.body.size(),
+                                   request.rangeStart, request.rangeLength, request.payloadSize);
+            if (!held.ok()) {
+                return rangeRefused(held.error(), request, url, reply.contentRange);
+            }
+        } else if (reply.status != 200) {
+            return fetchError(core::ErrorCode::FileImportFailure,
+                              "the server sent part of a file that was asked for whole",
+                              reply.status, url);
+        }
+        return std::move(reply.body);
+    }
+}
+
+} // namespace
+
 Fetch makeFetch(HopFn hop)
 {
     return [hop = std::move(hop)](const FetchRequest& request, std::stop_token stop,
                                   ProgressFn progress) -> core::Result<std::string> {
-        if (!hop) {
-            return core::makeError(core::ErrorCode::Internal, "no transport was given");
+        core::Result<std::string> answer = followRequest(hop, request, stop, progress);
+        if (!answer.ok() && !request.bearerToken.empty()) {
+            return withoutToken(answer.error(), request.bearerToken);
         }
-        // The caller's bound is what keeps an unverified answer from filling memory or disk.
-        if (request.maxBytes == 0) {
-            return core::makeError(core::ErrorCode::InvalidArgument,
-                                   "a request must name the most bytes it accepts",
-                                   displayUrl(request.url));
-        }
-        const bool ranged = request.rangeLength > 0;
-        if (ranged && request.payloadSize == 0) {
-            return core::makeError(core::ErrorCode::InvalidArgument,
-                                   "a ranged request must name the signed size of the file",
-                                   displayUrl(request.url));
-        }
-        // A feed of the owner's own may be a plain-http loopback server (a test, a local
-        // mirror); a request that began on the open internet is https the whole way.
-        const bool allowLoopbackHttp = isLoopbackHttpUrl(request.url);
-        if (!isFetchableUrl(request.url, allowLoopbackHttp)) {
-            return core::makeError(core::ErrorCode::InvalidArgument,
-                                   "only https addresses are fetched", displayUrl(request.url));
-        }
-
-        std::string url = request.url;
-        for (int redirects = 0;; ++redirects) {
-            if (stop.stop_requested()) {
-                return cancelled(url);
-            }
-            HttpHop one;
-            one.url = url;
-            one.userAgent = request.userAgent;
-            one.headers = hopHeaders(request, url);
-            one.maxBytes = request.maxBytes;
-            one.timeoutSeconds = ranged ? kRangeHopTimeoutSeconds : kHopTimeoutSeconds;
-
-            core::Result<HttpHopReply> answer = hop(one, stop, progress);
-            if (!answer) {
-                const core::Error& error = answer.error();
-                if (error.code == core::ErrorCode::Unsupported && ranged) {
-                    // The body outgrew the range: a server that ignored `Range` and began the
-                    // whole payload.
-                    return core::makeError(core::ErrorCode::Unsupported,
-                                           std::string(kPartialDownloadsRefused),
-                                           "status=200; " + displayUrl(url) + "; exceeded=" +
-                                               std::to_string(request.maxBytes) + " bytes");
-                }
-                return error;
-            }
-            HttpHopReply& reply = answer.value();
-
-            if (isRedirectStatus(reply.status)) {
-                if (redirects >= kMaxRedirects) {
-                    return fetchError(core::ErrorCode::FileImportFailure,
-                                      "the server redirected too many times", reply.status, url,
-                                      "reason=too_many_redirects");
-                }
-                core::Result<std::string> next = resolveRedirect(url, reply.location);
-                if (!next) {
-                    return fetchError(core::ErrorCode::FileImportFailure,
-                                      next.error().message, reply.status, url,
-                                      "reason=bad_redirect");
-                }
-                if (!isFetchableUrl(next.value(), allowLoopbackHttp)) {
-                    return fetchError(core::ErrorCode::FileImportFailure,
-                                      "the server redirected to an address that is not https",
-                                      reply.status, url, "reason=bad_redirect");
-                }
-                url = std::move(next).value();
-                continue;
-            }
-
-            if (reply.status == 404) {
-                return fetchError(core::ErrorCode::NotFound,
-                                  "the server has nothing at this address (404)", 404, url);
-            }
-            if (reply.status != 200 && reply.status != 206) {
-                return fetchError(core::ErrorCode::FileImportFailure,
-                                  messageForStatus(reply.status), reply.status, url);
-            }
-            if (contentTypeIsHtml(reply.contentType)) {
-                return fetchError(core::ErrorCode::FileImportFailure,
-                                  "the network answered with a web page instead of the file "
-                                  "(a sign-in page?)",
-                                  reply.status, url, "portal=html");
-            }
-            if (reply.body.size() > request.maxBytes) {
-                return core::makeError(core::ErrorCode::Unsupported,
-                                       ranged ? std::string(kPartialDownloadsRefused)
-                                              : "the answer is longer than this request allows",
-                                       "status=" + std::to_string(reply.status) + "; " +
-                                           displayUrl(url));
-            }
-            if (ranged) {
-                const core::Status held =
-                    checkRangeResponse(reply.status, reply.contentRange, reply.body.size(),
-                                       request.rangeStart, request.rangeLength,
-                                       request.payloadSize);
-                if (!held.ok()) {
-                    return held.error();
-                }
-            } else if (reply.status != 200) {
-                return fetchError(core::ErrorCode::FileImportFailure,
-                                  "the server sent part of a file that was asked for whole",
-                                  reply.status, url);
-            }
-            return std::move(reply.body);
-        }
+        return answer;
     };
 }
 
 std::string fetchFailureReason(const core::Error& error)
 {
-    // A reason the code that made the Error gave it.
+    // The two leading fields this program writes, `status=<n>; ` and then `reason=<token>`, and
+    // nothing after them: what follows may be an address or a server's words, and must not be
+    // able to name a reason.
+    std::string_view rest = error.context;
+    std::optional<int> status;
+    constexpr std::string_view kStatus = "status=";
+    if (rest.starts_with(kStatus)) {
+        rest.remove_prefix(kStatus.size());
+        std::size_t digits = 0;
+        int number = 0;
+        while (digits < rest.size() && rest[digits] >= '0' && rest[digits] <= '9' &&
+               number < 10000) {
+            number = number * 10 + (rest[digits] - '0');
+            ++digits;
+        }
+        if (digits > 0) {
+            status = number;
+        }
+        rest.remove_prefix(digits);
+        constexpr std::string_view kNext = "; ";
+        // Only a number and then the separator lead to a second field: `status=200x` and a
+        // `status=` with no number have none.
+        rest = digits > 0 && rest.starts_with(kNext) ? rest.substr(kNext.size())
+                                                     : std::string_view{};
+    }
     constexpr std::string_view kReason = "reason=";
-    if (const std::size_t at = error.context.find(kReason); at != std::string::npos) {
-        const std::size_t begin = at + kReason.size();
-        const std::size_t end = error.context.find(';', begin);
-        const std::string token = error.context.substr(
-            begin, end == std::string::npos ? std::string::npos : end - begin);
+    if (rest.starts_with(kReason)) {
+        rest.remove_prefix(kReason.size());
+        const std::string_view token = rest.substr(0, rest.find(';'));
         if (!token.empty()) {
-            return token;
+            return std::string(token);
         }
     }
+
     switch (error.code) {
     case core::ErrorCode::InvalidState:
         return "cancelled";
@@ -646,23 +735,9 @@ std::string fetchFailureReason(const core::Error& error)
         return "http_404";
     case core::ErrorCode::Unsupported:
         return error.message == kPartialDownloadsRefused ? "partial_downloads" : "too_large";
-    case core::ErrorCode::FileImportFailure: {
-        if (error.context.find("portal=html") != std::string::npos) {
-            return "html_page";
-        }
-        constexpr std::string_view kStatus = "status=";
-        if (error.context.starts_with(kStatus)) {
-            std::size_t at = kStatus.size();
-            int status = 0;
-            while (at < error.context.size() && error.context[at] >= '0' &&
-                   error.context[at] <= '9' && status < 10000) {
-                status = status * 10 + (error.context[at] - '0');
-                ++at;
-            }
-            return status == 0 ? "offline" : "http_" + std::to_string(status);
-        }
-        return "offline";
-    }
+    case core::ErrorCode::FileImportFailure:
+        // No status at all is a failure to get an answer, like status 0.
+        return status.value_or(0) == 0 ? "offline" : "http_" + std::to_string(*status);
     default:
         return "error";
     }
