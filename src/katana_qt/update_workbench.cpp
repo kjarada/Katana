@@ -465,6 +465,16 @@ void UpdateWorkbench::runNow(const QString& line)
             show(std::move(view));
         }
     }
+    // UPDATE BLOCKED CLEAR, carried out: no release is set aside any more, so
+    // a dialog that still says one "is not offered again" says what is no
+    // longer so. It goes back to knowing nothing, as after SKIP NONE, and the
+    // next check - Help > Check for Updates runs one - offers the release.
+    if (action == QLatin1String("BLOCKED") && words.size() == 3 &&
+        updateReplyValue(qs(reply->text), "reason").isEmpty() &&
+        view_.state == UpdateDialogState::NotOffered &&
+        view_.reason == QLatin1String("blocked_before")) {
+        show(viewOf(UpdateDialogState::Idle));
+    }
 }
 
 // ---- the jobs ----------------------------------------------------------------------------------
@@ -1137,6 +1147,14 @@ SettingsUpdates UpdateWorkbench::settingsUpdates()
             const Result<katana::update::UpdateState> state =
                 katana::update::readState(stateDirectory);
             return state ? qs(state->skippedVersion) : QString();
+        };
+        // The releases that were put back here, as the engine's own file has
+        // them (UPDATE STATUS does not say them): any at all is what the page
+        // tells of, and what its button - UPDATE BLOCKED CLEAR - empties.
+        updates.putBack = [stateDirectory] {
+            const Result<katana::update::UpdateState> state =
+                katana::update::readState(stateDirectory);
+            return state && !state->blockedSequences.empty();
         };
     }
     updates.credentials = made.credentials;

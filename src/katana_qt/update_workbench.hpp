@@ -22,7 +22,7 @@
 //     runs the helper's self-test) are run by app::runUpdateLine on a worker,
 //     with a copy of the context, and their reply is logged on the interface
 //     thread when they end, as a typed line's is. The other lines (STATUS,
-//     SKIP, SET, TOKEN) read and write small files and run at once;
+//     SKIP, BLOCKED, SET, TOKEN) read and write small files and run at once;
 //   - the AUTOMATIC CHECK (start(), then once an hour to see whether one is
 //     due): only in a window a person uses - never headless - of a copy that
 //     packaging installed (not a development tree), with the state's

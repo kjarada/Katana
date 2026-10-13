@@ -27,10 +27,11 @@
 //
 // The lines are the verbs' grammar (src/katana_app/update_verbs.hpp): UPDATE
 // CHECK, UPDATE DOWNLOAD CONFIRM, UPDATE APPLY CONFIRM, UPDATE SKIP <version>,
-// UPDATE SKIP NONE, UPDATE SET AUTO ON|OFF, UPDATE TOKEN CLEAR. The words for a
-// reason token are the dialog's own table, of which the header of
-// update_dialog.cpp says the rule (a row a token of the engine's check.hpp and
-// apply.hpp); the tokens listed here are copied from those two headers.
+// UPDATE SKIP NONE, UPDATE BLOCKED CLEAR, UPDATE SET AUTO ON|OFF, UPDATE TOKEN
+// CLEAR. The words for a reason token are the dialog's own table, of which the
+// header of update_dialog.cpp says the rule (a row a token of the engine's
+// check.hpp and apply.hpp, and of the verbs' header); the tokens listed here
+// are copied from those headers.
 //
 // The numbers: 71 000 000 bytes is the design's "71 MB" and 31 000 000 its
 // "31"; 31 / 71 of the progress bar's thousand steps is 436.6, so 437.
@@ -75,9 +76,11 @@
 #include <QAbstractButton>
 #include <QCheckBox>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
+#include <QPoint>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -1855,6 +1858,7 @@ struct UpdatesFixture {
     std::vector<std::pair<QString, bool>> logged;
     bool automatic = true;
     QString skipped;
+    bool putBack = false; // a release that did not start here is set aside
     int tokenChanges = 0;
     // What a line does and answers. Unset: nothing, and that it was carried out.
     std::function<VerbOutcome(const QString& line)> answer;
@@ -1870,6 +1874,7 @@ struct UpdatesFixture {
         };
         context.updates.automatic = [this] { return automatic; };
         context.updates.skippedVersion = [this] { return skipped; };
+        context.updates.putBack = [this] { return putBack; };
         context.updates.credentials = &store;
         context.updates.tokenChanged = [this] { ++tokenChanges; };
         context.updates.userAgent = QStringLiteral("Katana/0.2.0 (win64)");
@@ -1926,7 +1931,8 @@ TEST(SettingsUpdates, ThePageIsTheSecondOfSettingsWithANameForEveryControl)
     for (const char* name :
          {"settingsUpdateNote", "settingsUpdateAuto", "settingsUpdateSends", "settingsUpdateToken",
           "settingsUpdateTokenSave", "settingsUpdateTokenClear", "settingsUpdateTokenState",
-          "settingsUpdateSkipped", "settingsUpdateUnskip"}) {
+          "settingsUpdateSkipped", "settingsUpdateUnskip", "settingsUpdateBlocked",
+          "settingsUpdateUnblock"}) {
         EXPECT_NE(page->findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
     }
     // The words the design gives the controls.
@@ -2144,6 +2150,159 @@ TEST(SettingsUpdates, OfferTheSkippedVersionAgainRunsItsLineAndIsOffWhenNoneIsSk
     EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE SKIP NONE")}));
     EXPECT_EQ(shown(dialog, "settingsUpdateSkipped"), QStringLiteral("No version is skipped."));
     EXPECT_FALSE(enabled(dialog, "settingsUpdateUnskip")) << "nothing left to offer again";
+}
+
+// ---- the version that was put back (the hardening pass's ruling H5, 2026-10-14) -----------------
+//
+// "Window: Settings > Updates gets a button under 'Offer the skipped version
+// again': object name settingsUpdateUnblock, text 'Offer the version that was
+// put back again', which runs that line" - UPDATE BLOCKED CLEAR, whose reply
+// is blocked=none - "through the same path settingsUpdateUnskip uses". The
+// name, the words, the line and the reply below are copied from that ruling.
+
+TEST(SettingsUpdates, OfferTheVersionThatWasPutBackAgainIsAButtonUnderTheSkippedVersionsOne)
+{
+    UpdatesFixture f;
+    SettingsDialog dialog(f.context);
+    QWidget* page = child<QWidget>(dialog, "settingsUpdates");
+    ASSERT_NE(page, nullptr);
+    const auto* unblock = page->findChild<QPushButton*>(QStringLiteral("settingsUpdateUnblock"));
+    ASSERT_NE(unblock, nullptr) << "on the Updates page, by its name";
+    EXPECT_EQ(unblock->text(), QStringLiteral("Offer the version that was put back again"));
+    // It says what it does, and by which line.
+    EXPECT_TRUE(unblock->toolTip().contains(QStringLiteral("UPDATE BLOCKED CLEAR")))
+        << unblock->toolTip().toStdString();
+    // Like every button of Settings it is no default: Enter presses nothing.
+    EXPECT_FALSE(unblock->isDefault());
+    EXPECT_FALSE(unblock->autoDefault());
+    EXPECT_NE(page->findChild<QLabel*>(QStringLiteral("settingsUpdateBlocked")), nullptr);
+
+    // Under the skipped version's: each button is in a box of the page's
+    // column, and a column lays its boxes out from the top in their order.
+    const auto* unskip = child<QPushButton>(dialog, "settingsUpdateUnskip");
+    const QLayout* column = page->layout();
+    ASSERT_NE(column, nullptr);
+    const int skippedAt = column->indexOf(unskip->parentWidget());
+    const int putBackAt = column->indexOf(unblock->parentWidget());
+    ASSERT_GE(skippedAt, 0) << "the skipped version's box is one of the column's";
+    EXPECT_GT(putBackAt, skippedAt);
+    // And as a person sees the page: turned to and shown, it is the lower one.
+    child<QListWidget>(dialog, "settingsPages")->setCurrentRow(1);
+    dialog.show();
+    katana::qt::test::processEvents();
+    EXPECT_TRUE(unblock->isVisibleTo(&dialog));
+    EXPECT_GT(unblock->mapTo(&dialog, QPoint(0, 0)).y(), unskip->mapTo(&dialog, QPoint(0, 0)).y());
+
+    EXPECT_TRUE(f.ran.isEmpty()) << "showing the page runs nothing";
+    katana::qt::test::paint(dialog);
+}
+
+TEST(SettingsUpdates, OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse)
+{
+    UpdatesFixture f;
+    f.putBack = true;
+    f.skipped = QStringLiteral("0.3.0");
+    f.store.token = kToken.toStdString();
+    // The verb, as far as the page can tell: it empties the list, and answers
+    // as the ruling gives its reply.
+    f.answer = [&f](const QString&) {
+        f.putBack = false;
+        return VerbOutcome{true, QStringLiteral("blocked=none"), {}};
+    };
+    SettingsDialog dialog(f.context);
+    EXPECT_EQ(shown(dialog, "settingsUpdateBlocked"),
+              QStringLiteral("A version that was installed here did not start and was put back: "
+                             "it is not offered."));
+    ASSERT_TRUE(enabled(dialog, "settingsUpdateUnblock"));
+    EXPECT_TRUE(f.ran.isEmpty()) << "showing the state runs nothing";
+
+    press(dialog, "settingsUpdateUnblock");
+    // The one line, once, as a person would type it.
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")}));
+    // And nothing else: the dialog writes no store, tells nobody the token
+    // changed, and words nothing of its own into the log - the executor logs
+    // the line it ran.
+    EXPECT_TRUE(f.store.written.empty());
+    EXPECT_EQ(f.store.cleared, 0);
+    EXPECT_EQ(f.tokenChanges, 0);
+    EXPECT_TRUE(f.logged.empty());
+    EXPECT_EQ(status(dialog), QStringLiteral("> UPDATE BLOCKED CLEAR\nblocked=none"));
+    EXPECT_FALSE(saysARefusal(dialog));
+    // The page shows what the state has now.
+    EXPECT_EQ(shown(dialog, "settingsUpdateBlocked"), QStringLiteral("No version was put back."));
+    EXPECT_FALSE(enabled(dialog, "settingsUpdateUnblock")) << "nothing left to offer again";
+    // The skipped version is another list, and this line is not its line.
+    EXPECT_EQ(shown(dialog, "settingsUpdateSkipped"),
+              QStringLiteral("Katana 0.3.0 is skipped: it is not offered."));
+    EXPECT_TRUE(enabled(dialog, "settingsUpdateUnskip"));
+
+    // Each of the two buttons runs its own line and not the other's.
+    press(dialog, "settingsUpdateUnskip");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR"),
+                                  QStringLiteral("UPDATE SKIP NONE")}));
+}
+
+TEST(SettingsUpdates, ALineThatWasRefusedLeavesTheVersionThatWasPutBackAsTheStateHasIt)
+{
+    // A state file that does not read: the verb refuses the line and leaves
+    // the file as it is (the ruling: "refused (InvalidState) and the file left
+    // as it is, as SKIP does").
+    UpdatesFixture f;
+    f.putBack = true;
+    f.answer = [](const QString&) {
+        return VerbOutcome{false, {},
+                           QStringLiteral("InvalidState: the update settings could not be read")};
+    };
+    SettingsDialog dialog(f.context);
+    press(dialog, "settingsUpdateUnblock");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")})) << "once, not again";
+    EXPECT_EQ(status(dialog),
+              QStringLiteral("> UPDATE BLOCKED CLEAR\nRefused: InvalidState: the update settings "
+                             "could not be read"));
+    EXPECT_TRUE(saysARefusal(dialog));
+    EXPECT_EQ(shown(dialog, "settingsUpdateBlocked"),
+              QStringLiteral("A version that was installed here did not start and was put back: "
+                             "it is not offered."));
+    EXPECT_TRUE(enabled(dialog, "settingsUpdateUnblock")) << "it can be tried again";
+}
+
+TEST(SettingsUpdates, TheButtonForAVersionThatWasPutBackIsOffWithNoneAndOnWhenNobodySays)
+{
+    // None was put back: nothing to do.
+    UpdatesFixture none;
+    SettingsDialog without(none.context);
+    EXPECT_EQ(shown(without, "settingsUpdateBlocked"), QStringLiteral("No version was put back."));
+    EXPECT_FALSE(enabled(without, "settingsUpdateUnblock"));
+    press(without, "settingsUpdateUnblock");
+    EXPECT_TRUE(none.ran.isEmpty()) << "a disabled button runs nothing";
+
+    // Changed elsewhere since - an update was put back, a line was typed: the
+    // page reads the state again when it is turned to, and runs nothing.
+    none.putBack = true;
+    child<QListWidget>(without, "settingsPages")->setCurrentRow(1);
+    EXPECT_TRUE(enabled(without, "settingsUpdateUnblock"));
+    EXPECT_TRUE(none.ran.isEmpty());
+
+    // Nobody says whether one was (a headless window keeps no state): the
+    // page says nothing of it, and the button stays on for the verb to answer.
+    UpdatesFixture unsaid;
+    unsaid.context.updates.putBack = {};
+    SettingsDialog asking(unsaid.context);
+    EXPECT_TRUE(shown(asking, "settingsUpdateBlocked").isEmpty());
+    ASSERT_TRUE(enabled(asking, "settingsUpdateUnblock"));
+    press(asking, "settingsUpdateUnblock");
+    EXPECT_EQ(unsaid.ran, (QStringList{QStringLiteral("UPDATE BLOCKED CLEAR")}));
+
+    // No executor: nothing can run the line, whatever the state has.
+    UpdatesFixture mute;
+    mute.putBack = true;
+    mute.context.run = {};
+    SettingsDialog silent(mute.context);
+    EXPECT_FALSE(enabled(silent, "settingsUpdateUnblock"));
+    // And with nothing given at all, as every control of the page.
+    SettingsDialog bare(SettingsContext{});
+    EXPECT_FALSE(enabled(bare, "settingsUpdateUnblock"));
+    EXPECT_TRUE(shown(bare, "settingsUpdateBlocked").isEmpty());
 }
 
 TEST(SettingsUpdates, AStoreThatCannotBeReadSaysSoInItsOwnWords)

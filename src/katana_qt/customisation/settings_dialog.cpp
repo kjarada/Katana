@@ -457,6 +457,15 @@ QString updateSkippedWords(const QString& version)
                                    .arg(version);
 }
 
+// Whether a version is set aside, without its number: the state keeps which
+// BUILD was put back (a release's sequence), and no version to say.
+QString updatePutBackWords(bool putBack)
+{
+    return putBack ? QStringLiteral("A version that was installed here did not start and was "
+                                    "put back: it is not offered.")
+                   : QStringLiteral("No version was put back.");
+}
+
 } // namespace
 
 SettingsDialog::SettingsDialog(SettingsContext context, QWidget* parent)
@@ -844,6 +853,17 @@ QWidget* SettingsDialog::buildUpdatesPage()
     skipLayout->addWidget(updateSkipped_, 1);
     skipLayout->addWidget(updateUnskip_);
     column->addWidget(skipBox);
+
+    // The version that was put back: under the skipped one, and built as it
+    // is - what the state has, and the button that runs the line.
+    auto* blockedBox = new QGroupBox(QStringLiteral("Version that was put back"), page);
+    auto* blockedLayout = new QHBoxLayout(blockedBox);
+    updateBlocked_ = valueLabel("settingsUpdateBlocked", blockedBox);
+    updateUnblock_ = button(QStringLiteral("Offer the version that was put back again"),
+                            "settingsUpdateUnblock", blockedBox);
+    blockedLayout->addWidget(updateBlocked_, 1);
+    blockedLayout->addWidget(updateUnblock_);
+    column->addWidget(blockedBox);
     column->addStretch(1);
 
     // ---- wiring: lambdas, no moc. toggled, not clicked, for the reason the
@@ -862,6 +882,8 @@ QWidget* SettingsDialog::buildUpdatesPage()
     });
     QObject::connect(updateUnskip_, &QPushButton::clicked, this,
                      [this] { runUpdatesLine(QStringLiteral("UPDATE SKIP NONE")); });
+    QObject::connect(updateUnblock_, &QPushButton::clicked, this,
+                     [this] { runUpdatesLine(QStringLiteral("UPDATE BLOCKED CLEAR")); });
     return page;
 }
 
@@ -1261,6 +1283,15 @@ void SettingsDialog::showUpdates()
     updateUnskip_->setEnabled(lines && (!updates.skippedVersion || !skipped.isEmpty()));
     updateUnskip_->setToolTip(QStringLiteral(
         "Forget which version was skipped, so that the next check offers it (UPDATE SKIP NONE)"));
+
+    // The same of a version that was put back: on while nobody says whether
+    // one was, and off when none was.
+    const bool putBack = updates.putBack && updates.putBack();
+    updateBlocked_->setText(updates.putBack ? updatePutBackWords(putBack) : QString());
+    updateUnblock_->setEnabled(lines && (!updates.putBack || putBack));
+    updateUnblock_->setToolTip(QStringLiteral(
+        "Forget which versions were put back because they did not start here, so that the next "
+        "check offers the newest again and it can be installed (UPDATE BLOCKED CLEAR)"));
 }
 
 void SettingsDialog::runUpdatesLine(const QString& line)

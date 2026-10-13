@@ -3100,7 +3100,7 @@ void MainWindow::runTypedLine(const QString& line)
 
 bool MainWindow::runWorkbenchLine(const QString& line)
 {
-    // UPDATE CHECK, STATUS, DOWNLOAD, APPLY, SKIP, SET and TOKEN: the
+    // UPDATE CHECK, STATUS, DOWNLOAD, APPLY, SKIP, BLOCKED, SET and TOKEN: the
     // session's verbs (update_verbs.hpp), before every other family, as in
     // the session. The update workbench runs them - the ones that reach the
     // network as jobs - and a DOWNLOAD or an APPLY typed here goes the way the

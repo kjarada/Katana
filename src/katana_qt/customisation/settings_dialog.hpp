@@ -115,6 +115,14 @@
 //                              none is
 //   settingsUpdateUnskip       "Offer the skipped version again": runs UPDATE
 //                              SKIP NONE
+//   settingsUpdateBlocked      whether a version is set aside because it was
+//                              installed here, did not start and was put
+//                              back, or that none is
+//   settingsUpdateUnblock      "Offer the version that was put back again":
+//                              runs UPDATE BLOCKED CLEAR, as Unskip runs its
+//                              line. One start too slow for the update's
+//                              health check sets a sound release aside, and
+//                              this is the way back
 // The page is there whatever the dialog was given; with no SettingsUpdates its
 // controls are disabled, as a button with no callback is on the first page.
 
@@ -162,6 +170,11 @@ struct SettingsUpdates {
     // The version UPDATE SKIP set aside, empty when none is. Asked likewise.
     // Empty function: the page says nothing of it and the button stays on.
     std::function<QString()> skippedVersion{};
+    // Whether a version is set aside because it was installed here, did not
+    // start and was put back (the state's list of blocked releases holds one;
+    // which version is not kept, only which build). Asked likewise. Empty
+    // function: the page says nothing of it and the button stays on.
+    std::function<bool()> putBack{};
     // Where the access token is kept: Save writes it here and the page says
     // whether one is stored - never the token itself. Null: Save is disabled.
     katana::update::CredentialStore* credentials = nullptr;
@@ -336,6 +349,8 @@ class SettingsDialog final : public QDialog {
     QLabel* updateTokenState_ = nullptr;
     QLabel* updateSkipped_ = nullptr;
     QPushButton* updateUnskip_ = nullptr;
+    QLabel* updateBlocked_ = nullptr;
+    QPushButton* updateUnblock_ = nullptr;
     QPlainTextEdit* status_ = nullptr;
 
     // Last, so it is destroyed first: no delivery reaches a half-destroyed
