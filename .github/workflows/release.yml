@@ -107,6 +107,10 @@ jobs:
       # first minute rather than after each toolchain is installed.
       - name: Update keys
         run: |
+          if ! command -v cmake > /dev/null; then
+            echo "::notice::no cmake on this runner: the update keys are first checked by each job's configure"
+            exit 0
+          fi
           cmake -DKATANA_REQUIRE_UPDATE_KEYS=ON -P cmake/KatanaUpdateKeys.cmake || {
             echo "::error::cmake/KatanaUpdateKeys.cmake does not hold update keys a release can be built with. The owner's key steps: docs/release.md, Update signing."
             exit 1
@@ -537,7 +541,7 @@ jobs:
       HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN != '' }}
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ needs.version.outputs.tag }}
-      REPO: ${{ needs.version.outputs.repo }}
+      PUBLISH_REPO: ${{ needs.version.outputs.repo }}
       # The packages an update can be applied to file by file. macOS is not
       # one: a file changed inside Katana.app breaks the bundle's seal, so
       # its manifest only announces the release.
@@ -549,7 +553,7 @@ jobs:
       - name: Where the release goes
         if: needs.version.outputs.elsewhere == 'true' && env.HAS_RELEASES_TOKEN != 'true'
         run: |
-          echo "::error::publish_repo names $REPO, but the secret RELEASES_REPO_TOKEN (a token that may write that repository's releases) is not set"
+          echo "::error::publish_repo names $PUBLISH_REPO, but the secret RELEASES_REPO_TOKEN (a token that may write that repository's releases) is not set"
           exit 1
       # tools/ and cmake/KatanaUpdateKeys.cmake: the producer, the recheck
       # and the keys a signature must be made with.
@@ -591,7 +595,7 @@ jobs:
             exit 0
           fi
 
-          options=(--out dist --version "$VERSION" --tag "$TAG" --repo "$REPO")
+          options=(--out dist --version "$VERSION" --tag "$TAG" --repo "$PUBLISH_REPO")
           if [ "$mode" = signed ]; then
             # The key as a file only the producer reads (it signs with the
             # openssl command line and refuses a key the tree does not pin),
