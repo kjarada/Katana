@@ -34,8 +34,9 @@ files with the standard `json` module, shares no code with Katana, and compares 
   text styles         the style a text rule names
   shapes              a definition that DRAWS what one of the reference's draws. A stroke list is read as the marks
                       it makes, as Katana's renderer reads it (`flattenDefinition`): each straight piece between
-                      two points, and each circle, arc, dot and text where the pen stands. Two definitions have
-                      one shape when every mark of each is a mark of the other, so the comparison is made
+                      two points, and each circle, arc, dot and text where the pen stands (a draw that goes
+                      nowhere marks a point, and is a dot). Two definitions have one shape when every mark of
+                      each is a mark of the other, so the comparison is made
                         without regard to the ORDER the strokes are written in, to how they are chained (a square
                           as one path, or as four lines), or to a mark written twice;
                         without regard to the DIRECTION a line or an arc is drawn in;
@@ -48,8 +49,8 @@ files with the standard `json` module, shares no code with Katana, and compares 
                       the larger side of that box is 1 (radii and text heights are sized with it; a shape that
                       is all about one point is sized by its largest radius). Two numbers are the same when
                       they are less than 0.001 apart as drawn and moved, and less than 0.01 apart in the unit
-                      box: the third and the second decimal, which is what the scan has always told apart. A
-                      text is its characters, its place and its height. A list of five strokes or fewer (a
+                      box: the third decimal, which is as fine as this library writes a number, and the second.
+                      A text is its characters, its place and its height. A list of five strokes or fewer (a
                       dash, a plus, a square) is left out: any library draws those
   near names          a definition name at least 0.9 alike (difflib) to a reference definition name, to one less
                       its lead-in or to a reference legend label, and a legend label as near to any of those,
@@ -172,6 +173,11 @@ def strokes_of(definition):
     return [list(s) if not isinstance(s, dict) else s for s in definition.get("strokes", [])]
 
 
+def real(document):
+    """The definitions whose shapes are compared: those of more than TRIVIAL strokes."""
+    return [d for d in definitions(document) if len(strokes_of(d)) > TRIVIAL]
+
+
 # ---- shapes ----------------------------------------------------------------------------------------------------
 # A stroke list says how a drawing is made, and a shape is the drawing. `marks_of` reads a list the way Katana's
 # renderer does (cad::flattenDefinition: a move lifts the pen, a draw is a straight piece from where the pen
@@ -179,8 +185,8 @@ def strokes_of(definition):
 # longer say in which order, in which direction or in which colour they were made.
 
 DRAWN, MOVED, SCALED = "as drawn", "moved", "scaled"
-# Two numbers are the same when they are less than this apart: the third decimal as drawn and moved, and the
-# second in the unit box, which is what rounding to three and to two decimals told apart when lists were compared.
+# Two numbers are the same when they are less than this apart: the third decimal as drawn and moved (a file of
+# this library has no finer number, so two of its numbers that differ are apart), and the second in the unit box.
 STEPS = {DRAWN: 0.001, MOVED: 0.001, SCALED: 0.01}
 GUARD = 1e-9   # 1.001 - 1 is a hair under 0.001 in binary, and a whole step apart is apart
 # The eight symmetries of the square: (quarter turns counter-clockwise, mirrored in the y axis first).
@@ -305,13 +311,9 @@ def one_shape(ours, theirs, step):
                     for kind in their_marks for n in their_marks[kind]))
 
 
-def shapes_in_common(reference, candidate, trivial=TRIVIAL):
-    """{DRAWN: [names], MOVED: [names], SCALED: [names]}: the candidate's definitions of more than `trivial`
-    strokes that draw, under one of the eight symmetries, what a definition of the reference of more than
-    `trivial` strokes draws."""
-    def real(document):
-        return [d for d in definitions(document) if len(strokes_of(d)) > trivial]
-
+def shapes_in_common(reference, candidate):
+    """{DRAWN: [names], MOVED: [names], SCALED: [names]}: the candidate's definitions that draw, under one of
+    the eight symmetries, what a definition of the reference draws. Only `real` definitions take part."""
     their_marks = [marks_of(strokes_of(d)) for d in real(reference)]
     # Each of the candidate's under the eight symmetries; the reference's are compared as they are.
     ours = [(d["name"], [turned(marks, turns, mirrored) for turns, mirrored in SYMMETRIES])
@@ -373,9 +375,6 @@ def scan(reference, candidate):
 
     exact["attribute names"] = sorted(attribute_names(candidate) & attribute_names(reference))
     exact["text styles"] = sorted(text_styles(candidate) & text_styles(reference))
-
-    def real(document):
-        return [d for d in definitions(document) if len(strokes_of(d)) > TRIVIAL]
 
     for how, names in shapes_in_common(reference, candidate).items():
         exact["shapes, " + how] = names

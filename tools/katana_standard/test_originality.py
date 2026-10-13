@@ -343,6 +343,16 @@ class ShapesHoweverTheyAreWritten(unittest.TestCase):
         other = [["move", 7, 7], ["circle", 7], ["circle", 2], ["circle", 6], ["circle", 4], ["dot", 0]]
         self.assertEqual(self.found(other, theirs), [])
 
+    def test_a_list_that_draws_nothing_has_no_shape_and_dots_on_one_point_have_one(self):
+        # Six moves make no mark: two such lists draw nothing, and nothing is no shape to have in common.
+        nothing = [["move", n, n] for n in range(6)]
+        self.assertEqual(self.found(nothing, nothing), [])
+        # Five dots on one point have neither a box nor a radius to be sized by, and are compared as they are:
+        # the same marks, at another place.
+        theirs = [["move", 0, 0]] + [["dot", 0] for _ in range(5)]
+        ours = [["move", 3, 3]] + [["dot", 0.2] for _ in range(5)]
+        self.assertEqual(self.found(ours, theirs), ["shapes, moved", "shapes, scaled"])
+
     def test_a_ring_with_a_cross_in_it_is_found_at_another_size_however_it_was_written(self):
         # Theirs: a spare move, a ring of radius 1 and the two strokes of a cross to 0.7 each way. Ours: the
         # ring first, 1.6 times the size, the cross's strokes in the other order and each from its other end.
