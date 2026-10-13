@@ -29,11 +29,15 @@
 #    move the trust root of every update.
 # 4. share/katana/install.json, the file that says an install is a RELEASE and
 #    names its target, is written ONLY by CPack: by a script CPack runs on the
-#    staged tree (cmake/KatanaInstallRecord.cmake, written by
-#    cmake/KatanaPackaging.cmake and listed first in CPACK_PRE_BUILD_SCRIPTS,
-#    before the signing script, so a signed tree is not changed after it is
-#    signed). Never by `cmake --install`, the `bundle` target or the build
-#    tree: those are development trees, and a development tree that carried it
+#    staged tree. That script is <build dir>/KatanaInstallRecord.cmake - no file
+#    of the repository: cmake/KatanaPackaging.cmake writes it into the build
+#    directory at configure time, and the check below takes its path from
+#    CPACK_PRE_BUILD_SCRIPTS. It is listed there first, before the signing
+#    script, so what that script signs already holds the record. (A macOS
+#    bundle was sealed ad hoc by the install before either ran, and
+#    cmake/KatanaSign.cmake seals it again for that reason.) Never by
+#    `cmake --install`, the `bundle` target or the build tree: those are
+#    development trees, and a development tree that carried it
 #    would be offered an update that replaced a developer's build with a
 #    release. So: no install script names install.json; CPackConfig.cmake lists
 #    the record script before the signing script; that script exists and
