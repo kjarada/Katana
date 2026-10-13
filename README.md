@@ -714,6 +714,23 @@ quarantine on macOS. How the keys are set up is in `docs/release.md`,
 
 ---
 
+### Updates
+
+On Windows, Katana updates itself, whether it came from the installer or the
+zip. Once a day the window asks the project's releases whether a newer
+version exists, sending its own version and platform and nothing else; when
+there is one, a button appears in the status bar. **Help > Check for
+Updates**, then **Update**, downloads only the files that changed, closes
+Katana, swaps them in and opens it again, with no administrator prompt; if
+the new version does not start, the old one is put back. **File > Settings >
+Updates** turns the daily check off, and `katana_cli -c "UPDATE CHECK"` asks
+from a terminal. On Linux and macOS Katana tells you that a newer version
+exists, and you install it as you installed this one. The first release
+that carries the updater is installed by hand; the ones after it arrive as
+updates. `docs/update.md` has the whole of it.
+
+---
+
 ### First steps
 
 **The window.** Open a project folder by passing it, or use **File > Open**.
