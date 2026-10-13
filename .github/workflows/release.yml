@@ -1,7 +1,8 @@
 # Builds Katana for Windows (x86-64, ARM64), Linux (x86-64, ARM64) and macOS
 # (Apple silicon), runs the whole test suite on each, proves each
 # package and installer starts on its own, signs what can be signed, and
-# publishes them as a GitHub release (docs/release.md).
+# publishes them as a GitHub release (docs/release.md) together with the
+# update assets an installed copy reads to find and fetch the next version.
 #
 # It runs only when started by hand: Actions > Release > Run workflow. With a
 # tag (vX.Y.Z, matching project(Katana VERSION)) it publishes that release;
@@ -19,6 +20,17 @@ on:
         description: "Release tag to publish, vX.Y.Z matching project(Katana VERSION). Empty: build only."
         required: false
         default: ""
+      sign:
+        description: "Who signs the update manifests. ci: this run (secret UPDATE_SIGNING_KEY). offline: nobody yet; the release stays a draft until tools/update_release_sign.py has signed it."
+        type: choice
+        options:
+          - ci
+          - offline
+        default: ci
+      publish_repo:
+        description: "Another repository to publish the release in, owner/name (secret RELEASES_REPO_TOKEN). Empty: this repository."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -29,6 +41,21 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# What every run of the producer (tools/update_make_manifest.py) is told about
+# an unpacked package, here once so that the rehearsal in each build job and
+# the publish job cannot differ (docs/release.md, "Update assets"):
+#   UPDATE_SEED            written only where absent: a sample project the
+#                          user has worked in is neither overwritten nor
+#                          fetched again at every update.
+#   UPDATE_EXCLUDE         outside the four folders a manifest may name
+#   UPDATE_EXCLUDE_LINUX   (bin share etc lib), so not part of an update: the
+#                          licence text beside them and, in the Linux tree,
+#                          the certificate bundle in ssl/.
+env:
+  UPDATE_SEED: "share/katana/samples/*"
+  UPDATE_EXCLUDE: "LICENSE"
+  UPDATE_EXCLUDE_LINUX: "ssl/*"
+
 jobs:
   version:
     name: Version
@@ -36,6 +63,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      repo: ${{ steps.version.outputs.repo }}
+      elsewhere: ${{ steps.version.outputs.elsewhere }}
+      sequence: ${{ steps.version.outputs.sequence }}
     steps:
       - uses: actions/checkout@v4
       # One place a version is written: project(Katana VERSION ...). A tag
@@ -44,6 +74,8 @@ jobs:
       - id: version
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PUBLISH_REPO: ${{ inputs.publish_repo }}
+          HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN != '' }}
         run: |
           version=$(sed -n 's/^project(Katana VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           test -n "$version" || { echo "::error::no project(Katana VERSION ...) in CMakeLists.txt"; exit 1; }
@@ -52,9 +84,82 @@ jobs:
             echo "::error::tag $tag does not match project(Katana VERSION $version); expected v$version"
             exit 1
           fi
+          # Where the release is published is where an installed copy looks
+          # for the next one, so it is settled here, once: compiled into every
+          # program below (KATANA_UPDATE_REPO) and written into every update
+          # manifest. This repository unless the run names another.
+          repo="${INPUT_PUBLISH_REPO:-$GITHUB_REPOSITORY}"
+          if ! printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then
+            echo "::error::publish_repo must be owner/name of a GitHub repository"
+            exit 1
+          fi
+          elsewhere=false
+          if [ "${repo,,}" != "${GITHUB_REPOSITORY,,}" ]; then
+            elsewhere=true
+            # Publishing in another repository needs a token that may write
+            # there; the run's own cannot. Asked here, before anything is
+            # built for a release that could not be created - which is why
+            # the token is a secret of the REPOSITORY: this job does not run
+            # in the environment `release` and sees none of its secrets. A
+            # run without a tag publishes nothing and needs no token.
+            if [ -n "$tag" ] && [ "$HAS_RELEASES_TOKEN" != true ]; then
+              echo "::error::publish_repo names $repo, but the repository secret RELEASES_REPO_TOKEN (a token that may write that repository's releases) is not set"
+              exit 1
+            fi
+          fi
+          # The sequence of every update manifest this run makes
+          # (docs/release.md, "Update assets"): the time the run began to
+          # build. Read here and not when publishing, so that the Publish job
+          # run again by itself publishes the same packages under the same
+          # sequence - an installed copy that already has them is then not
+          # offered them a second time - while a whole new run, whose
+          # packages are new, outranks this one.
+          sequence=$(date -u +%s)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Katana $version${tag:+, publishing $tag}"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "elsewhere=$elsewhere" >> "$GITHUB_OUTPUT"
+          echo "sequence=$sequence" >> "$GITHUB_OUTPUT"
+          echo "Katana $version${tag:+, publishing $tag in $repo}, sequence $sequence"
+      # Every job below configures with KATANA_REQUIRE_UPDATE_KEYS=ON, which
+      # refuses the placeholder update keys: a program built with them can
+      # never be updated. This is that refusal asked for in the first
+      # minute, rather than after each toolchain is installed.
+      #
+      # cmake/KatanaUpdateKeys.cmake is run as a script, but not bare. It is
+      # written for a configure, where the root CMakeLists.txt has set the
+      # policies of its minimum CMake before including it; a script starts
+      # with none set, and a CMake older than 4.0 - this runner's own is,
+      # the build jobs install a newer one - then does not know the file's
+      # `if(... IN_LIST ...)`. So a script of two lines states the minimum
+      # the root CMakeLists.txt states and includes the file (a relative
+      # path: a script's source directory is the one it is run from).
+      #
+      # Only a refusal the keys file itself states stops the run: CMake
+      # reports those as `KatanaUpdateKeys.cmake:<line> (message)`. Anything
+      # else - a CMake too old for that minimum, say - is this check failing
+      # to run, not the keys failing it, and each job's configure decides.
+      - name: Update keys
+        run: |
+          if ! command -v cmake > /dev/null; then
+            echo "::notice::no cmake on this runner: the update keys are first checked by each job's configure"
+            exit 0
+          fi
+          cmake --version | head -1
+          script="$RUNNER_TEMP/update-keys.cmake"
+          log="$RUNNER_TEMP/update-keys.log"
+          printf '%s\n' 'cmake_minimum_required(VERSION 3.24)' 'include(cmake/KatanaUpdateKeys.cmake)' > "$script"
+          status=0
+          cmake -DKATANA_REQUIRE_UPDATE_KEYS=ON -P "$script" > "$log" 2>&1 || status=$?
+          cat "$log"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if grep -Eq 'KatanaUpdateKeys\.cmake:[0-9]+ \(message\)' "$log"; then
+            echo "::error::cmake/KatanaUpdateKeys.cmake does not hold update keys a release can be built with; its own words are above. The owner's key steps: docs/release.md, Update signing."
+            exit 1
+          fi
+          echo "::warning::The update keys could not be checked in this job: cmake stopped for a reason of its own, shown above. Each job's configure checks them."
 
   windows:
     name: ${{ matrix.name }}
@@ -82,7 +187,7 @@ jobs:
             packages: clang:p
             package: win-arm64
             # NSIS's own x86 build, which Windows on ARM runs emulated; the
-            # installer it makes puts the ARM64 programs in Program Files.
+            # installer it makes installs the ARM64 programs.
             nsis: chocolatey
     env:
       HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
@@ -114,14 +219,44 @@ jobs:
           "KATANA_MAKENSIS=$($makensis -replace '\\','/')" >> $env:GITHUB_ENV
       # The release preset, with the compiler and prefix of the environment
       # the action installed (the preset names C:/msys64/ucrt64, a
-      # developer's default).
+      # developer's default). What makes it a RELEASE and not a developer's
+      # build: the update keys must be real ones, and the repository an
+      # installed copy asks for the next version is the one this run
+      # publishes in.
+      #
+      # Both settings must have reached the project, not only its command
+      # line: CMake takes a -D the project has no use for with a warning and
+      # builds without it, and no program says which repository it asks. So
+      # the cache must hold each as the option the project declares (a -D
+      # nothing declares stays there as UNINITIALIZED), and the repository
+      # must be on the update library's compile line. Through tr, and grep
+      # without -q: on Windows CMake writes these files with CR LF, and this
+      # shell runs with pipefail, which a grep leaving early would trip. The
+      # two files are read as bytes (LC_ALL=C): macOS's sed and tr stop at a
+      # byte that is no character of the locale.
       - name: Configure
+        env:
+          UPDATE_REPO: ${{ needs.version.outputs.repo }}
         run: |
           prefix=$(cygpath -m "$MINGW_PREFIX")
           cmake --preset release \
             -DCMAKE_CXX_COMPILER="$prefix/bin/${{ matrix.compiler }}" -DCMAKE_PREFIX_PATH="$prefix" \
             ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} \
-            -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF
+            -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
+            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+          export LC_ALL=C
+          cache=build/release/CMakeCache.txt
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
+            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
+              echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
+              exit 1
+            }
+          done
+          compiled=$(sed -n 's/.*-DKATANA_UPDATE_REPO=[^A-Za-z0-9 ]*\([A-Za-z0-9._/-]*\).*/\1/p' build/release/build.ninja | sort -u)
+          if [ "$compiled" != "$UPDATE_REPO" ]; then
+            echo "::error::the update library is compiled with KATANA_UPDATE_REPO '$compiled', not '$UPDATE_REPO': the programs would ask another repository for the next version"
+            exit 1
+          fi
       - name: Build
         run: cmake --build build/release --parallel
       # The whole suite, on the machine the package is for: nothing is
@@ -149,32 +284,67 @@ jobs:
       # PATH, the command line must draw and save a drawing, read a CRS from
       # PROJ's database, import through PDAL and GDAL, and the window must
       # build itself headless.
+      #
+      # It is also what an update is made from, so the producer and the
+      # independent recheck run on it here, unsigned and into a scratch
+      # folder, before any program has run in the tree: a file the update
+      # rules refuse (docs/release.md, "Update assets") then fails the job
+      # that built it, in a run without a tag too, and not the publish job
+      # hours later.
+      #
+      # Then the updater itself: the helper must start, verify a known
+      # signature and hold real keys, not the placeholders, and the command
+      # line must know which release it is - its version, the target the
+      # package was named for, and that it is an unpacked archive.
       - name: Smoke test the package
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           set -eux
-          package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
+          # said <file> <word>: what a program printed holds exactly that
+          # word, between white space. Through a file, not a pipe: this shell
+          # runs with pipefail, and grep -q leaving early would fail the pipe.
+          said() {
+            tr -s ' \t\r' '\n' < "$1" > "$1.words"
+            grep -qxF -- "$2" "$1.words" || { echo "::error::$1 does not say $2"; return 1; }
+          }
+          version="${{ needs.version.outputs.version }}"
+          package="Katana-$version-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
           unzip -q "build/release/$package.zip" -d smoke
           root="smoke/$package"
           cp -r samples/site_plan smoke/project
+          python tools/update_make_manifest.py --tree "$root" --out smoke/update \
+            --version "$version" --target "${{ matrix.package }}" --sequence 1 \
+            --seed "$UPDATE_SEED" --exclude "$UPDATE_EXCLUDE"
+          python tools/update_verify_release.py smoke/update --allow-unsigned --targets "${{ matrix.package }}"
           export PATH=/c/Windows/System32:/c/Windows:/usr/bin
           "$root/bin/katana_cli.exe" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
           test -f smoke/rect.katana/project.db
           "$root/bin/katana_cli.exe" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
           grep -q "EPSG:32630" smoke/info.txt
           "$root/bin/katana_cli.exe" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
+          "$root/bin/katana_updater.exe" --selftest > smoke/selftest.txt || { cat smoke/selftest.txt; exit 1; }
+          cat smoke/selftest.txt
+          said smoke/selftest.txt "selftest=ok"
+          said smoke/selftest.txt "keys=pinned"
+          "$root/bin/katana_cli.exe" -c "UPDATE STATUS" > smoke/status.txt || { cat smoke/status.txt; exit 1; }
+          cat smoke/status.txt
+          said smoke/status.txt "installed=$version"
+          said smoke/status.txt "target=${{ matrix.package }}"
+          said smoke/status.txt "kind=archive"
           # /usr/bin's timeout, by path: with PATH cut to the Windows
           # directories, `timeout` is Windows' own TIMEOUT.EXE, a pause.
           QT_QPA_PLATFORM=offscreen /usr/bin/timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
-      # The installer, as a user or an administrator's deployment runs it:
-      # silently into a folder of its own, where the installed command line
-      # must read a CRS through GDAL and PROJ; then its uninstaller, which
-      # must remove it. /D takes the rest of the line unquoted, so the folder
-      # has no space for Start-Process to quote. `_?=` keeps the uninstaller
-      # in place, so -Wait waits for it rather than for the copy of itself it
-      # would otherwise start.
+      # The installer, as a deployment script runs it: silently into a folder
+      # of its own, where the installed command line must read a CRS through
+      # GDAL and PROJ and must know it is an INSTALLED copy of this target -
+      # the installer records its folder under HKCU, which is how the updater
+      # tells it from an unpacked zip (include/katana/update/registry.hpp);
+      # then its uninstaller, which must remove it. /D takes the rest of the
+      # line unquoted, so the folder has no space for Start-Process to quote.
+      # `_?=` keeps the uninstaller in place, so -Wait waits for it rather
+      # than for the copy of itself it would otherwise start.
       - name: Smoke test the installer
         timeout-minutes: 15
         shell: pwsh
@@ -188,6 +358,13 @@ jobs:
           Write-Output $info
           if ($LASTEXITCODE -ne 0) { throw "the installed katana_cli exited with $LASTEXITCODE" }
           if ($info -notmatch "EPSG:32630") { throw "the installed katana_cli named no CRS" }
+          $status = & "$target\bin\katana_cli.exe" -c "UPDATE STATUS" | Out-String
+          Write-Output $status
+          if ($LASTEXITCODE -ne 0) { throw "UPDATE STATUS in the installed copy exited with $LASTEXITCODE" }
+          $words = $status -split '\s+'
+          foreach ($word in "kind=installer", "target=${{ matrix.package }}") {
+            if ($words -cnotcontains $word) { throw "the installed katana_cli does not say $word" }
+          }
           $uninstall = Start-Process -FilePath "$target\Uninstall.exe" -ArgumentList "/S", "_?=$target" -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "the uninstaller exited with $($uninstall.ExitCode)" }
           if (Test-Path "$target\bin\katana_cli.exe") { throw "the uninstaller left bin\katana_cli.exe" }
@@ -260,8 +437,30 @@ jobs:
           for tool in cmake ctest cpack ninja; do
             ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$KATANA_TOOLCHAIN/bin-tools/$tool"
           done
+      # A release, not a developer's build: real update keys, and the
+      # repository this run publishes in as the one an installed copy asks
+      # for the next version - and both must have reached the project, in
+      # its cache and on the update library's compile line (see the Windows
+      # job, whose check this is).
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF
+        env:
+          UPDATE_REPO: ${{ needs.version.outputs.repo }}
+        run: |
+          cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
+            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+          export LC_ALL=C
+          cache=build/${{ matrix.preset }}/CMakeCache.txt
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
+            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
+              echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
+              exit 1
+            }
+          done
+          compiled=$(sed -n 's/.*-DKATANA_UPDATE_REPO=[^A-Za-z0-9 ]*\([A-Za-z0-9._/-]*\).*/\1/p' build/${{ matrix.preset }}/build.ninja | sort -u)
+          if [ "$compiled" != "$UPDATE_REPO" ]; then
+            echo "::error::the update library is compiled with KATANA_UPDATE_REPO '$compiled', not '$UPDATE_REPO': the programs would ask another repository for the next version"
+            exit 1
+          fi
       - name: Build
         run: cmake --build build/${{ matrix.preset }} --parallel
       # What the Linux tests need of the machine and a CI image lacks: the
@@ -332,11 +531,28 @@ jobs:
       # installs it, and the app's seal is checked before it runs.
       # macOS has no timeout(1); the step's own limit stands in for it, so a
       # window that waits on a dialog fails the job instead of holding it.
+      #
+      # The Linux tarball is also what an update is made from, so the
+      # producer and the independent recheck run on it here, unsigned and
+      # into a scratch folder, before any program has run in the tree (see
+      # the Windows job). The disk image gets no such run: its manifest only
+      # announces a release and lists no file.
+      #
+      # Then the updater: the helper (Linux; the bundle carries none) must
+      # start, verify a known signature and hold real keys, and the command
+      # line must know which release it is.
       - name: Smoke test the package
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           set -eux
-          package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
+          # said <file> <word>: what a program printed holds exactly that
+          # word, between white space.
+          said() {
+            tr -s ' \t\r' '\n' < "$1" > "$1.words"
+            grep -qxF -- "$2" "$1.words" || { echo "::error::$1 does not say $2"; return 1; }
+          }
+          version="${{ needs.version.outputs.version }}"
+          package="Katana-$version-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
           if [ "${{ matrix.archive }}" = dmg ]; then
             volume="$RUNNER_TEMP/katana-volume"
@@ -351,6 +567,10 @@ jobs:
           else
             tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C smoke
             bin="smoke/$package/bin"
+            python3 tools/update_make_manifest.py --tree "smoke/$package" --out smoke/update \
+              --version "$version" --target "${{ matrix.package }}" --sequence 1 \
+              --seed "$UPDATE_SEED" --exclude "$UPDATE_EXCLUDE" --exclude "$UPDATE_EXCLUDE_LINUX"
+            python3 tools/update_verify_release.py smoke/update --allow-unsigned --targets "${{ matrix.package }}"
           fi
           cp -r samples/site_plan smoke/project
           mv "$KATANA_TOOLCHAIN" "$KATANA_TOOLCHAIN.away"
@@ -363,6 +583,17 @@ jobs:
           grep -q "EPSG:32630" smoke/info.txt
           # PDAL and GDAL's vector drivers.
           "$bin/katana_cli" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
+          if [ "${{ matrix.archive }}" != dmg ]; then
+            "$bin/katana_updater" --selftest > smoke/selftest.txt || { cat smoke/selftest.txt; exit 1; }
+            cat smoke/selftest.txt
+            said smoke/selftest.txt "selftest=ok"
+            said smoke/selftest.txt "keys=pinned"
+          fi
+          "$bin/katana_cli" -c "UPDATE STATUS" > smoke/status.txt || { cat smoke/status.txt; exit 1; }
+          cat smoke/status.txt
+          said smoke/status.txt "installed=$version"
+          said smoke/status.txt "target=${{ matrix.package }}"
+          said smoke/status.txt "kind=archive"
           QT_QPA_PLATFORM=offscreen "$bin/katana" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       # What the window drew, to look at; not part of the release.
@@ -383,16 +614,146 @@ jobs:
     needs: [version, windows, unix]
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-24.04
+    # The update signing key is a secret of this environment: no other job
+    # can read it, and this one only once the reviewers the environment
+    # names have approved the run (docs/release.md, "Update signing").
+    environment: release
     permissions:
       contents: write
     env:
       HAS_GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+      HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN != '' }}
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
+      PUBLISH_REPO: ${{ needs.version.outputs.repo }}
+      # The run's one sequence for its update manifests, read by the Version
+      # job before anything was built.
+      SEQUENCE: ${{ needs.version.outputs.sequence }}
+      # The packages an update can be applied to file by file. macOS is not
+      # one: a file changed inside Katana.app breaks the bundle's seal, so
+      # its manifest only announces the release.
+      TARGETS: win64 win-arm64 linux-x86_64 linux-aarch64
     steps:
+      # Publishing in another repository needs a token that may write there;
+      # the run's own cannot. The Version job asked for it before anything
+      # was built. Asked again here, where it is used: this job may run long
+      # after that one (it waits for an approval, and it can be run again by
+      # itself), and without the secret the Release step would go to the
+      # other repository with this run's own token.
+      - name: Where the release goes
+        if: needs.version.outputs.elsewhere == 'true' && env.HAS_RELEASES_TOKEN != 'true'
+        run: |
+          echo "::error::publish_repo names $PUBLISH_REPO, but the secret RELEASES_REPO_TOKEN (a token that may write that repository's releases) is not set"
+          exit 1
+      # tools/ and cmake/KatanaUpdateKeys.cmake: the producer, the recheck
+      # and the keys a signature must be made with.
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: katana-*
           path: dist
           merge-multiple: true
+      # The update assets (docs/release.md, "Update assets"), made from the
+      # packages themselves, unpacked: for each target a manifest of every
+      # install file's SHA-256, a zip an installed copy fetches single files
+      # out of, and the manifest's signature. Their names start Katana-, so
+      # the checksums and the OpenPGP signatures below take them as they take
+      # the packages.
+      #
+      # sign=ci (the default) signs here. Without the secret there is nothing
+      # to sign with: no update asset is made, the run says so, and the
+      # release is published as it was before there was an updater.
+      # sign=offline makes the manifests and zips and no signature; the
+      # release then stays a draft until the owner has signed it.
+      - name: Update assets
+        id: update
+        env:
+          SIGN: ${{ inputs.sign }}
+          UPDATE_SIGNING_KEY: ${{ inputs.sign != 'offline' && secrets.UPDATE_SIGNING_KEY || '' }}
+        run: |
+          set -euo pipefail
+          mode=none
+          if [ "$SIGN" = offline ]; then
+            mode=offline
+          elif [ -n "${UPDATE_SIGNING_KEY:-}" ]; then
+            mode=signed
+          else
+            echo "::warning title=No update assets::The secret UPDATE_SIGNING_KEY is not set (environment release), so $TAG is published without update manifests: installed copies are not told about it, and while it is the latest release they find no update information at all. Add the secret and run this job again (docs/release.md, Update signing)."
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          if [ "$mode" = none ]; then
+            exit 0
+          fi
+
+          # ONE sequence for every target, and the run's own: the Version job
+          # read it once, before anything was built. It is what orders two
+          # builds of one version, so a whole new run outranks an earlier
+          # one, while this job run again by itself publishes the same
+          # packages under the same sequence and so offers them to no copy
+          # that already has them. The recheck below refuses a release whose
+          # manifests disagree on it.
+          case "$SEQUENCE" in
+            '' | *[!0-9]*)
+              echo "::error::the Version job gave no sequence for the update manifests (got '$SEQUENCE')"
+              exit 1
+              ;;
+          esac
+          options=(--out dist --version "$VERSION" --tag "$TAG" --repo "$PUBLISH_REPO" --sequence "$SEQUENCE")
+          if [ "$mode" = signed ]; then
+            # The key as a file only the producer reads (it signs with the
+            # openssl command line and refuses a key the tree does not pin),
+            # for the length of this step and out of every child's
+            # environment.
+            key="$RUNNER_TEMP/update-signing.pem"
+            trap 'rm -f "$key"' EXIT
+            (umask 077 && printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key")
+            options+=(--key "$key")
+          fi
+          unset UPDATE_SIGNING_KEY
+
+          for token in $TARGETS; do
+            mkdir -p "trees/$token"
+            case "$token" in
+              win*)
+                unzip -q "dist/Katana-$VERSION-$token.zip" -d "trees/$token"
+                # A zip made on Windows carries the execute bits its archiver
+                # guessed from the file names, and the producer, here on
+                # Linux, would read them: as "exec" in the manifest and as a
+                # reason to call a file in bin/ a program. Cleared, a Windows
+                # file is classed by its name alone (.exe, .dll), as the
+                # producer classes it on Windows, where there is no such bit.
+                chmod -R u+rwX "trees/$token"
+                find "trees/$token" -type f -exec chmod a-x {} +
+                extra=()
+                ;;
+              *)
+                tar -xzf "dist/Katana-$VERSION-$token.tar.gz" -C "trees/$token"
+                extra=(--exclude "$UPDATE_EXCLUDE_LINUX")
+                ;;
+            esac
+            tree="trees/$token/Katana-$VERSION-$token"
+            # The manifest about to be made is offered to the installs whose
+            # install.json names this target, so the package must be one.
+            grep -qF "\"target\":\"$token\"" "$tree/share/katana/install.json" || {
+              echo "::error::share/katana/install.json of the $token package does not name the target $token"
+              exit 1
+            }
+            python3 tools/update_make_manifest.py --tree "$tree" --target "$token" "${options[@]}" \
+              --seed "$UPDATE_SEED" --exclude "$UPDATE_EXCLUDE" "${extra[@]}"
+          done
+          python3 tools/update_make_manifest.py --target macos-arm64 --notify-only "${options[@]}"
+          rm -rf trees
+
+          # The independent recheck: nothing of the producer, every hash
+          # recomputed from the zips and, when signed, every signature
+          # verified against the keys the tree pins - the keys the programs
+          # just built will verify with.
+          targets="${TARGETS// /,},macos-arm64"
+          if [ "$mode" = signed ]; then
+            python3 tools/update_verify_release.py dist --keys-cmake cmake/KatanaUpdateKeys.cmake --targets "$targets"
+          else
+            python3 tools/update_verify_release.py dist --allow-unsigned --targets "$targets"
+          fi
       - name: Checksums
         working-directory: dist
         run: sha256sum Katana-* | tee SHA256SUMS.txt
@@ -412,18 +773,82 @@ jobs:
               --armor --detach-sign "$file"
           done
           gpg --armor --export > katana-signing-key.asc
-      # A release that already exists (a re-run) gets its files replaced, so
-      # publishing is safe to repeat.
+      # ONE call creates the release with every file, the update assets
+      # among them: gh creates it as a draft, uploads, and only then
+      # publishes, so the release an installed copy finds as `latest` is
+      # never one whose manifests are still on their way. --latest is said,
+      # not left to GitHub's guess from dates: `latest` is the feed.
+      #
+      # A release that already exists (a re-run) gets its files replaced,
+      # the update zips first and the manifests last, loses any file this
+      # run did not make, and is marked latest again. During the upload an
+      # installed copy may meet a manifest and a signature of two different
+      # runs; it then verifies nothing and offers nothing, and finds the
+      # release whole at its next check.
       - name: Release
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ needs.version.outputs.elsewhere == 'true' && secrets.RELEASES_REPO_TOKEN || github.token }}
+          GH_REPO: ${{ needs.version.outputs.repo }}
+          ELSEWHERE: ${{ needs.version.outputs.elsewhere }}
+          MODE: ${{ steps.update.outputs.mode }}
         run: |
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+          set -euo pipefail
+          case "$MODE" in
+            signed | offline | none) ;;
+            *) echo "::error::the Update assets step did not say what it made"; exit 1 ;;
+          esac
+          if [ "$ELSEWHERE" = true ]; then
+            # Another repository has no commit of this one to tag: gh tags
+            # its default branch, and there is no history to write notes from.
+            notes=(--notes "Katana $VERSION")
           else
-            gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Katana $VERSION" \
-              --generate-notes
+            notes=(--target "$GITHUB_SHA" --generate-notes)
+          fi
+          if [ "$MODE" = offline ]; then
+            state=(--draft)
+          else
+            state=(--latest)
+          fi
+
+          if gh release view "$TAG" --json isDraft --jq .isDraft > "$RUNNER_TEMP/draft" 2> /dev/null; then
+            draft=$(cat "$RUNNER_TEMP/draft")
+            gh release view "$TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/published"
+            if [ "$MODE" = offline ] && [ "$draft" != true ]; then
+              echo "::error::$TAG is already published. sign=offline would put unsigned manifests in place of the signed ones installed copies are reading; nothing was uploaded. Delete the release first if that is meant."
+              exit 1
+            fi
+            if [ "$MODE" = none ] && grep -q '^Katana-update-' "$RUNNER_TEMP/published"; then
+              echo "::error::$TAG already carries update assets, and this run has no key to make its own: the packages would be replaced and the manifests would go on describing the earlier build. Nothing was uploaded; set the secret UPDATE_SIGNING_KEY and run this job again."
+              exit 1
+            fi
+            first=() signatures=() manifests=()
+            for file in dist/*; do
+              case "$file" in
+                dist/Katana-update-*.json.sig) signatures+=("$file") ;;
+                dist/Katana-update-*.json) manifests+=("$file") ;;
+                *) first+=("$file") ;;
+              esac
+            done
+            gh release upload "$TAG" "${first[@]}" --clobber
+            if [ "${#signatures[@]}" -gt 0 ]; then
+              gh release upload "$TAG" "${signatures[@]}" --clobber
+            fi
+            if [ "${#manifests[@]}" -gt 0 ]; then
+              gh release upload "$TAG" "${manifests[@]}" --clobber
+            fi
+            # What an earlier run published and this one did not make: a
+            # signature of a manifest that has just been replaced, say.
+            while IFS= read -r name; do
+              if [ -n "$name" ] && [ ! -e "dist/$name" ]; then
+                gh release delete-asset "$TAG" "$name" --yes
+              fi
+            done < "$RUNNER_TEMP/published"
+            if [ "$MODE" != offline ]; then
+              gh release edit "$TAG" --draft=false --latest
+            fi
+          else
+            gh release create "$TAG" dist/* --title "Katana $VERSION" "${notes[@]}" "${state[@]}"
+          fi
+          if [ "$MODE" = offline ]; then
+            echo "::notice title=A draft without update signatures::$TAG is a draft: its update manifests are not signed. To finish it, on the machine that holds the key: python tools/update_release_sign.py --repo $GH_REPO --tag $TAG --key update-signing.pem (docs/release.md, Update signing)."
           fi
