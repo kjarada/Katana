@@ -43,9 +43,11 @@
 // file is renamed; and running it now makes Defender scan it early, and proves
 // it starts, before the window closes. A staged helper is held to its signed
 // hash twice: where it lies in the stage folder, before anything is created,
-// and again as the COPY in run-<tx>, which is the file that will run - so
-// what is started is what the release signed, whatever happened to the staged
-// file between the first look and the copy.
+// and again as the COPY in run-<tx>, which is the file that will run - so a
+// staged file that changed between the first look and the copy is caught, and
+// not started. (Both folders are the user's own to write. This is a guard
+// against a file that changed, not against the user: the helper verifies the
+// release again with its own keys before it touches the install.)
 
 #include <filesystem>
 #include <stop_token>
