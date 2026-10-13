@@ -917,6 +917,22 @@ anything else with the JSON-RPC error the specification names.
   other; the helper refuses at the swap (`last=refused:root_not_writable` in
   `UPDATE STATUS` afterwards), after the download. Asking the file system
   beforehand, without writing into the install, is not written.
+* **`katana_cli`'s start of the helper has no test.** Everything up to the
+  prepared request is tested through the session
+  (`tests/app/test_update_verbs.cpp`); the few lines of `main()` after the
+  session has ended - `update::launchApply`, and the note on stderr when the
+  line was typed or piped - run only in an installed copy, and the shipped
+  programs cannot be given the test keys an installed copy in a test would
+  need (`include/katana/update/trust.hpp`).
+* **Two programs that change the update settings at the same instant can
+  lose one change.** A setting is changed by reading the state file and
+  writing it back, and `UPDATE CHECK` records its time the same way, into
+  the state as it is at the moment of writing - so nothing kept during the
+  seconds it spends hashing the installed files is undone. Between that
+  reading and the writing there are still some microseconds in which another
+  program's change is lost. Closing them needs a lock on the state file,
+  which the engine does not have; and no test holds the two programs at that
+  point, so the rule is kept by the code's shape and not by a test.
 * **The window is not driven.** The server runs its own session on project
   files; it does not reach into a running `katana` window. To see the result,
   save and open the project in the window. A bridge into the window (the same
