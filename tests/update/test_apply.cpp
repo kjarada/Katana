@@ -19,6 +19,7 @@
 #include "apply_harness.hpp"
 #include "command_line.hpp"
 #include "recover_internal.hpp"
+#include "scripted_processes.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1260,7 +1261,10 @@ TEST(ApplyWait, AProgramThatExitsWhileTheUpdateWaitsLetsItGoAhead)
     rig.timings.waitForHolders = std::chrono::milliseconds(5000);
     const ApplyResult result = rig.run();
     EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << result.detail;
-    EXPECT_EQ(rig.processes.scans.load(), 6);
+    // Five answers that name the program, a sixth that names nobody and ends the wait - and one
+    // more: the same question is asked again when the plan is made, before the journal says
+    // COMMITTING (apply.hpp, step 4; the cases of that second look are further down).
+    EXPECT_EQ(rig.processes.scans.load(), 7);
     EXPECT_EQ(treeHash(s.root), s.v2Hash);
 }
 
@@ -1349,6 +1353,121 @@ TEST(ApplyWait, ACancelWhileWaitingEndsTheWaitWithoutTouchingAnything)
     canceller.join();
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(10));
     expectRefused(s, result, "cancelled");
+}
+
+// ---- step 2's second look: a program started while the plan was made --------------------------------------------------
+//
+// The first look is over before the plan, and the plan hashes and copies every changed file. A
+// program of the install started in that time ran old code over the new tree, unseen. The rule
+// now (apply.hpp, step 4): the scan is asked once more, with the PLAN on disk and immediately
+// before the journal goes to COMMITTING, and a holder found then is the Blocked of the first
+// look - the install untouched and the download kept. The expectations below are that rule's:
+// the outcome and its sentence are the ones ProgramsStillRunningUnderTheRoot... holds the first
+// look to, and "untouched" and "kept" are facts about the disk.
+
+namespace {
+
+// One run of the swap with a process seam of the test's own in the place of the rig's: the
+// harness's FakeProcesses cannot say "nobody, and then somebody" (scripted_processes.hpp).
+ApplyResult runWith(Rig& rig, ProcessOps& processes)
+{
+    const ApplyServices services{*rig.fs, processes, rig.launcher, rig.registry, testTrust(), rig.timings};
+    return apply(rig.request, services, std::stop_token{});
+}
+
+} // namespace
+
+TEST(ApplyWait, AProgramStartedWhileThePlanWasMadeBlocksTheUpdateAndTheInstallAndTheDownloadAreAsBefore)
+{
+    Scenario s("apply-late-holder");
+    buildFixtureScenario(s);
+    const std::map<std::string, std::string> stageBefore = snapshot(s.stage);
+    StdFs disk;
+    Rig rig(s, disk);
+    // Nobody at the first look. At the second, katana_cli: started while the files were hashed
+    // and copied.
+    ScriptedProcesses processes({nobody(), somebody(4412, "C:/k/bin/katana_cli.exe")});
+
+    const ApplyResult result = runWith(rig, processes);
+    EXPECT_EQ(result.outcome, ApplyOutcome::Blocked);
+    EXPECT_EQ(result.reason, "blocked");
+    ASSERT_EQ(result.holders.size(), 1u);
+    EXPECT_EQ(result.holders[0].pid, 4412u);
+    EXPECT_EQ(result.detail, "Close these first: katana_cli.exe (4412). Then press Retry.");
+    EXPECT_EQ(processes.scans, 2) << "the second look is one question, not another wait";
+
+    // The install is as it was: not a file of it moved, and no folder of the transaction left.
+    expectUntouched(s, result);
+    // The download is kept: every staged file is where it was, with the bytes it had.
+    EXPECT_EQ(difference(stageBefore, snapshot(s.stage)), "") << "the stage was changed";
+    // The journal never said COMMITTING, so no RunOnce entry was ever registered.
+    EXPECT_TRUE(rig.registry.runOnceHistory.empty());
+    // As after the first look: the old version is started again, nothing is run for its health,
+    // and the outcome is recorded for the window to show.
+    ASSERT_EQ(rig.launcher.started.size(), 1u);
+    EXPECT_EQ(rig.launcher.started[0].executable, rig.request.relaunch);
+    EXPECT_TRUE(rig.launcher.ran.empty());
+    const LastResult last = lastOf(s);
+    EXPECT_EQ(last.status, "blocked");
+    EXPECT_EQ(last.holder, "katana_cli.exe (4412)");
+
+    // "Kept" in the sense that matters: with the program closed, the Retry installs from that
+    // same stage, with nothing downloaded again.
+    Rig retry(s, disk, "b2b2b2b2");
+    const ApplyResult again = retry.run();
+    EXPECT_EQ(again.outcome, ApplyOutcome::Committed) << again.reason << ": " << again.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+}
+
+TEST(ApplyWait, TheSecondLookIsTheLastThingBeforeTheJournalSaysCommitting)
+{
+    Scenario s("apply-late-look-order");
+    buildFixtureScenario(s);
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(s, log);
+    ScriptedProcesses processes; // nobody, whenever it is asked
+    std::size_t changesBefore = 0; // the changes to the disk made before the second look
+    JournalState journalAtTheLook = JournalState::Empty;
+    std::string treeAtTheLook;
+    processes.onScan = [&](int asked) {
+        if (asked == 2) {
+            changesBefore = log.log.size();
+            journalAtTheLook = journalStateOf(s.root);
+            treeAtTheLook = treeHash(s.root);
+        }
+    };
+
+    const ApplyResult result = runWith(rig, processes);
+    ASSERT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(processes.scans, 2) << "asked once before the plan and once before the commit";
+    // When it was asked the second time the PLAN group was on disk and nothing had moved ...
+    EXPECT_EQ(journalAtTheLook, JournalState::Planned);
+    EXPECT_EQ(treeAtTheLook, s.v1Hash);
+    // ... the PLAN group was the last change before it, and the COMMITTING record the first one
+    // after it: nothing is done between the answer and the commit, in which a program could be
+    // started and not seen.
+    ASSERT_GT(changesBefore, 0u);
+    ASSERT_LT(changesBefore, log.log.size());
+    EXPECT_EQ(log.find("appendDurable", "PLAN"), changesBefore);
+    EXPECT_EQ(log.find("appendDurable", "COMMITTING"), changesBefore + 1) << log.log[changesBefore];
+    EXPECT_EQ(treeHash(s.root), s.v2Hash);
+}
+
+TEST(ApplyWait, AScanThatFailsAtTheSecondLookIsARefusalTooAndNothingIsTouched)
+{
+    Scenario s("apply-late-scan-fails");
+    buildFixtureScenario(s);
+    const std::map<std::string, std::string> stageBefore = snapshot(s.stage);
+    StdFs disk;
+    Rig rig(s, disk);
+    // "Nobody" the first time; the second time the scan gives no answer, which is not "nobody".
+    ScriptedProcesses processes({nobody(), noAnswer()});
+    const ApplyResult result = runWith(rig, processes);
+    expectRefused(s, result, "scan_failed");
+    EXPECT_EQ(processes.scans, 2);
+    EXPECT_EQ(difference(stageBefore, snapshot(s.stage)), "") << "the stage was changed";
+    EXPECT_TRUE(rig.registry.runOnceHistory.empty());
 }
 
 // ---- removals and seeds, the rules ---------------------------------------------------------------------------------------
