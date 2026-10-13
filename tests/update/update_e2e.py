@@ -4,6 +4,7 @@
     python tests/update/update_e2e.py --case <name> --engine <katana_update_e2e>
            --helper <katana_updater_test> --stub <katana_updater_stub> [--shard I/N] [--keep]
     python tests/update/update_e2e.py --list
+    python tests/update/update_e2e.py --registered <case>... [--portable-only]
 
 One run is one case (tests/update/e2e.cmake registers each as a ctest). Nothing here is a fake of the code
 under test:
@@ -1353,7 +1354,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shard", type=parse_shard, default=(1, 1), metavar="I/N",
                         help="crash_at_every_step only: the crashes before change I, I+N, I+2N ...")
     parser.add_argument("--keep", action="store_true", help="leave the work folder and print where it is")
+    parser.add_argument("--registered", nargs="*", metavar="CASE",
+                        help="instead of running a case: fail unless these are exactly the cases there are "
+                             "(tests/update/e2e.cmake says which it registered)")
+    parser.add_argument("--portable-only", action="store_true",
+                        help="with --registered: only the portable cases are expected")
     return parser
+
+
+def check_registered(registered: list[str], portable_only: bool) -> int:
+    """0 when `registered` names every case that can run here, once each, and nothing else."""
+    expected = sorted(name for name, (_, portable) in CASES.items() if portable or not portable_only)
+    problems = [f"registered twice: {name}" for name in sorted(set(registered)) if registered.count(name) > 1]
+    problems += [f"not registered: {name}" for name in expected if name not in registered]
+    problems += [f"registered, but no case of the driver{' that runs here' if portable_only else ''}: {name}"
+                 for name in sorted(set(registered)) if name not in expected]
+    for problem in problems:
+        print(problem)
+    if not problems:
+        print(f"all {len(expected)} cases are registered")
+    return 1 if problems else 0
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -1368,8 +1388,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         for name in sorted(CASES):
             print(f"{name} portable" if CASES[name][1] else name)
         return 0
+    if args.registered is not None:
+        return check_registered(args.registered, args.portable_only)
     if not args.case:
-        parser.error("give --case (or --list)")
+        parser.error("give --case (or --list, or --registered)")
     if not args.engine:
         parser.error("give --engine: every case asks the feed through katana_update_e2e")
     for given in (args.engine, args.helper, args.stub):
