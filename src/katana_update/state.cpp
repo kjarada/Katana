@@ -421,7 +421,18 @@ stdfs::path updateWorkDirectory(const stdfs::path& root)
     return root / ".update";
 }
 
-core::Result<Install> readInstall(const stdfs::path& root, const RegistryOps& registry)
+namespace detail {
+
+// readInstall (install.hpp) for a program of version `program`: all of it, with the version of
+// the program that asks handed in instead of taken from this build. The installed version is
+// the higher of the record's and the program's own, so what readInstall answers depends on the
+// version of the binary it is linked into. This is the same reading without that: the rule
+// can be shown for a program below, at and above a record without a build of each, and a
+// record that names a fixed version can be read by a build of any version.
+// In no public header (tests/update/test_state.cpp declares it); readInstall below is its one
+// caller in the library.
+core::Result<Install> readInstallAs(const stdfs::path& root, const RegistryOps& registry,
+                                    const Version& program)
 {
     if (root.empty()) {
         return core::makeError(core::ErrorCode::InvalidArgument, "no install folder was given");
@@ -436,20 +447,10 @@ core::Result<Install> readInstall(const stdfs::path& root, const RegistryOps& re
     if (!installText) {
         return installText.error();
     }
-    // What a build that was not installed by the helper counts as: the version it was built as.
-    auto builtVersion = [&install]() -> core::Status {
-        const core::Result<Version> program = programVersion();
-        if (!program) {
-            return program.error();
-        }
-        install.version = *program;
-        return {};
-    };
     if (!installText->has_value()) {
-        // A development tree: nothing is updated here.
-        if (const core::Status built = builtVersion(); !built) {
-            return built.error();
-        }
+        // A development tree: nothing is updated here. What was not installed by the helper
+        // counts as the version it was built as.
+        install.version = program;
         return install;
     }
 
@@ -506,12 +507,13 @@ core::Result<Install> readInstall(const stdfs::path& root, const RegistryOps& re
         install.version = *version;
         install.sequence = sequence->get<std::uint64_t>();
         install.hasInstalledRecord = true;
-        // THE FLOOR AGAINST GOING BACK is the higher of what the record says and what this
-        // program was built as. The record is the helper's, written when an update commits, and
-        // nothing else keeps it true: a newer zip unpacked by hand over a copy that had updated
-        // itself leaves it saying the older version, and read alone it would let an earlier
-        // signed release pass for a newer one (isNewerThan, trust.hpp) and be installed over
-        // the programs that are there. A program is never older than itself.
+        // THE FLOOR AGAINST GOING BACK is the higher of what the record says and the version of
+        // the program that asks (`program`: for readInstall, what this build was built as). The
+        // record is the helper's, written when an update commits, and nothing else keeps it
+        // true: a newer zip unpacked by hand over a copy that had updated itself leaves it
+        // saying the older version, and read alone it would let an earlier signed release pass
+        // for a newer one (isNewerThan, trust.hpp) and be installed over the programs that are
+        // there. A program is never older than itself.
         //
         // Only the version is raised. The sequence and `hasInstalledRecord` stay the record's:
         // with the versions equal isNewerThan compares the sequences, and the helper that
@@ -520,20 +522,29 @@ core::Result<Install> readInstall(const stdfs::path& root, const RegistryOps& re
         // version it is installing, and it must still find the release above the build the
         // record names. So a copy overwritten by hand is offered its own release once, which
         // changes no file and writes the records that were stale.
-        const core::Result<Version> program = programVersion();
-        if (!program) {
-            return program.error();
+        if (program > install.version) {
+            install.version = program;
         }
-        if (*program > install.version) {
-            install.version = *program;
-        }
-    } else if (const core::Status built = builtVersion(); !built) {
-        return built.error(); // a fresh install: the version it was built as, sequence 0
+    } else {
+        install.version = program; // a fresh install: the version it was built as, sequence 0
     }
 
     install.hasInstalledManifest =
         isRegularFile(records / kInstalledManifest) && isRegularFile(records / kInstalledSignature);
     return install;
+}
+
+} // namespace detail
+
+core::Result<Install> readInstall(const stdfs::path& root, const RegistryOps& registry)
+{
+    // The program's own version is this build's (version.hpp). One that does not read is a
+    // broken build, and is said before any file of the install is looked at.
+    const core::Result<Version> program = programVersion();
+    if (!program) {
+        return program.error();
+    }
+    return detail::readInstallAs(root, registry, *program);
 }
 
 core::Result<stdfs::path> installRootOfRunningProgram()
