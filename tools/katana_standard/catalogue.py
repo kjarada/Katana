@@ -218,11 +218,16 @@ def catalogue(data, root):
     # What comes from the other library beside the keys, by count, and how many labels are near its own.
     shared = {"diameters": applied("Diameter (mm)"), "heights": applied("Height (mm)"),
               "zones": applied("Check Zone"), "texts": kinds.get("text", 0),
-              "near_labels": "(at 0.85 alike or more)"}
+              "near_labels": "(at 0.85 alike or more)", "near_any": ""}
     if figures:
         scan = _sibling("originality").scan(parity.load_document(os.path.join(root, REFERENCE)),
                                             _candidate(data))
         shared["near_labels"] = "(%d at 0.85 alike or more)" % len(scan["same_key_labels"])
+        n_names, n_labels = len(scan["near_names"]), len(scan["near_labels"])
+        shared["near_any"] = ("%s as near as 0.9 to anything the other library calls a thing, whatever the key. "
+                              % ("No definition name and no legend label is" if n_names + n_labels == 0 else
+                                 "%s and %s are" % (plural(n_names, "definition name"),
+                                                    plural(n_labels, "legend label"))))
     no_symbol = [c["key"] for c in codes if codes_module.kind_of(c) == "point" and not styled[c["key"]]["symbol"]]
     labelled = {}
     for c in codes:
@@ -445,11 +450,10 @@ def catalogue(data, root):
     w("**What two libraries cannot help sharing** is the trade's own names for real things, and the sizes "
       "above. A give way line, a sewage pumping station and a culvert by its height are called that by anyone, "
       "so some legend labels here are near the other library's label for the same key without being it: "
-      "`originality.py` counts them %s and prints this library's side, "
-      "as a figure to read. No definition name and no legend label is that near (0.9) to a name or a label of "
-      "the other library under another key. The meanings are sentences written for this document, and where "
-      "one uses a term of the trade or of the law (a permanent survey mark, an endangered ecological "
-      "community) it is because that is the thing's name." % shared["near_labels"])
+      "`originality.py` counts them %s and prints this library's side, as a figure to read. %sThe meanings "
+      "are sentences written for this document, and where one uses a term of the trade or of the law (a "
+      "permanent survey mark, an endangered ecological community) it is because that is the thing's name."
+      % (shared["near_labels"], shared["near_any"]))
     w("")
     if figures:
         w("**One field file, the same kinds of entity.** A code is answered by several keys at once, the exact "

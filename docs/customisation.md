@@ -2192,7 +2192,7 @@ release job against the tracked default having been deleted or a path being wron
   has". Settings' sentence, beside its own Built-in library, says "Reset to Built-in
   gives this program's".
 - **`benchmarks/bench_customisation.cpp`** measures the file `KATANA_BUILTIN_CUSTOMISATION`
-  names, which is Katana Standard now: 318,679 bytes, about a fifth of the 1,540,630
+  names, which is Katana Standard now: 319,020 bytes, about a fifth of the 1,540,630
   of the NSW file it once measured.
 - **A project that records the earlier file names** is told that they are not
   loaded, under the default, without the `CUSTOMISE BUILTIN NSW` words: the missing
@@ -2641,7 +2641,7 @@ one's size and mix (792 definitions, 35,692 strokes with coordinates of three
 decimals, 1,624 rules), so that the measurement can be repeated in any clone;
 the built-in column is the converted reference file (the NSW file), which was the
 build's built-in when this was measured; the default is now Katana Standard, a
-fifth of the size (318,679 bytes), and the benchmark reads that, so a new run's
+fifth of the size (319,020 bytes), and the benchmark reads that, so a new run's
 built-in column is not comparable with this one.
 
 | | Generated, 1,559,276 bytes | Built-in, 1,541,462 bytes |
