@@ -22,6 +22,7 @@
 #include "import_records.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
+#include "katana/update/fsops.hpp"
 #include "katana/update/manifest.hpp"
 #include "katana/update/plan.hpp"
 #include "katana/update/registry.hpp"
@@ -385,14 +386,30 @@ std::optional<std::string> smallFile(const fs::path& path, std::uint64_t limit)
     return std::move(*bytes);
 }
 
-// The sequence a folder name stage-<n> carries.
-std::optional<std::uint64_t> stageSequence(std::string_view name)
+// The sequence a folder name stage-<n> carries. The name is read as the file
+// system holds it and is never converted: on Windows a name need not be
+// Unicode text (an unpaired surrogate is a name there), converting such a one
+// throws (core/path_text.hpp, pathToUtf8), and the update folder is the
+// user's to write - one entry of that kind in it would end every STATUS and
+// APPLY with an exception that nothing up the line catches.
+std::optional<std::uint64_t> stageSequence(const fs::path::string_type& name)
 {
     constexpr std::string_view kPrefix = "stage-";
-    if (!name.starts_with(kPrefix) || name.size() == kPrefix.size() || name.size() > 40) {
+    if (name.size() <= kPrefix.size() || name.size() > 40) {
         return std::nullopt;
     }
-    const std::string_view digits = name.substr(kPrefix.size());
+    std::string ascii;
+    ascii.reserve(name.size());
+    for (const fs::path::value_type unit : name) {
+        if (unit < 0x20 || unit > 0x7E) {
+            return std::nullopt; // no letter of stage-<digits> lies outside ASCII
+        }
+        ascii.push_back(static_cast<char>(unit));
+    }
+    if (!std::string_view(ascii).starts_with(kPrefix)) {
+        return std::nullopt;
+    }
+    const std::string_view digits = std::string_view(ascii).substr(kPrefix.size());
     std::uint64_t sequence = 0;
     const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), sequence);
     if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size()) {
@@ -407,6 +424,14 @@ std::optional<std::uint64_t> stageSequence(std::string_view name)
 // installed. The newest when there are several. A folder without them is a
 // download that did not finish; one that is not above the install is what a
 // finished update left behind.
+//
+// A LINK to a folder is not told from a folder here, and need not be. (On
+// Windows this toolchain's symlink_status answers for what a junction or a
+// symbolic link points at: src/katana_update/plan.cpp, look.) Nothing is
+// believed of a stage but what the signature covers, and the helper verifies
+// the release again with its own keys and COPIES each file out of the stage,
+// hashing the copy (update/apply.hpp, steps 1 and 3): a stage that lies
+// somewhere else is still only the user's own folder.
 std::optional<Staged> findStaged(const UpdateContext& context)
 {
     std::optional<Staged> newest;
@@ -417,15 +442,15 @@ std::optional<Staged> findStaged(const UpdateContext& context)
     for (fs::directory_iterator at(context.stateDirectory, error), end; !error && at != end;
          at.increment(error)) {
         const fs::path folder = at->path();
-        const std::optional<std::uint64_t> named =
-            stageSequence(katana::core::pathToUtf8(folder.filename()));
+        const fs::path name = folder.filename();
+        const std::optional<std::uint64_t> named = stageSequence(name.native());
         if (!named.has_value()) {
             continue;
         }
         const std::uint64_t sequence = named.value_or(0);
         std::error_code ignored;
         if (!fs::is_directory(fs::symlink_status(folder, ignored)) || ignored) {
-            continue; // a file or a link of that name is not a stage
+            continue; // a file of that name is not a stage
         }
         const std::optional<std::string> json =
             smallFile(update::stagedManifestPath(folder), update::kMaxManifestBytes);
@@ -507,7 +532,7 @@ Result<Checked> runCheck(const UpdateContext& context)
 
     // Read now, not before the request: what another program wrote while this
     // one waited for the network is in it.
-    KeptState kept = readKeptState(context);
+    const KeptState kept = readKeptState(context);
     if (kept.kept && !kept.readable) {
         checked.warnings.push_back(unreadableState(kept));
     }
@@ -540,9 +565,15 @@ Result<Checked> runCheck(const UpdateContext& context)
         }
     }
 
+    // Recorded through changeState, which reads the file again at the moment
+    // it writes. `kept` is from before the installed files were hashed, which
+    // takes seconds: written back as it was read, it would undo whatever
+    // another program of this install kept meanwhile - a skip, the switch, or
+    // the release the helper has just put back and blocked.
     if (answeredByFeed && kept.kept && kept.readable) {
-        kept.state.lastCheckEpoch = nowOf(context);
-        if (const core::Status written = update::writeState(context.stateDirectory, kept.state);
+        const std::int64_t now = nowOf(context);
+        if (const core::Status written = changeState(
+                context, [now](update::UpdateState& state) { state.lastCheckEpoch = now; });
             !written) {
             checked.warnings.push_back(warningText("the time of this check could not be "
                                                    "recorded: " +
@@ -609,6 +640,15 @@ Result<UpdateReply> status(const UpdateContext& context)
     said.installedVersion = update::toString(context.install.version);
     said.target = context.install.target;
     said.kind = context.install.kind;
+    if (!context.installProblem.empty()) {
+        // kind= has three words and none of them is "an install whose record
+        // does not read" (update_verbs.hpp): the record says what the context
+        // holds, and this says that it is not what the copy is.
+        warnings.push_back(warningText("this copy's install record could not be read, so what "
+                                       "kind of copy it is is not known and nothing is "
+                                       "downloaded or applied to it: " +
+                                       context.installProblem));
+    }
     const KeptState kept = readKeptState(context);
     if (kept.kept && !kept.readable) {
         warnings.push_back(unreadableState(kept));
@@ -863,7 +903,19 @@ Result<UpdateReply> apply(const UpdateContext& context)
     }
     // A release whose apply was rolled back here is not tried again: the
     // helper found that it does not start on this machine (apply.hpp, step 7).
+    // Which releases those are is in the state file, so one that does not
+    // read stops the line: its defaults say that none was ever put back,
+    // and the file that is damaged, or was written by a newer Katana, is the
+    // very one that holds them.
     const KeptState kept = readKeptState(context);
+    if (!kept.readable) {
+        return makeError(ErrorCode::InvalidState,
+                         "the update settings could not be read, so whether Katana " +
+                             update::toString(staged->manifest.version) +
+                             " was put back here before is not known, and it is not applied: " +
+                             kept.problem,
+                         "reason=state_unreadable");
+    }
     if (std::find(kept.state.blockedSequences.begin(), kept.state.blockedSequences.end(),
                   staged->manifest.sequence) != kept.state.blockedSequences.end()) {
         return makeError(ErrorCode::InvalidState,
@@ -1147,14 +1199,15 @@ class ProgramCredentials final : public update::CredentialStore {
     mutable std::atomic<bool> fromEnvironment_{false};
 };
 
-// What the running program is: its install's own records, or - with no
-// install to speak of - the program as it was built, a development copy.
-void readRunningInstall(UpdateContext& context, const update::RegistryOps& registry)
+// What a program is, `root` being the install it was found in: that install's
+// own records, or - with no install to speak of - the program as it was
+// built, a development copy.
+void readInstallOf(UpdateContext& context, const Result<fs::path>& root,
+                   const update::RegistryOps& registry)
 {
     if (const Result<update::Version> built = update::programVersion()) {
         context.install.version = *built;
     }
-    const Result<fs::path> root = update::installRootOfRunningProgram();
     if (!root) {
         return; // not in a bin/ beside a share/: a test's program, a tool's
     }
@@ -1167,12 +1220,58 @@ void readRunningInstall(UpdateContext& context, const update::RegistryOps& regis
     context.install = std::move(*install);
 }
 
+// The context of the program found in `root` (update_verbs.hpp,
+// makeUpdateContext): the running one's, or the one a caller named.
+UpdateContext contextOf(UpdateSurface surface, const Result<fs::path>& root)
+{
+    // As long as the program: a context holds pointers to them, and a window
+    // hands a copy of its context to a job's thread.
+    static const std::unique_ptr<update::RegistryOps> registry = update::makeSystemRegistryOps();
+    static const std::unique_ptr<update::CredentialStore> environment =
+        update::makeEnvironmentCredentialStore();
+    static ProgramCredentials program;
+
+    // A headless window and katana_mcp keep and read nothing a PERSON chose:
+    // no state folder, and no store but the variable their own run was given.
+    // What the copy IS is read for every surface, and on Windows one part of
+    // that is per user as well: the folder the per-user installer recorded
+    // (HKCU, update/registry.hpp), which is what tells kind=installer from
+    // kind=archive. It is the install's own record, read and never written.
+    const bool perUser = surface == UpdateSurface::Cli || surface == UpdateSurface::Window;
+
+    UpdateContext context;
+    context.surface = surface;
+    readInstallOf(context, root, *registry);
+    context.feed = update::defaultFeedConfig(context.install.target);
+    context.credentials = perUser ? static_cast<update::CredentialStore*>(&program)
+                                  : environment.get();
+    if (Result<std::string> token = context.credentials->read()) {
+        context.feed.token = std::move(*token);
+    }
+    // In a build without an HTTP stack this is a transport that answers every
+    // request with no_network (update_transport.hpp), which CHECK reports as
+    // update=unsupported: there is no second way to say so here.
+    context.fetch = makeUpdateFetch();
+    if (perUser) {
+        context.stateDirectory = update::stateDirectory();
+    }
+    return context;
+}
+
 } // namespace
 
 bool isUpdateLine(std::string_view line)
 {
     const std::vector<std::string_view> words = wordsOf(line);
     return !words.empty() && sameWord(words.front(), "UPDATE");
+}
+
+bool isUpdateApplyLine(std::string_view line)
+{
+    // The words as parse() takes them, so that the line a front end holds to
+    // be the last one is exactly the line that would prepare an apply.
+    const std::vector<std::string_view> words = wordsOf(line);
+    return words.size() >= 2 && sameWord(words[0], "UPDATE") && sameWord(words[1], "APPLY");
 }
 
 Result<UpdateReply> runUpdateLine(const UpdateContext& context, std::string_view line)
@@ -1202,34 +1301,23 @@ Result<UpdateReply> runUpdateLine(const UpdateContext& context, std::string_view
 
 UpdateContext makeUpdateContext(UpdateSurface surface)
 {
-    // As long as the program: a context holds pointers to them, and a window
-    // hands a copy of its context to a job's thread.
-    static const std::unique_ptr<update::RegistryOps> registry = update::makeSystemRegistryOps();
-    static const std::unique_ptr<update::CredentialStore> environment =
-        update::makeEnvironmentCredentialStore();
-    static ProgramCredentials program;
+    return contextOf(surface, update::installRootOfRunningProgram());
+}
 
-    // A headless window and katana_mcp read and write no per-user place: no
-    // state folder, and no store but the variable their own run was given.
-    const bool perUser = surface == UpdateSurface::Cli || surface == UpdateSurface::Window;
+UpdateContext makeUpdateContext(UpdateSurface surface, const std::filesystem::path& executable)
+{
+    return contextOf(surface, update::installRootOfExecutable(executable));
+}
 
-    UpdateContext context;
-    context.surface = surface;
-    readRunningInstall(context, *registry);
-    context.feed = update::defaultFeedConfig(context.install.target);
-    context.credentials = perUser ? static_cast<update::CredentialStore*>(&program)
-                                  : environment.get();
-    if (Result<std::string> token = context.credentials->read()) {
-        context.feed.token = std::move(*token);
+core::Status abandonApply(const update::ApplyRequest& request)
+{
+    if (request.stateDirectory.empty() || !update::isValidTransactionId(request.transaction)) {
+        return {}; // no request the preflight made: there is no folder of its to list
     }
-    // In a build without an HTTP stack this is a transport that answers every
-    // request with no_network (update_transport.hpp), which CHECK reports as
-    // update=unsupported: there is no second way to say so here.
-    context.fetch = makeUpdateFetch();
-    if (perUser) {
-        context.stateDirectory = update::stateDirectory();
-    }
-    return context;
+    const std::unique_ptr<update::FsOps> files = update::makeSystemFsOps();
+    return update::appendCleanup(request.stateDirectory,
+                                 update::runPath(request.stateDirectory, request.transaction),
+                                 *files);
 }
 
 const char* updateHelpText()

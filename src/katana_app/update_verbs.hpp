@@ -58,14 +58,22 @@
 //                     manifest verified: available, current or blocked - and
 //                     not for a check that could not read it, so that an
 //                     automatic check that failed is due again; nor for a
-//                     copy that asks nobody (unsupported).
+//                     copy that asks nobody (unsupported). It is written into
+//                     the state as that is at the moment of writing, so what
+//                     another program of the install kept while the installed
+//                     files were hashed - a skip, the switch, a release the
+//                     helper blocked - is kept.
 //   UPDATE STATUS     target=none for a development copy; last=none when no
 //                     apply's outcome is recorded. A development copy is
 //                     staged=none last=none whatever the update folder holds:
 //                     those are an install's, and it is none. staged= is the
 //                     newest release in the update folder whose two records
 //                     (stage.hpp) verify and which is above what is installed;
-//                     APPLY applies that one.
+//                     APPLY applies that one. A copy whose install record does
+//                     not read (UpdateContext::installProblem) has no word of
+//                     its own in kind=: the record says target=none
+//                     kind=development, and a warning record after it says
+//                     that the install record could not be read, and why.
 //   UPDATE DOWNLOAD CONFIRM
 //                     each progress line is
 //                         progress bytes=<done>/<total> files=<done>/<total>
@@ -80,7 +88,10 @@
 //                     refused, with reason= first in the error's context:
 //                     not_staged, blocked_before, development_tree,
 //                     install_record, no_state, platform, or the preflight's
-//                     token (stage.hpp).
+//                     token (stage.hpp); and state_unreadable when the state
+//                     file does not read - it is where the releases that were
+//                     put back here are kept, so without it the line cannot
+//                     know that this one was not, and applies nothing.
 //   UPDATE SKIP, UPDATE SET AUTO
 //                     skipped=<v|none>; auto=on|off. With no update folder:
 //                     the same with reason=no_state, and nothing is kept. With
@@ -128,6 +139,12 @@ namespace katana::app {
 
 // True for a line whose verb is UPDATE.
 [[nodiscard]] bool isUpdateLine(std::string_view line);
+
+// True for an UPDATE APPLY line, with its CONFIRM or without: the line a front
+// end that runs many lines must run LAST (Session::isUpdateApply). The words
+// are split as runUpdateLine splits them, so the line that is held to be the
+// last one is exactly the line that would prepare an apply.
+[[nodiscard]] bool isUpdateApplyLine(std::string_view line);
 
 enum class UpdateSurface { Cli, Window, HeadlessWindow, Mcp };
 
@@ -226,6 +243,24 @@ struct UpdateReply {
 // `relaunch` are left for the caller. The stores it makes live as long as the
 // program (function-local statics).
 [[nodiscard]] UpdateContext makeUpdateContext(UpdateSurface surface);
+
+// The same for the program whose executable is at `executable` (an absolute
+// path; update::installRootOfExecutable finds its install) instead of the
+// running one: the install's records are that copy's, and everything else -
+// the feed, the token, the transport, the state folder - is as above. What a
+// test builds a scratch install for.
+[[nodiscard]] UpdateContext makeUpdateContext(UpdateSurface surface,
+                                              const std::filesystem::path& executable);
+
+// What a caller does with an UpdateReply::apply it will NOT launch - its close
+// was cancelled, the helper could not be started, a later APPLY took its
+// place. UPDATE APPLY CONFIRM copied the helper to U/run-<tx> for it
+// (update/stage.hpp, preflight), and only a helper that ran would have cleared
+// that copy away: this lists the folder for the sweep the next start makes
+// (update/state.hpp, cleanup.list). The release stays staged, and nothing else
+// is touched. An error is the list's, which could not be written: the copy
+// then stays, a program's size in the user's own folder.
+[[nodiscard]] katana::core::Status abandonApply(const update::ApplyRequest& request);
 
 // The lines HELP UPDATE and --help print.
 [[nodiscard]] const char* updateHelpText();
