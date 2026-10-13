@@ -216,7 +216,10 @@ SpawnResult runProgram(const Path& executable, std::vector<std::string> argument
     return ran.value();
 }
 
-// A program left running: the stub, asked to sleep. Ended with the object.
+// A program left running: the stub, asked to sleep. Ended with the object. It is started here and
+// not by the Launcher because the test needs its process id and a handle to end it with - so the
+// Launcher's one precaution is taken here too: no message box of the system's, should the copy
+// of the stub not be a program after all (a copy cut short), only an error.
 class Sleeper {
   public:
     Sleeper(const Path& executable, unsigned milliseconds)
@@ -225,9 +228,14 @@ class Sleeper {
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         const Path directory = executable.parent_path();
+        const UINT previousMode =
+            SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
         started_ = CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
-                                  CREATE_NO_WINDOW, nullptr, directory.c_str(), &startup, &process_) != 0;
-        EXPECT_TRUE(started_) << "could not start " << toUtf8(executable.native()) << ": " << GetLastError();
+                                  CREATE_NO_WINDOW | CREATE_DEFAULT_ERROR_MODE, nullptr, directory.c_str(), &startup,
+                                  &process_) != 0;
+        const DWORD error = GetLastError();
+        SetErrorMode(previousMode);
+        EXPECT_TRUE(started_) << "could not start " << toUtf8(executable.native()) << ": " << error;
         executable_ = executable;
     }
     Sleeper(const Sleeper&) = delete;
