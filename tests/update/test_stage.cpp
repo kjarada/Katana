@@ -1120,7 +1120,7 @@ TEST(Stage, AnEmptyFileIsStagedLikeAnyOther)
     EXPECT_EQ(h::readText(rig.stageDir / "share/one.txt"), "x");
 }
 
-// ---- one stage at a time ---------------------------------------------------------------------------------------------------------------
+// ---- one stage at a time ---------------------------------------------------------------------
 
 TEST(Stage, TheLockOfAStageFolderIsAFileBesideIt)
 {
@@ -1506,7 +1506,8 @@ TEST(Preflight, AStagedHelperThatChangesBetweenTheCheckAndTheCopyIsNotRun)
         ASSERT_FALSE(prepared.ok()) << swapped;
         EXPECT_EQ(prepared.error().code, core::ErrorCode::InvalidState) << swapped;
         EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_missing") << swapped;
-        EXPECT_TRUE(launcher.ran.empty()) << "what was copied is not the signed helper: " << swapped;
+        EXPECT_TRUE(launcher.ran.empty())
+            << "what was copied is not the signed helper: " << swapped;
         EXPECT_TRUE(rig.runFolders().empty()) << swapped;
     }
 }

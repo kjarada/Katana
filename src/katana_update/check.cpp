@@ -153,8 +153,9 @@ FetchRequest apiRequest(const FeedConfig& feed, std::string url, std::string acc
 {
     FetchRequest request = wholeBody(feed, std::move(url), maxBytes);
     request.accept = std::move(accept);
-    // Every address built here is api.github.com's (feed.hpp), and makeFetch sends the token
-    // there only, whatever this field says.
+    // Every address built here is api.github.com's (feed.hpp). makeFetch sends the token to that
+    // host only, whatever this field says, and with the request to this address only: no
+    // address a redirect names is sent it.
     request.bearerToken = feed.token;
     return request;
 }

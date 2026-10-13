@@ -472,7 +472,7 @@ TEST(WithoutQueries, ATextWithoutAnAddressOrWithoutAQueryIsLeftAsItIs)
     }
 }
 
-// ---- the time a request is given ---------------------------------------------------------------------
+// ---- the time a request is given ---------------------------------------------------------------
 
 TEST(Timeouts, ARangeIsGivenTheTimeItsLengthTakesOnASlowLine)
 {
@@ -1252,7 +1252,8 @@ TEST(Transport, AHopsErrorKeepsItsStatusAndItsWordsAndCannotNameAReason)
                   "; SSL certificate problem: unable to get local issuer certificate");
     EXPECT_EQ(fetchFailureReason(refused.error()), "offline");
 
-    const auto bare = oneRequest(fail(core::makeError(core::ErrorCode::FileImportFailure, "no route")));
+    const auto bare =
+        oneRequest(fail(core::makeError(core::ErrorCode::FileImportFailure, "no route")));
     ASSERT_FALSE(bare.ok());
     EXPECT_EQ(bare.error().context, "status=0; " + address);
 
