@@ -13,6 +13,7 @@
 #include <iterator>
 #include <numbers>
 #include <string>
+#include <vector>
 
 #include "katana/gis/reproject.hpp"
 #include "katana/gis/web_access.hpp"
@@ -159,6 +160,29 @@ TEST(OnlineWeb, AnExchangeRefusesWhatItCannotSendBeforeAnyConnectionIsMade)
     const std::string said = stopped.error().describe();
     EXPECT_EQ(said.find("SECRET-IN-QUERY"), std::string::npos) << said;
     EXPECT_EQ(said.find("SECRET-IN-HEADER"), std::string::npos) << said;
+}
+
+TEST(OnlineWeb, ARequestCarriesCredentialsWhenAHeaderIsAnAuthorization)
+{
+    // The rule by which an exchange keeps the certificate check on whatever GDAL_HTTP_UNSAFESSL
+    // says (web_access.hpp). RFC 9110: field names are case-insensitive (5.1); Authorization
+    // (11.6.2) and Proxy-Authorization (11.7.2) are the two that carry credentials.
+    using Headers = std::vector<std::string>;
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Authorization: Bearer abc"}));
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Accept: */*", "authorization:Basic abc"}));
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"AUTHORIZATION : x"})) << "blanks about the name";
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Proxy-Authorization: Basic abc"}));
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Authorization"}))
+        << "malformed, and not let through for it";
+
+    EXPECT_FALSE(gis::carriesCredentials(Headers{}));
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"Accept: application/octet-stream",
+                                                 "Range: bytes=0-99",
+                                                 "X-GitHub-Api-Version: 2022-11-28"}));
+    // The name must BE the field, not hold it or be named in a value.
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"X-Authorization-Hint: none"}));
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"Accept: Authorization"}));
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"WWW-Authenticate: Bearer"}));
 }
 
 TEST(OnlineWeb, AFailureIsExplainedByWhatActuallyStoppedIt)

@@ -105,7 +105,10 @@ using TransferProgress = std::function<void(std::uint64_t received, std::uint64_
 //     try: a dropped or timed-out connection, and a 502, 503 or 504 answer. A 429 is returned
 //     at once - a rate limit that says wait an hour is not helped by a second.
 // Proxy, certificates, timeouts and the User-Agent are set exactly as httpFetch sets them
-// (GDAL's own option handling is applied to the same libcurl handle). Errors: InvalidArgument
+// (GDAL's own option handling is applied to the same libcurl handle), with one exception: a
+// request with an Authorization (or Proxy-Authorization) header always has the server's
+// certificate checked, even where GDAL_HTTP_UNSAFESSL turns the check off for everything
+// else, so that a credential is never handed to an unverified server. Errors: InvalidArgument
 // (not http or https, or a body), InvalidState (cancelled), Unsupported (body past maxBytes),
 // FileImportFailure (no HTTP answer: explainHttpFailure's words - except a timeout, which says
 // how long was waited and gives no advice about map areas - with the address through
@@ -122,6 +125,12 @@ struct HttpExchange {
 [[nodiscard]] katana::core::Result<HttpExchange>
 httpExchange(const HttpRequest& request, const std::stop_token& stop = {},
              const TransferProgress& progress = {});
+
+// Whether these request headers ("Name: value" each) hand over credentials: one of them is
+// Authorization or Proxy-Authorization (RFC 9110, 11.6.2 and 11.7.2), the name in any case.
+// httpExchange's rule for when the certificate check cannot be turned off, public so that it is
+// tested without a server.
+[[nodiscard]] bool carriesCredentials(const std::vector<std::string>& headers);
 
 // A transfer that failed after its retries, as httpFetch saw it.
 struct HttpFailure {

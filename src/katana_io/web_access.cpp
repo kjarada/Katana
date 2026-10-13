@@ -438,6 +438,19 @@ Result<HttpResponse> httpFetch(const HttpRequest& request, const std::stop_token
 
 // ---- one exchange, redirects not followed ---------------------------------------------------
 
+bool carriesCredentials(const std::vector<std::string>& headers)
+{
+    return std::any_of(headers.begin(), headers.end(), [](const std::string& header) {
+        // The field name: up to the colon, case-insensitive (RFC 9110, 5.1). A line with no
+        // colon is no header; all of it is taken for the name, so that one that names
+        // credentials is not let through for being malformed.
+        const std::string_view name =
+            katana::core::trimmed(std::string_view(header).substr(0, header.find(':')));
+        return katana::core::equalsIgnoringCase(name, "authorization") ||
+               katana::core::equalsIgnoringCase(name, "proxy-authorization");
+    });
+}
+
 namespace {
 
 // What a bounded copy of an error page is worth: enough to name the problem, never a download.
@@ -562,6 +575,14 @@ CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::
     // caller that asks for a range by offset, and counts what arrives, means those bytes. NULL
     // is libcurl's "send no Accept-Encoding and decode nothing".
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, static_cast<const char*>(nullptr));
+    // Credentials go only to a server whose certificate was checked, whatever
+    // GDAL_HTTP_UNSAFESSL says (CPLHTTPSetOptions obeys it): that setting is a person's answer
+    // to a map server with a bad certificate, not leave to hand a token to whoever answers in
+    // its place. A request without credentials keeps the person's setting.
+    if (carriesCredentials(request.headers)) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    }
     // Called from worker threads (the update's download job): no signal-based timeouts.
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
