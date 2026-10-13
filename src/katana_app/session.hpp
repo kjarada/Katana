@@ -19,6 +19,7 @@
 // (takePendingApply); katana_mcp runs none, and says which of its tools
 // checks for an update (setUpdateSurface).
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -30,6 +31,7 @@ namespace katana::app {
 
 // update_verbs.hpp, which a front end that only runs lines need not read.
 enum class UpdateSurface;
+struct UpdateContext;
 
 // What katana_cli's and katana_mcp's main() do before anything else:
 // update::recover for the install the running program is in, so that an
@@ -93,8 +95,21 @@ class Session {
     // there is no program for them to act on.
     void setUpdateSurface(UpdateSurface surface);
 
+    // Where this session's UPDATE lines get their context: makeUpdateContext
+    // (update_verbs.hpp) of the running program, unless one is handed over
+    // here. It is called for every line with the session's surface, as
+    // makeUpdateContext is, so a line sees what the line before it changed.
+    // To what it returns the session adds what is its own to say: the
+    // process the helper waits for (`pid`, this one) and the printing of a
+    // download's progress; `relaunch` it leaves as it comes, which from
+    // makeUpdateContext is empty - katana_cli starts nothing again. A test
+    // hands over a scratch install and a fake feed, and so runs what
+    // katana_cli runs. An empty function puts the running program's back.
+    void setUpdateContextSource(std::function<UpdateContext(UpdateSurface)> source);
+
     // True for an UPDATE APPLY line, CONFIRM or not: the line a front end
-    // must run LAST, since a session that has run it is over.
+    // must run LAST, since a session that has run it is over. The verbs' own
+    // reading of the line (update_verbs.hpp, isUpdateApplyLine).
     [[nodiscard]] static bool isUpdateApply(const std::string& line);
 
     // What an UPDATE APPLY CONFIRM line that succeeded left to be done, once:
@@ -104,7 +119,11 @@ class Session {
     // calls update::launchApply with it; the helper waits for the process to
     // exit. nullopt when no such line has succeeded since the last call. A
     // front end that does not take it, or does not launch, leaves the release
-    // downloaded and the install as it was.
+    // downloaded and the install as it was. The helper's copy that the line
+    // made is then nobody's: a front end that took the request and does not
+    // launch it calls abandonApply (update_verbs.hpp), and a request nobody
+    // took is abandoned by the session itself, when a later one takes its
+    // place or when the session ends.
     [[nodiscard]] std::optional<katana::update::ApplyRequest> takePendingApply();
 
   private:

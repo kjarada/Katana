@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -236,6 +237,9 @@ struct UpdatePart {
     // What an UPDATE APPLY CONFIRM left for the front end to launch once the
     // session has ended (Session::takePendingApply).
     std::optional<katana::update::ApplyRequest> pendingApply;
+    // Where a line's context comes from when it is not the running program's
+    // (Session::setUpdateContextSource). Empty: makeUpdateContext.
+    std::function<katana::app::UpdateContext(katana::app::UpdateSurface)> source;
 };
 
 // One session's mutable state. Grouped so that adding a verb that needs more
@@ -285,9 +289,11 @@ bool runUpdate(UpdatePart& updates, const std::string& line)
     }
     // Made for each line: it reads the install's records and the stored token
     // as they are now, so a line sees what the line before it changed.
-    app::UpdateContext context = app::makeUpdateContext(updates.surface);
+    app::UpdateContext context = updates.source ? updates.source(updates.surface)
+                                                : app::makeUpdateContext(updates.surface);
     context.pid = ownProcessId();
-    // `relaunch` stays empty: katana_cli starts nothing again after an update.
+    // `relaunch` is left as it came, which from makeUpdateContext is empty:
+    // katana_cli starts nothing again after an update.
     // A download is watched, so its progress is printed as it happens; the
     // same lines are in the reply, and are not printed a second time.
     std::vector<std::string> shown;
@@ -315,6 +321,11 @@ bool runUpdate(UpdatePart& updates, const std::string& line)
         rest.remove_prefix(end + 1);
     }
     if (reply->apply.has_value()) {
+        // One apply is prepared at a time. An earlier one that nobody took is
+        // nobody's now: its helper copy goes to the sweep (abandonApply).
+        if (updates.pendingApply.has_value()) {
+            (void)app::abandonApply(*updates.pendingApply);
+        }
         updates.pendingApply = reply->apply;
     }
     return true;
@@ -545,7 +556,23 @@ Session::Session(const char* executable) : state_(std::make_unique<State>())
     }
 }
 
-Session::~Session() = default;
+Session::~Session()
+{
+    // A prepared apply that nobody took before the session ended will not be
+    // launched: the helper copy it had made is listed for the sweep
+    // (update_verbs.hpp, abandonApply), and the release stays downloaded.
+    // Nothing is said if that fails, and nothing may leave a destructor: the
+    // list's path is turned into text on the way, which the standard library
+    // does by throwing when it cannot.
+    if (const std::optional<katana::update::ApplyRequest>& pending =
+            state_->session.updates.pendingApply) {
+        try {
+            (void)abandonApply(*pending);
+        } catch (...) {
+            // Nothing to say and nobody to say it to: the copy stays.
+        }
+    }
+}
 
 bool Session::run(const std::string& line)
 {
@@ -572,10 +599,17 @@ void Session::setUpdateSurface(UpdateSurface surface)
     state_->session.updates.surface = surface;
 }
 
+void Session::setUpdateContextSource(std::function<UpdateContext(UpdateSurface)> source)
+{
+    state_->session.updates.source = std::move(source);
+}
+
 bool Session::isUpdateApply(const std::string& line)
 {
-    const std::string words = upperWords(line);
-    return words == "UPDATE APPLY" || words.starts_with("UPDATE APPLY ");
+    // The verbs' own splitter, not this file's: a line that the verbs would
+    // read as UPDATE APPLY - its words parted by a carriage return, say, as a
+    // -c argument can hold one - is the line that must be last.
+    return isUpdateApplyLine(line);
 }
 
 std::optional<katana::update::ApplyRequest> Session::takePendingApply()

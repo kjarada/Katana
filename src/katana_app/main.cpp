@@ -16,7 +16,10 @@
 //   - UPDATE APPLY CONFIRM must be the LAST line of a run. The line only
 //     prepares: the run then ends, the session with it, and only then is the
 //     update helper started, which waits for this process to exit before it
-//     replaces a file. Nothing is started again afterwards.
+//     replaces a file. Nothing is started again afterwards. A script or a -c
+//     with a line after it is refused before anything is prepared; typed or
+//     piped on standard input, where the next line cannot be looked at
+//     without waiting for it, the session ends with the line and says so.
 
 #include <cstddef>
 #include <fstream>
@@ -30,6 +33,7 @@
 #include "katana/core/text.hpp"
 #include "katana/update/apply.hpp"
 #include "session.hpp"
+#include "update_verbs.hpp"
 
 namespace {
 
@@ -130,8 +134,16 @@ int main(int argc, char* argv[])
                 }
                 (void)session.run(line); // interactive: report and carry on
                 // Typed, an UPDATE APPLY CONFIRM that succeeded is the last
-                // line by being it: the session ends here.
+                // line by being it: the session ends here. That is said,
+                // because a line after it is not run - one piped in behind it
+                // is dropped here, where runBatch refuses the same lines
+                // before anything is prepared. Standard input cannot be
+                // looked ahead in: reading on would wait for a person who has
+                // nothing more to type.
                 if ((apply = session.takePendingApply())) {
+                    std::cerr << "note: the session ends with UPDATE APPLY CONFIRM and the "
+                                 "update helper is started now; a line typed or piped after it "
+                                 "is not run\n";
                     break;
                 }
             }
@@ -146,6 +158,9 @@ int main(int argc, char* argv[])
     // nothing after it.
     if (apply.has_value()) {
         if (const katana::core::Status launched = katana::update::launchApply(*apply); !launched) {
+            // The helper's copy the line had made is nobody's now: it is listed
+            // for the sweep (update_verbs.hpp, abandonApply).
+            (void)katana::app::abandonApply(*apply);
             std::cerr << "error: the update helper could not be started, so nothing was "
                          "installed and the release stays downloaded: "
                       << launched.error().describe() << '\n';
