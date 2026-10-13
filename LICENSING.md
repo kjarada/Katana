@@ -159,7 +159,7 @@ project licence, or are not known to be:
      it. Whether that is satisfied for a program containing this file rests on
      the owner's statement that the information is public; this repository
      cannot settle it, and a lawyer's confirmation is advised.
-   * Making the repository public also publishes the file.
+   * The repository is public, so the file is published with it.
    * Anyone who cannot rely on that statement can build without the file: an
      empty list of alternates makes a program with Katana Standard alone
      (`-DKATANA_ALTERNATE_CUSTOMISATIONS=`; `src/katana_cad/CMakeLists.txt`,
@@ -240,10 +240,11 @@ show it.
   the notice is "Copyright (c) 2026 Jarada".
 * **The release workflow** leaves out the built-in customisation and
   `samples/Survey_File` until their rights are settled (above).
-* **`https://github.com/kjarada/Katana`**, the address in the notice, returned
-  "not found" on 2026-10-08, because the repository is not public yet. The line
-  points nowhere until it is. A way to ask for written permission (term 3)
-  needs a contact there.
+* **A contact for written permission.** `https://github.com/kjarada/Katana`,
+  the address in the notice, is the repository, which is public: it answered
+  a request made without credentials on 2026-10-14 (on 2026-10-08, before it
+  was public, it returned "not found"). So the line points somewhere. A way
+  to ask for written permission (term 3) still needs a contact there.
 
 ## Contributing
 

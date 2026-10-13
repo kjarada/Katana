@@ -518,8 +518,8 @@ Not everything in the repository is covered by the project licence:
   they came from is not recorded, and one file is a software vendor's format
   documentation. `LICENSING.md` says what is known about each.
 
-No lawyer has reviewed this licence yet, and the repository is not public yet,
-so the address in the line above does not work until it is.
+No lawyer has reviewed this licence yet. The repository is public, so the
+address in the line above is one anybody can open.
 
 ---
 
@@ -725,12 +725,15 @@ version exists, sending its own version and platform and nothing else; when
 there is one, a button appears in the status bar. **Help > Check for
 Updates**, then **Update**, downloads only the files that changed, closes
 Katana, swaps them in and opens it again, with no administrator prompt; if
-the new version does not start, the old one is put back. **File > Settings >
-Updates** turns the daily check off, and `katana_cli -c "UPDATE CHECK"` asks
-from a terminal. On Linux and macOS Katana tells you that a newer version
-exists, and you install it as you installed this one. The first release
-that carries the updater is installed by hand; the ones after it arrive as
-updates. `docs/update.md` has the whole of it.
+the new version does not start, the old one is put back, and that version
+is not offered again until you ask for it. **File > Settings > Updates**
+turns the daily check off and has the button that offers such a version
+again, and `katana_cli -c "UPDATE CHECK"` asks from a terminal. Start Katana
+the ordinary way to update it: started with "Run as administrator" it
+downloads an update and does not install it. On Linux and macOS Katana
+tells you that a newer version exists, and you install it as you installed
+this one. The first release that carries the updater is installed by hand;
+the ones after it arrive as updates. `docs/update.md` has the whole of it.
 
 ---
 
