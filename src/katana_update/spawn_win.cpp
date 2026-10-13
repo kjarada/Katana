@@ -290,10 +290,23 @@ std::unique_ptr<Launcher> makeSystemLauncher()
     return std::make_unique<WindowsLauncher>();
 }
 
-// process.hpp says what is asked and why. TokenElevationTypeFull is the elevated half of a
-// split token; TokenElevationTypeLimited is the other half, and TokenElevationTypeDefault a
-// token that was never split (User Account Control off, or the built-in administrator).
-// Every failure to ask is "not elevated".
+namespace detail {
+
+// Which answer of TokenElevationType is the elevated half of a split token: the one decision
+// processIsElevated makes, apart from asking. TokenElevationTypeFull is that half;
+// TokenElevationTypeLimited is the other half, and TokenElevationTypeDefault a token that was
+// never split (User Account Control off, or the built-in administrator). `type` is the
+// TOKEN_ELEVATION_TYPE as a number, so that every kind can be put to it by a test whatever
+// token the test's own run holds, and declared without a Windows header
+// (tests/update/test_state.cpp declares it; it is in no public header).
+bool isElevatedHalf(unsigned long type)
+{
+    return type == static_cast<unsigned long>(TokenElevationTypeFull);
+}
+
+} // namespace detail
+
+// process.hpp says what is asked and why. Every failure to ask is "not elevated".
 bool processIsElevated()
 {
     HANDLE opened = nullptr;
@@ -307,7 +320,7 @@ bool processIsElevated()
         written != sizeof(kind)) {
         return false;
     }
-    return kind == TokenElevationTypeFull;
+    return detail::isElevatedHalf(static_cast<unsigned long>(kind));
 }
 
 } // namespace katana::update
