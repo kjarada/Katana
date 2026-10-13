@@ -489,7 +489,11 @@ struct KeptSession {
 
 // ---- what it is ---------------------------------------------------------------------------------
 
-TEST(SettingsDialog, ItIsANonModalDialogWithOnePageAndANameForEveryControl)
+// Two pages since the update system gave Settings its second (2026-10-13): this
+// test said one, and the count moved with the dialog's design, not with what a
+// run printed. The Updates page's own controls are tested with the update
+// dialog (tests/qt_widgets/test_update_dialog.cpp, SettingsUpdates.*).
+TEST(SettingsDialog, ItIsANonModalDialogWithTwoPagesAndANameForEveryControl)
 {
     SettingsFixture f;
     SettingsDialog dialog(f.context);
@@ -498,11 +502,12 @@ TEST(SettingsDialog, ItIsANonModalDialogWithOnePageAndANameForEveryControl)
     EXPECT_FALSE(dialog.isModal());
 
     const auto* pages = child<QListWidget>(dialog, "settingsPages");
-    ASSERT_EQ(pages->count(), 1);
+    ASSERT_EQ(pages->count(), 2);
     EXPECT_EQ(pages->item(0)->text(), QStringLiteral("Customisation"));
+    EXPECT_EQ(pages->item(1)->text(), QStringLiteral("Updates"));
     EXPECT_EQ(pages->currentRow(), 0);
     const auto* stack = child<QStackedWidget>(dialog, "settingsStack");
-    ASSERT_EQ(stack->count(), 1);
+    ASSERT_EQ(stack->count(), 2);
     ASSERT_NE(stack->currentWidget(), nullptr);
     EXPECT_EQ(stack->currentWidget()->objectName(), QStringLiteral("settingsCustomisation"));
 
@@ -1968,8 +1973,12 @@ TEST(SettingsDialog, TheLineworkCodesAreShownAsTheDocumentSpellsThemAndEditedInO
               QStringLiteral("Start: S, End: END, Close: CL, Begin curve: BC, End curve: EC, "
                              "Join to point: JPN, Rectangle: (off)"));
 
-    // Nothing on the page edits them: the button opens their one editor.
-    EXPECT_EQ(dialog.findChildren<QLineEdit*>().size(), 2) << "the two path fields, and no more";
+    // Nothing on the page edits them: the button opens their one editor. Of
+    // the Customisation page, since the Updates page beside it has a field of
+    // its own (the access token's), which is no editor of these either.
+    EXPECT_EQ(child<QWidget>(dialog, "settingsCustomisation")->findChildren<QLineEdit*>().size(),
+              2)
+        << "the two path fields, and no more";
     press(dialog, "settingsEditLinework");
     EXPECT_EQ(f.openedLinework, 1);
     EXPECT_EQ(f.openedCodes, 0);
