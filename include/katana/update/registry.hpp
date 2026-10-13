@@ -24,6 +24,34 @@
 // the update library compiles (the program reads installerLocation too, to
 // say `kind=installer`). Elsewhere makeSystemRegistryOps() is a registry that
 // has nothing: installerLocation is empty and the writes succeed doing nothing.
+//
+// WHAT THE WINDOWS IMPLEMENTATION HOLDS ITSELF TO:
+//   - HKCU only, so no call needs or asks for administrator rights.
+//   - installerLocation reads the key's default value. An expandable string is
+//     expanded; a missing key, an empty value and a value that is not a string
+//     are all "no installer" (std::nullopt), not errors.
+//   - setRunOnce writes a REG_SZ under the given name and nothing else in the
+//     key, and has it flushed to disk before it returns (RegFlushKey): the
+//     entry is there for a machine that loses power during the commit, and the
+//     registry would otherwise write it some seconds later, or never.
+//     It REFUSES (InvalidArgument, nothing written, an older value of the
+//     name left standing) a command longer than 260 characters - the limit
+//     Microsoft documents for the command line of a Run or RunOnce value -
+//     rather than write an entry that would not run. apply() goes on without
+//     the entry: it is the second safety net, behind recover() at the next start
+//     of any program.
+//   - The entry exists only while a swap could have been cut short. apply()
+//     registers it once the journal says COMMITTING and before the first file
+//     moves, and removes it when the transaction ends in any way but
+//     RollbackIncomplete (then the next logon is wanted to try again);
+//     recoverInProcess removes it after a recovery that put everything back.
+//   - setInstalledVersion OPENS the Uninstall key and never creates it: only an
+//     installer makes that key, so an archive install gains no entry in
+//     Settings > Apps. Other values of the key are left as they are.
+//   - A test never reaches these keys. The helper built for the tests
+//     (katana_updater_test) uses the same code re-rooted under an HKCU subkey of
+//     the test's own, or a registry that has nothing
+//     (src/katana_updater/main.cpp, --registry-base).
 
 #include <filesystem>
 #include <memory>
