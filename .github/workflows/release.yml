@@ -65,6 +65,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       repo: ${{ steps.version.outputs.repo }}
       elsewhere: ${{ steps.version.outputs.elsewhere }}
+      sequence: ${{ steps.version.outputs.sequence }}
     steps:
       - uses: actions/checkout@v4
       # One place a version is written: project(Katana VERSION ...). A tag
@@ -74,6 +75,7 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_PUBLISH_REPO: ${{ inputs.publish_repo }}
+          HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN != '' }}
         run: |
           version=$(sed -n 's/^project(Katana VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           test -n "$version" || { echo "::error::no project(Katana VERSION ...) in CMakeLists.txt"; exit 1; }
@@ -94,27 +96,70 @@ jobs:
           elsewhere=false
           if [ "${repo,,}" != "${GITHUB_REPOSITORY,,}" ]; then
             elsewhere=true
+            # Publishing in another repository needs a token that may write
+            # there; the run's own cannot. Asked here, before anything is
+            # built for a release that could not be created - which is why
+            # the token is a secret of the REPOSITORY: this job does not run
+            # in the environment `release` and sees none of its secrets. A
+            # run without a tag publishes nothing and needs no token.
+            if [ -n "$tag" ] && [ "$HAS_RELEASES_TOKEN" != true ]; then
+              echo "::error::publish_repo names $repo, but the repository secret RELEASES_REPO_TOKEN (a token that may write that repository's releases) is not set"
+              exit 1
+            fi
           fi
+          # The sequence of every update manifest this run makes
+          # (docs/release.md, "Update assets"): the time the run began to
+          # build. Read here and not when publishing, so that the Publish job
+          # run again by itself publishes the same packages under the same
+          # sequence - an installed copy that already has them is then not
+          # offered them a second time - while a whole new run, whose
+          # packages are new, outranks this one.
+          sequence=$(date -u +%s)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
           echo "elsewhere=$elsewhere" >> "$GITHUB_OUTPUT"
-          echo "Katana $version${tag:+, publishing $tag in $repo}"
+          echo "sequence=$sequence" >> "$GITHUB_OUTPUT"
+          echo "Katana $version${tag:+, publishing $tag in $repo}, sequence $sequence"
       # Every job below configures with KATANA_REQUIRE_UPDATE_KEYS=ON, which
       # refuses the placeholder update keys: a program built with them can
-      # never be updated. This is that check run as the script
-      # cmake/KatanaUpdateKeys.cmake also is, so that the refusal comes in the
-      # first minute rather than after each toolchain is installed.
+      # never be updated. This is that refusal asked for in the first
+      # minute, rather than after each toolchain is installed.
+      #
+      # cmake/KatanaUpdateKeys.cmake is run as a script, but not bare. It is
+      # written for a configure, where the root CMakeLists.txt has set the
+      # policies of its minimum CMake before including it; a script starts
+      # with none set, and a CMake older than 4.0 - this runner's own is,
+      # the build jobs install a newer one - then does not know the file's
+      # `if(... IN_LIST ...)`. So a script of two lines states the minimum
+      # the root CMakeLists.txt states and includes the file (a relative
+      # path: a script's source directory is the one it is run from).
+      #
+      # Only a refusal the keys file itself states stops the run: CMake
+      # reports those as `KatanaUpdateKeys.cmake:<line> (message)`. Anything
+      # else - a CMake too old for that minimum, say - is this check failing
+      # to run, not the keys failing it, and each job's configure decides.
       - name: Update keys
         run: |
           if ! command -v cmake > /dev/null; then
             echo "::notice::no cmake on this runner: the update keys are first checked by each job's configure"
             exit 0
           fi
-          cmake -DKATANA_REQUIRE_UPDATE_KEYS=ON -P cmake/KatanaUpdateKeys.cmake || {
-            echo "::error::cmake/KatanaUpdateKeys.cmake does not hold update keys a release can be built with. The owner's key steps: docs/release.md, Update signing."
+          cmake --version | head -1
+          script="$RUNNER_TEMP/update-keys.cmake"
+          log="$RUNNER_TEMP/update-keys.log"
+          printf '%s\n' 'cmake_minimum_required(VERSION 3.24)' 'include(cmake/KatanaUpdateKeys.cmake)' > "$script"
+          status=0
+          cmake -DKATANA_REQUIRE_UPDATE_KEYS=ON -P "$script" > "$log" 2>&1 || status=$?
+          cat "$log"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if grep -Eq 'KatanaUpdateKeys\.cmake:[0-9]+ \(message\)' "$log"; then
+            echo "::error::cmake/KatanaUpdateKeys.cmake does not hold update keys a release can be built with; its own words are above. The owner's key steps: docs/release.md, Update signing."
             exit 1
-          }
+          fi
+          echo "::warning::The update keys could not be checked in this job: cmake stopped for a reason of its own, shown above. Each job's configure checks them."
 
   windows:
     name: ${{ matrix.name }}
@@ -178,6 +223,15 @@ jobs:
       # build: the update keys must be real ones, and the repository an
       # installed copy asks for the next version is the one this run
       # publishes in.
+      #
+      # Both settings must have reached the project, not only its command
+      # line: CMake takes a -D the project has no use for with a warning and
+      # builds without it, and no program says which repository it asks. So
+      # the cache must hold each as the option the project declares (a -D
+      # nothing declares stays there as UNINITIALIZED), and the repository
+      # must be on the update library's compile line. Through tr, and grep
+      # without -q: on Windows CMake writes these files with CR LF, and this
+      # shell runs with pipefail, which a grep leaving early would trip.
       - name: Configure
         env:
           UPDATE_REPO: ${{ needs.version.outputs.repo }}
@@ -188,6 +242,18 @@ jobs:
             ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} \
             -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
             -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+          cache=build/release/CMakeCache.txt
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
+            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
+              echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
+              exit 1
+            }
+          done
+          compiled=$(sed -n 's/.*-DKATANA_UPDATE_REPO=[^A-Za-z0-9 ]*\([A-Za-z0-9._/-]*\).*/\1/p' build/release/build.ninja | sort -u)
+          if [ "$compiled" != "$UPDATE_REPO" ]; then
+            echo "::error::the update library is compiled with KATANA_UPDATE_REPO '$compiled', not '$UPDATE_REPO': the programs would ask another repository for the next version"
+            exit 1
+          fi
       - name: Build
         run: cmake --build build/release --parallel
       # The whole suite, on the machine the package is for: nothing is
@@ -370,13 +436,27 @@ jobs:
           done
       # A release, not a developer's build: real update keys, and the
       # repository this run publishes in as the one an installed copy asks
-      # for the next version (see the Windows job).
+      # for the next version - and both must have reached the project, in
+      # its cache and on the update library's compile line (see the Windows
+      # job, whose check this is).
       - name: Configure
         env:
           UPDATE_REPO: ${{ needs.version.outputs.repo }}
         run: |
           cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
             -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+          cache=build/${{ matrix.preset }}/CMakeCache.txt
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
+            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
+              echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
+              exit 1
+            }
+          done
+          compiled=$(sed -n 's/.*-DKATANA_UPDATE_REPO=[^A-Za-z0-9 ]*\([A-Za-z0-9._/-]*\).*/\1/p' build/${{ matrix.preset }}/build.ninja | sort -u)
+          if [ "$compiled" != "$UPDATE_REPO" ]; then
+            echo "::error::the update library is compiled with KATANA_UPDATE_REPO '$compiled', not '$UPDATE_REPO': the programs would ask another repository for the next version"
+            exit 1
+          fi
       - name: Build
         run: cmake --build build/${{ matrix.preset }} --parallel
       # What the Linux tests need of the machine and a CI image lacks: the
@@ -542,14 +622,20 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ needs.version.outputs.tag }}
       PUBLISH_REPO: ${{ needs.version.outputs.repo }}
+      # The run's one sequence for its update manifests, read by the Version
+      # job before anything was built.
+      SEQUENCE: ${{ needs.version.outputs.sequence }}
       # The packages an update can be applied to file by file. macOS is not
       # one: a file changed inside Katana.app breaks the bundle's seal, so
       # its manifest only announces the release.
       TARGETS: win64 win-arm64 linux-x86_64 linux-aarch64
     steps:
       # Publishing in another repository needs a token that may write there;
-      # the run's own cannot. Asked first, so that nothing is made for a
-      # release that could not be created.
+      # the run's own cannot. The Version job asked for it before anything
+      # was built. Asked again here, where it is used: this job may run long
+      # after that one (it waits for an approval, and it can be run again by
+      # itself), and without the secret the Release step would go to the
+      # other repository with this run's own token.
       - name: Where the release goes
         if: needs.version.outputs.elsewhere == 'true' && env.HAS_RELEASES_TOKEN != 'true'
         run: |
@@ -595,7 +681,20 @@ jobs:
             exit 0
           fi
 
-          options=(--out dist --version "$VERSION" --tag "$TAG" --repo "$PUBLISH_REPO")
+          # ONE sequence for every target, and the run's own: the Version job
+          # read it once, before anything was built. It is what orders two
+          # builds of one version, so a whole new run outranks an earlier
+          # one, while this job run again by itself publishes the same
+          # packages under the same sequence and so offers them to no copy
+          # that already has them. The recheck below refuses a release whose
+          # manifests disagree on it.
+          case "$SEQUENCE" in
+            '' | *[!0-9]*)
+              echo "::error::the Version job gave no sequence for the update manifests (got '$SEQUENCE')"
+              exit 1
+              ;;
+          esac
+          options=(--out dist --version "$VERSION" --tag "$TAG" --repo "$PUBLISH_REPO" --sequence "$SEQUENCE")
           if [ "$mode" = signed ]; then
             # The key as a file only the producer reads (it signs with the
             # openssl command line and refuses a key the tree does not pin),
@@ -607,13 +706,6 @@ jobs:
             options+=(--key "$key")
           fi
           unset UPDATE_SIGNING_KEY
-
-          # ONE sequence for every target of the run. It is what orders two
-          # builds of one version, so a later run of this job outranks an
-          # earlier one, and the recheck below refuses a release whose
-          # manifests disagree on it.
-          sequence=$(date -u +%s)
-          options+=(--sequence "$sequence")
 
           for token in $TARGETS; do
             mkdir -p "trees/$token"
