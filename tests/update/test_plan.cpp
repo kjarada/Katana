@@ -829,6 +829,127 @@ TEST(Plan, AnInstallUnderNonAsciiNamesIsPlannedLikeAnyOther)
     EXPECT_EQ(plan->changedBytes, 11u);
 }
 
+namespace {
+
+// How the file system wants a path that may pass the 260 characters of the ordinary calls: on
+// Windows with the \\?\ prefix, which is how the library names such a file (long_path.hpp); the
+// test builds the tree with it and plans it with the ORDINARY spelling, as a command line carries
+// it.
+fs::path forTheSystem(const fs::path& path)
+{
+#ifdef _WIN32
+    return fs::path(L"\\\\?\\" + path.native());
+#else
+    return path;
+#endif
+}
+
+void writeDeep(const fs::path& path, const std::string& bytes)
+{
+#ifdef _WIN32
+    const fs::path name = forTheSystem(path);
+    const HANDLE handle = CreateFileW(name.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(handle, INVALID_HANDLE_VALUE) << "os_error=" << GetLastError();
+    DWORD written = 0;
+    ASSERT_TRUE(WriteFile(handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr));
+    CloseHandle(handle);
+#else
+    writeFile(path, bytes);
+#endif
+}
+
+// A root of exactly 250 characters under `top`, built of long names, so that its folder
+// share/katana is 263 characters deep and the files in it 270 and more.
+fs::path deepRootUnder(const fs::path& top)
+{
+    fs::path root = top;
+    int index = 0;
+    while (root.native().size() + 61 <= 190) {
+        root /= std::string(60, static_cast<char>('b' + index++ % 20));
+    }
+    root /= std::string(250 - root.native().size() - 1, 'z');
+    return root;
+}
+
+// Takes the deep tree away again, name by name: std::filesystem does not walk a tree by its
+// prefixed name on this toolchain (the same note as in test_apply.cpp).
+void removeDeep(const fs::path& top, const fs::path& root, const std::vector<fs::path>& files)
+{
+#ifdef _WIN32
+    for (const fs::path& file : files) {
+        DeleteFileW(forTheSystem(file).c_str());
+    }
+    for (fs::path folder = root / "share" / "katana"; folder.native().size() >= top.native().size();
+         folder = folder.parent_path()) {
+        RemoveDirectoryW(forTheSystem(folder).c_str());
+    }
+#else
+    (void)top;
+    (void)root;
+    (void)files;
+#endif
+}
+
+} // namespace
+
+TEST(Plan, AnInstallUnderAVeryDeepFolderIsPlannedByTheNamesTheFileSystemAccepts)
+{
+    // The root is 250 characters: share/katana under it is 263, and every file in that folder is
+    // past the 260 of the ordinary calls. A program that has no long-path manifest is told "no
+    // such file" for such a name unless it is given the prefixed one; the planner then reports a
+    // file that is there and right as absent and changed - a needless download - and cannot
+    // see a link at that depth at all.
+    TempDir temp;
+    const fs::path top = temp.path() / std::string(8, 'a');
+    if (top.native().size() > 190) {
+        GTEST_SKIP() << "the temporary folder is too deep to build a root of 250 characters in it";
+    }
+    const fs::path root = deepRootUnder(top);
+    ASSERT_EQ(root.native().size(), 250u);
+    const fs::path folder = root / "share" / "katana";
+    std::error_code error;
+    fs::create_directories(forTheSystem(folder), error);
+    ASSERT_FALSE(error) << error.message();
+
+    const std::string kept = "as released\n";           // 12 bytes
+    const std::string edited = "edited by hand\n";       // 15 bytes
+    const std::string released = "as released, 2\n";     // 15 bytes
+    const std::vector<fs::path> files{folder / "readme.txt", folder / "settings.txt"};
+    struct Remove {
+        const fs::path& top;
+        const fs::path& root;
+        const std::vector<fs::path>& files;
+        ~Remove() { removeDeep(top, root, files); }
+    } remove{top, root, files};
+    writeDeep(files[0], kept);
+    writeDeep(files[1], edited);
+    ASSERT_GT(files[0].native().size(), 260u) << "the point of the case";
+
+    update::Manifest manifest;
+    auto add = [&manifest](const std::string& path, const std::string& bytes, std::uint64_t size) {
+        update::ManifestFile entry;
+        entry.path = path;
+        entry.fileClass = update::FileClass::Data;
+        entry.size = size;
+        entry.compressedSize = 3;
+        entry.offset = 100 + 10 * manifest.files.size();
+        entry.sha256 = core::sha256Hex(bytes);
+        manifest.files.push_back(entry);
+    };
+    add("share/katana/readme.txt", kept, kept.size());       // 0: the same bytes
+    add("share/katana/settings.txt", released, released.size()); // 1: the file has been edited
+    add("share/katana/gone.txt", "never there", 11);           // 2: absent
+
+    const auto plan = planOf(manifest, root);
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_EQ(changedIndexes(*plan), (Indexes{1, 2}))
+        << "readme.txt is there and right, even at 270 characters";
+    EXPECT_EQ(plan->changedBytes, 15u + 11u);
+    // 2.6 * 26 = 67.6, rounded up.
+    EXPECT_EQ(plan->requiredFreeBytes, 68u);
+}
+
 #ifdef _WIN32
 TEST(Plan, OnWindowsAFileWhoseNameDiffersOnlyInCaseIsTheSameFile)
 {

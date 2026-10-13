@@ -26,6 +26,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/core/path_text.hpp"
+#include "katana/core/text.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/state.hpp"
 
@@ -39,6 +40,7 @@
 #include <io.h>
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -210,13 +212,16 @@ struct Replaced {
     std::string why;
 };
 
-// `from` renamed over `to`. Windows: MoveFileExW, so that the reason is the system's own error
-// number and the cases worth waiting for can be told from the rest; elsewhere a rename that
-// fails fails for good.
+// `from` renamed over `to`, and the rename itself on the disk before this returns: the data was
+// flushed already, but a rename that a power failure can undo would take last.json's note that
+// an update was rolled back with it. Windows: MoveFileExW with MOVEFILE_WRITE_THROUGH, so that
+// the reason is also the system's own error number and the cases worth waiting for can be told
+// from the rest; elsewhere the folder is fsynced after the rename, and a rename that fails
+// fails for good.
 Replaced replaceFile(const stdfs::path& from, const stdfs::path& to)
 {
 #ifdef _WIN32
-    if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         return {true, false, {}};
     }
     const DWORD error = GetLastError();
@@ -233,10 +238,19 @@ Replaced replaceFile(const stdfs::path& from, const stdfs::path& to)
 #else
     std::error_code error;
     stdfs::rename(from, to, error);
-    if (!error) {
-        return {true, false, {}};
+    if (error) {
+        return {false, false, error.message()};
     }
-    return {false, false, error.message()};
+#ifdef O_DIRECTORY
+    // Best effort: the record is in place whatever this says, and a file system that cannot
+    // fsync a folder (some network ones) is no reason to call the write failed.
+    const int folder = ::open(to.parent_path().c_str(), O_RDONLY | O_DIRECTORY);
+    if (folder >= 0) {
+        (void)::fsync(folder);
+        (void)::close(folder);
+    }
+#endif
+    return {true, false, {}};
 #endif
 }
 
@@ -775,7 +789,7 @@ namespace {
 #ifdef _WIN32
 wchar_t foldAscii(wchar_t c)
 {
-    return (c >= L'A' && c <= L'Z') ? static_cast<wchar_t>(c + 32) : c;
+    return c < 0x80 ? static_cast<wchar_t>(core::asciiLower(static_cast<char>(c))) : c;
 }
 #endif
 
@@ -886,24 +900,27 @@ core::Status removeTree(FsOps& fs, const stdfs::path& path, int depth)
 }
 
 struct CleanupBase {
-    stdfs::path lexical;  // as the caller spelled it
-    stdfs::path resolved; // with every link resolved
+    stdfs::path lexical;                // as the caller spelled it
+    std::optional<stdfs::path> resolved; // with every link resolved; none when that failed
 };
 
 enum class LineOutcome { Done, Retry };
 
 // One line of the list. Done: removed, or nothing to remove, or not a place this list may
-// name (never touched). Retry: it is ours and could not be removed (a locked file): keep it.
+// name (never touched). Retry: it is ours and could not be removed (a locked file), or it is
+// under a place that could not be examined just now: keep it.
 LineOutcome cleanOne(FsOps& fs, const std::string& line, const std::vector<CleanupBase>& bases,
-                     const stdfs::path& listFile)
+                     const std::vector<stdfs::path>& listFiles)
 {
     const stdfs::path given = core::pathFromUtf8(line);
     if (!given.is_absolute()) {
         return LineOutcome::Done;
     }
     const stdfs::path path = bare(given);
-    if (sameName(path, bare(listFile))) {
-        return LineOutcome::Done; // the list does not delete itself
+    for (const stdfs::path& listFile : listFiles) {
+        if (sameName(path, bare(listFile))) {
+            return LineOutcome::Done; // the list does not delete itself
+        }
     }
 
     for (const CleanupBase& base : bases) {
@@ -916,6 +933,12 @@ LineOutcome cleanOne(FsOps& fs, const std::string& line, const std::vector<Clean
             return LineOutcome::Done; // not a line this program wrote: never touched
         }
 #endif
+        if (!base.resolved) {
+            // A place that could not be resolved (access denied, a sharing violation: a
+            // missing place resolves fine) is not a place without leftovers. The line is by
+            // its text one of ours, so it is kept for the next start, not dropped.
+            return LineOutcome::Retry;
+        }
         // Each folder between the base and the path, itself excluded, must be a real folder:
         // through a link the path would name something that is not under the base at all.
         stdfs::path walk;
@@ -941,7 +964,7 @@ LineOutcome cleanOne(FsOps& fs, const std::string& line, const std::vector<Clean
         if (!parent) {
             return LineOutcome::Retry;
         }
-        if (!sameName(*parent, base.resolved) && !namesBelow(bare(*parent), base.resolved)) {
+        if (!sameName(*parent, *base.resolved) && !namesBelow(bare(*parent), *base.resolved)) {
             return LineOutcome::Done;
         }
         const core::Status removed = removeTree(fs, path, 0);
@@ -950,42 +973,50 @@ LineOutcome cleanOne(FsOps& fs, const std::string& line, const std::vector<Clean
     return LineOutcome::Done; // not under any place the list may name
 }
 
-} // namespace
+// The list a run is working on: cleanup.list renamed. The list is never read and rewritten in
+// place, because the helper appends to it (appendCleanup) while the window may be processing
+// it, and an append between the read and the rewrite would be lost with the old text. A rename
+// is atomic and moves the file away from the appenders: from then on they start a new list,
+// and what this run keeps is appended to that one.
+constexpr std::string_view kCleanupWorkName = "cleanup.list.work";
 
-core::Status processCleanupList(const stdfs::path& stateDir, const stdfs::path& root, FsOps& fs)
+// Acts on the lines of `work` and removes it, first appending the lines that must stay to
+// `list`. Nothing is dropped unless it was acted on: a crash, a full disk or a refusal anywhere
+// leaves `work` in place for the next start, and a line in both is acted on twice, which is
+// harmless.
+core::Status cleanTaken(const stdfs::path& stateDir, const stdfs::path& root, FsOps& fs,
+                        const stdfs::path& list, const stdfs::path& work)
 {
-    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
-        return usable;
-    }
-    const stdfs::path listFile = stateDir / kCleanupListName;
-    const core::Result<EntryInfo> info = fs.stat(listFile);
+    const core::Result<EntryInfo> info = fs.stat(work);
     if (!info) {
         return info.error();
     }
     if (info->kind == EntryKind::Missing) {
-        return {};
+        return {}; // another process finished it
     }
     if (info->kind != EntryKind::File) {
-        return core::makeError(core::ErrorCode::InvalidState, "cleanup.list is not a file",
-                               core::pathToUtf8(listFile));
+        return core::makeError(core::ErrorCode::InvalidState,
+                               std::string(kCleanupWorkName) + " is not a file",
+                               core::pathToUtf8(work));
     }
     if (info->size > kMaxCleanupListBytes) {
         // Not a list this program wrote. Dropped whole rather than walked line by line.
-        if (const core::Status removed = fs.removeFile(listFile); !removed) {
+        if (const core::Status removed = fs.removeFile(work); !removed) {
             return removed;
         }
         return core::makeError(core::ErrorCode::InvalidArgument,
                                "cleanup.list was too long to be one this program wrote; it was "
                                "discarded",
-                               core::pathToUtf8(listFile));
+                               core::pathToUtf8(list));
     }
-    const core::Result<std::string> text = fs.readFile(listFile);
+    const core::Result<std::string> text = fs.readFile(work);
     if (!text) {
         return text.error();
     }
 
-    // The places a line may name: U, and R/.update. A place that cannot be resolved at all
-    // has nothing under it that could exist, so no line is taken to be under it.
+    // The places a line may name: U, and R/.update. A place that cannot be resolved (it is not
+    // "missing": that resolves; it is an error from the system, which may pass) is kept in the
+    // list, and every line under it with it.
     std::vector<CleanupBase> bases;
     std::vector<stdfs::path> candidates{stateDir};
     if (!root.empty()) {
@@ -993,10 +1024,10 @@ core::Status processCleanupList(const stdfs::path& stateDir, const stdfs::path& 
     }
     for (const stdfs::path& candidate : candidates) {
         const core::Result<stdfs::path> resolved = fs.resolve(candidate);
-        if (resolved) {
-            bases.push_back({bare(candidate), bare(*resolved)});
-        }
+        bases.push_back({bare(candidate), resolved ? std::optional<stdfs::path>(bare(*resolved))
+                                                   : std::nullopt});
     }
+    const std::vector<stdfs::path> listFiles{list, work};
 
     std::vector<std::string> kept;
     std::size_t start = 0;
@@ -1013,20 +1044,59 @@ core::Status processCleanupList(const stdfs::path& stateDir, const stdfs::path& 
         if (line.empty() || std::find(kept.begin(), kept.end(), line) != kept.end()) {
             continue;
         }
-        if (cleanOne(fs, line, bases, listFile) == LineOutcome::Retry) {
+        if (cleanOne(fs, line, bases, listFiles) == LineOutcome::Retry) {
             kept.push_back(std::move(line));
         }
     }
 
-    if (kept.empty()) {
-        return fs.removeFile(listFile);
+    if (!kept.empty()) {
+        std::string again;
+        for (const std::string& line : kept) {
+            again += line;
+            again += '\n';
+        }
+        if (const core::Status appended = fs.appendDurable(list, again); !appended) {
+            return appended; // `work` stays: the lines are not lost
+        }
     }
-    std::string rewritten;
-    for (const std::string& line : kept) {
-        rewritten += line;
-        rewritten += '\n';
+    return fs.removeFile(work);
+}
+
+} // namespace
+
+core::Status processCleanupList(const stdfs::path& stateDir, const stdfs::path& root, FsOps& fs)
+{
+    if (const core::Status usable = requireStateDirectory(stateDir); !usable) {
+        return usable;
     }
-    return fs.writeDurable(listFile, rewritten);
+    const stdfs::path list = stateDir / kCleanupListName;
+    const stdfs::path work = stateDir / kCleanupWorkName;
+
+    // A run that died after it took the list left it as `work`: that one is finished first, and
+    // the list (which may hold what an appender added since) waits for the next start.
+    const core::Result<EntryInfo> leftWork = fs.stat(work);
+    if (!leftWork) {
+        return leftWork.error();
+    }
+    if (leftWork->kind != EntryKind::Missing) {
+        return cleanTaken(stateDir, root, fs, list, work);
+    }
+
+    const core::Result<EntryInfo> info = fs.stat(list);
+    if (!info) {
+        return info.error();
+    }
+    if (info->kind == EntryKind::Missing) {
+        return {};
+    }
+    if (info->kind != EntryKind::File) {
+        return core::makeError(core::ErrorCode::InvalidState, "cleanup.list is not a file",
+                               core::pathToUtf8(list));
+    }
+    if (const core::Status taken = fs.renameFile(list, work); !taken) {
+        return taken;
+    }
+    return cleanTaken(stateDir, root, fs, list, work);
 }
 
 } // namespace katana::update

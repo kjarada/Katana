@@ -19,6 +19,11 @@
 // ProjFS use, and those stay where they are (a folder in OneDrive is `Directory, ReparsePoint`
 // and holds ordinary files). Only a tag with the name-surrogate bit - symbolic link, junction
 // and the like - sends a path somewhere else.
+//
+// Every path the planner hands to the system - the examination of a name, the open of a file to
+// hash it - goes through long_path.hpp, as the file system of the apply (fsops_win.cpp) does: a
+// file under a deep install root is past the 260 characters the plain calls accept, and a program
+// without the long-path manifest would be told "no such file" for one that is there.
 
 #include "katana/update/plan.hpp"
 
@@ -33,6 +38,7 @@
 #include "katana/core/path_text.hpp"
 #include "katana/core/sha256.hpp"
 #include "katana/update/paths.hpp"
+#include "long_path.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -82,7 +88,12 @@ enum class Kind { Missing, File, Directory, Link, Other };
 core::Result<Kind> look(const fs::path& path)
 {
 #ifdef _WIN32
-    const DWORD attributes = GetFileAttributesW(path.c_str());
+    // Named the way the file system names it (long_path.hpp): a deep install root puts a file
+    // past the 260 characters the plain calls accept, and a program without the long-path
+    // manifest would then be told "not found" - a changed file that is not, and a link at that
+    // depth that goes unseen.
+    const std::wstring wide = detail::widePath(path);
+    const DWORD attributes = GetFileAttributesW(wide.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         const DWORD error = GetLastError();
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
@@ -95,7 +106,7 @@ core::Result<Kind> look(const fs::path& path)
         // The tag is in the directory entry: dwReserved0 of what FindFirstFileW returns. The
         // path exists (it has attributes) and has no wildcard that FindFirstFileW would expand.
         WIN32_FIND_DATAW entry;
-        const HANDLE find = FindFirstFileW(path.c_str(), &entry);
+        const HANDLE find = FindFirstFileW(wide.c_str(), &entry);
         if (find == INVALID_HANDLE_VALUE) {
             return core::makeError(core::ErrorCode::FileImportFailure, "cannot examine the file",
                                    "os_error=" + std::to_string(GetLastError()) + "; " +
@@ -226,7 +237,7 @@ core::Error cancelled()
 core::Result<Plan> plan(const Manifest& manifest, const Install& install, std::stop_token stop)
 {
     std::error_code ignored;
-    if (!fs::is_directory(install.root, ignored)) {
+    if (!fs::is_directory(detail::openable(install.root), ignored)) {
         return core::makeError(core::ErrorCode::NotFound, "the install folder does not exist",
                                core::pathToUtf8(install.root));
     }
@@ -278,7 +289,8 @@ core::Result<Plan> plan(const Manifest& manifest, const Install& install, std::s
             break;
         case Found::File:
             if (!seed) { // a seed that exists is the person's: never read, never replaced
-                const core::Result<std::string> hash = core::sha256FileHex(located);
+                const core::Result<std::string> hash =
+                    core::sha256FileHex(detail::openable(located));
                 if (!hash) {
                     return core::makeError(
                         core::ErrorCode::FileImportFailure,
