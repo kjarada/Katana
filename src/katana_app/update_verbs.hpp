@@ -16,6 +16,9 @@
 //       -> ready=<v> transaction=<tx>; the caller then ends its session and
 //          starts the helper (see UpdateReply::apply)
 //   UPDATE SKIP <version> | UPDATE SKIP NONE
+//   UPDATE BLOCKED CLEAR
+//       -> blocked=none; the releases that were put back here are offered
+//          again
 //   UPDATE SET AUTO ON|OFF
 //   UPDATE TOKEN STATUS | UPDATE TOKEN CLEAR
 //
@@ -54,6 +57,10 @@
 //                     update=unsupported), install_record (install.json does
 //                     not read: update=unsupported), notify_only (available,
 //                     and installed by hand).
+//                     update=blocked (reason=blocked_before) has a detail
+//                     that is no failure's: that this release was put back
+//                     here, and that UPDATE BLOCKED CLEAR (Settings > Updates
+//                     in the window) offers it again.
 //                     last_check is recorded when the feed ANSWERED - a
 //                     manifest verified: available, current or blocked - and
 //                     not for a check that could not read it, so that an
@@ -102,11 +109,26 @@
 //                     before the preflight, so no helper copy is made and
 //                     the release stays downloaded: Katana started the
 //                     ordinary way applies it. DOWNLOAD is not refused.
-//   UPDATE SKIP, UPDATE SET AUTO
-//                     skipped=<v|none>; auto=on|off. With no update folder:
-//                     the same with reason=no_state, and nothing is kept. With
-//                     a state file that does not read: refused (InvalidState),
-//                     and the file is left as it is.
+//                     The sentence of blocked_before names the line that
+//                     offers the release again, UPDATE BLOCKED CLEAR.
+//   UPDATE SKIP, UPDATE SET AUTO, UPDATE BLOCKED CLEAR
+//                     skipped=<v|none>; auto=on|off; blocked=none. With no
+//                     update folder: the same with reason=no_state (blocked=
+//                     none reason=no_state), and nothing is kept. With a state
+//                     file that does not read: refused (InvalidState), and the
+//                     file is left as it is. Each changes its one member of
+//                     the state as that is at the moment of writing.
+//   UPDATE BLOCKED CLEAR
+//                     empties the list of releases whose apply was put back
+//                     here (update/state.hpp, `blocked`), all of them: one
+//                     start too slow for the health check blocks a release
+//                     that is sound, and this is the way back that does not
+//                     need the state file deleted by hand. The next CHECK
+//                     offers the release again and APPLY CONFIRM applies it.
+//                     UPDATE BLOCKED with another word, or none, is
+//                     InvalidArgument and says the one line there is. UPDATE
+//                     STATUS does not say what is blocked: CHECK does, for the
+//                     release the feed offers (update=blocked).
 //   UPDATE TOKEN STATUS | CLEAR
 //                     token=present|absent, and never the token. reason=
 //                     no_store, token_unusable or store_unavailable when the
