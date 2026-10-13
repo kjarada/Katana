@@ -214,6 +214,13 @@ the run:
 * Every job's first step, "Set up job", lists the actions it fetched, each
   by the 40 digits the workflow names it with ("The actions the workflow
   runs"), and no job stops there for an action GitHub could not find.
+* The annotations on the run's summary page, read for Node 20. Five of
+  the six actions ask for it ("Not done"). A warning that names them says
+  either that they were run on Node 24 instead, or that they ran on Node
+  20 and the day it leaves the runner: either is the reason to move those
+  actions before the next release, and a step that fails inside one of
+  them is the reason to move it now. No such warning means only that
+  GitHub asked the runner for none.
 * The Version job's step "Update keys" ends `Update keys: pinned, active
   <key id>, spare <key id>`, with no warning: the key check ran under the
   runner's own CMake. The job's first step prints the run's sequence.
@@ -355,16 +362,19 @@ actions run in the Publish job, which is where the update signing key is.
 A commit cannot be moved: what runs is what was read. The comment is for
 the reader; GitHub runs the commit.
 
-| Action | Tag | The release that tag stood at when it was read, 2026-10-14 | Jobs |
-|---|---|---|---|
-| `actions/checkout` | `v4` | 4.4.0 | all four |
-| `msys2/setup-msys2` | `v2` | 2.33.0 | the Windows jobs |
-| `actions/upload-artifact` | `v4` | 4.6.2 | the Windows, Linux and macOS jobs |
-| `actions/setup-python` | `v5` | 5.6.0 | the Linux and macOS jobs |
-| `actions/cache` | `v4` | 4.3.0 | the Linux and macOS jobs |
-| `actions/download-artifact` | `v4` | 4.3.0 | Publish |
+| Action | Tag | The release at the commit | Read | Jobs |
+|---|---|---|---|---|
+| `actions/checkout` | `v4` | 4.4.0 | 2026-10-14 | every job |
+| `msys2/setup-msys2` | `v2` | 2.33.0 | 2026-10-14 | the Windows jobs |
+| `actions/upload-artifact` | `v4` | 4.6.2 | 2026-10-14 | the Windows, Linux and macOS jobs |
+| `actions/setup-python` | `v5` | 5.6.0 | 2026-10-14 | the Linux and macOS jobs |
+| `actions/cache` | `v4` | 4.3.0 | 2026-10-14 | the Linux and macOS jobs |
+| `actions/download-artifact` | `v4` | 4.3.0 | 2026-10-14 | Publish |
 
-The commits themselves are in the workflow and not repeated here.
+The commits themselves are in the workflow and not repeated here. A row
+says which release its action's commit is, and the day that was read; it
+is changed together with the action's lines (step 3 below), and where
+the two disagree the workflow is what runs.
 
 **Moving an action to a newer version.** Nothing moves by itself any more,
 so an action stays at its commit until somebody moves it: when a runner
@@ -388,29 +398,41 @@ a time:
    ```
 
    (All six were plain tags, `commit`, when they were read.) A newer major
-   version is the same read with the other tag, `v5` for `v4`.
+   version is the same read with the other tag, `v5` for `v4`. Which
+   release the commit is, for the table above, is among the tags on it,
+   `v4.4.0` beside `v4`:
+
+   ```sh
+   gh api repos/actions/checkout/tags --paginate --jq '.[] | select(.commit.sha == "<the commit>") | .name'
+   ```
 2. Read what changed between the commit the workflow names and the new one,
    `https://github.com/actions/checkout/compare/<old>...<new>`, and the
    action's release notes: a major version may rename an input or need a
-   newer runner.
+   newer runner. The Node it asks the runner for is the `using:` line
+   under `runs:` in its `action.yml` as the new commit has it:
+
+   ```sh
+   gh api -H "Accept: application/vnd.github.raw+json" "repos/actions/checkout/contents/action.yml?ref=<new>"
+   ```
 3. Put the new digits on EVERY line that names the action - one action,
-   one commit, in all jobs - and change the comment if the tag changed.
-4. Run the workflow with the tag left empty. It builds, tests and
-   publishes nothing, which tries the new commit before a release depends
-   on it. `actions/download-artifact` is the exception: it runs only in
-   the Publish job, which such a run skips, so a new commit of it is first
-   tried by a release itself. Should it fail there, nothing has been
-   published; the line is put right on `main` and the release is started
-   again as a new run, because a job run again from the run's page runs
-   the workflow as that run's commit has it.
+   one commit, in all jobs - change the comment if the tag changed, and
+   put the release and the day in the action's row of the table above.
+4. Run the workflow with the tag left empty. It builds and tests the
+   packages and publishes nothing, which tries the new commit before a
+   release depends on it. `actions/download-artifact` is the exception:
+   it runs only in the Publish job, which such a run skips, so a new
+   commit of it is first tried by a release itself. Should it fail there,
+   nothing has been published; the line is put right on `main` and the
+   release is started again as a new run, because a job run again from
+   the run's page runs the workflow as that run's commit has it.
 
 A `uses:` line added later is written the same way, by the same read.
 GitHub can be told to refuse any other: the repository's Actions
 permissions (Settings > Actions > General) hold a requirement that actions
 be pinned to a full-length commit SHA, which
-`gh api repos/kjarada/Katana/actions/permissions` shows as
-`sha_pinning_required` (`false` on 2026-10-14). It has not been turned on,
-and what it does to a run was not tried ("Not done").
+`gh api repos/kjarada/Katana/actions/permissions --jq .sha_pinning_required`
+shows (`false` on 2026-10-14). It has not been turned on, and what it
+does to a run was not tried ("Not done").
 
 ### The whole suite, on the machine the package is for
 
@@ -850,11 +872,21 @@ gives the same steps).
    sign other files, as soon as that branch was run - after one approval,
    where there are reviewers, asked on a page that names the branch and
    shows nothing of what it changed. Restricted, GitHub refuses such a job
-   before it starts, so the key reaches only the workflow as `main` has it:
-   the one that was read when it was merged. The cost is that a release is
-   started on `main`, as "Publishing a release" already says. A run without
-   a tag works on any branch as before: its Publish job is skipped and
-   never asks for the environment.
+   before it starts, so the key reaches only what `main` holds: its
+   `release.yml`, and the tools of that tree which the Publish job runs.
+
+   That is as strong as what guards `main`, and no stronger. Nothing
+   guards it yet but the right to push: `main` is not a protected branch
+   and the repository has no ruleset ("Not done"), so an edited
+   `release.yml` pushed straight to `main` and then run is asked for
+   approval on a page that names `main`. What the restriction buys is
+   that such an edit has to be a commit of `main`, in the history every
+   checkout pulls, and cannot sit on a branch nobody reads. The approval
+   is still the owner's look at the commit the run is of, which the
+   run's page names. The cost is that a release is started on `main`, as
+   "Publishing a release" already says. A run without a tag works on any
+   branch as before: its Publish job is skipped and never asks for the
+   environment.
 
    Then give the environment the ACTIVE key, and only that one; the spare
    never goes to GitHub:
@@ -871,17 +903,28 @@ gives the same steps).
    command with `--env release`, in its help and after `pub`.)
 
    Both settings are GitHub's, where nothing in the repository can see
-   them, so read them back:
+   them, so read them back. Each read prints plain text: `gh` lays a
+   list or an object out over several lines at a terminal and on one
+   line into a pipe (seen with `gh` 2.98.0), so one of those would not
+   look the same in both.
 
    ```sh
-   gh api repos/kjarada/Katana/environments/release --jq '[.protection_rules[].type]'
-       # ["branch_policy","required_reviewers"]: both names, in either order
-   gh api repos/kjarada/Katana/environments/release --jq .deployment_branch_policy
-       # {"custom_branch_policies":true,"protected_branches":false}
+   gh api repos/kjarada/Katana/environments/release \
+     --jq '[.protection_rules[].type] | sort | join(" ")'
+       # branch_policy required_reviewers
+   gh api repos/kjarada/Katana/environments/release \
+     --jq '.deployment_branch_policy | "custom=\(.custom_branch_policies) protected=\(.protected_branches)"'
+       # custom=true protected=false   (custom=null protected=null: no restriction)
    gh api repos/kjarada/Katana/environments/release/deployment-branch-policies \
      --jq '.branch_policies[] | .type + " " + .name'
        # branch main, and no other line
    ```
+
+   None of the three could be run here when this was written: the
+   environment did not exist ("Not done"). They were run as they stand
+   on an environment of another public repository that has both settings
+   (`pypa/pip`, `PyPI`), where the first two printed the lines above and
+   the third one line for that environment's one rule.
 4. Publish a release and install it by hand ("The first release that carries
    the updater").
 
@@ -998,6 +1041,48 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   stays at its commit until it is moved by hand ("The actions the workflow
   runs"), and the repository has no `.github/dependabot.yml`, which would
   propose each move as a pull request.
+* **Five of the six actions are old major versions that ask for Node 20.**
+  At the commits the workflow names, the `action.yml` of
+  `actions/checkout`, `actions/upload-artifact`, `actions/setup-python`,
+  `actions/cache` and `actions/download-artifact` says `using: node20`
+  (`msys2/setup-msys2` says `node24`), and Node 20 reached its end of
+  life in April 2026. On 2026-10-14 their publishers' latest releases
+  were checkout 7.0.1, upload-artifact 7.0.2, setup-python 7.0.0, cache
+  6.1.0 and download-artifact 8.0.2, each `node24`. Naming commits did
+  not cause this: the tags `v4` and `v5` name these same commits, and
+  that change moved no version. The runner of that day (2.338.0;
+  `HandlerFactory.cs` and `JobExtension.cs` of its worker, in the
+  repository `actions/runner`) still carries Node 20 beside Node 24 and,
+  on the machines these jobs run on, refuses no action for asking for
+  it: it runs such an action on one or the other, as GitHub tells it for
+  the run, and can name it in a warning on the run's page. So the first run says where this stands
+  ("To verify on the first release"). Each of the five is moved as "The
+  actions the workflow runs" says, with the release notes of every major
+  version between read; none has been tried.
+* **`main` itself is not guarded.** The environment `release` takes runs
+  of `main` only ("Update signing", step 3), and that is worth what
+  decides what gets into `main`. On 2026-10-14 the right to push was all
+  that did:
+
+  ```sh
+  gh api repos/kjarada/Katana/branches/main --jq .protected
+      # false
+  gh api repos/kjarada/Katana/rules/branches/main --jq '[.[].type] | sort | join(" ")'
+      # an empty line: no rule of any ruleset applies to main
+  ```
+
+  A ruleset on the default branch (Settings > Rules > Rulesets) that
+  requires a pull request and blocks force pushes and deletion makes the
+  second read print `deletion non_fast_forward pull_request` (the names
+  were seen on another repository that has those rules; no ruleset was
+  made here). Every change to what the Publish job runs would then have
+  been a pull request. It is the owner's to decide: it ends pushing to
+  `main` directly, which is how changes reach `main` today, and while
+  one account has the right to push
+  (`gh api repos/kjarada/Katana/collaborators --jq '.[].login'`) the pull
+  request it asks for is that account's own to open and to merge: a
+  recorded step, not a second person. Until then the approval on the
+  run's page is the guard there is.
 * **The update keys are placeholders** until the owner's key steps ("Update
   signing"); until then the workflow stops in its first job. The
   environment `release` of those steps, with its reviewers and its
