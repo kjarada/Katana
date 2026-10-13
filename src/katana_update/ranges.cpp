@@ -4,11 +4,11 @@
 #include "katana/update/ranges.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <string>
 #include <string_view>
 
 #include "katana/core/error.hpp"
+#include "katana/core/text.hpp"
 
 namespace katana::update {
 
@@ -119,22 +119,6 @@ core::Result<std::string> rangeHeaderValue(std::uint64_t offset, std::uint64_t l
 
 namespace {
 
-bool isSpace(char c)
-{
-    return c == ' ' || c == '\t';
-}
-
-std::string_view trimmed(std::string_view text)
-{
-    while (!text.empty() && isSpace(text.front())) {
-        text.remove_prefix(1);
-    }
-    while (!text.empty() && isSpace(text.back())) {
-        text.remove_suffix(1);
-    }
-    return text;
-}
-
 // 1 to 20 ASCII digits that fit 64 bits, consumed from the front of `text`.
 bool takeNumber(std::string_view& text, std::uint64_t& value)
 {
@@ -176,15 +160,11 @@ struct ContentRange {
 
 bool parseContentRange(std::string_view header, ContentRange& out)
 {
-    std::string_view text = trimmed(header);
+    std::string_view text = core::trimmed(header);
     constexpr std::string_view kUnit = "bytes";
-    if (text.size() < kUnit.size()) {
+    if (text.size() < kUnit.size() ||
+        !core::equalsIgnoringCase(text.substr(0, kUnit.size()), kUnit)) {
         return false;
-    }
-    for (std::size_t i = 0; i < kUnit.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(text[i])) != kUnit[i]) {
-            return false;
-        }
     }
     text.remove_prefix(kUnit.size());
     if (!takeLiteral(text, ' ')) {

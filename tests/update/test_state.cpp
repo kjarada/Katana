@@ -9,9 +9,11 @@
 // anyone who is the user - so its cases are the attacks: a line that leaves the folder by
 // "..", by a sibling that shares a prefix, by a link; a name that is a folder, or the list.
 //
-// FsOps is T7's (src/katana_update/fsops_win.cpp is a stub while this is written), so the
-// cleanup cases run on DiskFs below: the std::filesystem operations the interface describes,
-// with reparse points reported as the interface says they are.
+// FsOps is T7's. The cleanup cases run on the file system that ships (makeSystemFsOps); DiskFs
+// below - the std::filesystem operations the interface describes, with reparse points reported
+// as the interface says they are - carries the faults the real one cannot be made to have on
+// demand (a locked file, a crash before the k-th change, a failed resolve, an append that lands
+// between two calls).
 
 #include <gtest/gtest.h>
 
@@ -22,7 +24,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <set>
@@ -408,6 +412,94 @@ class CrashingFs final : public DiskFs {
     std::uint64_t operations_ = 0;
 };
 
+// A DiskFs that tells a case about every call, before it is carried out and after it, so that the
+// case can act BETWEEN two calls of the code under test (an append from another program, a crash
+// before the k-th change), and that can be told to fail some: a locked name, a path that cannot be
+// resolved. The calls that only look are const in the interface and so are the hooks' callers.
+class WatchedFs final : public DiskFs {
+  public:
+    struct Call {
+        std::string op;
+        fs::path path;
+        bool changes = false; // one of the operations fsops.hpp lists as changing the disk
+    };
+    std::function<void(const Call&)> before;
+    std::function<void(const Call&)> after;
+    std::set<std::string> lockedNames;                  // removeFile fails with 32 for these names
+    std::function<bool(const fs::path&)> unresolvable;  // resolve fails for these paths
+    mutable std::vector<fs::path> removedFiles;         // every removeFile, locked or not
+
+  private:
+    // Declared before its users: a deduced return type must be known where it is called.
+    template <typename Carry>
+    auto watched(const Call& call, Carry&& carry) const
+    {
+        if (before) {
+            before(call);
+        }
+        auto result = carry();
+        if (after) {
+            after(call);
+        }
+        return result;
+    }
+
+  public:
+    core::Result<update::EntryInfo> stat(const fs::path& p) const override
+    {
+        return watched({"stat", p, false}, [&] { return DiskFs::stat(p); });
+    }
+    core::Result<std::vector<fs::path>> listDirectory(const fs::path& p) const override
+    {
+        return watched({"list", p, false}, [&] { return DiskFs::listDirectory(p); });
+    }
+    core::Result<std::string> readFile(const fs::path& p) const override
+    {
+        return watched({"read", p, false}, [&] { return DiskFs::readFile(p); });
+    }
+    core::Result<fs::path> resolve(const fs::path& p) const override
+    {
+        return watched({"resolve", p, false}, [&]() -> core::Result<fs::path> {
+            if (unresolvable && unresolvable(p)) {
+                return osError("resolve failed", 5, p);
+            }
+            return DiskFs::resolve(p);
+        });
+    }
+    core::Status makeDirectories(const fs::path& p) override
+    {
+        return watched({"mkdir", p, true}, [&] { return DiskFs::makeDirectories(p); });
+    }
+    core::Status renameFile(const fs::path& a, const fs::path& b) override
+    {
+        return watched({"rename", a, true}, [&] { return DiskFs::renameFile(a, b); });
+    }
+    core::Status removeFile(const fs::path& p) override
+    {
+        return watched({"remove", p, true}, [&]() -> core::Status {
+            removedFiles.push_back(p);
+            if (lockedNames.contains(p.filename().string())) {
+                return core::makeError(core::ErrorCode::FileExportFailure, "the file is in use",
+                                       "os_error=32; " + core::pathToUtf8(p));
+            }
+            return DiskFs::removeFile(p);
+        });
+    }
+    core::Status removeEmptyDirectory(const fs::path& p) override
+    {
+        return watched({"rmdir", p, true}, [&] { return DiskFs::removeEmptyDirectory(p); });
+    }
+    core::Status appendDurable(const fs::path& p, std::string_view bytes) override
+    {
+        return watched({"append", p, true}, [&] { return DiskFs::appendDurable(p, bytes); });
+    }
+    core::Status writeDurable(const fs::path& p, std::string_view bytes) override
+    {
+        return watched({"write", p, true}, [&] { return DiskFs::writeDurable(p, bytes); });
+    }
+
+};
+
 // A registry that says what it is told to.
 class FakeRegistry final : public update::RegistryOps {
   public:
@@ -424,15 +516,6 @@ class FakeRegistry final : public update::RegistryOps {
     core::Status clearRunOnce(std::string_view) override { return {}; }
     core::Status setInstalledVersion(std::string_view, std::string_view) override { return {}; }
 };
-
-// parseVersion belongs to task T4. Until it is merged the cases that need a version are skipped,
-// visibly, rather than reported as failures of a function that is not this task's.
-#define REQUIRE_VERSION_PARSING()                                                                  \
-    do {                                                                                           \
-        if (!update::parseVersion("1.2").ok()) {                                                   \
-            GTEST_SKIP() << "update::parseVersion is not implemented yet (task T4)";               \
-        }                                                                                          \
-    } while (false)
 
 update::Version versionOf(std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d,
                           std::uint8_t written)
@@ -480,7 +563,6 @@ TEST(InstallRecords, TheRecordsLiveInShareKatanaAndTheWorkFolderIsDotUpdate)
 
 TEST(InstallRecords, ATreeWithoutInstallJsonIsADevelopmentTreeWhateverElseIsInIt)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     FakeRegistry registry;
     registry.location = world.root; // even a registry that claims it does not make it an install
@@ -503,7 +585,6 @@ TEST(InstallRecords, ATreeWithoutInstallJsonIsADevelopmentTreeWhateverElseIsInIt
 
 TEST(InstallRecords, AFolderThatDoesNotExistIsADevelopmentTreeToo)
 {
-    REQUIRE_VERSION_PARSING();
     TempDir temp;
     FakeRegistry registry;
     const auto install = update::readInstall(temp.path() / "nothing_here", registry);
@@ -513,7 +594,6 @@ TEST(InstallRecords, AFolderThatDoesNotExistIsADevelopmentTreeToo)
 
 TEST(InstallRecords, AnInstallJsonAloneIsAFreshInstallOfTheNamedTarget)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(R"({"schema":1,"target":"win-arm64"})");
     FakeRegistry registry;
@@ -531,7 +611,6 @@ TEST(InstallRecords, AnInstallJsonAloneIsAFreshInstallOfTheNamedTarget)
 
 TEST(InstallRecords, TheFixtureInstallTreesAreInstallsOfTargetWin64)
 {
-    REQUIRE_VERSION_PARSING();
     for (const char* tree : {"v1", "v2"}) {
         FakeRegistry registry;
         const auto install =
@@ -544,7 +623,6 @@ TEST(InstallRecords, TheFixtureInstallTreesAreInstallsOfTargetWin64)
 
 TEST(InstallRecords, InstalledJsonSaysWhichBuildTheHelperPutThere)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(R"({"schema":1,"target":"win64"})");
     world.installedJson(R"({"schema":1,"product":"katana","version":"0.9.0","sequence":1790000000,)"
@@ -560,7 +638,6 @@ TEST(InstallRecords, InstalledJsonSaysWhichBuildTheHelperPutThere)
 
 TEST(InstallRecords, VersionsOfFourComponentsAndSequencesBeyondTwoToTheFiftyThirdAreRead)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(R"({"schema":1,"target":"win64"})");
     world.installedJson(R"({"schema":1,"version":"1.2.3.4","sequence":18446744073709551615})");
@@ -574,7 +651,6 @@ TEST(InstallRecords, VersionsOfFourComponentsAndSequencesBeyondTwoToTheFiftyThir
 
 TEST(InstallRecords, TheInstalledManifestCountsOnlyWithItsSignatureBesideIt)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(R"({"schema":1,"target":"win64"})");
     FakeRegistry registry;
@@ -593,7 +669,6 @@ TEST(InstallRecords, TheInstalledManifestCountsOnlyWithItsSignatureBesideIt)
 
 TEST(InstallRecords, TheRegistryDecidesBetweenInstallerAndArchive)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(R"({"schema":1,"target":"win64"})");
     FakeRegistry registry;
@@ -619,7 +694,6 @@ TEST(InstallRecords, TheRegistryDecidesBetweenInstallerAndArchive)
 #ifdef _WIN32
 TEST(InstallRecords, OnWindowsTheInstallerFolderMayDifferInCaseFromTheRoot)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(R"({"schema":1,"target":"win64"})");
     FakeRegistry registry;
@@ -674,7 +748,6 @@ TEST(InstallRecords, AnInstallJsonThatIsNotWhatTheCpackInstallWritesIsRefused)
 
 TEST(InstallRecords, ATargetOfThirtyTwoCharactersAndTheFiveRealOnesAreAccepted)
 {
-    REQUIRE_VERSION_PARSING();
     for (const char* target : {"win64", "win-arm64", "linux-x86_64", "linux-aarch64", "macos-arm64",
                                "abcdefghijklmnopqrstuvwxyz012345"}) {
         Root world;
@@ -688,7 +761,6 @@ TEST(InstallRecords, ATargetOfThirtyTwoCharactersAndTheFiveRealOnesAreAccepted)
 
 TEST(InstallRecords, MembersAnInstallJsonHasBeyondTheOnesReadAreIgnored)
 {
-    REQUIRE_VERSION_PARSING();
     Root world;
     world.installJson(
         R"({"schema":1,"target":"win64","written_by":"a newer packaging","extra":[1,2]})");
@@ -698,7 +770,6 @@ TEST(InstallRecords, MembersAnInstallJsonHasBeyondTheOnesReadAreIgnored)
 
 TEST(InstallRecords, AnInstalledJsonThatIsNotWhatTheHelperWritesIsRefused)
 {
-    REQUIRE_VERSION_PARSING();
     const struct {
         const char* text;
         core::ErrorCode code;
@@ -1416,7 +1487,17 @@ struct CleanupWorld {
     fs::path root = temp.path() / "R";
     fs::path work = root / ".update";
     fs::path list = stateDir / "cleanup.list";
-    DiskFs disk;
+    // The file system that SHIPS (fsops_win.cpp), so that these cases judge the cleanup against it and
+    // not against the test-local DiskFs above, whose stat calls any reparse point a link where the real
+    // one goes by the tag (isLinkReparseTag). The crash and lock cases inject their faults into a
+    // DiskFs subclass instead, which is all an injected fault needs. The POSIX one is task T18's stub.
+#ifdef _WIN32
+    std::unique_ptr<update::FsOps> system = update::makeSystemFsOps(
+        update::RetryPolicy{std::chrono::milliseconds(5), std::chrono::milliseconds(100)});
+#else
+    std::unique_ptr<update::FsOps> system = std::make_unique<DiskFs>();
+#endif
+    update::FsOps& disk = *system;
     CleanupWorld()
     {
         fs::create_directories(stateDir);
@@ -1437,12 +1518,24 @@ struct CleanupWorld {
     }
 };
 
+// A file system of the shipped kind for a case that has no CleanupWorld.
+std::unique_ptr<update::FsOps> shippedFs()
+{
+#ifdef _WIN32
+    return update::makeSystemFsOps(
+        update::RetryPolicy{std::chrono::milliseconds(5), std::chrono::milliseconds(100)});
+#else
+    return std::make_unique<DiskFs>();
+#endif
+}
+
 } // namespace
 
 TEST(CleanupList, AppendingCreatesTheFolderAndTheListAndAddsALineEachTime)
 {
     TempDir temp;
-    DiskFs disk;
+    const auto shipped = shippedFs();
+    update::FsOps& disk = *shipped;
     const fs::path stateDir = temp.path() / "not" / "made" / "yet";
     const fs::path first = temp.path() / "a" / "first.bin";
     const fs::path second =
@@ -1456,7 +1549,8 @@ TEST(CleanupList, AppendingCreatesTheFolderAndTheListAndAddsALineEachTime)
 TEST(CleanupList, OnlyAnAbsolutePathOnOneLineIsListed)
 {
     TempDir temp;
-    DiskFs disk;
+    const auto shipped = shippedFs();
+    update::FsOps& disk = *shipped;
     const fs::path stateDir = temp.path() / "U";
     for (const fs::path& bad : {fs::path("relative/file.bin"), fs::path(), fs::path("file.bin"),
                                 temp.path() / "two\nlines", temp.path() / "carriage\rreturn"}) {
@@ -1495,18 +1589,21 @@ TEST(CleanupList, AppendingGoesThroughTheSeamSoACrashAtAnyStepLeavesAWholeList)
     }
 }
 
-TEST(CleanupList, AListRewrittenAfterACrashIsStillWholeOrTheOldOne)
+TEST(CleanupList, AListTakenForProcessingSurvivesACrashAndTheNextStartFinishesIt)
 {
-    // The rewrite is one writeDurable (or the removal of the file): a crash before it leaves the
-    // old list, which names the same leftovers, so nothing is lost and the next start finishes.
+    // The list is taken by a rename (cleanup.list to cleanup.list.work) and given back by an
+    // append of what stays, so that a line another program appends meanwhile is never written over.
+    // A crash in the middle leaves the lines in the work file under their other name: nothing is
+    // lost, and the next start finishes.
     CleanupWorld world;
     LockedFs locked({"locked.bin"});
     const fs::path stuck = world.file(world.stateDir / "run-x" / "locked.bin");
     const fs::path loose = world.file(world.stateDir / "loose.tmp");
     world.listLines({world.stateDir / "run-x", loose});
     const std::string before = readFile(world.list);
+    const fs::path taken = world.stateDir / "cleanup.list.work";
 
-    // A crash on the removal of the second line's file: the list on disk is still `before`.
+    // A crash on the removal of the second line's file.
     class CrashOnLoose final : public LockedFs {
       public:
         using LockedFs::LockedFs;
@@ -1519,13 +1616,201 @@ TEST(CleanupList, AListRewrittenAfterACrashIsStillWholeOrTheOldOne)
         }
     } crashing({"locked.bin"});
     EXPECT_THROW((void)update::processCleanupList(world.stateDir, world.root, crashing), Crash);
-    EXPECT_EQ(readFile(world.list), before);
+    EXPECT_EQ(readFile(taken), before) << "the same text, under the name of a list being worked on";
+    EXPECT_FALSE(fs::exists(world.list));
     EXPECT_TRUE(fs::exists(stuck));
     EXPECT_TRUE(fs::exists(loose));
     // And the next start gets on with it.
     ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, locked).ok());
     EXPECT_FALSE(fs::exists(loose));
     EXPECT_EQ(readFile(world.list), lineOf(world.stateDir / "run-x"));
+    EXPECT_FALSE(fs::exists(taken));
+}
+
+TEST(CleanupList, ACrashBeforeAnyChangeOfAProcessingRunLosesNoLeftoverAndTheNextStartsFinishIt)
+{
+    // The run takes the list (a rename), removes what it can (two removals, one refused), appends
+    // what stays and removes the work file: five changes. Die before each and then restart, as the
+    // next three starts would: the free leftover is gone, the locked one is still listed - once,
+    // after the duplicate a death between the append and the last removal leaves has been merged
+    // - and no work file is left.
+    auto setUp = [](CleanupWorld& world) {
+        world.file(world.stateDir / "run-x" / "locked.bin");
+        world.file(world.stateDir / "loose.tmp");
+        world.listLines({world.stateDir / "run-x", world.stateDir / "loose.tmp"});
+    };
+    std::uint64_t changes = 0;
+    {
+        CleanupWorld world;
+        setUp(world);
+        WatchedFs watched;
+        watched.lockedNames = {"locked.bin"};
+        watched.before = [&changes](const WatchedFs::Call& call) { changes += call.changes ? 1 : 0; };
+        ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, watched).ok());
+        ASSERT_EQ(changes, 5u) << "rename, two removals, the append, the work file's removal";
+    }
+    for (std::uint64_t k = 1; k <= changes; ++k) {
+        CleanupWorld world;
+        setUp(world);
+        {
+            WatchedFs watched;
+            watched.lockedNames = {"locked.bin"};
+            std::uint64_t seen = 0;
+            watched.before = [&seen, k](const WatchedFs::Call& call) {
+                if (call.changes && ++seen == k) {
+                    throw Crash{k};
+                }
+            };
+            EXPECT_THROW((void)update::processCleanupList(world.stateDir, world.root, watched), Crash)
+                << "change " << k;
+        }
+        for (int start = 1; start <= 3; ++start) {
+            WatchedFs again;
+            again.lockedNames = {"locked.bin"};
+            const core::Status status = update::processCleanupList(world.stateDir, world.root, again);
+            ASSERT_TRUE(status.ok()) << "change " << k << ", start " << start;
+        }
+        EXPECT_FALSE(fs::exists(world.stateDir / "loose.tmp")) << "change " << k;
+        EXPECT_TRUE(fs::exists(world.stateDir / "run-x" / "locked.bin")) << "change " << k;
+        EXPECT_EQ(readFile(world.list), lineOf(world.stateDir / "run-x")) << "change " << k;
+        EXPECT_FALSE(fs::exists(world.stateDir / "cleanup.list.work")) << "change " << k;
+    }
+}
+
+TEST(CleanupList, ALeftoverAppendedByAnotherProgramWhileTheListIsProcessedIsNeverLost)
+{
+    // The helper appends (appendCleanup) at any moment, and the window may be working through the
+    // list just then. Whichever call of the run the append falls after - between the read and what
+    // used to be the rewrite most of all - the leftover is either acted on in this run or still
+    // listed when it ends. Once with a list that ends up empty and once with a locked file kept.
+    for (const bool withLocked : {false, true}) {
+        auto setUp = [withLocked](CleanupWorld& world) {
+            world.file(world.stateDir / "old.tmp");
+            std::vector<fs::path> lines{world.stateDir / "old.tmp"};
+            if (withLocked) {
+                world.file(world.stateDir / "run-x" / "locked.bin");
+                lines.push_back(world.stateDir / "run-x");
+            }
+            world.listLines(lines);
+        };
+        std::uint64_t calls = 0;
+        {
+            CleanupWorld world;
+            setUp(world);
+            WatchedFs watched;
+            watched.lockedNames = {"locked.bin"};
+            watched.after = [&calls](const WatchedFs::Call&) { ++calls; };
+            ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, watched).ok());
+        }
+        ASSERT_GE(calls, 8u) << "the run makes the calls the loop is to fall between";
+        for (std::uint64_t k = 1; k <= calls; ++k) {
+            CleanupWorld world;
+            setUp(world);
+            const fs::path late = world.file(world.stateDir / "late.tmp");
+            WatchedFs watched;
+            watched.lockedNames = {"locked.bin"};
+            std::uint64_t seen = 0;
+            watched.after = [&seen, k, &world, &late](const WatchedFs::Call&) {
+                if (++seen == k) {
+                    std::ofstream out(world.list, std::ios::binary | std::ios::app);
+                    out << lineOf(late);
+                }
+            };
+            const core::Status status = update::processCleanupList(world.stateDir, world.root, watched);
+            ASSERT_TRUE(status.ok()) << "append after call " << k;
+            const std::string listed = fs::exists(world.list) ? readFile(world.list) : std::string();
+            EXPECT_TRUE(!fs::exists(late) || listed.find(lineOf(late)) != std::string::npos)
+                << "append after call " << k << ": late.tmp is neither removed nor listed";
+            EXPECT_FALSE(fs::exists(world.stateDir / "old.tmp")) << "call " << k;
+            EXPECT_FALSE(fs::exists(world.stateDir / "cleanup.list.work")) << "call " << k;
+            if (withLocked) {
+                const std::string line = lineOf(world.stateDir / "run-x");
+                EXPECT_TRUE(fs::exists(world.stateDir / "run-x" / "locked.bin")) << "call " << k;
+                EXPECT_NE(listed.find(line), std::string::npos) << "call " << k;
+                EXPECT_EQ(listed.find(line), listed.rfind(line)) << "listed once, call " << k;
+            }
+
+            // The next start finishes whatever was left, the lock gone.
+            WatchedFs next;
+            ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, next).ok());
+            EXPECT_FALSE(fs::exists(late)) << "call " << k;
+            EXPECT_FALSE(fs::exists(world.stateDir / "run-x")) << "call " << k;
+            EXPECT_FALSE(fs::exists(world.list)) << "call " << k;
+        }
+    }
+}
+
+TEST(CleanupList, AWorkFileLeftByARunThatDiedIsFinishedFirstAndTheListWaitsForTheNextStart)
+{
+    CleanupWorld world;
+    const fs::path taken = world.stateDir / "cleanup.list.work";
+    const fs::path fromTheDeadRun = world.file(world.stateDir / "a.tmp");
+    const fs::path fromTheList = world.file(world.stateDir / "b.tmp");
+    writeFile(taken, lineOf(fromTheDeadRun));
+    world.listLines({fromTheList});
+    ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, world.disk).ok());
+    EXPECT_FALSE(fs::exists(fromTheDeadRun));
+    EXPECT_FALSE(fs::exists(taken));
+    EXPECT_TRUE(fs::exists(fromTheList)) << "the list is the next start's";
+    EXPECT_EQ(readFile(world.list), lineOf(fromTheList));
+    ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, world.disk).ok());
+    EXPECT_FALSE(fs::exists(fromTheList));
+    EXPECT_FALSE(fs::exists(world.list));
+}
+
+TEST(CleanupList, AWorkFileThatIsAFolderIsAnError)
+{
+    CleanupWorld world;
+    world.listLines({world.stateDir / "x.tmp"});
+    fs::create_directory(world.stateDir / "cleanup.list.work");
+    const core::Status status = update::processCleanupList(world.stateDir, world.root, world.disk);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, core::ErrorCode::InvalidState);
+    EXPECT_TRUE(fs::exists(world.list)) << "and the list is not touched";
+}
+
+TEST(CleanupList, ALineNamingTheFileTheListIsBeingWorkedFromIsNotActedOn)
+{
+    // The list does not delete itself, and that holds for the name it has while it is processed.
+    // Removed from under the run it would take the lines with it should the run die before the
+    // end. The only removal of it is the run's own, once, at the end.
+    CleanupWorld world;
+    const fs::path taken = world.stateDir / "cleanup.list.work";
+    const fs::path loose = world.file(world.stateDir / "loose.tmp");
+    world.listLines({taken, loose, world.list});
+    WatchedFs watched;
+    ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, watched).ok());
+    EXPECT_FALSE(fs::exists(loose));
+    EXPECT_FALSE(fs::exists(taken));
+    EXPECT_FALSE(fs::exists(world.list));
+    EXPECT_EQ(std::count(watched.removedFiles.begin(), watched.removedFiles.end(), taken), 1);
+    EXPECT_EQ(std::count(watched.removedFiles.begin(), watched.removedFiles.end(), loose), 1);
+}
+
+TEST(CleanupList, ALineUnderAPlaceThatCannotBeResolvedJustNowIsKeptForTheNextStart)
+{
+    // A place that is missing resolves (the existing part, then the rest as it is); one that cannot
+    // be resolved gave the system's error - access denied, a sharing violation - which may pass.
+    // The lines under it are by their text ours: kept, not dropped, and the lines under the other
+    // place are not held up.
+    CleanupWorld world;
+    const fs::path inWork = world.file(world.work / "tx1" / "old.dll");
+    const fs::path inState = world.file(world.stateDir / "loose.tmp");
+    world.listLines({world.work / "tx1", inState});
+    {
+        WatchedFs watched;
+        watched.unresolvable = [](const fs::path& p) { return p.filename() == ".update"; };
+        ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, watched).ok());
+    }
+    EXPECT_TRUE(fs::exists(inWork)) << "not acted on while its place cannot be examined";
+    EXPECT_FALSE(fs::exists(inState)) << "the other place was examined";
+    EXPECT_EQ(readFile(world.list), lineOf(world.work / "tx1"));
+
+    // The next start, when the system answers.
+    ASSERT_TRUE(update::processCleanupList(world.stateDir, world.root, world.disk).ok());
+    EXPECT_FALSE(fs::exists(world.work / "tx1"));
+    EXPECT_TRUE(fs::is_directory(world.work));
+    EXPECT_FALSE(fs::exists(world.list));
 }
 
 TEST(CleanupList, NoListIsOkAndCreatesNothing)
@@ -1828,9 +2113,8 @@ TEST(CleanupList, AStateFolderReachedThroughALinkOfItsOwnIsStillTheStateFolder)
         GTEST_SKIP() << "this machine does not let the test make a directory link";
     }
     const fs::path leftover = world.file(world.stateDir / "run-1" / "x.exe");
-    DiskFs disk;
-    ASSERT_TRUE(update::appendCleanup(alias, alias / "run-1", disk).ok());
-    ASSERT_TRUE(update::processCleanupList(alias, world.root, disk).ok());
+    ASSERT_TRUE(update::appendCleanup(alias, alias / "run-1", world.disk).ok());
+    ASSERT_TRUE(update::processCleanupList(alias, world.root, world.disk).ok());
     EXPECT_FALSE(fs::exists(leftover));
     EXPECT_FALSE(fs::exists(world.list));
 }
