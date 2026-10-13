@@ -57,6 +57,7 @@
 #include "remove_tree.hpp"
 #include "katana/update/journal.hpp"
 #include "katana/update/install.hpp"
+#include "katana/update/paths.hpp"
 #include "katana/update/registry.hpp"
 #include "katana/update/state.hpp"
 #include "katana/update/trust.hpp"
@@ -73,6 +74,7 @@ constexpr std::chrono::milliseconds kPoll{250};
 constexpr std::chrono::seconds kHelperRunLimit{120};
 constexpr std::string_view kHelperStem = "katana_updater";
 constexpr std::string_view kJournalName = "journal";
+constexpr std::string_view kOldName = "old";
 constexpr std::string_view kLockName = "lock";
 
 // What to run by hand, in every message that says recovery did not finish.
@@ -216,11 +218,22 @@ Proof proofOf(const FsOps& fs, const Path& stateDirectory, const std::string& tr
     return info->kind == EntryKind::Missing ? Proof::Absent : Proof::Unknown;
 }
 
-// The sequence of the release a transaction installed: the third argument of its journal's
-// PLAN record (journal.hpp), read as a whole number and as nothing else. The journal is not
-// authenticated; all this number can do is fail to match the signed manifest in the tree, and
-// then nothing is rolled back.
-std::optional<std::uint64_t> plannedSequence(const FsOps& fs, const Path& work)
+// What the rule reads in a transaction's journal before it puts anything back.
+struct Planned {
+    // The sequence of the release the transaction installed: the third argument of the PLAN
+    // record (journal.hpp), read as a whole number and as nothing else.
+    std::uint64_t sequence = 0;
+    // The files the commit moved aside, to old/<path>: the paths of the REPLACE and REMOVE
+    // records. They are what a rollback puts back.
+    std::vector<std::string> setAside;
+};
+
+// The journal is not authenticated, and nothing here acts on it. All the number can do is fail
+// to match the signed manifest in the tree; all a path is used for is to look whether
+// old/<path> is a file; and a record the path rules refuse (paths.hpp, checkJournalPath - the
+// rule a rollback holds the same records to) makes the whole reading nothing. With nothing
+// read, nothing is rolled back.
+std::optional<Planned> plannedBy(const FsOps& fs, const Path& work)
 {
     const core::Result<std::string> text = fs.readFile(work / core::pathFromUtf8(kJournalName));
     if (!text.ok()) {
@@ -231,14 +244,52 @@ std::optional<std::uint64_t> plannedSequence(const FsOps& fs, const Path& work)
         journal.records.front().args.size() != 3) {
         return std::nullopt;
     }
+    Planned planned;
     const std::string& digits = journal.records.front().args[2];
-    std::uint64_t sequence = 0;
     const auto [end, error] =
-        std::from_chars(digits.data(), digits.data() + digits.size(), sequence);
+        std::from_chars(digits.data(), digits.data() + digits.size(), planned.sequence);
     if (digits.empty() || error != std::errc() || end != digits.data() + digits.size()) {
         return std::nullopt;
     }
-    return sequence;
+    for (const JournalRecord& record : journal.records) {
+        if (record.op != JournalOp::Replace && record.op != JournalOp::Remove) {
+            continue;
+        }
+        if (record.args.size() != 1 || !checkJournalPath(record.args.front()).ok()) {
+            return std::nullopt;
+        }
+        planned.setAside.push_back(record.args.front());
+    }
+    return planned;
+}
+
+// Whether every file the commit moved aside is still in the transaction's folder, an ordinary
+// file under old/. A rollback puts back what is there (apply.cpp, restoreFromDisk), so with one
+// of them gone - a clean-up that was cut off, a folder somebody emptied - it would leave the
+// new version of that file among the old ones and call the mix "put back".
+bool oldFilesAreKept(const FsOps& fs, const Path& work, const Planned& planned)
+{
+    const Path old = work / core::pathFromUtf8(kOldName);
+    for (const std::string& path : planned.setAside) {
+        const core::Result<EntryInfo> info = fs.stat(old / core::pathFromUtf8(path));
+        if (!info.ok() || info->kind != EntryKind::File || info->reparsePoint) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Whether `stateDirectory` is the per-user folder the update was applied from: the helper that
+// made the swap ran from a copy in it, U/run-<tx> (state.hpp), and that copy stays there until
+// the transaction is settled. Where it is not, this run is looking in another folder than the
+// one the new version writes its marker to - KATANA_UPDATE_STATE_DIR set for Katana and not
+// for this run, another account - and a marker that is absent THERE says nothing about
+// whether the release started.
+bool isWhereTheUpdateRanFrom(const FsOps& fs, const Path& stateDirectory,
+                             const std::string& transaction)
+{
+    const core::Result<EntryInfo> info = fs.stat(runPath(stateDirectory, transaction));
+    return info.ok() && info->kind == EntryKind::Directory;
 }
 
 // True when the scan ANSWERS and names no process but this one. A scan that fails is not
@@ -288,19 +339,30 @@ void settleOne(const Path& root, const ApplyServices& services, const std::strin
         outcome.left.push_back(name);
         return;
     }
-    const std::optional<std::uint64_t> sequence = plannedSequence(fs, work);
+    // "No marker" is evidence only in the folder the marker would have been written to, and a
+    // rollback is whole only while every file it puts back is still kept: without either the
+    // update is left as it is. Both are looked at, not assumed.
+    const std::optional<Planned> planned = plannedBy(fs, work);
+    if (!planned || !isWhereTheUpdateRanFrom(fs, stateDirectory, name) ||
+        !oldFilesAreKept(fs, work, *planned)) {
+        outcome.left.push_back(name);
+        return;
+    }
     // The scan is asked twice: hashing a whole install takes seconds, and a program started in
     // them must not have the files moved from under it.
-    if (!sequence || !nobodyElseRuns(services.processes, root) ||
-        !detail::treeIsRelease(root, *sequence, services) ||
+    if (!nobodyElseRuns(services.processes, root) ||
+        !detail::treeIsRelease(root, planned->sequence, services) ||
         !nobodyElseRuns(services.processes, root)) {
         outcome.left.push_back(name);
         return;
     }
     if (const core::Status undone = rollback(root, name, services); !undone.ok()) {
-        // However far it got, somebody finishes it: its first step writes ROLLING_BACK, and
-        // from then on every start does, as for any rollback that was cut off (journal.hpp,
-        // needsRecovery); had it failed before that step, the next `--recover` decides again.
+        // Either way somebody comes back to it. A rollback moves nothing from this state until
+        // its ROLLING_BACK record is on disk (apply.cpp, rollbackTransaction): when it could
+        // not begin - the record or the folder would not be written or read - the tree is still
+        // the whole new version and the next `--recover` decides again; once the record is
+        // there every start finishes it, as it finishes any rollback that was cut off
+        // (journal.hpp, needsRecovery).
         outcome.incomplete.push_back(name);
         return;
     }
@@ -381,10 +443,12 @@ PendingOutcome settlePending(const Path& rootGiven, const ApplyServices& service
     }
     // An exception - a name that is not text, a conversion - ends the pass with what was
     // settled until then: whatever it did not reach is as it was, and a later start comes
-    // back to it. (A FaultFs's SimulatedCrash is no std::exception and goes through.)
+    // back to it. (A FaultFs's SimulatedCrash is no std::exception and goes through.) A pass
+    // that was cut short, like one whose listing failed, says so: `unread` is not "none left".
     try {
         const core::Result<std::vector<Found>> all = transactions(services.fs, root);
         if (!all.ok()) {
+            outcome.unread = true;
             return outcome;
         }
         for (const Found& one : all.value()) {
@@ -393,6 +457,7 @@ PendingOutcome settlePending(const Path& rootGiven, const ApplyServices& service
             }
         }
     } catch (const std::exception&) {
+        outcome.unread = true;
     }
     return outcome;
 }
@@ -609,9 +674,10 @@ Confirmed confirmStartedUnguarded(const Path& rootGiven, const Path& stateDirect
     const ApplyServices services{fs, processes, launcher, registry, nobody, ApplyTimings{}};
     const PendingOutcome outcome = settlePending(root, services, {}, stateDirectory, false);
     forgetSettled(fs, stateDirectory, outcome);
-    if (!outcome.left.empty() || outcome.healthy.empty()) {
+    if (!outcome.left.empty() || outcome.unread || outcome.healthy.empty()) {
         // The marker or the record could not be written just now, or the folder could not be
-        // read again: nothing is settled, so the logon entry stays, and the window asks again.
+        // read again: something is not settled, or may not be, so the logon entry stays, and
+        // the window asks again.
         return Confirmed::Busy;
     }
     // The command it names runs the helper copy that has just been deleted.
@@ -715,6 +781,15 @@ Settled settleUnprovedUnguarded(const Path& rootGiven, const Path& helper,
         return Settled::Nothing; // the cheap answer, without touching the lock
     }
 
+    // The logon net: `<helper> --recover <R>`, the very text the swap registered. Best effort,
+    // like the swap's own registration.
+    const auto rearm = [&] {
+        if (!helper.empty()) {
+            (void)services.registry.setRunOnce(kRunOnceName,
+                                               detail::runOnceCommand(helper, root));
+        }
+    };
+
     // The lock is how a dead helper is told from a live one: a helper holds it from its first
     // step to its last, and it goes with the process. Polled as recoverInProcess polls it - one
     // attempt would lose to a scanner that has the lock file open for a moment - and a lock
@@ -731,7 +806,14 @@ Settled settleUnprovedUnguarded(const Path& rootGiven, const Path& helper,
             break;
         }
         if (!isHeld(taken.error())) {
-            return Settled::Left; // no lock, so no way to know that nobody is working on it
+            // No lock, so no way to know that nobody is working on it: it is left. But not
+            // without the logon net - a lock that is HELD is a helper that is alive and whose
+            // registry this is not, and this is not that: the lock file cannot be opened at all
+            // (a scanner that answers "access denied", a folder that will not be written just
+            // now). Started by the RunOnce entry, this run is the last one Windows starts unless
+            // the entry is put back, and then nothing would ever come to settle the update.
+            rearm();
+            return Settled::Left;
         }
         if (Clock::now() - start >= wait) {
             return Settled::Busy;
@@ -739,18 +821,17 @@ Settled settleUnprovedUnguarded(const Path& rootGiven, const Path& helper,
         std::this_thread::sleep_for(services.timings.pollInterval);
     }
 
-    // Under the lock, look again: the helper that was waited for may have settled its own.
+    // Under the lock, look again: the helper that was waited for may have settled its own. A
+    // look that fails now is not "it has": the rule below looks once more and says so.
     const core::Result<std::vector<Found>> pending = transactions(fs, root);
-    if (!pending.ok() || !anyUnproved(pending.value())) {
+    if (pending.ok() && !anyUnproved(pending.value())) {
         return Settled::Nothing;
     }
 
     // FIRST the logon net. When this run was started by the RunOnce entry, Windows has taken
     // the entry away already; were the machine to lose power in the lines below, no logon
-    // would come back here. Best effort, like the swap's own registration.
-    if (!helper.empty()) {
-        (void)services.registry.setRunOnce(kRunOnceName, detail::runOnceCommand(helper, root));
-    }
+    // would come back here.
+    rearm();
 
     const detail::PendingOutcome outcome =
         detail::settlePending(root, services, {}, evidenceDirectory, true);
@@ -765,7 +846,7 @@ Settled settleUnprovedUnguarded(const Path& rootGiven, const Path& helper,
     if (!outcome.incomplete.empty()) {
         return Settled::RollbackIncomplete;
     }
-    if (!outcome.left.empty()) {
+    if (!outcome.left.empty() || outcome.unread) {
         return Settled::Left;
     }
     if (!outcome.rolledBack.empty()) {

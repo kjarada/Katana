@@ -847,6 +847,22 @@ std::optional<Failure> Applier::begin()
                       "or run: katana_updater --recover \"" + core::pathToUtf8(root_) +
                           "\", which confirms it or puts it back - then update again");
     }
+    if (earlier.unread) {
+        // Not "nothing is left": the folder could not be looked through, so an update that is
+        // not settled may be in it, and planning over one is what this step exists to prevent.
+        return refuse("interrupted_update",
+                      "the install's update folder could not be read, so it is not known whether "
+                      "an earlier update is still to be confirmed, and no new one is started. "
+                      "Update again; if it stays so, run: katana_updater --recover \"" +
+                          core::pathToUtf8(root_) + "\"");
+    }
+    if (!earlier.healthy.empty()) {
+        // The RunOnce entry the dead helper left names its copy U/run-<tx>, which has just been
+        // deleted, and nothing of that update is left for a logon to do. This swap registers its
+        // own entry when its journal says COMMITTING - and one that ends before that (Blocked,
+        // Refused) registers none and removes none (runOnceSet_), so the entry goes here.
+        (void)services_.registry.clearRunOnce(kRunOnceName);
+    }
     // What is installed may be another version now (the rollback put it back).
     return readInstallRecord();
 }
@@ -1423,13 +1439,24 @@ std::optional<Failure> Applier::watchHealth()
 // What a healthy transaction leaves behind goes: its folder, the staged files (only those
 // the manifest names - the stage path came from a command line), the marker, the RunOnce
 // entry. What a lock keeps from being deleted goes to cleanup.list for the next start.
+//
+// The folder and the marker go ONLY ONCE THE JOURNAL SAYS HEALTHY. While it still says
+// COMMITTED_PENDING_HEALTH the folder is an update that somebody will settle
+// (recover_internal.hpp, settlePending), and they settle it by exactly these two: the marker is
+// the proof that it starts, and old/ is what it would be put back from. A folder deleted in
+// part with its marker gone would read, to the next `--recover`, as a release that never
+// started - and be "put back" from the half of old/ that was left. So when the record cannot be
+// written both stay whole: the update stands, as it does when this helper dies before the
+// record, and the window it starts next, or the next swap, settles it healthy on that marker.
 void Applier::finishHealthy()
 {
     const JournalRecord healthy{JournalOp::Healthy, {}};
-    (void)journal_->append(std::span(&healthy, 1));
+    const bool recorded = journal_->append(std::span(&healthy, 1)).ok();
 
     std::vector<Path> leftovers;
-    detail::removeTree(fs_, work_, leftovers, kJournalName);
+    if (recorded) {
+        detail::removeTree(fs_, work_, leftovers, kJournalName);
+    }
 
     const Path stage = request_.stageDirectory;
     for (const ManifestFile& file : manifest_->files) {
@@ -1449,7 +1476,9 @@ void Applier::finishHealthy()
     (void)fs_.removeFile(stagedSignaturePath(stage));
     (void)fs_.removeEmptyDirectory(stage);
     if (!request_.stateDirectory.empty()) {
-        (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, request_.transaction));
+        if (recorded) {
+            (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, request_.transaction));
+        }
         for (const Path& leftover : leftovers) {
             (void)appendCleanup(request_.stateDirectory, leftover, fs_);
         }
@@ -1491,13 +1520,20 @@ ApplyResult Applier::rolledBack(const std::string& reason, const std::string& de
 ApplyResult Applier::fail(const Failure& failure, bool rollbackFirst)
 {
     if (rollbackFirst) {
+        const bool unhealthy =
+            failure.reason == "health_exit" || failure.reason == "health_timeout";
+        // The marker a start that then failed wrote is evidence of nothing, and it goes BEFORE
+        // the rollback. Should the rollback not even begin (its first record cannot be written)
+        // or this helper die in the next lines, the journal still says the update is pending -
+        // and a marker left beside it would have whoever settles it later call healthy a
+        // release this helper has just seen fail (recover_internal.hpp, settlePending).
+        if (unhealthy && !request_.stateDirectory.empty()) {
+            (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, request_.transaction));
+        }
         ApplyResult result = rolledBack(failure.reason, failure.detail);
         // A release that does not start must not be offered again as it was (state.hpp).
-        if (result.outcome == ApplyOutcome::RolledBack &&
-            (failure.reason == "health_exit" || failure.reason == "health_timeout") &&
-            manifest_ && !request_.stateDirectory.empty()) {
-            // The marker a start that then failed wrote is no evidence for the next one.
-            (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, request_.transaction));
+        if (result.outcome == ApplyOutcome::RolledBack && unhealthy && manifest_ &&
+            !request_.stateDirectory.empty()) {
             core::Result<UpdateState> state = readState(request_.stateDirectory);
             // A file that is not ours to read is replaced; one that failed to read for another
             // reason is left alone (recover_internal.hpp).
@@ -1765,7 +1801,20 @@ core::Status rollbackTransaction(const Path& rootGiven, const std::string& trans
         JournalPlan plan = readPlan(parsed.value());
         if (parsed->state != JournalState::Empty) {
             const JournalRecord rolling{JournalOp::RollingBack, {}};
-            (void)journal.append(std::span(&rolling, 1));
+            const core::Status said = journal.append(std::span(&rolling, 1));
+            // Of the states a rollback starts from, COMMITTED_PENDING_HEALTH alone says "the
+            // tree is a whole version: leave it" (journal.hpp, needsRecovery). The first file
+            // moved makes that untrue, and this record is what tells every later start so. When
+            // it is not on disk NOTHING IS MOVED: the tree stays the whole new version its
+            // journal says it is, and whoever comes next decides again from a journal that is
+            // true. From every other state the journal asks for a rollback already, with the
+            // record or without it, so there the record stays best effort: a disk too full for
+            // one more line is still a disk the renames work on.
+            if (!said.ok() && parsed->state == JournalState::CommittedPendingHealth) {
+                return core::makeError(core::ErrorCode::InvalidState,
+                                       "the journal cannot be written, so nothing was put back",
+                                       said.error().describe());
+            }
         }
         const core::Status restored = restoreFromDisk(fs, root, work, plan);
         // After the restore, which adds what it found under old/ and would not touch.

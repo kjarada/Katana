@@ -126,12 +126,17 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
 struct PendingOutcome {
     std::vector<std::string> healthy;    // proved: HEALTHY written, its folder deleted
     std::vector<std::string> rolledBack; // never proved and put back: the tree is the old version's
-    std::vector<std::string> left;       // could not be decided now: nothing was written for it
-    std::vector<std::string> incomplete; // put back in part: the rollback did not finish
+    std::vector<std::string> left;       // could not be decided now: it is as it was
+    // The rollback did not finish, or could not begin: put back in part, or not at all.
+    std::vector<std::string> incomplete;
     // What a lock kept from being deleted under R/.update (each such folder keeps its journal,
     // which says HEALTHY, so every later start sweeps it: remove_tree.hpp). Reported, not
     // queued: of the three callers one may not write the per-user folder.
     std::vector<std::filesystem::path> leftovers;
+    // The pass could not look at every folder: R/.update could not be listed, or the pass was
+    // cut short. The lists above are then what it got to, and an empty `left` is NOT "none is
+    // left": a caller that goes on only when everything is settled must not go on.
+    bool unread = false;
 };
 
 // THE RULE. For every folder under R/.update whose journal says COMMITTED_PENDING_HEALTH, but
@@ -147,9 +152,19 @@ struct PendingOutcome {
 //                (treeIsRelease, with the `toSequence` of the journal's PLAN record), and the
 //                process scan - asked before the hashing, and again as the last thing - answers
 //                and names nobody but this process: rollback() (apply.hpp), as it is.
+//                Two more things are looked at first, because "no marker" and "put back" are
+//                claims too. `stateDirectory` must be the folder the update was applied from -
+//                it holds the dead helper's copy, U/run-<tx> - or a marker missing from it
+//                says nothing (KATANA_UPDATE_STATE_DIR set for Katana and not for this run;
+//                another account). And every file the PLAN's REPLACE and REMOVE records moved
+//                aside must still be a file under <tx>/old, or the rollback would put back
+//                some of the old version and call the mix whole.
 //   left         in every other case - a marker that cannot be looked for, a scan that fails,
 //                a tree somebody changed, a program of the install running - and then NOTHING
-//                is written: not a journal record, not a file, not a registry value.
+//                is written: not a journal record, not a file, not a registry value. (One
+//                case writes a value: a marker that IS there and a HEALTHY record that cannot
+//                be appended. The version Settings > Apps shows was rewritten before the
+//                append, and it names what is installed either way.)
 //
 // `stateDirectory` (U, or empty: then there is no evidence, and nothing is decided) is only
 // READ. Starts no program. Throws nothing but a FaultFs's SimulatedCrash.
