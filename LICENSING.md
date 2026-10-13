@@ -180,9 +180,12 @@ project licence, or are not known to be:
    | `utilities` | four small files added with the utility tools (2026-09-25 and 26); one names its columns as a published government schema does (names only) |
    | `Survey_File` | six large files added on 2026-10-08: three `.fld` field files, one data-collector `.sdr` file and one raw instrument `.txt` file, with coordinates that look like a real site's, and **one text file that is a survey software vendor's documentation of its file format** (its title begins "Structure of the"), in the vendor's words. Who made the data, who owns it and whether it may be published is not recorded; the vendor's document is very probably not the owner's to license. `docs/survey.md` says of the project's own fixtures: "No proprietary sample files are used". |
 
-   `Survey_File` should leave the repository and the packages, or its owners'
-   permission should be recorded, before the repository is made public.
-3. **`tests/`**, which is not installed but will be published with the
+   `Survey_File` is published now: it is in the repository, which is public,
+   and `cmake/KatanaPackaging.cmake` installs it in every package. It should
+   leave both, or its owners' permission should be recorded. That was to be
+   settled before the repository was made public, and was not, so it is
+   overdue.
+3. **`tests/`**, which is not installed but is published with the
    repository. `docs/survey.md` says the survey fixtures were constructed from
    specifications, and `docs/dxf.md` that the two DXF drawings were written by
    hand. For the rest the origin is not recorded: the archive-format fixtures
@@ -238,8 +241,11 @@ show it.
   Windows ARM64 packages were not audited.
 * **`src/katana_qt/katana.rc.in`** says "Copyright (C) Jarada" with no year;
   the notice is "Copyright (c) 2026 Jarada".
-* **The release workflow** leaves out the built-in customisation and
-  `samples/Survey_File` until their rights are settled (above).
+* **The release workflow** leaves `samples/Survey_File` out of the packages
+  until its rights are settled (item 2 above); today every package holds it,
+  because `cmake/KatanaPackaging.cmake` installs all of `samples/`. The NSW
+  built-in customisation is not on this list: the owner decided on
+  2026-10-08 that releases ship it (item 1 above).
 * **A contact for written permission.** `https://github.com/kjarada/Katana`,
   the address in the notice, is the repository, which is public: it answered
   a request made without credentials on 2026-10-14 (on 2026-10-08, before it
