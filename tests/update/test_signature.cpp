@@ -1139,7 +1139,7 @@ std::string shellQuoted(const std::string& text)
 {
     std::string quoted = "'";
     for (const char c : text) {
-        quoted += c == '\'' ? std::string("'\''") : std::string(1, c);
+        quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
     }
     return quoted + "'";
 }

@@ -429,7 +429,10 @@ TEST(Inflate, AMemberSignedAsEmptyThatHoldsDataIsRefusedBeforeAnyOfItIsDelivered
 
 TEST(Inflate, AMemberThatInflatesToLessThanItsSignedSizeIsRefused)
 {
-    for (const std::uint64_t claimed : {881ull, 1000000ull, UINT64_MAX}) {
+    // Each element is said to be a std::uint64_t: a braced list deduces one type or none, and
+    // UINT64_MAX is an `unsigned long` where a long has 64 bits (Linux) while 881ull is not.
+    for (const std::uint64_t claimed :
+         {std::uint64_t{881}, std::uint64_t{1000000}, std::uint64_t{UINT64_MAX}}) {
         const auto data = update::inflateRawToString(kHello, claimed);
         // The largest claims are refused up front by the string form, the others by the
         // length check: both are InvalidArgument, and both are before the data is believed.
