@@ -14,7 +14,7 @@ assets, and the Windows installer), `docs/desktop.md`, "Help > Check for
 Updates" (the window's dialog, state by state), `docs/mcp.md`, "Updates" (the
 agent's tool), and `docs/headless.md`, "Updates in a headless run".
 
-**Where it stands (2026-10-13).** No release carries the updater yet, and no
+**Where it stands (2026-10-14).** No release carries the updater yet, and no
 installed copy has been updated by it. The public keys the tree pins are
 placeholders, so every build made from it today refuses every release
 (`reason=placeholder_keys`) until the owner has run the key steps below. The
@@ -48,10 +48,13 @@ listed under "To verify on first release".
 5. **If it goes wrong,** the old version is put back and opened again, and
    the dialog says so at that start: "Katana 0.3.0 could not be installed, so
    0.2.0 was restored." with the reason. A release that was installed and did
-   not start is not offered again. If another program of the install is still
-   running - `katana_mcp` held open by an agent's client, say - nothing is
-   touched and the dialog names it: "Close these first: katana_mcp.exe
-   (4412)." and "Then press Retry."
+   not start is not offered again unasked: the dialog adds "A later release
+   will be offered, and Settings > Updates offers this one again.", and the
+   button there, "Offer the version that was put back again", is the way
+   back for a sound release whose first start was only slow. If another
+   program of the install is still running - `katana_mcp` held open by an
+   agent's client, say - nothing is touched and the dialog names it: "Close
+   these first: katana_mcp.exe (4412)." and "Then press Retry."
 
 "A few seconds" is the swap, not the download. Neither has been timed on a
 real install ("To verify on first release"); the estimates made when the
@@ -92,12 +95,32 @@ records beside the programs say what R is (`include/katana/update/install.hpp`):
 | Record | Written by | Says |
 |---|---|---|
 | `R/share/katana/install.json` | packaging only: CPack's pre-build script (`cmake/KatanaPackaging.cmake`) | `{"schema":1,"target":"win64"}`: this copy is a RELEASE, and which target to ask the feed for. The target comes from here and never from the operating system: Windows on ARM running the x64 zip stays `win64` |
-| `R/share/katana/installed.json` | the helper, at commit | the version, sequence, tag and target of the release an update put here. Absent on a fresh install, whose version is then the one the program was built as |
+| `R/share/katana/installed.json` | the helper, at commit | the version, sequence, tag and target of the release an update put here. Absent on a fresh install, whose version is then the one the program was built as. Never believed below the program that reads it ("The installed version", below) |
 | `R/share/katana/installed.manifest.json`, `.sig` | the helper, at commit | the signed manifest of the installed version: what a later update, and the uninstaller, may remove |
 | `R/.update/` | the helper | the update lock, one folder per transaction (`journal`, `new/`, `old/`) and `recovery.log`; inside R so that every rename stays on one volume |
 
 Those four file names and the folder `.update` are reserved: no manifest may
 carry them.
+
+**The installed version** is the HIGHER of the version `installed.json` names
+and the version of the program that reads it (`update::readInstall`). The
+record is the helper's, written when an update commits, and nothing else
+keeps it true: a newer zip unpacked by hand over a copy that had updated
+itself leaves it naming the older version. Believed alone, that record would
+lower the floor against going back, and an EARLIER signed release - a later
+build of the version the record names, say - would pass for a newer one and
+be installed over the programs that are there. A program is never older than
+itself, so a record can raise the installed version and never lower it. Only
+the version is raised: the sequence, and that there is a record at all, stay
+the record's. With the versions equal the sequences decide, so a copy
+overwritten by hand is offered the release of its own version once more,
+which changes no program and writes the records that were stale. The rule is
+shown for a program below, at and above a record without a build of each
+(`detail::readInstallAs`, the same reading with the program's version handed
+in: `OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), for
+this build's own version (`ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion`),
+against the order itself (`AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`)
+and at the verbs (`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
 
 ### The three kinds
 
@@ -128,6 +151,22 @@ downloaded or applied to it, and `UPDATE STATUS`, which has no word for it,
 says `target=none kind=development` with a `warning` record that the install
 record could not be read, and why.
 
+**No kind is updated from a Katana that was started as administrator.** An
+installed copy and an archive copy are both updated by the helper as the
+person who runs Katana, from a copy of the helper in that person's update
+folder (below), which every ordinary program of theirs can write. Started
+from a process that holds the ELEVATED HALF OF A SPLIT TOKEN - Katana run
+"as administrator" on a machine where an administrator's programs
+ordinarily run with the filtered half - the helper would run with
+administrator rights from that folder. So `UPDATE APPLY CONFIRM` is refused
+there, `reason=elevated`, before the copy is made; the download stays, and
+Katana started the ordinary way applies it ("The verbs"). A machine with
+that protection turned off, and the built-in administrator account, have
+one token and no unelevated half that could interfere, and are not refused
+(`update::processIsElevated`, `include/katana/update/process.hpp`: Windows'
+`TokenElevationType` is `TokenElevationTypeFull`; a process that cannot ask,
+and every system but Windows, is "not elevated").
+
 ### The per-user folder
 
 What belongs to the person and not to the install is in the **update state
@@ -140,12 +179,12 @@ trust: nothing in U is believed without a signature check.
 
 | In U | Holds |
 |---|---|
-| `state.json` | `last_check`, `auto`, `skipped` (a version) and `blocked` (the sequences of releases that were installed here and did not start) |
+| `state.json` | `last_check`, `auto`, `skipped` (a version) and `blocked` (the sequences of releases that were installed here and did not start: neither offered nor applied again until `UPDATE BLOCKED CLEAR` empties the list) |
 | `last.json` | how the last swap ended: `status`, `reason`, `holder`, `version`, `tx`. The window shows it once at its next start and clears it |
 | `stage-<sequence>/` | the downloaded files of one release at their root-relative paths, and last of all `manifest.json` and `manifest.json.sig`, whose presence means "complete"; `stage-<sequence>.lock` beside it |
-| `run-<tx>/` | the copy of the helper that runs the swap. A swap that ends puts the folder on `cleanup.list` itself. The copy of a swap that was interrupted and recovered is listed there by the next start of an interactive window of that install, which learns of it from `R/.update/recovery.log` ("Recovery") |
-| `healthy-<tx>` | the marker a new version writes to say it starts |
-| `cleanup.list` | what is to be deleted and could not be at the time: what a held lock kept the helper from deleting, the helper copy of a request that nobody started, and the helper copy of a recovered swap, which the window's start lists itself. An interactive window of an installed copy removes what it names at its next start |
+| `run-<tx>/` | the copy of the helper that runs the swap. A swap that ends puts the folder on `cleanup.list` itself. The copy of a swap that was interrupted and recovered is listed there by the next start of an interactive window of that install, which learns of it from `R/.update/recovery.log` ("Recovery"). The copy of a helper that died during the health check is deleted by whoever settles that update with the right to write here - the window that confirms it, or the next swap - and listed like a recovered one after `katana_updater --recover` settled it |
+| `healthy-<tx>` | the marker a new version writes to say it starts: by the health run the helper starts, or - when that helper died first - by a window of the new version at its first idle turn ("An update whose helper died during the health check") |
+| `cleanup.list` | what is to be deleted and could not be at the time: what a held lock kept the helper from deleting, the helper copy of a request that nobody started (`app::abandonApply`, the one way a prepared apply is given up: `katana_cli`'s session, the window after Later or a close that was cancelled, and `main()` when the helper could not be started), and the helper copy of a recovered swap, which the window's start lists itself. An interactive window of an installed copy removes what it names at its next start; nothing else reads the list |
 
 A headless run and `katana_mcp` are given no state folder: they read and
 write none of this ("The three surfaces").
@@ -413,7 +452,7 @@ web server does, and Settings > Updates says so.
 |---|---|---|
 | `available` | a verified release above the installed version (or the same version with a higher sequence, for a copy an update installed) | `notify_only` for a release that is only announced |
 | `current` | the feed's release is not above it | `skipped` when it is, and the person skipped that version |
-| `blocked` | this very release was installed here and put back | `blocked_before` |
+| `blocked` | this very release was installed here, did not start and was put back | `blocked_before`, with a `detail=` that says the way back: "this release was installed here before, did not start and was put back, so it is not offered; UPDATE BLOCKED CLEAR (Settings > Updates in the window) offers it again" |
 | `unreachable` | the feed could not be read, or did not verify | `offline`, `http_404`, `http_403`, `http_429`, `http_<n>`, `html_page` (a sign-in page where the file should be), `bad_redirect` (a redirect to an address that cannot be used: none, or one that is not https), `too_many_redirects` (a sixth), `too_large`, `bad_signature`, `untrusted_key`, `placeholder_keys`, `malformed`, `wrong_product`, `wrong_target`, `wrong_channel`, `verify_unavailable`, `asset_missing`, `cancelled`, `no_transport`, and `error` for a failure the transport gave no token of its own |
 | `unsupported` | this copy cannot update | `development_tree`, `disabled_build`, `install_record`, `no_network` (a build without the HTTP stack, `-DKATANA_BUILD_IO=OFF`) |
 
@@ -475,7 +514,10 @@ there (the "preflight"): the copy is what runs the swap, so at commit
 nothing under R is loaded, and running it while the window is still open
 proves it starts - and lets a virus scanner look at it - before anything is
 closed. Nothing in it asks for administrator rights, and an install that
-cannot be written as it stands is refused, never retried with more.
+cannot be written as it stands is refused, never retried with more. Nor is
+it started with more than it needs: a Katana that was started as
+administrator is refused the apply before the copy is made
+(`reason=elevated`, "The three kinds").
 
 ```
 katana_updater --root R --stage S --state U --tx T --wait-pid P --relaunch <path|none>
@@ -485,18 +527,24 @@ katana_updater --selftest | --version | --help
 
 The first form is how Katana starts it and is not meant to be typed.
 `--recover R` puts back an update of the install folder R that was
-interrupted; it is the one command a person may have to run by hand, and
-every message that says a rollback did not finish names it. The helper
-prints `key=value` lines (`outcome=`, `reason=`, `exit=`, `detail=`, a
-`holder=` for each blocking process), and its exit code is its interface to
-a script:
+interrupted, and then settles one that is installed and was never said to
+start: confirms it, puts it back, or leaves it for a start that can decide
+("An update whose helper died during the health check"). It is the one
+command a person may have to run by hand, and every message that says a
+rollback did not finish names it. The helper prints `key=value` lines, and
+its exit code is its interface to a script. The swap prints `outcome=`,
+`reason=`, `exit=`, a `holder=` for each blocking process and `detail=`;
+`--recover` prints `recover=ok|nothing_to_do|failed`, `exit=` and `detail=`
+- `ok` is a run that found a transaction folder and did not fail - and,
+where this program swaps nothing ("Platform scope"), `recover=refused` with
+a `reason=` line.
 
 | Exit | Means |
 |---|---|
-| 0 | the update is installed and healthy; or `--recover` put everything right or had nothing to do |
-| 10 | blocked: a program of the install is still running; nothing was touched |
+| 0 | the update is installed and healthy; or `--recover` put everything right, had nothing to do, or met an update that was never said to start and confirmed it, put it back, or left it (its `detail=` begins with which: `confirmed:`, `put back:`, `left:`, or `busy:` when another helper holds the lock) |
+| 10 | blocked: a program of the install is still running, or one was started while the files were being hashed and copied; nothing was touched |
 | 11 | rolled back: the update failed and the previous version is back |
-| 12 | rollback incomplete: the install may be half updated; run `katana_updater --recover R` |
+| 12 | rollback incomplete: the install may be half updated; run `katana_updater --recover R`. Also what `--recover` itself answers when it could not finish: a half-swapped tree it could not put back, or an update that was never said to start whose putting back did not finish, or could not begin (then nothing was moved, and the next run decides again) |
 | 13 | refused: nothing was touched (the `reason=` line says why) |
 | 20 | the command line is wrong |
 | 21 | the staged release is not trusted by this program's keys, or `--selftest` failed |
@@ -512,18 +560,25 @@ and the fault loops break it before each of its file operations
 (`docs/testing.md`).
 
 1. **Lock and verify.** Take `R/.update/lock`; a lock another helper holds
-   ends this one in silence (`locked`). An earlier transaction that a crash
-   left unfinished is put back FIRST: planned over a half-swapped tree, a new
-   update would succeed and a later recovery would then roll old files over
-   it (`interrupted_update` when it cannot be put back). Then verify the
-   staged manifest with the helper's own keys - `staged_manifest`,
-   `notify_only`, `applier_too_new`, `downgrade`.
+   ends this one in silence (`locked`). Under it, what an earlier swap left
+   is settled FIRST. A transaction that a crash left unfinished is put back:
+   planned over a half-swapped tree, a new update would succeed and a later
+   recovery would then roll old files over it. An update that is in place
+   and was never said to start - its helper died in step 7 - is confirmed
+   when its marker `U/healthy-<tx>` is there, and is never put back from
+   here: a swap is not the place to judge a release somebody may be running
+   from. Where the first cannot be put back, the second has no marker, or
+   `R/.update` cannot be read to know, nothing new is started
+   (`interrupted_update`; the `detail` says which, and what settles it).
+   Then verify the staged manifest with the helper's own keys -
+   `staged_manifest`, `notify_only`, `applier_too_new`, `downgrade`.
 2. **Wait** for the window's process to exit (60 s), then for every process
    that was started from a file under R (30 s). Past that the outcome is
    `blocked`, naming them; nothing was touched. The helper NEVER kills a
    process it did not start: a program somebody is using is waited for and
    then named. The one process it does stop is its own health run of step 7,
-   when that outlasts its wait (`SpawnRequest::timeout`).
+   when that outlasts its wait (`SpawnRequest::timeout`). The same question
+   is asked once more in step 4.
 3. **Plan, changing nothing under R.** Hash every file the manifest lists.
    Equal: keep. Otherwise the staged file must exist and is COPIED - not
    renamed: the stage folder is user-writable, and a file in R must take R's
@@ -536,9 +591,24 @@ and the fault loops break it before each of its file operations
    touched, and a first update, which has no installed manifest, deletes
    nothing (`AFirstUpdateWithNoInstalledManifestDeletesNothing`). Any
    shortfall ends here with R untouched.
-4. **Journal.** Append the PLAN group - every operation the transaction will
-   make - with one flush to stable storage, then `COMMITTING`. On Windows a
-   `RunOnce` value, `KatanaUpdateRecover`, is registered for
+4. **Journal, and look again.** Append the PLAN group - every operation the
+   transaction will make - with one flush to stable storage. Then step 2's
+   SECOND SCAN. The first was over before the plan, and the plan hashes and
+   copies every changed file of a release: seconds, in which a person opens
+   Katana again or a script runs `katana_cli`, and a program started then
+   would go on running old code over the new tree. So the processes under R
+   are listed once more, with the PLAN on disk and nothing moved - one
+   question and no second wait. A holder found now is the `blocked` of step
+   2, exactly: the transaction's folder is deleted, the install is as it
+   was, the download stays for Retry, the old version is started again and
+   `last.json` names the holder. A scan that fails is no "nobody"
+   (`scan_failed`). Only then `COMMITTING`, the first record after the
+   answer, so that nothing is done between the two in which a program could
+   start unseen
+   (`AProgramStartedWhileThePlanWasMadeBlocksTheUpdateAndTheInstallAndTheDownloadAreAsBefore`,
+   `TheSecondLookIsTheLastThingBeforeTheJournalSaysCommitting`,
+   `AScanThatFailsAtTheSecondLookIsARefusalTooAndNothingIsTouched`). On
+   Windows a `RunOnce` value, `KatanaUpdateRecover`, is then registered for
    `<run copy>\katana_updater --recover R`: a machine that loses power now
    rolls back at its next logon even if no program of the install can start.
 5. **Commit, by renames only.** In the order data and seeds, libraries,
@@ -555,7 +625,12 @@ and the fault loops break it before each of its file operations
    out; a folder it created goes when empty; then `ROLLED_BACK`. So it is
    the same code after a crash at any point, the middle of an earlier
    rollback included. The old version is then started again and `last.json`
-   says `rolled_back` with the reason.
+   says `rolled_back` with the reason. One state is guarded: from
+   `COMMITTED_PENDING_HEALTH` NOTHING MOVES until the `ROLLING_BACK` record
+   is on disk. That state alone tells recovery to leave the tree, so the
+   journal must stop saying it before the tree stops being whole; where the
+   record cannot be written the rollback has not begun, and says so
+   (`AFailedHealthRunWhosePuttingBackCannotBeginLeavesTheWholeNewTreeAndNoMarkerToCallItHealthyBy`).
 7. **Success, once the new version has shown that it starts.** Journal
    `COMMITTED_PENDING_HEALTH`, then start the new version as `R/bin/katana
    --update-health <tx>` and wait up to 60 s. That run builds its window
@@ -564,20 +639,34 @@ and the fault loops break it before each of its file operations
    exits. Healthy is: the marker is there, and the run ended with 0 (or was
    still running when the wait ended, and was stopped). Anything else - it
    could not be started, it ended with an error, it never wrote its marker -
-   is not a working release: rollback as in 6 (`health_exit`,
-   `health_timeout`), and its sequence is added to `blocked` in
-   `state.json`, so that it is not offered again. When healthy: for an
-   installer-kind install rewrite the version shown in Settings > Apps;
-   journal `HEALTHY`; delete the transaction folder, the staged files and
-   the marker; remove the `RunOnce` value; write `last.json`; and start
-   Katana again as a person would. What a lock keeps from being deleted -
-   the helper's own running copy among it - goes on `U/cleanup.list` for
-   the next start.
+   is not a working release. A marker such a start wrote is deleted FIRST,
+   so that nobody who meets the transaction later can read it as proof;
+   then rollback as in 6 (`health_exit`, `health_timeout`), and its
+   sequence is added to `blocked` in `state.json`, so that it is not
+   offered again until a person asks (`UPDATE BLOCKED CLEAR`). When healthy:
+   for an installer-kind install rewrite the version shown in Settings >
+   Apps; journal `HEALTHY`; delete the transaction folder, the staged files
+   and the marker; remove the `RunOnce` value; write `last.json`; and start
+   Katana again as a person would. The folder and the marker go only once
+   `HEALTHY` is on disk: until then they are what the update is settled by
+   (`AnUpdateWhoseHealthyRecordCannotBeWrittenKeepsItsFolderAndItsMarkerAndIsSettledByThem`).
+   What a lock keeps from being deleted - the helper's own running copy
+   among it - goes on `U/cleanup.list` for the next start.
 
 If the ROLLBACK ITSELF fails - a file that stays locked, a failing disk -
 the outcome is `rollback_incomplete`, never "rolled back": nothing is
 started, the `RunOnce` entry stays for the next logon, and `last.json` and
 the dialog name the command to run, `katana_updater --recover <R>`.
+
+If THE HELPER DIES in step 7 - between its `COMMITTED_PENDING_HEALTH`
+record and its `HEALTHY` one: power, a shutdown, the process ended - the
+tree is a whole new version that nobody has said starts. The `RunOnce`
+entry is still registered, the helper's copy is still in `U/run-<tx>`, and
+no `last.json` was written. No program's `update::recover` touches such an
+update: it may be a live helper's, waiting for that very program. It is
+settled under the update lock by `katana_updater --recover`, by a window of
+the new version, or by step 1 of the next swap ("An update whose helper
+died during the health check", under "Recovery").
 
 The steps are numbered as `include/katana/update/apply.hpp` numbers them,
 which is how the code and the other documents cite them.
@@ -597,6 +686,25 @@ stops at the first line that is incomplete, has a wrong check or is out of
 order, so a torn last write is ignored. The operations are `PLAN`, `ADD`,
 `REPLACE`, `REMOVE`, `MKDIR`, `COMMITTING`, `MOVED_OLD`, `MOVED_NEW`,
 `COMMITTED_PENDING_HEALTH`, `ROLLING_BACK`, `ROLLED_BACK` and `HEALTHY`.
+
+**Who writes what follows `COMMITTED_PENDING_HEALTH`.** The helper that made
+the swap, while it lives: `HEALTHY` once its health run has passed, or
+`ROLLING_BACK` and `ROLLED_BACK` when it has not. A helper that dies in
+between leaves the journal at `COMMITTED_PENDING_HEALTH`, and there is no
+further kind of record for that: the SAME records are appended later, under
+the update lock, by whoever settles the transaction - `HEALTHY` by
+`katana_updater --recover`, by a window of the new version or by the next
+swap, each on the marker; `ROLLING_BACK` and `ROLLED_BACK` by
+`katana_updater --recover` alone. So a journal reads the same way whoever
+finished it, and `update::needsRecovery` is as it was: `PLAN`, `COMMITTING`
+and `ROLLING_BACK` are what a crash left; `COMMITTED_PENDING_HEALTH` is not.
+And while a journal says `COMMITTED_PENDING_HEALTH` it is TRUE of the disk:
+the tree is the whole new version, because a rollback from that state moves
+no file before its `ROLLING_BACK` record is written; every old file is still
+in the folder, and the marker is there exactly when the new version started
+well, because the folder and the marker are deleted only after `HEALTHY` is
+written, and the marker of a start that then failed before the rollback
+begins.
 
 The journal is NOT authenticated: it lies in a folder a process of the same
 user can write, and its check finds a torn write, not a forged line. So a
@@ -618,7 +726,7 @@ has never updated.
 | The journal says | Recovery |
 |---|---|
 | nothing complete, `PLAN`, `COMMITTING`, `ROLLING_BACK` | a crash left it half done: rolled back, by running the helper copy `U/run-<tx>/katana_updater` (it is outside R, so it works when R's own `bin/` is half swapped), else `R/bin/katana_updater`, with `--recover R` |
-| `COMMITTED_PENDING_HEALTH` | left as it is: the tree is a whole version, and the folder is what a health rollback needs. A later update that proves healthy sweeps it |
+| `COMMITTED_PENDING_HEALTH` | left exactly as it is, with no lock asked for and nothing started: the tree is a whole version, and the helper that owns the folder may be alive and waiting for the very program that asks. When that helper has died, it is settled by others ("An update whose helper died during the health check", below) |
 | `ROLLED_BACK`, `HEALTHY` | over: what is left of the folder is deleted |
 
 An update that is running now holds the lock; recovery waits up to 20 s for
@@ -626,9 +734,12 @@ it and then leaves it alone. A recovery that fails is said on stderr with the
 command to run by hand, and the program goes on.
 
 `katana_updater --recover` is started by headless programs too, so it writes
-NOTHING per user - no `last.json`, no `cleanup.list` - whoever started it.
-Its one record is a line in `R/.update/recovery.log` for each run that found
-something to put right.
+NOTHING per user - no `last.json`, no `state.json`, no `cleanup.list`, no
+health marker - whoever started it. It READS U for one question, and only
+when the install holds an update that was never said to start: whether that
+update's marker `U/healthy-<tx>` is there, and its helper copy `U/run-<tx>`
+(below). Its one record is a line in `R/.update/recovery.log` for each run
+that found something to put right.
 
 `update::recover` keeps the same rule in the program that called it. It
 READS U, to find the helper copy `U/run-<tx>/katana_updater`, and that is
@@ -702,6 +813,142 @@ program runs on as old code until it is closed. A per-user install is a
 folder of one profile, so this takes an archive unpacked where several
 accounts reach it (`src/katana_updater/process_scan_win.cpp` gives the
 reasons the file's name alone is not held on).
+
+### An update whose helper died during the health check
+
+The helper installs a release and then waits, up to a minute, for the new
+version to prove that it starts (step 7). A helper that dies in that wait -
+power, a shutdown, the process ended - leaves an update that is INSTALLED AND
+WAS NEVER SAID TO START:
+
+- the journal at `COMMITTED_PENDING_HEALTH`, the tree a whole new version,
+  and every file the commit moved aside still under `R/.update/<tx>/old/`;
+- the `RunOnce` entry of step 4, still registered;
+- the helper's copy in `U/run-<tx>/`, on no list, and the marker
+  `U/healthy-<tx>` when the health run got as far as writing it;
+- no `last.json`, so nothing for a window to show.
+
+Recovery is right to leave that tree alone, and until 2026-10-14 nothing
+else settled it but a later update that proved healthy: `--recover` and the
+`RunOnce` entry did nothing with it, so a release that could not start
+stayed installed until the person reinstalled. It is settled now, by
+evidence and never by assumption.
+
+**One rule** (`detail::settlePending`, `src/katana_update/recover_internal.hpp`)
+for every transaction whose journal says `COMMITTED_PENDING_HEALTH`. Its
+caller holds the update lock. A helper holds that lock from its first step
+to its last and it goes with the process, so holding it is how a settler
+knows that no helper is alive and waiting on the transaction.
+
+| Settled as | When | What is done |
+|---|---|---|
+| `HEALTHY` | `U/healthy-<tx>` is a file: the proof the swap itself accepts, whoever wrote it | for an installer-kind install the version shown in Settings > Apps is rewritten (the swap writes it only once the proof is there, and may have died before); `HEALTHY` is appended, one flushed record; then the folder is deleted, its journal last |
+| `ROLLED_BACK` | only for the one caller that may put back, and only when ALL of these hold: there is no marker; U holds `run-<tx>`, the dead helper's copy, so U is the folder the update was applied from and the one the marker would be in; every file the PLAN's `REPLACE` and `REMOVE` records moved aside is still a file under `old/`; the tree is still that release (`detail::treeIsRelease`: `installed.manifest.json` verifies with the settler's own keys, its sequence is the PLAN's, and every file it lists that is no seed hashes as listed); and the process scan - asked before the hashing, and again as the last thing - answers and names nobody but the settler itself | `update::rollback`, as step 6 does it |
+| left as it is | every other case: a marker that cannot be looked for, a scan that fails, a tree somebody changed, old files that are not all kept, another per-user folder, a program of the install running | NOTHING is written: no journal record, no file, no registry value |
+
+"No marker" and "put back" are claims too, which is why the rule looks
+before it believes either. A marker missing from ANOTHER folder than the one
+the new version writes to - `KATANA_UPDATE_STATE_DIR` set for Katana and not
+for this run, another account - says nothing about whether the release
+started (`AMarkerMissingFromAnotherPerUserFolderIsNotProofThatTheReleaseNeverStarted`).
+A rollback puts back what is under `old/`, so with one of those files gone
+it would leave a mix and call it the old version. And nothing is ever put
+back under a running program, or over files that are no longer that release
+(`NothingIsPutBackUnderARunningProgramOrOverFilesThatAreNoLongerThatRelease`,
+`TheProgramsAreAskedForBeforeTheReleaseInTheTreeIsReadAndAgainAfterItAndNothingChangesUntilThen`).
+
+**Three callers**, which differ only in what they may do
+(`include/katana/update/recover.hpp`):
+
+1. **`katana_updater --recover R`** - the `RunOnce` entry at the next logon,
+   or a person. It first does what it always did, unchanged
+   (`update::recoverInProcess`), and when that is OK calls
+   `update::settleUnproved`. With no such update: nothing, and no lock is
+   asked for. Otherwise the lock is polled as recovery polls it, up to 20 s;
+   a lock that stays held is a live helper's health run, which is not this
+   run's to judge: `busy`, with nothing written, the registry included. Then,
+   FIRST, the `RunOnce` entry is registered again, for the helper that is
+   running and R - the very text the swap registered, when it was that entry
+   which started the run: Windows removes an entry before it runs it, so a
+   run that lost power in the next lines would otherwise leave no logon to
+   come back at
+   (`TheLogonNetIsPutBackFirstAndTheVersionIsRewrittenBeforeTheRecordIsWritten`).
+   Then the rule, putting back allowed. Then the entry is removed when no
+   transaction folder is left under `R/.update`; an update that was left, or
+   a putting back that did not finish, keeps it. (A lock that cannot be
+   opened at all is no helper's: the update is left, with the entry
+   registered again.) U is only READ - the marker stays where it is - so the
+   headless rule above holds for this too
+   (`AnUpdateWhoseMarkerIsThereIsSettledHealthyAndThePerUserFolderIsOnlyRead`).
+   The run prints `recover=ok`, exit 0, and a `detail=` that begins with
+   what became of the update - `confirmed:`, `put back:`, `left:` or `busy:`
+   - or `recover=failed`, exit 12, when the putting back did not finish or
+   could not begin.
+
+   What such a run cannot record is NOT recorded: a putting back made here
+   writes no `last.json` and does not add the release to `blocked`, so the
+   next check offers that release again. No apply-and-put-back loop follows:
+   nothing applies an update but a person asking for it, and an update a
+   person applies runs under a live helper, whose own health check blocks a
+   release that does not start.
+2. **A window of the new version**, on its first idle turn and before the
+   automatic check (`UpdateWorkbench::start`). A window that has come idle is
+   exactly what the health run exists to show, so it IS the proof - when it
+   is that version. The call is made only in an interactive window (it
+   writes per-user state), on Windows, of an installed copy that has an
+   install record and whose installed version is the program's own
+   (`updateStartMayConfirm`, with the record read again at that moment).
+   What that refuses is a window of the OLD files that was started during
+   the commit: the record then names a version above its own, and its start
+   proves nothing about the release. `update::confirmStarted` then: with no
+   such update, nothing - a listing of one folder. One attempt at the lock,
+   since a window does not wait; while it is held the window asks again
+   every 5 s, 12 times - the minute a helper waits at most - and then leaves
+   it to the next start or the next logon. Else the marker `U/healthy-<tx>`
+   is written FIRST, so that a crash from there on is settled healthy by the
+   next `--recover` too; the rule settles the update healthy, and never puts
+   anything back; the marker and `U/run-<tx>` are deleted, what will not go
+   being put on `cleanup.list`; and the `RunOnce` entry is removed. Nothing
+   is shown and nothing logged: the update did work
+   (`docs/desktop.md`, "An update that was never said to start").
+3. **The next swap**, in its step 1, after it has put back what a crash
+   left: the rule with the request's own U, and never a putting back.
+   Settled: the marker and `U/run-<tx>` go, and the dead helper's `RunOnce`
+   entry with them. Left: `interrupted_update`, and nothing is touched. So an
+   install holds ONE such update at most
+   (`AnEarlierUpdateWhoseMarkerIsThereIsSettledFirstWhateverBecomesOfTheNextOne`,
+   `AnEarlierUpdateThatWasNeverSaidToStartStopsTheNextOneBeforeItTouchesAnything`).
+
+`update::recover` itself - the first act of every program, the health run
+included - is unchanged and asks for no lock over such an update
+(`AnUpdateThatWasNeverSaidToStartIsLeftExactlyAsItIsWithNoLockAndNoHelper`):
+that is what keeps the health run's own recovery from waiting on, or
+starting again, the helper that started it. And none of the three settlers
+starts a program.
+
+**What comes of it, case by case.**
+
+- *Power is lost again while it is settled.* Before `HEALTHY` is on disk the
+  next settler decides again from the same evidence; after it any start
+  sweeps what is left of the folder; and a putting back that was cut off is
+  finished by every start, as any rollback is - `ROLLING_BACK` is a state
+  recovery puts back. Three loops die before every change to the disk of a
+  healthy settlement, of a putting back and of a window's confirming, and
+  require the whole tree to be one version's afterwards ("The update
+  system's tests" in `docs/testing.md`).
+- *The window, `katana_cli` and `katana_mcp` are started together.* Each
+  one's `update::recover` returns at once, and the window confirms.
+- *A helper is alive, in its own health run.* It holds the lock: `--recover`
+  answers `busy` and a window asks again; the helper settles its own update.
+- *Katana is started at a logon before the `RunOnce` entry runs.* Its window
+  confirms the update; or the scan names it as a program of the install, and
+  `--recover` leaves the update for the next logon, the entry registered
+  again.
+- *A program's own recovery starts `--recover`* (it found a half-swapped
+  tree). That program runs from R, so the scan names it and nothing of this
+  kind is put back under it.
+
+What this leaves open is under "Not done".
 
 ## The three surfaces
 
