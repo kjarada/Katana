@@ -316,8 +316,9 @@ if(Python3_Interpreter_FOUND)
     # it. `katana_standard_parity` holds that the two have the same keys and, for each key, the same kinds of rule
     # (parity.py, with its documented exceptions in parity_exceptions.json); `katana_standard_parity_script` is
     # parity.py's own test, on small invented customisations; `katana_standard_originality` scans the two files for
-    # anything but the keys that they share (originality.py). All three read the two files with Python's json module
-    # alone (docs/katana_standard.md, "What is shared and what is not").
+    # anything but the keys that they share (originality.py), and `katana_standard_originality_script` is that
+    # scan's own test, on two invented libraries. The scripts read the files with Python's json module alone
+    # (docs/katana_standard.md, "What is shared and what is not").
     set(_ks_tools "${PROJECT_SOURCE_DIR}/tools/katana_standard")
     set(_ks_nsw "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json")
     set(_ks_own "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")
@@ -327,6 +328,8 @@ if(Python3_Interpreter_FOUND)
         COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_parity.py")
     add_test(NAME katana_standard_originality
         COMMAND "${KATANA_PYTHON}" "${_ks_tools}/originality.py" "${_ks_nsw}" "${_ks_own}")
+    add_test(NAME katana_standard_originality_script
+        COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_originality.py")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only

@@ -36,7 +36,10 @@
 //
 // Nothing here names a definition, a layer, a group or a legend label of the
 // NSW customisation: where the two are compared it is by key and by kind of
-// entity, from the two tracked files, at run time.
+// entity, from the two tracked files, at run time. What else the two share is
+// counted by tools/katana_standard/originality.py (nothing: no name, group,
+// layer, label, colour name, attribute name or text style, and of colour
+// values only the white of communications) and held here by count.
 
 #include <gtest/gtest.h>
 
@@ -655,7 +658,8 @@ TEST(KatanaStandard, OnlyTheBareStarIsAPipeAndSizesItFromTheDiameterAttribute)
                            : section == SurveySection::VertexPipe ? *rule.vertexPipe
                                                                   : *rule.segmentPipe;
         EXPECT_TRUE(pipe.active) << word;
-        EXPECT_EQ(pipe.justify, "Obvert") << word << ": a string with a diameter is measured from its top";
+        EXPECT_EQ(pipe.justify, "Obvert")
+            << word << ": a string with a diameter is measured from its top";
         EXPECT_EQ(pipe.shape, "diameter") << word;
         EXPECT_EQ(pipe.size1, "$Diameter (mm)") << word << " sizes from an attribute";
         EXPECT_TRUE(pipe.size2.empty()) << word;
@@ -678,8 +682,13 @@ TEST(KatanaStandard, TheSevenTextCodesAreStandardTextInMillimetresOfPaper)
     }
     // The keys 1 to 5 and 7 are the sizes 1.5, 2.5, 3.5, 5, 7 and 10 mm; 8 is
     // the parcel label's 2.5 (census.py "textSizes").
-    EXPECT_EQ(sizes, (std::map<std::string, double>{
-                         {"1", 1.5}, {"2", 2.5}, {"3", 3.5}, {"4", 5.0}, {"5", 7.0}, {"7", 10.0}, {"8", 2.5}}));
+    EXPECT_EQ(sizes, (std::map<std::string, double>{{"1", 1.5},
+                                                    {"2", 2.5},
+                                                    {"3", 3.5},
+                                                    {"4", 5.0},
+                                                    {"5", 7.0},
+                                                    {"7", 10.0},
+                                                    {"8", 2.5}}));
     // And each has a feature rule under its star that names the layer all text goes on.
     const auto features = rulesOf(file, SurveySection::Map);
     for (const char* key : {"1*", "2*", "3*", "4*", "5*", "7*", "8*"}) {
@@ -700,15 +709,18 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndNoOtherCodeClaimsOneButTh
     const auto attributes = rulesOf(file, SurveySection::StringAttribute);
     for (const auto& [key, feature] : rulesOf(file, SurveySection::Map)) {
         const auto found = attributes.find(key);
-        const bool says = found != attributes.end() && hasAttributeNamed(*found->second, "utility.type");
+        const bool says =
+            found != attributes.end() && hasAttributeNamed(*found->second, "utility.type");
         const bool inUtilities = feature->model.rfind("utilities/", 0) == 0;
         // The stormwater pits, structures, pipes and culverts are services too,
         // though they are catalogued with drainage.
         const bool stormwater = feature->model.rfind("drainage/pipes/", 0) == 0 ||
                                 feature->model.rfind("drainage/structures/", 0) == 0;
         if (!inUtilities) {
-            EXPECT_EQ(says, stormwater) << key << (stormwater ? " is stormwater and must say so"
-                                                              : " is not a service and must not claim one");
+            EXPECT_EQ(says, stormwater)
+                << key
+                << (stormwater ? " is stormwater and must say so"
+                               : " is not a service and must not claim one");
             if (stormwater && says) {
                 EXPECT_TRUE(hasAttribute(*found->second, "utility.type", "stormwater")) << key;
                 ++stormwaterTyped;
@@ -729,7 +741,8 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndNoOtherCodeClaimsOneButTh
             continue;
         }
         ASSERT_NE(found, attributes.end()) << key;
-        EXPECT_TRUE(hasAttribute(*found->second, "utility.type", service)) << key << " " << feature->model;
+        EXPECT_TRUE(hasAttribute(*found->second, "utility.type", service))
+            << key << " " << feature->model;
         ++typedUtilities;
         ++perService[service];
         if (hasAttributeNamed(*found->second, "utility.status")) {
@@ -843,7 +856,9 @@ TEST(KatanaStandard, EveryBuriedUtilityLineAsksForItsOwnerItsConditionAndItsDept
     EXPECT_EQ(lines, 52u);
     EXPECT_EQ(depth, 38u);
     EXPECT_EQ(height, 4u);
-    EXPECT_EQ(neither, (std::set<std::string>{"EC*", "EL*", "RE*", "SC*", "SP*", "SQ*", "ST*", "TX*", "US*"}));
+    const std::set<std::string> outlines{"EC*", "EL*", "RE*", "SC*", "SP*",
+                                         "SQ*", "ST*", "TX*", "US*"};
+    EXPECT_EQ(neither, outlines);
     EXPECT_EQ(depth + height + neither.size() + 1u, lines);
 }
 
@@ -857,20 +872,24 @@ TEST(KatanaStandard, AnAttributeWithNoValueIsAPromptAndOnlyAFewKindsAreApplied)
         std::set<std::string> names;
         for (const auto& attribute : rule->attributes) {
             EXPECT_TRUE(attribute.type == "text" || attribute.type == "integer") << key;
-            EXPECT_TRUE(names.insert(attribute.name).second) << key << " repeats " << attribute.name;
+            EXPECT_TRUE(names.insert(attribute.name).second)
+                << key << " repeats " << attribute.name;
             if (attribute.value.empty()) {
                 ++prompts;
             } else {
                 ++applied;
                 ++appliedNames[attribute.name];
-                // Applied: the service word, a model zone, or a size the key itself states (a whole number).
+                // Applied: the service word, a model zone, or a size the key itself
+                // states (a whole number).
                 const bool service = attribute.name == "utility.type";
                 const bool zone = attribute.name == "Check Zone";
-                const bool stated = attribute.name == "Diameter (mm)" || attribute.name == "Height (mm)";
+                const bool stated =
+                    attribute.name == "Diameter (mm)" || attribute.name == "Height (mm)";
                 EXPECT_TRUE(service || zone || stated) << key << " applies " << attribute.name;
                 if (zone || stated) {
                     EXPECT_EQ(attribute.type, "integer") << key;
-                    EXPECT_EQ(attribute.value.find_first_not_of("0123456789"), std::string::npos) << key;
+                    EXPECT_EQ(attribute.value.find_first_not_of("0123456789"), std::string::npos)
+                        << key;
                 }
             }
         }
@@ -881,8 +900,10 @@ TEST(KatanaStandard, AnAttributeWithNoValueIsAPromptAndOnlyAFewKindsAreApplied)
     // (the culverts D0 to D9 and the box culverts B0 to B9 that exist).
     EXPECT_EQ(applied, 244u);
     EXPECT_EQ(prompts, 641u);
-    EXPECT_EQ(appliedNames, (std::map<std::string, std::size_t>{
-                                {"Check Zone", 12}, {"Diameter (mm)", 28}, {"Height (mm)", 18}, {"utility.type", 186}}));
+    EXPECT_EQ(appliedNames, (std::map<std::string, std::size_t>{{"Check Zone", 12},
+                                                                {"Diameter (mm)", 28},
+                                                                {"Height (mm)", 18},
+                                                                {"utility.type", 186}}));
     EXPECT_EQ(186u + 12u + 28u + 18u, 244u);
 }
 
@@ -941,7 +962,8 @@ TEST(KatanaStandard, EveryDefinitionIsInPaperMillimetresAndStaysInsideTheBoundsO
                     highY = std::max(highY, y);
                 }
             }
-            if (stroke.op == StrokeOp::Circle || stroke.op == StrokeOp::Arc || stroke.op == StrokeOp::Dot) {
+            if (stroke.op == StrokeOp::Circle || stroke.op == StrokeOp::Arc ||
+                stroke.op == StrokeOp::Dot) {
                 EXPECT_TRUE(atMostThreeDecimals(stroke.radius)) << style.name;
             }
             if (symbol) {
@@ -964,7 +986,8 @@ TEST(KatanaStandard, EveryDefinitionNameIsTitleCaseWithNoDigitAndNoStop)
         std::stringstream words(style.name);
         for (std::string word; std::getline(words, word, ' ');) {
             ASSERT_FALSE(word.empty()) << "'" << style.name << "'";
-            EXPECT_TRUE(std::isupper(static_cast<unsigned char>(word.front())) || small.count(word) == 1)
+            EXPECT_TRUE(std::isupper(static_cast<unsigned char>(word.front())) ||
+                        small.count(word) == 1)
                 << style.name << ": '" << word << "'";
         }
         EXPECT_EQ(style.name.find_first_of("0123456789.-_/"), std::string::npos) << style.name;
@@ -1077,7 +1100,7 @@ TEST(KatanaStandard, EveryDefinitionAndEveryCodeIsCataloguedInTheDocument)
     EXPECT_EQ(missing, 0u);
 }
 
-// ---- the keys of the NSW built-in -------------------------------------------------------------------------
+// ---- the keys of the NSW built-in ------------------------------------------------------------
 
 TEST(KatanaStandard, EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey)
 {
@@ -1091,9 +1114,11 @@ TEST(KatanaStandard, EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey)
     // parity.py and tools/customisation_census.py: the other library has 632 keys.
     EXPECT_EQ(theirs.size(), 632u);
     std::vector<std::string> missing;
-    std::set_difference(theirs.begin(), theirs.end(), ours.begin(), ours.end(), std::back_inserter(missing));
+    std::set_difference(theirs.begin(), theirs.end(), ours.begin(), ours.end(),
+                        std::back_inserter(missing));
     std::vector<std::string> extra;
-    std::set_difference(ours.begin(), ours.end(), theirs.begin(), theirs.end(), std::back_inserter(extra));
+    std::set_difference(ours.begin(), ours.end(), theirs.begin(), theirs.end(),
+                        std::back_inserter(extra));
     EXPECT_TRUE(missing.empty()) << missing.size() << " keys are missing, the first "
                                  << (missing.empty() ? std::string() : missing.front());
     EXPECT_TRUE(extra.empty()) << extra.size() << " keys are extra, the first "
@@ -1181,7 +1206,9 @@ std::vector<SurveySection> sectionsOf(const Customisation& library, const std::s
         }
     }
     if (dropExtraAttributes && !otherHasAttributes) {
-        sections.erase(std::remove(sections.begin(), sections.end(), SurveySection::StringAttribute), sections.end());
+        sections.erase(
+            std::remove(sections.begin(), sections.end(), SurveySection::StringAttribute),
+            sections.end());
     }
     return sections;
 }
@@ -1228,15 +1255,19 @@ TEST(KatanaStandard, FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBui
     ASSERT_EQ(distinct.size(), 40u) << "the sample names a key twice";
     for (const std::string& key : keys) {
         SCOPED_TRACE("key " + key);
-        ASSERT_TRUE(hasSection(file, key, SurveySection::Map) || hasSection(file, key, SurveySection::Tinable) ||
-                    hasSection(file, key, SurveySection::VertexTextStyle) || hasSection(file, key, SurveySection::Pipe))
+        ASSERT_TRUE(hasSection(file, key, SurveySection::Map) ||
+                    hasSection(file, key, SurveySection::Tinable) ||
+                    hasSection(file, key, SurveySection::VertexTextStyle) ||
+                    hasSection(file, key, SurveySection::Pipe))
             << "the sample names a key this library lacks";
         ASSERT_FALSE(other.value.map.rules().empty());
 
         // 1. The same ordered kinds of rule. This library adds one attributes
         //    rule to a service key where the other has none; that is left out.
-        const bool otherHasAttributes = hasSection(other.value, key, SurveySection::StringAttribute);
-        EXPECT_EQ(sectionsOf(file, key, true, otherHasAttributes), sectionsOf(other.value, key, false, true));
+        const bool otherHasAttributes =
+            hasSection(other.value, key, SurveySection::StringAttribute);
+        EXPECT_EQ(sectionsOf(file, key, true, otherHasAttributes),
+                  sectionsOf(other.value, key, false, true));
 
         // 2. The first attributes rule of the other library: the same entries
         //    (a type and whether a value is given), then maybe more.
@@ -1260,13 +1291,16 @@ TEST(KatanaStandard, FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBui
             ASSERT_EQ(ours->attributes.size(), theirs->attributes.size());
             for (std::size_t i = 0; i < theirs->attributes.size(); ++i) {
                 EXPECT_EQ(ours->attributes[i].type, theirs->attributes[i].type) << "entry " << i;
-                EXPECT_EQ(ours->attributes[i].value.empty(), theirs->attributes[i].value.empty()) << "entry " << i;
+                EXPECT_EQ(ours->attributes[i].value.empty(), theirs->attributes[i].value.empty())
+                    << "entry " << i;
             }
         }
 
         // 3. The same code makes the same kind of entity. A code that the key
         //    answers: the key without its star, or the key itself.
-        const std::string code = key == "*" ? std::string("QZ") : (key.back() == '*' ? key.substr(0, key.size() - 1) : key);
+        const std::string code = key == "*" ? std::string("QZ")
+                                 : key.back() == '*' ? key.substr(0, key.size() - 1)
+                                                     : key;
         const Kind a = kindOf(other.value, code);
         const Kind b = kindOf(file, code);
         EXPECT_EQ(b.matched, a.matched) << code;
@@ -1303,14 +1337,51 @@ TEST(KatanaStandard, FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBui
 
 namespace {
 
+// The names of every attribute a library's rules apply or ask for, whichever
+// list of a rule holds them.
+std::set<std::string> attributeNamesOf(const Customisation& library)
+{
+    std::set<std::string> names;
+    for (const SurveyRule& rule : library.map.rules()) {
+        for (const auto* list :
+             {&rule.attributes, &rule.vertexAttributes, &rule.segmentAttributes}) {
+            for (const auto& attribute : *list) {
+                names.insert(attribute.name);
+            }
+        }
+    }
+    return names;
+}
+
+// The text styles a library's text rules name.
+std::set<std::string> textStylesOf(const Customisation& library)
+{
+    std::set<std::string> styles;
+    for (const SurveyRule& rule : library.map.rules()) {
+        if (rule.textStyle && !rule.textStyle->textstyle.empty()) {
+            styles.insert(rule.textStyle->textstyle);
+        }
+    }
+    return styles;
+}
+
+// Whether the survey code keys of the library compared with are promised to
+// be this library's: they are the NSW customisation's, on the owner's
+// decision, and nothing is said of any other library a build compiles in.
+enum class Keys { TheSame, NotCompared };
+
 // Counts only, found at run time: nothing here names what the other holds.
 // Katana Standard was made so that nothing but the survey code keys is the
-// other's: no definition name, group path, layer path or colour name of it is
-// one of the other's, whole, and its keys are the other's exactly.
-void expectNothingButTheKeysInCommonWith(const Customisation& file, const Customisation& other)
+// other's: no definition name, group path, layer path, colour name, attribute
+// name or text style of it is one of the other's, whole, and (with the NSW
+// customisation) its keys are the other's exactly.
+void expectNothingButTheKeysInCommonWith(const Customisation& file, const Customisation& other,
+                                         Keys keys)
 {
     std::size_t sharedNames = 0;
-    file.library.forEach([&](const LineStyle& style) { sharedNames += other.library.contains(style.name) ? 1 : 0; });
+    file.library.forEach([&](const LineStyle& style) {
+        sharedNames += other.library.contains(style.name) ? 1 : 0;
+    });
     EXPECT_EQ(sharedNames, 0u) << "definition names in common";
 
     std::set<std::string> otherGroups;
@@ -1324,16 +1395,33 @@ void expectNothingButTheKeysInCommonWith(const Customisation& file, const Custom
     EXPECT_EQ(sharedGroups, 0u) << "group paths in common";
 
     // The keys are the one thing shared, and shared whole.
-    std::set<std::string> otherKeys;
-    for (const std::string& key : other.map.keys()) {
-        otherKeys.insert(key);
+    if (keys == Keys::TheSame) {
+        std::set<std::string> otherKeys;
+        for (const std::string& key : other.map.keys()) {
+            otherKeys.insert(key);
+        }
+        std::size_t sharedKeys = 0;
+        for (const std::string& key : file.map.keys()) {
+            sharedKeys += otherKeys.count(key);
+        }
+        EXPECT_EQ(sharedKeys, otherKeys.size()) << "survey code keys in common";
+        EXPECT_EQ(sharedKeys, file.map.keys().size()) << "survey code keys in common";
     }
-    std::size_t sharedKeys = 0;
-    for (const std::string& key : file.map.keys()) {
-        sharedKeys += otherKeys.count(key);
+
+    // No attribute is called what the other calls one, and no text style is
+    // the other's (tools/katana_standard/originality.py counts both at none).
+    const std::set<std::string> otherAttributes = attributeNamesOf(other);
+    std::size_t sharedAttributes = 0;
+    for (const std::string& name : attributeNamesOf(file)) {
+        sharedAttributes += otherAttributes.count(name);
     }
-    EXPECT_EQ(sharedKeys, otherKeys.size()) << "survey code keys in common";
-    EXPECT_EQ(sharedKeys, file.map.keys().size()) << "survey code keys in common";
+    EXPECT_EQ(sharedAttributes, 0u) << "attribute names in common";
+    const std::set<std::string> otherTextStyles = textStylesOf(other);
+    std::size_t sharedTextStyles = 0;
+    for (const std::string& style : textStylesOf(file)) {
+        sharedTextStyles += otherTextStyles.count(style);
+    }
+    EXPECT_EQ(sharedTextStyles, 0u) << "text styles in common";
 
     std::size_t sharedColours = 0;
     for (const auto& entry : file.colours.entries()) {
@@ -1424,7 +1512,12 @@ TEST(KatanaStandard, NothingButTheKeysIsSharedWithAnyOtherCompiledInBuiltIn)
     KS_LOAD();
     // EVERY built-in this build compiled in but this one: Katana Standard is
     // the default now, so the other is an alternate, and a build may carry
-    // several. Skipped only where there is none to compare with.
+    // several. Skipped only where there is none to compare with. The keys are
+    // promised the same for the NSW customisation alone, which is known here
+    // by the name the tracked file gives itself; of any other alternate a
+    // build was given, nothing is said about its keys.
+    const Loaded& tracked = nsw();
+    ASSERT_TRUE(tracked.problem.empty()) << tracked.problem;
     std::size_t compared = 0;
     for (const katana::cad::BuiltInEntry& entry : katana::cad::builtIns()) {
         if (!entry.builtIn.customisation || entry.builtIn.customisation->name == file.name) {
@@ -1432,7 +1525,9 @@ TEST(KatanaStandard, NothingButTheKeysIsSharedWithAnyOtherCompiledInBuiltIn)
         }
         ++compared;
         SCOPED_TRACE("compared with the built-in number " + std::to_string(compared));
-        expectNothingButTheKeysInCommonWith(file, *entry.builtIn.customisation);
+        const bool isTheNswOne = entry.builtIn.customisation->name == tracked.value.name;
+        expectNothingButTheKeysInCommonWith(file, *entry.builtIn.customisation,
+                                            isTheNswOne ? Keys::TheSame : Keys::NotCompared);
     }
     if (compared == 0) {
         GTEST_SKIP() << "this build has no other customisation compiled in to compare with";
@@ -1446,5 +1541,5 @@ TEST(KatanaStandard, NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt)
     // build and not only in one that compiled the other built-in in.
     const Loaded& other = nsw();
     ASSERT_TRUE(other.problem.empty()) << other.problem;
-    expectNothingButTheKeysInCommonWith(file, other.value);
+    expectNothingButTheKeysInCommonWith(file, other.value, Keys::TheSame);
 }
