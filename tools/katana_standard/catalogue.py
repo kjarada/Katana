@@ -409,35 +409,46 @@ def catalogue(data, root):
           "is hidden, the text and the pipe rules. They are the same for every one."
           % report["codes_resolved"])
         w("")
+        n_hidden = sum(1 for st in styled.values() if st["hide"])
+        pipe_attributes = sum(count or 1 for _, reason, count in exceptions if reason == parity.PIPE_ATTRIBUTES)
         w("**Where the other library is not clean, this one is.** The NSW customisation holds %d rules over %d "
           "keys. %d of the rules repeat an earlier rule of their key exactly and %d add nothing to an earlier "
-          "one, in %d of the keys; %d more add only a `hide` that the key's first symbol rule leaves unsaid, so "
-          "a lookup hides the symbol; %d keys name a pen colour that resolves to nothing; and %d draws its "
-          "symbol through the linestyle slot, which `CODE CHECK` reports as a linestyle that is a symbol. "
-          "Katana Standard keeps one clean rule set per key: one rule of each kind, every name resolved, the "
-          "symbol said in a symbol rule, `hide` said where the lookup makes it true. Those %d differences are "
-          "listed in `tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and "
-          "`parity.py` fails on an entry that explains nothing or a difference that has none."
+          "one, in %d of the keys; %d more say something the first rule of their kind leaves unsaid, which a "
+          "lookup then takes (in %d keys a `hide`, so the symbol is hidden); %d keys name a pen colour that "
+          "resolves to nothing; %d draws its symbol through the linestyle slot, which `CODE CHECK` reports as a "
+          "linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in which a rule "
+          "can be for one case of an attribute, carry those cases as attributes, which a lookup here applies to "
+          "every code (%d of them). Katana Standard keeps one clean rule set per key: one rule of each kind, "
+          "every name resolved, the symbol said in a symbol rule, `hide` said where the lookup makes it true, "
+          "and no attribute on a pipe rule. Those %d differences are listed in "
+          "`tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and `parity.py` "
+          "fails on an entry that explains nothing or a difference that has none."
           % (ref["rules"], ref["keys"], ref["collapsible_duplicates"], ref["collapsible_shadowed"],
-             ref["keys_with_a_collapsible_rule"], merged_rules, by_reason.get(parity.COLOUR, 0),
-             by_reason.get(parity.LINESTYLE_SYMBOL, 0), len(exceptions)))
+             ref["keys_with_a_collapsible_rule"], merged_rules, n_hidden, by_reason.get(parity.COLOUR, 0),
+             by_reason.get(parity.LINESTYLE_SYMBOL, 0), pipe_attributes, len(exceptions)))
         w("")
         w(table(["Reason", "Keys", "What the other library does and this one does not"], [
             [parity.DUPLICATE, by_reason.get(parity.DUPLICATE, 0), "repeats a rule of the key field for field"],
             [parity.SHADOWED, by_reason.get(parity.SHADOWED, 0),
              "has a later rule of a kind that says nothing the earlier one of the key did not"],
             [parity.MERGED, by_reason.get(parity.MERGED, 0),
-             "has a later rule that says a field the first leaves unsaid; here the one rule says it"],
+             "has a later rule that says a field, or names an attribute, that the first leaves unsaid; here the "
+             "one rule says the field"],
             [parity.COLOUR, by_reason.get(parity.COLOUR, 0), "names a pen colour that resolves to nothing"],
             [parity.LINESTYLE_SYMBOL, by_reason.get(parity.LINESTYLE_SYMBOL, 0),
              "names a symbol as a linestyle; here a symbol rule follows the feature rule"],
+            [parity.PIPE_ATTRIBUTES, by_reason.get(parity.PIPE_ATTRIBUTES, 0),
+             "carries attributes on its pipe rules, which a lookup applies to every code the key answers; here "
+             "a pipe rule carries none"],
         ]))
         w("")
         w("**What this library adds.** %d keys carry one more attributes rule than the other library has for them, "
           "last: the service word `utility.type` and the prompts Owner, Depth (m) and Condition (grammar rule 9). "
           "The rule makes no entity, so the same field file still makes the same kinds of entity; it is why a coded "
           "string is typed for `UTILITY DRAW`. `parity.py` counts these apart (%d rules) and `--no-extra-attributes` "
-          "makes them differences." % (extra_keys, extra_rules))
+          "makes them differences. So the kinds of entity are the same in the two libraries and the properties "
+          "on them are not: a service coded here carries its service word and its prompts, and nothing coded "
+          "here carries the attributes the other's `*` rules apply." % (extra_keys, extra_rules))
         w("")
 
     # ---- palette ----------------------------------------------------------------------------------------------
@@ -618,8 +629,10 @@ def catalogue(data, root):
       "back, and a looser match (the same key but another draw mode), under which the same field file would "
       "make a point in one library and a line in the other.")
     w("- **One clean rule set per key.** The other library repeats and shadows rules, names pen colours that "
-      "resolve to nothing and draws a symbol through a linestyle slot. Reproducing that would give `CODE CHECK` "
-      "hundreds of warnings on a new library; each difference is a counted exception that `parity.py` holds.")
+      "resolve to nothing, draws a symbol through a linestyle slot and applies the attributes of its `*` pipe "
+      "rules to every code. Reproducing that would give `CODE CHECK` hundreds of warnings on a new library and "
+      "put those attributes on whatever is coded; each difference is a counted exception that `parity.py` "
+      "holds.")
     w("- **A service code asks for its service's attributes.** Where the other library has no attributes rule "
       "for a service key, one is added last (grammar rule 9), so that `UTILITY DRAW` reads a coded string as a "
       "typed service. Rejected: strict equality of the rule kinds, which would drop the typing the utility tools "

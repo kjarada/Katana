@@ -49,10 +49,11 @@ THE GRAMMAR
    either library. `tools/katana_standard/parity.py` compares the two files and the tests hold it. What a
    key LOOKS like is Katana's.
 7. One clean rule set per key. The other library repeats rules and shadows them, names pen colours that
-   resolve to nothing, and draws a symbol through a linestyle slot; this one writes one rule of each kind per
-   key, resolves every name, and says a symbol in a symbol rule. Where the two differ for that reason the key
-   is listed in `parity_exceptions.json` with the reason, and `parity.py` fails the day an entry explains
-   nothing.
+   resolve to nothing, draws a symbol through a linestyle slot, and hangs on the pipe rules of its bare `*`
+   attributes that a lookup applies to every code; this one writes one rule of each kind per key, resolves
+   every name, says a symbol in a symbol rule and puts no attribute on a pipe rule. Where the two differ for
+   that reason the key is listed in `parity_exceptions.json` with the reason, and `parity.py` fails the day an
+   entry explains nothing.
 8. What a code sets, in this order. `feature`: layer, colour, draw (line or point, none for a layer-only key),
    linestyle (lines only), weight, group and comment. `symbol` for points and for lines that carry a symbol at
    every vertex. `text` for the text keys. `pipe`, `vertexPipe` and `segmentPipe` for the bare `*`. `attributes`

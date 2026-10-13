@@ -267,6 +267,45 @@ class SymbolSaidThroughTheLinestyle(unittest.TestCase):
             self.assertEqual(run(reference, [feature("AB*")])["required"], {("AB*", parity.DUPLICATE): 1}, word)
 
 
+class PipeAttributes(unittest.TestCase):
+    """A pipe rule may carry an attribute list. Where the rules were written it is the case a rule is for; a
+    lookup here takes the first pipe rule and applies the attributes of them all."""
+
+    @staticmethod
+    def pipe(justify="Obvert", **attributes):
+        rule = {"key": "*", "sets": "pipe", "pipe": {"justify": justify, "shape": "diameter", "size1": "$D",
+                                                     "active": True}}
+        if attributes:
+            rule["attributes"] = [{"type": "text", "name": name.replace("_", " "), "value": value}
+                                  for name, value in attributes.items()]
+        return rule
+
+    def setUp(self):
+        # Three rules for three cases: the second names the same attribute as the first and so adds nothing a
+        # lookup takes; the third spells the name another way, and its attribute is applied as a second one.
+        self.reference = [self.pipe(Case="top"), self.pipe("Invert", Case="bottom"),
+                          self.pipe("Centre", Case_Two="middle")]
+
+    def test_a_clean_rule_that_carries_none_leaves_them_out_and_needs_the_exception(self):
+        report = run(self.reference, [self.pipe()])
+        self.assertEqual(report["structure"], [])
+        self.assertEqual(report["required"], {("*", parity.SHADOWED): 1, ("*", parity.MERGED): 1,
+                                              ("*", parity.PIPE_ATTRIBUTES): 2})
+        self.assertFalse(report["ok"])
+        exceptions = [("*", parity.SHADOWED, 1), ("*", parity.MERGED, 1), ("*", parity.PIPE_ATTRIBUTES, 2)]
+        self.assertTrue(run(self.reference, [self.pipe()], exceptions)["ok"])
+
+    def test_a_clean_rule_that_carries_them_all_needs_no_such_exception(self):
+        report = run(self.reference, [self.pipe(Mine="a", Mine_Two="b")])
+        self.assertEqual(report["required"], {("*", parity.SHADOWED): 1, ("*", parity.MERGED): 1})
+
+    def test_carrying_some_of_them_or_some_the_reference_has_not_is_a_difference(self):
+        self.assertIn("attributes", run(self.reference, [self.pipe(Mine="a")])["structure"][0]["problems"][0])
+        report = run([self.pipe()], [self.pipe(Mine="a")])
+        self.assertIn("attributes", report["structure"][0]["problems"][0])
+        self.assertFalse(report["ok"])
+
+
 class Extras(unittest.TestCase):
     reference = [feature("AB*")]
     candidate = [feature("AB*"), {"key": "AB*", "sets": "attributes",

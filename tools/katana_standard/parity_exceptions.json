@@ -1,5 +1,7 @@
 [
- {"key": "*", "reason": "nsw-shadowed-collapsed", "count": 45},
+ {"key": "*", "reason": "nsw-fields-merged", "count": 1, "note": "the last of the reference's sixteen pipe rules names its attribute with another spelling, so a lookup applies a second attribute; neither is carried here (see the pipe attributes)"},
+ {"key": "*", "reason": "nsw-pipe-attributes-left-out", "count": 4, "note": "the reference's pipe rules each carry the case they were written for as an attribute, which a lookup here applies to every code; the one pipe rule of each kind here carries none"},
+ {"key": "*", "reason": "nsw-shadowed-collapsed", "count": 44},
  {"key": "1", "reason": "nsw-shadowed-collapsed", "count": 1},
  {"key": "1*", "reason": "nsw-shadowed-collapsed", "count": 1},
  {"key": "2", "reason": "nsw-shadowed-collapsed", "count": 1},

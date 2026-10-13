@@ -25,11 +25,11 @@ WHAT IT REPORTS, in the order it is printed
                  feature    draw (line, point or none), that a layer is given, the state of the colour name
                  symbol     that a symbol is named, hide (absent reads as false)
                  text       units, size, justifyX, justifyY, the state of the colour name
-                 pipe, vertexPipe, segmentPipe   justify, shape, active, whether size1 and size2 are given
+                 pipe, vertexPipe, segmentPipe   justify, shape, active, whether size1 and size2 are given,
+                                                 and the entries of the attribute list the rule carries
                  attributes, vertexAttributes    each entry's type and what its value is (a prompt, deferred,
                                                  the code itself, a number as written, or some text)
                  surface    the flag
-               A pipe rule's own attribute list is not compared: it belongs to the reference's wording.
                Attribute rules the candidate has under a key where the reference has none (a library may ask
                for more than the reference does; they make no entity) are EXTRAS: counted, allowed, and
                refused by --no-extra-attributes.
@@ -48,6 +48,12 @@ WHAT IT REPORTS, in the order it is printed
                  nsw-fields-merged            a later rule of a kind said a field the first left unsaid and so
                                               changed the effective structure (a symbol's hide); the candidate's
                                               one rule of that kind carries the field
+                 nsw-pipe-attributes-left-out the reference's pipe rules carry attribute lists (where they were
+                                              written, the condition a rule applies under: sixteen rules for
+                                              sixteen cases). Katana has no conditional rule: a lookup takes the
+                                              first pipe rule and APPLIES the attributes of them all, to every
+                                              code the key answers. The candidate's one pipe rule carries none;
+                                              `count` is the number of attribute entries left out
                An entry that explains nothing is itself an error, so the list cannot go stale.
   4. DEFECTS   in the CANDIDATE, by the notions of CODE CHECK (src/katana_cad/customisation/code_table.cpp): a
                duplicate rule, a shadowed rule, an unknown colour, a linestyle or symbol nothing defines, a
@@ -90,7 +96,10 @@ SHADOWED = "nsw-shadowed-collapsed"
 COLOUR = "nsw-unknown-colour-replaced"
 LINESTYLE_SYMBOL = "nsw-linestyle-symbol-resolved"
 MERGED = "nsw-fields-merged"
-REASONS = (DUPLICATE, SHADOWED, COLOUR, LINESTYLE_SYMBOL, MERGED)
+PIPE_ATTRIBUTES = "nsw-pipe-attributes-left-out"
+REASONS = (DUPLICATE, SHADOWED, COLOUR, LINESTYLE_SYMBOL, MERGED, PIPE_ATTRIBUTES)
+# The member a pipe rule of each kind keeps its attribute list in (SECTION_MEMBERS below).
+PIPE_ATTRIBUTE_SCOPE = {"pipe": "attributes", "vertexPipe": "vertexAttributes", "segmentPipe": "segmentAttributes"}
 
 SETS = ("feature", "symbol", "text", "pipe", "vertexPipe", "segmentPipe", "attributes", "vertexAttributes",
         "surface")
@@ -366,6 +375,8 @@ def structure(rule, colours):
             out["active"] = bool(pipe.get("active", False))
             out["size1"] = "given" if pipe.get("size1") else "absent"
             out["size2"] = "given" if pipe.get("size2") else "absent"
+        out["attributes"] = [[a.get("type", ""), value_kind(a, rule["key"])]
+                             for a in rule.get(PIPE_ATTRIBUTE_SCOPE[kind], [])]
     elif kind in ("attributes", "vertexAttributes"):
         out["entries"] = [[a.get("type", ""), value_kind(a, rule["key"])] for a in rule.get(kind, [])]
     elif kind == "surface":
@@ -399,12 +410,13 @@ def effective_structure(document, indices, colours):
 
 
 def differences(expected, got):
-    """Why two lists of structures differ, as sentences; an empty list when they are the same. A difference in
-    the colour state alone is returned apart, as ('colour', index), for the exceptions to explain."""
+    """Why two lists of structures differ, as sentences; an empty list when they are the same. Two differences
+    are returned apart, for the exceptions to explain: the positions where only the colour state differs
+    (unknown there, known here), and the number of attribute entries a pipe rule carries there and none here."""
     if [e["sets"] for e in expected] != [g["sets"] for g in got]:
         return ["kinds of rule: expected [%s], found [%s]" % (", ".join(e["sets"] for e in expected),
-                                                               ", ".join(g["sets"] for g in got))], []
-    problems, colour_only = [], []
+                                                               ", ".join(g["sets"] for g in got))], [], 0
+    problems, colour_only, pipe_attributes = [], [], 0
     for position, (e, g) in enumerate(zip(expected, got), 1):
         for member in e:
             if e[member] == g.get(member):
@@ -412,9 +424,12 @@ def differences(expected, got):
             if member == "colour" and e[member] == "unknown" and g.get(member) == "known":
                 colour_only.append(position)
                 continue
+            if member == "attributes" and e["sets"] in PIPE_ATTRIBUTE_SCOPE and not g.get(member):
+                pipe_attributes += len(e[member])
+                continue
             problems.append("rule %d (%s) %s: expected %s, found %s" % (
                 position, e["sets"], member, json.dumps(e[member]), json.dumps(g.get(member))))
-    return problems, colour_only
+    return problems, colour_only, pipe_attributes
 
 
 # ---- resolution ------------------------------------------------------------------------------------------------
@@ -598,7 +613,7 @@ def compare(reference, candidate, exceptions=(), allow_extras=True, allow_candid
             report["extras"]["keys"] += 1 if extras else 0
         got = [structure(cand_rules[i], cand_colours) for i in got_indices]
 
-        problems, colour_positions = differences(expected, got)
+        problems, colour_positions, pipe_attributes = differences(expected, got)
         if problems:
             report["structure"].append({"key": key, "problems": problems})
             continue
@@ -607,6 +622,8 @@ def compare(reference, candidate, exceptions=(), allow_extras=True, allow_candid
             report["required"][(key, reason)] = count
         if colour_positions:
             report["required"][(key, COLOUR)] = len(colour_positions)
+        if pipe_attributes:
+            report["required"][(key, PIPE_ATTRIBUTES)] = pipe_attributes
         if said_through_linestyle:
             report["required"][(key, LINESTYLE_SYMBOL)] = 1
 
