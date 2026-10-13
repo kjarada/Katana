@@ -99,14 +99,19 @@ using TransferProgress = std::function<void(std::uint64_t received, std::uint64_
 //     it. Only a failure to get an HTTP answer is an error;
 //   - a 200 or 206 body is collected up to request.maxBytes and the transfer abandoned the
 //     moment it is passed (Unsupported); the body of any other status is kept to 64 KiB;
+//   - the body is the server's bytes as it holds them: no Accept-Encoding is sent and nothing
+//     is decompressed, so a `Range` header asks for, and a count measures, those bytes;
 //   - retries (request.retries, doubling from retryDelaySeconds) are for what is worth another
 //     try: a dropped or timed-out connection, and a 502, 503 or 504 answer. A 429 is returned
 //     at once - a rate limit that says wait an hour is not helped by a second.
 // Proxy, certificates, timeouts and the User-Agent are set exactly as httpFetch sets them
 // (GDAL's own option handling is applied to the same libcurl handle). Errors: InvalidArgument
 // (not http or https, or a body), InvalidState (cancelled), Unsupported (body past maxBytes),
-// FileImportFailure (no HTTP answer: explainHttpFailure's words, the curl code in the context).
-// The request's headers are never put in an error or a log.
+// FileImportFailure (no HTTP answer: explainHttpFailure's words - except a timeout, which says
+// how long was waited and gives no advice about map areas - with the address through
+// redactUrl and then libcurl's own message in the context). The request's headers are never
+// put in an error or a log. redactUrl keeps a query it does not know for a secret, so a caller
+// whose addresses are secret as a whole (a signed download address) rewrites the context.
 struct HttpExchange {
     int status = 0;            // the HTTP status of the last response on the connection
     std::string contentType;   // "" when none

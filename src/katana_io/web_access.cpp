@@ -558,6 +558,10 @@ CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     // The point of this function. CPLHTTPSetOptions turns following on; it is turned off after.
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    // The body is the bytes the server holds, never a compressed form of them unpacked here: a
+    // caller that asks for a range by offset, and counts what arrives, means those bytes. NULL
+    // is libcurl's "send no Accept-Encoding and decode nothing".
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, static_cast<const char*>(nullptr));
     // Called from worker threads (the update's download job): no signal-based timeouts.
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
@@ -571,6 +575,14 @@ CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::
 
     const CURLcode code = curl_easy_perform(curl);
     message = errorBuffer[0] != '\0' ? errorBuffer : curl_easy_strerror(code);
+    // libcurl's own record of the last response, when it has one: the status lines are read
+    // above because the body callback needs the status while the body arrives, and this is the
+    // same number without this file's reading of a line.
+    long answered = 0;
+    if (code == CURLE_OK &&
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &answered) == CURLE_OK && answered > 0) {
+        state.status = static_cast<int>(answered);
+    }
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
     curl_easy_cleanup(curl);
     curl_slist_free_all(headers);
@@ -628,6 +640,14 @@ Result<HttpExchange> httpExchange(const HttpRequest& request, const std::stop_to
                 return exchange;
             }
         } else if (attempt >= request.retries || !worthRetrying(0, static_cast<int>(code))) {
+            if (code == CURLE_OPERATION_TIMEDOUT) {
+                // Worded here: explainHttpFailure's sentence for a timeout advises "a smaller
+                // area", which is advice for a map request and not for whoever calls this.
+                return makeError(ErrorCode::FileImportFailure,
+                                 "the server did not answer within " +
+                                     std::to_string(request.timeoutSeconds) + " s",
+                                 shown + ": " + message);
+            }
             HttpFailure failure;
             failure.status = 0;
             failure.curlCode = static_cast<int>(code);
