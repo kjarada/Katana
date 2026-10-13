@@ -1671,7 +1671,8 @@ TEST(UpdateVerbs, TheContextOfAProgramInNoInstallIsADevelopmentCopys)
         // whichever that is for this run of the suite, the context says it.
         // WHAT THIS LINE CANNOT SHOW in a suite started the ordinary way: both
         // sides are then "no", and a context that was never filled is "no"
-        // as well. It fails for one only in a suite started as administrator.
+        // as well. It fails for one only in a suite that itself holds the
+        // elevated half of a split token (one started as administrator).
         // No test can make the system answer "yes", and the member is set by
         // the tests for that reason: what a "yes" refuses is shown with it set
         // (the tests under "a Katana that was started as administrator"
@@ -1721,6 +1722,17 @@ TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
     writeInstallRecords(rig.root);
     const fs::path program = rig.root / "bin" / "katana_cli.exe";
     ASSERT_TRUE(fs::exists(program));
+    // The record says 0.9.0, the older release of the fixtures, and what is
+    // installed is the higher of the record's version and this program's own
+    // (update/install.hpp, readInstall). So what follows is the record's for
+    // as long as this project's version is not above 0.9.0. Past that the
+    // expectations below have to move, with the fixtures' pair they stand on
+    // (0.9.0 and 0.10.0): said here, where it would otherwise first show as a
+    // wrong version in a reply.
+    const core::Result<update::Version> own = update::programVersion();
+    ASSERT_TRUE(own.ok());
+    ASSERT_LE(*own, update::parseVersion("0.9.0").value())
+        << "this program is above the record this test writes: see the comment above";
 
     UpdateContext context = katana::app::makeUpdateContext(UpdateSurface::Cli, program);
     EXPECT_EQ(context.surface, UpdateSurface::Cli);
@@ -1737,8 +1749,9 @@ TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
     EXPECT_EQ(context.stateDirectory, rig.state);
     EXPECT_EQ(context.pid, 0u) << "left for the caller";
     EXPECT_TRUE(context.relaunch.empty());
-    // As in the test above: "no" on both sides unless the suite itself was
-    // started as administrator, so only such a run sees this form ask.
+    // As in the test above: "no" on both sides unless the suite itself holds
+    // the elevated half of a split token, so only such a run sees this form
+    // ask.
     EXPECT_EQ(context.elevated, update::processIsElevated()) << "this form asks as well";
 
     // The lines on it, with the rig's feed and the fixtures' keys where the
@@ -2802,9 +2815,9 @@ TEST(UpdateVerbs, AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseTha
 // UpdateContext::elevated is what makeUpdateContext sets for the elevated half
 // of a split token (update/process.hpp). These tests set the member, so they
 // are the same tests however the suite itself was started. That
-// makeUpdateContext fills it from the system is seen only by a suite started
-// as administrator (TheContextOfAProgramInNoInstallIsADevelopmentCopys says
-// why).
+// makeUpdateContext fills it from the system is seen only by a suite that
+// itself holds that half (TheContextOfAProgramInNoInstallIsADevelopmentCopys
+// says why).
 
 // The folders U/run-<tx> in `state`: one for each helper copy a preflight made
 // (update/state.hpp).

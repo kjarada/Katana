@@ -2405,7 +2405,7 @@ TEST(CleanupList, AFolderNestedDeeperThanTheUpdaterEverMakesIsLeftAlone)
 // no test can give itself one. So the function's one decision - which kind of token is a yes -
 // is a function of its own (spawn_win.cpp, detail::isElevatedHalf) and every kind is put to
 // it below. What stays unshown in an ordinary run is only that processIsElevated hands it
-// the kind Windows gave: that is seen when the suite itself is started as administrator.
+// the kind Windows gave: that is seen by a suite that itself holds the elevated half.
 
 #ifdef _WIN32
 TEST(ProcessIsElevated, OnlyTheElevatedHalfOfASplitTokenIsAYes)
