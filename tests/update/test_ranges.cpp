@@ -25,15 +25,6 @@ using namespace katana;
 using update::MergedRange;
 using update::RangeMember;
 
-// ---- defined in src/katana_update/ranges.cpp, which declares them there until ranges.hpp
-// (task T1's file) does: see the report of task T6.
-namespace katana::update {
-core::Result<std::string> rangeHeaderValue(std::uint64_t offset, std::uint64_t length);
-core::Status checkRangeResponse(int status, std::string_view contentRange, std::uint64_t bodyBytes,
-                                std::uint64_t offset, std::uint64_t length,
-                                std::uint64_t payloadSize);
-} // namespace katana::update
-
 namespace {
 
 constexpr std::uint64_t kMiB = 1024 * 1024;

@@ -24,14 +24,6 @@ char lowerAscii(char c)
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
 
-std::string lowerAscii(std::string_view text)
-{
-    std::string out(text);
-    std::transform(out.begin(), out.end(), out.begin(),
-                   [](char c) { return lowerAscii(c); });
-    return out;
-}
-
 bool equalsIgnoringAsciiCase(std::string_view a, std::string_view b)
 {
     return a.size() == b.size() &&
@@ -121,6 +113,13 @@ template <typename Visitor> void forEachComponent(std::string_view path, Visitor
 }
 
 } // namespace
+
+std::string lowerAscii(std::string_view text)
+{
+    std::string out(text);
+    std::transform(out.begin(), out.end(), out.begin(), [](char c) { return lowerAscii(c); });
+    return out;
+}
 
 bool isReservedName(std::string_view path)
 {

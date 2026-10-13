@@ -39,6 +39,7 @@
 
 #include "katana/core/path_text.hpp"
 #include "katana/core/sha256.hpp"
+#include "katana/update/fsops.hpp"
 #include "katana/update/paths.hpp"
 #include "katana/update/plan.hpp"
 
@@ -55,11 +56,6 @@
 
 using namespace katana;
 namespace fs = std::filesystem;
-
-namespace katana::update {
-// Defined in src/katana_update/plan.cpp and declared in no header yet (see the note there).
-[[nodiscard]] bool isLinkReparseTag(std::uint32_t tag);
-} // namespace katana::update
 
 namespace {
 

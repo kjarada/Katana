@@ -98,6 +98,10 @@ CPACK_INSTALL_RECORD = "share/katana/install.json"
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)  # the zip format's earliest date
 ZIP_LEVEL = 9
 CHUNK = 1 << 20
+# What the engine accepts as a tag or a channel (name tokens, manifest.cpp checkName): 1 to 64
+# characters, the first a letter or digit. A channel is held to lower case on top of that.
+TAG_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+CHANNEL_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 # ---- keys ---------------------------------------------------------------------------------------
 
@@ -367,6 +371,13 @@ def zip_order(files: Iterable[TreeFile]) -> list[TreeFile]:
     return sorted(files, key=lambda f: (CLASS_ORDER.index(f.file_class), f.path))
 
 
+def csize_limit(size: int) -> int:
+    """The most the engine accepts as the deflate stream of `size` bytes: size + size/8 + 64 (maxCompressedBytes,
+    manifest.cpp). zlib stays within a few hundredths of a percent of the input; the limit is the fixed-Huffman worst
+    case of any encoder, so a stream past it means something other than zlib wrote it."""
+    return size + size // 8 + 64
+
+
 def write_update_zip(zip_path: Path, members: Iterable[TreeFile]) -> dict[str, Placement]:
     """Write every member deflated alone, with fixed timestamps; return where each one's bytes are.
 
@@ -406,6 +417,9 @@ def write_update_zip(zip_path: Path, members: Iterable[TreeFile]) -> dict[str, P
             placement.csize = info.compress_size
             if placement.csize < 2:
                 raise ToolError(f"{member.path}: the deflate stream is {placement.csize} bytes; a stream is never shorter than 2")
+            if placement.csize > csize_limit(placement.size):
+                raise ToolError(f"{member.path}: the deflate stream is {placement.csize} bytes for {placement.size}; "
+                                f"the engine accepts at most {csize_limit(placement.size)}")
     return placements
 
 
@@ -708,12 +722,12 @@ def produce(
     if not notify_only and tree is None:
         raise Refusal(["--tree is required (the folder that holds bin/ and share/)"])
     tag = tag or f"v{version}"
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
-        raise Refusal([f"tag '{tag}' has a character other than letters, digits, '.', '_' and '-'"])
+    if not TAG_PATTERN.fullmatch(tag):
+        raise Refusal([f"tag '{tag}' is not 1 to 64 letters, digits, '.', '_' and '-', starting with a letter or digit"])
     if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo):
         raise Refusal([f"repo '{repo}' is not owner/name"])
-    if not channel or not re.fullmatch(r"[a-z0-9_-]+", channel):
-        raise Refusal([f"channel '{channel}' is not a lower-case word"])
+    if not CHANNEL_PATTERN.fullmatch(channel):
+        raise Refusal([f"channel '{channel}' is not 1 to 64 lower-case letters, digits, '_' and '-', starting with a letter or digit"])
     if applier < 1:
         raise Refusal(["applier must be 1 or more"])
     seq = resolve_sequence(sequence, os.environ if environ is None else environ)

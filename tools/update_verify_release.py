@@ -361,6 +361,11 @@ def check_file_entries(report: Report, where: str, m: dict) -> bool:
                 report.errors.append(f"{label} {name} is not a non-negative integer")
         if _is_int(entry["csize"]) and entry["csize"] < 2:
             report.errors.append(f"{label} csize is {entry['csize']}: a deflate stream is never under 2 bytes")
+        if _is_int(entry["csize"]) and _is_int(entry["size"]) and entry["csize"] > entry["size"] + entry["size"] // 8 + 64:
+            # maxCompressedBytes (manifest.cpp): the engine refuses a member past this, so a release with one is
+            # a release no client installs, however well it is signed.
+            report.errors.append(f"{label} csize {entry['csize']} is more than the engine accepts for size "
+                                 f"{entry['size']} (size + size/8 + 64 = {entry['size'] + entry['size'] // 8 + 64})")
         if not isinstance(entry["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
             report.errors.append(f"{label} sha256 is not 64 lower-case hex digits")
         if "exec" in entry and not isinstance(entry["exec"], bool):

@@ -31,8 +31,10 @@
 //        (journal, new/, old/): the helper's working place, inside R so that
 //        every rename stays on one volume.
 //
-// The names installed*.json, install.json and the folder .update are reserved
-// (paths.hpp): a manifest can never carry them.
+// The four names install.json, installed.json, installed.manifest.json and
+// installed.manifest.json.sig, and the folder .update, are reserved (paths.hpp): a
+// manifest can never carry them. They are the literal names the helper writes, not a
+// pattern: installed.json.bak is a file like any other.
 //
 // WHERE R IS, by platform:
 //   Windows, Linux   R is the folder that holds bin/ and share/: the programs are

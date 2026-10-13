@@ -428,6 +428,21 @@ TEST(UpdatePaths, NamesThatOnlyLookLikeRecordsAreOrdinaryFiles)
     });
 }
 
+// ---- lowerAscii --------------------------------------------------------------------------------------
+
+TEST(UpdateLowerAscii, OnlyTheLettersAToZAreFoldedAndEveryOtherByteIsKept)
+{
+    EXPECT_EQ(update::lowerAscii(""), "");
+    EXPECT_EQ(update::lowerAscii("Share/KATANA/Install.JSON"), "share/katana/install.json");
+    // The neighbours of the two ends of each range differ from a letter by one: '@' (0x40) and '[' (0x5B)
+    // either side of A to Z, '`' (0x60) and '{' (0x7B) either side of a to z. None of them is a letter.
+    EXPECT_EQ(update::lowerAscii("@AZ[`az{"), "@az[`az{");
+    // A byte above 0x7F is never a letter, whatever the locale: the UTF-8 of an A with a diaeresis
+    // (0xC3 0x84) and a lone 0x80 are returned as they came, and so is a NUL inside the text.
+    EXPECT_EQ(update::lowerAscii("\xC3\x84Z\x80"), "\xC3\x84z\x80");
+    EXPECT_EQ(update::lowerAscii(std::string_view("A\0B", 3)), std::string_view("a\0b", 3));
+}
+
 // ---- isReservedName ----------------------------------------------------------------------------------
 
 TEST(UpdateReservedNames, TheFourRecordNamesAreReservedAsABareNameOrAtTheEndOfAPath)

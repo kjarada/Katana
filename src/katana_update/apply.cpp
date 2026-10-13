@@ -69,17 +69,6 @@ constexpr std::chrono::milliseconds kLockGrace{2000};
 
 // ---- text and paths ---------------------------------------------------------------------
 
-std::string asciiLower(std::string_view text)
-{
-    std::string out(text);
-    for (char& c : out) {
-        if (c >= 'A' && c <= 'Z') {
-            c = static_cast<char>(c - 'A' + 'a');
-        }
-    }
-    return out;
-}
-
 // "bin/<stem>" with ".exe" on Windows: the manifest path of an installed program.
 std::string installedProgramRelative(std::string_view stem)
 {
@@ -997,7 +986,7 @@ std::optional<Failure> Applier::plan()
         if (cancelled()) {
             return refuse("cancelled", "the update was cancelled");
         }
-        inNewManifest.insert(asciiLower(file.path));
+        inNewManifest.insert(lowerAscii(file.path));
         const Path target = under(root_, file.path);
         if (const std::optional<Failure> unsafe = guard.check(target.parent_path())) {
             return unsafe;
@@ -1048,7 +1037,7 @@ std::optional<Failure> Applier::plan()
     // whose bytes are still the ones that manifest signed. Anything else is not ours.
     if (installedManifest_) {
         for (const ManifestFile& old : installedManifest_->files) {
-            if (inNewManifest.contains(asciiLower(old.path)) || isReservedName(old.path) ||
+            if (inNewManifest.contains(lowerAscii(old.path)) || isReservedName(old.path) ||
                 !checkManifestPath(old.path).ok()) {
                 continue;
             }

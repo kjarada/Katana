@@ -7,8 +7,15 @@
 //
 // A file is KEPT when the installed file exists and its SHA-256 equals the
 // manifest's. Otherwise it is CHANGED and is fetched. A `seed` file is
-// changed only when it is absent (an edit by the user survives). A file
-// listed in the manifest that cannot be read is changed.
+// changed only when it is absent (an edit by the user survives; it is never read).
+// Where a manifest file is not a plain file the plan says so rather than guess:
+//   - a link in the place of the file is CHANGED (it cannot be hashed without following
+//     it, and the update does not follow links);
+//   - an installed file that exists but cannot be read (open in another program, no
+//     permission) is an ERROR naming it, not a change: the update could not tell whether it
+//     differs, and replacing a file somebody holds open would fail at the swap anyway;
+//   - a link in a folder of the path, a file where a folder is needed, or a folder or a
+//     special file where the file goes, is an ERROR naming the manifest path.
 //
 // Removals are not planned here: only the helper decides them, from the
 // installed manifest it verified itself (apply.hpp), never from anything the

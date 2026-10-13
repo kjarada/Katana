@@ -20,6 +20,10 @@
 //   U/healthy-<tx>    the marker the new version writes after its first idle turn
 //   U/cleanup.list    leftovers a locked file kept from being deleted; the next start removes them
 //                     (appendCleanup, processCleanupList below)
+//   U/cleanup.list.work  the list while a run works on it: processCleanupList renames the list to
+//                     this name (atomic, so a helper that appends meanwhile starts a new list),
+//                     acts on it, appends what must stay to the list and removes it. A run that
+//                     died leaves it, and the next start finishes it first.
 //
 // Headless runs read and write no per-user place (docs/headless.md): the
 // callers that are headless do not call these.
@@ -107,8 +111,9 @@ inline constexpr std::chrono::seconds kCheckJitterMax{2 * 3600};
 [[nodiscard]] core::Status appendCleanup(const std::filesystem::path& stateDir,
                                          const std::filesystem::path& leftover, FsOps& fs);
 
-// Deletes what the list names and rewrites it with what could still not be deleted (a file
-// still locked stays listed). Called first thing at the next start of the window, and by the
+// Deletes what the list names and keeps on the list what could still not be deleted (a file
+// still locked stays listed), working on the renamed copy U/cleanup.list.work so that an append
+// that arrives meanwhile is not lost. Called first thing at the next start of the window, and by the
 // helper after a healthy update. U is user-writable, so the list is NOT trusted: a line is
 // acted on only when its path, resolved (FsOps::resolve), lies strictly under `stateDir`, or
 // under <root>/.update, and no parent of it between that folder and the path is a reparse

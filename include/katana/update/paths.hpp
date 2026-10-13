@@ -93,4 +93,9 @@ inline constexpr std::array<std::string_view, 3> kRecordPaths{
 // never removed. Takes a whole path or a bare name.
 [[nodiscard]] bool isReservedName(std::string_view path);
 
+// The text with A to Z made a to z and every other byte as it was: the case folding that these rules
+// are written in (not std::tolower, which depends on the locale). The one definition, for the helper
+// too when it compares manifest paths.
+[[nodiscard]] std::string lowerAscii(std::string_view text);
+
 } // namespace katana::update

@@ -52,7 +52,6 @@ using Path = std::filesystem::path;
 constexpr DWORD kShareAll = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 // Past this a file is not a record or a manifest, and readFile would hold it all in memory.
 constexpr std::uint64_t kReadFileLimit = 256ull * 1024 * 1024;
-constexpr DWORD kReparseNameSurrogate = 0x20000000;
 
 std::string contextOf(DWORD osError, const Path& path)
 {
@@ -131,7 +130,7 @@ bool redirects(const std::wstring& wide)
         return true;
     }
     FindClose(search);
-    return (found.dwReserved0 & kReparseNameSurrogate) != 0;
+    return isLinkReparseTag(found.dwReserved0);
 }
 
 core::Status writeAll(HANDLE file, std::string_view bytes, const Path& path)

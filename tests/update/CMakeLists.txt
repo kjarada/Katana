@@ -331,4 +331,9 @@ if(_katana_tool_tests_ready)
                 "KATANA_OPENSSL=set:${KATANA_OPENSSL_EXECUTABLE};KATANA_CMAKE=set:${CMAKE_COMMAND}"
             TIMEOUT 1800)
     endforeach()
+    # Not a tool's test: the RFC 8032 arithmetic that derived the literals of test_signature.cpp. Run so that
+    # it keeps working (it exits non-zero when it no longer reproduces the RFC's own vectors).
+    add_test(NAME update_tools_rfc8032_oracle
+        COMMAND "${KATANA_PYTHON}" -I -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/rfc8032_oracle.py")
+    set_tests_properties(update_tools_rfc8032_oracle PROPERTIES TIMEOUT 120)
 endif()

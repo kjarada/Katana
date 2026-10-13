@@ -152,11 +152,22 @@ enum class ApplyOutcome {
 
 struct ApplyResult {
     ApplyOutcome outcome = ApplyOutcome::Refused;
-    // A short machine-readable token: "locked", "signature", "downgrade",
-    // "wrong_target", "path_rule", "space", "staged_missing", "staged_hash",
-    // "reparse_point", "rename_failed", "health_timeout", "health_exit",
-    // "blocked", "cancelled", "root_not_writable", "staged_manifest",
-    // "rollback_failed".
+    // A short machine-readable token. Everything apply() produces (src/katana_update/apply.cpp):
+    //   before anything is read: "locked", "interrupted_update" (an earlier transaction could
+    //     not be put back, so no new one starts: run katana_updater --recover), "invalid_request",
+    //     "root_not_writable", "install_record", "development_tree";
+    //   the staged release: "staged_manifest" (missing, unsigned, or refused by verifyManifest -
+    //     which also covers another product, target or channel and the path rules, so there is no
+    //     separate token for them), "notify_only", "applier_too_new", "downgrade";
+    //   waiting for the window and the programs under R: "blocked" (the Blocked outcome),
+    //     "scan_failed", "cancelled";
+    //   the plan: "staged_missing", "staged_hash", "reparse_point", "path_conflict", "copy_failed",
+    //     "space", "journal", "io_error", "transaction_exists";
+    //   the commit and after: "rename_failed", "health_timeout", "health_exit", "rollback_failed";
+    //   anywhere: "internal_error" (a std::exception from the file system or a conversion cut the
+    //     run short; it was ended like any other failure at that point, and "rollback_failed"
+    //     replaces it when putting the tree back threw as well).
+    // A dialog switches on the token, never on `detail`.
     std::string reason;
     std::string detail;                    // one sentence for a person
     std::vector<RunningProgram> holders;   // Blocked: who holds the files

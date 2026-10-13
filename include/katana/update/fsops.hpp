@@ -36,6 +36,19 @@ namespace katana::update {
 
 enum class EntryKind { Missing, File, Directory, Other };
 
+// Whether a Windows reparse tag is that of a LINK: a name surrogate (winnt.h:
+// IsReparseTagNameSurrogate, bit 29), which makes a path stand for another path. Symbolic links
+// (0xA000000C), junctions and mount points (0xA0000003), WSL symlinks (0xA000001D) are; OneDrive
+// and other cloud placeholders (0x9000001A, 0x9000701A, ...), the de-duplication and compression
+// filters (0x80000013, 0x80000017), app execution aliases (0x8000001B) and ProjFS (0x9000001C)
+// are not. The ONE definition of the rule: the planner (plan.cpp) and the apply's FsOps::stat
+// (fsops_win.cpp) both use it, and the helper's own check must. Pure, so it is tested on every
+// platform (test_plan.cpp).
+[[nodiscard]] constexpr bool isLinkReparseTag(std::uint32_t tag)
+{
+    return (tag & 0x20000000u) != 0;
+}
+
 struct EntryInfo {
     EntryKind kind = EntryKind::Missing;
     // True for a Windows reparse point (junction, symlink, mount point) and a

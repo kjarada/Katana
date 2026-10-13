@@ -469,6 +469,20 @@ class TheFiles(Checked):
     def test_a_deflate_stream_cannot_be_shorter_than_two_bytes(self) -> None:
         self.broken(lambda m: self.first(m).update(csize=1), "never under 2")
 
+    def test_a_deflate_stream_cannot_be_longer_than_the_engine_accepts(self) -> None:
+        # The bound is size + size/8 + 64 (manifest.cpp): worked by hand, for size 1000 it is 1000 + 125 + 64 = 1189.
+        # At the bound the claim passes this check (the zip then disagrees about the size, a different message);
+        # one past it is the engine's refusal.
+        def at(delta: int):
+            def change(m: dict) -> None:
+                self.first(m).update(size=1000, csize=1189 + delta)
+            return change
+        done = self.broken(at(1), "more than the engine accepts")
+        self.assertIn("1189", done.stdout + done.stderr)
+        self.rewrite(at(0))
+        at_the_bound = self.verify("--allow-unsigned", trust=())
+        self.assertNotIn("more than the engine accepts", at_the_bound.stdout + at_the_bound.stderr)
+
     def test_overlapping_ranges_are_named(self) -> None:
         def overlap(m: dict) -> None:
             a, b = m["files"][0], m["files"][1]

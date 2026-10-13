@@ -583,12 +583,25 @@ class TheOptions(Produced):
 
     def test_values_the_manifest_could_not_carry_are_refused_and_nothing_is_written(self) -> None:
         for option, value in (("--tag", "v 1"), ("--tag", "v1/2"), ("--repo", "nope"), ("--repo", "a/b/c"),
-                              ("--applier", "0"), ("--channel", "Beta"), ("--channel", "")):
+                              ("--applier", "0"), ("--channel", "Beta"), ("--channel", ""),
+                              # The engine's name token (manifest.cpp): 1 to 64, the first a letter or a digit.
+                              ("--tag", ".v1"), ("--tag", "_v1"), ("--tag", "v" + "1" * 64),
+                              ("--channel", "_beta"), ("--channel", "b" * 65)):
             with self.subTest(option=option, value=value):
                 out = self.tmp / "refused"
                 done = self.produce(self.build(), out, option, value)
                 self.assertNotEqual(done.returncode, 0, done.stdout)
                 self.assertFalse(out.exists())
+
+
+    def test_a_tag_and_a_channel_of_exactly_sixty_four_characters_are_what_the_engine_still_accepts(self) -> None:
+        # 64 is the longest name token manifest.cpp reads; 65 is refused above. A digit may start either.
+        tag, channel = "9" + "t" * 63, "0" + "c" * 63
+        self.assertEqual((len(tag), len(channel)), (64, 64))
+        out = self.tmp / "out"
+        self.assert_tool_ok(self.produce(self.build(), out, "--tag", tag, "--channel", channel))
+        manifest = json.loads((out / "Katana-update-win64.json").read_bytes())
+        self.assertEqual((manifest["tag"], manifest["channel"]), (tag, channel))
 
 
 class TheFailures(Produced):
@@ -638,6 +651,24 @@ class TheFailures(Produced):
         self.assertEqual([f.path for f in scan.files], ["bin/katana.exe"])
         self.assertEqual(len(scan.problems), 1, scan.problems)
         self.assertIn("share/katana/a.txt", scan.problems[0])
+
+    def test_the_compressed_size_bound_is_the_engines_and_a_stream_past_it_is_refused(self) -> None:
+        # size + size/8 + 64 (maxCompressedBytes in manifest.cpp), worked by hand: 0 + 0 + 64; 1 + 0 + 64;
+        # 7 + 0 + 64; 8 + 1 + 64; 999 + 124 + 64; 1000 + 125 + 64; 2^31 + 2^28 + 64.
+        for size, limit in ((0, 64), (1, 65), (7, 71), (8, 73), (999, 1187), (1000, 1189), (2 ** 31, 2415919168)):
+            self.assertEqual(producer.csize_limit(size), limit, size)
+        # Real zlib stays far inside it, even on bytes that do not compress at all.
+        hard = producer.TreeFile("bin/n.dll", noise("csize", 200_000), 200_000, False, "lib")
+        placement = producer.write_update_zip(self.tmp / "ok.zip", [hard])["bin/n.dll"]
+        self.assertGreater(placement.csize, 200_000)          # it did not compress...
+        self.assertLessEqual(placement.csize, 200_000 + 200_000 // 8 + 64)   # ...and is within the bound
+        # And a stream past the bound is refused by name, whatever wrote it (the bound is patched down to
+        # show the check is made).
+        with mock.patch.object(producer, "csize_limit", lambda size: 5):
+            with self.assertRaises(producer.ToolError) as raised:
+                producer.write_update_zip(self.tmp / "bad.zip", [hard])
+        self.assertIn("bin/n.dll", str(raised.exception))
+        self.assertIn("accepts at most 5", str(raised.exception))
 
     def test_a_file_that_changes_size_while_it_is_read_is_refused(self) -> None:
         member = producer.TreeFile("bin/a.dll", b"abc", 5, False, "lib")   # said to be 5 bytes, is 3

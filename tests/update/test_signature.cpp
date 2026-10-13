@@ -19,8 +19,10 @@
 // What each case would catch is named in its comment: removing the explicit S check, the
 // key check or the strict base64 makes the case after it fail.
 //
-// To regenerate the Python-derived literals (about 100 lines of Python from RFC 8032 sections
-// 5.1 and 6 and nothing else; check it against TEST 1 to 3 first): an order-8 point is L * Q for
+// To regenerate the Python-derived literals: tests/update/tool_tests/rfc8032_oracle.py (run it
+// with `python -I`; about 100 lines from RFC 8032 sections 5.1 and 6 and nothing else, and it
+// checks itself against TEST 1 to 3 first, exiting non-zero if it disagrees with the RFC). An
+// order-8 point is L * Q for
 // a curve point Q found by decoding small y values, and its other-sign and other-y forms are the
 // same points with x or y negated; a non-canonical alias is y + p written in 255 bits
 // (p = 2^255 - 19); the mixed-order key is TEST 1's A plus one order-8 point, encoded; "S + L" is
