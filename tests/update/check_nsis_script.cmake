@@ -15,23 +15,45 @@
 #   * no administrator rights asked for, and nothing machine-wide written: no HKLM or any
 #     other hive but HKCU, no "all users" shell context, no Program Files or system folder;
 #   * the folder is %LOCALAPPDATA%\Programs\Katana, and the registry holds what the updater
-#     reads and Settings > Apps shows (include/katana/update/registry.hpp);
+#     reads and Settings > Apps shows (include/katana/update/registry.hpp); a copy that is
+#     already installed is offered as the folder again; no folder at all, or one that cannot
+#     be written to, is refused before anything is put down, by a silent run too;
 #   * installed over a copy of Katana, it clears the updater's record of that copy's version
 #     and the working folder of an update that was cut short, and a file that is in use stops
-#     it: none is skipped;
+#     it: none is skipped; an entry in Settings > Apps whose uninstaller is gone does not
+#     stop it;
 #   * the uninstaller removes the updater's working folder .update and every file the
-#     installed manifest lists, and never removes the install folder recursively, so what a
-#     person put there stays; outside it, it clears the updater's state folder and no other,
+#     installed manifest lists, reading that list before it deletes it, and never removes the
+#     install folder recursively, so what a person put there stays; it stops when its folder
+#     is not known; outside the folder it clears the updater's state folder and no other,
 #     keeps the person's choices about updating, and removes the helper's RunOnce value under
 #     the name the helper gives it (REGISTRY_HEADER, when given, is where that name is read);
 #   * a silent run never waits for an answer; the text is Unicode.
 #
-# Comments are removed before anything is looked at: the template explains in them what it
-# does not do, and a word in a comment is not an instruction. NSIS continues a line that ends
-# in a backslash onto the next one, and a comment as well as a command (its manual, "Long
-# commands"), so the line after such a comment is part of the comment to NSIS and would be an
-# instruction to this check, which takes comments out a line at a time. A line that has a
-# comment character in it and ends in a backslash is therefore refused, not interpreted.
+# That list is all this check holds the text to. What only a run can show (the exit code of a
+# refused folder, the size in Settings > Apps, the shortcuts) is not in it.
+#
+# The check reads text, and NSIS does not compile all of its text. Two things take an
+# instruction away from NSIS, and each is dealt with before a rule looks at anything:
+#
+#   * comments. Whole-line comments are removed: the template explains in them what it does
+#     not do, and a word in a comment is not an instruction. NSIS continues a line that ends
+#     in a backslash onto the next one, a comment as well as a command (its manual, "Long
+#     commands"), so the line after such a comment is part of the comment to NSIS and would
+#     be an instruction here; a line that has a comment character in it and ends in a
+#     backslash is therefore refused, not interpreted. So is a block comment (a slash and a
+#     star), anywhere: the template has none, and none is read here;
+#   * conditional compilation. The template has two kinds, and no other is accepted. The test
+#     for MSYS2's NSIS (!if /FileExists) cannot be evaluated here, so it may hold the Target
+#     line and nothing else. A comparison of two literal strings, which is what a value CPack
+#     filled in makes, is evaluated as NSIS evaluates it (== and !=, without regard to case),
+#     and the text inside a false one is removed, as NSIS leaves it out. One condition inside
+#     another, an !else, an !ifdef and every other form are refused.
+#
+# What it cannot see is an instruction that is compiled and never reached: one in a function
+# that nothing calls, or behind a jump. The rules about the installer's and the uninstaller's
+# sections look inside the section, so an instruction moved out of one is missed there; beyond
+# that, this is for whoever reads a change to the template.
 # Instruction names are read in the case the template writes them; NSIS itself takes any.
 #
 # -DMUTATE=<name> changes the text first in one way that breaks one rule (a check that cannot
@@ -166,6 +188,32 @@ elseif(MUTATE STREQUAL "run_once_under_another_name")
     katana_mutate([=["KatanaUpdateRecover"]=] [=["KatanaRecover"]=])
 elseif(MUTATE STREQUAL "file_in_use_skipped")
     katana_mutate([=[AllowSkipFiles off]=] [=[AllowSkipFiles on]=])
+elseif(MUTATE STREQUAL "block_comment_hides_an_instruction")
+    katana_mutate([=[RMDir /r "$INSTDIR\.update"]=] "/*\n  RMDir /r \"$INSTDIR\\.update\"\n  */")
+elseif(MUTATE STREQUAL "unknown_condition_hides_an_instruction")
+    katana_mutate([=[RMDir /r "$INSTDIR\.update"]=] "!if 0\n  RMDir /r \"$INSTDIR\\.update\"\n  !endif")
+elseif(MUTATE STREQUAL "false_condition_hides_an_instruction")
+    # The form the template itself uses, false: nothing refuses it, so the call must not be
+    # found, and the rule that asks for the call must say so.
+    katana_mutate([=[Call un.DeleteManifestFiles]=] "!if \"\" != \"\"\n  Call un.DeleteManifestFiles\n  !endif")
+elseif(MUTATE STREQUAL "condition_inside_a_condition")
+    katana_mutate([=[Call un.DeleteManifestFiles]=]
+                  "!if \"a\" == \"a\"\n  !if \"\" != \"\"\n  !endif\n  Call un.DeleteManifestFiles\n  !endif")
+elseif(MUTATE STREQUAL "manifest_deleted_before_it_is_read")
+    # Moved, not copied: the delete leaves its place below the call and goes above it.
+    katana_mutate("  Delete \"$INSTDIR\\share\\katana\\installed.manifest.json\"\n" "")
+    katana_mutate([=[Call un.DeleteManifestFiles]=]
+                  "Delete \"$INSTDIR\\share\\katana\\installed.manifest.json\"\n  Call un.DeleteManifestFiles")
+elseif(MUTATE STREQUAL "no_folder_at_all_is_installed_into")
+    katana_mutate([=[StrCmp $INSTDIR "" folder_not_writable]=] "")
+elseif(MUTATE STREQUAL "silent_install_does_not_try_the_folder")
+    katana_mutate([=[Call CheckInstallFolder]=] "")
+elseif(MUTATE STREQUAL "installed_copy_is_not_offered_again")
+    katana_mutate([=[InstallDirRegKey HKCU "${KATANA_PRODUCT_KEY}" ""]=] "")
+elseif(MUTATE STREQUAL "uninstaller_runs_without_a_folder")
+    katana_mutate([=[Abort "Katana's folder is not known, so nothing was removed."]=] "")
+elseif(MUTATE STREQUAL "uninstaller_that_is_gone_stops_the_install")
+    katana_mutate([=[IfFileExists "$0" 0 onInitDone]=] "")
 elseif(MUTATE)
     message(FATAL_ERROR "unknown mutation '${MUTATE}'")
 endif()
@@ -183,11 +231,78 @@ function(katana_require what literal)
     endif()
 endfunction()
 
-# 0. Nothing hides an instruction from this check.
+# 0. What NSIS does not compile is not read as an instruction (the top of this file says what
+# that covers and what it does not).
+# 0a. Comments.
 if(NOT _continued_comment STREQUAL "")
     string(STRIP "${_continued_comment}" _continued_comment)
     katana_problem("a line with a comment character in it ends in a backslash: NSIS continues a comment onto the next line, so the instruction there may be none, and this check would still read it as one. The line:  ${_continued_comment}")
 endif()
+if(_text MATCHES "/[*]")
+    katana_problem("/*: a block comment. NSIS skips everything up to the end of it and this check does not, so an instruction inside one would be read here as an instruction that NSIS never sees. Comments are whole lines")
+endif()
+
+# 0b. Conditional compilation: the two kinds the template has, and never one inside another.
+string(REGEX MATCHALL "(^|\n)[ \t]*!(if|else|endif)[^\n]*" _conditions "${_text}")
+set(_condition_open FALSE)
+foreach(_condition IN LISTS _conditions)
+    string(STRIP "${_condition}" _condition)
+    if(_condition STREQUAL "!endif")
+        if(NOT _condition_open)
+            katana_problem("!endif: it ends no condition")
+        endif()
+        set(_condition_open FALSE)
+    elseif(_condition_open)
+        katana_problem("${_condition}: one condition inside another, or an !else. This check reads a condition up to its !endif and no further, so it would take what follows for text that NSIS compiles")
+    elseif(_condition STREQUAL [=[!if /FileExists "${NSISDIR}\Plugins\unicode\nsDialogs.dll"]=]
+           OR _condition MATCHES "^!if \"[^\"$]*\" (==|!=) \"[^\"$]*\"$")
+        set(_condition_open TRUE)
+    else()
+        katana_problem("${_condition}: a condition this check cannot evaluate, so it cannot tell whether NSIS compiles what is inside it. The template's own are the test for MSYS2's NSIS and comparisons of two literal strings")
+        if(_condition MATCHES "^!if")
+            set(_condition_open TRUE)
+        endif()
+    endif()
+endforeach()
+if(_condition_open)
+    katana_problem("a condition does not end: the script has an !if with no !endif after it")
+endif()
+# The one that cannot be evaluated here holds the Target line and nothing else.
+string(REGEX REPLACE
+    "!if /FileExists \"[$][{]NSISDIR[}]\\\\Plugins\\\\unicode\\\\nsDialogs[.]dll\"[ \t]*\n[ \t]*Target amd64-unicode[ \t]*\n[ \t]*!endif"
+    "" _without_the_target "${_text}")
+if(_without_the_target MATCHES "!if /FileExists")
+    katana_problem("!if /FileExists: this check cannot tell whether the file is there, so that condition may hold the line  Target amd64-unicode  and nothing else")
+endif()
+# A comparison of two literal strings is evaluated as NSIS evaluates it, without regard to
+# case, and what is inside a false one goes: NSIS never sees it, so no rule below may.
+set(_compiled "")
+set(_rest "${_text}")
+while(TRUE)
+    string(REGEX MATCH "(^|\n)[ \t]*!if \"([^\"$\n]*)\" (==|!=) \"([^\"$\n]*)\"[ \t]*\n" _comparison "${_rest}")
+    if(_comparison STREQUAL "")
+        break()
+    endif()
+    string(TOUPPER "${CMAKE_MATCH_2}" _left)
+    set(_operator "${CMAKE_MATCH_3}")
+    string(TOUPPER "${CMAKE_MATCH_4}" _right)
+    string(FIND "${_rest}" "${_comparison}" _at)
+    string(LENGTH "${_comparison}" _length)
+    math(EXPR _body "${_at} + ${_length}")
+    string(SUBSTRING "${_rest}" 0 ${_body} _head)
+    string(SUBSTRING "${_rest}" ${_body} -1 _rest)
+    string(APPEND _compiled "${_head}")
+    string(COMPARE EQUAL "${_left}" "${_right}" _same)
+    if((_operator STREQUAL "==" AND NOT _same) OR (_operator STREQUAL "!=" AND _same))
+        string(FIND "${_rest}" "!endif" _end)
+        if(_end EQUAL -1)
+            set(_rest "")
+        else()
+            string(SUBSTRING "${_rest}" ${_end} -1 _rest)
+        endif()
+    endif()
+endwhile()
+set(_text "${_compiled}${_rest}")
 
 # 1. No elevation: exactly one RequestExecutionLevel, and it is user.
 string(REGEX MATCHALL "(^|\n)[ \t]*RequestExecutionLevel[^\n]*" _levels "${_text}")
@@ -273,6 +388,41 @@ katana_require_in_installer("clear the working folder of an update that was cut 
 katana_require_in_installer("keep that clearing to a folder that holds a packaged Katana"
     [=[IfFileExists "$INSTDIR\share\katana\install.json" 0 previous_copy_done]=])
 
+# 3b. The folder. A copy that is already installed is offered as the folder again, so that a
+# reinstall goes where the first install went. No folder at all, and a folder that cannot be
+# written to, are refused before anything is cleared or put down: by the folder page as it is
+# left, and by the installer's section as its first instruction, which is where a silent run,
+# which has no page, meets the test. Without a folder every path would start at the top of a
+# drive.
+katana_require("a copy that is already installed is offered as the folder again"
+    [=[InstallDirRegKey HKCU "${KATANA_PRODUCT_KEY}" ""]=])
+katana_require("no folder at all is refused, like one that cannot be written to"
+    [=[StrCmp $INSTDIR "" folder_not_writable]=])
+katana_require("the folder is tried for writing"
+    [=[FileOpen $0 "$INSTDIR\katana-write-test.tmp" w]=])
+katana_require("the folder page refuses a folder that fails that test"
+    [=[!define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckInstallFolder]=])
+if(NOT _install STREQUAL ""
+   AND NOT _install MATCHES "^Section \"-Core installation\"[ \t\n]*Call CheckInstallFolder[ \t]*\n")
+    katana_problem("the installer's section does not begin with  Call CheckInstallFolder: a silent run has no folder page, so it would clear and write a folder that nothing has tried")
+endif()
+
+# 3c. A copy that is already installed is uninstalled first, by running the uninstaller that
+# its entry in Settings > Apps names. An entry can outlive its uninstaller (the folder deleted
+# by hand, which is easy in one's own profile), and running a program that is not there
+# fails. The install must not stop on that, so the program is looked for first and, when it is
+# gone, the install goes ahead. (Where the installer does not read the entry at all, because
+# uninstalling first is switched off, there is nothing to hold.)
+string(FIND "${_text}" [=[ReadRegStr $0 HKCU "${KATANA_UNINSTALL_KEY}" "UninstallString"]=] _entry_read)
+if(NOT _entry_read EQUAL -1)
+    string(SUBSTRING "${_text}" ${_entry_read} -1 _after_the_read)
+    string(FIND "${_after_the_read}" [=[IfFileExists "$0" 0 onInitDone]=] _looked_for)
+    string(FIND "${_after_the_read}" "ExecWait" _run)
+    if(_looked_for EQUAL -1 OR (NOT _run EQUAL -1 AND _run LESS _looked_for))
+        katana_problem("the installer runs the uninstaller that the entry in Settings > Apps names without looking for it first (IfFileExists \"$0\" 0 onInitDone, before ExecWait): an entry whose uninstaller is gone, because the folder was deleted by hand, would stop every install at \"Uninstall failed.\"")
+    endif()
+endif()
+
 # 4. Silent: every MessageBox has a default answer (/SD), or a silent install waits for ever.
 string(REGEX MATCHALL "(^|\n)[ \t]*MessageBox[^\n]*" _boxes "${_text}")
 list(LENGTH _boxes _box_count)
@@ -311,6 +461,12 @@ function(katana_require_in_uninstaller what literal)
         katana_problem("the uninstaller does not ${what}: it has no  ${literal}")
     endif()
 endfunction()
+# It stops, before it removes anything, when its folder is not known: every path below starts
+# with the folder, and without one would start at the top of a drive.
+if(NOT _uninstall STREQUAL ""
+   AND NOT _uninstall MATCHES "^Section \"Uninstall\"[ \t\n]*StrCmp [$]INSTDIR \"\" 0 uninstall_folder_known[ \t]*\n[ \t]*Abort [^\n]*\n[ \t]*uninstall_folder_known:")
+    katana_problem("the uninstaller's section does not begin by stopping when its folder is not known (StrCmp $INSTDIR \"\" 0 uninstall_folder_known, an Abort, uninstall_folder_known:): without a folder its paths would start at the top of a drive")
+endif()
 katana_require_in_uninstaller("remove the updater's working folder" [=[RMDir /r "$INSTDIR\.update"]=])
 katana_require_in_uninstaller("remove the files the installed manifest lists" [=[Call un.DeleteManifestFiles]=])
 katana_require_in_uninstaller("remove the updater's records" [=[Delete "$INSTDIR\share\katana\installed.json"]=])
@@ -374,6 +530,13 @@ if(NOT _first_folder STREQUAL "" AND NOT _manifest_call EQUAL -1)
         string(STRIP "${_first_folder}" _first_folder)
         katana_problem("${_first_folder} comes before Call un.DeleteManifestFiles: a folder an update filled would be left behind")
     endif()
+endif()
+# ...and before the list itself is deleted: the call reads the file, and with the file gone it
+# finds nothing to read, deletes nothing and says nothing, so every file an update added would
+# be left behind.
+string(FIND "${_uninstall}" [=[Delete "$INSTDIR\share\katana\installed.manifest.json"]=] _manifest_delete)
+if(NOT _manifest_delete EQUAL -1 AND NOT _manifest_call EQUAL -1 AND _manifest_delete LESS _manifest_call)
+    katana_problem("Delete \"$INSTDIR\\share\\katana\\installed.manifest.json\" comes before Call un.DeleteManifestFiles: the list would be gone before it is read, and every file an update added would be left behind")
 endif()
 
 # What the build said goes in (CPack's own lists, from the real staged tree).
