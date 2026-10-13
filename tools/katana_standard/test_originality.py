@@ -18,7 +18,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import originality  # noqa: E402
 
-# A definition of more than five strokes, so that it takes part in the stroke comparison.
+# A definition that more than five strokes draw, so that it takes part in the comparison of shapes.
 ELDER_STROKES = [["move", 0, 0], ["draw", 4, 0], ["draw", 4, 2], ["draw", 0, 2], ["draw", 0, 0], ["move", 1, 1],
                  ["circle", 0.5]]
 PROBE_STROKES = [["move", 0, 0], ["draw", 3, 1], ["draw", 6, 0], ["move", 2, -1], ["draw", 2, 1], ["move", 4, -1],
@@ -200,7 +200,25 @@ class OneThingCopied(unittest.TestCase):
         self.assertEqual(result["definitions"], (2, 2, 1))   # one of the candidate's two is left out
 
 
-class ShapesHoweverTheyAreWritten(unittest.TestCase):
+class Shapes(unittest.TestCase):
+    """What the tests of the comparison of shapes share; it has no test of its own."""
+
+    ALL = ["shapes, as drawn", "shapes, moved", "shapes, scaled"]
+
+    def found(self, ours, theirs=None, their_members=None):
+        """Which of the three comparisons find the candidate's line (and nothing else of it) in the reference.
+        `their_members` are further members of the reference's definition (an `origin`, a `factor`)."""
+        reference, candidate = elder(), probe()
+        reference["linestyles"][0]["strokes"] = copy.deepcopy(ELDER_KEY if theirs is None else theirs)
+        reference["linestyles"][0].update(their_members or {})
+        candidate["linestyles"][0]["strokes"] = copy.deepcopy(ours)
+        found = failing(originality.scan(reference, candidate))
+        for names in found.values():
+            self.assertEqual(names, ["Probe Line"])
+        return sorted(found)
+
+
+class ShapesHoweverTheyAreWritten(Shapes):
     """What two definitions DRAW is compared, not how their lists are written: without regard to the order of the
     strokes, to the direction a line or an arc is drawn in, and under the eight symmetries of the square. The
     reference's line is ELDER_KEY and the candidate's is the list of each test, worked out by hand from it: a
@@ -208,18 +226,6 @@ class ShapesHoweverTheyAreWritten(unittest.TestCase):
     axis takes x to -x and an angle a to 180 - a, so an arc then runs from where it ended. A list that only
     orders, reverses, turns or mirrors the reference's was a different list to a comparison of lists, and none
     of those was found."""
-
-    ALL = ["shapes, as drawn", "shapes, moved", "shapes, scaled"]
-
-    def found(self, ours, theirs=None):
-        """Which of the three comparisons find the candidate's line (and nothing else of it) in the reference."""
-        reference, candidate = elder(), probe()
-        reference["linestyles"][0]["strokes"] = copy.deepcopy(ELDER_KEY if theirs is None else theirs)
-        candidate["linestyles"][0]["strokes"] = copy.deepcopy(ours)
-        found = failing(originality.scan(reference, candidate))
-        for names in found.values():
-            self.assertEqual(names, ["Probe Line"])
-        return sorted(found)
 
     @staticmethod
     def with_ring(radius):
@@ -343,15 +349,16 @@ class ShapesHoweverTheyAreWritten(unittest.TestCase):
         other = [["move", 7, 7], ["circle", 7], ["circle", 2], ["circle", 6], ["circle", 4], ["dot", 0]]
         self.assertEqual(self.found(other, theirs), [])
 
-    def test_a_list_that_draws_nothing_has_no_shape_and_dots_on_one_point_have_one(self):
+    def test_a_list_that_draws_nothing_has_no_shape_and_dots_on_one_point_are_one_dot(self):
         # Six moves make no mark: two such lists draw nothing, and nothing is no shape to have in common.
         nothing = [["move", n, n] for n in range(6)]
         self.assertEqual(self.found(nothing, nothing), [])
-        # Five dots on one point have neither a box nor a radius to be sized by, and are compared as they are:
-        # the same marks, at another place.
+        # Five dots on one point are one dot, whatever their radii: a mark written five times. A move and a
+        # dot draw it, so the six strokes that wrote it do not make it a shape to compare.
         theirs = [["move", 0, 0]] + [["dot", 0] for _ in range(5)]
         ours = [["move", 3, 3]] + [["dot", 0.2] for _ in range(5)]
-        self.assertEqual(self.found(ours, theirs), ["shapes, moved", "shapes, scaled"])
+        self.assertEqual(self.found(ours, theirs), [])
+        self.assertEqual(originality.strokes_to_draw(originality.drawing_of({"strokes": ours})), 2)
 
     def test_a_ring_with_a_cross_in_it_is_found_at_another_size_however_it_was_written(self):
         # Theirs: a spare move, a ring of radius 1 and the two strokes of a cross to 0.7 each way. Ours: the
@@ -363,6 +370,163 @@ class ShapesHoweverTheyAreWritten(unittest.TestCase):
         ours = [["move", 0, 0], ["circle", 1.6], ["move", 1.12, -1.12], ["draw", -1.12, 1.12],
                 ["move", 1.12, 1.12], ["draw", -1.12, -1.12]]
         self.assertEqual(self.found(ours, theirs), ["shapes, scaled"])
+
+
+class TheDrawingAndNotTheList(Shapes):
+    """A definition is compared as the DRAWING it makes where the renderer puts it: its marks less what a pen
+    would not show. A line cut into pieces is the line, a dot on a line, a ring or an arc of its own definition
+    is no mark, an `origin` and a `factor` put the marks where they are drawn, and an arc's angle is held as
+    closely as its lengths. Which definitions take part is counted on the drawing too. Every expectation is
+    worked out by hand from the rules in originality.py's header. A comparison of the marks as they are written
+    found none of the pairs below that differ by a hidden dot, a cut line, a factor or a fraction of a degree,
+    and left a reference definition of five strokes or fewer out whatever it drew."""
+
+    # A square from (0, 0) to (2, 2) with both its diagonals, and one of side 3 about the origin. In the unit
+    # box each is the four sides and the two diagonals of the square from (0, 0) to (1, 1).
+    SQUARE = [["move", 0, 0], ["draw", 2, 0], ["draw", 2, 2], ["draw", 0, 2], ["draw", 0, 0],
+              ["move", 0, 0], ["draw", 2, 2], ["move", 0, 2], ["draw", 2, 0]]
+    OUR_SQUARE = [["move", -1.5, -1.5], ["draw", 1.5, -1.5], ["draw", 1.5, 1.5], ["draw", -1.5, 1.5],
+                  ["draw", -1.5, -1.5], ["move", -1.5, -1.5], ["draw", 1.5, 1.5], ["move", -1.5, 1.5],
+                  ["draw", 1.5, -1.5]]
+
+    @staticmethod
+    def strokes_to_draw(strokes):
+        return originality.strokes_to_draw(originality.drawing_of({"strokes": strokes}))
+
+    @staticmethod
+    def joined(*lines):
+        """The lines `originality.joined` makes of these, each as its two ends in order, in order."""
+        return sorted(tuple(sorted((line[:2], line[2:]))) for line in originality.joined(lines))
+
+    def test_a_dot_where_the_lines_of_its_definition_cross_is_no_mark(self):
+        # (1, 1) is on both diagonals of the reference's square, so its dot there draws nothing that a line has
+        # not drawn, and the two squares are one shape at another place and size.
+        self.assertEqual(self.found(self.OUR_SQUARE, self.SQUARE + [["move", 1, 1], ["dot", 0]]),
+                         ["shapes, scaled"])
+        # The other way round: ours with a dot where its diagonals cross, theirs with none.
+        self.assertEqual(self.found(self.OUR_SQUARE + [["move", 0, 0], ["dot", 0.3]], self.SQUARE),
+                         ["shapes, scaled"])
+        # (1, 0.5) is on no side (x or y is 0 or 2 on those) and on no diagonal (y is x on one and 2 - x on the
+        # other). A dot there is a mark, and the other square has none.
+        self.assertEqual(self.found(self.OUR_SQUARE, self.SQUARE + [["move", 1, 0.5], ["dot", 0]]), [])
+
+    def test_a_dot_on_a_ring_or_on_an_arc_is_no_mark_and_a_dot_beside_one_is(self):
+        # The key's ring has radius 0.5 about (1, 2), and its arc is the quarter from 0 to 90 degrees about
+        # (3, 2) with radius 1. (1.5, 2) is on the ring. (3.6, 2.8) is 0.6 and 0.8 from the arc's centre, so 1
+        # from it, at 53 degrees: on the arc.
+        on_both = ELDER_KEY + [["move", 1.5, 2], ["dot", 0], ["move", 3.6, 2.8], ["dot", 0]]
+        self.assertEqual(self.found(ELDER_KEY, on_both), self.ALL)
+        # (2.4, 2.8) is as far from that centre at 127 degrees: on the arc's circle, and past its end.
+        self.assertEqual(self.found(ELDER_KEY, ELDER_KEY + [["move", 2.4, 2.8], ["dot", 0]]), [])
+        # The middle of a ring is not on the ring: a ring with a dot in it is two marks.
+        self.assertEqual(self.found(ELDER_KEY, ELDER_KEY + [["move", 1, 2], ["dot", 0]]), [])
+
+    def test_a_line_written_in_pieces_is_the_line(self):
+        rest = ELDER_KEY[2:]   # the upright of the L, from (4, 0), and everything after it
+        # The bottom of the L, from (0, 0) to (4, 0), as four pieces drawn end to end.
+        chained = [["move", 0, 0], ["draw", 1, 0], ["draw", 2, 0], ["draw", 3, 0], ["draw", 4, 0]] + rest
+        self.assertEqual(self.found(chained), self.ALL)
+        # As two lines that overlap from 2 to 3, the second drawn backwards.
+        overlapping = [["move", 0, 0], ["draw", 3, 0], ["move", 4, 0], ["draw", 2, 0], ["move", 4, 0]] + rest
+        self.assertEqual(self.found(overlapping), self.ALL)
+        # With nothing from 1.5 to 2 it is two lines, and the key has no such gap: a gap is no ink.
+        broken = [["move", 0, 0], ["draw", 1.5, 0], ["move", 2, 0], ["draw", 4, 0]] + rest
+        self.assertEqual(self.found(broken), [])
+
+    def test_only_lines_on_one_straight_line_that_touch_or_overlap_are_joined(self):
+        self.assertEqual(self.joined((0, 0, 1, 0), (1, 0, 2, 0)), [((0, 0), (2, 0))])
+        self.assertEqual(self.joined((0, 0, 4, 0), (1, 0, 2, 0)), [((0, 0), (4, 0))])        # one within the other
+        self.assertEqual(self.joined((0, 0, 1, 1), (2, 2, 1, 1)), [((0, 0), (2, 2))])        # one of them backwards
+        # The piece that joins two others, written last.
+        self.assertEqual(self.joined((0, 0, 1, 0), (2, 0, 3, 0), (1, 0, 2, 0)), [((0, 0), (3, 0))])
+        # A plus written as four spokes from its middle is two lines.
+        self.assertEqual(self.joined((0, 0, 1, 0), (0, 0, -1, 0), (0, 0, 0, 1), (0, 0, 0, -1)),
+                         [((-1, 0), (1, 0)), ((0, -1), (0, 1))])
+        # Not joined: two lines that meet at a corner, two that run side by side, two with a gap between them.
+        self.assertEqual(self.joined((0, 0, 1, 0), (1, 0, 1, 1)), [((0, 0), (1, 0)), ((1, 0), (1, 1))])
+        self.assertEqual(self.joined((0, 0, 2, 0), (0, 0.5, 2, 0.5)), [((0, 0), (2, 0)), ((0, 0.5), (2, 0.5))])
+        self.assertEqual(self.joined((0, 0, 1, 0), (1.5, 0, 2, 0)), [((0, 0), (1, 0)), ((1.5, 0), (2, 0))])
+
+    def test_the_strokes_that_draw_a_drawing_are_counted_on_the_drawing_and_not_on_the_list(self):
+        count = self.strokes_to_draw
+        dash = [["move", 0, 0], ["draw", 3, 0]]
+        self.assertEqual(count(dash), 2)
+        self.assertEqual(count([["move", 0, 0]] + [["draw", n, 0] for n in range(1, 11)]), 2)   # in ten pieces
+        self.assertEqual(count(dash + [["move", 1, 0], ["dot", 0]]), 2)                         # a dot on it
+        self.assertEqual(count(dash + [["move", 1, 1], ["text", {"text": "W", "height": 1}]]), 4)
+        plus = [["move", -1, 0], ["draw", 1, 0], ["move", 0, -1], ["draw", 0, 1]]
+        self.assertEqual(count(plus), 4)   # its two lines cross and do not meet at an end: two paths
+        self.assertEqual(count([["move", 0, 0], ["draw", 1, 0], ["move", 0, 0], ["draw", -1, 0],
+                                ["move", 0, 0], ["draw", 0, 1], ["move", 0, 0], ["draw", 0, -1]]), 4)
+        # A square is one path round, as one path or as four lines of two strokes each.
+        self.assertEqual(count(self.SQUARE[:5]), 5)
+        self.assertEqual(count([["move", 0, 0], ["draw", 2, 0], ["move", 2, 2], ["draw", 2, 0],
+                                ["move", 2, 2], ["draw", 0, 2], ["move", 0, 0], ["draw", 0, 2]]), 5)
+        # With both diagonals three lines meet at each of its four corners: two paths, and six lines.
+        self.assertEqual(count(self.SQUARE), 8)
+        self.assertEqual(count([["move", 0, 0], ["draw", 1, 1], ["draw", 2, 0], ["draw", 3, 1]]), 4)   # a zigzag
+        # A bar and a stem to its middle: the stem ends ON the bar and at no end of it, so they are two paths.
+        self.assertEqual(count([["move", 0, 0], ["draw", 2, 0], ["move", 1, 0], ["draw", 1, -1]]), 4)
+        # Three lines from one point: one line ends at each of three points and three at the fourth.
+        self.assertEqual(count([["move", 0, 0], ["draw", 1, 0], ["move", 0, 0], ["draw", -1, 1],
+                                ["move", 0, 0], ["draw", -1, -1]]), 5)
+        ring = [["move", 0, 0], ["circle", 1]]
+        self.assertEqual(count(ring), 2)
+        self.assertEqual(count(ring + ring), 2)                                       # written twice
+        self.assertEqual(count(ring + [["dot", 0]]), 4)                               # a dot in its middle
+        self.assertEqual(count(ring + [["circle", 2], ["circle", 3]]), 6)             # a move for each ring
+        # A ring with two chords across it, from (-0.6, -0.8) and from (0.6, -0.8) straight up: two more paths.
+        self.assertEqual(count(ring + [["move", -0.6, -0.8], ["draw", -0.6, 0.8],
+                                       ["move", 0.6, -0.8], ["draw", 0.6, 0.8]]), 6)
+
+    def test_a_drawing_of_five_strokes_or_fewer_is_left_out_however_many_strokes_wrote_it(self):
+        # A dash from 0 to 6 written as six pieces is seven strokes, and a move and a draw make it. The
+        # reference has the dash at half the length; a dash is anybody's.
+        reference, candidate = elder(), probe()
+        reference["linestyles"][0]["strokes"] = [["move", 0, 0], ["draw", 3, 0]]
+        candidate["linestyles"][0]["strokes"] = [["move", 0, 0]] + [["draw", n, 0] for n in range(1, 7)]
+        result = originality.scan(reference, candidate)
+        self.assertEqual(failing(result), {})
+        self.assertEqual(result["definitions"], (2, 2, 2))   # the dash and the mark of one ring are both left out
+
+    def test_every_definition_of_the_reference_takes_part_however_few_strokes_wrote_it(self):
+        # Three rings about one point. The reference writes them after ONE move, in four strokes; ours has a
+        # move for each, at twice the size and elsewhere. Sized by the largest radius both are rings of a
+        # third, two thirds and the whole.
+        theirs = [["move", 0, 0], ["circle", 1], ["circle", 2], ["circle", 3]]
+        ours = [["move", 5, 5], ["circle", 2], ["move", 5, 5], ["circle", 4], ["move", 5, 5], ["circle", 6]]
+        self.assertEqual(self.found(ours, theirs), ["shapes, scaled"])
+
+    def test_a_definition_is_read_where_its_origin_and_its_factor_put_it(self):
+        # The key written at a quarter of its size about (1, 2): a point p is written p / 4 + (1, 2) and a
+        # radius r is written r / 4. The origin (1, 2) and the factor 4 put every one of them back where the
+        # key has it, so the two are one drawing as they are drawn and not only at one size.
+        quarter = [["move", 1, 2], ["draw", 2, 2], ["draw", 2, 2.25], ["move", 1.25, 2.5], ["circle", 0.125],
+                   ["move", 1.75, 2.5], ["arc", 0.25, 0, 90], ["move", 1, 2.75], ["dot", 0]]
+        placing = {"origin": [1, 2], "factor": 4}
+        self.assertEqual(self.found(ELDER_KEY, quarter, placing), self.ALL)
+        # Without them it is the key elsewhere, at a quarter of its size.
+        self.assertEqual(self.found(ELDER_KEY, quarter), ["shapes, scaled"])
+        # A text's height is not sized by the factor, since the renderer sizes a text by where the definition
+        # is put: the letter written 1 high at (1.5, 2.375) is drawn 1 high at (2, 1.5).
+        lettered = quarter + [["move", 1.5, 2.375], ["text", {"text": "E", "height": 1}]]
+        same = ELDER_KEY + [["move", 2, 1.5], ["text", {"text": "E", "height": 1}]]
+        taller = ELDER_KEY + [["move", 2, 1.5], ["text", {"text": "E", "height": 4}]]
+        self.assertEqual(self.found(same, lettered, placing), self.ALL)
+        self.assertEqual(self.found(taller, lettered, placing), [])
+
+    def test_an_angle_is_the_same_when_no_point_of_the_arc_is_a_step_apart_for_it(self):
+        def swept_to(end):
+            return [["arc", 1, 0, end] if s[0] == "arc" else list(s) for s in ELDER_KEY]
+
+        # The key's arc has radius 1, so a degree more moves its end 0.01745 round the circle; its box is 4
+        # wide. 0.03 of a degree moves the end 0.0005: the same arc as it is drawn.
+        self.assertEqual(self.found(swept_to(90.03)), self.ALL)
+        # 0.1 of a degree moves it 0.0017, which is apart as drawn and 0.0004 in the unit box.
+        self.assertEqual(self.found(swept_to(90.1)), ["shapes, scaled"])
+        # Two degrees move it 0.035, which is 0.0087 in the unit box; three move it 0.052, which is 0.013.
+        self.assertEqual(self.found(swept_to(92)), ["shapes, scaled"])
+        self.assertEqual(self.found(swept_to(93)), [])
 
 
 class WhatTheReferenceCallsAThing(unittest.TestCase):
