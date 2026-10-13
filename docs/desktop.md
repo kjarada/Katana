@@ -3004,11 +3004,14 @@ environment, the job runner - and does what they say:
 |---|---|
 | `updateViewOfOffer` | which state `UPDATE CHECK`'s answer is: Available, or Ready when that version is already downloaded; Current; NotOffered; CheckFailed; Unsupported |
 | `updateQuietAnswer` | what the AUTOMATIC check does with its answer: announce it, show it without a word, or drop it |
+| `updateEffectOfLine` | what a line that was run at once and carried out does to what the dialog shows: `UPDATE SKIP NONE` and `UPDATE BLOCKED CLEAR` take back what their own list set aside, `UPDATE SKIP <version>` the release that was offered |
 | `updateStagedToOffer` | whether the release `UPDATE STATUS` says is downloaded is offered as Ready when the window starts |
 | `updateStagedAfter` | whether a downloaded release is still one to install after a check answered |
 | `updateViewOfLastResult` | how the last apply's result is shown at the next start |
 | `updateAutomaticCheckIsDue` | whether the window checks by itself now |
-| `updateStartMayConfirm` | whether a window that has come idle is the proof that an update starts: only a window of the very version the install's record names ("An update that was never said to start", below) |
+| `updateSkippedOfState`, `updatePutBackOfState` | what Settings > Updates is told of the state file: the skipped version, and whether a release was put back - and nothing at all for a file that does not read, never "none" ("The Updates page") |
+| `updateStartMayConfirm` | whether a window that has come idle is the proof that an update starts: only in a copy with an install record whose installed version is the program's own, which refuses a record that names a version above the program's ("An update that was never said to start", below) |
+| `updateFailureIsBoxed` | whether an update that could not be started is said in a message box as well as on stderr: only in a run that was given no line to run. It is `main()`'s decision, here with the others so that a test can ask it |
 | `updateRecoveredTransactions` | which helper copies a start may remove: those of this install's updates that a recovery put right and that are over |
 | `updateStatusButtonText` | the status-bar button's words, and that it is hidden |
 | `updateReplyValue`, `updateStagedOfReply` | a record of a reply, by its key |
@@ -3091,6 +3094,11 @@ The button is Settings > Updates' "Offer the version that was put back
 again" ("The Updates page"). Once its line was carried out, a dialog that
 still said "not offered again" goes back to "Not checked for updates yet.",
 as it does after `UPDATE SKIP NONE`, and the next check offers the release.
+Each line takes back only what its own list set aside - `BLOCKED CLEAR`
+leaves a skipped release as it is shown, `SKIP NONE` one that was put back -
+and a reply that gives a reason (`blocked=none reason=no_state`: no update
+folder, so nothing was kept) takes back nothing (`updateEffectOfLine`;
+`ALineThatWasCarriedOutTakesBackOnlyWhatItsOwnListSetAside`).
 *Rejected: a button for it in this dialog.* RolledBack is read and closed,
 with nothing to press, so that no single press there installs again a
 release that has just failed to start; the way back is a deliberate step
@@ -3210,10 +3218,12 @@ question are asked as ever:
   person may use, shown, with the automatic check), yet it is driven by
   whoever started it - a script, a test, an agent - and nobody may be there
   to close a box: until 2026-10-14 `katana --command "UPDATE APPLY CONFIRM"`
-  whose helper did not start waited on that box for ever. *Rejected: making
-  every `--command` run headless.* A headless window is never shown, restores
-  no session and starts nothing about updates, and a run is started with
-  `--command` precisely to set a window up for a person.
+  whose helper did not start waited on that box for ever. Which runs get the
+  box is `updateFailureIsBoxed`, asked with the kinds of the steps the run
+  was given (`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`).
+  *Rejected: making every `--command` run headless.* A headless window is
+  never shown, restores no session and starts nothing about updates, and a
+  run is started with `--command` precisely to set a window up for a person.
 
 **How the last one ended** is shown once. At the next interactive start the
 workbench reads the last apply's result from the update state folder, clears
@@ -3265,12 +3275,17 @@ update did work.
 
 - **Only the version that was installed proves it.** The call is made only
   in an interactive window (it writes per-user state) of an installed copy
-  whose install record names the program's own version
-  (`AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled`). The
-  case the rule exists for is a window of the OLD files that was started
-  while the files were being swapped: it runs old code over the new tree, the
-  record names a version it is not, and its start says nothing about the
-  release. The record is read again for this, not taken from the verbs'
+  that has an install record and whose installed version is the program's
+  own (`AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled`).
+  The installed version is the HIGHER of the version the record names and
+  the program's own (`update::readInstall`), so what this refuses is a record
+  that names a version ABOVE the program's. That is the case the rule exists
+  for: a window of the OLD files that was started while the files were being
+  swapped. It runs old code over the new tree, the record names a version it
+  is not, and its start says nothing about the release. A record BELOW the
+  program's refuses nothing: a newer copy unpacked by hand over one that had
+  updated itself reads as the version that is running, and its window
+  confirms. The record is read again for this, not taken from the verbs'
   context, which read it when the window was built - during the swap that may
   have been the old record still.
 - **A helper that is alive settles its own update.** It holds the update
@@ -3339,15 +3354,15 @@ Not done:
   tested (`updateStartMayConfirm`), and what confirming does is the engine's
   and tested there; the call itself, its fresh read of the install record and
   its twelve askings are run by an installed copy alone. And `main()`'s
-  answer to a helper that cannot be started - stderr, exit 1, the box only
-  for a run given no line - is reached by no test: it takes an installed copy
-  whose helper is there for the preflight and gone a moment later. What a
-  start lists from the
-  install's `recovery.log` and then sweeps is reached by neither a
-  development copy nor a headless run, so by no test: which copies it may
-  list is tested (`updateRecoveredTransactions`), and the sweep is the
-  engine's and tested there (`update::processCleanupList`); reading the log
-  and listing the copies are run by a release alone.
+  answer to a helper that cannot be started - stderr, exit 1, the box - is
+  reached by no test: it takes an installed copy whose helper is there for
+  the preflight and gone a moment later. Which runs get the box is tested
+  (`updateFailureIsBoxed`); that `main()` asks it, and says the rest, is not.
+  What a start lists from the install's `recovery.log` and then sweeps is
+  reached by neither a development copy nor a headless run, so by no test:
+  which copies it may list is tested (`updateRecoveredTransactions`), and the
+  sweep is the engine's and tested there (`update::processCleanupList`);
+  reading the log and listing the copies are run by a release alone.
 - **A typed check that fails while a release is Ready** leaves the dialog on
   "Could not check for updates" with Retry; the downloaded release is not
   forgotten, and is Ready again after a check that succeeds or at the next
@@ -4234,8 +4249,8 @@ reason it exists.
 | Note | `settingsUpdateNote` | one sentence, hidden when there is nothing to say: that a headless run keeps no update settings, that a development build is never updated, or that `KATANA_UPDATE_DISABLE` is set |
 | Checking | `settingsUpdateAuto`, `settingsUpdateSends` | "Check for updates automatically": toggled, `UPDATE SET AUTO ON` or `UPDATE SET AUTO OFF`, and the box then shows what the state has - a line that was refused puts it back, as the automation boxes go back to the Document. Under it, what a check sends: only the user agent (`Katana/0.2.0 (win64)`), nothing about the person, their files or their drawings - and that the server it asks sees the computer's network address, as every website does |
 | Access token | `settingsUpdateToken`, `settingsUpdateTokenSave`, `settingsUpdateTokenClear`, `settingsUpdateTokenState` | a token for private releases, typed as dots. **Save writes the credential store directly** (`CredentialStore::write`) and runs no line. Clear runs `UPDATE TOKEN CLEAR`. The label says whether a token is stored and where, never the token |
-| Skipped version | `settingsUpdateSkipped`, `settingsUpdateUnskip` | the version `UPDATE SKIP` set aside, and "Offer the skipped version again": `UPDATE SKIP NONE`. Disabled while none is skipped |
-| Version that was put back | `settingsUpdateBlocked`, `settingsUpdateUnblock` | whether a version is set aside because it was installed here, did not start and was put back ("A version that was installed here did not start and was put back: it is not offered." or "No version was put back."), and "Offer the version that was put back again": `UPDATE BLOCKED CLEAR`. Disabled while none was put back |
+| Skipped version | `settingsUpdateSkipped`, `settingsUpdateUnskip` | the version `UPDATE SKIP` set aside, and "Offer the skipped version again": `UPDATE SKIP NONE`. Disabled while none is skipped; when nobody can say - a state file that does not read - the label is empty and the button stays on |
+| Version that was put back | `settingsUpdateBlocked`, `settingsUpdateUnblock` | whether a version is set aside because it was installed here, did not start and was put back ("A version that was installed here did not start and was put back: it is not offered." or "No version was put back."), and "Offer the version that was put back again": `UPDATE BLOCKED CLEAR`. Disabled while none was put back; when nobody can say, the label is empty and the button stays on |
 
 **The version that was put back** (2026-10-14). An update that is installed
 and does not prove that it starts is put back, and its release is set aside:
@@ -4255,14 +4270,32 @@ and Update installs it. Whether a version is set aside is read from the
 state file by the window (`SettingsUpdates::putBack`), since `UPDATE STATUS`
 does not say it; with nobody to say - a headless run - the page says nothing
 of it and the button stays on for the verbs to answer
-(`TheButtonForAVersionThatWasPutBackIsOffWithNoneAndOnWhenNobodySays`). The
-update dialog's two sentences about such a release point here ("Help >
-Check for Updates", "A release that was set aside says where the way back
-is"). *Rejected: offering again only the one release, by its number.* The
-state keeps the builds that were put back by sequence, not by version, so
-there is no number to show or to ask for; and the feed has one release to
-offer, the newest, so emptying the list and offering "the" release are the
-same act.
+(`TheButtonForAVersionThatWasPutBackIsOffWithNoneAndOnWhenNobodySays`).
+
+**A state file that does not read is nobody to say, too.** The verbs do not
+write over such a file: `UPDATE BLOCKED CLEAR` and `UPDATE SKIP NONE` are
+refused, and the refusal is the one thing that names the cause. The window
+told the page "none" for it, so the page said "No version was put back." and
+switched the button off - a guess, and one that kept a person from that
+refusal. Both of the page's questions now answer nothing at all for a file
+that did not read (`updateSkippedOfState`, `updatePutBackOfState`:
+`AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone`; a file that is not
+there reads as the defaults, which ARE known: none skipped, none put back),
+and the page then leaves the label empty and the button on
+(`AStateThatDoesNotReadIsNotGuessedAtAndTheButtonsLetTheVerbAnswer`: the
+line is run, its refusal is shown, and the button is still there to press
+once the file is put right). The skipped version's label and button had the
+same fault and follow the same rule. The automatic box does not: a state
+file that does not read is carried on from as the defaults are, for the
+check and so for the box.
+
+The update dialog's two sentences about a release that was put back point
+here ("Help > Check for Updates", "A release that was set aside says where
+the way back is"). *Rejected: offering again only the one release, by its
+number.* The state keeps the builds that were put back by sequence, not by
+version, so there is no number to show or to ask for; and the feed has one
+release to offer, the newest, so emptying the list and offering "the"
+release are the same act.
 
 **Why Save is not a line.** Every other button in Settings builds a line so
 that it is echoed in the command log and done by the one code path a typed

@@ -569,8 +569,11 @@ release still downloaded. A window nobody drove says it in a message box as
 well, since nobody reads a GUI program's stderr; a run that was given a line
 to run - `--command`, `--enter` or `--run-line` - is shown none, because
 whoever started it may not be there to close it, and it would wait for ever
-(`src/katana_qt/main.cpp`; no test reaches it, `docs/desktop.md`, "Not
-done" under "Help > Check for Updates").
+(`src/katana_qt/main.cpp`). Which runs are shown none is a function of the
+steps the run was given, and tested (`updateFailureIsBoxed`,
+`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`); `main()`'s
+own path - stderr, exit 1, the box - is reached by no test (`docs/desktop.md`,
+"Not done" under "Help > Check for Updates").
 
 Two things every run does about updates, headless or not, both before the
 window exists:
