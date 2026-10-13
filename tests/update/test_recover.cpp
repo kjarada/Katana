@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <stdexcept>
 #include <thread>
 
 #include "apply_harness.hpp"
@@ -544,6 +545,169 @@ TEST(RecoverForgery, AFolderTheJournalNamesThatIsALinkIsNotRestoredThroughAndThe
     EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "the new lib\n") << "nothing was moved through the link";
 }
 
+TEST(RecoverForgery, ALinkInsideOldOrNewIsNotMovedThroughEitherAndTheFailureIsReported)
+{
+    // old/<dir> and new/<dir> are in the transaction's folder, which is in the install, but a
+    // junction there leads anywhere: a file renamed from, or into, one comes from or goes to a
+    // place outside the install. The check on the install's side alone does not see it.
+    for (const char* side : {"old", "new"}) {
+        SCOPED_TRACE(side);
+        Forgery f(std::string("recover-forged-link-") + side);
+        fs::create_directories(f.work / "new/bin"); // as the plan made it
+        f.journal({
+            {JournalOp::Plan, {"deadbeef", "1", "2"}},
+            {JournalOp::Replace, {"bin/lib.dll"}},
+            {JournalOp::Committing, {}},
+        });
+        StdFs disk;
+        HookFs hooked(disk);
+        const Path linked = f.work / side / "bin";
+        hooked.adjustStat = [&](const Path& p, EntryInfo& info) {
+            if (p == linked) {
+                info.reparsePoint = true; // a junction to somewhere else
+            }
+        };
+        Rig rig(f.s, hooked, "eeeeeeee");
+        const core::Status status = recoverInProcess(f.s.root, rig.services());
+        ASSERT_FALSE(status.ok());
+        EXPECT_NE(status.error().message.find("katana_updater --recover"), std::string::npos);
+        EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "the new lib\n") << "nothing was moved through the link";
+        EXPECT_TRUE(isPresent(f.work / "old/bin/lib.dll")) << "and the old file is where it was";
+        EXPECT_FALSE(isPresent(f.work / "new/bin/lib.dll"));
+    }
+}
+
+TEST(RecoverForgery, AControlCharacterInARefusedPathCannotMakeTheLogSaySomethingElse)
+{
+    Forgery f("recover-forged-logline");
+    // A line feed and a carriage return, percent-encoded as the journal writes them.
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Replace, {"../a\ndeadbeef journal record refused: FORGED\r\nmore"}},
+        {JournalOp::Committing, {}},
+    });
+    StdFs disk;
+    Rig rig(f.s, disk, "eeeeeeee");
+    ASSERT_TRUE(recoverInProcess(f.s.root, rig.services()).ok());
+    EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "lib 0.1.0\n");
+
+    const std::string log = readText(f.s.root / ".update" / "recovery.log");
+    // One refused record is one line: the path's own line feed and carriage return are shown as
+    // %0A and %0D, from the byte values.
+    EXPECT_EQ(std::count(log.begin(), log.end(), '\n'), 1) << log;
+    EXPECT_EQ(log.find('\r'), std::string::npos) << log;
+    EXPECT_EQ(log.rfind("deadbeef journal record refused: REPLACE ../a%0Adeadbeef journal record refused: "
+                        "FORGED%0D%0Amore: ", 0),
+              0u)
+        << log;
+}
+
+TEST(RecoverBoundary, AnExceptionFromTheFileSystemIsAnErrorToReportAndNotACrash)
+{
+    Forgery f("recover-throws");
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Committing, {}},
+    });
+    StdFs disk;
+    class Throwing final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Result<EntryInfo> stat(const Path&) const override
+        {
+            throw std::runtime_error("injected: a conversion or an allocation failed");
+        }
+    } throwing(disk);
+
+    core::Status inProcess;
+    {
+        Rig rig(f.s, throwing, "eeeeeeee");
+        EXPECT_NO_THROW(inProcess = recoverInProcess(f.s.root, rig.services()));
+        EXPECT_FALSE(inProcess.ok());
+        core::Status rolled;
+        EXPECT_NO_THROW(rolled = rollback(f.s.root, "deadbeef", rig.services()));
+        EXPECT_FALSE(rolled.ok());
+    }
+    FakeLauncher launcher;
+    core::Status withHelper;
+    EXPECT_NO_THROW(withHelper = detail::recoverWith(f.s.root, throwing, launcher, f.s.state,
+                                                      std::chrono::milliseconds(50)));
+    EXPECT_FALSE(withHelper.ok()) << "recover() says so rather than dying: the caller reports it";
+    EXPECT_TRUE(launcher.ran.empty());
+    EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "the new lib\n") << "and nothing was touched";
+}
+
+#ifdef _WIN32
+
+TEST(RecoverBoundary, ANameThatIsNotTextInTheUpdateFolderOrInTheOldFilesCannotStopAProgramStarting)
+{
+    // NTFS allows a name with an unpaired surrogate; converting it to UTF-8 throws.
+    Forgery f("recover-odd-name");
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Committing, {}},
+    });
+    const Path oddName = Path(std::wstring(L"a\xD800" L"b"));
+    const Path oddFolder = f.s.root / ".update" / oddName;
+    const Path oddFile = f.work / "old/bin" / oddName;
+    std::error_code ec;
+    fs::create_directory(oddFolder, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    writeText(oddFile, "a file nobody can name in text");
+    EXPECT_ANY_THROW((void)core::pathToUtf8(oddName)) << "the premise of the test";
+
+    StdFs disk;
+    Rig rig(f.s, disk, "eeeeeeee");
+    core::Status status;
+    EXPECT_NO_THROW(status = recoverInProcess(f.s.root, rig.services()));
+    EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
+    EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "lib 0.1.0\n") << "the interrupted update is still put back";
+
+    // The system seams too: recover() is the first thing a program does.
+    FakeLauncher launcher;
+    core::Status first;
+    EXPECT_NO_THROW(first = detail::recoverWith(f.s.root, disk, launcher, f.s.state, std::chrono::milliseconds(50)));
+    EXPECT_TRUE(first.ok()) << (first.ok() ? "" : first.error().describe());
+    fs::remove(oddFolder, ec);
+}
+
+#endif // _WIN32
+
+TEST(RecoverBoundary, AFolderPlantedFarDeeperThanAnInstallIsLeftAndRecoveryStillReturns)
+{
+    // A finished transaction's folder is swept by every program's first lines. A nest planted to
+    // make that recursion run out of stack must not be entered without a bound.
+    Forgery f("recover-deep");
+    f.journal({
+        {JournalOp::Plan, {"deadbeef", "1", "2"}},
+        {JournalOp::Replace, {"bin/lib.dll"}},
+        {JournalOp::Committing, {}},
+        {JournalOp::CommittedPendingHealth, {}},
+        {JournalOp::Healthy, {}},
+    });
+    Path deep = f.work / "new";
+    for (int i = 0; i < 66; ++i) { // more than the 64 the clean-up goes down
+        deep /= "d";
+    }
+    std::error_code ec;
+    fs::create_directories(deep, ec);
+    ASSERT_FALSE(ec) << ec.message();
+
+    StdFs disk;
+    Rig rig(f.s, disk, "eeeeeeee");
+    core::Status status;
+    EXPECT_NO_THROW(status = recoverInProcess(f.s.root, rig.services()));
+    EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
+    EXPECT_TRUE(fs::is_directory(deep)) << "past the bound it is left, not walked";
+    EXPECT_FALSE(isPresent(f.work / "old")) << "and what is within the bound still goes";
+    EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "the new lib\n") << "a finished transaction is not rolled back";
+    // Nothing of an ordinary size is affected: the fixture-sized folders in the other tests are
+    // swept whole (EveryInterruptedStateIs...).
+}
+
 TEST(RecoverForgery, ATornJournalAndAnEmptyOneAreJunkNotAReasonToTouchTheInstall)
 {
     {
@@ -720,6 +884,87 @@ TEST(RecoverBeforeApply, AnInterruptedUpdateThatCannotBePutBackStopsTheNewOneBef
     // The old files are still in the first transaction's folder, and the next try finishes it.
     ASSERT_TRUE(recoverClean(s).ok());
     EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+}
+
+// ---- a pending folder whose helper died ---------------------------------------------------------------------------------------
+
+namespace {
+
+// v1 installed and v2 staged, from small specifications; `expected` is v2's tree.
+void buildTinyLoop(Scenario& s)
+{
+    s.v1 = tiny("0.1.0", 100);
+    s.v2 = tiny("0.2.0", 200);
+    writeInstall(s.root, s.v1);
+    writeStage(s.stage, s.v2);
+    writeInstall(s.expected, s.v2);
+    s.v1Hash = treeHash(s.root);
+    s.v1Snapshot = snapshot(s.root);
+    s.v2Hash = treeHash(s.expected);
+}
+
+} // namespace
+
+TEST(RecoverSuperseded, AnUpdateThatProvesHealthyDeletesThePendingFolderAnEarlierHelperLeft)
+{
+    REQUIRE_CAN_SIGN();
+    Loop loop("superseded", buildTinyLoop);
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+
+    // tx1 committed and passed its health check, and its helper died before it wrote HEALTHY.
+    crashAt(loop, p.healthy);
+    ASSERT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    ASSERT_EQ(treeHash(s.root), s.v2Hash);
+    const std::string first = onlyTransaction(s);
+    ASSERT_EQ(first, "a1b2c3d4");
+    writeText(s.state / ("run-" + first) / "katana_updater.exe", "the dead helper's copy");
+    ASSERT_TRUE(isPresent(healthMarkerPath(s.state, first))) << "written when it was started";
+
+    // A later release, installed by a window that was running tx1's version.
+    const ReleaseSpec v3 = tiny("0.3.0", 300);
+    fs::remove_all(s.stage);
+    writeStage(s.stage, v3);
+    const Path expected3 = s.scratch.path() / "expected3";
+    writeInstall(expected3, v3);
+
+    StdFs disk;
+    Rig second(s, disk, "bbbbbbbb");
+    const ApplyResult result = second.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), treeHash(expected3));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty())
+        << "the earlier folder, with the old files of the release before, is gone with its own";
+    EXPECT_FALSE(isPresent(s.state / ("run-" + first))) << "and so is its helper copy";
+    EXPECT_FALSE(isPresent(healthMarkerPath(s.state, first))) << "and its marker";
+}
+
+TEST(RecoverSuperseded, AnUpdateThatDoesNotProveHealthyLeavesThePendingFolderWhereItWas)
+{
+    REQUIRE_CAN_SIGN();
+    Loop loop("superseded-not", buildTinyLoop);
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.healthy);
+    ASSERT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    const std::string first = onlyTransaction(s);
+    writeText(s.state / ("run-" + first) / "katana_updater.exe", "the dead helper's copy");
+
+    fs::remove_all(s.stage);
+    writeStage(s.stage, tiny("0.3.0", 300));
+    StdFs disk;
+    Rig second(s, disk, "bbbbbbbb");
+    second.launcher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
+        SpawnResult bad;
+        bad.exitCode = 1; // the third release does not start
+        return bad;
+    };
+    const ApplyResult result = second.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::RolledBack) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << "back to the second release";
+    EXPECT_EQ(leftoversInUpdate(s.root), std::vector<std::string>{first})
+        << "the second release is not proved yet: its folder is what a health rollback needs";
+    EXPECT_TRUE(isPresent(s.state / ("run-" + first)));
 }
 
 // ---- a journal that is not whole ----------------------------------------------------------------------------------------------
@@ -1051,6 +1296,48 @@ TEST(RecoverWith, NothingToDoStartsNothingAndTakesNoLock)
     writeText(s.root / ".update" / "lock", "");
     EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait).ok());
     EXPECT_EQ(watched.locks, 0);
+}
+
+TEST(RecoverEmptyRoot, NoInstallFolderIsNotTheDotUpdateOfTheCurrentFolder)
+{
+    // updateWorkDirectory("") is ".update" under whatever folder the program was started in.
+    Scenario s("recover-empty-root");
+    StdFs disk;
+    class Watching final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Result<EntryInfo> stat(const Path& p) const override
+        {
+            ++calls;
+            return inner_.stat(p);
+        }
+        core::Result<std::vector<Path>> listDirectory(const Path& p) const override
+        {
+            ++calls;
+            return inner_.listDirectory(p);
+        }
+        core::Result<std::unique_ptr<FileLock>> tryLock(const Path& p) override
+        {
+            ++calls;
+            return inner_.tryLock(p);
+        }
+        mutable int calls = 0;
+    } watching(disk);
+    FakeLauncher launcher;
+    Rig rig(s, watching);
+
+    // recover(): nothing to recover where there is no install.
+    EXPECT_TRUE(detail::recoverWith(Path(), watching, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(launcher.ran.empty());
+    // The helper's --recover and a rollback are told a folder explicitly: an empty one is a
+    // mistake, and an error.
+    const core::Status inProcess = recoverInProcess(Path(), rig.services());
+    ASSERT_FALSE(inProcess.ok());
+    EXPECT_EQ(inProcess.error().code, core::ErrorCode::InvalidArgument);
+    const core::Status rolled = rollback(Path(), "deadbeef", rig.services());
+    ASSERT_FALSE(rolled.ok());
+    EXPECT_EQ(rolled.error().code, core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(watching.calls, 0) << "not one question was asked of the disk";
 }
 
 // ---- recover(), the system seams, on Windows -----------------------------------------------------------------------------------------

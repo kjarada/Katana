@@ -4,10 +4,14 @@
 // and never installed.
 
 #include <chrono>
+#include <exception>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <string_view>
 
 #include "katana/core/error.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/update/apply.hpp"
 #include "katana/update/fsops.hpp"
 #include "katana/update/process.hpp"
@@ -25,6 +29,39 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
         normal = normal.parent_path();
     }
     return normal;
+}
+
+// The last component of `path` as UTF-8 text, or nothing when it is not text: a name with an
+// unpaired surrogate, which the file systems of Windows allow, cannot be converted (the
+// conversion throws). Every name read from a folder somebody else can write goes through this,
+// so one odd name cannot stop a program from starting.
+[[nodiscard]] inline std::optional<std::string> nameAsText(const std::filesystem::path& path)
+{
+    try {
+        return core::pathToUtf8(path.filename());
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+// `text` on one line: a control character (a line feed in a path that came from a journal)
+// becomes %XX, so that a line written to a log cannot be made to look like two.
+[[nodiscard]] inline std::string oneLine(std::string_view text)
+{
+    constexpr std::string_view hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || byte == 0x7F) {
+            out += '%';
+            out += hex[byte >> 4];
+            out += hex[byte & 0x0F];
+        } else {
+            out += c;
+        }
+    }
+    return out;
 }
 
 // A state.json that could not be read, and whether the helper may write the defaults over it

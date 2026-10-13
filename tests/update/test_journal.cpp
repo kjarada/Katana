@@ -595,6 +595,23 @@ TEST(WindowsFs, ReadFileReturnsEveryByteAndAMissingFileIsErrorTwo)
     EXPECT_EQ(osErrorOf(missing.error()), "2");
 }
 
+TEST(WindowsFs, AFileTooLargeToBeARecordIsRefusedAndNotReadIntoMemory)
+{
+    // readFile is for journals, manifests and records. A file past 256 MiB (the limit written in
+    // fsops_win.cpp) is refused by its size, before a buffer of that size is made.
+    Scratch scratch("winfs-read-large");
+    const auto disk = systemFs();
+    const Path big = scratch.path() / "big.bin";
+    writeText(big, "x");
+    std::error_code ec;
+    fs::resize_file(big, 256ull * 1024 * 1024 + 1, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    const core::Result<std::string> read = disk->readFile(big);
+    ASSERT_FALSE(read.ok());
+    EXPECT_EQ(read.error().code, core::ErrorCode::FileImportFailure);
+    EXPECT_NE(read.error().message.find("too large"), std::string::npos) << read.error().describe();
+}
+
 TEST(WindowsFs, MakeDirectoriesMakesTheParentsAndIsDoneWhenItExists)
 {
     Scratch scratch("winfs-mkdir");

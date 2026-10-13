@@ -8,7 +8,9 @@
 //   Empty, Planned, Committing, RollingBack   the crash left it half done: rolled back.
 //   CommittedPendingHealth                    the new version is in place and not yet proved:
 //                                             left as it is - the tree is a whole version, and
-//                                             the folder is what a health rollback needs.
+//                                             the folder is what a health rollback needs. (When
+//                                             its helper died, a LATER update that proves
+//                                             healthy deletes it: apply.cpp, sweepSuperseded.)
 //   RolledBack, Healthy                       over. The tree is whole; what is left of the
 //                                             folder (a crash part way through deleting it, a
 //                                             file a scanner held at the time) is swept, so a
@@ -20,6 +22,7 @@
 #include "katana/update/recover.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <thread>
 
 #include "katana/core/path_text.hpp"
@@ -86,9 +89,11 @@ core::Result<std::vector<Found>> actionable(const FsOps& fs, const Path& root)
     }
     std::vector<Found> found;
     for (const Path& entry : entries.value()) {
-        const std::string name = core::pathToUtf8(entry.filename());
+        const std::string name = detail::nameAsText(entry).value_or(std::string());
         if (!isValidTransactionId(name)) {
-            continue; // the lock, the recovery log, anything that is not a transaction's folder
+            // The lock, the recovery log, anything that is not a transaction's folder - and a
+            // name that is not even text.
+            continue;
         }
         const core::Result<EntryInfo> folder = fs.stat(entry);
         if (!folder.ok() || folder->kind != EntryKind::Directory || folder->reparsePoint) {
@@ -164,10 +169,17 @@ core::Status recoverLocked(const Path& rootGiven, const ApplyServices& services,
     return {};
 }
 
-core::Status recoverWith(const Path& rootGiven, FsOps& fs, Launcher& launcher,
-                         const Path& stateDirectory, std::chrono::milliseconds lockWait)
+namespace {
+
+core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& launcher,
+                                  const Path& stateDirectory, std::chrono::milliseconds lockWait)
 {
     const Path root = normalizedRoot(rootGiven);
+    if (root.empty()) {
+        // No install folder: nothing to recover, and ".update" of the current folder is not
+        // an install's.
+        return {};
+    }
     const core::Result<std::vector<Found>> first = actionable(fs, root);
     if (!first.ok()) {
         // No way to tell: a start must not be held up by a question it cannot answer.
@@ -280,10 +292,32 @@ core::Status recoverWith(const Path& rootGiven, FsOps& fs, Launcher& launcher,
     return {};
 }
 
+} // namespace
+
+// The entry of recover(): an exception from a name or a folder somebody else can write becomes
+// an error to report, never a program that dies in its first lines at every start.
+core::Status recoverWith(const Path& rootGiven, FsOps& fs, Launcher& launcher,
+                         const Path& stateDirectory, std::chrono::milliseconds lockWait)
+{
+    try {
+        return recoverWithUnguarded(rootGiven, fs, launcher, stateDirectory, lockWait);
+    } catch (const std::exception& error) {
+        return core::makeError(core::ErrorCode::Internal,
+                               "looking for an interrupted update stopped on an unexpected error",
+                               error.what());
+    }
+}
+
 } // namespace detail
 
-core::Status recoverInProcess(const Path& rootGiven, const ApplyServices& services)
+namespace {
+
+core::Status recoverInProcessUnguarded(const Path& rootGiven, const ApplyServices& services)
 {
+    if (rootGiven.empty()) {
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "no install folder to recover: --recover needs one", "");
+    }
     FsOps& fs = services.fs;
     const Path root = detail::normalizedRoot(rootGiven);
     const core::Result<std::vector<Found>> first = actionable(fs, root);
@@ -330,11 +364,30 @@ core::Status recoverInProcess(const Path& rootGiven, const ApplyServices& servic
     return {};
 }
 
+} // namespace
+
+core::Status recoverInProcess(const Path& root, const ApplyServices& services)
+{
+    try {
+        return recoverInProcessUnguarded(root, services);
+    } catch (const std::exception& error) {
+        return core::makeError(core::ErrorCode::Internal,
+                               "looking for an interrupted update stopped on an unexpected error",
+                               error.what());
+    }
+}
+
 core::Status recover(const Path& root)
 {
-    const std::unique_ptr<FsOps> fs = makeSystemFsOps();
-    const std::unique_ptr<Launcher> launcher = makeSystemLauncher();
-    return detail::recoverWith(root, *fs, *launcher, stateDirectory(), kRecoverWait);
+    try {
+        const std::unique_ptr<FsOps> fs = makeSystemFsOps();
+        const std::unique_ptr<Launcher> launcher = makeSystemLauncher();
+        return detail::recoverWith(root, *fs, *launcher, stateDirectory(), kRecoverWait);
+    } catch (const std::exception& error) {
+        return core::makeError(core::ErrorCode::Internal,
+                               "looking for an interrupted update stopped on an unexpected error",
+                               error.what());
+    }
 }
 
 } // namespace katana::update

@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <cctype>
+#include <stdexcept>
 #include <thread>
 
 #include "apply_harness.hpp"
@@ -268,6 +269,32 @@ TEST(TransactionId, ANewIdIsValidAsLongAsTheDocumentationSaysAndNeverRepeats)
         EXPECT_GE(id.size(), 16u) << "enough that two runs do not collide";
         EXPECT_TRUE(seen.insert(id).second) << "repeated: " << id;
     }
+}
+
+TEST(TransactionId, IdsMadeAtTheSameTimeByManyThreadsAreAllDifferent)
+{
+    // The counter that is part of each id is shared by the threads.
+    constexpr int kThreads = 8;
+    constexpr int kEach = 250;
+    std::vector<std::vector<std::string>> made(kThreads);
+    {
+        std::vector<std::jthread> threads;
+        for (int t = 0; t < kThreads; ++t) {
+            threads.emplace_back([&made, t] {
+                for (int i = 0; i < kEach; ++i) {
+                    made[static_cast<std::size_t>(t)].push_back(newTransactionId());
+                }
+            });
+        }
+    }
+    std::set<std::string> seen;
+    for (const std::vector<std::string>& ids : made) {
+        for (const std::string& id : ids) {
+            ASSERT_TRUE(isValidTransactionId(id)) << id;
+            EXPECT_TRUE(seen.insert(id).second) << "repeated: " << id;
+        }
+    }
+    EXPECT_EQ(seen.size(), static_cast<std::size_t>(kThreads * kEach));
 }
 
 // ---- command-line quoting ---------------------------------------------------------------------------------
@@ -724,6 +751,21 @@ TEST(ApplyRefusals, AnInvalidTransactionIdOrNoRootIsRefusedBeforeAnythingIsMade)
     }
 }
 
+TEST(ApplyRefusals, AnEmptyStateFolderIsRefusedBecauseTheHealthMarkerCouldNotBeLookedFor)
+{
+    Scenario s("apply-no-state-folder");
+    buildFixtureScenario(s);
+    StdFs disk;
+    Rig rig(s, disk);
+    rig.request.stateDirectory.clear();
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Refused);
+    EXPECT_EQ(result.reason, "invalid_request");
+    EXPECT_FALSE(isPresent(s.root / ".update")) << "refused before anything is made";
+    EXPECT_EQ(treeHash(s.root), s.v1Hash);
+    EXPECT_TRUE(rig.launcher.ran.empty()) << "no health check without a place for its marker";
+}
+
 TEST(ApplyRefusals, ARefusedUpdateStartsTheOldVersionAgainAndSaysSoInLastJson)
 {
     Scenario s("apply-refused-relaunch");
@@ -1102,6 +1144,65 @@ TEST(ApplyLock, ARootThatCannotBeWrittenIsReportedAsSuch)
     EXPECT_EQ(treeHash(s.root), s.v1Hash);
 }
 
+namespace {
+
+// Answers "held" to the first `heldFor` attempts to take the lock (always, when it is -1): what a
+// virus scanner or an indexer that has the lock file open for a moment looks like to a program
+// that asks for it with share mode 0.
+class BusyLockFs final : public ForwardingFs {
+  public:
+    BusyLockFs(FsOps& inner, int heldFor) : ForwardingFs(inner), heldFor_(heldFor) {}
+
+    core::Result<std::unique_ptr<FileLock>> tryLock(const Path& p) override
+    {
+        ++attempts;
+        if (heldFor_ < 0 || attempts <= heldFor_) {
+            return core::makeError(core::ErrorCode::InvalidState, "held",
+                                   "os_error=32 " + core::pathToUtf8(p));
+        }
+        return inner_.tryLock(p);
+    }
+
+    int attempts = 0;
+
+  private:
+    int heldFor_;
+};
+
+} // namespace
+
+TEST(ApplyLock, ALockThatIsHeldOnlyForAMomentIsWaitedForNotMistakenForAnotherHelper)
+{
+    Scenario s("apply-lock-blip");
+    buildFixtureScenario(s);
+    StdFs disk;
+    BusyLockFs busy(disk, 3);
+    Rig rig(s, busy);
+    rig.timings.waitForHolders = std::chrono::seconds(5); // the grace is the shorter of this and 2 s
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(busy.attempts, 4) << "three refusals, then the lock";
+    EXPECT_EQ(treeHash(s.root), s.v2Hash);
+}
+
+TEST(ApplyLock, ALockThatStaysHeldIsLookedAtAgainAndThenLeftToItsHolderInSilence)
+{
+    Scenario s("apply-lock-stays");
+    buildFixtureScenario(s);
+    StdFs disk;
+    BusyLockFs busy(disk, -1);
+    Rig rig(s, busy);
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Refused);
+    EXPECT_EQ(result.reason, "locked");
+    EXPECT_GT(busy.attempts, 1) << "it looked again before it believed the lock was held";
+    EXPECT_EQ(treeHash(s.root), s.v1Hash);
+    EXPECT_TRUE(rig.launcher.started.empty()) << "the holder starts the program";
+    const core::Result<std::optional<LastResult>> last = readLastResult(s.state);
+    ASSERT_TRUE(last.ok());
+    EXPECT_FALSE(last->has_value()) << "it is the other helper's to write";
+}
+
 // ---- waiting for the window and for everyone under the root -----------------------------------------------------------
 
 TEST(ApplyWait, ProgramsStillRunningUnderTheRootBlockTheUpdateAndNothingIsTouched)
@@ -1188,6 +1289,22 @@ TEST(ApplyWait, AWindowThatDoesNotExitBlocksTheUpdate)
     EXPECT_EQ(result.holders[0].pid, 77u);
     expectUntouched(s, result);
     EXPECT_EQ(rig.processes.scans.load(), 0) << "the files are not even looked at before the window is gone";
+}
+
+TEST(ApplyWait, AWindowThatIsStillRunningIsNotStartedASecondTimeBesideItself)
+{
+    Scenario s("apply-parent-no-second-window");
+    buildFixtureScenario(s);
+    StdFs disk;
+    Rig rig(s, disk);
+    rig.request.waitPid = 77;
+    rig.processes.parentAliveFor = -1; // hung: it never exits
+    const ApplyResult result = rig.run();
+    ASSERT_EQ(result.outcome, ApplyOutcome::Blocked);
+    EXPECT_TRUE(rig.launcher.started.empty()) << "a second Katana would open beside the hung one";
+    EXPECT_TRUE(rig.launcher.ran.empty());
+    EXPECT_EQ(lastOf(s).status, "blocked") << "and the outcome is still recorded";
+    expectUntouched(s, result);
 }
 
 TEST(ApplyWait, AWindowThatExitsAfterAWhileIsWaitedFor)
@@ -1411,6 +1528,33 @@ TEST(ApplyCommit, ClassesAreCommittedDataThenLibsThenProgramsThenTheHelperThenTh
     EXPECT_EQ(intoPlace[intoPlace.size() - 3], "share/katana/installed.json");
     EXPECT_EQ(intoPlace[intoPlace.size() - 2], "share/katana/installed.manifest.json");
     EXPECT_EQ(intoPlace[intoPlace.size() - 1], "share/katana/installed.manifest.json.sig");
+}
+
+TEST(ApplyCommit, OnlyTheCopiesOfFilesTheManifestMarksExecutableAreMadeExecutable)
+{
+    REQUIRE_CAN_SIGN();
+    Scenario s("apply-exec-bit");
+    buildFortyFileScenario(s);
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(s, log);
+    ASSERT_EQ(rig.run().outcome, ApplyOutcome::Committed);
+
+    std::vector<std::string> marked; // the path below new/, '/'-separated
+    for (std::string entry : log.log) {
+        if (entry.rfind("setExecutable ", 0) != 0) {
+            continue;
+        }
+        std::replace(entry.begin(), entry.end(), '\\', '/');
+        const std::size_t at = entry.find("/new/");
+        ASSERT_NE(at, std::string::npos) << entry;
+        marked.push_back(entry.substr(at + 5));
+    }
+    std::sort(marked.begin(), marked.end());
+    // From the specification (apply_harness.hpp, buildFortyFileScenario): the three programs are
+    // the only files with exec set, and all three change between the releases.
+    EXPECT_EQ(marked, (std::vector<std::string>{"bin/katana.exe", "bin/katana_cli.exe",
+                                                "bin/katana_updater.exe"}));
 }
 
 TEST(ApplyCommit, TheStageIsCopiedFromAndNeverRenamedOutOf)
@@ -2173,6 +2317,181 @@ TEST(ApplyOnWindows, ARealJunctionInsideTheInstallRefusesTheUpdateAndNothingBeyo
 
 #endif // _WIN32
 
+// ---- an exception from below -------------------------------------------------------------------------------------------------
+
+namespace {
+
+// Throws a std::exception - what a conversion, an allocation or a library does, and a crash
+// injected by FaultFs does NOT (SimulatedCrash is not one) - in place of the k-th mutating
+// operation - once, or (`sticky`) at that one and every one after it, as when a disk has gone.
+// The operations are the eight FaultFs counts.
+class ThrowingFs final : public ForwardingFs {
+  public:
+    ThrowingFs(FsOps& inner, std::uint64_t throwBefore, bool sticky)
+        : ForwardingFs(inner), throwBefore_(throwBefore), sticky_(sticky)
+    {
+    }
+
+    core::Status makeDirectories(const Path& p) override
+    {
+        step();
+        return inner_.makeDirectories(p);
+    }
+    core::Status copyFile(const Path& a, const Path& b) override
+    {
+        step();
+        return inner_.copyFile(a, b);
+    }
+    core::Status renameFile(const Path& a, const Path& b) override
+    {
+        step();
+        return inner_.renameFile(a, b);
+    }
+    core::Status removeFile(const Path& p) override
+    {
+        step();
+        return inner_.removeFile(p);
+    }
+    core::Status removeEmptyDirectory(const Path& p) override
+    {
+        step();
+        return inner_.removeEmptyDirectory(p);
+    }
+    core::Status appendDurable(const Path& p, std::string_view bytes) override
+    {
+        step();
+        return inner_.appendDurable(p, bytes);
+    }
+    core::Status writeDurable(const Path& p, std::string_view bytes) override
+    {
+        step();
+        return inner_.writeDurable(p, bytes);
+    }
+    core::Status setExecutable(const Path& p) override
+    {
+        step();
+        return inner_.setExecutable(p);
+    }
+
+    [[nodiscard]] bool thrown() const { return thrown_; }
+
+  private:
+    void step()
+    {
+        ++count_;
+        if (count_ == throwBefore_ || (sticky_ && count_ > throwBefore_)) {
+            thrown_ = true;
+            throw std::runtime_error("injected: not a core::Error and not a crash");
+        }
+    }
+
+    std::uint64_t throwBefore_;
+    bool sticky_;
+    std::uint64_t count_ = 0;
+    bool thrown_ = false;
+};
+
+// For every operation k of a clean small update: the update runs on a file system that throws
+// at k (and, if `sticky`, at every operation after it); apply() must return, never throw, and the
+// tree must end as the algorithm says - then recovery on a clean disk must make it v1 or v2.
+void exceptionAtEveryOperation(bool sticky)
+{
+    Loop loop("apply-throws", [](Scenario& s) {
+        buildSmallScenario(s);
+        writeInstall(s.expected, s.v2); // the tree a good update leaves, from the specification
+        s.v2Hash = treeHash(s.expected);
+    });
+    Scenario& s = loop.scenario();
+
+    // The operations of a clean run, and where its PLAN group and its HEALTHY record fall.
+    std::uint64_t total = 0;
+    std::uint64_t plan = 0;
+    std::uint64_t healthy = 0;
+    {
+        StdFs bottom;
+        LogFs log(bottom);
+        Rig rig(s, log);
+        ASSERT_EQ(rig.run().outcome, ApplyOutcome::Committed);
+        total = log.log.size();
+        plan = log.find("appendDurable", "PLAN");
+        healthy = log.find("appendDurable", " HEALTHY ");
+    }
+    ASSERT_GT(plan, 0u);
+    ASSERT_GT(healthy, plan);
+    ASSERT_GT(total, healthy);
+
+    for (std::uint64_t k = 1; k <= total; ++k) {
+        SCOPED_TRACE((sticky ? "every operation from " : "exception before operation ") +
+                     std::to_string(k) + " of " + std::to_string(total));
+        loop.reset();
+        StdFs bottom;
+        ThrowingFs throwing(bottom, k, sticky);
+        Rig rig(s, throwing);
+        ApplyResult result;
+        try {
+            result = rig.run();
+        } catch (...) {
+            FAIL() << "an exception escaped apply()";
+        }
+        ASSERT_TRUE(throwing.thrown()) << "the operation was never reached";
+
+        // From the algorithm: before the PLAN group is written nothing under the install has
+        // moved; between that and the HEALTHY record the tree is put back from the disk; the
+        // HEALTHY record comes after the new version proved itself, so only the clean-up is
+        // lost and the update stands.
+        std::string expectedAfterRecovery;
+        if (k <= plan) {
+            EXPECT_EQ(result.outcome, ApplyOutcome::Refused) << result.reason << ": " << result.detail;
+            EXPECT_EQ(result.reason, "internal_error");
+            EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+            if (!sticky) {
+                EXPECT_TRUE(leftoversInUpdate(s.root).empty()) << "the folder of copies is deleted";
+            }
+            expectedAfterRecovery = s.v1Hash;
+        } else if (k < healthy) {
+            if (sticky) {
+                // The disk is gone for the rollback too: said so, with the command that puts it right.
+                EXPECT_EQ(result.outcome, ApplyOutcome::RollbackIncomplete)
+                    << result.reason << ": " << result.detail;
+                EXPECT_EQ(result.reason, "rollback_failed");
+                EXPECT_NE(result.detail.find("katana_updater --recover"), std::string::npos);
+            } else {
+                EXPECT_EQ(result.outcome, ApplyOutcome::RolledBack)
+                    << result.reason << ": " << result.detail;
+                EXPECT_EQ(result.reason, "internal_error");
+                EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+                EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+            }
+            expectedAfterRecovery = s.v1Hash;
+        } else {
+            EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+            EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+            expectedAfterRecovery = s.v2Hash;
+        }
+
+        // Whatever it was, the lock is free, and recovery on a disk that works makes the tree
+        // one whole version: the old one before the commit and during it, the new one after.
+        StdFs after;
+        EXPECT_TRUE(after.tryLock(s.root / ".update" / "lock").ok());
+        ASSERT_TRUE(recoverClean(s).ok());
+        EXPECT_EQ(treeHash(s.root), expectedAfterRecovery);
+    }
+}
+
+} // namespace
+
+TEST(ApplyUnexpected, AnExceptionAtAnyOperationEndsInTheOldTreeOrTheNewOneAndNeverEscapes)
+{
+    REQUIRE_CAN_SIGN();
+    exceptionAtEveryOperation(false);
+}
+
+TEST(ApplyUnexpected, AFileSystemThatKeepsThrowingFromAnyOperationOnEndsTheSameWayOrSaysTheRollbackFailed)
+{
+    REQUIRE_CAN_SIGN();
+    exceptionAtEveryOperation(true);
+}
+
 // ---- the Windows launcher ------------------------------------------------------------------------------------------------------
 
 #ifdef _WIN32
@@ -2306,7 +2625,7 @@ TEST(Launcher, TheWorkingDirectoryIsTheOneAskedFor)
 TEST(Launcher, ArgumentsReachTheProgramWhateverTheyHold)
 {
     if (!fs::exists(powershell())) {
-        GTEST_SKIP() << "no powershell.exe to print the arguments it was given";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("no powershell.exe to print the arguments it was given");
     }
     Scratch scratch("launcher-args");
     writeText(scratch.path() / "args.ps1", "$args | ForEach-Object { '[' + $_ + ']' }\n");
@@ -2331,7 +2650,7 @@ TEST(Launcher, ARunStartsAConsoleProgramWithNoConsoleWindow)
     // CREATE_NO_WINDOW: katana_updater is a console program started from a program with no
     // console, and without the flag Windows opens a black one for as long as it runs.
     if (!fs::exists(powershell())) {
-        GTEST_SKIP() << "no powershell.exe to ask";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("no powershell.exe to ask");
     }
     SpawnRequest request;
     request.executable = powershell();
@@ -2342,7 +2661,7 @@ TEST(Launcher, ARunStartsAConsoleProgramWithNoConsoleWindow)
     const core::Result<SpawnResult> result = launcher->run(request);
     ASSERT_TRUE(result.ok()) << result.error().describe();
     if (result->exitCode != 0) {
-        GTEST_SKIP() << "PowerShell cannot compile the probe here: " << result->output;
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("PowerShell cannot compile the probe here: " + result->output);
     }
     EXPECT_EQ(result->output, "0\r\n") << "a console window handle: the child was given a window";
 }
@@ -2350,7 +2669,7 @@ TEST(Launcher, ARunStartsAConsoleProgramWithNoConsoleWindow)
 TEST(Launcher, ADetachedStartReturnsAtOnceAndTheChildHasNoConsoleWindowEither)
 {
     if (!fs::exists(powershell())) {
-        GTEST_SKIP() << "no powershell.exe to ask";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("no powershell.exe to ask");
     }
     Scratch scratch("launcher-detached");
     const Path answer = scratch.path() / "answer.txt";
@@ -2369,7 +2688,8 @@ TEST(Launcher, ADetachedStartReturnsAtOnceAndTheChildHasNoConsoleWindowEither)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     if (!isPresent(answer)) {
-        GTEST_SKIP() << "the child wrote no answer in a minute (PowerShell cannot compile the probe here?)";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI(
+            "the child wrote no answer in a minute (PowerShell cannot compile the probe here?)");
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     std::string text = readText(answer);
@@ -2399,7 +2719,7 @@ TEST(Launcher, ADetachedChildOutlivesTheCallThatStartedIt)
 TEST(Launcher, APathWithANonAsciiLetterReachesTheChildIntact)
 {
     if (!fs::exists(powershell())) {
-        GTEST_SKIP() << "no powershell.exe to print the arguments it was given";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("no powershell.exe to print the arguments it was given");
     }
     Scratch scratch("launcher-unicode");
     writeText(scratch.path() / "args.ps1",
