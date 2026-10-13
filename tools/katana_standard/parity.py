@@ -36,7 +36,7 @@ WHAT IT REPORTS, in the order it is printed
   3. EXCEPTIONS the reference is not clean: it repeats and shadows rules, and names colours that nothing
                resolves. A candidate that keeps ONE clean rule set per key leaves those out, so its raw rule
                list differs from the reference's. Each such key needs an entry in the exceptions file
-               (`parity_exceptions.json`, a list of {"key", "reason", optional "count"}), with one of
+               (`parity_exceptions.json`, a list of {"key", "reason", optional "count" and "note"}), with one of
                  nsw-duplicate-collapsed      a rule the same as an earlier one, field for field, was left out
                  nsw-shadowed-collapsed       a rule that adds nothing to an earlier one of its key was left out
                  nsw-unknown-colour-replaced  an effective rule named a colour that resolves to nothing, and the
@@ -49,10 +49,10 @@ WHAT IT REPORTS, in the order it is printed
                                               changed the effective structure (a symbol's hide); the candidate's
                                               one rule of that kind carries the field
                  nsw-pipe-attributes-left-out the reference's pipe rules carry attribute lists (where they were
-                                              written, the condition a rule applies under: sixteen rules for
-                                              sixteen cases). Katana has no conditional rule: a lookup takes the
-                                              first pipe rule and APPLIES the attributes of them all, to every
-                                              code the key answers. The candidate's one pipe rule carries none;
+                                              written, the condition a rule applies under: a rule for each
+                                              case). Katana has no conditional rule: a lookup takes the first
+                                              pipe rule and APPLIES the attributes of them all, to every code
+                                              the key answers. The candidate's one pipe rule carries none;
                                               `count` is the number of attribute entries left out
                An entry that explains nothing is itself an error, so the list cannot go stale.
   4. DEFECTS   in the CANDIDATE, by the notions of CODE CHECK (src/katana_cad/customisation/code_table.cpp): a
