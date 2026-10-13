@@ -3,6 +3,7 @@
 #include "update_workbench.hpp"
 
 #include <QAction>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -18,13 +19,14 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "katana/core/path_text.hpp"
 #include "katana/update/check.hpp"
 #include "katana/update/fsops.hpp"
 #include "katana/update/install.hpp"
-#include "katana/update/manifest.hpp"
+#include "katana/update/stage.hpp"
 #include "katana/update/state.hpp"
 #include "katana/update/version.hpp"
 #include "main_window.hpp"
@@ -89,40 +91,6 @@ std::int64_t nowEpoch()
         .count();
 }
 
-// "0.3" and "0.3.0" are one release (update/version.hpp); text that is no
-// version is the same only as itself.
-bool sameVersion(const QString& a, const QString& b)
-{
-    const Result<katana::update::Version> first = katana::update::parseVersion(a.toStdString());
-    const Result<katana::update::Version> second = katana::update::parseVersion(b.toStdString());
-    if (first && second) {
-        return *first == *second;
-    }
-    return a == b;
-}
-
-// The value of `key` in a reply's records - of the last one that has it, since
-// a download's reply ends with the record that says what is staged. Empty when
-// no word of the reply is `key=...`.
-QString replyValue(const std::string& text, const char* key)
-{
-    const QString prefix = QString::fromLatin1(key) + QLatin1Char('=');
-    QString value;
-    for (const QString& word : qs(text).split(QChar::Space, Qt::SkipEmptyParts)) {
-        for (const QString& part : word.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
-            const QString trimmed = part.trimmed();
-            if (trimmed.startsWith(prefix)) {
-                value = trimmed.mid(prefix.size());
-            }
-        }
-    }
-    if (value.size() >= 2 && value.startsWith(QLatin1Char('"')) &&
-        value.endsWith(QLatin1Char('"'))) {
-        value = value.mid(1, value.size() - 2);
-    }
-    return value;
-}
-
 // A reply as the log shows it: without the line breaks it may end with.
 QString replyText(const std::string& text)
 {
@@ -140,7 +108,7 @@ QString whyNot(const Result<katana::app::UpdateReply>& reply)
     if (!reply) {
         return qs(reply.error().message);
     }
-    return updateReasonWords(replyValue(reply->text, "reason"));
+    return updateReasonWords(updateReplyValue(qs(reply->text), "reason"));
 }
 
 QString problemSentence(const char* what, const QString& why)
@@ -152,6 +120,35 @@ QString problemSentence(const char* what, const QString& why)
 bool automaticCheckDisabled()
 {
     return !katana::core::environmentVariable(kDisableVariable).empty();
+}
+
+// Whether the complete stage of the release with this sequence is in the
+// update folder: its manifest is the last thing a download writes there
+// (update/stage.hpp), so the file's presence is the stage's.
+bool stageIsThere(const std::filesystem::path& stateDirectory, std::uint64_t sequence)
+{
+    std::error_code failed;
+    return std::filesystem::exists(
+        katana::update::stagedManifestPath(katana::update::stagePath(stateDirectory, sequence)),
+        failed);
+}
+
+// The helper's copy that UPDATE APPLY CONFIRM made for a request nobody will
+// start (U/run-<tx>, update/stage.hpp, preflight): listed for the sweep the
+// next start makes (update/state.hpp, cleanup.list). It is a program's size,
+// and one would otherwise stay behind for every press that was taken back.
+// Empty when it is listed; else why it could not be.
+QString discardPrepared(const katana::update::ApplyRequest& request)
+{
+    if (request.stateDirectory.empty() ||
+        !katana::update::isValidTransactionId(request.transaction)) {
+        return {};
+    }
+    const std::unique_ptr<katana::update::FsOps> files = katana::update::makeSystemFsOps();
+    const katana::core::Status listed = katana::update::appendCleanup(
+        request.stateDirectory,
+        katana::update::runPath(request.stateDirectory, request.transaction), *files);
+    return listed ? QString() : qs(listed.error().message);
 }
 
 } // namespace
@@ -270,53 +267,15 @@ UpdateView UpdateWorkbench::readyView()
 
 UpdateView UpdateWorkbench::viewOfOffer(const katana::app::UpdateOffer& offer)
 {
-    using katana::update::CheckStatus;
-    const katana::update::CheckResult& check = offer.check;
-    UpdateView view = viewOf(UpdateDialogState::Idle);
-    if (!check.installedVersion.empty()) {
-        view.installedVersion = qs(check.installedVersion);
-    }
-    view.latestVersion = qs(check.latestVersion);
-    view.notesUrl = qs(check.notesUrl);
-    view.reason = qs(check.reason);
-    switch (check.status) {
-    case CheckStatus::Available:
-        // The release that is already downloaded is ready, not to be
-        // downloaded again.
-        if (!stagedVersion_.isEmpty() && sameVersion(stagedVersion_, view.latestVersion)) {
-            view.state = UpdateDialogState::Ready;
-            break;
-        }
-        view.state = UpdateDialogState::Available;
-        view.changedFiles = offer.changedFiles;
-        view.totalFiles = offer.totalFiles;
-        view.downloadBytes = offer.downloadBytes;
-        // `expires` is advisory: said, and the update still offered.
-        view.informationIsOld =
-            check.manifest.has_value() && katana::update::isExpired(*check.manifest, nowEpoch());
-        view.notifyOnly =
-            !kAppliesHere || (check.manifest.has_value() && check.manifest->notifyOnly);
-        break;
-    case CheckStatus::Current:
-        if (check.reason == "skipped") {
-            view.state = UpdateDialogState::NotOffered;
-        } else {
-            view.state = UpdateDialogState::Current;
-            view.lastChecked = QTime::currentTime().toString(QStringLiteral("HH:mm"));
-        }
-        break;
-    case CheckStatus::Blocked:
-        view.state = UpdateDialogState::NotOffered;
-        view.reason = QStringLiteral("blocked_before");
-        break;
-    case CheckStatus::Unreachable:
-        view.state = UpdateDialogState::CheckFailed;
-        break;
-    case CheckStatus::Unsupported:
-        view.state = UpdateDialogState::Unsupported;
-        break;
-    }
-    return view;
+    // The facts only this object has; what they make of the answer is
+    // updateViewOfOffer's (update_dialog.hpp, "THE DECISIONS").
+    UpdateOfferFacts facts;
+    facts.installedVersion = installedVersion();
+    facts.stagedVersion = stagedVersion_;
+    facts.checkedAt = QTime::currentTime().toString(QStringLiteral("HH:mm"));
+    facts.nowEpoch = nowEpoch();
+    facts.appliesHere = kAppliesHere;
+    return updateViewOfOffer(offer, facts);
 }
 
 void UpdateWorkbench::show(UpdateView view)
@@ -325,15 +284,13 @@ void UpdateWorkbench::show(UpdateView view)
     if (!dialog_.isNull()) {
         dialog_->setView(view_);
     }
-    // The button is there while there is a release to act on: offered, on its
-    // way, downloaded, or waiting for other programs to close.
-    const bool offered = !view_.latestVersion.isEmpty() &&
-                         (view_.state == UpdateDialogState::Available ||
-                          view_.state == UpdateDialogState::Downloading ||
-                          view_.state == UpdateDialogState::Ready ||
-                          view_.state == UpdateDialogState::Blocked);
-    statusButton_->setText(QStringLiteral("Update ") + view_.latestVersion);
-    statusButton_->setVisible(offered);
+    // The button is there while there is a release to act on, and says which
+    // (updateStatusButtonText); it keeps its words while it is hidden.
+    const QString offered = updateStatusButtonText(view_);
+    if (!offered.isEmpty()) {
+        statusButton_->setText(offered);
+    }
+    statusButton_->setVisible(!offered.isEmpty());
 }
 
 // ---- the lines ---------------------------------------------------------------------------------
@@ -368,13 +325,13 @@ bool UpdateWorkbench::runLine(const QString& line)
 }
 
 void UpdateWorkbench::logReply(const Result<katana::app::UpdateReply>& reply,
-                               const QStringList& secrets) const
+                               const QString& line) const
 {
-    std::string said = reply ? reply->text : reply.error().describe();
-    for (const QString& secret : secrets) {
-        said = katana::update::redactToken(said, secret.toStdString());
-    }
-    log(replyText(said), !reply);
+    const std::string said = reply ? reply->text : reply.error().describe();
+    // Whatever the verbs say back to a line that was typed where a token was
+    // hoped to go is logged without the words that may be one, in any case
+    // (updateLoggedReply): a refusal may quote the line it refuses.
+    log(updateLoggedReply(replyText(said), line), !reply);
 }
 
 bool UpdateWorkbench::mayStart(const QString& line)
@@ -404,19 +361,11 @@ void UpdateWorkbench::runNow(const QString& line)
     }
     // No UPDATE line takes a token, and a person may type one that does all
     // the same. The verbs refuse it; whatever they say back is logged without
-    // the words that may be one (updateLoggedLine hides them in the echo).
-    QStringList secrets;
-    if (action == QLatin1String("TOKEN")) {
-        for (qsizetype at = 2; at < words.size(); ++at) {
-            if (words[at].compare(QLatin1String("STATUS"), Qt::CaseInsensitive) != 0 &&
-                words[at].compare(QLatin1String("CLEAR"), Qt::CaseInsensitive) != 0) {
-                secrets << words[at];
-            }
-        }
-    }
+    // the words that may be one (logReply; updateLoggedLine hides them in the
+    // echo).
     const Result<katana::app::UpdateReply> reply =
         katana::app::runUpdateLine(context(), line.trimmed().toStdString());
-    logReply(reply, secrets);
+    logReply(reply, line);
     if (!reply) {
         return;
     }
@@ -427,14 +376,17 @@ void UpdateWorkbench::runNow(const QString& line)
     }
     // A reply that gives a reason is one that was not carried out.
     if (action == QLatin1String("SKIP") && words.size() == 3 &&
-        replyValue(reply->text, "reason").isEmpty()) {
+        updateReplyValue(qs(reply->text), "reason").isEmpty()) {
         if (words[2].compare(QLatin1String("NONE"), Qt::CaseInsensitive) == 0) {
             if (view_.state == UpdateDialogState::NotOffered &&
                 view_.reason == QLatin1String("skipped")) {
                 show(viewOf(UpdateDialogState::Idle));
             }
         } else if (view_.state == UpdateDialogState::Available &&
-                   sameVersion(view_.latestVersion, words[2])) {
+                   updateSameVersion(view_.latestVersion, words[2])) {
+            // What was offered is not any more: neither the dialog nor a
+            // download typed next goes on about it.
+            offer_.reset();
             UpdateView view = viewOf(UpdateDialogState::NotOffered);
             view.latestVersion = view_.latestVersion;
             view.reason = QStringLiteral("skipped");
@@ -452,6 +404,16 @@ void UpdateWorkbench::startCheck(bool automatic)
         if (running_ != JobKind::None) {
             return;
         }
+    } else if (running_ == JobKind::Check && automaticCheck_) {
+        // The check the window started by itself is on its way, and a person
+        // asks for one: that one becomes theirs - answered aloud, in the log
+        // and in the dialog - and is not started twice, nor are they told
+        // that a job they never started is in their way. Cancelled, it goes
+        // back to what was shown before it began (viewBeforeJob_ is still
+        // that).
+        automaticCheck_ = false;
+        show(viewOf(UpdateDialogState::Checking));
+        return;
     } else if (!mayStart(QString::fromLatin1(kUpdateCheckLine))) {
         return;
     }
@@ -567,6 +529,13 @@ void UpdateWorkbench::finished(JobKind kind, Shared& shared, const JobReport& re
         } else if (kind == JobKind::Download) {
             log(QStringLiteral("The download was cancelled. What had arrived is kept, and the "
                                "next download starts from it."));
+        } else if (kind == JobKind::Apply && shared.reply.has_value()) {
+            // Later was pressed while the helper was being prepared, and the
+            // preparation had got as far as its copy: nobody will start it.
+            if (const Result<katana::app::UpdateReply>& prepared = *shared.reply;
+                prepared && prepared->apply.has_value()) {
+                dropPrepared(*prepared->apply);
+            }
         }
         if (!(kind == JobKind::Check && automatic)) {
             show(viewBeforeJob_);
@@ -607,7 +576,7 @@ void UpdateWorkbench::checkFinished(const Result<katana::app::UpdateReply>& repl
         logReply(reply);
         UpdateView view = viewOf(UpdateDialogState::CheckFailed);
         if (reply) {
-            view.reason = replyValue(reply->text, "reason");
+            view.reason = updateReplyValue(qs(reply->text), "reason");
         } else {
             view.problem = qs(reply.error().message);
         }
@@ -623,30 +592,41 @@ void UpdateWorkbench::checkFinished(const Result<katana::app::UpdateReply>& repl
                 katana::update::readState(context().stateDirectory)) {
             katana::update::applyUpdateState(offer.check, *state);
         }
-        const CheckStatus status = offer.check.status;
-        if (status == CheckStatus::Current && offer.check.reason != "skipped") {
-            // Nothing to say, but something to show when the dialog is opened.
-            route_ = offer.check.route;
-            if (view_.state == UpdateDialogState::Idle) {
-                show(viewOfOffer(offer));
-            }
-            return;
-        }
-        if (status != CheckStatus::Available) {
-            // It learnt nothing a person asked to be told: quiet.
-            return;
-        }
-        // News: logged as the typed line would be, from its echo on.
-        log(QStringLiteral("> ") + QLatin1String(kUpdateCheckLine));
     }
-    logReply(reply);
-    // The download asks the way the check was answered (update/feed.hpp).
-    route_ = offer.check.route;
-    if (context_) {
-        context_->feed.route = offer.check.route;
+    const CheckStatus status = offer.check.status;
+    const UpdateView answer = viewOfOffer(offer);
+    // Nobody asked for the automatic check's answer: whether it is said,
+    // shown without a word, or dropped is updateQuietAnswer's.
+    const UpdateQuietAnswer quiet =
+        automatic ? updateQuietAnswer(view_, answer) : UpdateQuietAnswer::Announce;
+    if (quiet == UpdateQuietAnswer::Nothing) {
+        return;
     }
-    offer_ = offer;
-    show(viewOfOffer(offer));
+    if (status != CheckStatus::Unreachable && status != CheckStatus::Unsupported) {
+        // The feed answered. The download asks the way the check was answered
+        // (update/feed.hpp); the release offered is the one a download typed
+        // next is of, and an answer that offers none leaves none - a check
+        // that failed un-knows nothing; and a downloaded release the answer
+        // no longer offers is not ready any more (updateStagedAfter).
+        route_ = offer.check.route;
+        if (context_) {
+            context_->feed.route = offer.check.route;
+        }
+        if (status == CheckStatus::Available) {
+            offer_ = offer;
+        } else {
+            offer_.reset();
+        }
+        stagedVersion_ = updateStagedAfter(stagedVersion_, answer);
+    }
+    if (quiet == UpdateQuietAnswer::Announce) {
+        if (automatic) {
+            // News: logged as the typed line would be, from its echo on.
+            log(QStringLiteral("> ") + QLatin1String(kUpdateCheckLine));
+        }
+        logReply(reply);
+    }
+    show(answer);
 }
 
 void UpdateWorkbench::downloadFinished(const Result<katana::app::UpdateReply>& reply,
@@ -654,8 +634,8 @@ void UpdateWorkbench::downloadFinished(const Result<katana::app::UpdateReply>& r
 {
     logReply(reply);
     // The line's last record says what is staged (update_verbs.hpp).
-    const QString staged = reply ? replyValue(reply->text, "staged") : QString();
-    if (staged.isEmpty() || staged.compare(QLatin1String("none"), Qt::CaseInsensitive) == 0) {
+    const QString staged = reply ? updateStagedOfReply(qs(reply->text)) : QString();
+    if (staged.isEmpty()) {
         UpdateView view = viewBeforeJob_;
         view.problem = problemSentence("The download did not finish", whyNot(reply));
         show(std::move(view));
@@ -737,7 +717,11 @@ void UpdateWorkbench::open()
     if (running_ == JobKind::None && view_.state == UpdateDialogState::RolledBack) {
         show(viewOf(UpdateDialogState::Idle));
     }
-    if (running_ == JobKind::None && view_.state == UpdateDialogState::Idle) {
+    // With nothing known yet, and nothing on its way - or only the check the
+    // window started by itself, which the typed line below then takes over
+    // (startCheck) rather than say "not checked yet" while one is running.
+    const bool quietCheck = running_ == JobKind::Check && automaticCheck_;
+    if ((running_ == JobKind::None || quietCheck) && view_.state == UpdateDialogState::Idle) {
         if (context().install.kind == katana::update::InstallKind::Development) {
             // Known without asking anyone: a copy packaging did not write is
             // never updated (update_verbs.hpp), and the check would say this.
@@ -763,8 +747,19 @@ void UpdateWorkbench::installUpdate()
     // One click, two lines and a close: the download's line now, marked so
     // that the apply's follows when it has staged the release (downloadFinished).
     applyAfterDownload_ = true;
-    (void)window_.runVerbLine(QString::fromLatin1(kUpdateDownloadLine));
+    const VerbOutcome outcome = window_.runVerbLine(QString::fromLatin1(kUpdateDownloadLine));
     applyAfterDownload_ = false;
+    // A line that was refused before it began - another update job is running
+    // - is in the log; the press was made in the dialog, so it is said there
+    // too, unless the line's own end has said why already.
+    if (!outcome.ok && view_.problem.isEmpty()) {
+        UpdateView view = view_;
+        view.problem = outcome.error.isEmpty()
+                           ? QStringLiteral("The update could not be started; the command log "
+                                            "says why.")
+                           : outcome.error;
+        show(std::move(view));
+    }
 }
 
 void UpdateWorkbench::cancelJob()
@@ -811,9 +806,19 @@ void UpdateWorkbench::later()
         return;
     }
     if (pendingApply_.has_value() && !closedForApply_) {
-        pendingApply_.reset();
+        dropPrepared(*std::exchange(pendingApply_, std::nullopt));
         waitTimer_->stop();
         show(readyView());
+    }
+}
+
+void UpdateWorkbench::dropPrepared(const katana::update::ApplyRequest& request)
+{
+    if (const QString failed = discardPrepared(request); !failed.isEmpty()) {
+        // A leftover only: said, not an error of the session.
+        log(QStringLiteral("Update: the helper's copy made for the update that was not started "
+                           "could not be listed for removal (%1).")
+                .arg(failed));
     }
 }
 
@@ -826,11 +831,18 @@ void UpdateWorkbench::closeWhenIdle()
         return;
     }
     // A window that closes stops every job it runs (the runner joins them as
-    // it goes): a geoprocessing run is not cut short for an update. It waits.
-    if (JobRunner::of(window_).activeCount() > 0) {
-        if (!view_.waitingForJobs || view_.state != UpdateDialogState::Ready) {
+    // it goes): a geoprocessing run is not cut short for an update. And this
+    // close comes from a timer, not from a press: under a modal dialog the
+    // person opened meanwhile - a file dialog, a question - it would close
+    // the program around that dialog. It waits for both.
+    const bool jobs = JobRunner::of(window_).activeCount() > 0;
+    const bool dialogOpen = !jobs && QApplication::activeModalWidget() != nullptr;
+    if (jobs || dialogOpen) {
+        if (view_.state != UpdateDialogState::Ready || view_.waitingForJobs != jobs ||
+            view_.waitingForDialog != dialogOpen) {
             UpdateView view = readyView();
-            view.waitingForJobs = true;
+            view.waitingForJobs = jobs;
+            view.waitingForDialog = dialogOpen;
             show(std::move(view));
         }
         waitTimer_->start();
@@ -844,7 +856,7 @@ void UpdateWorkbench::closeWhenIdle()
         return;
     }
     // Cancel there: the window stays, and so does the release, downloaded.
-    pendingApply_.reset();
+    dropPrepared(*std::exchange(pendingApply_, std::nullopt));
     show(readyView());
     log(QStringLiteral("The window stayed open, so Katana %1 was not installed. It is still "
                        "downloaded: Help > Check for Updates installs it.")
@@ -901,22 +913,30 @@ void UpdateWorkbench::start()
 
 void UpdateWorkbench::checkIfDue()
 {
-    if (headless() || running_ != JobKind::None || automaticCheckDisabled()) {
+    // A headless run is turned away before anything is made or read for it.
+    if (headless()) {
         return;
     }
     const katana::app::UpdateContext& made = context();
-    // Development and test trees stay offline; and with no state folder there
+    // Every condition but the clock's (updateAutomaticCheckIsDue names them):
+    // development and test trees stay offline, and with no state folder there
     // is no saying when the last check was.
-    if (made.install.kind == katana::update::InstallKind::Development ||
-        made.stateDirectory.empty()) {
-        return;
-    }
+    UpdateAutoCheckFacts facts;
+    facts.headless = false;
+    facts.disabled = automaticCheckDisabled();
+    facts.jobRunning = running_ != JobKind::None;
+    facts.kind = made.install.kind;
+    facts.keepsState = !made.stateDirectory.empty();
     // A state file that does not read is carried on from as the defaults are
     // (update/state.hpp): the check the person never switched off still runs.
-    const Result<katana::update::UpdateState> read =
-        katana::update::readState(made.stateDirectory);
-    const katana::update::UpdateState state = read ? *read : katana::update::UpdateState{};
-    if (!katana::update::checkIsDue(state, nowEpoch(), jitter_)) {
+    katana::update::UpdateState state;
+    if (facts.keepsState) {
+        if (Result<katana::update::UpdateState> read =
+                katana::update::readState(made.stateDirectory)) {
+            state = std::move(*read);
+        }
+    }
+    if (!updateAutomaticCheckIsDue(facts, state, nowEpoch(), jitter_)) {
         return;
     }
     startCheck(true);
@@ -926,20 +946,25 @@ void UpdateWorkbench::restoreStaged()
 {
     // UPDATE STATUS, asked without a line in the log: nobody typed it. A
     // release downloaded in an earlier session ("Download only") is offered
-    // again as ready.
+    // again as ready - but not one the person skipped since, and never one
+    // that was rolled back here: the apply keeps the stage of a release that
+    // did not start, and "ready" would install it again
+    // (updateStagedToOffer).
     const Result<katana::app::UpdateReply> reply =
         katana::app::runUpdateLine(context(), "UPDATE STATUS");
-    if (!reply || !reply->status.has_value() || reply->status->stagedVersion.empty()) {
+    if (!reply || !reply->status.has_value()) {
         return;
     }
-    // Not a stage that a finished update left behind: only a release above
-    // what is installed is one to install.
-    const Result<katana::update::Version> staged =
-        katana::update::parseVersion(reply->status->stagedVersion);
-    if (!staged || !(*staged > context().install.version)) {
+    const std::filesystem::path stateDirectory = context().stateDirectory;
+    const QString staged = updateStagedToOffer(
+        *reply->status, context().install.version,
+        [&stateDirectory](std::uint64_t sequence) {
+            return stageIsThere(stateDirectory, sequence);
+        });
+    if (staged.isEmpty()) {
         return;
     }
-    stagedVersion_ = qs(reply->status->stagedVersion);
+    stagedVersion_ = staged;
     show(readyView());
 }
 
@@ -960,27 +985,19 @@ void UpdateWorkbench::showLastResult()
     // Shown once: cleared whatever it says, so the next start is not told again.
     (void)katana::update::clearLastResult(stateDirectory);
 
-    if (last.status == "committed") {
+    // What it is shown as is updateViewOfLastResult's; a success is no dialog.
+    const std::optional<UpdateView> ended = updateViewOfLastResult(
+        last, installedVersion(),
+        QDir::toNativeSeparators(qs(katana::core::pathToUtf8(context().install.root))));
+    if (!ended.has_value()) {
         log(QStringLiteral("Katana was updated to %1.").arg(qs(last.version)));
         return;
     }
-    UpdateView view = viewOf(UpdateDialogState::RolledBack);
-    view.latestVersion = qs(last.version);
-    view.reason = qs(last.reason);
-    if (last.status == "blocked") {
+    UpdateView view = *ended;
+    if (view.state == UpdateDialogState::Blocked) {
         // Nothing was touched and the release is still downloaded: Retry
         // applies it again once the programs named are closed.
-        view.state = UpdateDialogState::Blocked;
-        view.holders = qs(last.holder);
         stagedVersion_ = view.latestVersion;
-    } else {
-        view.lastStatus = qs(last.status);
-        if (last.status == "rollback_incomplete") {
-            view.recoverCommand =
-                QStringLiteral("katana_updater --recover \"%1\"")
-                    .arg(QDir::toNativeSeparators(
-                        qs(katana::core::pathToUtf8(context().install.root))));
-        }
     }
     const QString said = updateDetailText(view).isEmpty()
                              ? updateStateText(view)

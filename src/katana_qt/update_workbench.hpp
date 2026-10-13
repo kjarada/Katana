@@ -29,16 +29,28 @@
 //     automatic flag on, when update::checkIsDue says so and
 //     KATANA_UPDATE_DISABLE is not set. It is quiet when it learns nothing, and
 //     a release the person skipped, or that was rolled back here, is not
-//     offered (update::applyUpdateState);
+//     offered (update::applyUpdateState) - and is taken back if the window
+//     still offered it. A person who asks for a check while it is on its way
+//     is given that one, aloud;
 //   - ONE CLICK (the dialog's Update): the DOWNLOAD line, then the APPLY line,
 //     then the window's ordinary close - its unsaved-changes question
 //     included. Cancel there, and the window stays, the release stays staged
 //     and the dialog says Ready. A close that would cut a running job short
-//     waits for the job. ONLY when the close this object asked for succeeded
-//     does takePendingApply() hand main() the request to start the helper
-//     with, after the event loop has ended;
+//     waits for the job, and one that would close the program around a modal
+//     dialog the person opened meanwhile waits for that. ONLY when the close
+//     this object asked for succeeded does takePendingApply() hand main() the
+//     request to start the helper with, after the event loop has ended;
 //   - what the last apply ended as (U/last.json), shown once at the next start
-//     and then cleared.
+//     and then cleared; and a release downloaded in an earlier session offered
+//     again as ready - unless it was skipped since, or rolled back here.
+//
+// WHAT IT DECIDES IS NOT HERE. Which view an answer is, what is offered at a
+// start, when the automatic check is due, what its answer does to what is
+// shown and what the log may show are functions of their arguments beside the
+// dialog (update_dialog.hpp, "THE DECISIONS"), where the widget tests drive
+// them: this object needs the whole window and is built in no test. It
+// gathers the facts - the disk, the clock, the environment, the job runner -
+// and does what they say.
 //
 // A HEADLESS RUN (docs/headless.md): no automatic check, no per-user state
 // read or written (the context has no state folder), nothing shown unless
@@ -150,11 +162,12 @@ class UpdateWorkbench {
 
     // A line that answers at once, on the interface thread.
     void runNow(const QString& line);
-    // The reply, or the refusal, in the log - with each of `secrets` shown as
-    // "***" wherever the verbs' words repeat it: what was typed where someone
-    // hoped UPDATE TOKEN would take a token.
+    // The reply, or the refusal, in the log. `line` is the line it answers,
+    // when that was typed by a person: what stands in it where someone hoped
+    // UPDATE TOKEN would take a token is shown as "***" wherever the verbs'
+    // words repeat it, in any case (updateLoggedReply).
     void logReply(const katana::core::Result<katana::app::UpdateReply>& reply,
-                  const QStringList& secrets = {}) const;
+                  const QString& line = {}) const;
     // False, said in the log, while another update job runs.
     [[nodiscard]] bool mayStart(const QString& line);
     void startCheck(bool automatic);
@@ -176,7 +189,12 @@ class UpdateWorkbench {
     void openNotes(const QString& url);
     void later();
 
-    // The window's close for a prepared apply, once no job would be cut short.
+    // A request UPDATE APPLY CONFIRM prepared and nobody will start - Later,
+    // or Cancel at the window's question: the helper's copy made for it is
+    // listed for the next start's sweep.
+    void dropPrepared(const katana::update::ApplyRequest& request);
+    // The window's close for a prepared apply, once no job would be cut short
+    // and no modal dialog is open over the window.
     void closeWhenIdle();
     // The automatic check, when every condition for one holds.
     void checkIfDue();
