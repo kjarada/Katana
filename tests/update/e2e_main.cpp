@@ -133,8 +133,9 @@ constexpr int kExitUsage = 2;
 constexpr int kExitInternal = 3;
 
 constexpr std::string_view kUsage =
-    "usage: katana_update_e2e check|plan|stage --root R --state U (--feed URL | --github OWNER/NAME)\n"
-    "                         [--token T] [--connect HOST=PORT]... [--even-if-not-newer]\n"
+    "usage: katana_update_e2e check|plan|stage --root R --state U\n"
+    "                         (--feed URL | --github OWNER/NAME) [--token T]\n"
+    "                         [--connect HOST=PORT]... [--even-if-not-newer]\n"
     "       katana_update_e2e preflight --root R --state U --stage S\n"
     "       katana_update_e2e launch --root R --state U --stage S [--relaunch <path|none>]\n"
     "                         [--wait-pid <n|self>]\n"
@@ -184,7 +185,7 @@ int sayError(const core::Error& error)
     return kExitFailed;
 }
 
-// ---- the wire: one request to 127.0.0.1, redirects not followed ------------------------------------
+// ---- the wire: one request to 127.0.0.1, redirects not followed ---------------------------------
 
 #ifdef _WIN32
 using Socket = SOCKET;
@@ -351,7 +352,8 @@ std::optional<Address> parseAddress(std::string_view url)
     address.host = core::lowered(authority.substr(0, colon));
     if (colon != std::string_view::npos) {
         const std::string_view digits = authority.substr(colon + 1);
-        const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), address.port);
+        const auto parsed =
+            std::from_chars(digits.data(), digits.data() + digits.size(), address.port);
         if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() ||
             address.port < 1 || address.port > 65535) {
             return std::nullopt;
@@ -454,8 +456,7 @@ core::Result<upd::HttpHopReply> hopOverLoopback(const Routes& routes, const upd:
                                                 const upd::ProgressFn& progress)
 {
     if (!upd::isFetchableUrl(hop.url, /*allowLoopbackHttp=*/true)) {
-        return core::makeError(core::ErrorCode::InvalidArgument,
-                               "this address cannot be fetched");
+        return core::makeError(core::ErrorCode::InvalidArgument, "this address cannot be fetched");
     }
     const std::optional<Address> address = parseAddress(hop.url);
     if (!address) {
@@ -486,7 +487,8 @@ core::Result<upd::HttpHopReply> hopOverLoopback(const Routes& routes, const upd:
         return noAnswer("no connection to the feed",
                         "os_error=" + std::to_string(lastSocketError()));
     }
-    std::string request = "GET " + address->target + " HTTP/1.1\r\nHost: " + address->authority + "\r\n";
+    std::string request =
+        "GET " + address->target + " HTTP/1.1\r\nHost: " + address->authority + "\r\n";
     if (!hop.userAgent.empty()) {
         request += "User-Agent: " + hop.userAgent + "\r\n";
     }
@@ -643,7 +645,8 @@ core::Result<Arguments> parseArguments(const std::vector<std::string>& words)
             // HOST=PORT: the loopback port that stands in for an https host.
             const std::size_t equals = value.find('=');
             int port = 0;
-            const char* const digits = value.data() + (equals == std::string::npos ? 0 : equals + 1);
+            const char* const digits =
+                value.data() + (equals == std::string::npos ? 0 : equals + 1);
             const char* const end = value.data() + value.size();
             const auto parsed = std::from_chars(digits, end, port);
             if (equals == std::string::npos || equals == 0 || parsed.ec != std::errc{} ||
@@ -690,7 +693,8 @@ core::Result<Arguments> parseArguments(const std::vector<std::string>& words)
         return usageError(needsTheStage ? "missing option" : "this command takes no stage folder",
                           "--stage");
     }
-    if (arguments.command != "launch" && (arguments.has("--relaunch") || arguments.has("--wait-pid"))) {
+    if (arguments.command != "launch" &&
+        (arguments.has("--relaunch") || arguments.has("--wait-pid"))) {
         return usageError("only launch takes --relaunch and --wait-pid", arguments.command);
     }
     return arguments;
@@ -707,7 +711,7 @@ core::Result<Path> absoluteFolder(const Arguments& arguments, const std::string&
     return path;
 }
 
-// ---- what the commands share ----------------------------------------------------------------------
+// ---- what the commands share --------------------------------------------------------------------
 
 // The registry of this program: none. The install's kind is then `archive` whatever the machine
 // has installed, and nothing of the machine's is read or written.
@@ -717,7 +721,10 @@ class NoRegistry final : public upd::RegistryOps {
     {
         return std::optional<Path>{};
     }
-    [[nodiscard]] core::Status setRunOnce(std::string_view, std::string_view) override { return {}; }
+    [[nodiscard]] core::Status setRunOnce(std::string_view, std::string_view) override
+    {
+        return {};
+    }
     [[nodiscard]] core::Status clearRunOnce(std::string_view) override { return {}; }
     [[nodiscard]] core::Status setInstalledVersion(std::string_view, std::string_view) override
     {
@@ -777,7 +784,7 @@ struct ProgressWatch {
     }
 };
 
-// ---- check, plan, stage ---------------------------------------------------------------------------
+// ---- check, plan, stage -------------------------------------------------------------------------
 
 int runFeedCommand(const Arguments& arguments, const upd::Install& install, const Path& state)
 {
@@ -795,7 +802,8 @@ int runFeedCommand(const Arguments& arguments, const upd::Install& install, cons
 
     const SocketsLibrary sockets;
     if (!sockets.started()) {
-        return sayError(core::makeError(core::ErrorCode::Internal, "the sockets could not be started"));
+        return sayError(
+            core::makeError(core::ErrorCode::Internal, "the sockets could not be started"));
     }
     const Routes routes = arguments.routes;
     const upd::Fetch fetch = upd::makeFetch(
@@ -877,7 +885,7 @@ int runFeedCommand(const Arguments& arguments, const upd::Install& install, cons
     return kExitOk;
 }
 
-// ---- preflight, launch ----------------------------------------------------------------------------
+// ---- preflight, launch --------------------------------------------------------------------------
 
 int runApplyCommand(const Arguments& arguments, const upd::Install& install, const Path& state)
 {
@@ -896,7 +904,8 @@ int runApplyCommand(const Arguments& arguments, const upd::Install& install, con
         const std::string relaunch = arguments.value("--relaunch");
         request.relaunch = relaunch == "none" ? Path() : core::pathFromUtf8(relaunch);
         if (!request.relaunch.empty() && !request.relaunch.is_absolute()) {
-            std::cerr << "katana_update_e2e: --relaunch must be an absolute path or none\n" << kUsage;
+            std::cerr << "katana_update_e2e: --relaunch must be an absolute path or none\n"
+                      << kUsage;
             return kExitUsage;
         }
     }
@@ -935,7 +944,8 @@ int runApplyCommand(const Arguments& arguments, const upd::Install& install, con
     request.helper = prepared.value().helper;
     request.transaction = prepared.value().transaction;
     sayNumber("wait_pid", request.waitPid);
-    say("relaunch", request.relaunch.empty() ? std::string("none") : core::pathToUtf8(request.relaunch));
+    say("relaunch",
+        request.relaunch.empty() ? std::string("none") : core::pathToUtf8(request.relaunch));
     // Flushed before the helper exists: it waits for this process to be gone, and whoever reads
     // these lines must not wait for the helper.
     std::cout << std::flush;
@@ -946,7 +956,7 @@ int runApplyCommand(const Arguments& arguments, const upd::Install& install, con
     return kExitOk;
 }
 
-// ---- recover --------------------------------------------------------------------------------------
+// ---- recover ------------------------------------------------------------------------------------
 
 int runRecover(const upd::Install& install, const Path& state)
 {
