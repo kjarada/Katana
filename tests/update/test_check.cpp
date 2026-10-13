@@ -236,8 +236,9 @@ TEST(Check, TheSameOrAnOlderReleaseIsCurrentAndNeverOffered)
 
 TEST(Check, AFreshInstallIsNotOfferedTheReleaseItCameFrom)
 {
-    // No installed.json: the zip carries no sequence to compare with the manifest's, so the same
-    // version is not newer (trust.hpp, isNewerThan).
+    // No installed.json: a fresh install's sequence is the placeholder 0, whatever sequence its
+    // package names (install.hpp), and isNewerThan leaves it out while there is no record
+    // (trust.hpp), so the same version is not newer.
     FakeFeed feed;
     const FeedConfig config = githubFeed();
     feed.serveRelease(config, fixture("v2"));

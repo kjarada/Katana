@@ -696,16 +696,11 @@ runs on:
   program's version, and the staged release is then the newer one only
   while the project has not passed it.
 
-  The end-to-end tests are NOT yet free of it. Their driver writes the
-  record with the target alone (`INSTALL_RECORD` in
-  `tests/update/update_e2e.py`), and their installs are read by
-  `katana_update_e2e` and `katana_updater_test`, which are built as the
-  project's version. Its expectation that the fixtures' first install
-  says `installed` 0.9.0 holds while the project's version is not above
-  0.9.0; its updates from 0.9.0 to 0.10.0 are updates until the project
-  passes 0.10.0 - by their versions below it, by their sequences at it -
-  and each a `downgrade` above. The driver's record, or the fixtures'
-  two versions, has to move before the project's does.
+  The end-to-end tests stand the same way. Their driver gives both of its
+  packages that record (`INSTALL_RECORD` in `tests/update/update_e2e.py`:
+  0.1.0, as `kInstallJson`), so the installs that `katana_update_e2e` and
+  `katana_updater_test` read - programs built as the project's version -
+  are what their records say, whichever build reads them.
 - **What the person kept.** `UPDATE BLOCKED CLEAR` is run by `katana_cli`
   against a state file a CMake script wrote by hand - two releases blocked,
   a version skipped, the switch off, a time of the last check - and the
