@@ -626,7 +626,8 @@ class World:
 
 
 def staged_files(stage: Path) -> dict[str, str]:
-    """The files in a stage folder, by path, with their hashes (the two records and the lock aside)."""
+    """The files in a stage folder, by path, with their hashes: the release's files, without the two
+    records stage() writes last and the scratch folder it works in (stage.hpp)."""
     entries = snapshot(stage) if stage.is_dir() else {}
     return {name: what for name, what in entries.items()
             if what != "dir" and name not in ("manifest.json", "manifest.json.sig") and not name.startswith(".partial")}
@@ -1081,6 +1082,15 @@ def other_key(bench: Bench, args: argparse.Namespace) -> None:
     feed = bench.feed(claimed.folder)
     expect_unreachable(world.ask("check", feed), "bad_signature", "another key's signature under the pinned key's id")
     expect_nothing_fetched_or_staged(world, feed, claimed, "another key's signature under the pinned key's id")
+    feed.stop()
+
+    # The control: it is the key that decides, not the fact that it is not the active one. A release signed
+    # by the SPARE key, which is pinned too, is believed (trust.hpp: either verifies).
+    spare = bench.produce("v2-spare-key", bench.package("v2"), V2_VERSION, V2_SEQUENCE, key="spare")
+    feed = bench.feed(spare.folder)
+    trusted = world.ask("check", feed)
+    expect_equal((trusted.code, trusted.value("update"), trusted.value("latest")), (0, "available", V2_VERSION),
+                 "check against a release signed by the spare key")
 
 
 @case("wrong_target", portable=True)
