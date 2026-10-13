@@ -1501,8 +1501,9 @@ TEST(StageOnTheSystemFileSystem, TheFixtureReleaseIsStagedResumedAndItsHelperPre
     ASSERT_FALSE(progress.empty());
     EXPECT_EQ(progress.back(), (std::pair<std::uint64_t, std::uint64_t>{2949, 2949}));
 
-    // One staged file is damaged: the second run asks for that file and no other.
-    h::writeText(rig.stageDir / "share/katana/news.txt", "not the news");
+    // One staged file goes missing: the second run finds the other four by their hashes and
+    // asks for that file and no other.
+    ASSERT_TRUE(fs::remove(rig.stageDir / "share/katana/news.txt"));
     PayloadServer second(rig.v2Zip);
     ASSERT_TRUE(stage(makeFetch(second.hop()), rig.feed, rig.manifest, rig.thePlan, rig.stageDir,
                       std::stop_token{}, ProgressFn{})
