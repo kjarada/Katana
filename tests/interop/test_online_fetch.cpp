@@ -932,3 +932,24 @@ TEST(OnlineLive, EveryBuiltInEndpointAnswers)
         }
     }
 }
+
+TEST(OnlineLive, AnExchangeHandsBackARedirectAndDoesNotFollowIt)
+{
+    if (!liveTestsEnabled()) {
+        GTEST_SKIP() << "set KATANA_ONLINE_TESTS=1 to reach the network";
+    }
+    // gis::httpExchange is the one request the update engine follows redirects with by hand, so
+    // that its access token goes to one host and no further (web_access.hpp): a redirect must
+    // come back as an answer. github.com answers plain http with a 301 to its https address;
+    // were the redirect followed, this would be a 200 and a page of several hundred kilobytes.
+    gis::HttpRequest request;
+    request.url = "http://github.com/";
+    request.userAgent = OnlineEnvironment{}.userAgent;
+    request.maxBytes = 1u << 20;
+    request.retries = 1;
+    const auto answer = gis::httpExchange(request);
+    ASSERT_TRUE(answer.ok()) << answer.error().describe();
+    EXPECT_EQ(answer->status, 301);
+    EXPECT_EQ(answer->location, "https://github.com/");
+    EXPECT_LE(answer->body.size(), 64u * 1024u) << "the body of a redirect is kept to 64 KiB";
+}
