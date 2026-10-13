@@ -46,7 +46,9 @@
 // jitter, or never checked, or a last check in the future), the run is not
 // headless and KATANA_UPDATE_DISABLE is not set, and is quiet when it learns
 // nothing; the status bar's button reads "Update <version>" and is hidden
-// until an update is known. The records are written by hand: the design's
+// until an update is known; and a start confirms an update that was never
+// said to start only in a window of the version it installed (the hardening
+// pass's H1, 2026-10-14). The records are written by hand: the design's
 // 0.2.0 and 0.3.0, its sequence 1792312800, its `expires` of
 // 2027-04-18T08:00:00Z - which is 1 808 035 200 seconds after 1970 (20 926
 // days: 57 years of 365, 14 leap days, 31 + 28 + 31 + 17; and 8 hours).
@@ -1550,6 +1552,72 @@ TEST(UpdateDecisions, TheWindowChecksByItselfOnlyWhenEveryConditionHolds)
     // A last check in the future - the clock was set back - silences nothing.
     checked.lastCheckEpoch = kNow + 3600;
     EXPECT_TRUE(updateAutomaticCheckIsDue(go, checked, kNow, noJitter));
+}
+
+TEST(UpdateDecisions, AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled)
+{
+    // The hardening pass's H1 (2026-10-14): an update whose helper died while
+    // it waited for the new version to prove that it starts is settled by "an
+    // interactive window (kAppliesHere, not headless, not development), first
+    // idle turn, only when install.hasInstalledRecord and install.version is
+    // the program's own". Each condition is taken away in turn, as the
+    // automatic check's are above; the rule is that specification's, and the
+    // versions are the design's 0.2.0 and 0.3.0.
+    using katana::qt::UpdateConfirmFacts;
+    using katana::qt::updateStartMayConfirm;
+    using katana::update::InstallKind;
+    const auto version = [](std::uint32_t minor, std::uint8_t written) {
+        katana::update::Version made;
+        made.components = {0, minor, 0, 0};
+        made.written = written;
+        return made;
+    };
+    // 0.3.0 was installed by an update, and this window is 0.3.0.
+    UpdateConfirmFacts go;
+    go.appliesHere = true;
+    go.keepsState = true;
+    go.kind = InstallKind::Installer;
+    go.hasInstalledRecord = true;
+    go.installed = version(3, 3);
+    go.program = version(3, 3);
+    EXPECT_TRUE(updateStartMayConfirm(go));
+    UpdateConfirmFacts unpacked = go;
+    unpacked.kind = InstallKind::Archive;
+    EXPECT_TRUE(updateStartMayConfirm(unpacked)) << "an unpacked archive updates itself too";
+    // "0.3" and "0.3.0" are one version (update/version.hpp).
+    UpdateConfirmFacts shortened = go;
+    shortened.program = version(3, 2);
+    EXPECT_TRUE(updateStartMayConfirm(shortened));
+
+    // THE CASE THE RULE EXISTS FOR: a window of the old files, started while
+    // the update was swapping them. The install's record names 0.3.0 and the
+    // program running is 0.2.0: its start says nothing about 0.3.0.
+    UpdateConfirmFacts oldWindow = go;
+    oldWindow.program = version(2, 3);
+    EXPECT_FALSE(updateStartMayConfirm(oldWindow));
+    // Nor the other way about: the record does not name what is running.
+    UpdateConfirmFacts staleRecord = go;
+    staleRecord.installed = version(2, 3);
+    EXPECT_FALSE(updateStartMayConfirm(staleRecord));
+
+    // Each other condition, alone, stops it.
+    UpdateConfirmFacts fresh = go;
+    fresh.hasInstalledRecord = false;
+    EXPECT_FALSE(updateStartMayConfirm(fresh)) << "no update ever committed here";
+    UpdateConfirmFacts headless = go;
+    headless.headless = true;
+    EXPECT_FALSE(updateStartMayConfirm(headless)) << "a headless run writes no per-user state";
+    UpdateConfirmFacts development = go;
+    development.kind = InstallKind::Development;
+    EXPECT_FALSE(updateStartMayConfirm(development)) << "a build tree is never updated";
+    UpdateConfirmFacts stateless = go;
+    stateless.keepsState = false;
+    EXPECT_FALSE(updateStartMayConfirm(stateless)) << "no update folder to write the proof in";
+    UpdateConfirmFacts elsewhere = go;
+    elsewhere.appliesHere = false;
+    EXPECT_FALSE(updateStartMayConfirm(elsewhere)) << "a copy that cannot replace its own files";
+    // And with nothing known, nothing is confirmed.
+    EXPECT_FALSE(updateStartMayConfirm(UpdateConfirmFacts{}));
 }
 
 TEST(UpdateDecisions, TheStatusBarButtonNamesTheReleaseAndIsHiddenUntilOneIsKnown)

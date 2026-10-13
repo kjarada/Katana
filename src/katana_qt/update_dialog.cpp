@@ -713,6 +713,16 @@ bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
     return katana::update::checkIsDue(state, nowEpoch, jitter);
 }
 
+bool updateStartMayConfirm(const UpdateConfirmFacts& facts)
+{
+    if (!facts.appliesHere || facts.headless || !facts.keepsState ||
+        facts.kind == katana::update::InstallKind::Development) {
+        return false;
+    }
+    // As versions: "0.3" and "0.3.0" are one release (update/version.hpp).
+    return facts.hasInstalledRecord && facts.installed == facts.program;
+}
+
 std::vector<std::string>
 updateRecoveredTransactions(std::string_view recoveryLog,
                             const std::function<bool(const std::string& transaction)>& isOver)

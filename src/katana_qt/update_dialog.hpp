@@ -239,7 +239,8 @@ updateFilesOfProgressLine(const QString& line);
 //
 // What the dialog's owner decides from the update engine's records: which view
 // an answer is, what is offered when the window starts, when the window checks
-// by itself, what the log may show, which helper copies a start may remove.
+// by itself, what the log may show, which helper copies a start may remove,
+// whether a start confirms an update that was never said to start.
 // They are here - beside the dialog, in the library the widget tests link -
 // because their owner in the program (UpdateWorkbench) needs the whole window
 // and cannot be built in a test. Each is a function of its arguments: the
@@ -364,6 +365,34 @@ struct UpdateAutoCheckFacts {
 [[nodiscard]] bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
                                              const katana::update::UpdateState& state,
                                              std::int64_t nowEpoch, std::chrono::seconds jitter);
+
+// What a window knows when it asks whether its own start settles an update
+// that was installed and never said to start (below).
+struct UpdateConfirmFacts {
+    bool appliesHere = false; // false where a copy cannot replace its own files
+    bool headless = false;    // a headless run writes no per-user state
+    bool keepsState = false;  // the session has a per-user update folder
+    katana::update::InstallKind kind = katana::update::InstallKind::Development;
+    // The install has a record of an update that committed (installed.json),
+    // and the version that record names.
+    bool hasInstalledRecord = false;
+    katana::update::Version installed;
+    // The version this program was built as (update::programVersion).
+    katana::update::Version program;
+};
+
+// Whether this window, having reached its first idle turn, is the proof an
+// update's health run was to give - so that it may settle an update whose
+// helper died while it waited for that run (update::confirmStarted,
+// include/katana/update/recover.hpp). Only when ALL of these hold: the copy
+// can replace its own files; the run is not headless (the confirmation writes
+// per-user state); the session has a per-user update folder; the copy is one
+// packaging installed; and the install has a record of its own whose version
+// is this program's own. The last is what tells the new version from a window
+// of the OLD files that was started while the files were being swapped: that
+// one runs old code over the new tree, its record names a version it is not,
+// and its start proves nothing about the release.
+[[nodiscard]] bool updateStartMayConfirm(const UpdateConfirmFacts& facts);
 
 // The transactions whose helper copy U/run-<tx> the window's start lists for
 // removal (update/state.hpp, cleanup.list). A swap that ends lists its own

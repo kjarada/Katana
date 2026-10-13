@@ -28,6 +28,8 @@
 #include "katana/update/check.hpp"
 #include "katana/update/fsops.hpp"
 #include "katana/update/install.hpp"
+#include "katana/update/recover.hpp"
+#include "katana/update/registry.hpp"
 #include "katana/update/stage.hpp"
 #include "katana/update/state.hpp"
 #include "katana/update/version.hpp"
@@ -75,6 +77,15 @@ constexpr std::chrono::minutes kDueProbe{60};
 constexpr std::chrono::milliseconds kProgressTick{250};
 // How often a close that waits for a job looks again.
 constexpr std::chrono::milliseconds kJobPoll{250};
+// A start that would confirm an update and finds the update lock held asks
+// again this often, this many times, and then leaves it (confirmStart). The
+// lock is held by a helper that is alive, and the longest it holds it over an
+// update it has installed is its wait for the new version's health run - a
+// minute (update/apply.hpp, ApplyTimings::healthWait), which twelve times five
+// seconds is; after that the helper has settled the update itself. The two
+// numbers are the hardening pass's specification of 2026-10-14 for this call.
+constexpr std::chrono::seconds kConfirmRetry{5};
+constexpr int kConfirmRetries = 12;
 // The install's own record of its recoveries, R/.update/recovery.log
 // (update/recover.hpp, "WHAT RECOVERY WRITES, AND WHERE").
 constexpr std::string_view kRecoveryLogName = "recovery.log";
@@ -1012,8 +1023,68 @@ void UpdateWorkbench::start()
     restoreStaged();
     showLastResult();
     dueTimer_->start();
-    // On the first idle turn, so that the window is up before anything is asked.
-    QTimer::singleShot(0, scope_.get(), [this] { checkIfDue(); });
+    // On the first idle turn, so that the window is up before anything is
+    // asked - and because a window that has come idle is what an update's
+    // health run exists to show: that first, then the check.
+    QTimer::singleShot(0, scope_.get(), [this] {
+        confirmStart();
+        checkIfDue();
+    });
+}
+
+void UpdateWorkbench::confirmStart()
+{
+    // An update whose helper died while it waited for the new version to
+    // prove that it starts is installed, and nothing says that it works
+    // (update/recover.hpp, "AN UPDATE THAT IS INSTALLED AND WAS NEVER SAID TO
+    // START"). This window has just proved it - if it IS that version, which
+    // updateStartMayConfirm decides. Nothing in a headless run: the
+    // confirmation writes per-user state.
+    if (headless()) {
+        return;
+    }
+    const katana::app::UpdateContext& made = context();
+    if (made.install.root.empty()) {
+        return;
+    }
+    // The install's records as they are NOW, not as the context read them
+    // when the window was built: a window of the old files that was started
+    // while an update was swapping them may have read the old record, which
+    // names the version it is. By the time the update lock can be had the
+    // record names the new one, and that window confirms nothing.
+    const std::unique_ptr<katana::update::RegistryOps> registry =
+        katana::update::makeSystemRegistryOps();
+    const Result<katana::update::Install> install =
+        katana::update::readInstall(made.install.root, *registry);
+    const Result<katana::update::Version> program = katana::update::programVersion();
+    if (!install || !program) {
+        // Records that do not read prove nothing; the check says why they do
+        // not, when it is asked.
+        return;
+    }
+    UpdateConfirmFacts facts;
+    facts.appliesHere = kAppliesHere;
+    facts.headless = false;
+    facts.keepsState = !made.stateDirectory.empty();
+    facts.kind = install->kind;
+    facts.hasInstalledRecord = install->hasInstalledRecord;
+    facts.installed = install->version;
+    facts.program = *program;
+    if (!updateStartMayConfirm(facts)) {
+        return;
+    }
+    // With nothing to settle - every start but the one after such a death -
+    // this is a listing of one folder, and no lock is asked for.
+    if (katana::update::confirmStarted(made.install.root, made.stateDirectory) !=
+        katana::update::Confirmed::Busy) {
+        return;
+    }
+    // A helper is alive: its own health run is still being waited for, and it
+    // settles the update itself. Asked again, in case it dies instead.
+    if (confirmRetries_ < kConfirmRetries) {
+        ++confirmRetries_;
+        QTimer::singleShot(kConfirmRetry, scope_.get(), [this] { confirmStart(); });
+    }
 }
 
 void UpdateWorkbench::checkIfDue()
