@@ -33,7 +33,9 @@
 //                it." / "Settings > Updates offers it again."
 //                "blocked_before": "Katana 0.3.0 could not be installed here
 //                before, and is not offered again." / "A later release will
-//                be offered."   [Check now]
+//                be offered, and Settings > Updates offers this one again."
+//                (its button settingsUpdateUnblock runs UPDATE BLOCKED CLEAR)
+//                [Check now]
 //   Available    "Update Available" / "Katana 0.3.0 (you have 0.2.0). 23 of
 //                411 files changed, 71 MB to download."
 //                [Update] [Download only] [Skip this version] [Release notes]
@@ -58,7 +60,11 @@
 //                Retry."  [Retry]
 //   RolledBack   what the last apply ended as, by `lastStatus`
 //                (update::LastResult): "rolled_back": "Katana 0.3.0 could not
-//                be installed, so 0.2.0 was restored." / "Reason: <reason>.";
+//                be installed, so 0.2.0 was restored." / "Reason: <reason>." -
+//                and, when the reason is that the new version did not start
+//                (health_exit, health_timeout), which is when the helper sets
+//                the release aside, "A later release will be offered, and
+//                Settings > Updates offers this one again." after it;
 //                "refused": "Katana 0.3.0 could not be installed; nothing was
 //                changed."; "rollback_incomplete": "Katana 0.3.0 could not be
 //                installed, and 0.2.0 could not be put back completely." with
@@ -206,7 +212,11 @@ inline constexpr const char* kUpdateApplyLine = "UPDATE APPLY CONFIRM";
 // with error 503"; a token it does not know is given back as it came, which is
 // still better than nothing said. The table is in update_dialog.cpp, a row a
 // token of include/katana/update/check.hpp, feed.hpp (the transport's),
-// stage.hpp (the download's and the preflight's) and apply.hpp.
+// stage.hpp (the download's and the preflight's), apply.hpp, and the verbs'
+// own (src/katana_app/update_verbs.hpp). Where a person can do something about
+// it the words say what: "elevated" is "Katana was started as administrator;
+// start it the ordinary way, not as administrator, and update again - the
+// download is kept".
 [[nodiscard]] QString updateReasonWords(const QString& token);
 
 // Bytes as whole megabytes of a million bytes, rounded to the nearest - "71"

@@ -514,14 +514,61 @@ TEST(UpdateDialog, RolledBackSaysWhatWasRestoredAndWhy)
     view.lastStatus = QStringLiteral("rolled_back");
     view.reason = QStringLiteral("health_exit");
     dialog.setView(view);
+    // The design's sentence, and after it - the hardening pass's ruling H5 of
+    // 2026-10-14, "the dialog's sentence for a blocked release says where that
+    // button is" - where the release that was put back is offered again: a
+    // release that did not start is set aside for good otherwise.
     EXPECT_EQ(said(dialog),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored. Reason: "
-                             "the new version did not start."));
+                             "the new version did not start. A later release will be offered, "
+                             "and Settings > Updates offers this one again."));
     EXPECT_EQ(shown(dialog, "updateStateText"),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored."));
     // It is read and closed: nothing here tries the same release again.
     EXPECT_TRUE(shownButtons(dialog).isEmpty())
         << shownButtons(dialog).join(QLatin1Char(' ')).toStdString();
+}
+
+TEST(UpdateDialog, OnlyAReleaseThatWasPutBackForNotStartingIsSaidToBeOfferedAgainInSettings)
+{
+    // Which endings set a release aside is the helper's rule
+    // (src/katana_update/apply.cpp, Applier::fail: "A release that does not
+    // start must not be offered again as it was" - a rollback whose reason is
+    // health_exit or health_timeout, and no other ending). Only there is
+    // there something for Settings > Updates to offer again; said after any
+    // other ending the sentence would send the person to a button that is off.
+    DialogFixture f;
+    UpdateDialog dialog(f.context);
+    const QString again = QStringLiteral("A later release will be offered, and Settings > "
+                                         "Updates offers this one again.");
+    UpdateView view = viewOf(UpdateDialogState::RolledBack);
+    view.lastStatus = QStringLiteral("rolled_back");
+    view.reason = QStringLiteral("health_timeout");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Reason: the new version did not finish starting in time. ") + again);
+
+    // Put back because a file could not be replaced: nothing was set aside.
+    view.reason = QStringLiteral("rename_failed");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Reason: a file was in use and could not be replaced."));
+
+    // The same reasons under the two endings that put nothing back, or not
+    // all of it: no release was set aside by either.
+    for (const char* status : {"refused", "rollback_incomplete"}) {
+        view.lastStatus = QString::fromLatin1(status);
+        view.reason = QStringLiteral("health_exit");
+        dialog.setView(view);
+        EXPECT_FALSE(shown(dialog, "updateDetailText").contains(QStringLiteral("Settings")))
+            << status;
+    }
+    // And with no reason given there is no sentence to hang it on, and none
+    // that says it was the health check.
+    view.lastStatus = QStringLiteral("rolled_back");
+    view.reason.clear();
+    dialog.setView(view);
+    EXPECT_TRUE(shown(dialog, "updateDetailText").isEmpty());
 }
 
 TEST(UpdateDialog, AnApplyThatChangedNothingAndOneThatCouldNotBePutBackAreNotCalledRestored)
@@ -617,11 +664,15 @@ TEST(UpdateDialog, AReleaseThatWasSkippedOrRolledBackHereBeforeIsSaidAndNotOffer
                                            "Settings > Updates offers it again."));
     EXPECT_EQ(shownButtons(dialog), (QStringList{QStringLiteral("updateCheckNow")}));
 
+    // And, since the hardening pass's ruling H5 (2026-10-14), where the way
+    // back is: the sentence ended at "A later release will be offered." while
+    // nothing but deleting the state file by hand offered the release again.
     view.reason = QStringLiteral("blocked_before");
     dialog.setView(view);
     EXPECT_EQ(said(dialog), QStringLiteral("Katana 0.3.0 could not be installed here before, and "
                                            "is not offered again. A later release will be "
-                                           "offered."));
+                                           "offered, and Settings > Updates offers this one "
+                                           "again."));
     EXPECT_EQ(shownButtons(dialog), (QStringList{QStringLiteral("updateCheckNow")}));
 }
 
@@ -875,7 +926,13 @@ TEST(UpdateWords, EveryReasonTheEngineGivesHasWordsOfItsOwn)
     // And the tokens the network engine adds, copied from the comments of its
     // headers (branch upd-t8: check.hpp "Added by check() itself", feed.hpp
     // fetchFailureReason, stage.hpp "The Error of a failure carries a
-    // machine-readable token" and "preflight's"): the last five rows.
+    // machine-readable token" and "preflight's"): the rows from html_page to
+    // helper_failed.
+    //
+    // And the two refusals of a copy that may not install, which the verbs'
+    // header lists for UPDATE APPLY CONFIRM (update_verbs.hpp: "platform" where
+    // this version installs nothing, "elevated" - the hardening pass's ruling
+    // H4 - for a Katana started as administrator): the last row.
     for (const char* token :
          {"offline",          "http_403",        "http_404",         "http_429",
           "bad_signature",    "wrong_product",   "wrong_target",     "malformed",
@@ -893,12 +950,71 @@ TEST(UpdateWords, EveryReasonTheEngineGivesHasWordsOfItsOwn)
           "error",            "staged_corrupt",  "write_failed",     "stage_busy",
           "low_disk_space",   "short_range",     "unverified_manifest", "no_token",
           "payload_mismatch", "helper_missing",  "helper_not_started", "helper_timeout",
-          "helper_failed"}) {
+          "helper_failed",
+          "platform",         "elevated"}) {
         const QString words = katana::qt::updateReasonWords(QString::fromLatin1(token));
         EXPECT_NE(words, QString::fromLatin1(token)) << token;
         EXPECT_TRUE(words.contains(QLatin1Char(' '))) << token << ": " << words.toStdString();
         EXPECT_FALSE(words.endsWith(QLatin1Char('.'))) << token << " ends the sentence itself";
     }
+}
+
+TEST(UpdateWords, ACopyThatMayNotInstallIsToldWhatItCanDoAboutIt)
+{
+    using katana::qt::updateReasonWords;
+    // Started as administrator (the hardening pass's ruling H4: "The sentence
+    // tells the person to start Katana the ordinary way and update again; the
+    // download stays"). Each of the three things is said, in a person's
+    // words, and the token is not.
+    const QString elevated = updateReasonWords(QStringLiteral("elevated"));
+    EXPECT_EQ(elevated,
+              QStringLiteral("Katana was started as administrator; start it the ordinary way, "
+                             "not as administrator, and update again - the download is kept"));
+    for (const char* part : {"start it the ordinary way", "not as administrator", "update again",
+                             "the download is kept"}) {
+        EXPECT_TRUE(elevated.contains(QLatin1String(part))) << part;
+    }
+    EXPECT_FALSE(elevated.contains(QStringLiteral("elevated")));
+
+    // A copy on a platform this version installs nothing on (the update
+    // document's platform table: such a copy is told of a release and sent to
+    // its notes, which is the Available state's sentence for it too).
+    const QString platform = updateReasonWords(QStringLiteral("platform"));
+    EXPECT_EQ(platform,
+              QStringLiteral("this copy of Katana cannot install an update on this kind of "
+                             "computer; the release notes say where to download it"));
+    EXPECT_TRUE(platform.contains(QStringLiteral("the release notes say where to download it")));
+
+    // As the dialog says them: how the last apply ended, when the helper
+    // refused it for either (apply.hpp lists both among an apply's reasons).
+    UpdateDialog dialog(UpdateDialogContext{});
+    UpdateView view = viewOf(UpdateDialogState::RolledBack);
+    view.lastStatus = QStringLiteral("refused");
+    view.reason = QStringLiteral("platform");
+    dialog.setView(view);
+    EXPECT_EQ(said(dialog),
+              QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed. Reason: "
+                             "this copy of Katana cannot install an update on this kind of "
+                             "computer; the release notes say where to download it."));
+}
+
+TEST(UpdateWords, AnEarlierUpdateThatIsStillOpenIsSaidToBeUnsettledNotFailed)
+{
+    // The helper refuses an apply as interrupted_update while an earlier one
+    // is neither confirmed nor put back (the hardening pass's H1: an update
+    // whose helper died during the health check is settled by a later start,
+    // and until then "an earlier update is not settled yet"). The words said
+    // it "could not be put back", which is not what has happened.
+    EXPECT_EQ(katana::qt::updateReasonWords(QStringLiteral("interrupted_update")),
+              QStringLiteral("an earlier update is not settled yet"));
+    UpdateDialog dialog(UpdateDialogContext{});
+    UpdateView view = viewOf(UpdateDialogState::RolledBack);
+    view.lastStatus = QStringLiteral("refused");
+    view.reason = QStringLiteral("interrupted_update");
+    dialog.setView(view);
+    EXPECT_EQ(said(dialog),
+              QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed. Reason: "
+                             "an earlier update is not settled yet."));
 }
 
 TEST(UpdateWords, ACaptivePortalAndAFullDiskAreSaidInWordsNotAsTheirTokens)
@@ -1149,15 +1265,25 @@ TEST(UpdateDecisions, EveryOtherAnswerOfACheckIsItsOwnStateAndOffersNothing)
                                            "Settings > Updates offers it again."));
     EXPECT_TRUE(updateStatusButtonText(view).isEmpty()) << "a skipped release is not offered";
 
-    // A release that was rolled back here: `blocked`.
+    // A release that was rolled back here: `blocked`. Its sentence names the
+    // place that offers it again (ruling H5 of the hardening pass).
     UpdateOffer blocked = offerOf(CheckStatus::Blocked);
     blocked.check.reason = "blocked_before";
     view = updateViewOfOffer(blocked, factsOf());
     EXPECT_EQ(view.state, UpdateDialogState::NotOffered);
     EXPECT_EQ(saidBy(view), QStringLiteral("Katana 0.3.0 could not be installed here before, and "
                                            "is not offered again. A later release will be "
-                                           "offered."));
+                                           "offered, and Settings > Updates offers this one "
+                                           "again."));
     EXPECT_TRUE(updateStatusButtonText(view).isEmpty()) << "a blocked release is not offered";
+
+    // The verbs give that answer a sentence of their own, for a line's reply
+    // (update_verbs.hpp: CheckResult::detail of update=blocked). It changes
+    // nothing here: the dialog says where its own button is.
+    blocked.check.detail = "this release was installed here before, did not start and was put "
+                           "back, so it is not offered; UPDATE BLOCKED CLEAR (Settings > Updates "
+                           "in the window) offers it again";
+    EXPECT_EQ(saidBy(updateViewOfOffer(blocked, factsOf())), saidBy(view));
 
     // A private feed's 404.
     UpdateOffer unreachable = offerOf(CheckStatus::Unreachable);
@@ -1320,7 +1446,9 @@ TEST(UpdateDecisions, HowTheLastUpdateEndedIsItsOwnStateAndASuccessIsNone)
     last.status = "committed";
     EXPECT_FALSE(updateViewOfLastResult(last, installed, root).has_value());
 
-    // The design's sentence.
+    // The design's sentence, and where the release it tells of is offered
+    // again (ruling H5 of the hardening pass: a release that did not start is
+    // set aside, and the person is told where the way back is).
     last.status = "rolled_back";
     last.reason = "health_exit";
     std::optional<UpdateView> view = updateViewOfLastResult(last, installed, root);
@@ -1328,7 +1456,8 @@ TEST(UpdateDecisions, HowTheLastUpdateEndedIsItsOwnStateAndASuccessIsNone)
     EXPECT_EQ(view->state, UpdateDialogState::RolledBack);
     EXPECT_EQ(saidBy(*view),
               QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored. Reason: "
-                             "the new version did not start."));
+                             "the new version did not start. A later release will be offered, "
+                             "and Settings > Updates offers this one again."));
     EXPECT_TRUE(katana::qt::updateStatusButtonText(*view).isEmpty())
         << "what was rolled back is not offered";
 
