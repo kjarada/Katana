@@ -15,8 +15,11 @@
 // `reason=`): "offline", "http_403", "http_404", "http_429", "http_<n>",
 // "bad_signature", "wrong_product", "wrong_target", "malformed", "untrusted_key",
 // "placeholder_keys", "partial_downloads", "cancelled", "disabled_build",
-// "development_tree", "root_not_writable", "headless", "skipped",
-// "blocked_before". Added by check() itself: "html_page" (a web page where the file
+// "development_tree", "skipped", "blocked_before". (No check says "root_not_writable" or
+// "headless": whether the install folder can be written is found by the helper, which
+// refuses under the first (apply.hpp), and the second is the verbs' answer to a headless
+// window's DOWNLOAD and APPLY, src/katana_app/update_verbs.hpp - a headless check is a check
+// like any other.) Added by check() itself: "html_page" (a web page where the file
 // should be: a captive portal), "too_large" (a file longer than the engine reads before
 // it has verified it), "wrong_channel", "asset_missing" (the private route's release has no
 // manifest or signature asset), "verify_unavailable" (the signature could not be checked at
@@ -45,9 +48,12 @@ enum class CheckStatus {
     Available,   // a release above the installed (version, sequence); manifest is set
     Current,     // the feed's release is not above it
     Unreachable, // the feed could not be read or did not verify; `reason` says why
-    // This copy cannot update: a development tree, no feed in this build, an unwritable root.
+    // This copy cannot update: a development tree, or no feed in this build. (An install folder
+    // that cannot be written is not found by a check: the helper finds it, apply.hpp.)
     Unsupported,
-    Blocked,     // an apply of this very release was rolled back here; not offered again
+    // An apply of this very release was rolled back here: not offered again until the person
+    // clears the list of such releases (`UPDATE BLOCKED CLEAR`).
+    Blocked,
 };
 
 // "available" "current" "unreachable" "unsupported" "blocked"
@@ -66,6 +72,8 @@ struct CheckResult {
     FeedRoute route = FeedRoute::Download;
     // The failure's own sentence (the transport's or the verifier's message, never a URL with a
     // query and never the token), for "Could not check for updates: <detail>". Empty on success.
+    // (The verbs give a Blocked answer one as well, which is no failure's: how the release is
+    // offered again, src/katana_app/update_verbs.hpp.)
     // Last in the struct: it was added after the members above were published, and a member
     // added anywhere else would move them.
     std::string detail;
@@ -81,7 +89,8 @@ struct CheckResult {
 // What the person has already decided about a release the feed offers, applied to an answer
 // check() gave (check() reads no per-user file, so it is called with the state the caller read):
 //   - a release whose sequence is in `state.blockedSequences` (its apply was rolled back here)
-//     is Blocked, reason "blocked_before": not offered again;
+//     is Blocked, reason "blocked_before": not offered again, until `UPDATE BLOCKED CLEAR`
+//     empties that list;
 //   - otherwise a release whose version is `state.skippedVersion` ("UPDATE SKIP") is Current,
 //     reason "skipped". The window's automatic check applies this; a typed `UPDATE CHECK` may
 //     choose to show the skipped release anyway.

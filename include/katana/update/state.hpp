@@ -18,8 +18,11 @@
 //   U/stage-<seq>/    staged files, one per changed manifest file, at their root-relative paths
 //   U/run-<tx>/       the preflighted helper copy (and its self-test output)
 //   U/healthy-<tx>    the marker the new version writes after its first idle turn
-//   U/cleanup.list    leftovers a locked file kept from being deleted; the next start removes them
-//                     (appendCleanup, processCleanupList below)
+//   U/cleanup.list    what the next start of the window deletes: leftovers a locked file kept
+//                     from being deleted, and helper copies (U/run-<tx>) that nobody will run
+//                     again - the one a helper ran from, which it cannot delete itself, and
+//                     those the verbs and the window list for an apply that was prepared and
+//                     never started (appendCleanup, processCleanupList below)
 //   U/cleanup.list.work  the list while a run works on it: processCleanupList renames the list to
 //                     this name (atomic, so a helper that appends meanwhile starts a new list),
 //                     acts on it, appends what must stay to the list and removes it. A run that
@@ -44,7 +47,9 @@ struct UpdateState {
     std::int64_t lastCheckEpoch = 0;       // 0: never
     bool automatic = true;                 // "Check for updates automatically" (default on)
     std::string skippedVersion;            // "UPDATE SKIP <version>": that version is not offered
-    std::vector<std::uint64_t> blockedSequences; // releases whose health check failed here
+    // Releases whose health check failed here, by sequence: not offered and not applied again
+    // until the person empties the list ("UPDATE BLOCKED CLEAR").
+    std::vector<std::uint64_t> blockedSequences;
 };
 
 struct LastResult {
@@ -105,16 +110,22 @@ inline constexpr std::chrono::seconds kCheckJitterMax{2 * 3600};
 
 // ---- U/cleanup.list --------------------------------------------------------------------------
 
-// Appends `leftover` (an absolute path) to U/cleanup.list, one path per line, UTF-8: what a
-// held lock kept the helper from deleting (the helper copy it runs from, a locked file under
-// R/.update/<tx>). Written through `fs` so the fault loops see it.
+// Appends `leftover` (an absolute path) to U/cleanup.list, one path per line, UTF-8. Two kinds
+// of thing are listed. What a held lock kept the helper from deleting: the helper copy it runs
+// from, a locked file under R/.update/<tx>. And a helper copy that will never be started: the
+// U/run-<tx> of an apply that was prepared and then not launched (app::abandonApply,
+// src/katana_app/update_verbs.hpp: katana_cli's session, and the window when its restart is
+// taken back), and the one a recovery left behind, which the window lists at its start.
+// Written through `fs` so the fault loops see it.
 [[nodiscard]] core::Status appendCleanup(const std::filesystem::path& stateDir,
                                          const std::filesystem::path& leftover, FsOps& fs);
 
 // Deletes what the list names and keeps on the list what could still not be deleted (a file
 // still locked stays listed), working on the renamed copy U/cleanup.list.work so that an append
-// that arrives meanwhile is not lost. Called first thing at the next start of the window, and by the
-// helper after a healthy update. U is user-writable, so the list is NOT trusted: a line is
+// that arrives meanwhile is not lost. Called by the window alone, first thing at its start
+// (src/katana_qt/update_workbench.cpp): the helper only appends, and katana_cli, katana_mcp
+// and a headless window never sweep, so what is listed stays until the window is next
+// started. U is user-writable, so the list is NOT trusted: a line is
 // acted on only when its path, resolved (FsOps::resolve), lies strictly under `stateDir`, or
 // under <root>/.update, and no parent of it between that folder and the path is a reparse
 // point; every other line is dropped without being touched. `root` may be empty (no install
