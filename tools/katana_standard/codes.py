@@ -84,8 +84,9 @@ THE GRAMMAR
    are written for the day it does.
 13. Load the library alone, or with Replace. Merged onto another customisation, a broader prefix rule there can
    supply a field these rules leave unsaid (a symbol, a text), because the most specific rule wins field by
-   field. Merged onto the other library it shares every key, so each key's rules are replaced or added to field
-   by field and the result is neither.
+   field. Merged onto the other library, which has the same keys and the same kinds of rule for each, every
+   rule of it is replaced by this library's (a merge replaces the rules of a key of one kind), so the codes
+   become this library's; the other's definitions and colours stay loaded beside these, and no code names them.
 14. The classes. The 13 classes and their groups are this library's own way of arranging the keys for a reader
    and for the layer tree: a class letter is a label in the catalogue and is not part of any key. The keys that
    the other library labels as design strings (road, lane, earthworks, kerb, bridge, drainage and barrier

@@ -285,9 +285,10 @@ def catalogue(data, root):
       "of the codes. It brings no linework spellings and no import switches, so the session keeps its own.")
     w("2. **Merging works, with one caution.** `CUSTOMISE <file>`, or Import without the tick, merges by name. "
       "The most specific rule wins field by field, so a broader prefix rule already in the session can still "
-      "supply a field these rules leave unsaid (a symbol, a text). Merged onto the NSW customisation it shares "
-      "every key with it, so the result is neither library but a field-by-field mixture of the two: load it "
-      "alone when you want its library and nothing else.")
+      "supply a field these rules leave unsaid (a symbol, a text). Merged onto the NSW customisation, which "
+      "has the same keys and the same kinds of rule for each, every rule of that one is replaced by this "
+      "library's, so the codes become Katana Standard's while the other's definitions and colours stay loaded "
+      "beside these, named by no code: load it alone when you want its library and nothing else.")
     w("3. **Start with it, or go back to it.** It is what a program starts with when nothing else is said. After "
       "another built-in was chosen, `CUSTOMISE BUILTIN \"Katana Standard\"` or Settings > Built-in library > Use "
       "puts it back, and `CUSTOMISE RESET` does too unless the run was started with another built-in as its "
