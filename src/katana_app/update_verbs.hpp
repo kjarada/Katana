@@ -40,6 +40,56 @@
 // A copy that packaging did not write (no share/katana/install.json: a build
 // tree, a plain install) is kind=development: CHECK replies unsupported and
 // nothing is ever downloaded or applied to it.
+//
+// WHAT THE REPLIES ADD TO THE LINES ABOVE (update_verbs.cpp). A key is written
+// only when it has a value, so a reply without reason= is one that was carried
+// out, and a value is quoted when it holds a blank (cad::recordValue).
+//   UPDATE CHECK      detail="<the failure's own sentence>" after reason=, and
+//                     information=old before it when the release's `expires`
+//                     has passed (it is offered all the same). files= and
+//                     download_bytes= are there when the installed files were
+//                     hashed, which is for update=available alone.
+//                     reason=, beyond check.hpp's: no_transport (the context
+//                     has no fetch), no_network (this build has no HTTP stack:
+//                     update=unsupported), install_record (install.json does
+//                     not read: update=unsupported), notify_only (available,
+//                     and installed by hand).
+//   UPDATE STATUS     target=none for a development copy; last=none when no
+//                     apply's outcome is recorded. A development copy is
+//                     staged=none last=none whatever the update folder holds:
+//                     those are an install's, and it is none.
+//   UPDATE DOWNLOAD CONFIRM
+//                     each progress line is
+//                         progress bytes=<done>/<total> files=<done>/<total>
+//                     (compressed bytes fetched; changed files staged). When
+//                     nothing is staged the reply is CHECK's record - which
+//                     says why - and then staged=none; with no update folder,
+//                     staged=none reason=no_state. A download that fails is an
+//                     error whose context begins reason=<token> (stage.hpp).
+//   UPDATE APPLY CONFIRM
+//                     refused, with reason= first in the error's context:
+//                     not_staged, blocked_before, development_tree, no_state,
+//                     platform, or the preflight's token (stage.hpp).
+//   UPDATE SKIP, UPDATE SET AUTO
+//                     skipped=<v|none>; auto=on|off. With no update folder:
+//                     the same with reason=no_state, and nothing is kept.
+//   UPDATE TOKEN STATUS | CLEAR
+//                     token=present|absent, and never the token. reason=
+//                     no_store, token_unusable or store_unavailable when the
+//                     store could not say; after CLEAR, token=present
+//                     reason=environment when KATANA_UPDATE_TOKEN still gives
+//                     one, which is not this program's to remove.
+//   any line          a record `warning text="..."` after the reply's own, for
+//                     what did not stop the line: a state file that does not
+//                     read (the defaults are used and it is not written over).
+// A headless window's DOWNLOAD and APPLY are replies, staged=none or ready=none
+// with reason=headless and text="..." naming who runs them; every other line a
+// surface may not run is an Unsupported error whose context is reason=headless
+// or reason=mcp. Where this version cannot install an update at all (it is
+// written for Windows; elsewhere a release is told of and no more) DOWNLOAD and
+// APPLY are Unsupported, reason=platform.
+// Every reply, error and progress line passes through update::redactToken with
+// the context's token and the store's.
 
 #pragma once
 
@@ -105,6 +155,13 @@ struct UpdateContext {
     std::function<void(std::string_view)> progressLine;
     // The time CHECK records as last_check, UTC seconds. 0: the system clock.
     std::int64_t nowEpoch = 0;
+    // Why `install` is not what the install's own records say: install.json was
+    // there and did not read (makeUpdateContext). Empty: it read, or there was
+    // none. Such a copy is not called a development build, which it is not:
+    // CHECK replies update=unsupported reason=install_record with this as its
+    // detail, and nothing is downloaded or applied. Last in the struct: it was
+    // added after the members above were published.
+    std::string installProblem;
 };
 
 // What UPDATE CHECK found, for a caller that shows it rather than prints it.
