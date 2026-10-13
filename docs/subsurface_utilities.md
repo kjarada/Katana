@@ -364,7 +364,9 @@ yellow gas and cream sewer, which keep the ground's 3:1 and print light
 holds both, with the two exceptions named, and
 `UtilityDrawing.TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays`
 holds the ten names and that each value reads as its name (hue, saturation and
-value bands). Dymark's chart draws the same names in values of the same hues
+value bands), and `UtilityDrawing.TheColourTableIsTheDocumentedOneValueForValue`
+holds each of the twelve values exactly and requires this section's table to
+show the same one on the row of its type. Dymark's chart draws the same names in values of the same hues
 (orange `#E24727`, yellow `#FFD400`, cream `#F9E7B6`, pink `#EE3A7F`, green
 `#008A59`), which is a check of hue and not a source: its blue, purple and
 red are too dark for the plan's ground (1.77, 1.68 and 2.69 : 1) and are not
@@ -390,9 +392,10 @@ layers recoloured.
 library (`docs/katana_standard.md`) draws a coded service in the same values,
 so a coded service and a drawn one are one colour in one drawing.
 `KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` reads the
-committed library file and requires each of its 71 service codes to draw in
-the colour of its kind, and each service colour of the file to be one of this
-table's. Changing one value without the other fails that test.
+committed library file and requires each of its 71 coded services to draw in
+the colour of its kind, and every kind but `other` (the library has no code
+for it) to be reached. A palette colour that no code uses is not held to the
+table. Changing one value without the other fails that test.
 
 The colours are layer colours, so a project with its own convention changes
 the layers after a draw - `MODIFY LAYERS utilities/water/QL-B SET
@@ -882,6 +885,16 @@ they are written as (`docs/ifc.md`, "In the window").
   pen, only white and near-white ones (`cad::paperColour`). A rule that did,
   for any pen under 3:1 on white, is a change to every plot and the owner's to
   decide; until then, plot such a sheet monochrome or recolour the layers.
+- The A3 frame's built-in public utilities legend
+  (`resources/plot_frames/a3_landscape.json`) draws its swatches in the
+  measured colours of the cross-section app that frame reproduces (`#0093D0`
+  for water, `#F07000` orange, `#E8B800` yellow, `#C9A227` off yellow and
+  `#8B5A2B` brown), not in this table's. A sheet of `UTILITY
+  DRAW` layers that keeps the frame's legend block therefore shows a legend
+  that does not match its lines. The frame is a measured reproduction, so
+  changing its palette is the owner's decision; until then turn the block off
+  (`Sheet::frameLegend`) and add a Legend sheet, which draws a sample of each
+  layer in the colour the layer prints.
 - `CHECK` does not evaluate the schema's conditional attributes (it cannot
   know the condition) and does not check the `EPSG Code` beside the
   coordinate system, which the schema lists with no attribute of its own.

@@ -430,10 +430,12 @@ def catalogue(data, root):
       "written brief and looked at, in Katana's own renderer, before it was kept. "
       "Reviewers then compared every definition name, group path, layer, survey code key, comment and colour "
       "with the built-in's, and every stroke list by exact, translated and scaled match, and found no exact "
-      "match of a name, key or colour and no stroke list beyond a single dash; what overlaps is single generic "
-      "words and names of real objects that any survey library has to use (a bollard, a fire hydrant, a "
-      "retaining wall, layer words such as `water`), which cannot be avoided without being wrong. The test "
-      "`KatanaStandard.*` repeats the name, key and colour comparison at run time, by count. The library is "
+      "match of a name or key, no stroke list beyond a single dash, and of colours only pure white, "
+      "`#FFFFFF`, which AS 5488 names for communications and which every drawing system has; what overlaps is "
+      "single generic words and names of real objects that any survey library has to use (a bollard, a fire "
+      "hydrant, a retaining wall, layer words such as `water`), which cannot be avoided without being wrong. "
+      "The test `KatanaStandard.*` repeats the name, key and colour comparison at run time, by count, and "
+      "excuses that one white and no other value. The library is "
       "licensed with the rest of the repository (`LICENSING.md`).")
     w("")
     w("## Decisions, and what was rejected")

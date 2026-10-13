@@ -34,7 +34,8 @@ katana_add_test_suite(cad
 # The sample investigation the utility tests draw and report, the one the
 # cli.utility_* tests and docs/subsurface_utilities.md work by hand.
 target_compile_definitions(katana_cad_tests PRIVATE
-    KATANA_UTILITY_SAMPLES="${PROJECT_SOURCE_DIR}/samples/utilities")
+    KATANA_UTILITY_SAMPLES="${PROJECT_SOURCE_DIR}/samples/utilities"
+    KATANA_UTILITY_DOC="${PROJECT_SOURCE_DIR}/docs/subsurface_utilities.md")
 # Katana Standard, the original customisation under resources/customisation,
 # and the catalogue that lists every one of its definitions and codes
 # (tests/cad/customisation/test_katana_standard.cpp).
