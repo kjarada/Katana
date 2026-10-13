@@ -385,11 +385,18 @@ def catalogue(data, root):
       "pen weights, text styles, legend labels, and every sentence of every meaning and of this document. "
       "`tools/katana_standard/originality.py` scans the two files for what a person could copy and the test "
       "`KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the result: no definition "
-      "name, group path, layer path, legend label or colour name is the same in both, and no stroke list is, "
-      "exactly, moved or scaled, beyond the dash, the plus and the square that any library draws. Of colour "
-      "values one is in both: pure white, `#FFFFFF`, which AS 5488 names for communications and which every "
-      "drawing system has. The script and the tests excuse that one white, the communications colour of "
-      "`utilityTypeColour`, and no other value.")
+      "name, group path, layer path, legend label, colour name, attribute name or text style is the same in "
+      "both, and no stroke list is, exactly, moved or scaled, beyond the dash, the plus and the square that any "
+      "library draws. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for "
+      "communications and which every drawing system has. The script and the tests excuse that one white, the "
+      "communications colour of `utilityTypeColour`, and no other value: a second white would fail them.")
+    w("")
+    w("**What two libraries cannot help sharing** is the trade's own names for real things. A give way line, a "
+      "sewage pumping station and a culvert by its height are called that by anyone, so some legend labels here "
+      "are near the other library's label for the same key without being it; `originality.py` counts them (at "
+      "0.85 alike or more) and prints this library's side, as a figure to read. The meanings are sentences "
+      "written for this document, and where one uses a term of the trade or of the law (a permanent survey "
+      "mark, an endangered ecological community) it is because that is the thing's name.")
     w("")
     if figures:
         w("**Where the other library is not clean, this one is.** The NSW customisation holds %d rules over %d "
@@ -656,8 +663,10 @@ def catalogue(data, root):
       "tests pin the figures those scripts gave.")
     w("- **The comparison with the other library** is `tools/katana_standard/parity.py` (keys and structure, with "
       "`parity_exceptions.json` and its own tests in `test_parity.py`) and `originality.py` (what else is "
-      "shared). `katana_standard_parity`, `katana_standard_parity_script` and `katana_standard_originality` run "
-      "them against the two tracked files; `KatanaStandard.EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey` and "
+      "shared, with its own tests in `test_originality.py`). `katana_standard_parity` and "
+      "`katana_standard_originality` run them against the two tracked files, and `katana_standard_parity_script` "
+      "and `katana_standard_originality_script` run the scripts' own tests on small invented libraries; "
+      "`KatanaStandard.EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey` and "
       "`KatanaStandard.FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBuiltInMakes` do the same in C++, "
       "from the two files alone.")
     w("- **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed "

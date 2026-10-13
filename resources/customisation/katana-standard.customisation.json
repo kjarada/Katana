@@ -4,9 +4,9 @@
   "name": "Katana Standard",
   "description": "Katana Standard, edition 1: Katana's own linestyles, symbols, layers and colours for 632 survey codes, with 98 linestyles and 123 symbols. The survey code keys are the other built-in library's, for field-data compatibility.",
   "notice": [
-    "Katana Standard is original work made for Katana.",
-    "Its survey code keys follow those of the other built-in library, reused for field-data compatibility on the owner's decision; everything else in it is Katana's own.",
-    "Its licence is that of the Katana repository."
+    "Katana Standard was made for Katana: its linestyles, symbols, layers, colours and words are Katana's own.",
+    "Its survey code keys are those of the other built-in library, kept so that the same field data works with either, on the owner's decision; nothing else of that library is in it.",
+    "Its licence is that of the Katana repository, whose LICENSING.md says what that leaves open for the keys."
   ],
   "colours": {
     "katana boundary": "#796EDA",

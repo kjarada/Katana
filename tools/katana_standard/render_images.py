@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Draw the catalogue's sheets with Katana itself, headlessly: docs/images/katana-standard-*.png.
 
-    python tools/katana_standard/render_images.py [--bin DIR] [--out DIR] [symbols] [linestyles] [plan]
+    python tools/katana_standard/render_images.py [--bin DIR] [--out DIR] [symbols] [linestyles] [plan] [showcase]
 
-`DIR` is the folder holding `katana.exe` (default: build/release/bin of this checkout, else KATANA_BIN). Needs
+`DIR` is the folder holding `katana.exe` (default: KATANA_BIN, else build/release/bin of this checkout). Needs
 Pillow (to crop, tile and shrink what Katana draws) and a built `katana`; the run is headless
 (QT_QPA_PLATFORM=offscreen) and reads no per-user file (KATANA_BUILTIN_CUSTOMISATION=none, so the library is
 the only customisation in the session). Without a sheet named, all four are drawn.
@@ -17,6 +17,8 @@ What each sheet is, and what is Katana's and what is Pillow's:
             code of the library in the colour that code gives it, on a sheet of white paper at true size.
 * plan      the plan view of the window after `SURVEY IMPORT tests/data/katana_standard/street_corner.fld`:
             the invented street corner, coded and strung by the library, on the plan's own ground.
+* showcase  the plan view of the scene `showcase.py` writes, at the plot scale 1:500, a window at a time, the
+            screenshots laid side by side.
 
 The palette sheet, katana-standard-palette.png, is not drawn here: a palette is a table of values, so
 `palette_preview.py` lays it out from colours.py. The images are not byte-reproducible (fonts differ between
