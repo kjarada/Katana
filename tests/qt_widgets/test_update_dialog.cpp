@@ -34,9 +34,25 @@
 //
 // The numbers: 71 000 000 bytes is the design's "71 MB" and 31 000 000 its
 // "31"; 31 / 71 of the progress bar's thousand steps is 436.6, so 437.
+//
+// THE DECISIONS (the UpdateDecisions tests, at the end of the first half): what
+// the window's update workbench decides from the engine's records is a set of
+// functions beside the dialog, because the workbench itself needs the whole
+// window. Their expectations are the task's rules, written out case by case:
+// a skipped or blocked release is not offered; the automatic check runs only
+// when the install is not a development one, the automatic flag is on, a check
+// is due (include/katana/update/state.hpp states when: every 24 hours plus the
+// jitter, or never checked, or a last check in the future), the run is not
+// headless and KATANA_UPDATE_DISABLE is not set, and is quiet when it learns
+// nothing; the status bar's button reads "Update <version>" and is hidden
+// until an update is known. The records are written by hand: the design's
+// 0.2.0 and 0.3.0, its sequence 1792312800, its `expires` of
+// 2027-04-18T08:00:00Z - which is 1 808 035 200 seconds after 1970 (20 926
+// days: 57 years of 365, 14 leap days, 31 + 28 + 31 + 17; and 8 hours).
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -61,9 +77,15 @@
 #include "customisation/settings_dialog.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/error.hpp"
+#include "katana/update/check.hpp"
 #include "katana/update/credential.hpp"
+#include "katana/update/install.hpp"
+#include "katana/update/manifest.hpp"
+#include "katana/update/state.hpp"
+#include "katana/update/version.hpp"
 #include "theme.hpp"
 #include "update_dialog.hpp"
+#include "update_verbs.hpp"
 #include "widget_harness.hpp"
 
 using katana::qt::SettingsContext;
@@ -428,6 +450,32 @@ TEST(UpdateDialog, WhileTheWindowWaitsForAJobRestartIsOffAndTheDetailSaysWhatItW
               (QStringList{QStringLiteral("updateLater"), QStringLiteral("updateRestart")}));
     EXPECT_FALSE(enabled(dialog, "updateRestart"));
     EXPECT_TRUE(enabled(dialog, "updateLater"));
+}
+
+TEST(UpdateDialog, WhileTheWindowWaitsForAnOpenDialogItSaysThatAndRestartIsOff)
+{
+    // The close comes from a timer, not from a press: under a modal dialog
+    // the person opened while the release was downloading it would close the
+    // program around that dialog, so it waits for it - and says so.
+    DialogFixture f;
+    UpdateDialog dialog(f.context);
+    UpdateView view = viewOf(UpdateDialogState::Ready);
+    view.waitingForDialog = true;
+    dialog.setView(view);
+    EXPECT_EQ(said(dialog), QStringLiteral("Katana 0.3.0 is ready. Katana will close when the "
+                                           "dialog that is open has been closed, then update and "
+                                           "reopen."));
+    EXPECT_EQ(shownButtons(dialog),
+              (QStringList{QStringLiteral("updateLater"), QStringLiteral("updateRestart")}));
+    EXPECT_FALSE(enabled(dialog, "updateRestart"));
+    EXPECT_TRUE(enabled(dialog, "updateLater"));
+
+    // A job is what it waits for first, when there are both.
+    view.waitingForJobs = true;
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Katana will close when the running job has finished, then update "
+                             "and reopen."));
 }
 
 TEST(UpdateDialog, BlockedNamesWhatToCloseAndOffersRetry)
@@ -813,6 +861,11 @@ TEST(UpdateWords, EveryReasonTheEngineGivesHasWordsOfItsOwn)
     // apply.hpp (ApplyResult::reason) and the verbs' own two
     // (update_verbs.hpp), copied from those headers' comments. Each must read
     // as words: none comes back as the token it is.
+    //
+    // And the tokens the network engine adds, copied from the comments of its
+    // headers (branch upd-t8: check.hpp "Added by check() itself", feed.hpp
+    // fetchFailureReason, stage.hpp "The Error of a failure carries a
+    // machine-readable token" and "preflight's"): the last five rows.
     for (const char* token :
          {"offline",          "http_403",        "http_404",         "http_429",
           "bad_signature",    "wrong_product",   "wrong_target",     "malformed",
@@ -824,12 +877,37 @@ TEST(UpdateWords, EveryReasonTheEngineGivesHasWordsOfItsOwn)
           "blocked",          "scan_failed",     "staged_missing",   "staged_hash",
           "reparse_point",    "path_conflict",   "copy_failed",      "space",
           "journal",          "io_error",        "transaction_exists", "rename_failed",
-          "health_timeout",   "health_exit",     "rollback_failed",  "internal_error"}) {
+          "health_timeout",   "health_exit",     "rollback_failed",  "internal_error",
+          "html_page",        "too_large",       "wrong_channel",    "asset_missing",
+          "verify_unavailable", "bad_range",     "bad_redirect",     "too_many_redirects",
+          "error",            "staged_corrupt",  "write_failed",     "stage_busy",
+          "low_disk_space",   "short_range",     "unverified_manifest", "no_token",
+          "payload_mismatch", "helper_missing",  "helper_not_started", "helper_timeout",
+          "helper_failed"}) {
         const QString words = katana::qt::updateReasonWords(QString::fromLatin1(token));
         EXPECT_NE(words, QString::fromLatin1(token)) << token;
         EXPECT_TRUE(words.contains(QLatin1Char(' '))) << token << ": " << words.toStdString();
         EXPECT_FALSE(words.endsWith(QLatin1Char('.'))) << token << " ends the sentence itself";
     }
+}
+
+TEST(UpdateWords, ACaptivePortalAndAFullDiskAreSaidInWordsNotAsTheirTokens)
+{
+    // The two a person meets most of the network engine's reasons: a hotel's
+    // or a site office's sign-in page answering in the place of the release
+    // server (html_page), and a download that does not fit (low_disk_space).
+    // Neither sentence may show the token.
+    UpdateDialog dialog(UpdateDialogContext{});
+    UpdateView view = viewOf(UpdateDialogState::CheckFailed);
+    view.reason = QStringLiteral("html_page");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateStateText"),
+              QStringLiteral("Could not check for updates: a web page answered in the place of "
+                             "the release server; this network may want you to sign in first."));
+    EXPECT_EQ(katana::qt::updateReasonWords(QStringLiteral("low_disk_space")),
+              QStringLiteral("there is not enough free disk space for the download"));
+    EXPECT_EQ(katana::qt::updateReasonWords(QStringLiteral("stage_busy")),
+              QStringLiteral("another Katana is downloading this update now"));
 }
 
 TEST(UpdateWords, TheFilesOfAProgressLineAreReadWhereverTheWordStands)
@@ -875,6 +953,542 @@ TEST(UpdateWords, WhatIsTypedWhereATokenWasHopedToGoIsNeverEchoed)
                              "ONLINE KEY provider secret", "TOKEN one two", "LINE 0,0 10,0", ""}) {
         EXPECT_EQ(updateLoggedLine(QString::fromLatin1(line)), QString::fromLatin1(line)) << line;
     }
+}
+
+// ---- the decisions ------------------------------------------------------------------------------
+
+namespace {
+
+using katana::app::UpdateOffer;
+using katana::app::UpdateStatus;
+using katana::qt::UpdateAutoCheckFacts;
+using katana::qt::UpdateOfferFacts;
+using katana::qt::UpdateQuietAnswer;
+using katana::update::CheckStatus;
+
+// 2026-10-20T08:00:00Z: 20 746 days after 1970 (56 years of 365, 14 leap
+// days, 273 days to the first of October, 19 more) and 8 hours.
+constexpr std::int64_t kNow = 1'792'483'200;
+// The design's `sequence` for the build of 0.3.0.
+constexpr std::uint64_t kSequence = 1'792'312'800;
+
+// 0.2.0 as the install's record has it (update/version.hpp).
+katana::update::Version installedVersion()
+{
+    katana::update::Version version;
+    version.components = {0, 2, 0, 0};
+    version.written = 3;
+    return version;
+}
+
+// What UPDATE CHECK answers for the design's example: 0.2.0 installed, 0.3.0
+// released, 23 of 411 files and 71 MB when it is offered.
+UpdateOffer offerOf(CheckStatus status)
+{
+    UpdateOffer offer;
+    offer.check.status = status;
+    offer.check.installedVersion = "0.2.0";
+    offer.check.latestVersion = "0.3.0";
+    offer.check.notesUrl = "https://github.com/kjarada/Katana/releases/tag/v0.3.0";
+    if (status == CheckStatus::Available) {
+        offer.changedFiles = 23;
+        offer.totalFiles = 411;
+        offer.downloadBytes = 71'000'000;
+    }
+    return offer;
+}
+
+UpdateOfferFacts factsOf()
+{
+    UpdateOfferFacts facts;
+    facts.installedVersion = QStringLiteral("0.2.0");
+    facts.checkedAt = QStringLiteral("14:02");
+    facts.nowEpoch = kNow;
+    return facts;
+}
+
+// A view's two sentences, as the dialog shows them and the log says them.
+QString saidBy(const UpdateView& view)
+{
+    const QString state = katana::qt::updateStateText(view);
+    const QString detail = katana::qt::updateDetailText(view);
+    return detail.isEmpty() ? state : state + QLatin1Char(' ') + detail;
+}
+
+UpdateView viewOfVersion(UpdateDialogState state, const char* version)
+{
+    UpdateView view = viewOf(state);
+    view.latestVersion = QString::fromLatin1(version);
+    return view;
+}
+
+} // namespace
+
+TEST(UpdateDecisions, AReleaseThatWasRolledBackHereIsNotOfferedAsReadyAtTheNextStart)
+{
+    // THE REGRESSION. 0.3.0 was installed, did not start, and was rolled
+    // back: the helper put its sequence on the blocked list and KEPT its stage
+    // (include/katana/update/apply.hpp, step 7: "the sequence is added to
+    // `blocked`"; only a healthy update deletes the stage). UPDATE STATUS
+    // then still names 0.3.0 as downloaded. Offered as ready, with the status
+    // bar's button, "Restart and update" installs the release known not to
+    // start here - and after each rollback it is offered again.
+    using katana::qt::updateStagedToOffer;
+    UpdateStatus status;
+    status.installedVersion = "0.2.0";
+    status.stagedVersion = "0.3.0";
+    status.state.blockedSequences = {kSequence};
+    const auto stageOfTheReleaseThatFailed = [](std::uint64_t sequence) {
+        return sequence == kSequence;
+    };
+    EXPECT_TRUE(updateStagedToOffer(status, installedVersion(), stageOfTheReleaseThatFailed)
+                    .isEmpty());
+
+    // The same copy BEFORE that release failed: it is the one to offer.
+    status.state.blockedSequences.clear();
+    EXPECT_EQ(updateStagedToOffer(status, installedVersion(), stageOfTheReleaseThatFailed),
+              QStringLiteral("0.3.0"));
+
+    // And once a later build has been downloaded: the stage of the build that
+    // failed is gone (a download removes the stages its release outranks), so
+    // what STATUS names is not the release that does not start here.
+    status.state.blockedSequences = {kSequence};
+    status.stagedVersion = "0.3.1";
+    const auto noStageOfIt = [](std::uint64_t) { return false; };
+    EXPECT_EQ(updateStagedToOffer(status, installedVersion(), noStageOfIt),
+              QStringLiteral("0.3.1"));
+}
+
+TEST(UpdateDecisions, ADownloadedReleaseIsOfferedAtAStartOnlyWhenItIsOneToInstall)
+{
+    using katana::qt::updateStagedToOffer;
+    const auto noBlockedStage = [](std::uint64_t) { return false; };
+    UpdateStatus status;
+    status.installedVersion = "0.2.0";
+    // Nothing is downloaded.
+    EXPECT_TRUE(updateStagedToOffer(status, installedVersion(), noBlockedStage).isEmpty());
+
+    // Downloaded, and skipped since ("0.3" and "0.3.0" are one release): a
+    // skipped release is not offered.
+    status.stagedVersion = "0.3.0";
+    status.state.skippedVersion = "0.3";
+    EXPECT_TRUE(updateStagedToOffer(status, installedVersion(), noBlockedStage).isEmpty());
+    // Another version is the skipped one: this one is still to offer.
+    status.state.skippedVersion = "0.2.5";
+    EXPECT_EQ(updateStagedToOffer(status, installedVersion(), noBlockedStage),
+              QStringLiteral("0.3.0"));
+    status.state.skippedVersion.clear();
+
+    // The stage a finished update left behind - what is installed, or older -
+    // is nothing to install; nor is text that is no version.
+    for (const char* stale : {"0.2.0", "0.2", "0.1.9", "none", "0.3.0-beta"}) {
+        status.stagedVersion = stale;
+        EXPECT_TRUE(updateStagedToOffer(status, installedVersion(), noBlockedStage).isEmpty())
+            << stale;
+    }
+}
+
+TEST(UpdateDecisions, ACheckThatOffersAReleaseIsShownAsTheDesignSaysIt)
+{
+    const UpdateView view =
+        katana::qt::updateViewOfOffer(offerOf(CheckStatus::Available), factsOf());
+    EXPECT_EQ(view.state, UpdateDialogState::Available);
+    EXPECT_EQ(saidBy(view),
+              QStringLiteral("Update Available Katana 0.3.0 (you have 0.2.0). 23 of 411 files "
+                             "changed, 71 MB to download."));
+    EXPECT_EQ(view.notesUrl,
+              QStringLiteral("https://github.com/kjarada/Katana/releases/tag/v0.3.0"));
+    EXPECT_FALSE(view.notifyOnly);
+    EXPECT_FALSE(view.informationIsOld);
+    EXPECT_EQ(katana::qt::updateStatusButtonText(view), QStringLiteral("Update 0.3.0"));
+}
+
+TEST(UpdateDecisions, TheReleaseThatIsAlreadyDownloadedIsReadyNotToBeDownloadedAgain)
+{
+    UpdateOfferFacts facts = factsOf();
+    facts.stagedVersion = QStringLiteral("0.3"); // the same release as 0.3.0
+    const UpdateView view = katana::qt::updateViewOfOffer(offerOf(CheckStatus::Available), facts);
+    EXPECT_EQ(saidBy(view), QStringLiteral("Katana 0.3.0 is ready. Katana will close, update and "
+                                           "reopen in a few seconds."));
+    EXPECT_EQ(katana::qt::updateStatusButtonText(view), QStringLiteral("Update 0.3.0"));
+
+    // What is downloaded is an older release than the one offered: that one
+    // is offered for download.
+    facts.stagedVersion = QStringLiteral("0.2.9");
+    EXPECT_EQ(katana::qt::updateViewOfOffer(offerOf(CheckStatus::Available), facts).state,
+              UpdateDialogState::Available);
+}
+
+TEST(UpdateDecisions, EveryOtherAnswerOfACheckIsItsOwnStateAndOffersNothing)
+{
+    using katana::qt::updateStatusButtonText;
+    using katana::qt::updateViewOfOffer;
+    // The feed has nothing above this copy.
+    UpdateOffer current = offerOf(CheckStatus::Current);
+    current.check.latestVersion = "0.2.0";
+    UpdateView view = updateViewOfOffer(current, factsOf());
+    EXPECT_EQ(saidBy(view), QStringLiteral("Katana 0.2.0 is up to date. Last checked 14:02."));
+    EXPECT_TRUE(updateStatusButtonText(view).isEmpty());
+
+    // A release the person skipped: `current`, reason "skipped" (check.hpp).
+    UpdateOffer skipped = offerOf(CheckStatus::Current);
+    skipped.check.reason = "skipped";
+    view = updateViewOfOffer(skipped, factsOf());
+    EXPECT_EQ(view.state, UpdateDialogState::NotOffered);
+    EXPECT_EQ(saidBy(view), QStringLiteral("Katana 0.3.0 is available, and you chose to skip it. "
+                                           "Settings > Updates offers it again."));
+    EXPECT_TRUE(updateStatusButtonText(view).isEmpty()) << "a skipped release is not offered";
+
+    // A release that was rolled back here: `blocked`.
+    UpdateOffer blocked = offerOf(CheckStatus::Blocked);
+    blocked.check.reason = "blocked_before";
+    view = updateViewOfOffer(blocked, factsOf());
+    EXPECT_EQ(view.state, UpdateDialogState::NotOffered);
+    EXPECT_EQ(saidBy(view), QStringLiteral("Katana 0.3.0 could not be installed here before, and "
+                                           "is not offered again. A later release will be "
+                                           "offered."));
+    EXPECT_TRUE(updateStatusButtonText(view).isEmpty()) << "a blocked release is not offered";
+
+    // A private feed's 404.
+    UpdateOffer unreachable = offerOf(CheckStatus::Unreachable);
+    unreachable.check.latestVersion.clear();
+    unreachable.check.notesUrl.clear();
+    unreachable.check.reason = "http_404";
+    view = updateViewOfOffer(unreachable, factsOf());
+    EXPECT_EQ(saidBy(view),
+              QStringLiteral("No update information found. If the releases are private, add an "
+                             "access token in Settings > Updates."));
+    EXPECT_TRUE(updateStatusButtonText(view).isEmpty());
+
+    // A copy that cannot update, whose answer names no version: the copy's own.
+    UpdateOffer unsupported;
+    unsupported.check.status = CheckStatus::Unsupported;
+    unsupported.check.reason = "development_tree";
+    view = updateViewOfOffer(unsupported, factsOf());
+    EXPECT_EQ(saidBy(view),
+              QStringLiteral("Updates are not available for this copy of Katana: it is a "
+                             "development build, not an installed release."));
+    EXPECT_EQ(view.installedVersion, QStringLiteral("0.2.0"));
+    EXPECT_TRUE(updateStatusButtonText(view).isEmpty());
+}
+
+TEST(UpdateDecisions, ANotifyOnlyReleaseAndACopyThatCannotApplyAreToldOfAndNotInstalled)
+{
+    using katana::qt::updateViewOfOffer;
+    UpdateOffer offer = offerOf(CheckStatus::Available);
+    katana::update::Manifest manifest;
+    manifest.expires = "2027-04-18T08:00:00Z";
+    manifest.notifyOnly = true;
+    offer.check.manifest = manifest;
+    EXPECT_TRUE(updateViewOfOffer(offer, factsOf()).notifyOnly);
+
+    offer.check.manifest->notifyOnly = false;
+    EXPECT_FALSE(updateViewOfOffer(offer, factsOf()).notifyOnly);
+    // The same release where the copy cannot replace its own files.
+    UpdateOfferFacts elsewhere = factsOf();
+    elsewhere.appliesHere = false;
+    const UpdateView view = updateViewOfOffer(offer, elsewhere);
+    EXPECT_TRUE(view.notifyOnly);
+    EXPECT_EQ(katana::qt::updateDetailText(view),
+              QStringLiteral("Katana 0.3.0 (you have 0.2.0). This copy cannot update itself: the "
+                             "release notes say where to download it."));
+}
+
+TEST(UpdateDecisions, UpdateInformationPastItsExpiryIsSaidToBeOldAndTheReleaseStillOffered)
+{
+    using katana::qt::updateViewOfOffer;
+    UpdateOffer offer = offerOf(CheckStatus::Available);
+    katana::update::Manifest manifest;
+    manifest.expires = "2027-04-18T08:00:00Z"; // 1 808 035 200
+    offer.check.manifest = manifest;
+    UpdateOfferFacts facts = factsOf();
+    EXPECT_FALSE(updateViewOfOffer(offer, facts).informationIsOld) << "six months before";
+    // At the second it expires it has not passed; one later it has.
+    facts.nowEpoch = 1'808'035'200;
+    EXPECT_FALSE(updateViewOfOffer(offer, facts).informationIsOld);
+    facts.nowEpoch = 1'808'035'201;
+    const UpdateView old = updateViewOfOffer(offer, facts);
+    EXPECT_TRUE(old.informationIsOld);
+    EXPECT_EQ(old.state, UpdateDialogState::Available) << "advisory: nothing is refused";
+    // An answer that carries no manifest is never called old.
+    offer.check.manifest.reset();
+    EXPECT_FALSE(updateViewOfOffer(offer, facts).informationIsOld);
+}
+
+TEST(UpdateDecisions, TheAutomaticChecksAnswerIsAnnouncedShownWithoutAWordOrDropped)
+{
+    using katana::qt::updateQuietAnswer;
+    struct Case {
+        UpdateView shown;
+        UpdateView answer;
+        UpdateQuietAnswer expected;
+        const char* why;
+    };
+    UpdateView upToDate = viewOf(UpdateDialogState::Current);
+    upToDate.latestVersion = QStringLiteral("0.2.0");
+    UpdateView blockedBefore = viewOf(UpdateDialogState::NotOffered);
+    blockedBefore.reason = QStringLiteral("blocked_before");
+    UpdateView skipped = viewOf(UpdateDialogState::NotOffered);
+    skipped.reason = QStringLiteral("skipped");
+    const std::vector<Case> cases{
+        // News.
+        {viewOf(UpdateDialogState::Idle), available(), UpdateQuietAnswer::Announce,
+         "a release, and nothing was known"},
+        {upToDate, available(), UpdateQuietAnswer::Announce, "a release since the last check"},
+        {available(), viewOfVersion(UpdateDialogState::Available, "0.3.1"),
+         UpdateQuietAnswer::Announce, "a later release than the one offered"},
+        {viewOf(UpdateDialogState::CheckFailed), available(), UpdateQuietAnswer::Announce,
+         "a release, after a check that failed"},
+        // No news: the release is offered already, in whichever way.
+        {available(), available(), UpdateQuietAnswer::Nothing, "the release already offered"},
+        {viewOf(UpdateDialogState::Ready), viewOf(UpdateDialogState::Ready),
+         UpdateQuietAnswer::Nothing, "the release already downloaded"},
+        {viewOf(UpdateDialogState::Blocked), viewOf(UpdateDialogState::Ready),
+         UpdateQuietAnswer::Nothing, "the programs to close stay named"},
+        // Quiet when it learns nothing.
+        {viewOf(UpdateDialogState::Idle), viewOf(UpdateDialogState::CheckFailed),
+         UpdateQuietAnswer::Nothing, "a check that failed says nothing"},
+        {viewOf(UpdateDialogState::Ready), viewOf(UpdateDialogState::CheckFailed),
+         UpdateQuietAnswer::Nothing, "and takes nothing back"},
+        {viewOf(UpdateDialogState::Idle), viewOf(UpdateDialogState::Unsupported),
+         UpdateQuietAnswer::Nothing, "a copy that cannot update says nothing by itself"},
+        // Nothing to tell, something to show.
+        {viewOf(UpdateDialogState::Idle), upToDate, UpdateQuietAnswer::Show,
+         "up to date, for when the dialog is opened"},
+        {viewOf(UpdateDialogState::CheckFailed), upToDate, UpdateQuietAnswer::Show,
+         "up to date, over an older failure"},
+        // A release the window still offers is taken back, without a word.
+        {viewOf(UpdateDialogState::Ready), blockedBefore, UpdateQuietAnswer::Show,
+         "ready, and rolled back here: not offered"},
+        {available(), skipped, UpdateQuietAnswer::Show, "offered, and skipped: not offered"},
+        {viewOf(UpdateDialogState::Ready), upToDate, UpdateQuietAnswer::Show,
+         "ready, and no longer released: not offered"},
+        // What must stay until it is read, and what a job owns.
+        {viewOf(UpdateDialogState::RolledBack), available(), UpdateQuietAnswer::Nothing,
+         "how the last update ended stays until it is read"},
+        {viewOf(UpdateDialogState::RolledBack), upToDate, UpdateQuietAnswer::Nothing,
+         "how the last update ended stays until it is read"},
+        {viewOf(UpdateDialogState::Checking), available(), UpdateQuietAnswer::Nothing,
+         "a check a person asked for answers for itself"},
+        {downloading(), upToDate, UpdateQuietAnswer::Nothing, "a download is not interrupted"},
+    };
+    for (const Case& each : cases) {
+        EXPECT_EQ(updateQuietAnswer(each.shown, each.answer), each.expected) << each.why;
+    }
+}
+
+TEST(UpdateDecisions, ADownloadedReleaseStaysReadyOnlyWhileACheckStillOffersIt)
+{
+    using katana::qt::updateStagedAfter;
+    const QString staged = QStringLiteral("0.3.0");
+    // The feed has nothing above this copy any more: the release was withdrawn.
+    EXPECT_TRUE(updateStagedAfter(staged, viewOf(UpdateDialogState::Current)).isEmpty());
+    // That very version was skipped, or rolled back here ("0.3" is 0.3.0).
+    EXPECT_TRUE(updateStagedAfter(staged, viewOf(UpdateDialogState::NotOffered)).isEmpty());
+    EXPECT_TRUE(updateStagedAfter(staged, viewOfVersion(UpdateDialogState::NotOffered, "0.3"))
+                    .isEmpty());
+    // Another version is the one not offered; a check that failed un-knows
+    // nothing; and an answer that offers a release leaves what is downloaded.
+    EXPECT_EQ(updateStagedAfter(staged, viewOfVersion(UpdateDialogState::NotOffered, "0.4.0")),
+              staged);
+    EXPECT_EQ(updateStagedAfter(staged, viewOf(UpdateDialogState::CheckFailed)), staged);
+    EXPECT_EQ(updateStagedAfter(staged, viewOf(UpdateDialogState::Ready)), staged);
+    EXPECT_EQ(updateStagedAfter(staged, viewOfVersion(UpdateDialogState::Available, "0.4.0")),
+              staged);
+}
+
+TEST(UpdateDecisions, HowTheLastUpdateEndedIsItsOwnStateAndASuccessIsNone)
+{
+    using katana::qt::updateViewOfLastResult;
+    const QString installed = QStringLiteral("0.2.0");
+    const QString root = QStringLiteral("C:\\Programs\\Katana");
+    katana::update::LastResult last;
+    last.version = "0.3.0";
+    last.transaction = "0a1b2c3d";
+
+    // A success is one line in the log, not a dialog.
+    last.status = "committed";
+    EXPECT_FALSE(updateViewOfLastResult(last, installed, root).has_value());
+
+    // The design's sentence.
+    last.status = "rolled_back";
+    last.reason = "health_exit";
+    std::optional<UpdateView> view = updateViewOfLastResult(last, installed, root);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->state, UpdateDialogState::RolledBack);
+    EXPECT_EQ(saidBy(*view),
+              QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored. Reason: "
+                             "the new version did not start."));
+    EXPECT_TRUE(katana::qt::updateStatusButtonText(*view).isEmpty())
+        << "what was rolled back is not offered";
+
+    // Nothing was touched: the programs to close, and the release still there.
+    last.status = "blocked";
+    last.reason = "blocked";
+    last.holder = "katana_mcp.exe (4412)";
+    view = updateViewOfLastResult(last, installed, root);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->state, UpdateDialogState::Blocked);
+    EXPECT_EQ(saidBy(*view),
+              QStringLiteral("Close these first: katana_mcp.exe (4412). Then press Retry."));
+    EXPECT_EQ(katana::qt::updateStatusButtonText(*view), QStringLiteral("Update 0.3.0"));
+
+    last.holder.clear();
+    last.status = "refused";
+    last.reason = "space";
+    view = updateViewOfLastResult(last, installed, root);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(saidBy(*view), QStringLiteral("Katana 0.3.0 could not be installed; nothing was "
+                                            "changed. Reason: there is not enough free disk "
+                                            "space."));
+
+    // The old version is NOT back: the command that puts it right, by hand.
+    last.status = "rollback_incomplete";
+    last.reason = "rollback_failed";
+    view = updateViewOfLastResult(last, installed, root);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(saidBy(*view),
+              QStringLiteral("Katana 0.3.0 could not be installed, and 0.2.0 could not be put "
+                             "back completely. Reason: the old version could not be put back "
+                             "completely. Close Katana and run: katana_updater --recover "
+                             "\"C:\\Programs\\Katana\""));
+}
+
+TEST(UpdateDecisions, TheWindowChecksByItselfOnlyWhenEveryConditionHolds)
+{
+    using katana::qt::updateAutomaticCheckIsDue;
+    using katana::update::InstallKind;
+    const std::chrono::seconds noJitter{0};
+    const std::chrono::seconds twoHours{2 * 3600};
+    // An installed copy, a window a person uses, nothing running, nothing
+    // switched off - and never checked, with the automatic flag at its default.
+    UpdateAutoCheckFacts go;
+    go.kind = InstallKind::Installer;
+    go.keepsState = true;
+    const katana::update::UpdateState never;
+    ASSERT_TRUE(never.automatic) << "the state's default is on";
+    EXPECT_TRUE(updateAutomaticCheckIsDue(go, never, kNow, noJitter));
+    UpdateAutoCheckFacts unpacked = go;
+    unpacked.kind = InstallKind::Archive;
+    EXPECT_TRUE(updateAutomaticCheckIsDue(unpacked, never, kNow, noJitter));
+
+    // Each condition, alone, stops it.
+    UpdateAutoCheckFacts headless = go;
+    headless.headless = true;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(headless, never, kNow, noJitter)) << "headless";
+    UpdateAutoCheckFacts disabled = go;
+    disabled.disabled = true;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(disabled, never, kNow, noJitter))
+        << "KATANA_UPDATE_DISABLE";
+    UpdateAutoCheckFacts development = go;
+    development.kind = InstallKind::Development;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(development, never, kNow, noJitter))
+        << "a development tree stays offline";
+    UpdateAutoCheckFacts busy = go;
+    busy.jobRunning = true;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(busy, never, kNow, noJitter)) << "an update job runs";
+    UpdateAutoCheckFacts stateless = go;
+    stateless.keepsState = false;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(stateless, never, kNow, noJitter)) << "no state folder";
+    katana::update::UpdateState switchedOff;
+    switchedOff.automatic = false;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(go, switchedOff, kNow, noJitter))
+        << "the person switched it off";
+
+    // The clock: 24 hours and the jitter after the last check (state.hpp).
+    katana::update::UpdateState checked;
+    checked.lastCheckEpoch = kNow - 3600;
+    EXPECT_FALSE(updateAutomaticCheckIsDue(go, checked, kNow, noJitter)) << "an hour ago";
+    checked.lastCheckEpoch = kNow - 24 * 3600;
+    EXPECT_TRUE(updateAutomaticCheckIsDue(go, checked, kNow, noJitter)) << "24 hours ago";
+    EXPECT_FALSE(updateAutomaticCheckIsDue(go, checked, kNow, twoHours))
+        << "24 hours ago, with two hours of jitter still to go";
+    checked.lastCheckEpoch = kNow - 26 * 3600;
+    EXPECT_TRUE(updateAutomaticCheckIsDue(go, checked, kNow, twoHours)) << "26 hours ago";
+    // A last check in the future - the clock was set back - silences nothing.
+    checked.lastCheckEpoch = kNow + 3600;
+    EXPECT_TRUE(updateAutomaticCheckIsDue(go, checked, kNow, noJitter));
+}
+
+TEST(UpdateDecisions, TheStatusBarButtonNamesTheReleaseAndIsHiddenUntilOneIsKnown)
+{
+    using katana::qt::updateStatusButtonText;
+    // "Update <version>" while there is a release to act on.
+    for (const UpdateDialogState state :
+         {UpdateDialogState::Available, UpdateDialogState::Downloading, UpdateDialogState::Ready,
+          UpdateDialogState::Blocked}) {
+        EXPECT_EQ(updateStatusButtonText(viewOf(state)), QStringLiteral("Update 0.3.0"))
+            << static_cast<int>(state);
+    }
+    // Hidden - no text - in every other state, though a version is named...
+    for (const UpdateDialogState state :
+         {UpdateDialogState::Idle, UpdateDialogState::Checking, UpdateDialogState::Current,
+          UpdateDialogState::NotOffered, UpdateDialogState::RolledBack,
+          UpdateDialogState::CheckFailed, UpdateDialogState::Unsupported}) {
+        EXPECT_TRUE(updateStatusButtonText(viewOf(state)).isEmpty()) << static_cast<int>(state);
+    }
+    // ...as made, before anything is known, and for a download nobody named.
+    EXPECT_TRUE(updateStatusButtonText(UpdateView{}).isEmpty());
+    const UpdateView unnamed = viewOfVersion(UpdateDialogState::Downloading, "");
+    EXPECT_TRUE(updateStatusButtonText(unnamed).isEmpty());
+}
+
+TEST(UpdateDecisions, ARecordOfAReplyIsReadByItsKeyAndTheLastOneCounts)
+{
+    using katana::qt::updateReplyValue;
+    using katana::qt::updateStagedOfReply;
+    // The grammar of update_verbs.hpp: records `key=value`, blanks between.
+    const QString check = QStringLiteral("update=unreachable installed=0.2.0 reason=offline");
+    EXPECT_EQ(updateReplyValue(check, "reason"), QStringLiteral("offline"));
+    EXPECT_EQ(updateReplyValue(check, "update"), QStringLiteral("unreachable"));
+    EXPECT_TRUE(updateReplyValue(check, "staged").isEmpty());
+    // A key is a whole word's start, not the end of another key.
+    EXPECT_TRUE(updateReplyValue(QStringLiteral("unstaged=0.3.0"), "staged").isEmpty());
+    EXPECT_EQ(updateReplyValue(QStringLiteral("notes_url=\"https://example.org/v0.3.0\""),
+                               "notes_url"),
+              QStringLiteral("https://example.org/v0.3.0"));
+
+    // DOWNLOAD: "progress lines, then staged=<v>" - the last record is the answer.
+    const QString download = QStringLiteral("progress bytes=31000000/71000000 files=12/23\n"
+                                            "progress bytes=71000000/71000000 files=23/23\r\n"
+                                            "staged=0.3.0\n");
+    EXPECT_EQ(updateStagedOfReply(download), QStringLiteral("0.3.0"));
+    EXPECT_EQ(updateStagedOfReply(QStringLiteral("staged=none\nstaged=0.3.0")),
+              QStringLiteral("0.3.0"));
+    // Nothing staged: said as none, or not said at all.
+    EXPECT_TRUE(updateStagedOfReply(QStringLiteral("staged=none reason=headless")).isEmpty());
+    EXPECT_TRUE(updateStagedOfReply(QStringLiteral("reason=offline")).isEmpty());
+    EXPECT_TRUE(updateStagedOfReply(QString()).isEmpty());
+}
+
+TEST(UpdateDecisions, WhatTheVerbsSayBackToALineWithATokenTypedOnItIsHiddenInAnyCase)
+{
+    // The echo of such a line is hidden by updateLoggedLine; a refusal may
+    // quote the line all the same, and may have folded its case to find the
+    // verb. Whatever is logged of it holds the word in no case.
+    using katana::qt::updateLoggedReply;
+    const QString token = QStringLiteral("ghp_NotARealTokenOnlyATestsWord0123456789");
+    const QString line = QStringLiteral("update token ") + token;
+    EXPECT_EQ(updateLoggedReply(QStringLiteral("InvalidArgument: UPDATE TOKEN takes STATUS or "
+                                               "CLEAR [UPDATE TOKEN ") +
+                                    token.toUpper() + QStringLiteral("]"),
+                                line),
+              QStringLiteral("InvalidArgument: UPDATE TOKEN takes STATUS or CLEAR [UPDATE TOKEN "
+                             "***]"));
+    EXPECT_EQ(updateLoggedReply(QStringLiteral("no such word: ") + token, line),
+              QStringLiteral("no such word: ***"));
+    EXPECT_EQ(updateLoggedReply(QStringLiteral("no such word: ") + token.toLower(), line),
+              QStringLiteral("no such word: ***"));
+
+    // The two lines the grammar has, and every other line, hide nothing.
+    EXPECT_EQ(updateLoggedReply(QStringLiteral("token=present"),
+                                QStringLiteral("UPDATE TOKEN STATUS")),
+              QStringLiteral("token=present"));
+    EXPECT_EQ(updateLoggedReply(QStringLiteral("skipped=0.3.0"),
+                                QStringLiteral("UPDATE SKIP 0.3.0")),
+              QStringLiteral("skipped=0.3.0"));
+    EXPECT_EQ(updateLoggedReply(QStringLiteral("update=current"), QString()),
+              QStringLiteral("update=current"));
 }
 
 // ---- Settings > Updates -------------------------------------------------------------------------
