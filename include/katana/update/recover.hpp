@@ -35,9 +35,10 @@
 //
 //   settleUnproved   `katana_updater --recover R` - the RunOnce entry at the next
 //                    logon, or a person. Healthy when the marker U/healthy-<tx> is
-//                    there; else PUT BACK, when the tree is still that release and
-//                    no program of the install is running; else left for a start
-//                    that can decide.
+//                    there; else PUT BACK, when the tree is still that release, its
+//                    old files are all kept, U is the folder the update was applied
+//                    from and no program of the install is running; else left for
+//                    a start that can decide.
 //   confirmStarted   the window of the new version, on its first idle turn: it IS
 //                    the proof, so it writes the marker and settles it healthy.
 //   the next swap    Applier::begin (apply.cpp): healthy when the marker is there;
@@ -71,7 +72,9 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     started it: no last.json, no state.json, no cleanup.list, no health
 //     marker. It READS the per-user folder (stateDirectory(), so
 //     KATANA_UPDATE_STATE_DIR counts) for one thing: whether the marker
-//     U/healthy-<tx> of an update that was never said to start is there
+//     U/healthy-<tx> of an update that was never said to start is there - and,
+//     so that a marker missing from the wrong folder is not taken for one that
+//     was never written, whether that update's helper copy U/run-<tx> is
 //     (settleUnproved, below) - and only when the install holds such an update.
 //     Its only record is in the install itself, R/.update/recovery.log: a line
 //     appended for each run that found something to put right
@@ -135,16 +138,23 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 // refuses to start beside one, so there is one at most - the answer is the first
 // of RollbackIncomplete, Left, RolledBack, Healthy that fits any of them.
 enum class Settled {
-    Nothing,            // the install holds no such update; no lock was taken, nothing written
+    // The install holds no such update, and nothing was written. Mostly without the lock being
+    // asked for; also when the helper whose lock was waited for had settled its own by then.
+    Nothing,
     Healthy,            // the marker was there: the update stands (its folder is deleted, or
                         // kept under a journal that says HEALTHY while a file in it is held)
     RolledBack,         // no marker, and it could be put back: the old version is in place
-    // It could not be decided in this run - a program of the install is running, the files
-    // are no longer that release's, the scan or the marker could not be asked, the lock could
-    // not be taken for a reason other than a holder - and it is as it was.
+    // It could not be decided in this run, and it is as it was: a program of the install is
+    // running; the files are no longer that release's, or the old ones it would be put back
+    // from are not all kept; `evidenceDirectory` is not the folder the update was applied from
+    // (it holds no U/run-<tx>), so a marker missing there proves nothing; the scan, the marker
+    // or the folder could not be asked; or the lock could not be taken for a reason other than
+    // a holder. The RunOnce entry is registered, so a logon comes back to it.
     Left,
     Busy,               // the update lock stayed held: a helper is alive. Nothing was written
-    RollbackIncomplete, // putting it back did not finish: the tree may be half swapped
+    // Putting it back did not finish, or could not begin (the ROLLING_BACK record could not
+    // be written, and then nothing was moved): the tree may be half swapped.
+    RollbackIncomplete,
 };
 
 // What `katana_updater --recover R` does once recoverInProcess has returned OK, with
@@ -154,7 +164,9 @@ enum class Settled {
 // With no folder under R/.update whose journal says COMMITTED_PENDING_HEALTH:
 // Nothing, and the lock is not asked for. Otherwise the lock is taken, polled the
 // way recoverInProcess polls it (kRecoverWait, shortened by the timings); a lock
-// that stays held is Busy, with nothing written, the registry included. Then:
+// that stays held is Busy, with nothing written, the registry included. A lock
+// that cannot be opened at all is no helper's: Left, with the RunOnce entry
+// registered (step 1) so that a logon comes back. Then:
 //
 //   1. FIRST the RunOnce entry is registered again, `<helper> --recover <R>` (the
 //      text the swap registered). Windows removes an entry before it runs it, so a
@@ -165,17 +177,23 @@ enum class Settled {
 //          is written and the folder deleted. Evidence, not assumption: it is the
 //          proof the swap itself asks for - without the exit code of the health
 //          run, which died with the helper.
-//        - no marker, the tree is still that release, and no program of the
-//          install is running (asked before the files are hashed and again as the
-//          last thing): the update is put back by rollback() (apply.hpp). Nothing
-//          is rolled back under a running program.
+//        - no marker, and the absence is evidence: U holds the copy the update's
+//          helper ran from, U/run-<tx>, so it is the folder the marker would be
+//          in. The tree is still that release, every old file the update moved
+//          aside is still kept, and no program of the install is running (asked
+//          before the files are hashed and again as the last thing): the update
+//          is put back by rollback() (apply.hpp). Nothing is rolled back under a
+//          running program.
 //        - otherwise it is left, and nothing is written for it.
 //   3. The RunOnce entry is removed when no transaction folder is left under
 //      R/.update. Left, or a rollback that did not finish, keeps it: the next
 //      logon comes here again.
 //
 // WHAT IT WRITES: the install (the journal, the files a rollback moves, the
-// folder it deletes) and the RunOnce value. U is only READ - the marker stays
+// folder it deletes), the RunOnce value, and - for an installer's install that
+// is settled healthy - DisplayVersion and DisplayName, the version Settings >
+// Apps shows (apply.hpp, step 7: the swap writes them only once the proof is
+// there, and it may have died before). U is only READ - the marker stays
 // where it is - so the rule of recover() holds for the headless programs that
 // start `--recover`. And what such a run CANNOT record is NOT recorded: a
 // rollback made here writes no last.json and does not add the release to
@@ -198,9 +216,9 @@ enum class Confirmed {
              // start (or its folder could not be looked at, which asking again does not mend)
     Done,    // it is settled healthy
     // Not now: the update lock is held - a helper is alive, or a scanner has the lock file
-    // for a moment - or the marker or the record could not be written. Nothing is settled,
-    // the RunOnce entry is as it was, and the caller asks again later (the window: every
-    // 5 s, 12 times).
+    // for a moment - or the marker or the record could not be written, or the folder could
+    // not be read through. Nothing is settled, the RunOnce entry is as it was, and the caller
+    // asks again later (the window: every 5 s, 12 times).
     Busy,
 };
 

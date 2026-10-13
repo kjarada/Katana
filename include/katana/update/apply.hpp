@@ -12,7 +12,8 @@
 //     Refused "locked"). Under it, first settle what an earlier swap left: one
 //     that a crash cut off is put back, and one that is in place and was never
 //     said to start (below, after step 7) is confirmed when its marker is there;
-//     when either cannot be, Refused "interrupted_update" and nothing new starts.
+//     when either cannot be - or R/.update cannot be read to know - Refused
+//     "interrupted_update" and nothing new starts.
 //     Verify the installed manifest's signature and the
 //     staged manifest's (stagedManifestPath(S), stagedSignaturePath(S): stage.hpp;
 //     missing or unverified -> Refused "staged_manifest") - with THE HELPER'S OWN
@@ -47,7 +48,10 @@
 //     decide FROM THE DISK: each existing old/p goes back over R/p, files the
 //     transaction added are deleted, directories it created go when empty;
 //     journal ROLLED_BACK; relaunch the old version; write last.json. It is
-//     idempotent after a crash anywhere, including inside itself.
+//     idempotent after a crash anywhere, including inside itself. From
+//     COMMITTED_PENDING_HEALTH - a health check that failed - NOTHING MOVES until
+//     ROLLING_BACK is on disk: that state alone tells recovery to leave the tree,
+//     so the journal must stop saying it before the tree stops being whole.
 //  7. SUCCESS, once the new version has shown that it starts. Journal
 //     COMMITTED_PENDING_HEALTH; then RUN `R/bin/katana --update-health <tx>` TO
 //     ITS END, for up to 60 s. That run is a whole start of the window that
@@ -56,12 +60,15 @@
 //     the run ended with 0 or was still running when the wait ended (it is then
 //     stopped). A start that could not be made, that ends non-zero (a missing
 //     entry point fails before main), or that never writes the marker - however
-//     it ended - means rollback as in 6, and the sequence is added to `blocked`.
+//     it ended - means rollback as in 6, and the sequence is added to `blocked`;
+//     a marker such a start wrote is deleted BEFORE the rollback, so that it can
+//     never be read as proof by whoever meets the transaction later.
 //     Healthy: for an installer-kind install rewrite DisplayVersion and
 //     DisplayName (only now: a release that is put back must never be the one
 //     Settings > Apps names); journal HEALTHY; delete R/.update/<tx>, the stage
 //     and the marker; what a lock keeps from being deleted goes to
-//     U/cleanup.list for the next start.
+//     U/cleanup.list for the next start. The folder and the marker go only once
+//     HEALTHY is on disk: until then they are what the update is settled by.
 //
 //  If the ROLLBACK ITSELF fails (a file that stays locked, a full or failing disk),
 //  the tree may be half swapped and nothing more can be done from here: the outcome is
@@ -181,7 +188,8 @@ struct ApplyResult {
     //     earlier one that is not settled. Either that one was cut off and could not be put back
     //     - run katana_updater --recover - or it is in place and was never said to start, and
     //     its marker is not there: the window of that version settles it at its start, and so
-    //     does katana_updater --recover, which may put it back. `detail` says which),
+    //     does katana_updater --recover, which may put it back. Or R/.update could not be read
+    //     through, so that neither is known. `detail` says which),
     //     "invalid_request", "root_not_writable", "install_record", "development_tree";
     //   the staged release: "staged_manifest" (missing, unsigned, or refused by verifyManifest -
     //     which also covers another product, target or channel and the path rules, so there is no

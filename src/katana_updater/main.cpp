@@ -38,7 +38,9 @@
 //       to start - one whose helper died while the new version was proving itself, which no
 //       program's recover() touches (recover.hpp, settleUnproved): confirmed when the new
 //       version's marker U/healthy-<tx> is there; else put back, when the files are still that
-//       release's and no program of the install is running; else left as it is, with the RunOnce
+//       release's, the old ones it moved aside are all kept, U is the folder the update was
+//       applied from (it holds that update's helper copy, so a marker missing from it was never
+//       written) and no program of the install is running; else left as it is, with the RunOnce
 //       entry registered again so that the next logon comes back. It starts no program.
 //   katana_updater --selftest
 //       proves this binary starts, links and can verify an Ed25519 signature: it checks a
@@ -71,7 +73,7 @@
 //       swapped, nothing is started, and the command to run is `katana_updater --recover R`.
 //       Also what --recover itself returns when it could not finish - a half-swapped tree it
 //       could not put back, or an update that was never said to start whose putting back did
-//       not finish
+//       not finish, or could not begin (then nothing was moved, and the next run decides again)
 //   13  refused: nothing was touched, for a reason that is not about the release's signature:
 //       another update holds the lock, the install cannot be written, a staged file is missing
 //       or wrong, ... (the `reason=` line says which; apply.hpp lists them). Also the swap AND
@@ -94,8 +96,11 @@
 //                  confirmed:  the marker was there; the update stands and its folder is gone
 //                  put back:   no marker; the previous version is in place again
 //                  left:       it could not be judged in this run; it is as it was
-//                  busy:       another helper holds the update lock; nothing was written
-//                and `failed`, exit 12, when putting it back did not finish.
+//                  busy:       another helper holds the update lock; the update and the
+//                              registry were not touched
+//                and `failed`, exit 12, when putting it back did not finish. (The line this
+//                run keeps in R/.update/recovery.log is written in every one of these cases,
+//                busy included: it records the run, and changes nothing of the update.)
 //                Where this program swaps nothing (not Windows): recover=refused, a reason=
 //                line (`platform`), exit=13, detail= - and for the swap outcome=refused with the
 //                same three lines (refusedByThePlatform, below)
@@ -136,7 +141,10 @@
 //                (installed.json says which version is there), and from last.json when the
 //                swap's own helper got to write one.
 //                U is READ, and for one question only: whether the marker U/healthy-<tx> of an
-//                update that was never said to start is there. U is update::stateDirectory()
+//                update that was never said to start is there (and, before a missing marker
+//                is believed, whether that update's helper copy U/run-<tx> is: where it is
+//                not, this U is not the folder the marker would be in, and nothing is put
+//                back). U is update::stateDirectory()
 //                - KATANA_UPDATE_STATE_DIR, else the per-user folder - and it is not even
 //                looked into unless the install holds such an update. So an update this mode
 //                puts back is recorded nowhere per-user: no last.json, and its release is not
@@ -281,13 +289,16 @@ constexpr std::string_view kHelp =
     "The first form is how Katana starts this program to install a downloaded update: it\n"
     "replaces the files of the install folder R with those staged in S once the process P has\n"
     "exited, and starts <path> again. It is not meant to be typed.\n"
-    "  --recover R   put back an update of the install folder R that was interrupted\n"
+    "  --recover R   put back an update of the install folder R that was interrupted, and settle\n"
+    "                one that is installed and was never confirmed to start: confirm it, put it\n"
+    "                back, or leave it for later (the detail= line says which)\n"
     "  --selftest    check that this program starts and can verify a signature; print its version\n"
     "  --version     print the version and the update protocol\n"
     "  --help        print this text\n"
     "\n"
     "exit codes:\n"
-    "   0  done: the update is installed, or --recover had nothing to put back or put it back\n"
+    "   0  done: the update is installed; or --recover had nothing to do, put an update back,\n"
+    "      confirmed one, or left one for later\n"
     "  10  blocked: a program of the install is still running; nothing was changed\n"
     "  11  rolled back: the update failed and the previous version is back\n"
     "  12  rollback incomplete: the install may be half updated; run katana_updater --recover R\n"
@@ -1087,8 +1098,11 @@ int runRecover(const Path& root, const std::string& argv0, Rig& rig)
         settled = upd::settleUnproved(root, ownExecutable(argv0), upd::stateDirectory(),
                                       rig.services());
         if (settled == upd::Settled::RollbackIncomplete) {
-            // Its journal says ROLLING_BACK now, so the next run of this mode - the RunOnce
-            // entry is still there - finishes it as it finishes any rollback that was cut off.
+            // The next run of this mode - the RunOnce entry is still there - comes back to it
+            // either way. Where the putting back began, the journal says ROLLING_BACK, and
+            // that run finishes it as it finishes any rollback that was cut off. Where it could
+            // not begin (the record could not be written, the folder not read) nothing was
+            // moved, the journal says what it said, and that run decides again.
             status = core::makeError(core::ErrorCode::InvalidState,
                                      "an update that was never said to start could not be put "
                                      "back; run: katana_updater --recover \"" +
@@ -1156,13 +1170,15 @@ int runRecover(const Path& root, const std::string& argv0, Rig& rig)
         break;
     case upd::Settled::Left:
         detail = "left: an update that never said it starts is in place and could not be judged "
-                 "now (a program of the install is running, its files are no longer that "
-                 "release's, or they could not be examined); the next logon, or Katana's "
-                 "window, settles it: " +
+                 "now (a program of the install is running; its files, or the old ones kept to "
+                 "put it back from, are not as the update left them; this run looks in another "
+                 "per-user folder than the update used; or something could not be examined); "
+                 "the next logon, or Katana's window, settles it: " +
                  joined(left);
         break;
     case upd::Settled::Busy:
-        detail = "busy: another update holds the lock; nothing was touched: " + joined(left);
+        detail = "busy: another update holds the lock; the update was not touched: " +
+                 joined(left);
         break;
     }
     std::cout << "recover=" << (found.empty() ? "nothing_to_do" : "ok") << "\nexit=" << kExitOk

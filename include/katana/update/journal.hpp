@@ -47,7 +47,10 @@
 // (recover.hpp) - HEALTHY by `katana_updater --recover`, by the window of the new version
 // or by the next swap, each on the marker the health run writes; ROLLING_BACK and
 // ROLLED_BACK by `katana_updater --recover` alone. So a journal still reads the same way
-// whoever finished it.
+// whoever finished it. And it stays TRUE of the tree: while it says
+// COMMITTED_PENDING_HEALTH the tree is the whole new version, because a rollback from that
+// state moves no file before its ROLLING_BACK record is on disk, and the folder and the
+// marker are deleted only after HEALTHY is (apply.cpp).
 //
 // THE JOURNAL IS NOT AUTHENTICATED. It sits in R/.update, which a process running as the
 // same user can write, and its crc detects a torn write, not a forged line. So what rollback
