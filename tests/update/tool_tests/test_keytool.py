@@ -49,8 +49,14 @@ SECRET_COMMAND = "gh secret set UPDATE_SIGNING_KEY --env release"
 
 
 def secret_commands(text: str) -> list[str]:
-    """Every `gh secret set UPDATE_SIGNING_KEY ...` in `text`, up to the `<` that feeds it the key (or the line's end)."""
-    return [found.strip() for found in re.findall(r"gh secret set UPDATE_SIGNING_KEY[^<\r\n]*", text)]
+    """Every `gh secret set ...` in `text`, up to the `<` that feeds it the key (or the line's end).
+
+    Whatever it sets and however it is spaced, as it stands in the text. The tests require the whole list to
+    be the one command, so a second form of it (an option before the name, two spaces between the words) has
+    to be FOUND here to be refused there: a reader of the one spelling returns nothing for it, and "in no
+    other form" then passes over the very thing it is for.
+    """
+    return [found.strip() for found in re.findall(r"\bgh\s+secret\s+set\b[^<\r\n]*", text)]
 
 
 def with_placeholders(data: bytes) -> bytes:
@@ -363,14 +369,27 @@ class TheCommandLine(ToolTest):
         self.assertEqual(secret_commands(text), [SECRET_COMMAND])
         self.assertNotIn("add --env release", text)
 
-    def test_the_reader_of_secret_commands_tells_the_two_forms_apart(self) -> None:
+    def test_the_reader_of_secret_commands_finds_the_command_however_it_is_spelled(self) -> None:
         # The helper the tests above lean on, held to texts written here.
         self.assertEqual(secret_commands("x\n   gh secret set UPDATE_SIGNING_KEY < update-signing.pem\n"),
                          ["gh secret set UPDATE_SIGNING_KEY"])
         self.assertEqual(secret_commands("one:  gh secret set UPDATE_SIGNING_KEY --env release < a.pem\r\n"
                                          "two: gh secret set UPDATE_SIGNING_KEY\r\n"),
                          [SECRET_COMMAND, "gh secret set UPDATE_SIGNING_KEY"])
-        self.assertEqual(secret_commands("gh secret set RELEASES_REPO_TOKEN"), [])
+        # The repository-wide command spelled another way: an option before the name, two spaces, a tab. Each
+        # comes back as it was written, which is not SECRET_COMMAND, so the tests above refuse it.
+        self.assertEqual(secret_commands("or: gh secret set -a actions UPDATE_SIGNING_KEY < a.pem\n"),
+                         ["gh secret set -a actions UPDATE_SIGNING_KEY"])
+        self.assertEqual(secret_commands("gh  secret set  UPDATE_SIGNING_KEY\n"),
+                         ["gh  secret set  UPDATE_SIGNING_KEY"])
+        self.assertEqual(secret_commands("gh\tsecret\tset UPDATE_SIGNING_KEY --env release < a.pem"),
+                         ["gh\tsecret\tset UPDATE_SIGNING_KEY --env release"])
+        # A command that sets another secret is one too: the key tool has no business printing it.
+        self.assertEqual(secret_commands("gh secret set RELEASES_REPO_TOKEN"), ["gh secret set RELEASES_REPO_TOKEN"])
+        # What is no such command: the secret's name in a sentence, another `gh secret` command, a longer word.
+        self.assertEqual(secret_commands("the secret UPDATE_SIGNING_KEY of the environment `release`\n"
+                                         "gh secret list --env release\n"
+                                         "gh secret settle UPDATE_SIGNING_KEY\n"), [])
 
 
 if __name__ == "__main__":
