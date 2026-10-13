@@ -231,7 +231,9 @@ jobs:
       # nothing declares stays there as UNINITIALIZED), and the repository
       # must be on the update library's compile line. Through tr, and grep
       # without -q: on Windows CMake writes these files with CR LF, and this
-      # shell runs with pipefail, which a grep leaving early would trip.
+      # shell runs with pipefail, which a grep leaving early would trip. The
+      # two files are read as bytes (LC_ALL=C): macOS's sed and tr stop at a
+      # byte that is no character of the locale.
       - name: Configure
         env:
           UPDATE_REPO: ${{ needs.version.outputs.repo }}
@@ -242,6 +244,7 @@ jobs:
             ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} \
             -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
             -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+          export LC_ALL=C
           cache=build/release/CMakeCache.txt
           for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
             tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
@@ -445,6 +448,7 @@ jobs:
         run: |
           cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
             -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+          export LC_ALL=C
           cache=build/${{ matrix.preset }}/CMakeCache.txt
           for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
             tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
