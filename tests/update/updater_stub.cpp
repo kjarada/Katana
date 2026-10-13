@@ -9,9 +9,11 @@
 //
 //   KATANA_STUB_LOG              file to append one line to for every start (what ran, with what)
 //   KATANA_STUB_MODE             for --update-health: healthy (default: write the marker, exit 0),
-//                                exit1 (exit 1 without the marker), delay_exit1 (the same after 1.5 s,
-//                                time for a test to do something to the install), marker_then_exit3,
-//                                silent (never write it and never return: the helper's timeout ends it)
+//                                exit1 (exit 1 without the marker), exit0 (exit 0 without it: a
+//                                start that ends well and never says it started), delay_exit1 (exit 1
+//                                after 1.5 s, time for a test to do something to the install),
+//                                marker_then_exit3, silent (never write it and never return: the
+//                                helper's timeout ends it)
 //   KATANA_UPDATE_STATE_DIR      where the marker goes, <dir>\healthy-<tx> (state.hpp)
 //   KATANA_STUB_REGISTRY_BASE    an HKCU subkey: the line says whether the RunOnce value of the
 //                                helper is there at that moment (it must be, during the health
@@ -19,6 +21,9 @@
 //   KATANA_STUB_MACHINE_RUNONCE  set to anything: the line also says whether the helper's value
 //                                is in the MACHINE's own RunOnce key at that moment (it is only
 //                                read; a test helper must never have put it there)
+//   KATANA_STUB_PID_FILE         file to write this process's id to, as decimal digits and a line
+//                                feed, before anything else: how a test learns which process the
+//                                Launcher started for it (the Launcher hands back no id)
 //
 //   --sleep <ms>                 stay running that long: a process whose image is under the
 //                                install, for the helper's scan to find
@@ -166,10 +171,29 @@ std::string runOnceValue(const std::wstring& base)
     return utf8(value);
 }
 
+// The process id, into the file a test named (see the top): one write of the whole text, so a
+// reader that sees the line feed has the whole number.
+void writeOwnProcessId(const std::wstring& path)
+{
+    if (path.empty()) {
+        return;
+    }
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    const std::string text = std::to_string(GetCurrentProcessId()) + "\n";
+    DWORD written = 0;
+    WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+    CloseHandle(file);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
+    writeOwnProcessId(environment(L"KATANA_STUB_PID_FILE"));
     const std::wstring logPath = environment(L"KATANA_STUB_LOG");
     const std::string mode = utf8(environment(L"KATANA_STUB_MODE"));
     const std::wstring openssl = environment(L"OPENSSL_CONF");
@@ -198,6 +222,9 @@ int main(int argc, char** argv)
     if (first == "--update-health" && argc > 2) {
         if (mode == "exit1") {
             return 1;
+        }
+        if (mode == "exit0") {
+            return 0;
         }
         if (mode == "delay_exit1") {
             Sleep(1500);
