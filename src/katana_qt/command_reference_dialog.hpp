@@ -6,9 +6,10 @@
 //
 // The reference is built from the texts the verbs' own code keeps - the
 // interpreter's HELP (with the annotation verbs), HELP SHEETS, HELP UTILITY,
-// the ONLINE usage - plus windowHelpText, the verbs only the window's front
-// end runs, and the tool catalogue's names, aliases and tips. Nothing is
-// written twice: a verb whose help changes changes here, and katana_cli -h and
+// the ONLINE usage, the geoprocessing and the survey field file verbs' help,
+// HELP UPDATE - plus windowHelpText, the verbs only the window's front end
+// runs, and the tool catalogue's names, aliases and tips. Nothing is written
+// twice: a verb whose help changes changes here, and katana_cli -h and
 // katana_mcp's katana_help print the same interpreter text.
 //
 // The dialog is non-modal and changes nothing; a double-click puts an entry's
@@ -73,8 +74,9 @@ struct ReferenceSection {
 [[nodiscard]] QString windowHelpText();
 
 // Every section of the reference: the interpreter's commands (the annotation
-// verbs among them), sheets, subsurface utilities, online data, the window's
-// own verbs, and the tools by menu.
+// verbs among them), sheets, subsurface utilities, online data, geoprocessing,
+// survey field files, updates (the UPDATE verbs, over app::updateHelpText),
+// the window's own verbs, and the tools by menu.
 [[nodiscard]] std::vector<ReferenceSection> commandReferenceSections();
 
 class CommandReferenceDialog final : public QDialog {
