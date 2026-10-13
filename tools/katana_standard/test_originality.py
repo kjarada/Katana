@@ -23,6 +23,15 @@ ELDER_STROKES = [["move", 0, 0], ["draw", 4, 0], ["draw", 4, 2], ["draw", 0, 2],
                  ["circle", 0.5]]
 PROBE_STROKES = [["move", 0, 0], ["draw", 3, 1], ["draw", 6, 0], ["move", 2, -1], ["draw", 2, 1], ["move", 4, -1],
                  ["draw", 4, 1]]
+# A shape with no symmetry of its own, so that each of its eight turned and mirrored images is another list: an L
+# (along the bottom from the origin, then up at the right end), a ring over its left part, a quarter arc over
+# its right part (about (3, 2), from (4, 2) round to (3, 3)) and a dot at the top left. Its points fill a box 4
+# wide and 3 high.
+ELDER_KEY = [["move", 0, 0], ["draw", 4, 0], ["draw", 4, 1], ["move", 1, 2], ["circle", 0.5],
+             ["move", 3, 2], ["arc", 1, 0, 90], ["move", 0, 3], ["dot", 0]]
+# The same at twice the size, every length doubled and no angle.
+ELDER_KEY_DOUBLED = [["move", 0, 0], ["draw", 8, 0], ["draw", 8, 2], ["move", 2, 4], ["circle", 1],
+                     ["move", 6, 4], ["arc", 2, 0, 90], ["move", 0, 6], ["dot", 0]]
 
 
 def elder():
@@ -89,7 +98,7 @@ class NothingInCommon(unittest.TestCase):
         self.assertEqual(found["colour names"], ["elder ink"])
         self.assertEqual(found["attribute names"], ["Elder Note"])
         self.assertEqual(found["text styles"], ["Elder Text"])
-        self.assertEqual(found["stroke lists, exact"], ["Elder Line"])   # the mark has one stroke and is left out
+        self.assertEqual(found["shapes, as drawn"], ["Elder Line"])   # the mark has one stroke and is left out
 
 
 class OneThingCopied(unittest.TestCase):
@@ -173,22 +182,177 @@ class OneThingCopied(unittest.TestCase):
         found, _ = self.one(lambda c: c["codes"][3]["text"].update(style="Elder Text"))
         self.assertEqual(found, {"text styles": ["Elder Text"]})
 
-    def test_a_stroke_list_is_found_as_it_is_moved_and_scaled(self):
+    def test_a_shape_is_found_as_it_is_drawn_moved_and_scaled(self):
         found, _ = self.one(lambda c: c["linestyles"][0].update(strokes=copy.deepcopy(ELDER_STROKES)))
-        self.assertEqual(sorted(found), ["stroke lists, exact", "stroke lists, scaled", "stroke lists, translated"])
+        self.assertEqual(sorted(found), ["shapes, as drawn", "shapes, moved", "shapes, scaled"])
         moved = [[s[0], s[1] + 5, s[2] - 3] if s[0] in ("move", "draw") else list(s) for s in ELDER_STROKES]
         found, _ = self.one(lambda c: c["linestyles"][0].update(strokes=moved))
-        self.assertEqual(sorted(found), ["stroke lists, scaled", "stroke lists, translated"])
+        self.assertEqual(sorted(found), ["shapes, moved", "shapes, scaled"])
         doubled = [[s[0], s[1] * 2, s[2] * 2] if s[0] in ("move", "draw") else [s[0], s[1] * 2] for s in ELDER_STROKES]
         found, _ = self.one(lambda c: c["linestyles"][0].update(strokes=doubled))
-        self.assertEqual(sorted(found), ["stroke lists, scaled"])
-        self.assertEqual(found["stroke lists, scaled"], ["Probe Line"])
+        self.assertEqual(sorted(found), ["shapes, scaled"])
+        self.assertEqual(found["shapes, scaled"], ["Probe Line"])
 
     def test_a_list_of_five_strokes_or_fewer_is_no_copy(self):
         # Both libraries draw a ring for their mark; one stroke is anybody's.
         found, result = self.one(lambda c: c["symbols"][0].update(strokes=[["circle", 1]]))
         self.assertEqual(found, {})
         self.assertEqual(result["definitions"], (2, 2, 1))   # one of the candidate's two is left out
+
+
+class ShapesHoweverTheyAreWritten(unittest.TestCase):
+    """What two definitions DRAW is compared, not how their lists are written: without regard to the order of the
+    strokes, to the direction a line or an arc is drawn in, and under the eight symmetries of the square. The
+    reference's line is ELDER_KEY and the candidate's is the list of each test, worked out by hand from it: a
+    quarter turn counter-clockwise takes (x, y) to (-y, x) and adds 90 degrees to an angle, a mirror in the y
+    axis takes x to -x and an angle a to 180 - a, so an arc then runs from where it ended. A list that only
+    orders, reverses, turns or mirrors the reference's was a different list to a comparison of lists, and none
+    of those was found."""
+
+    ALL = ["shapes, as drawn", "shapes, moved", "shapes, scaled"]
+
+    def found(self, ours, theirs=None):
+        """Which of the three comparisons find the candidate's line (and nothing else of it) in the reference."""
+        reference, candidate = elder(), probe()
+        reference["linestyles"][0]["strokes"] = copy.deepcopy(ELDER_KEY if theirs is None else theirs)
+        candidate["linestyles"][0]["strokes"] = copy.deepcopy(ours)
+        found = failing(originality.scan(reference, candidate))
+        for names in found.values():
+            self.assertEqual(names, ["Probe Line"])
+        return sorted(found)
+
+    @staticmethod
+    def with_ring(radius):
+        return [["circle", radius] if s[0] == "circle" else list(s) for s in ELDER_KEY]
+
+    def test_the_same_strokes_in_another_order_are_the_same_shape(self):
+        # The dot first, then the arc, the upright of the L, the ring, and the bottom of the L last: the L is two
+        # lines now, and no longer one path.
+        ours = [["move", 0, 3], ["dot", 0], ["move", 3, 2], ["arc", 1, 0, 90], ["move", 4, 0], ["draw", 4, 1],
+                ["move", 1, 2], ["circle", 0.5], ["move", 0, 0], ["draw", 4, 0]]
+        self.assertEqual(self.found(ours), self.ALL)
+
+    def test_a_line_and_an_arc_drawn_from_the_other_end_are_the_same_shape(self):
+        # The L from its top end back to the origin, and the arc from 90 degrees down to 0.
+        ours = [["move", 4, 1], ["draw", 4, 0], ["draw", 0, 0], ["move", 1, 2], ["circle", 0.5],
+                ["move", 3, 2], ["arc", 1, 90, 0], ["move", 0, 3], ["dot", 0]]
+        self.assertEqual(self.found(ours), self.ALL)
+
+    def test_a_shape_turned_by_quarter_turns_is_the_same_shape(self):
+        # One quarter turn: (4, 0) to (0, 4), (4, 1) to (-1, 4), the ring to (-2, 1), the arc to (-2, 3) and
+        # through 90 to 180, the dot to (-3, 0).
+        quarter = [["move", 0, 0], ["draw", 0, 4], ["draw", -1, 4], ["move", -2, 1], ["circle", 0.5],
+                   ["move", -2, 3], ["arc", 1, 90, 180], ["move", -3, 0], ["dot", 0]]
+        # Two: every point through the origin, the arc through 180 to 270.
+        half = [["move", 0, 0], ["draw", -4, 0], ["draw", -4, -1], ["move", -1, -2], ["circle", 0.5],
+                ["move", -3, -2], ["arc", 1, 180, 270], ["move", 0, -3], ["dot", 0]]
+        # Three: (x, y) to (y, -x), the arc through 270 to 360.
+        three = [["move", 0, 0], ["draw", 0, -4], ["draw", 1, -4], ["move", 2, -1], ["circle", 0.5],
+                 ["move", 2, -3], ["arc", 1, 270, 360], ["move", 3, 0], ["dot", 0]]
+        for ours in (quarter, half, three):
+            self.assertEqual(self.found(ours), self.ALL, ours)
+
+    def test_a_shape_turned_and_then_moved_or_sized_is_found_moved_or_scaled(self):
+        # The quarter turn above, then every point moved by (5, -3): no symmetry about the origin brings it back.
+        moved = [["move", 5, -3], ["draw", 5, 1], ["draw", 4, 1], ["move", 3, -2], ["circle", 0.5],
+                 ["move", 3, 0], ["arc", 1, 90, 180], ["move", 2, -3], ["dot", 0]]
+        self.assertEqual(self.found(moved), ["shapes, moved", "shapes, scaled"])
+        # The quarter turn at twice the size: every length doubled, and no angle.
+        doubled = [["move", 0, 0], ["draw", 0, 8], ["draw", -2, 8], ["move", -4, 2], ["circle", 1],
+                   ["move", -4, 6], ["arc", 2, 90, 180], ["move", -6, 0], ["dot", 0]]
+        self.assertEqual(self.found(doubled), ["shapes, scaled"])
+
+    def test_a_shape_mirrored_is_the_same_shape(self):
+        # In the y axis: x to -x, and the arc, which ran from 0 to 90, runs from 180 back to 90.
+        in_y = [["move", 0, 0], ["draw", -4, 0], ["draw", -4, 1], ["move", -1, 2], ["circle", 0.5],
+                ["move", -3, 2], ["arc", 1, 90, 180], ["move", 0, 3], ["dot", 0]]
+        # In the x axis: y to -y, the arc from 0 back to -90, which is 270 to 360.
+        in_x = [["move", 0, 0], ["draw", 4, 0], ["draw", 4, -1], ["move", 1, -2], ["circle", 0.5],
+                ["move", 3, -2], ["arc", 1, 270, 360], ["move", 0, -3], ["dot", 0]]
+        # In the diagonal y = x: x and y change places. The arc's ends (4, 2) and (3, 3) go to (2, 4) and
+        # (3, 3), which are at 90 and at 0 degrees from its new centre (2, 3).
+        in_diagonal = [["move", 0, 0], ["draw", 0, 4], ["draw", 1, 4], ["move", 2, 1], ["circle", 0.5],
+                       ["move", 2, 3], ["arc", 1, 0, 90], ["move", 3, 0], ["dot", 0]]
+        # In the other diagonal: (x, y) to (-y, -x). The arc's ends go to (-2, -4) and (-3, -3), at 270 and at
+        # 180 degrees from its new centre (-2, -3).
+        in_other_diagonal = [["move", 0, 0], ["draw", 0, -4], ["draw", -1, -4], ["move", -2, -1], ["circle", 0.5],
+                             ["move", -2, -3], ["arc", 1, 180, 270], ["move", -3, 0], ["dot", 0]]
+        for ours in (in_y, in_x, in_diagonal, in_other_diagonal):
+            self.assertEqual(self.found(ours), self.ALL, ours)
+
+    def test_a_mark_that_differs_makes_another_shape(self):
+        # The arc over the OTHER quarter, and nothing else mirrored with it: an arc is where it is.
+        other_quarter = [["arc", 1, 90, 180] if s[0] == "arc" else list(s) for s in ELDER_KEY]
+        # Stretched one way only, every x doubled: no turn, mirror, move or size undoes that.
+        stretched = [["move", 0, 0], ["draw", 8, 0], ["draw", 8, 1], ["move", 2, 2], ["circle", 0.5],
+                     ["move", 6, 2], ["arc", 1, 0, 90], ["move", 0, 3], ["dot", 0]]
+        # A mark fewer (no dot), and a mark more (a bar through the ring).
+        fewer = [list(s) for s in ELDER_KEY[:-2]]
+        more = [list(s) for s in ELDER_KEY] + [["move", 0.5, 2], ["draw", 1.5, 2]]
+        for ours in (other_quarter, stretched, fewer, more):
+            self.assertEqual(self.found(ours), [], ours)
+
+    def test_a_mark_written_twice_is_the_same_drawing(self):
+        # The bottom of the L once more, backwards, after everything else.
+        ours = [list(s) for s in ELDER_KEY] + [["move", 4, 0], ["draw", 0, 0]]
+        self.assertEqual(self.found(ours), self.ALL)
+
+    def test_a_pen_a_dot_s_radius_and_the_sign_of_a_radius_are_no_part_of_a_shape(self):
+        # A pen is a colour; Katana draws a radius as a length whatever its sign, and a dot as one point
+        # whatever its radius.
+        ours = [["pen", "probe ink"], ["move", 0, 0], ["draw", 4, 0], ["draw", 4, 1], ["move", 1, 2],
+                ["circle", -0.5], ["move", 3, 2], ["arc", -1, 0, 90], ["move", 0, 3], ["dot", 0.3]]
+        self.assertEqual(self.found(ours), self.ALL)
+        # A draw that goes nowhere marks a point, as a dot does.
+        ours = [list(s) for s in ELDER_KEY[:-1]] + [["draw", 0, 3]]
+        self.assertEqual(self.found(ours), self.ALL)
+
+    def test_two_numbers_are_the_same_within_the_third_decimal_and_within_the_second_in_the_unit_box(self):
+        # The ring's radius is 0.5. Its points' box is 4 wide, so in the unit box every length is a quarter.
+        self.assertEqual(self.found(self.with_ring(0.5004)), self.ALL)   # 0.0004 away
+        # 0.001 away is another number as drawn and as moved; in the unit box it is 0.12525 beside 0.125. (As
+        # lists rounded to two decimals those two were 0.13 and 0.12, and the shape was not found.)
+        self.assertEqual(self.found(self.with_ring(0.501)), ["shapes, scaled"])
+        # 0.53 / 4 is 0.1325, which is 0.0075 from 0.125; 0.55 / 4 is 0.1375, which is 0.0125 from it.
+        self.assertEqual(self.found(self.with_ring(0.53)), ["shapes, scaled"])
+        self.assertEqual(self.found(self.with_ring(0.55)), [])
+
+    def test_a_text_is_its_characters_its_place_and_its_height_and_is_sized_with_the_shape(self):
+        def lettered(strokes, at, height, characters="E"):
+            return [list(s) for s in strokes] + [["move", at[0], at[1]], ["text", {"text": characters,
+                                                                                  "height": height}]]
+        theirs = lettered(ELDER_KEY, (2, 1.5), 1)
+        self.assertEqual(self.found(lettered(ELDER_KEY, (2, 1.5), 1), theirs), self.ALL)
+        self.assertEqual(self.found(lettered(ELDER_KEY, (2, 1.5), 1, "P"), theirs), [])      # another letter
+        self.assertEqual(self.found(lettered(ELDER_KEY, (2, 1.5), 1.5), theirs), [])         # another height
+        self.assertEqual(self.found(lettered(ELDER_KEY, (2, 2.5), 1), theirs), [])           # another place
+        # At twice the size the letter is twice as high, at twice the place; left at its height it is another
+        # drawing (a quarter of the box's width in one, an eighth in the other).
+        self.assertEqual(self.found(lettered(ELDER_KEY_DOUBLED, (4, 3), 2), theirs), ["shapes, scaled"])
+        self.assertEqual(self.found(lettered(ELDER_KEY_DOUBLED, (4, 3), 1), theirs), [])
+
+    def test_a_shape_that_is_all_about_one_point_is_sized_by_its_largest_radius(self):
+        # Four rings and a dot about one point: the box round its points has no size to divide by.
+        theirs = [["move", 0, 0], ["circle", 1], ["circle", 2], ["circle", 3], ["circle", 4], ["dot", 0]]
+        elsewhere = [["move", 7, 7], ["circle", 4], ["circle", 2], ["circle", 3], ["circle", 1], ["dot", 0]]
+        self.assertEqual(self.found(elsewhere, theirs), ["shapes, moved", "shapes, scaled"])
+        # Twice the size: 2, 4, 6 and 8 of 8 are the quarters that 1, 2, 3 and 4 of 4 are.
+        doubled = [["move", 7, 7], ["circle", 8], ["circle", 2], ["circle", 6], ["circle", 4], ["dot", 0]]
+        self.assertEqual(self.found(doubled, theirs), ["shapes, scaled"])
+        # 2, 4, 6 and 7 of 7 are not.
+        other = [["move", 7, 7], ["circle", 7], ["circle", 2], ["circle", 6], ["circle", 4], ["dot", 0]]
+        self.assertEqual(self.found(other, theirs), [])
+
+    def test_a_ring_with_a_cross_in_it_is_found_at_another_size_however_it_was_written(self):
+        # Theirs: a spare move, a ring of radius 1 and the two strokes of a cross to 0.7 each way. Ours: the
+        # ring first, 1.6 times the size, the cross's strokes in the other order and each from its other end.
+        # In the unit box both rings are 1 / 1.4 = 1.6 / 2.24 = 0.714 about the middle, and both crosses are
+        # the box's diagonals.
+        theirs = [["move", 0, 0], ["move", 0, 0], ["circle", 1], ["move", -0.7, -0.7], ["draw", 0.7, 0.7],
+                  ["move", -0.7, 0.7], ["draw", 0.7, -0.7]]
+        ours = [["move", 0, 0], ["circle", 1.6], ["move", 1.12, -1.12], ["draw", -1.12, 1.12],
+                ["move", 1.12, 1.12], ["draw", -1.12, -1.12]]
+        self.assertEqual(self.found(ours, theirs), ["shapes, scaled"])
 
 
 class WhatTheReferenceCallsAThing(unittest.TestCase):

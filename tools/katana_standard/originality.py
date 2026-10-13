@@ -32,9 +32,25 @@ files with the standard `json` module, shares no code with Katana, and compares 
                       candidate, is a colour value in common like any other
   attribute names     the name of an attribute a rule applies or asks for
   text styles         the style a text rule names
-  stroke lists        a definition whose strokes equal one of the reference's: exactly; after moving the first
-                      point to the origin (translated); or after also scaling to a unit box (scaled). A list of
-                      five strokes or fewer (a dash, a plus, a square) is left out: any library draws those
+  shapes              a definition that DRAWS what one of the reference's draws. A stroke list is read as the marks
+                      it makes, as Katana's renderer reads it (`flattenDefinition`): each straight piece between
+                      two points, and each circle, arc, dot and text where the pen stands. Two definitions have
+                      one shape when every mark of each is a mark of the other, so the comparison is made
+                        without regard to the ORDER the strokes are written in, to how they are chained (a square
+                          as one path, or as four lines), or to a mark written twice;
+                        without regard to the DIRECTION a line or an arc is drawn in;
+                        under the EIGHT SYMMETRIES of the square: the four quarter turns, and each of them
+                          mirrored. A definition turned or mirrored is the same drawing;
+                        without regard to the pen (a colour is no shape) or to a dot's radius (Katana draws a dot
+                          as one point of the pen's width, whatever radius the file gives it).
+                      Compared three ways, each counted apart: as drawn; moved, so that the lower left corner of
+                      the box round its points is the origin; and scaled, which is moved and then sized so that
+                      the larger side of that box is 1 (radii and text heights are sized with it; a shape that
+                      is all about one point is sized by its largest radius). Two numbers are the same when
+                      they are less than 0.001 apart as drawn and moved, and less than 0.01 apart in the unit
+                      box: the third and the second decimal, which is what the scan has always told apart. A
+                      text is its characters, its place and its height. A list of five strokes or fewer (a
+                      dash, a plus, a square) is left out: any library draws those
   near names          a definition name at least 0.9 alike (difflib) to a reference definition name, to one less
                       its lead-in or to a reference legend label, and a legend label as near to any of those,
                       without being equal to it; listed to --limit
@@ -156,49 +172,163 @@ def strokes_of(definition):
     return [list(s) if not isinstance(s, dict) else s for s in definition.get("strokes", [])]
 
 
-def flat(strokes):
-    """(kind, numbers...) tuples with every number rounded to 3 decimals; text strokes by their text and height."""
+# ---- shapes ----------------------------------------------------------------------------------------------------
+# A stroke list says how a drawing is made, and a shape is the drawing. `marks_of` reads a list the way Katana's
+# renderer does (cad::flattenDefinition: a move lifts the pen, a draw is a straight piece from where the pen
+# stands, and a circle, an arc, a dot and a text are about the pen and do not move it) and gives marks that no
+# longer say in which order, in which direction or in which colour they were made.
+
+DRAWN, MOVED, SCALED = "as drawn", "moved", "scaled"
+# Two numbers are the same when they are less than this apart: the third decimal as drawn and moved, and the
+# second in the unit box, which is what rounding to three and to two decimals told apart when lists were compared.
+STEPS = {DRAWN: 0.001, MOVED: 0.001, SCALED: 0.01}
+GUARD = 1e-9   # 1.001 - 1 is a hair under 0.001 in binary, and a whole step apart is apart
+# The eight symmetries of the square: (quarter turns counter-clockwise, mirrored in the y axis first).
+SYMMETRIES = [(turns, mirrored) for mirrored in (False, True) for turns in range(4)]
+
+
+def marks_of(strokes):
+    """The marks a stroke list draws, each a tuple of its kind, its point and what else it has:
+         ("line", x0, y0, x1, y1)              a straight piece; which end comes first says nothing
+         ("circle", x, y, radius)              an arc of a whole turn or more is one too
+         ("arc", x, y, radius, start, sweep)   counter-clockwise from `start` (0 to 360) through `sweep` degrees,
+                                               whichever way round it was written
+         ("dot", x, y)                         whatever its radius; a draw that goes nowhere is one too
+         ("text", x, y, height, characters)
+    A radius is a length whatever its sign, as it is drawn. A pen stroke makes no mark."""
     out = []
+    x = y = 0.0
     for s in strokes:
         kind = s[0]
-        if kind == "text":
-            body = s[1]
-            out.append((kind, body.get("text", ""), round(float(body.get("height", 0)), 3)))
-        elif kind == "pen":
-            out.append((kind, s[1]))
-        else:
-            out.append((kind,) + tuple(round(float(v), 3) for v in s[1:]))
-    return tuple(out)
+        if kind == "move":
+            x, y = float(s[1]), float(s[2])
+        elif kind == "draw":
+            to = (float(s[1]), float(s[2]))
+            out.append(("dot", x, y) if to == (x, y) else ("line", x, y) + to)
+            x, y = to
+        elif kind == "circle":
+            out.append(("circle", x, y, abs(float(s[1]))))
+        elif kind == "arc":
+            low, high = sorted((float(s[2]), float(s[3])))
+            if high - low >= 360.0:
+                out.append(("circle", x, y, abs(float(s[1]))))
+            else:
+                out.append(("arc", x, y, abs(float(s[1])), low % 360.0, high - low))
+        elif kind == "dot":
+            out.append(("dot", x, y))
+        elif kind == "text":
+            out.append(("text", x, y, float(s[1].get("height", 0)), s[1].get("text", "")))
+    return out
 
 
-def translated(strokes):
-    """The strokes with the first move or draw point at the origin."""
-    first = next(((s[1], s[2]) for s in strokes if s[0] in ("move", "draw")), None)
-    if first is None:
-        return flat(strokes)
-    return flat([[s[0], s[1] - first[0], s[2] - first[1]] if s[0] in ("move", "draw") else s for s in strokes])
+def turned(marks, quarter_turns, mirrored):
+    """The marks under one of the eight symmetries of the square: mirrored in the y axis when asked, then turned
+    counter-clockwise by `quarter_turns` quarter turns. A text moves with its point and keeps its characters."""
+    def point(x, y):
+        if mirrored:
+            x = -x
+        for _ in range(quarter_turns):
+            x, y = -y, x
+        return (x, y)
 
-
-def scaled(strokes):
-    """Translated, then scaled so the larger extent of the move/draw points is 1."""
-    pts = [(s[1], s[2]) for s in strokes if s[0] in ("move", "draw")]
-    if not pts:
-        return flat(strokes)
-    extent = max(max(p[0] for p in pts) - min(p[0] for p in pts), max(p[1] for p in pts) - min(p[1] for p in pts))
-    if extent == 0:
-        return flat(strokes)
-    first = pts[0]
     out = []
-    for s in strokes:
-        if s[0] in ("move", "draw"):
-            out.append([s[0], (s[1] - first[0]) / extent, (s[2] - first[1]) / extent])
-        elif s[0] in ("circle", "dot"):
-            out.append([s[0], s[1] / extent])
-        elif s[0] == "arc":
-            out.append([s[0], s[1] / extent, s[2], s[3]])
+    for m in marks:
+        if m[0] == "line":
+            out.append(("line",) + point(m[1], m[2]) + point(m[3], m[4]))
+        elif m[0] == "arc":
+            # Mirrored, an arc runs the other way round, so it starts where it ended.
+            start = 180.0 - m[4] - m[5] if mirrored else m[4]
+            out.append(("arc",) + point(m[1], m[2]) + (m[3], (start + 90.0 * quarter_turns) % 360.0, m[5]))
         else:
-            out.append(s)
-    return tuple(tuple(round(v, 2) if isinstance(v, float) else v for v in t) for t in flat(out))
+            out.append((m[0],) + point(m[1], m[2]) + m[3:])
+    return out
+
+
+def placed(marks, how):
+    """The marks as they are compared `how`, as (the box round their points, {kind: [marks without the kind]}):
+    DRAWN as they are; MOVED so that the lower left corner of the box is the origin; SCALED moved, and then
+    sized so that the larger side of the box is 1. A shape whose marks are all about one point has a box of no
+    size, and is sized by its largest radius or text height instead."""
+    points = [(m[1], m[2]) for m in marks] + [(m[3], m[4]) for m in marks if m[0] == "line"]
+    if not points:
+        return (0.0, 0.0, 0.0, 0.0), {}
+    low_x, low_y = min(p[0] for p in points), min(p[1] for p in points)
+    high_x, high_y = max(p[0] for p in points), max(p[1] for p in points)
+    dx, dy = (0.0, 0.0) if how == DRAWN else (low_x, low_y)
+    size = 1.0
+    if how == SCALED:
+        size = (max(high_x - low_x, high_y - low_y)
+                or max((m[3] for m in marks if m[0] in ("circle", "arc", "text")), default=0.0) or 1.0)
+
+    def at(x, y):
+        return ((x - dx) / size, (y - dy) / size)
+
+    by_kind = {}
+    for m in marks:
+        if m[0] == "line":
+            mark = at(m[1], m[2]) + at(m[3], m[4])
+        elif m[0] == "dot":
+            mark = at(m[1], m[2])
+        else:   # a circle's and an arc's radius and a text's height are sized with the shape
+            mark = at(m[1], m[2]) + (m[3] / size,) + m[4:]
+        by_kind.setdefault(m[0], []).append(mark)
+    return at(low_x, low_y) + at(high_x, high_y), by_kind
+
+
+def alike(kind, a, b, step):
+    """Whether two placed marks of one kind are one mark: every number less than a step apart, a line's ends
+    either way round, an arc's start measured round the circle, a text's characters the same."""
+    def near(p, q):
+        return all(abs(u - v) < step - GUARD for u, v in zip(p, q))
+
+    if kind == "line":
+        return near(a, b) or near(a, b[2:] + b[:2])
+    if kind == "arc":
+        apart = abs(a[3] - b[3]) % 360.0
+        return near(a[:3] + a[4:], b[:3] + b[4:]) and min(apart, 360.0 - apart) < step - GUARD
+    if kind == "text":
+        return a[3] == b[3] and near(a[:3], b[:3])
+    return near(a, b)
+
+
+def one_shape(ours, theirs, step):
+    """Whether two placed definitions draw one shape: every mark of each is a mark of the other. The boxes are
+    compared first, which decides most pairs: where the marks pair off, so do their points."""
+    (our_box, our_marks), (their_box, their_marks) = ours, theirs
+    if not our_marks or our_marks.keys() != their_marks.keys():
+        return False
+    if not all(abs(u - v) < step - GUARD for u, v in zip(our_box, their_box)):
+        return False
+    return (all(any(alike(kind, m, n, step) for n in their_marks[kind])
+                for kind in our_marks for m in our_marks[kind])
+            and all(any(alike(kind, n, m, step) for m in our_marks[kind])
+                    for kind in their_marks for n in their_marks[kind]))
+
+
+def shapes_in_common(reference, candidate, trivial=TRIVIAL):
+    """{DRAWN: [names], MOVED: [names], SCALED: [names]}: the candidate's definitions of more than `trivial`
+    strokes that draw, under one of the eight symmetries, what a definition of the reference of more than
+    `trivial` strokes draws."""
+    def real(document):
+        return [d for d in definitions(document) if len(strokes_of(d)) > trivial]
+
+    their_marks = [marks_of(strokes_of(d)) for d in real(reference)]
+    # Each of the candidate's under the eight symmetries; the reference's are compared as they are.
+    ours = [(d["name"], [turned(marks, turns, mirrored) for turns, mirrored in SYMMETRIES])
+            for d in real(candidate) for marks in [marks_of(strokes_of(d))]]
+    found = {}
+    for how in (DRAWN, MOVED, SCALED):
+        theirs = {}   # by the kinds of mark a shape has: two shapes of other kinds are never one
+        for marks in their_marks:
+            shape = placed(marks, how)
+            theirs.setdefault(frozenset(shape[1]), []).append(shape)
+        found[how] = []
+        for name, eight in ours:
+            views = [placed(marks, how) for marks in eight]
+            if any(one_shape(view, shape, STEPS[how])
+                   for shape in theirs.get(frozenset(views[0][1]), ()) for view in views):
+                found[how].append(name)
+    return found
 
 
 def scan(reference, candidate):
@@ -247,12 +377,8 @@ def scan(reference, candidate):
     def real(document):
         return [d for d in definitions(document) if len(strokes_of(d)) > TRIVIAL]
 
-    ref_flat = {flat(strokes_of(d)) for d in real(reference)}
-    ref_trans = {translated(strokes_of(d)) for d in real(reference)}
-    ref_scaled = {scaled(strokes_of(d)) for d in real(reference)}
-    exact["stroke lists, exact"] = [d["name"] for d in real(candidate) if flat(strokes_of(d)) in ref_flat]
-    exact["stroke lists, translated"] = [d["name"] for d in real(candidate) if translated(strokes_of(d)) in ref_trans]
-    exact["stroke lists, scaled"] = [d["name"] for d in real(candidate) if scaled(strokes_of(d)) in ref_scaled]
+    for how, names in shapes_in_common(reference, candidate).items():
+        exact["shapes, " + how] = names
 
     # Near and not equal: against everything the reference calls a thing, as words.
     said = ({fold(d["name"]) for d in definitions(reference)}
@@ -287,7 +413,7 @@ def scan(reference, candidate):
 
 def render(result, limit):
     out = ["reference definitions=%d candidate definitions=%d (%d of the candidate's have %d strokes or fewer and "
-           "are left out of the stroke comparison)" % (result["definitions"] + (TRIVIAL,)),
+           "are left out of the comparison of shapes)" % (result["definitions"] + (TRIVIAL,)),
            "survey code keys in common=%d (reference %d, candidate %d)" % result["keys"],
            "white excused for the communications colour=%d" % len(result["excused"])]
 
