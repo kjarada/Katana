@@ -780,7 +780,9 @@ def v1_to_v2(bench: Bench, args: argparse.Namespace) -> None:
                  {"status": "committed", "reason": "", "version": V2_VERSION, "tx": transaction}, "last.json")
     world.expect_tree(world.after_update_to(v2), "after the update")
     expect_equal(world.leftovers(), [], "what a healthy update leaves in R/.update")
-    expect(not stage.exists(), "the stage folder is still there after a healthy update")
+    # The staged files are of no use any more (design, section 5: a healthy update deletes the stage).
+    expect(staged_files(stage) == {} and not (stage / "manifest.json").exists(),
+           f"a healthy update left its stage behind: {sorted(staged_files(stage))}")
     # The new version was started for its health check from the install, and again at the end.
     program = str(world.root / "bin" / "katana.exe")
     health = world.wait_for_stub("health ")
@@ -865,9 +867,11 @@ def locked_file(bench: Bench, args: argparse.Namespace) -> None:
     feed = bench.feed(v2.folder)
     stage = world.stage(feed)
     prepared = world.preflight(stage)
-    # A library: the data files are committed before it (apply.hpp, step 5), so the rollback has files to
-    # put back. Python opens without FILE_SHARE_DELETE, which is what keeps a file from being renamed.
-    held = world.root / "bin" / "libcore-1.dll"
+    # A program: the data files and the libraries are committed before the programs (apply.hpp, step 5),
+    # so by then files have been replaced, added and removed, and the rollback has all three to undo.
+    # Python opens without FILE_SHARE_DELETE, which is what keeps a file from being renamed; nothing runs
+    # from it, so the helper's scan of running programs has nobody to wait for.
+    held = world.root / "bin" / "katana_cli.exe"
     with open(held, "rb"):
         rolled = world.swap(prepared, timings=TIMINGS_SHORT_RETRY, relaunch=True)
     expect_equal((rolled.code, rolled.value("outcome"), rolled.value("reason")),
