@@ -392,7 +392,7 @@ layers recoloured.
 library (`docs/katana_standard.md`) draws a coded service in the same values,
 so a coded service and a drawn one are one colour in one drawing.
 `KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` reads the
-committed library file and requires each of its 71 coded services to draw in
+committed library file and requires each of its 186 coded services to draw in
 the colour of its kind, and every kind but `other` (the library has no code
 for it) to be reached. A palette colour that no code uses is not held to the
 table. Changing one value without the other fails that test.
