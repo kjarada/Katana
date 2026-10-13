@@ -368,7 +368,12 @@ endif()
 #                                           with the one worked out by hand (Windows with NSIS)
 #   packaging_nsis_uninstaller_test_catches_*
 #                                           the same with one rule of those functions broken: the
-#                                           test must name the file the broken rule left or took
+#                                           test must name the file the broken rule left or took.
+#                                           Each requires the test above as a fixture: a broken
+#                                           rule says something only where the unbroken functions
+#                                           pass, and a machine that will not run the throwaway
+#                                           programs then fails that one test after one wait, and
+#                                           ctest reports these as not run
 #
 # Those throwaway programs write under their own folder of the build tree only: no registry, no
 # Start menu, and a stand-in for LOCALAPPDATA. No test here runs Katana's installer, because that
@@ -422,6 +427,29 @@ katana_add_nsis_mutation(state_folder_is_another_folder "the updater's state fol
 katana_add_nsis_mutation(update_choices_removed "the person's choices about updating, which the uninstaller keeps")
 katana_add_nsis_mutation(run_once_under_another_name
     "does not remove the helper's RunOnce value under the name the helper gives it")
+# What NSIS does not compile is no instruction: a block comment, a condition the check cannot
+# evaluate, one condition inside another. A condition of the template's own kind that is false
+# is read as NSIS reads it, so the call inside it is not found and the rule that asks for the
+# call is the one that speaks.
+katana_add_nsis_mutation(block_comment_hides_an_instruction "/[*]: a block comment")
+katana_add_nsis_mutation(unknown_condition_hides_an_instruction "!if 0: a condition this check cannot evaluate")
+katana_add_nsis_mutation(false_condition_hides_an_instruction "does not remove the files the installed manifest lists")
+katana_add_nsis_mutation(condition_inside_a_condition "one condition inside another")
+# The installed manifest is read before it is deleted, or nothing an update added is removed.
+katana_add_nsis_mutation(manifest_deleted_before_it_is_read
+    "comes before Call un[.]DeleteManifestFiles: the list would be gone before it is read")
+# The folder: none at all is refused, a silent run tries it too, a reinstall is offered the same one.
+katana_add_nsis_mutation(no_folder_at_all_is_installed_into
+    "no folder at all is refused, like one that cannot be written to: the script has no")
+katana_add_nsis_mutation(silent_install_does_not_try_the_folder
+    "the installer's section does not begin with Call CheckInstallFolder")
+katana_add_nsis_mutation(installed_copy_is_not_offered_again
+    "a copy that is already installed is offered as the folder again: the script has no")
+katana_add_nsis_mutation(uninstaller_runs_without_a_folder
+    "the uninstaller's section does not begin by stopping when its folder is not known")
+# An entry in Settings > Apps whose uninstaller was deleted by hand must not stop the install.
+katana_add_nsis_mutation(uninstaller_that_is_gone_stops_the_install
+    "runs the uninstaller that the entry in Settings > Apps names without looking for it first")
 # The case no mutation can stand for: the template this one replaces, as CMake ships it. It is
 # the installer Katana had (administrator rights, HKLM, Program Files); the check must refuse it
 # on its own terms. Where CMake keeps it differs between versions, so it is only looked for.
@@ -469,9 +497,13 @@ if(WIN32 AND KATANA_MAKENSIS)
         add_test(NAME packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else
             COMMAND ${_katana_nsis_uninstaller_run} "-DWORK=${_katana_nsis_uninstaller_work}/as_it_is"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/run_nsis_uninstaller.cmake")
+        # A fixture: the tests of the broken rules below run only where this one passes. The
+        # script gives each program it starts a minute and stops at the first that does not
+        # come back, so 300 s is never reached by waiting on a program that is held.
         set_tests_properties(packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else PROPERTIES
             PASS_REGULAR_EXPRESSION "Uninstaller file removal: the manifest's files and the updater's staged files went"
             FAIL_REGULAR_EXPRESSION "CMake Error"
+            FIXTURES_SETUP packaging_nsis_uninstaller_runs
             TIMEOUT 300)
         # What each broken rule must be seen to do, named by the file it leaves or takes: a
         # listed file that stays (the rule that lets a release folder through is broken) or a
@@ -483,6 +515,7 @@ if(WIN32 AND KATANA_MAKENSIS)
                         -DMUTATE=${mutation} -P "${CMAKE_CURRENT_SOURCE_DIR}/run_nsis_uninstaller.cmake")
             set_tests_properties(packaging_nsis_uninstaller_test_catches_${mutation} PROPERTIES
                 PASS_REGULAR_EXPRESSION "${_regex}"
+                FIXTURES_REQUIRED packaging_nsis_uninstaller_runs
                 TIMEOUT 300)
         endfunction()
         katana_add_nsis_uninstaller_mutation(first_folder_length "left, should have gone: install/bin/katana[.]exe")

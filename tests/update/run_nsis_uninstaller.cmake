@@ -32,12 +32,30 @@
 # test that uses it expects this script to name the file that the broken rule left or took: a
 # test that cannot see a broken reader passes as quietly as one that finds none. A mutation
 # that leaves the trees as expected is an error of its own.
+#
+# Every program started here is new to the machine, and a scanner looks at a new program before
+# it lets it run: on the machine this was written on that is some seconds a program, and the
+# three cases together take about half a minute. Each program is given a minute, which is many
+# times that, and the script stops at the first one that does not come back: where these
+# programs are held for good, or not let run at all, that is one wait and one plain message.
 
 foreach(_required TEMPLATE MAKENSIS WORK)
     if(NOT ${_required})
         message(FATAL_ERROR "Pass -D${_required}=...")
     endif()
 endforeach()
+# How long one program may take (the top of this file).
+set(_program_seconds 60)
+# Stops the script when a program was ended for taking that long. `status` is what
+# execute_process reports: a number, or its words for a timeout or a program it could not start.
+function(katana_stop_if_held what status)
+    if(status MATCHES "timeout")
+        message(FATAL_ERROR "${what} did not come back in ${_program_seconds} s (${status}). Its work "
+            "takes a moment, so either something on this machine is holding a program it has not seen "
+            "before, most likely its endpoint protection, or the functions under test no longer end. "
+            "The trees were not compared")
+    endif()
+endfunction()
 if(WORK MATCHES " ")
     message(FATAL_ERROR "WORK (${WORK}) has a space in it: /D= and _?= cannot carry such a folder "
         "from CMake to an NSIS program (see the top of this file)")
@@ -140,7 +158,8 @@ SectionEnd
 ]=])
 file(WRITE "${WORK}/uninstaller_functions.nsi" "${_nsi}")
 execute_process(COMMAND "${MAKENSIS}" /V2 "${WORK}/uninstaller_functions.nsi"
-    RESULT_VARIABLE _status OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+    RESULT_VARIABLE _status OUTPUT_VARIABLE _output ERROR_VARIABLE _error TIMEOUT ${_program_seconds})
+katana_stop_if_held("makensis" "${_status}")
 if(NOT _status EQUAL 0)
     message(FATAL_ERROR "makensis did not accept the uninstaller's functions (${_status}):\n${_output}\n${_error}")
 endif()
@@ -187,7 +206,8 @@ function(katana_case case_name)
     file(REMOVE_RECURSE "${WORK}/localappdata")
     file(TO_NATIVE_PATH "${_root}" _native_root)
     execute_process(COMMAND "${WORK}/installer.exe" /S "/D=${_native_root}"
-        RESULT_VARIABLE _made OUTPUT_VARIABLE _o ERROR_VARIABLE _e TIMEOUT 120)
+        RESULT_VARIABLE _made OUTPUT_VARIABLE _o ERROR_VARIABLE _e TIMEOUT ${_program_seconds})
+    katana_stop_if_held("${case_name}: the throwaway installer" "${_made}")
     if(NOT _made EQUAL 0 OR NOT EXISTS "${_root}/Uninstall.exe")
         message(FATAL_ERROR "${case_name}: the throwaway installer did not write the uninstaller (${_made})")
     endif()
@@ -220,7 +240,8 @@ function(katana_case case_name)
     endif()
 
     execute_process(COMMAND "${_root}/Uninstall.exe" /S "_?=${_native_root}"
-        RESULT_VARIABLE _ran OUTPUT_VARIABLE _o ERROR_VARIABLE _e TIMEOUT 120)
+        RESULT_VARIABLE _ran OUTPUT_VARIABLE _o ERROR_VARIABLE _e TIMEOUT ${_program_seconds})
+    katana_stop_if_held("${case_name}: the uninstaller" "${_ran}")
     if(NOT _ran EQUAL 0)
         set(_failures "${_failures}${case_name}: the uninstaller exited with ${_ran}\n" PARENT_SCOPE)
         return()
