@@ -41,6 +41,10 @@ katana_add_test_suite(update
         test_feed.cpp
         test_check.cpp
         test_stage.cpp
+        # T9: the helper program's process scan, registry and command line, and the swap driven
+        # through the real katana_updater_test (updater_stub.cpp stands in for Katana). Windows
+        # only; the other platforms' seams are T18's.
+        test_helper.cpp
 )
 # src/katana_update/credential_detail.hpp, the seams test_credential.cpp holds the stores to.
 target_include_directories(katana_update_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/katana_update")
@@ -77,6 +81,25 @@ if(_katana_updater_main)
     target_link_options(katana_updater_test PRIVATE ${_katana_updater_link_options})
     set_target_properties(katana_updater_test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
+endif()
+
+# ---- what test_helper.cpp runs (T9) -----------------------------------------------------------------
+#
+# The shipped helper, the helper with the test key, and a stand-in for Katana that the helper starts
+# for its health check and its relaunch (updater_stub.cpp). test_helper.cpp is part of
+# katana_update_tests, so the three are built before it. The stub is static like the helper, so
+# that it runs from an install with no toolchain on PATH. Never installed.
+if(WIN32 AND TARGET katana_updater_test)
+    add_executable(katana_updater_stub updater_stub.cpp)
+    katana_target_defaults(katana_updater_stub)
+    target_link_options(katana_updater_stub PRIVATE ${_katana_updater_link_options})
+    set_target_properties(katana_updater_stub PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
+    target_compile_definitions(katana_update_tests PRIVATE
+        KATANA_UPDATER_EXE="$<TARGET_FILE:katana_updater>"
+        KATANA_UPDATER_TEST_EXE="$<TARGET_FILE:katana_updater_test>"
+        KATANA_UPDATER_STUB_EXE="$<TARGET_FILE:katana_updater_stub>")
+    add_dependencies(katana_update_tests katana_updater katana_updater_test katana_updater_stub)
 endif()
 
 # ---- the pinned keys (cmake/KatanaUpdateKeys.cmake) ----------------------------------
