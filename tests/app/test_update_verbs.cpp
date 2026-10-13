@@ -2177,7 +2177,7 @@ TEST(UpdateVerbs, KatanaClisSessionPrintsADownloadsProgressOnceAndKeepsThePrepar
     Rig rig;
     rig.serveV2();
     putAHelperIn(rig.root);
-    std::optional<update::ApplyRequest> request;
+    update::ApplyRequest request;
     {
         CliSession cli(rig);
         std::string downloaded;
@@ -2211,26 +2211,27 @@ TEST(UpdateVerbs, KatanaClisSessionPrintsADownloadsProgressOnceAndKeepsThePrepar
             applied = captured.out();
             EXPECT_TRUE(captured.err().empty()) << captured.err();
         }
-        request = cli.session.takePendingApply();
-        ASSERT_TRUE(request.has_value()) << "the line that succeeded left its request";
-        EXPECT_EQ(applied, "ready=0.10.0 transaction=" + request->transaction + "\n");
+        const std::optional<update::ApplyRequest> taken = cli.session.takePendingApply();
+        ASSERT_TRUE(taken.has_value()) << "the line that succeeded left its request";
+        request = *taken;
+        EXPECT_EQ(applied, "ready=0.10.0 transaction=" + request.transaction + "\n");
         EXPECT_FALSE(cli.session.takePendingApply().has_value()) << "handed over once";
     }
 
     // What katana_cli's request tells the helper: wait for THIS process - the
     // one that ran the line - and start nothing afterwards.
-    EXPECT_EQ(request->waitPid, static_cast<std::uint64_t>(GetCurrentProcessId()));
-    EXPECT_TRUE(request->relaunch.empty());
-    EXPECT_EQ(request->root, rig.root);
-    EXPECT_EQ(request->stageDirectory, rig.stageDirectory());
-    EXPECT_EQ(request->stateDirectory, rig.state);
-    EXPECT_TRUE(update::isValidTransactionId(request->transaction)) << request->transaction;
+    EXPECT_EQ(request.waitPid, static_cast<std::uint64_t>(GetCurrentProcessId()));
+    EXPECT_TRUE(request.relaunch.empty());
+    EXPECT_EQ(request.root, rig.root);
+    EXPECT_EQ(request.stageDirectory, rig.stageDirectory());
+    EXPECT_EQ(request.stateDirectory, rig.state);
+    EXPECT_TRUE(update::isValidTransactionId(request.transaction)) << request.transaction;
 
     // The session started nothing: its front end does, once the session has
     // ended. And a request that was taken is the front end's to launch - the
     // session that ended did not give its helper copy up.
     EXPECT_TRUE(rig.launcher.detached.empty());
-    EXPECT_TRUE(fs::exists(request->helper));
+    EXPECT_TRUE(fs::exists(request.helper));
     EXPECT_TRUE(listedForTheSweep(rig.state).empty());
 }
 
