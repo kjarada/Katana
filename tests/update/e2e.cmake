@@ -2,6 +2,7 @@
 # Included by tests/update/CMakeLists.txt (it globs e2e*.cmake) once katana_update_e2e,
 # katana_updater_test and katana_updater_stub exist.
 #
+#   update_e2e_program_...   katana_update_e2e by itself: its usage, and that it cannot leave the machine
 #   update_tools_fake_feed   tools/update_fake_feed.py asked with urllib (tool_tests/test_fake_feed.py)
 #   update_e2e_<sentence>    one case of tests/update/update_e2e.py each: the real producer makes and
 #                            signs two releases, the fake feed serves them on 127.0.0.1, and
@@ -23,6 +24,37 @@
 if(WIN32)
     target_link_libraries(katana_update_e2e PRIVATE ws2_32)
 endif()
+
+# ---- the program's own rule, with no feed and no Python ------------------------------------------
+#
+# katana_update_e2e is what every case below fetches with, so that it cannot leave the machine is a
+# promise worth a test of its own (e2e_main.cpp, "THE WIRE REACHES 127.0.0.1 AND NOTHING ELSE"): a
+# feed that is not `http://127.0.0.1` is refused on the command line, a name is never looked up
+# (localhost included), and GitHub's own addresses are not connected to unless --connect says which
+# loopback port stands in for the host. None of these opens a socket. The install they name is the
+# T3 fixtures' (read, never written); the state folder is never made.
+add_test(NAME update_e2e_program_prints_its_usage_when_given_no_command COMMAND katana_update_e2e)
+set_tests_properties(update_e2e_program_prints_its_usage_when_given_no_command PROPERTIES
+    PASS_REGULAR_EXPRESSION "usage: katana_update_e2e check[|]plan[|]stage")
+set(_katana_e2e_fixture_install --root "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/install/v1"
+    --state "${CMAKE_CURRENT_BINARY_DIR}/e2e-state-that-is-never-made")
+foreach(_katana_e2e_refused IN ITEMS
+        "an_https_feed|https://github.com/kjarada/Katana/releases/latest/download"
+        "a_feed_named_localhost_because_no_name_is_looked_up|http://localhost:8080"
+        "a_plain_http_feed_on_another_host|http://example.com/feed")
+    string(REPLACE "|" ";" _katana_e2e_refused "${_katana_e2e_refused}")
+    list(GET _katana_e2e_refused 0 _katana_e2e_what)
+    list(GET _katana_e2e_refused 1 _katana_e2e_address)
+    add_test(NAME update_e2e_program_refuses_${_katana_e2e_what}
+        COMMAND katana_update_e2e check ${_katana_e2e_fixture_install} --feed "${_katana_e2e_address}")
+    set_tests_properties(update_e2e_program_refuses_${_katana_e2e_what} PROPERTIES
+        PASS_REGULAR_EXPRESSION "--feed is an http address on the loopback")
+endforeach()
+add_test(NAME update_e2e_program_connects_to_no_github_address_it_was_given_no_route_for
+    COMMAND katana_update_e2e check ${_katana_e2e_fixture_install} --github kjarada/Katana)
+set_tests_properties(update_e2e_program_connects_to_no_github_address_it_was_given_no_route_for PROPERTIES
+    PASS_REGULAR_EXPRESSION "detail=the test client reaches the loopback address only"
+    TIMEOUT 300)
 
 if(NOT Python3_Interpreter_FOUND OR Python3_VERSION VERSION_LESS 3.10)
     message(STATUS "Update end-to-end tests: no Python 3.10 or later; the fake feed's test and the "
