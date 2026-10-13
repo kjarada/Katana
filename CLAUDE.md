@@ -120,6 +120,24 @@ cmake --build build/release --parallel       # ALWAYS --parallel
 QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 14 --output-on-failure
 ```
 
+- **Build once, at the end - the owner's standing instruction (2026-10-13).** A
+  build and a suite run take a long time, and a session that keeps running them
+  spends its time waiting.
+  - While code is being written - by you, or by several agents editing in
+    parallel worktrees - do NOT run `cmake --build`, `ninja` or `ctest`. Write,
+    read and review the code; check what can be checked by reading it.
+  - A syntax-only compile of one or two files (`g++ -fsyntax-only`, seconds,
+    no `ninja`, no object files) is not a build and is allowed.
+  - The build and the whole-suite run happen ONCE, as the final step, after
+    every agent has finished editing: one integration step builds everything,
+    runs everything, and fixes what the merge or the first compile broke. Its
+    totals are the evidence (section 6, section 7).
+  - A task that was only asked to edit says "not built" in its report as a
+    plain fact, not as a failure, and lists the tests it wrote for the
+    integration step to run.
+  - Not covered by this: the owner asking you to build, run a test or drive the
+    program, and the hand-off build (section 7).
+  - Everything else in this section says how to build when it is time to.
 - **Always `--parallel`.**
 - **Show the build.** Run cmake, ninja and ctest in the foreground, with
   their output reaching the terminal:
