@@ -14,6 +14,9 @@
 #include <QStringList>
 #include <QVBoxLayout>
 
+#include "katana/core/error.hpp"
+#include "katana/update/check.hpp"
+#include "katana/update/manifest.hpp"
 #include "theme.hpp"
 
 namespace katana::qt {
@@ -27,7 +30,9 @@ constexpr std::uint64_t kMegabyte = 1'000'000;
 constexpr int kProgressSteps = 1000;
 
 // A person's words for each token the engine gives as a reason: what a check
-// could not do (include/katana/update/check.hpp) and how an apply ended
+// could not do (include/katana/update/check.hpp), what the transport under it
+// and under the download refused (feed.hpp, fetchFailureReason), why a
+// download or the helper's preflight stopped (stage.hpp) and how an apply ended
 // (apply.hpp, ApplyResult::reason), with the verbs' own two (update_verbs.hpp:
 // no_transport, no_store). Each stands after a colon and before a full stop.
 struct ReasonWords {
@@ -43,7 +48,14 @@ constexpr ReasonWords kReasonWords[] = {
     {"bad_signature", "the update information is not signed by Katana's release key"},
     {"wrong_product", "the update information is for another product"},
     {"wrong_target", "the update information is for another kind of computer"},
+    {"wrong_channel", "the update information is for another release channel"},
     {"malformed", "the update information could not be read"},
+    {"too_large", "the update information is longer than update information can be"},
+    {"html_page", "a web page answered in the place of the release server; this network may "
+                  "want you to sign in first"},
+    {"asset_missing", "the release is missing a file the update needs"},
+    {"verify_unavailable", "the signature of the update information could not be checked on "
+                           "this computer"},
     {"untrusted_key", "the update information is signed by a key this copy does not trust"},
     {"placeholder_keys", "this build carries placeholder update keys and accepts no release"},
     {"partial_downloads", "this network does not allow partial downloads"},
@@ -56,6 +68,25 @@ constexpr ReasonWords kReasonWords[] = {
     {"blocked_before", "that version could not be installed here before"},
     {"no_transport", "this build has no network access"},
     {"no_store", "this session has no credential store"},
+    // The transport, under a check and under a download.
+    {"bad_range", "the release server sent another part of the download than was asked for"},
+    {"bad_redirect", "the release server sent the request on to an address that cannot be used"},
+    {"too_many_redirects", "the release server sent the request on too many times"},
+    {"error", "the release server's answer could not be used"},
+    // A download.
+    {"staged_corrupt", "a downloaded file could not be unpacked"},
+    {"write_failed", "the folder the download is kept in could not be written"},
+    {"stage_busy", "another Katana is downloading this update now"},
+    {"low_disk_space", "there is not enough free disk space for the download"},
+    {"short_range", "the release server sent less of the download than was asked for"},
+    {"unverified_manifest", "the update information was not verified"},
+    {"no_token", "the releases are private and no access token is stored"},
+    {"payload_mismatch", "the release's download is not the one its update information names"},
+    // The helper's preflight.
+    {"helper_missing", "the update helper program is missing"},
+    {"helper_not_started", "the update helper could not be started"},
+    {"helper_timeout", "the update helper did not answer in time"},
+    {"helper_failed", "the update helper did not pass its own test"},
     // An apply.
     {"locked", "another update was already running"},
     {"interrupted_update", "an earlier update was interrupted and could not be put back"},
@@ -192,23 +223,56 @@ QString updateSkipLine(const QString& version)
     return QStringLiteral("UPDATE SKIP ") + version;
 }
 
-QString updateLoggedLine(const QString& line)
+namespace {
+
+// The words of `line` when it is UPDATE TOKEN with something after it, and
+// none otherwise: the lines whose later words may be a token somebody typed.
+QStringList tokenLineWords(const QString& line)
 {
-    const QStringList words = line.simplified().split(QChar::Space, Qt::SkipEmptyParts);
+    QStringList words = line.simplified().split(QChar::Space, Qt::SkipEmptyParts);
     if (words.size() < 3 || words[0].compare(QLatin1String("UPDATE"), Qt::CaseInsensitive) != 0 ||
         words[1].compare(QLatin1String("TOKEN"), Qt::CaseInsensitive) != 0) {
+        words.clear();
+    }
+    return words;
+}
+
+// The two words the grammar has after UPDATE TOKEN; every other is hidden.
+bool isTokenVerbWord(const QString& word)
+{
+    return word.compare(QLatin1String("STATUS"), Qt::CaseInsensitive) == 0 ||
+           word.compare(QLatin1String("CLEAR"), Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
+
+QString updateLoggedLine(const QString& line)
+{
+    const QStringList words = tokenLineWords(line);
+    if (words.isEmpty()) {
         return line;
     }
     QStringList shown{words[0], words[1]};
     bool hidden = false;
     for (qsizetype at = 2; at < words.size(); ++at) {
-        const bool known = words[at].compare(QLatin1String("STATUS"), Qt::CaseInsensitive) == 0 ||
-                           words[at].compare(QLatin1String("CLEAR"), Qt::CaseInsensitive) == 0;
+        const bool known = isTokenVerbWord(words[at]);
         shown << (known ? words[at] : QStringLiteral("***"));
         hidden = hidden || !known;
     }
     // A line with nothing to hide is echoed as it was typed, blanks and all.
     return hidden ? shown.join(QChar::Space) : line;
+}
+
+QString updateLoggedReply(const QString& reply, const QString& line)
+{
+    const QStringList words = tokenLineWords(line);
+    QString shown = reply;
+    for (qsizetype at = 2; at < words.size(); ++at) {
+        if (!isTokenVerbWord(words[at])) {
+            shown.replace(words[at], QStringLiteral("***"), Qt::CaseInsensitive);
+        }
+    }
+    return shown;
 }
 
 QString updateReasonWords(const QString& token)
@@ -344,10 +408,15 @@ QString updateDetailText(const UpdateView& view)
         return text;
     }
     case UpdateDialogState::Ready:
-        return view.waitingForJobs
-                   ? QStringLiteral("Katana will close when the running job has finished, then "
-                                    "update and reopen.")
-                   : QStringLiteral("Katana will close, update and reopen in a few seconds.");
+        if (view.waitingForJobs) {
+            return QStringLiteral("Katana will close when the running job has finished, then "
+                                  "update and reopen.");
+        }
+        if (view.waitingForDialog) {
+            return QStringLiteral("Katana will close when the dialog that is open has been "
+                                  "closed, then update and reopen.");
+        }
+        return QStringLiteral("Katana will close, update and reopen in a few seconds.");
     case UpdateDialogState::Blocked:
         return QStringLiteral("Then press Retry.");
     case UpdateDialogState::RolledBack: {
@@ -372,6 +441,231 @@ QString updateDetailText(const UpdateView& view)
     }
     return {};
 }
+
+// ---- the decisions (update_dialog.hpp, "THE DECISIONS") ----------------------------------------
+
+bool updateSameVersion(const QString& a, const QString& b)
+{
+    const katana::core::Result<katana::update::Version> first =
+        katana::update::parseVersion(a.toStdString());
+    const katana::core::Result<katana::update::Version> second =
+        katana::update::parseVersion(b.toStdString());
+    if (first && second) {
+        return *first == *second;
+    }
+    return a == b;
+}
+
+QString updateReplyValue(const QString& reply, const char* key)
+{
+    // A record is a word: the two keys read here, reason and staged, have
+    // values without a blank in them.
+    static const QRegularExpression blanks(QStringLiteral("\\s+"));
+    const QString prefix = QString::fromLatin1(key) + QLatin1Char('=');
+    QString value;
+    for (const QString& word : reply.split(blanks, Qt::SkipEmptyParts)) {
+        if (word.startsWith(prefix)) {
+            value = word.mid(prefix.size());
+        }
+    }
+    if (value.size() >= 2 && value.startsWith(QLatin1Char('"')) &&
+        value.endsWith(QLatin1Char('"'))) {
+        value = value.mid(1, value.size() - 2);
+    }
+    return value;
+}
+
+QString updateStagedOfReply(const QString& reply)
+{
+    const QString staged = updateReplyValue(reply, "staged");
+    return staged.compare(QLatin1String("none"), Qt::CaseInsensitive) == 0 ? QString() : staged;
+}
+
+QString updateStatusButtonText(const UpdateView& view)
+{
+    if (view.latestVersion.isEmpty()) {
+        return {};
+    }
+    switch (view.state) {
+    case UpdateDialogState::Available:
+    case UpdateDialogState::Downloading:
+    case UpdateDialogState::Ready:
+    case UpdateDialogState::Blocked:
+        return QStringLiteral("Update ") + view.latestVersion;
+    case UpdateDialogState::Idle:
+    case UpdateDialogState::Checking:
+    case UpdateDialogState::Current:
+    case UpdateDialogState::NotOffered:
+    case UpdateDialogState::RolledBack:
+    case UpdateDialogState::CheckFailed:
+    case UpdateDialogState::Unsupported:
+        break;
+    }
+    return {};
+}
+
+UpdateView updateViewOfOffer(const katana::app::UpdateOffer& offer, const UpdateOfferFacts& facts)
+{
+    using katana::update::CheckStatus;
+    const katana::update::CheckResult& check = offer.check;
+    UpdateView view;
+    view.installedVersion = check.installedVersion.empty()
+                                ? facts.installedVersion
+                                : QString::fromStdString(check.installedVersion);
+    view.latestVersion = QString::fromStdString(check.latestVersion);
+    view.notesUrl = QString::fromStdString(check.notesUrl);
+    view.reason = QString::fromStdString(check.reason);
+    switch (check.status) {
+    case CheckStatus::Available:
+        // The release that is already downloaded is ready, not to be
+        // downloaded again.
+        if (!facts.stagedVersion.isEmpty() &&
+            updateSameVersion(facts.stagedVersion, view.latestVersion)) {
+            view.state = UpdateDialogState::Ready;
+            break;
+        }
+        view.state = UpdateDialogState::Available;
+        view.changedFiles = offer.changedFiles;
+        view.totalFiles = offer.totalFiles;
+        view.downloadBytes = offer.downloadBytes;
+        // `expires` is advisory: said, and the update still offered.
+        view.informationIsOld = check.manifest.has_value() &&
+                                katana::update::isExpired(*check.manifest, facts.nowEpoch);
+        view.notifyOnly =
+            !facts.appliesHere || (check.manifest.has_value() && check.manifest->notifyOnly);
+        break;
+    case CheckStatus::Current:
+        if (check.reason == "skipped") {
+            view.state = UpdateDialogState::NotOffered;
+        } else {
+            view.state = UpdateDialogState::Current;
+            view.lastChecked = facts.checkedAt;
+        }
+        break;
+    case CheckStatus::Blocked:
+        view.state = UpdateDialogState::NotOffered;
+        view.reason = QStringLiteral("blocked_before");
+        break;
+    case CheckStatus::Unreachable:
+        view.state = UpdateDialogState::CheckFailed;
+        break;
+    case CheckStatus::Unsupported:
+        view.state = UpdateDialogState::Unsupported;
+        break;
+    }
+    return view;
+}
+
+UpdateQuietAnswer updateQuietAnswer(const UpdateView& shown, const UpdateView& answer)
+{
+    // What must stay until it is read, and what a running job owns.
+    if (shown.state == UpdateDialogState::RolledBack ||
+        shown.state == UpdateDialogState::Checking ||
+        shown.state == UpdateDialogState::Downloading) {
+        return UpdateQuietAnswer::Nothing;
+    }
+    switch (answer.state) {
+    case UpdateDialogState::Available:
+    case UpdateDialogState::Ready:
+        // A release the view already offers - to download, downloaded, or
+        // waiting for other programs to close - is no news.
+        if (!updateStatusButtonText(shown).isEmpty() &&
+            updateSameVersion(shown.latestVersion, answer.latestVersion)) {
+            return UpdateQuietAnswer::Nothing;
+        }
+        return UpdateQuietAnswer::Announce;
+    case UpdateDialogState::Current:
+    case UpdateDialogState::NotOffered:
+        return UpdateQuietAnswer::Show;
+    case UpdateDialogState::Idle:
+    case UpdateDialogState::Checking:
+    case UpdateDialogState::Downloading:
+    case UpdateDialogState::Blocked:
+    case UpdateDialogState::RolledBack:
+    case UpdateDialogState::CheckFailed:
+    case UpdateDialogState::Unsupported:
+        break;
+    }
+    return UpdateQuietAnswer::Nothing;
+}
+
+QString updateStagedAfter(const QString& staged, const UpdateView& answer)
+{
+    if (answer.state == UpdateDialogState::Current) {
+        return {};
+    }
+    if (answer.state == UpdateDialogState::NotOffered &&
+        updateSameVersion(staged, answer.latestVersion)) {
+        return {};
+    }
+    return staged;
+}
+
+QString updateStagedToOffer(const katana::app::UpdateStatus& status,
+                            const katana::update::Version& installed,
+                            const std::function<bool(std::uint64_t sequence)>& stageIsThere)
+{
+    if (status.stagedVersion.empty()) {
+        return {};
+    }
+    const katana::core::Result<katana::update::Version> staged =
+        katana::update::parseVersion(status.stagedVersion);
+    if (!staged || !(*staged > installed)) {
+        return {};
+    }
+    const QString version = QString::fromStdString(status.stagedVersion);
+    if (!status.state.skippedVersion.empty() &&
+        updateSameVersion(version, QString::fromStdString(status.state.skippedVersion))) {
+        return {};
+    }
+    if (stageIsThere) {
+        for (const std::uint64_t sequence : status.state.blockedSequences) {
+            if (stageIsThere(sequence)) {
+                return {};
+            }
+        }
+    }
+    return version;
+}
+
+std::optional<UpdateView> updateViewOfLastResult(const katana::update::LastResult& last,
+                                                 const QString& installedVersion,
+                                                 const QString& installRoot)
+{
+    if (last.status == "committed") {
+        return std::nullopt;
+    }
+    UpdateView view;
+    view.installedVersion = installedVersion;
+    view.latestVersion = QString::fromStdString(last.version);
+    view.reason = QString::fromStdString(last.reason);
+    if (last.status == "blocked") {
+        // Nothing was touched and the release is still downloaded: Retry
+        // applies it again once the programs named are closed.
+        view.state = UpdateDialogState::Blocked;
+        view.holders = QString::fromStdString(last.holder);
+        return view;
+    }
+    view.state = UpdateDialogState::RolledBack;
+    view.lastStatus = QString::fromStdString(last.status);
+    if (last.status == "rollback_incomplete") {
+        view.recoverCommand = QStringLiteral("katana_updater --recover \"%1\"").arg(installRoot);
+    }
+    return view;
+}
+
+bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
+                               const katana::update::UpdateState& state, std::int64_t nowEpoch,
+                               std::chrono::seconds jitter)
+{
+    if (facts.headless || facts.disabled || facts.jobRunning || !facts.keepsState ||
+        facts.kind == katana::update::InstallKind::Development) {
+        return false;
+    }
+    return katana::update::checkIsDue(state, nowEpoch, jitter);
+}
+
+// ---- the dialog --------------------------------------------------------------------------------
 
 UpdateDialog::UpdateDialog(UpdateDialogContext context, QWidget* parent)
     : QDialog(parent), context_(std::move(context))
@@ -555,8 +849,9 @@ void UpdateDialog::refresh()
     downloadOnly_->setEnabled(lines);
     skip_->setEnabled(lines && !view_.latestVersion.isEmpty());
     notes_->setEnabled(static_cast<bool>(context_.openNotes) && !view_.notesUrl.isEmpty());
-    // While the window waits for a job before it closes, the press is already made.
-    restart_->setEnabled(lines && !view_.waitingForJobs);
+    // While the window waits - for a job, for a dialog that is open - before
+    // it closes, the press is already made.
+    restart_->setEnabled(lines && !view_.waitingForJobs && !view_.waitingForDialog);
     cancel_->setEnabled(static_cast<bool>(context_.cancel));
 }
 

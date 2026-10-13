@@ -3,13 +3,18 @@
 // Help > Check for Updates: what the update system knows, in two sentences, and
 // the buttons that fit it (docs/desktop.md, "Help > Check for Updates").
 //
-// THE DIALOG DOES NONE OF THE WORK and knows nothing of the update engine. It
+// THE DIALOG DOES NONE OF THE WORK and reads nothing of the update engine. It
 // shows an UpdateView - plain data its owner sets (UpdateWorkbench in the
 // window, a test's own) - and every button either builds the UPDATE line a
 // person would type (src/katana_app/update_verbs.hpp) and hands it to the
 // window's one executor (command_runner.hpp), or calls one callback of its
 // context. What the line did comes back as the next view, never as a guess of
 // the dialog's: a press changes no text here by itself.
+//
+// WHAT TURNS THE ENGINE'S RECORDS INTO A VIEW is beside it, at the end of this
+// file ("THE DECISIONS"): functions of their arguments, with no window, no
+// disk and no clock, which the owner calls and the widget tests drive with
+// records written by hand.
 //
 // Non-modal, kept by its owner, and no button is a default.
 //
@@ -45,8 +50,10 @@
 //   Ready        "Katana 0.3.0 is ready." / "Katana will close, update and
 //                reopen in a few seconds."  [Restart and update] [Later].
 //                With `waitingForJobs` the detail is "Katana will close when
-//                the running job has finished, then update and reopen." and
-//                Restart and update is disabled.
+//                the running job has finished, then update and reopen."; with
+//                `waitingForDialog`, "Katana will close when the dialog that
+//                is open has been closed, then update and reopen."; and
+//                Restart and update is disabled in both: the press is made.
 //   Blocked      "Close these first: katana_mcp.exe (4412)." / "Then press
 //                Retry."  [Retry]
 //   RolledBack   what the last apply ended as, by `lastStatus`
@@ -91,6 +98,7 @@
 // Its callbacks are its owner's: an owner that goes first calls detach(), after
 // which every button but Later is disabled and nothing is called.
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -100,6 +108,10 @@
 #include <QString>
 
 #include "command_runner.hpp"
+#include "katana/update/install.hpp"
+#include "katana/update/state.hpp"
+#include "katana/update/version.hpp"
+#include "update_verbs.hpp"
 
 class QLabel;
 class QProgressBar;
@@ -149,7 +161,8 @@ struct UpdateView {
     QString problem;
     bool informationIsOld = false; // Available
     bool notifyOnly = false;       // Available
-    bool waitingForJobs = false;   // Ready
+    bool waitingForJobs = false;   // Ready: the close waits for a running job
+    bool waitingForDialog = false; // Ready: the close waits for a dialog that is open
 };
 
 // What the dialog is given by whoever owns it. Every member may be empty, and
@@ -189,7 +202,8 @@ inline constexpr const char* kUpdateApplyLine = "UPDATE APPLY CONFIRM";
 // release server did not answer"; "http_503" is "the release server answered
 // with error 503"; a token it does not know is given back as it came, which is
 // still better than nothing said. The table is in update_dialog.cpp, a row a
-// token of include/katana/update/check.hpp and apply.hpp.
+// token of include/katana/update/check.hpp, feed.hpp (the transport's),
+// stage.hpp (the download's and the preflight's) and apply.hpp.
 [[nodiscard]] QString updateReasonWords(const QString& token);
 
 // Bytes as whole megabytes of a million bytes, rounded to the nearest - "71"
@@ -207,6 +221,135 @@ updateFilesOfProgressLine(const QString& line);
 // same words where a person is told outside the dialog.
 [[nodiscard]] QString updateStateText(const UpdateView& view);
 [[nodiscard]] QString updateDetailText(const UpdateView& view);
+
+// ---- THE DECISIONS -----------------------------------------------------------------------------
+//
+// What the dialog's owner decides from the update engine's records: which view
+// an answer is, what is offered when the window starts, when the window checks
+// by itself, what the log may show. They are here - beside the dialog, in the
+// library the widget tests link - because their owner in the program
+// (UpdateWorkbench) needs the whole window and cannot be built in a test. Each
+// is a function of its arguments: the owner gathers the facts (the disk, the
+// clock, the environment) and decides nothing of this itself.
+
+// "0.3" and "0.3.0" are one release (update/version.hpp); text that is no
+// version is the same only as itself.
+[[nodiscard]] bool updateSameVersion(const QString& a, const QString& b);
+
+// The value of `key` in a reply's records (`key=value`, blanks or line breaks
+// between them) - of the LAST record that has it, since a download's reply
+// ends with the record that says what is staged. Quotes around a value are
+// taken off. Empty when no record of the reply is `key=...`.
+[[nodiscard]] QString updateReplyValue(const QString& reply, const char* key);
+
+// The version UPDATE DOWNLOAD CONFIRM's reply says is staged: the value of its
+// last `staged=`, and empty for none at all and for `staged=none`.
+[[nodiscard]] QString updateStagedOfReply(const QString& reply);
+
+// What the verbs said back to `line`, as the command log may show it: every
+// word of the line that updateLoggedLine hides is hidden in `reply` too, IN
+// ANY CASE - a refusal may quote the line it refuses, and may have folded its
+// case first. A reply to any other line comes back unchanged.
+[[nodiscard]] QString updateLoggedReply(const QString& reply, const QString& line);
+
+// The status bar's button for a view: "Update 0.3.0" while there is a release
+// to act on - offered, on its way, downloaded, or waiting for other programs
+// to close - and EMPTY when the button is hidden: in every other state, and
+// for a view that names no version.
+[[nodiscard]] QString updateStatusButtonText(const UpdateView& view);
+
+// What the owner knows beside a check's answer.
+struct UpdateOfferFacts {
+    QString installedVersion;  // this copy's, for an answer that names none
+    QString stagedVersion;     // the release downloaded and waiting; empty when none is
+    QString checkedAt;         // the time as shown, "14:02"
+    std::int64_t nowEpoch = 0; // UTC seconds, for "the update information is old"
+    bool appliesHere = true;   // false where a copy cannot replace its own files
+};
+
+// What UPDATE CHECK's answer is shown as, by its status (update/check.hpp):
+//   available    Available, with the files and the bytes - or Ready, when the
+//                version offered is the one already downloaded. notifyOnly
+//                for a notify-only manifest and where the copy cannot apply;
+//                informationIsOld past the manifest's `expires`
+//   current      Current with the time; NotOffered "skipped" when the reason
+//                says the person skipped the release the feed has
+//   blocked      NotOffered "blocked_before"
+//   unreachable  CheckFailed with the reason
+//   unsupported  Unsupported with the reason
+[[nodiscard]] UpdateView updateViewOfOffer(const katana::app::UpdateOffer& offer,
+                                           const UpdateOfferFacts& facts);
+
+// What the AUTOMATIC check does with its answer, which nobody asked for.
+enum class UpdateQuietAnswer {
+    Nothing,  // it learnt nothing, or nothing that changes what is shown: no word anywhere
+    Show,     // nothing to tell, something to show: the view changes and the log does not
+    Announce, // a release to offer: logged as a typed check is, and shown
+};
+// `shown` is what the dialog shows now, `answer` the view of the check's
+// answer (updateViewOfOffer, after update::applyUpdateState):
+//   - a release to offer (Available, Ready) is announced - unless that very
+//     version is already shown in that state, which is no news;
+//   - a check that failed, or that this copy cannot make, says nothing;
+//   - "up to date" and "not offered" are shown without a word - which is what
+//     takes back a release the view still offers once the feed no longer has
+//     it, or once it was skipped or rolled back here - except over a view
+//     that must stay until it is read (RolledBack) or that a job owns
+//     (Checking, Downloading).
+[[nodiscard]] UpdateQuietAnswer updateQuietAnswer(const UpdateView& shown,
+                                                  const UpdateView& answer);
+
+// The downloaded release that is still one to install after a check answered
+// `answer`: none once the feed has nothing above this copy (Current: the
+// release was withdrawn), and none once the answer says that very version was
+// skipped or rolled back here (NotOffered); otherwise `staged` as it was - a
+// check that failed un-knows nothing.
+[[nodiscard]] QString updateStagedAfter(const QString& staged, const UpdateView& answer);
+
+// The release to offer as Ready when the window starts, from what UPDATE
+// STATUS says is downloaded: its version, or empty when none is to be offered -
+//   - nothing is staged, or what is staged is no version above `installed`
+//     (the stage a finished update left behind);
+//   - the person skipped that version (status.state.skippedVersion);
+//   - a release that was ROLLED BACK HERE still has its stage. The apply keeps
+//     the stage of a release it rolled back (update/apply.hpp) and STATUS
+//     names what is staged by version alone, so the complete stage of a
+//     blocked sequence in the update folder - which `stageIsThere(sequence)`
+//     says - means what is staged is, or may be, the release that does not
+//     start here. Offered as ready, it would be installed again.
+[[nodiscard]] QString
+updateStagedToOffer(const katana::app::UpdateStatus& status,
+                    const katana::update::Version& installed,
+                    const std::function<bool(std::uint64_t sequence)>& stageIsThere);
+
+// How the last apply ended (U/last.json, update::LastResult) as the dialog
+// shows it at the next start. nullopt for "committed": a success is one line
+// in the log, not a dialog. "blocked" is the Blocked state with the programs
+// to close; every other status is RolledBack with that status and the reason,
+// and "rollback_incomplete" with the command that puts the install right by
+// hand, which names `installRoot` (the folder as the platform writes it).
+[[nodiscard]] std::optional<UpdateView>
+updateViewOfLastResult(const katana::update::LastResult& last, const QString& installedVersion,
+                       const QString& installRoot);
+
+// What the window's automatic check depends on beside the state file.
+struct UpdateAutoCheckFacts {
+    bool headless = false;   // a headless run checks nothing by itself
+    bool disabled = false;   // KATANA_UPDATE_DISABLE is set
+    bool jobRunning = false; // an update job is running already
+    katana::update::InstallKind kind = katana::update::InstallKind::Development;
+    bool keepsState = false; // the session has a per-user update folder
+};
+
+// Whether the window checks by itself now. Only when ALL of these hold: the
+// run is not headless; KATANA_UPDATE_DISABLE is not set; no update job runs;
+// the copy is one packaging installed (a development tree stays offline); the
+// session keeps per-user state (with none there is no saying when the last
+// check was); and update::checkIsDue says so for `state` - its automatic flag
+// on, and the last check 24 hours and `jitter` ago, or never, or in the future.
+[[nodiscard]] bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
+                                             const katana::update::UpdateState& state,
+                                             std::int64_t nowEpoch, std::chrono::seconds jitter);
 
 class UpdateDialog final : public QDialog {
   public:
