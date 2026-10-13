@@ -41,7 +41,7 @@ files with the standard `json` module, shares no code with Katana, and compares 
                       overlap are one line, however many draws wrote it; a mark written twice is one mark; and
                       a dot that lies on a line, a ring or an arc of its own definition is no mark, since Katana
                       draws a dot as one point of the pen's width and the pen has been there. Two definitions
-                      have one shape when every mark of the one drawing is a mark of the other, so the
+                      have one shape when every mark of each drawing is a mark of the other, so the
                       comparison is made
                         without regard to the ORDER the strokes are written in, to how they are chained (a square
                           as one path, or as four lines), or to the pieces a line is cut into;
