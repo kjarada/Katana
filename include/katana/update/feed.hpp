@@ -134,6 +134,11 @@ struct FetchRequest {
     // the range).
     std::uint64_t rangeStart = 0;
     std::uint64_t rangeLength = 0;
+    // The signed size of the file a range is taken from (Manifest::payload->size): what a
+    // `Content-Range` total and a 200 that holds the whole file are held to
+    // (checkRangeResponse, ranges.hpp). Required (InvalidArgument without it) when
+    // rangeLength is not 0; ignored otherwise.
+    std::uint64_t payloadSize = 0;
     // The most bytes to accept; the transfer is abandoned the moment it is
     // exceeded. For a range this equals rangeLength, so a server that ignores
     // `Range` and starts the whole payload cannot flood the disk or memory.
@@ -165,5 +170,100 @@ using ProgressFn = std::function<void(std::uint64_t done, std::uint64_t total)>;
 // the signature, which is checked before the body is believed.
 using Fetch = std::function<core::Result<std::string>(const FetchRequest&, std::stop_token,
                                                       ProgressFn)>;
+
+// ---- the transport's rules ---------------------------------------------------------------------
+//
+// What a Fetch does between the request and the bytes is the engine's, and is written here with
+// no HTTP library, so that the rules that keep the token safe are tested to the letter:
+// makeFetch(hop) is a Fetch over a function that moves ONE request on the wire and follows
+// nothing. katana_app supplies that function from gis::httpExchange
+// (src/katana_app/update_transport.cpp); a test supplies a fake that records what each hop sent.
+//
+//   - Redirects are followed HERE, at most kMaxRedirects, and only to https addresses (an http
+//     address on the loopback only when the request itself began there: a feed of the owner's
+//     own, a test). The headers are REBUILT for every hop (hopHeaders): `Authorization: Bearer`
+//     only when the hop's address is exactly https://api.github.com, so the signed address of
+//     the storage host never receives the token, and `Range` and `Accept` on every hop.
+//   - A 404 is NotFound; any other status that is not 200/206 is FileImportFailure with the
+//     context `status=<n>`; a transport failure is `status=0` (the Fetch conventions above).
+//   - An answer whose content type is HTML is a web page standing in for the file (a captive
+//     portal, a proxy's sign-in): FileImportFailure, context `status=<n>; portal=html`.
+//   - A ranged answer is held to checkRangeResponse (ranges.hpp): 206 with the Content-Range
+//     asked for, or a 200 that is the whole file when the whole file was asked for. A server that
+//     ignores `Range` and starts the whole payload is cut off at maxBytes (the hop function does
+//     that) and reported as Unsupported "this network does not allow partial downloads".
+//   - No address with a query string, and no header, is ever put in an Error: displayUrl.
+
+inline constexpr std::string_view kApiHost = "api.github.com";
+inline constexpr int kMaxRedirects = 5;
+// What the hop function is given as the time for one request: a whole-body request is a few
+// kilobytes; a range is at most kRangeMaxLength (32 MiB), which a slow line takes minutes over.
+inline constexpr int kHopTimeoutSeconds = 60;
+inline constexpr int kRangeHopTimeoutSeconds = 600;
+
+// True for exactly `https://api.github.com` and a path or query after it, in any case: the
+// authority is the whole text up to the first '/', '?' or '#', so a user-info prefix
+// (https://api.github.com@host/), a port, a longer name (api.github.com.example.org) and a
+// trailing dot are all NOT api.github.com. The one test the token passes.
+[[nodiscard]] bool isApiGithubUrl(std::string_view url);
+
+// https://..., or http://127.0.0.1, http://localhost or http://[::1] (any port) when
+// `allowLoopbackHttp`. No control character, space or backslash, no user-info, a non-empty host.
+[[nodiscard]] bool isFetchableUrl(std::string_view url, bool allowLoopbackHttp);
+[[nodiscard]] bool isLoopbackHttpUrl(std::string_view url);
+
+// The address a Location header names, from the address that answered with it: an absolute
+// https (or http, which isFetchableUrl then judges) address, "//host/path" with the scheme of
+// `from`, or "/path" on the host of `from`. The fragment is dropped. Anything else - a path
+// relative to the current one, another scheme, a control character, a space, a backslash,
+// user-info - is FileImportFailure "bad_redirect".
+[[nodiscard]] core::Result<std::string> resolveRedirect(std::string_view from,
+                                                        std::string_view location);
+
+// The request headers for one hop to `hopUrl`, "Name: value" each:
+//   Accept: <request.accept>                         when it is not empty
+//   Range: bytes=a-b                                  for a ranged request
+//   Authorization: Bearer <request.bearerToken>       only when the token is not empty AND
+//                                                     isApiGithubUrl(hopUrl)
+//   X-GitHub-Api-Version: 2022-11-28                  for a hop to api.github.com
+// The token is a value in the result and nowhere else; log nothing built from it.
+[[nodiscard]] std::vector<std::string> hopHeaders(const FetchRequest& request,
+                                                  std::string_view hopUrl);
+
+// `url` without user-info, query and fragment: scheme://host/path, for an error context or a
+// log line. A signed storage address carries its signature in the query.
+[[nodiscard]] std::string displayUrl(std::string_view url);
+
+// One request on the wire, redirects NOT followed.
+struct HttpHop {
+    std::string url;
+    std::string userAgent;
+    std::vector<std::string> headers; // from hopHeaders
+    std::uint64_t maxBytes = 0;       // abandon the transfer past this many body bytes
+    int timeoutSeconds = kHopTimeoutSeconds;
+};
+
+// What came back. Any HTTP status that arrived is a reply, 3xx and 4xx included.
+struct HttpHopReply {
+    int status = 0;
+    std::string contentType;
+    std::string location;      // the Location header, empty when none
+    std::string contentRange;  // the Content-Range header, empty when none
+    std::string body;
+};
+
+// Errors of a hop: InvalidState when cancelled; Unsupported when the body passed maxBytes;
+// FileImportFailure with the context `status=0` for any failure to get an HTTP answer (no
+// connection, a certificate refused, a timeout); InvalidArgument for an address it cannot fetch.
+using HopFn = std::function<core::Result<HttpHopReply>(const HttpHop&, std::stop_token,
+                                                       ProgressFn)>;
+
+[[nodiscard]] Fetch makeFetch(HopFn hop);
+
+// The short machine-readable token for a failure of a Fetch (or of stage(), which adds its own
+// `reason=<token>` to its contexts): "cancelled", "http_<status>" (http_404, http_403, http_429),
+// "offline" (status=0), "html_page", "partial_downloads", "too_large", or the `reason=` token
+// the Error carries; "error" for anything else. What check()'s CheckResult::reason holds.
+[[nodiscard]] std::string fetchFailureReason(const core::Error& error);
 
 } // namespace katana::update

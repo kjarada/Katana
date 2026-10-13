@@ -68,7 +68,19 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 // InvalidState "cancelled"; the transport's errors; InvalidArgument for a
 // member that fails its hash or its size; FileExportFailure when the disk
 // refuses. Progress is bytes of the compressed payload fetched over the total
-// to fetch.
+// to fetch, counting what a previous run already staged as fetched.
+//
+// The Error of a failure carries a machine-readable token, `reason=<token>` first in
+// its context (fetchFailureReason, feed.hpp, reads it back; the transport's own failures
+// have theirs: http_<status>, offline, html_page, partial_downloads, cancelled):
+//   staged_hash      a member inflated to bytes that are not the signed file
+//   staged_corrupt   a member could not be unpacked, or is not the signed length
+//   write_failed     the stage folder could not be written
+//   low_disk_space   the volume has less than the plan's requiredFreeBytes (less what is staged)
+//   short_range      the server sent a body that is not the range's length
+//   unverified_manifest / notify_only / no_token   the call is not one stage() can serve
+//   asset_missing / payload_mismatch / malformed   the private route's release listing
+// preflight's: helper_missing, helper_not_started, helper_timeout, helper_failed.
 [[nodiscard]] core::Status stage(const Fetch& fetch, const FeedConfig& feed,
                                  const Manifest& manifest, const Plan& plan,
                                  const std::filesystem::path& stageDir, std::stop_token stop,

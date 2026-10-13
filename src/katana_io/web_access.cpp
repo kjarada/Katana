@@ -15,6 +15,7 @@
 #include <cpl_http.h>
 #include <cpl_minixml.h>
 #include <cpl_string.h>
+#include <curl/curl.h>
 
 #include "gdal_registry.hpp"
 #include "katana/core/sha256.hpp"
@@ -432,6 +433,212 @@ Result<HttpResponse> httpFetch(const HttpRequest& request, const std::stop_token
         failure.body = transfer.body.substr(0, 4096);
         failure.timeoutSeconds = request.timeoutSeconds;
         return explainHttpFailure(failure, std::move(context));
+    }
+}
+
+// ---- one exchange, redirects not followed ---------------------------------------------------
+
+namespace {
+
+// What a bounded copy of an error page is worth: enough to name the problem, never a download.
+constexpr std::size_t kErrorBodyBytes = 64 * 1024;
+
+struct ExchangeState {
+    const std::stop_token* stop = nullptr;
+    const TransferProgress* progress = nullptr;
+    std::uint64_t maxBytes = 0;
+    int status = 0; // of the LAST status line seen (a 100 Continue or a proxy's 200 comes first)
+    std::string contentType;
+    std::string location;
+    std::string contentRange;
+    std::string body;
+    bool tooLarge = false;
+};
+
+std::size_t onExchangeHeader(char* buffer, std::size_t size, std::size_t count, void* user)
+{
+    auto& state = *static_cast<ExchangeState*>(user);
+    const std::size_t bytes = size * count;
+    std::string_view line(buffer, bytes);
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+        line.remove_suffix(1);
+    }
+    if (line.starts_with("HTTP/")) {
+        // "HTTP/1.1 206 Partial Content", "HTTP/2 200": a new response begins, and what the
+        // earlier one said about itself no longer applies.
+        int code = 0;
+        const std::size_t space = line.find(' ');
+        for (std::size_t i = space == std::string_view::npos ? line.size() : space + 1;
+             i < line.size() && line[i] >= '0' && line[i] <= '9' && code < 1000; ++i) {
+            code = code * 10 + (line[i] - '0');
+        }
+        state.status = code;
+        state.contentType.clear();
+        state.location.clear();
+        state.contentRange.clear();
+        return bytes;
+    }
+    const std::size_t colon = line.find(':');
+    if (colon == std::string_view::npos) {
+        return bytes;
+    }
+    const std::string_view name = line.substr(0, colon);
+    const std::string value(katana::core::trimmed(line.substr(colon + 1)));
+    if (katana::core::equalsIgnoringCase(name, "content-type")) {
+        state.contentType = value;
+    } else if (katana::core::equalsIgnoringCase(name, "location")) {
+        state.location = value;
+    } else if (katana::core::equalsIgnoringCase(name, "content-range")) {
+        state.contentRange = value;
+    }
+    return bytes;
+}
+
+std::size_t onExchangeBody(char* data, std::size_t size, std::size_t count, void* user)
+{
+    auto& state = *static_cast<ExchangeState*>(user);
+    const std::size_t bytes = size * count;
+    if (state.stop != nullptr && state.stop->stop_requested()) {
+        return 0;
+    }
+    if (state.status == 200 || state.status == 206) {
+        if (state.body.size() + bytes > state.maxBytes) {
+            state.tooLarge = true;
+            return 0; // aborts the transfer
+        }
+        state.body.append(data, bytes);
+    } else if (state.body.size() < kErrorBodyBytes) {
+        state.body.append(data, std::min(bytes, kErrorBodyBytes - state.body.size()));
+    }
+    return bytes;
+}
+
+int onExchangeProgress(void* user, curl_off_t total, curl_off_t received, curl_off_t, curl_off_t)
+{
+    auto& state = *static_cast<ExchangeState*>(user);
+    if (state.progress != nullptr && *state.progress && received >= 0) {
+        (*state.progress)(static_cast<std::uint64_t>(received),
+                          total > 0 ? static_cast<std::uint64_t>(total) : 0);
+    }
+    return state.stop != nullptr && state.stop->stop_requested() ? 1 : 0; // non-zero aborts
+}
+
+// One request on a fresh libcurl handle, configured by GDAL's own option handling
+// (CPLHTTPSetOptions: proxy, certificate bundle, timeouts, user agent) and then told not to
+// follow a redirect.
+CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::string& message)
+{
+    CURL* curl = curl_easy_init();
+    if (curl == nullptr) {
+        message = "libcurl could not be started";
+        return CURLE_FAILED_INIT;
+    }
+    CPLStringList options;
+    options.SetNameValue("TIMEOUT", std::to_string(std::max(1, request.timeoutSeconds)).c_str());
+    options.SetNameValue("CONNECTTIMEOUT",
+                         std::to_string(std::max(1, request.connectTimeoutSeconds)).c_str());
+    options.SetNameValue("LOW_SPEED_LIMIT", "16");
+    options.SetNameValue("LOW_SPEED_TIME", "30");
+    if (!request.userAgent.empty()) {
+        options.SetNameValue("USERAGENT", request.userAgent.c_str());
+    }
+    CPLErrorReset();
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    // GDAL returns the header list it built; the caller attaches and frees it.
+    curl_slist* headers =
+        static_cast<curl_slist*>(CPLHTTPSetOptions(curl, request.url.c_str(), options.List()));
+    CPLPopErrorHandler();
+    for (const std::string& header : request.headers) {
+        headers = curl_slist_append(headers, header.c_str());
+    }
+
+    char errorBuffer[CURL_ERROR_SIZE] = {};
+    curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    // The point of this function. CPLHTTPSetOptions turns following on; it is turned off after.
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    // Called from worker threads (the update's download job): no signal-based timeouts.
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, onExchangeHeader);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &state);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onExchangeBody);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &state);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, onExchangeProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &state);
+
+    const CURLcode code = curl_easy_perform(curl);
+    message = errorBuffer[0] != '\0' ? errorBuffer : curl_easy_strerror(code);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    return code;
+}
+
+} // namespace
+
+Result<HttpExchange> httpExchange(const HttpRequest& request, const std::stop_token& stop,
+                                  const TransferProgress& progress)
+{
+    const std::string lower = katana::core::lowered(request.url.substr(0, 8));
+    if (!lower.starts_with("https://") && !lower.starts_with("http://")) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "only http and https URLs can be exchanged", redactUrl(request.url));
+    }
+    if (!request.postBody.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "an exchange is a GET and has no body",
+                         redactUrl(request.url));
+    }
+    detail::ensureGdalRegistered();
+
+    const std::string shown = redactUrl(request.url);
+    double delay = std::max(0.1, request.retryDelaySeconds);
+    for (int attempt = 0;; ++attempt) {
+        if (stop.stop_requested()) {
+            return makeError(ErrorCode::InvalidState, "cancelled", shown);
+        }
+        ExchangeState state;
+        state.stop = &stop;
+        state.progress = &progress;
+        state.maxBytes = request.maxBytes;
+        std::string message;
+        const CURLcode code = performExchange(request, state, message);
+
+        if (stop.stop_requested()) {
+            return makeError(ErrorCode::InvalidState, "cancelled", shown);
+        }
+        if (state.tooLarge) {
+            return makeError(ErrorCode::Unsupported,
+                             "the answer is larger than the " +
+                                 std::to_string(request.maxBytes) + " bytes this request allows",
+                             shown);
+        }
+        if (code == CURLE_OK) {
+            const bool serverTrouble =
+                state.status == 502 || state.status == 503 || state.status == 504;
+            if (!serverTrouble || attempt >= request.retries) {
+                HttpExchange exchange;
+                exchange.status = state.status;
+                exchange.contentType = std::move(state.contentType);
+                exchange.location = std::move(state.location);
+                exchange.contentRange = std::move(state.contentRange);
+                exchange.body = std::move(state.body);
+                return exchange;
+            }
+        } else if (attempt >= request.retries || !worthRetrying(0, static_cast<int>(code))) {
+            HttpFailure failure;
+            failure.status = 0;
+            failure.curlCode = static_cast<int>(code);
+            failure.error = message;
+            failure.timeoutSeconds = request.timeoutSeconds;
+            return explainHttpFailure(failure, shown + ": " + message);
+        }
+        if (!pause(delay, stop)) {
+            return makeError(ErrorCode::InvalidState, "cancelled", shown);
+        }
+        delay *= 2.0;
     }
 }
 
