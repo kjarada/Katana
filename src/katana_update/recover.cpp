@@ -195,7 +195,7 @@ void sweep(FsOps& fs, const Path& folder, const Path& stateDirectory, std::strin
     }
 }
 
-// ---- the rule's three questions -----------------------------------------------------------------
+// ---- what the rule asks -------------------------------------------------------------------------
 
 // Whether the new version of a transaction said that it starts: the marker U/healthy-<tx>
 // (state.hpp), judged as the swap judges it (Applier::watchHealth, apply.cpp: it is a file).

@@ -149,7 +149,8 @@ enum class Settled {
     // from are not all kept; `evidenceDirectory` is not the folder the update was applied from
     // (it holds no U/run-<tx>), so a marker missing there proves nothing; the scan, the marker
     // or the folder could not be asked; or the lock could not be taken for a reason other than
-    // a holder. The RunOnce entry is registered, so a logon comes back to it.
+    // a holder. In each of those the RunOnce entry is registered, so a logon comes back to it.
+    // (Also the answer when the run stopped on an unexpected error, before anything was done.)
     Left,
     Busy,               // the update lock stayed held: a helper is alive. Nothing was written
     // Putting it back did not finish, or could not begin (the ROLLING_BACK record could not
