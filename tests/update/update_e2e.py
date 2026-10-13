@@ -341,6 +341,7 @@ class Bench:
         self.helper = helper
         self.stub = stub
         self.transcript: list[str] = []
+        self.worlds: list["World"] = []
         self.feeds: list[fake.FakeFeed] = []
         self.children: list[subprocess.Popen] = []
         self._packages: dict[tuple[str, bool], dict[str, bytes]] = {}
@@ -517,6 +518,7 @@ class World:
         self.state.mkdir(parents=True)
         self.files = self.installed_files()
         write_tree(self.root, self.files)
+        self.bench.worlds.append(self)
 
     def installed_files(self) -> dict[str, bytes]:
         """The install as the helper leaves a release it installed: the package, installed.json and the
@@ -623,6 +625,31 @@ class World:
     def blocked_sequences(self) -> list[int]:
         state = read_json(self.state / "state.json") or {}
         return list(state.get("blocked", []))
+
+
+def describe_world(world: World) -> str:
+    """What a world's programs left to read, for the report of a failure: the stub's log, the records in the
+    state folder, and the helper's working folder with its journals. The work folder is removed afterwards,
+    so this is all that is left of it."""
+    lines = [f"---- the world {world.name} ----"]
+    if not world.top.is_dir():
+        return lines[0] + "\n  (removed)"
+    lines += [f"  stub: {line}" for line in world.stub_lines()]
+    for name in ("last.json", "state.json", "cleanup.list"):
+        try:
+            lines.append(f"  state/{name}: {(world.state / name).read_text(encoding='utf-8', errors='replace').strip()}")
+        except OSError:
+            pass
+    lines.append("  state holds: " + ", ".join(sorted(entry.name for entry in world.state.iterdir())))
+    work = world.root / ".update"
+    for folder, _, files in os.walk(work) if work.is_dir() else []:
+        relative = Path(folder).relative_to(world.root).as_posix()
+        lines.append(f"  {relative}/: {', '.join(sorted(files)) or '(no files)'}")
+        for name in files:
+            if name in ("journal", "recovery.log"):
+                text_of = (Path(folder) / name).read_text(encoding="utf-8", errors="replace")
+                lines += [f"    {name}: {line}" for line in text_of.splitlines()[-60:]]
+    return "\n".join(lines)
 
 
 def staged_files(stage: Path) -> dict[str, str]:
@@ -1428,6 +1455,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"FAILED {args.case}: the test itself stopped on an error\n{traceback.format_exc()}")
         print("---- what was run ----")
         print("\n".join(bench.transcript))
+        for world in bench.worlds[-3:]:
+            try:
+                print(describe_world(world))
+            except OSError as unreadable:
+                print(f"---- the world {world.name} ---- could not be read: {unreadable}")
         for number, served in enumerate(bench.feeds, 1):
             print(f"---- what feed {number} was asked ----")
             for record in served.requests(settle_seconds=1.0):
