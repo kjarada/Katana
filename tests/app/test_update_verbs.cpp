@@ -45,6 +45,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stop_token>
@@ -55,10 +56,12 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/update/apply.hpp"
 #include "katana/update/check.hpp"
 #include "katana/update/credential.hpp"
 #include "katana/update/feed.hpp"
+#include "katana/update/fsops.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/process.hpp"
 #include "katana/update/signature.hpp"
@@ -72,6 +75,19 @@
 // The two public test keys, by their hex: the trust is built from them below.
 #include "update/test_key.hpp"
 #include "update_verbs.hpp"
+
+// Last, so that no header above is read with its macros: where this test
+// program is (GetModuleFileNameW) and which process it is
+// (GetCurrentProcessId), for the tests of the download and the apply.
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 // tests/update/fixtures. The suite is told where the survey fixtures are
 // (tests/app/CMakeLists.txt), and these lie two folders from them.
@@ -446,6 +462,48 @@ class Captured {
     std::streambuf* cerr_;
 };
 
+// The v2 release downloaded and ready in the update folder `state`, made by
+// hand: the two records stage() writes last (update/stage.hpp) are all that
+// says a stage is complete, and they are the feed's own signed bytes. No file
+// of the release is beside them, and none is looked for by the lines that
+// only say what is staged.
+void putACompleteStageOfV2In(const fs::path& state)
+{
+    const fs::path release = fixtures() / "release" / "v2";
+    const fs::path stage = state / ("stage-" + std::to_string(kV2Sequence));
+    writeBytes(update::stagedManifestPath(stage), bytesOf(release / "Katana-update-win64.json"));
+    writeBytes(update::stagedSignaturePath(stage),
+               bytesOf(release / "Katana-update-win64.json.sig"));
+}
+
+// The two records of an install in `root` (update/install.hpp): install.json
+// as packaging writes it, and installed.json as the helper does for 0.9.0.
+void writeInstallRecords(const fs::path& root)
+{
+    const fs::path records = root / "share" / "katana";
+    writeBytes(records / "install.json", "{\"schema\":1,\"target\":\"win64\"}\n");
+    writeBytes(records / "installed.json",
+               "{\"schema\":1,\"product\":\"katana\",\"version\":\"0.9.0\","
+               "\"sequence\":1790000000,\"tag\":\"v0.9.0\",\"target\":\"win64\"}\n");
+}
+
+// A katana_cli session whose UPDATE lines run on the rig instead of on this
+// test program's own install (Session::setUpdateContextSource). It starts
+// with no customisation, so that it prints nothing of one.
+struct CliSession {
+    explicit CliSession(Rig& rig)
+    {
+        session.setUpdateContextSource([&rig, this](UpdateSurface surface) {
+            asked.push_back(surface);
+            return rig.context(surface);
+        });
+    }
+
+    katana::app::tests::StartEnvironment environment{"none", nullptr};
+    katana::app::Session session{"katana_cli"};
+    std::vector<UpdateSurface> asked; // the surface each context was asked for
+};
+
 // ---- the line -----------------------------------------------------------------------------------
 
 TEST(UpdateVerbs, ALineIsAnUpdateLineByItsFirstWordInAnyCase)
@@ -817,6 +875,79 @@ TEST(UpdateVerbs, AnInstallRecordThatDoesNotReadIsSaidAndTheCopyIsNotUpdated)
     EXPECT_EQ(reply->text, "update=unsupported installed=0.9.0 reason=install_record "
                            "detail=\"ParseFailure: install.json is not a record\"");
     EXPECT_TRUE(rig.feed.requests.empty());
+
+    // STATUS has no word in kind= for such a copy: its record says what the
+    // context holds, and a warning after it says that this is not what the
+    // copy is. Without it the copy was called a development build and no more.
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    const std::vector<std::string> lines = linesOf(status->text);
+    ASSERT_EQ(lines.size(), 2u) << status->text;
+    EXPECT_EQ(lines[0], "installed=0.9.0 target=none kind=development staged=none skipped=none "
+                        "auto=on last_check=never token=absent last=none");
+    EXPECT_EQ(lines[1].rfind("warning text=\"this copy's install record could not be read", 0),
+              0u)
+        << lines[1];
+    EXPECT_TRUE(contains(lines[1], "ParseFailure: install.json is not a record")) << lines[1];
+    EXPECT_FALSE(fs::exists(rig.state));
+}
+
+TEST(UpdateVerbs, CheckOffersAReleaseWhoseFilesItCouldNotCompareAndSaysThatItCouldNot)
+{
+    // update/plan.hpp: a folder where a file of the release goes is an error
+    // that names the file, not a change. The release is known all the same;
+    // what it would fetch is not, so the record has no files= and no
+    // download_bytes= (update_verbs.hpp) and a warning says why.
+    Rig rig;
+    rig.serveV2();
+    const fs::path readme = rig.root / "share" / "katana" / "readme.txt";
+    ASSERT_TRUE(fs::remove(readme));
+    ASSERT_TRUE(fs::create_directory(readme));
+
+    const core::Result<UpdateReply> reply = runUpdateLine(rig.context(), "UPDATE CHECK");
+    ASSERT_TRUE(reply.ok()) << said(reply);
+    const std::vector<std::string> lines = linesOf(reply->text);
+    ASSERT_EQ(lines.size(), 2u) << reply->text;
+    EXPECT_EQ(lines[0], "update=available installed=0.9.0 latest=0.10.0 notes_url=" + kNotes);
+    EXPECT_EQ(lines[1].rfind("warning text=\"what the update would change could not be worked out",
+                             0),
+              0u)
+        << lines[1];
+    EXPECT_TRUE(contains(lines[1], "share/katana/readme.txt")) << lines[1];
+    ASSERT_TRUE(reply->offer.has_value());
+    EXPECT_EQ(reply->offer->check.status, update::CheckStatus::Available);
+    EXPECT_EQ(reply->offer->totalFiles, 0u);
+    EXPECT_EQ(reply->offer->downloadBytes, 0u);
+
+    // The feed answered, so it was a check.
+    const core::Result<update::UpdateState> state = update::readState(rig.state);
+    ASSERT_TRUE(state.ok());
+    EXPECT_EQ(state->lastCheckEpoch, kNow);
+}
+
+TEST(UpdateVerbs, ACheckThatWasCancelledBeforeItBeganIsAnErrorAndAsksNobody)
+{
+    // update/check.hpp: the call's own error is for a check that could not be
+    // made at all, and a stop already asked for is one; `cancelled` is what
+    // the engine calls it everywhere (plan.hpp, stage.hpp).
+    Rig rig;
+    rig.serveV2();
+    std::stop_source cancelled;
+    cancelled.request_stop();
+    UpdateContext context = rig.context();
+    context.stop = cancelled.get_token();
+
+    const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE CHECK");
+    ASSERT_FALSE(reply.ok()) << said(reply);
+    EXPECT_EQ(reply.error().code, core::ErrorCode::InvalidState);
+    EXPECT_EQ(reply.error().message, "cancelled");
+    EXPECT_TRUE(rig.feed.requests.empty());
+    EXPECT_FALSE(fs::exists(rig.state)) << "a check that asked nobody is not recorded";
+
+    // A status asks nobody, so there is nothing of it to cancel.
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    EXPECT_EQ(status->text, kFreshStatus);
 }
 
 TEST(UpdateVerbs, AStateFileThatDoesNotReadIsSaidAndIsNotWrittenOver)
@@ -915,6 +1046,72 @@ TEST(UpdateVerbs, StatusSaysAnInstallerKindAndALastUpdateThatWentThrough)
     ASSERT_TRUE(reply.ok()) << said(reply);
     EXPECT_EQ(reply->text, "installed=0.9.0 target=win64 kind=installer staged=none skipped=none "
                            "auto=on last_check=never token=absent last=committed");
+}
+
+TEST(UpdateVerbs, WhatIsDownloadedAndHowTheLastUpdateEndedAreAnInstallsAndNoDevelopmentCopys)
+{
+    // One update folder, as one user has: the v2 release complete in it, and
+    // the record of an update that was put back.
+    Rig rig;
+    putACompleteStageOfV2In(rig.state);
+    update::LastResult last;
+    last.status = "rolled_back";
+    last.reason = "health_exit";
+    last.version = "0.10.0";
+    ASSERT_TRUE(update::writeLastResult(rig.state, last).ok());
+
+    // The installed copy says both: the release is above what it has.
+    const core::Result<UpdateReply> installed = runUpdateLine(rig.context(), "UPDATE STATUS");
+    ASSERT_TRUE(installed.ok()) << said(installed);
+    EXPECT_EQ(installed->text, "installed=0.9.0 target=win64 kind=archive staged=0.10.0 "
+                               "skipped=none auto=on last_check=never token=absent "
+                               "last=rolled_back:health_exit");
+
+    // A development copy on the same machine shares the folder, and neither
+    // is its own (update_verbs.hpp): nothing is ever applied to it.
+    rig.install = update::Install{};
+    rig.install.version = update::parseVersion("0.9.0").value();
+    const core::Result<UpdateReply> development = runUpdateLine(rig.context(), "UPDATE STATUS");
+    ASSERT_TRUE(development.ok()) << said(development);
+    EXPECT_EQ(development->text, "installed=0.9.0 target=none kind=development staged=none "
+                                 "skipped=none auto=on last_check=never token=absent last=none");
+    ASSERT_TRUE(development->status.has_value());
+    EXPECT_TRUE(development->status->stagedVersion.empty());
+    EXPECT_FALSE(development->status->last.has_value());
+}
+
+TEST(UpdateVerbs, AStageIsReadyByItsTwoSignedRecordsAndByNothingElse)
+{
+    // What STATUS calls staged (update_verbs.hpp): the folder stage-<sequence>
+    // whose two records verify and name that sequence. Each folder here lacks
+    // one of those things, and is passed over.
+    const fs::path release = fixtures() / "release" / "v2";
+    const std::string manifest = bytesOf(release / "Katana-update-win64.json");
+    const std::string signature = bytesOf(release / "Katana-update-win64.json.sig");
+    Rig rig;
+    // No signature beside the manifest: a download that did not finish.
+    writeBytes(update::stagedManifestPath(rig.stageDirectory()), manifest);
+    // The records of v2 in a folder named for another release.
+    writeBytes(update::stagedManifestPath(rig.state / "stage-1792312801"), manifest);
+    writeBytes(update::stagedSignaturePath(rig.state / "stage-1792312801"), signature);
+    // Names that are no stage-<sequence>, and a file where a folder would be.
+    writeBytes(update::stagedManifestPath(rig.state / "stage-"), manifest);
+    writeBytes(update::stagedSignaturePath(rig.state / "stage-"), signature);
+    writeBytes(update::stagedManifestPath(rig.state / "stage-1792312800x"), manifest);
+    writeBytes(update::stagedSignaturePath(rig.state / "stage-1792312800x"), signature);
+    writeBytes(rig.state / "stage-17", "a file");
+
+    const UpdateContext context = rig.context();
+    const core::Result<UpdateReply> none = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(none.ok()) << said(none);
+    EXPECT_EQ(none->text, kFreshStatus);
+
+    // With its signature the first folder is the release, ready.
+    writeBytes(update::stagedSignaturePath(rig.stageDirectory()), signature);
+    const core::Result<UpdateReply> ready = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(ready.ok()) << said(ready);
+    ASSERT_TRUE(ready->status.has_value());
+    EXPECT_EQ(ready->status->stagedVersion, "0.10.0");
 }
 
 // ---- UPDATE SKIP, UPDATE SET AUTO ---------------------------------------------------------------
@@ -1326,6 +1523,95 @@ TEST(UpdateVerbs, AHeadlessContextHasNoTokenWithoutTheVariable)
     }
 }
 
+TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
+{
+    // A scratch install with the two records an installed copy has, and the
+    // context of the program that lies in its bin/. The token comes from the
+    // variable and the state folder is the test's own, so that neither the
+    // credential store nor the settings of whoever runs the suite is read.
+    katana::app::tests::ScopedVariable token("KATANA_UPDATE_TOKEN", "ghp_from_the_environment");
+    Rig rig;
+    katana::app::tests::ScopedVariable folder("KATANA_UPDATE_STATE_DIR", rig.state);
+    writeInstallRecords(rig.root);
+    const fs::path program = rig.root / "bin" / "katana_cli.exe";
+    ASSERT_TRUE(fs::exists(program));
+
+    UpdateContext context = katana::app::makeUpdateContext(UpdateSurface::Cli, program);
+    EXPECT_EQ(context.surface, UpdateSurface::Cli);
+    EXPECT_TRUE(context.installProblem.empty()) << context.installProblem;
+    EXPECT_EQ(context.install.root, rig.root);
+    EXPECT_EQ(context.install.target, "win64");
+    // No installer recorded this scratch folder as the place it installed to.
+    EXPECT_EQ(context.install.kind, update::InstallKind::Archive);
+    EXPECT_EQ(update::toString(context.install.version), "0.9.0");
+    EXPECT_EQ(context.install.sequence, kV1Sequence);
+    EXPECT_TRUE(context.install.hasInstalledRecord);
+    EXPECT_EQ(context.feed.target, "win64") << "the feed is asked for what the copy was packaged as";
+    EXPECT_EQ(context.feed.token, "ghp_from_the_environment");
+    EXPECT_EQ(context.stateDirectory, rig.state);
+    EXPECT_EQ(context.pid, 0u) << "left for the caller";
+    EXPECT_TRUE(context.relaunch.empty());
+
+    // The lines on it, with the rig's feed and the fixtures' keys where the
+    // network and the release keys are: an installed copy, so it IS asked
+    // about. (The address is the rig's, whatever this build was configured
+    // to ask.)
+    context.trust = &testKeys();
+    context.feed = rig.feedConfig;
+    context.fetch = rig.feed.fetch();
+    context.nowEpoch = kNow;
+    rig.serveV2();
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    EXPECT_EQ(status->text, "installed=0.9.0 target=win64 kind=archive staged=none skipped=none "
+                            "auto=on last_check=never token=present last=none");
+    const core::Result<UpdateReply> checked = runUpdateLine(context, "UPDATE CHECK");
+    ASSERT_TRUE(checked.ok()) << said(checked);
+    EXPECT_EQ(checked->text, kAvailable);
+}
+
+TEST(UpdateVerbs, TheContextOfAProgramWhoseInstallRecordDoesNotReadSaysSoAndIsAskedAboutByNobody)
+{
+    katana::app::tests::ScopedVariable token("KATANA_UPDATE_TOKEN", "ghp_from_the_environment");
+    Rig rig;
+    katana::app::tests::ScopedVariable folder("KATANA_UPDATE_STATE_DIR", rig.state);
+    writeBytes(rig.root / "share" / "katana" / "install.json", "this is not a record");
+
+    UpdateContext context =
+        katana::app::makeUpdateContext(UpdateSurface::Cli, rig.root / "bin" / "katana_cli.exe");
+    // Why, and of which file: the error of the reading names it (install.hpp).
+    EXPECT_TRUE(contains(context.installProblem, "install.json")) << context.installProblem;
+    EXPECT_EQ(context.install.root, rig.root);
+    EXPECT_TRUE(context.install.target.empty());
+    EXPECT_EQ(update::toString(context.install.version), update::programVersionText());
+
+    context.trust = &testKeys();
+    context.feed = rig.feedConfig;
+    context.fetch = rig.feed.fetch();
+    context.nowEpoch = kNow;
+    rig.serveV2();
+    const std::string version(update::programVersionText());
+    const core::Result<UpdateReply> checked = runUpdateLine(context, "UPDATE CHECK");
+    ASSERT_TRUE(checked.ok()) << said(checked);
+    EXPECT_EQ(checked->text.rfind("update=unsupported installed=" + version +
+                                      " reason=install_record detail=",
+                                  0),
+              0u)
+        << checked->text;
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    const std::vector<std::string> lines = linesOf(status->text);
+    ASSERT_EQ(lines.size(), 2u) << status->text;
+    EXPECT_EQ(lines[0], "installed=" + version +
+                            " target=none kind=development staged=none skipped=none auto=on "
+                            "last_check=never token=present last=none");
+    EXPECT_EQ(lines[1].rfind("warning text=\"this copy's install record could not be read", 0),
+              0u)
+        << lines[1];
+    EXPECT_TRUE(rig.feed.requests.empty()) << "nothing is asked about a copy that is not known";
+    EXPECT_FALSE(fs::exists(rig.state));
+}
+
 // ---- the help, and the session ------------------------------------------------------------------
 
 TEST(UpdateVerbs, TheHelpNamesEveryLineOfTheGrammarAndIsInTheSessionsHelp)
@@ -1393,11 +1679,81 @@ TEST(UpdateVerbs, TheLineAFrontEndMustRunLastIsUpdateApply)
     for (const char* line : {"UPDATE APPLY CONFIRM", "update apply confirm", "  UPDATE\tAPPLY",
                              "UPDATE APPLY NOW"}) {
         EXPECT_TRUE(Session::isUpdateApply(line)) << line;
+        EXPECT_TRUE(katana::app::isUpdateApplyLine(line)) << line;
     }
     for (const char* line : {"UPDATE CHECK", "UPDATE DOWNLOAD CONFIRM", "UPDATE APPLYING",
                              "APPLY", "HELP UPDATE", "", "# UPDATE APPLY CONFIRM"}) {
         EXPECT_FALSE(Session::isUpdateApply(line)) << line;
+        EXPECT_FALSE(katana::app::isUpdateApplyLine(line)) << line;
     }
+}
+
+TEST(UpdateVerbs, TheLastLineRuleReadsALineAsTheVerbsDo)
+{
+    // A carriage return or a line feed parts two words for the verbs, as a
+    // blank does, and a -c argument can hold one. Such a line IS an apply to
+    // the verbs, so it is one to the rule that holds an apply to the last
+    // line: read otherwise, the lines after it would be run by a session that
+    // had already prepared the swap.
+    Rig rig;
+    const UpdateContext headless = rig.context(UpdateSurface::HeadlessWindow);
+    for (const char* line : {"UPDATE\rAPPLY CONFIRM", "UPDATE\nAPPLY CONFIRM",
+                             "update \r\n apply\rconfirm", "UPDATE\tAPPLY\rCONFIRM"}) {
+        // What the verbs make of it: UPDATE APPLY CONFIRM, answered here as a
+        // headless window answers that line on every system.
+        const core::Result<UpdateReply> reply = runUpdateLine(headless, line);
+        ASSERT_TRUE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply->text.rfind("ready=none reason=headless", 0), 0u) << reply->text;
+        EXPECT_TRUE(katana::app::Session::isUpdateApply(line));
+        EXPECT_TRUE(katana::app::isUpdateApplyLine(line));
+    }
+}
+
+TEST(UpdateVerbs, AProgramsSessionRunsItsUpdateLinesOnTheContextItIsHandedAndPrintsTheReply)
+{
+    Rig rig;
+    rig.serveV2();
+    CliSession cli(rig);
+    {
+        Captured captured;
+        EXPECT_TRUE(cli.session.run("UPDATE STATUS"));
+        EXPECT_EQ(captured.out(), kFreshStatus + "\n");
+        EXPECT_TRUE(captured.err().empty()) << captured.err();
+    }
+    {
+        Captured captured;
+        EXPECT_TRUE(cli.session.run("update check"));
+        EXPECT_EQ(captured.out(), kAvailable + "\n");
+        EXPECT_TRUE(captured.err().empty()) << captured.err();
+    }
+    {
+        // A refusal is the line's failure: said on std::cerr, nothing on std::cout.
+        Captured captured;
+        EXPECT_FALSE(cli.session.run("UPDATE DOWNLOAD"));
+        EXPECT_TRUE(captured.out().empty()) << captured.out();
+        EXPECT_EQ(captured.err().rfind("error: InvalidArgument: UPDATE DOWNLOAD needs the word "
+                                       "CONFIRM",
+                                       0),
+                  0u)
+            << captured.err();
+    }
+    // The context is asked for as katana_cli's, anew for each line.
+    ASSERT_GE(cli.asked.size(), 2u);
+    for (const UpdateSurface surface : cli.asked) {
+        EXPECT_EQ(surface, UpdateSurface::Cli);
+    }
+    EXPECT_FALSE(cli.session.takePendingApply().has_value());
+
+    // Told that it is katana_mcp's, the session refuses the line before any
+    // context is made: nothing of the install or the user is read for it.
+    cli.session.setUpdateSurface(UpdateSurface::Mcp);
+    cli.asked.clear();
+    {
+        Captured captured;
+        EXPECT_FALSE(cli.session.run("UPDATE CHECK"));
+        EXPECT_TRUE(contains(captured.err(), "katana_check_update")) << captured.err();
+    }
+    EXPECT_TRUE(cli.asked.empty());
 }
 
 // ---- UPDATE DOWNLOAD CONFIRM and UPDATE APPLY CONFIRM -------------------------------------------
@@ -1465,6 +1821,16 @@ TEST(UpdateVerbs, DownloadStagesTheChangedFilesInOneRequestAndSaysSo)
     EXPECT_EQ(spoken, progress) << "each line was said as it happened, and is in the reply";
     ASSERT_FALSE(counted.empty());
     EXPECT_EQ(counted.back(), (std::pair<std::uint64_t, std::uint64_t>{2949, 2949}));
+
+    // It asked the feed first, as CHECK does, so what a window shows of the
+    // release is in this reply too (update_verbs.hpp).
+    ASSERT_TRUE(reply->offer.has_value());
+    EXPECT_EQ(reply->offer->check.status, update::CheckStatus::Available);
+    EXPECT_EQ(reply->offer->check.latestVersion, "0.10.0");
+    EXPECT_EQ(reply->offer->changedFiles, 5u);
+    EXPECT_EQ(reply->offer->totalFiles, 10u);
+    EXPECT_EQ(reply->offer->downloadBytes, 339u);
+    EXPECT_FALSE(reply->apply.has_value());
 
     const std::vector<update::FetchRequest> payload = rig.feed.requestsFor(kPayloadUrl);
     ASSERT_EQ(payload.size(), 1u);
@@ -1674,13 +2040,69 @@ TEST(UpdateVerbs, ApplyWithoutADownloadedReleaseIsRefused)
     EXPECT_TRUE(rig.feed.requests.empty()) << "and an apply asks the feed for nothing";
 }
 
-// The program an install's helper is. Any bytes will do: the launcher is a
-// fake, and nothing is ever started.
+// Where this test program is, as the system names it.
+fs::path thisProgram()
+{
+    std::wstring name(32768, L'\0'); // the longest path Windows has
+    const DWORD length =
+        GetModuleFileNameW(nullptr, name.data(), static_cast<DWORD>(name.size()));
+    name.resize(length);
+    return fs::path(name);
+}
+
+// A program to stand where an install's helper is. A REAL one, although
+// nothing here starts it - the launcher of every test is a fake: a file named
+// .exe that is no program is what Windows answers with a message box the day
+// something does start it, so no test makes one. It is the build's own helper
+// when that is built (the test programs are in bin/tests, the helper in bin),
+// and otherwise this test program, which is always there.
+const fs::path& aRealProgram()
+{
+    static const fs::path program = [] {
+        const fs::path self = thisProgram();
+        const fs::path helper = self.parent_path().parent_path() / "katana_updater.exe";
+        std::error_code error;
+        return fs::is_regular_file(helper, error) && !error ? helper : self;
+    }();
+    return program;
+}
+
+// The helper of the install in `root`: R/bin/katana_updater.exe.
 fs::path putAHelperIn(const fs::path& root)
 {
     const fs::path helper = update::installedProgram(root, "katana_updater");
-    writeBytes(helper, "the helper of this install");
+    std::error_code error;
+    fs::create_directories(helper.parent_path(), error);
+    fs::copy_file(aRealProgram(), helper, fs::copy_options::overwrite_existing, error);
+    EXPECT_FALSE(error) << "the helper could not be put in the scratch install: "
+                        << error.message();
     return helper;
+}
+
+// What `transaction=` of an APPLY's printed record says: "ready=<v> transaction=<tx>".
+std::string transactionOf(const std::string& printed)
+{
+    constexpr std::string_view kKey = " transaction=";
+    const std::size_t at = printed.find(kKey);
+    if (at == std::string::npos) {
+        return {};
+    }
+    const std::size_t from = at + kKey.size();
+    return printed.substr(from, printed.find_first_of("\r\n", from) - from);
+}
+
+// The lines of U/cleanup.list as paths: what is listed for the sweep
+// (update/state.hpp: one absolute path to a line, UTF-8).
+std::vector<fs::path> listedForTheSweep(const fs::path& state)
+{
+    std::vector<fs::path> listed;
+    if (!fs::exists(state / "cleanup.list")) {
+        return listed;
+    }
+    for (const std::string& line : linesOf(bytesOf(state / "cleanup.list"))) {
+        listed.push_back(core::pathFromUtf8(line));
+    }
+    return listed;
 }
 
 TEST(UpdateVerbs, ApplyPreparesTheHelperAndHandsBackTheRequestChangingNothingInTheInstall)
@@ -1711,7 +2133,8 @@ TEST(UpdateVerbs, ApplyPreparesTheHelperAndHandsBackTheRequestChangingNothingInT
     // was asked to prove it starts - by the launcher the context gave.
     EXPECT_EQ(request.helper,
               rig.state / ("run-" + request.transaction) / installedHelper.filename());
-    EXPECT_EQ(bytesOf(request.helper), "the helper of this install");
+    EXPECT_TRUE(bytesOf(request.helper) == bytesOf(installedHelper))
+        << "the copy is the install's helper, byte for byte";
     ASSERT_EQ(rig.launcher.runs.size(), 1u);
     EXPECT_EQ(rig.launcher.runs[0].executable, request.helper);
     EXPECT_EQ(rig.launcher.runs[0].arguments, std::vector<std::string>{"--selftest"});
@@ -1731,10 +2154,10 @@ TEST(UpdateVerbs, ApplyPreparesTheHelperAndHandsBackTheRequestChangingNothingInT
     EXPECT_EQ(rig.launcher.detached[0].arguments, update::helperArguments(request));
 }
 
-TEST(UpdateVerbs, ApplyFromKatanaCliRelaunchesNothing)
+TEST(UpdateVerbs, ARequestSaysWhoIsWaitedForAndWhatIsStartedAgainAsItsContextDid)
 {
-    // katana_cli leaves `relaunch` empty (session.cpp), and the request says
-    // so to the helper.
+    // A context that names nobody to wait for and nothing to start again
+    // makes a request that says so to the helper (update/apply.hpp).
     Rig rig;
     rig.serveV2();
     putAHelperIn(rig.root);
@@ -1745,6 +2168,303 @@ TEST(UpdateVerbs, ApplyFromKatanaCliRelaunchesNothing)
     ASSERT_TRUE(reply->apply.has_value());
     EXPECT_TRUE(reply->apply->relaunch.empty());
     EXPECT_EQ(reply->apply->waitPid, 0u);
+}
+
+// ---- katana_cli's own path: the session ---------------------------------------------------------
+
+TEST(UpdateVerbs, KatanaClisSessionPrintsADownloadsProgressOnceAndKeepsThePreparedApplyToBeTaken)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    std::optional<update::ApplyRequest> request;
+    {
+        CliSession cli(rig);
+        std::string downloaded;
+        {
+            Captured captured;
+            ASSERT_TRUE(cli.session.run("UPDATE DOWNLOAD CONFIRM")) << captured.err();
+            downloaded = captured.out();
+            EXPECT_TRUE(captured.err().empty()) << captured.err();
+        }
+        // Progress lines, then what is staged: the verbs' reply, a line each.
+        const std::vector<std::string> lines = linesOf(downloaded);
+        ASSERT_GE(lines.size(), 2u) << downloaded;
+        EXPECT_EQ(lines.back(), "staged=0.10.0");
+        EXPECT_EQ(lines[lines.size() - 2], "progress bytes=2949/2949 files=5/5");
+        for (std::size_t at = 0; at + 1 < lines.size(); ++at) {
+            EXPECT_EQ(lines[at].rfind("progress bytes=", 0), 0u) << lines[at];
+        }
+        // Each once. A progress line is printed as it happens AND is in the
+        // reply, which is printed when the line has run; and no two lines of
+        // one download are the same, for one is said only when the bytes or
+        // the files have moved on. So a line seen twice was printed twice.
+        std::vector<std::string> sorted = lines;
+        std::sort(sorted.begin(), sorted.end());
+        EXPECT_TRUE(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end())
+            << downloaded;
+
+        std::string applied;
+        {
+            Captured captured;
+            ASSERT_TRUE(cli.session.run("UPDATE APPLY CONFIRM")) << captured.err();
+            applied = captured.out();
+            EXPECT_TRUE(captured.err().empty()) << captured.err();
+        }
+        request = cli.session.takePendingApply();
+        ASSERT_TRUE(request.has_value()) << "the line that succeeded left its request";
+        EXPECT_EQ(applied, "ready=0.10.0 transaction=" + request->transaction + "\n");
+        EXPECT_FALSE(cli.session.takePendingApply().has_value()) << "handed over once";
+    }
+
+    // What katana_cli's request tells the helper: wait for THIS process - the
+    // one that ran the line - and start nothing afterwards.
+    EXPECT_EQ(request->waitPid, static_cast<std::uint64_t>(GetCurrentProcessId()));
+    EXPECT_TRUE(request->relaunch.empty());
+    EXPECT_EQ(request->root, rig.root);
+    EXPECT_EQ(request->stageDirectory, rig.stageDirectory());
+    EXPECT_EQ(request->stateDirectory, rig.state);
+    EXPECT_TRUE(update::isValidTransactionId(request->transaction)) << request->transaction;
+
+    // The session started nothing: its front end does, once the session has
+    // ended. And a request that was taken is the front end's to launch - the
+    // session that ended did not give its helper copy up.
+    EXPECT_TRUE(rig.launcher.detached.empty());
+    EXPECT_TRUE(fs::exists(request->helper));
+    EXPECT_TRUE(listedForTheSweep(rig.state).empty());
+}
+
+TEST(UpdateVerbs, ASessionWhoseApplyIsRefusedLeavesNothingToLaunch)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    CliSession cli(rig);
+    {
+        // Nothing is downloaded yet.
+        Captured captured;
+        EXPECT_FALSE(cli.session.run("UPDATE APPLY CONFIRM"));
+        EXPECT_TRUE(contains(captured.err(), "reason=not_staged")) << captured.err();
+        EXPECT_TRUE(captured.out().empty()) << captured.out();
+    }
+    EXPECT_FALSE(cli.session.takePendingApply().has_value());
+
+    {
+        Captured captured;
+        ASSERT_TRUE(cli.session.run("UPDATE DOWNLOAD CONFIRM")) << captured.err();
+    }
+    {
+        // Downloaded, and the helper does not prove that it starts.
+        rig.launcher.exitCode = 3;
+        Captured captured;
+        EXPECT_FALSE(cli.session.run("UPDATE APPLY CONFIRM"));
+        EXPECT_TRUE(contains(captured.err(), "reason=helper_failed")) << captured.err();
+        EXPECT_FALSE(contains(captured.out(), "ready=")) << captured.out();
+    }
+    EXPECT_FALSE(cli.session.takePendingApply().has_value());
+    EXPECT_TRUE(rig.launcher.detached.empty());
+}
+
+TEST(UpdateVerbs, AnApplyNobodyLaunchesHasItsHelperCopyListedForTheSweep)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    const UpdateContext context = rig.context();
+    ASSERT_TRUE(runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM").ok());
+    const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_TRUE(reply.ok()) << said(reply);
+    ASSERT_TRUE(reply->apply.has_value());
+    const update::ApplyRequest& request = *reply->apply;
+    const fs::path runFolder = rig.state / ("run-" + request.transaction);
+    ASSERT_EQ(request.helper.parent_path(), runFolder);
+    ASSERT_TRUE(fs::exists(request.helper));
+    // A request that may yet be launched is listed nowhere.
+    EXPECT_TRUE(listedForTheSweep(rig.state).empty());
+
+    // Its caller will not launch it: the copy is listed (update/state.hpp),
+    // not removed here, and the release stays downloaded.
+    ASSERT_TRUE(katana::app::abandonApply(request).ok());
+    EXPECT_EQ(listedForTheSweep(rig.state), std::vector<fs::path>{runFolder});
+    EXPECT_TRUE(fs::exists(request.helper));
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    EXPECT_TRUE(contains(status->text, "staged=0.10.0")) << status->text;
+
+    // And the line is one the sweep of the next start takes for its own
+    // (update/state.hpp): the folder goes - or, should a scanner be holding
+    // the new copy open at this moment, it stays listed for the start after.
+    // A line the sweep did not take for its own would be dropped, with the
+    // folder still there.
+    const std::unique_ptr<update::FsOps> files = update::makeSystemFsOps();
+    ASSERT_TRUE(update::processCleanupList(rig.state, rig.root, *files).ok());
+    const std::vector<fs::path> left = listedForTheSweep(rig.state);
+    EXPECT_TRUE(!fs::exists(runFolder) || left == std::vector<fs::path>{runFolder})
+        << "the folder is still there and is no longer listed";
+    EXPECT_TRUE(fs::exists(update::stagedManifestPath(rig.stageDirectory())));
+
+    // A request that is none - nothing was prepared for it - lists nothing.
+    EXPECT_TRUE(katana::app::abandonApply(update::ApplyRequest{}).ok());
+    EXPECT_EQ(listedForTheSweep(rig.state), left);
+}
+
+TEST(UpdateVerbs, ASessionGivesUpAPreparedApplyThatALaterOneReplacesOrThatNobodyTook)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    std::string first;
+    std::string second;
+    {
+        CliSession cli(rig);
+        {
+            Captured captured;
+            ASSERT_TRUE(cli.session.run("UPDATE DOWNLOAD CONFIRM")) << captured.err();
+        }
+        {
+            Captured captured;
+            ASSERT_TRUE(cli.session.run("UPDATE APPLY CONFIRM")) << captured.err();
+            first = transactionOf(captured.out());
+        }
+        ASSERT_TRUE(update::isValidTransactionId(first)) << first;
+        EXPECT_TRUE(listedForTheSweep(rig.state).empty()) << "it may yet be taken and launched";
+
+        // A second apply is prepared before anybody took the first: one is
+        // launched at most, so the first's helper copy is nobody's.
+        {
+            Captured captured;
+            ASSERT_TRUE(cli.session.run("UPDATE APPLY CONFIRM")) << captured.err();
+            second = transactionOf(captured.out());
+        }
+        ASSERT_TRUE(update::isValidTransactionId(second)) << second;
+        ASSERT_NE(first, second);
+        EXPECT_EQ(listedForTheSweep(rig.state),
+                  std::vector<fs::path>{rig.state / ("run-" + first)});
+    }
+    // The session ended and nobody took the second: that one is given up too.
+    EXPECT_EQ(listedForTheSweep(rig.state),
+              (std::vector<fs::path>{rig.state / ("run-" + first), rig.state / ("run-" + second)}));
+    EXPECT_TRUE(rig.launcher.detached.empty());
+}
+
+TEST(UpdateVerbs, ApplyIsRefusedWhenTheStateFileDoesNotReadForItIsWhereWhatWasPutBackIsKept)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    const UpdateContext context = rig.context();
+    ASSERT_TRUE(runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM").ok());
+    // Damaged, or written by a newer Katana: either way the list of the
+    // releases that were put back here cannot be read out of it.
+    const std::string damaged = "this is not a state file";
+    writeBytes(rig.state / "state.json", damaged);
+
+    const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_FALSE(reply.ok()) << said(reply);
+    EXPECT_EQ(reply.error().code, core::ErrorCode::InvalidState);
+    EXPECT_EQ(reply.error().context, "reason=state_unreadable");
+    EXPECT_TRUE(contains(reply.error().message, "Katana 0.10.0")) << reply.error().message;
+    EXPECT_TRUE(rig.launcher.runs.empty()) << "no helper was copied or started";
+    EXPECT_EQ(bytesOf(rig.state / "state.json"), damaged) << "and the file is left as it is";
+
+    // With the file gone the defaults are the truth again - nothing was put
+    // back here - and the release is applied.
+    ASSERT_TRUE(fs::remove(rig.state / "state.json"));
+    const core::Result<UpdateReply> again = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_TRUE(again.ok()) << said(again);
+    EXPECT_TRUE(again->apply.has_value());
+}
+
+TEST(UpdateVerbs, AFolderWhoseNameIsNoUnicodeTextInTheUpdateFolderIsPassedOver)
+{
+    // What a Windows file system lets a name be and UTF-8 cannot say: a
+    // surrogate with no partner, U+D800 alone. Turning such a name into text
+    // throws (core/path_text.hpp), and the update folder is the user's to
+    // write: with one such folder in it, STATUS and APPLY ended in an
+    // exception that nothing caught.
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    const UpdateContext context = rig.context();
+    ASSERT_TRUE(runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM").ok());
+    std::wstring name = L"stage-";
+    name.push_back(static_cast<wchar_t>(0xD800));
+    std::error_code refused;
+    if (!fs::create_directory(rig.state / name, refused)) {
+        GTEST_SKIP() << "this file system holds no such name: " << refused.message();
+    }
+
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    EXPECT_TRUE(contains(status->text, "staged=0.10.0")) << status->text;
+    const core::Result<UpdateReply> apply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_TRUE(apply.ok()) << said(apply);
+    EXPECT_EQ(apply->text.rfind("ready=0.10.0 transaction=", 0), 0u) << apply->text;
+}
+
+TEST(UpdateVerbs, NothingIsDownloadedToOrAppliedToACopyWhoseInstallRecordDoesNotRead)
+{
+    Rig rig;
+    rig.serveV2();
+    UpdateContext context = rig.context();
+    context.installProblem = "ParseFailure: install.json is not a record";
+
+    const core::Result<UpdateReply> download = runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM");
+    ASSERT_TRUE(download.ok()) << said(download);
+    EXPECT_EQ(download->text,
+              "update=unsupported installed=0.9.0 reason=install_record "
+              "detail=\"ParseFailure: install.json is not a record\"\nstaged=none");
+
+    const core::Result<UpdateReply> apply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_FALSE(apply.ok()) << said(apply);
+    EXPECT_EQ(apply.error().code, core::ErrorCode::Unsupported);
+    EXPECT_EQ(apply.error().context, "reason=install_record");
+    EXPECT_TRUE(contains(apply.error().message, "ParseFailure: install.json is not a record"))
+        << apply.error().message;
+
+    EXPECT_TRUE(rig.feed.requests.empty());
+    EXPECT_TRUE(rig.launcher.runs.empty());
+    EXPECT_FALSE(fs::exists(rig.state));
+}
+
+TEST(UpdateVerbs, ADownloadThatCannotCompareTheInstalledFilesFetchesNothingAndSaysWhy)
+{
+    // As for CHECK above: a folder where a file of the release goes. What to
+    // fetch cannot be worked out, so nothing is.
+    Rig rig;
+    rig.serveV2();
+    const fs::path readme = rig.root / "share" / "katana" / "readme.txt";
+    ASSERT_TRUE(fs::remove(readme));
+    ASSERT_TRUE(fs::create_directory(readme));
+
+    const core::Result<UpdateReply> reply = runUpdateLine(rig.context(), "UPDATE DOWNLOAD CONFIRM");
+    ASSERT_FALSE(reply.ok()) << said(reply);
+    EXPECT_EQ(reply.error().context.rfind("reason=plan_failed", 0), 0u) << reply.error().context;
+    EXPECT_EQ(reply.error().message.rfind("what the update would change could not be worked out, "
+                                          "so nothing was downloaded: ",
+                                          0),
+              0u)
+        << reply.error().message;
+    EXPECT_TRUE(contains(reply.error().context, "share/katana/readme.txt"))
+        << reply.error().context;
+    EXPECT_TRUE(rig.feed.requestsFor(kPayloadUrl).empty());
+    EXPECT_FALSE(fs::exists(rig.stageDirectory()));
+}
+
+TEST(UpdateVerbs, ADownloadThatWasCancelledBeforeItBeganIsAnErrorAndFetchesNothing)
+{
+    Rig rig;
+    rig.serveV2();
+    std::stop_source cancelled;
+    cancelled.request_stop();
+    UpdateContext context = rig.context();
+    context.stop = cancelled.get_token();
+    const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM");
+    ASSERT_FALSE(reply.ok()) << said(reply);
+    EXPECT_EQ(reply.error().code, core::ErrorCode::InvalidState);
+    EXPECT_EQ(reply.error().message, "cancelled");
+    EXPECT_TRUE(rig.feed.requests.empty());
+    EXPECT_FALSE(fs::exists(rig.state));
 }
 
 TEST(UpdateVerbs, ApplySaysWhyWhenTheHelperDoesNotProveItStarts)

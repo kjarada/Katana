@@ -671,16 +671,21 @@ TEST_F(McpServer, TheUpdateToolIsListedReadOnlyAndOpenWorldAndTheToolsThatRunLin
     };
     const Json update = named("katana_check_update");
     ASSERT_TRUE(update.is_object()) << "katana_check_update is not listed";
-    EXPECT_TRUE(update["annotations"]["readOnlyHint"].get<bool>());
-    EXPECT_TRUE(update["annotations"]["openWorldHint"].get<bool>());
-    // Not destructive: said by being read-only, which is all a read-only
-    // tool's annotations say here (the two other hints mean something only
-    // for a tool that changes things).
-    EXPECT_FALSE(update["annotations"].value("destructiveHint", false));
-    EXPECT_TRUE(update["annotations"].value("idempotentHint", true));
+    // Read-only and open-world, and nothing else: the WHOLE object. A tool
+    // that is not read-only is listed with two hints more - whether it
+    // destroys, and whether asking twice is asking once (hints(),
+    // mcp_server.cpp) - which mean something only for a tool that changes
+    // things; so their absence is the tool being listed as one that changes
+    // nothing, and a tool listed any other way fails here.
+    EXPECT_EQ(update["annotations"], (Json{{"readOnlyHint", true}, {"openWorldHint", true}}))
+        << update["annotations"].dump();
     EXPECT_TRUE(update["inputSchema"]["properties"].empty()) << "it takes no argument";
     const std::string description = update["description"].get<std::string>();
+    // Among them what is sent, the one case in which a token is included:
+    // a client is told the whole of it before it lets the tool run.
     for (const char* words : {"Read-only", "downloads nothing", "It reaches the network",
+                              "the program's version and platform", "KATANA_UPDATE_TOKEN",
+                              "api.github.com, and to no other host",
                               "update=unsupported reason=development_tree", "never the token"}) {
         EXPECT_NE(description.find(words), std::string::npos) << words;
     }
