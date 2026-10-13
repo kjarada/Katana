@@ -16,13 +16,16 @@
 //   KATANA_STUB_REGISTRY_BASE    an HKCU subkey: the line says whether the RunOnce value of the
 //                                helper is there at that moment (it must be, during the health
 //                                check, and gone afterwards)
+//   KATANA_STUB_MACHINE_RUNONCE  set to anything: the line also says whether the helper's value
+//                                is in the MACHINE's own RunOnce key at that moment (it is only
+//                                read; a test helper must never have put it there)
 //
 //   --sleep <ms>                 stay running that long: a process whose image is under the
 //                                install, for the helper's scan to find
 //
 // Each log line is
 //   <kind> tag=<tag> exe=<path> cwd=<folder> OPENSSL_CONF=<value or -> [runonce=<value or ->]
-//   [tx=<tx> mode=<mode>]
+//   [machine_runonce=<value or ->] [tx=<tx> mode=<mode>]
 // UTF-8; <kind> is health, sleep or start. The tag is read from the end of this very file: the
 // text KATANA-STUB-TAG= and the letters, digits, dots and hyphens that follow it, at its LAST
 // occurrence. A copy nobody tagged finds only this program's own string literal, which nothing
@@ -143,10 +146,12 @@ void appendLine(const std::wstring& path, const std::string& line)
     CloseHandle(file);
 }
 
-// The RunOnce value of the helper under HKCU\<base>, or "-" when it is not there.
+// The RunOnce value of the helper under HKCU\<base> - under HKCU itself for an empty base - or
+// "-" when it is not there.
 std::string runOnceValue(const std::wstring& base)
 {
-    const std::wstring key = base + L"\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+    const std::wstring key = (base.empty() ? std::wstring() : base + L"\\") +
+                             L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
     std::wstring value(1024, L'\0');
     DWORD bytes = static_cast<DWORD>(value.size() * sizeof(wchar_t));
     const LONG status = RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"KatanaUpdateRecover",
@@ -177,6 +182,9 @@ int main(int argc, char** argv)
             " OPENSSL_CONF=" + (openssl.empty() ? std::string("-") : utf8(openssl));
     if (!registryBase.empty()) {
         line += " runonce=" + runOnceValue(registryBase);
+    }
+    if (!environment(L"KATANA_STUB_MACHINE_RUNONCE").empty()) {
+        line += " machine_runonce=" + runOnceValue(std::wstring());
     }
     if (first == "--update-health" && argc > 2) {
         line += std::string(" tx=") + argv[2] + " mode=" + (mode.empty() ? "healthy" : mode);
