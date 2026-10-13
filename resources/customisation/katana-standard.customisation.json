@@ -1796,10 +1796,10 @@
     {"name": "Bridge Column", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 1.6],
-      ["move", -1.13, -1.13],
-      ["draw", 1.13, 1.13],
-      ["move", -1.13, 1.13],
-      ["draw", 1.13, -1.13]
+      ["move", -0.674, -1.451],
+      ["draw", 1.451, 0.674],
+      ["move", -1.451, -0.674],
+      ["draw", 0.674, 1.451]
     ]},
     {"name": "Broad Tree Canopy", "group": "Vegetation and Landscape/Trees", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
