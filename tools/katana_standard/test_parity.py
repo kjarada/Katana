@@ -196,6 +196,42 @@ class Collapse(unittest.TestCase):
         self.assertIn("hide", report["structure"][0]["problems"][0])
 
 
+class FieldsMerged(unittest.TestCase):
+    """A lookup takes each field from the first rule that says it, so a later rule that says a field the first
+    leaves unsaid is part of the effective rule: the reference's second file hides the symbols its first file
+    left unsaid."""
+    # The first symbol rule says no hide; the second says hide=true. A lookup hides the symbol.
+    reference = [feature("AB*"), symbol("AB*"), feature("AB*"), symbol("AB*", hide=True)]
+
+    def test_a_later_rule_that_says_a_field_the_first_left_unsaid_changes_the_effective_rule(self):
+        candidate = [feature("AB*"), symbol("AB*", hide=True)]
+        report = run(self.reference, candidate)
+        self.assertEqual(report["required"], {("AB*", parity.DUPLICATE): 1, ("AB*", parity.MERGED): 1})
+        self.assertEqual(report["structure"], [])
+
+    def test_with_the_exceptions_parity_holds(self):
+        candidate = [feature("AB*"), symbol("AB*", hide=True)]
+        exceptions = [("AB*", parity.DUPLICATE, 1), ("AB*", parity.MERGED, 1)]
+        self.assertTrue(run(self.reference, candidate, exceptions)["ok"])
+
+    def test_a_candidate_that_follows_the_first_rule_alone_differs(self):
+        report = run(self.reference, [feature("AB*"), symbol("AB*")],
+                     [("AB*", parity.DUPLICATE, 1), ("AB*", parity.MERGED, 1)])
+        self.assertFalse(report["ok"])
+        self.assertIn("hide", report["structure"][0]["problems"][0])
+
+    def test_a_later_rule_that_only_repeats_what_the_first_said_is_shadowed_and_not_merged(self):
+        reference = [feature("AB*"), symbol("AB*", hide=False), symbol("AB*", hide=True)]
+        report = run(reference, [feature("AB*"), symbol("AB*", hide=False)])
+        self.assertEqual(report["required"], {("AB*", parity.SHADOWED): 1})
+
+    def test_a_field_that_is_not_compared_does_not_make_a_merge(self):
+        # The second feature rule adds a comment, which is how a key looks, not what it does.
+        reference = [feature("AB*"), feature("AB*", comment="one more word")]
+        report = run(reference, [feature("AB*")])
+        self.assertEqual(report["required"], {("AB*", parity.SHADOWED): 1})
+
+
 class UnknownColour(unittest.TestCase):
     reference = [feature("AB*", colour="pen 018")]
 

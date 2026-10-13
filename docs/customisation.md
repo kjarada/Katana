@@ -1479,7 +1479,7 @@ What was installed is said in one line on standard output - in `katana_mcp`
 that is the client's log, since the protocol has standard output to itself:
 
 ```
-Customisation: Katana Standard, 186 linestyles and symbols and 770 survey code rules, built in
+Customisation: Katana Standard, 221 linestyles and symbols and 1103 survey code rules, built in
 Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, built in
 Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, kept
 Customisation: One, 1 linestyle or symbol and 1 survey code rule, kept
@@ -1961,7 +1961,7 @@ The customisations a program offers are COMPILED INTO it: Katana customisation
 files, embedded in `katana_cad` with `#embed` into one generated table
 (`src/katana_cad/customisation/builtin_table.hpp`, written by
 `src/katana_cad/CMakeLists.txt`), as the plot frame is. ONE of them is THE
-built-in, the DEFAULT - Katana Standard, an original library made for Katana -
+built-in, the DEFAULT - Katana Standard, a library made for Katana with the NSW customisation's survey code keys -
 which a program starts with and which `CUSTOMISE RESET` gives; it is parsed
 once at first use by `cad::compiledInCustomisation()`, and alone, so a start
 reads its bytes only. The others are ALTERNATES - the NSW customisation - and
@@ -1998,8 +1998,9 @@ There is no script: the build needs nothing but the compiler, where the
 embedding this replaced ran Python over a folder of four files on every build.
 
 Katana Standard, `resources/customisation/katana-standard.customisation.json`,
-is the default (the owner's ruling, 2026-10-08): an original library of 73
-linestyles, 113 symbols and 245 survey codes made for Katana
+is the default (the owner's ruling, 2026-10-08): a library of 98
+linestyles, 123 symbols and 632 survey codes made for Katana, whose survey code
+keys are the NSW customisation's and whose look is its own
 (`docs/katana_standard.md`: how to read it and what is not done). The NSW file
 is compiled in beside it as an alternate and stays selectable. Either also loads
 like any file, with `CUSTOMISE REPLACE` or Settings > Import with Replace ticked.
@@ -2119,7 +2120,7 @@ release job against the tracked default having been deleted or a path being wron
 - `BuiltInLibrary.*` (`tests/cad/customisation/test_builtin_library.cpp`): the
   list (default first, one entry a name, found by name in any letter case), the
   seam's name form and its precedence, `builtInChoices`, and what this build
-  compiled in - Katana Standard's census (186 definitions, 770 rules over 245
+  compiled in - Katana Standard's census (221 definitions, 1,103 rules over 632
   codes, 28 colours; `tools/katana_standard/census.py`) and the NSW alternate's.
   The first half is written against stand-ins and is the same test on every
   build; the second skips what the build did not compile in.
@@ -2181,7 +2182,7 @@ release job against the tracked default having been deleted or a path being wron
   has". Settings' sentence, beside its own Built-in library, says "Reset to Built-in
   gives this program's".
 - **`benchmarks/bench_customisation.cpp`** measures the file `KATANA_BUILTIN_CUSTOMISATION`
-  names, which is Katana Standard now: 190,649 bytes, about an eighth of the 1,540,630
+  names, which is Katana Standard now: 318,550 bytes, about a fifth of the 1,540,630
   of the NSW file it once measured.
 - **A project that records the earlier file names** is told that they are not
   loaded, under the default, without the `CUSTOMISE BUILTIN NSW` words: the missing

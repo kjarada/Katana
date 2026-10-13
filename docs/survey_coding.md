@@ -22,8 +22,8 @@ the verbs). It holds three kinds of thing, which are useless apart:
 | **symbol definitions** (`symbols`) | what each symbol is drawn with |
 
 Katana reads that one format. The program is built with two customisations of
-its own: Katana Standard, the default, an original library made for Katana
-(`docs/katana_standard.md`), and the NSW customisation, an alternate that
+its own: Katana Standard, the default, a library made for Katana that uses the
+NSW customisation's survey code keys (`docs/katana_standard.md`), and the NSW customisation, an alternate that
 Settings and `CUSTOMISE BUILTIN` choose. The NSW customisation - 792 definitions (471 symbols and 321
 linestyles; the catalogue counts one more definition as a symbol, 472, by
 a signal other than the file's `symbols` list, below) and 1,624 survey code rules - which was made once from a real

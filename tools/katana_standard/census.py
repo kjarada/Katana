@@ -9,7 +9,7 @@ the data modules (`codes.py`, `linestyles.py`, `symbols.py`) that made it, so it
 the figures `tests/cad/customisation/test_katana_standard.cpp` pins were counted here, by a program that shares
 no code with the one under test. `tools/customisation_census.py` counts the same file for the generic figures
 (definitions, strokes, rules, keys) and gives the same numbers; this one adds what only Katana Standard promises:
-the twelve classes, the three-level layers, the weights, the utility words.
+the thirteen classes, the key forms, the three-level layers, the weights, the utility words.
 
 With FILE absent it reads resources/customisation/katana-standard.customisation.json beside the tools folder.
 """
@@ -42,15 +42,15 @@ def census(document, raw_text):
     distinct = sorted(set(keys))
     features = [r for r in rules if r["sets"] == "feature"]
     stroke_kinds = collections.Counter(s[0] for d in definitions for s in d.get("strokes", []))
-    classes = collections.Counter(k[0] for k in distinct)
-    kinds = collections.Counter()
+    # The class of a key is the first part of its feature rule's group; a key with no feature rule (a text key, a
+    # surface-only key, the bare `*`) has none in the file.
+    classes = collections.Counter(f["group"].split("/")[0] for f in features)
+    draws = collections.Counter(f.get("draw", "none") for f in features)
     symbol_keys = {r["key"] for r in rules if r["sets"] == "symbol"}
-    text_keys = {r["key"] for r in rules if r["sets"] == "text"}
-    for f in features:
-        drawn_line = f.get("draw") == "line"
-        has_symbol = f["key"] in symbol_keys
-        kinds["text" if f["key"] in text_keys else "both" if drawn_line and has_symbol else
-              "line" if drawn_line else "point"] += 1
+    both = sum(1 for f in features if f.get("draw") == "line" and f["key"] in symbol_keys)
+    keys_without_feature = sorted(set(distinct) - {f["key"] for f in features})
+    prefix_keys = [k for k in distinct if k.endswith("*") and k != "*"]
+    exact_keys = [k for k in distinct if not k.endswith("*")]
     used = set()
     for r in rules:
         if r.get("linestyle"):
@@ -67,7 +67,13 @@ def census(document, raw_text):
     layers = sorted({f["layer"] for f in features})
     attribute_lists = [r["attributes"] for r in rules if r["sets"] == "attributes"]
     attributes = [a for lst in attribute_lists for a in lst]
-    surface_true = sorted(r["key"][:-1] for r in rules if r["sets"] == "surface" and r["surface"] is True)
+    surface_true = sorted(r["key"] for r in rules if r["sets"] == "surface" and r["surface"] is True)
+    surface_false = sorted(r["key"] for r in rules if r["sets"] == "surface" and r["surface"] is False)
+    typed = collections.Counter(a["value"] for lst in attribute_lists for a in lst if a["name"] == "utility.type")
+    zones = collections.Counter((r["key"], a["value"]) for r in rules if r["sets"] == "attributes"
+                                for a in r["attributes"] if a["name"] == "Check Zone")
+    hidden = sorted(r["key"] for r in rules if r.get("hide") is True)
+    texts = {r["key"]: r["text"]["size"] for r in rules if r["sets"] == "text"}
     numbers = []
 
     def walk(value):
@@ -105,16 +111,27 @@ def census(document, raw_text):
         "rules": len(rules),
         "rulesBySets": dict(sorted(by_sets.items())),
         "keys": len(distinct),
-        "keysOfThreeCapitals": sum(1 for k in rules if re.fullmatch(r"[A-Z]{3}\*", k["key"])),
+        "keysPrefix": len(prefix_keys),
+        "keysExact": len(exact_keys),
+        "keysBare": 1 if "*" in distinct else 0,
+        "keysOfCapitalsAndDigits": sum(1 for k in distinct if re.fullmatch(r"[A-Z0-9]+\*?|\*", k)),
+        "keysWithoutFeature": len(keys_without_feature),
         "keysRepeatedInASection": sum(v - 1 for v in collections.Counter((r["key"], r["sets"]) for r in rules).values()),
         "classes": dict(sorted(classes.items())),
-        "kinds": dict(sorted(kinds.items())),
+        "draws": dict(sorted(draws.items())),
+        "linesWithASymbol": both,
         "layers": len(layers),
         "layerDepths": sorted({len(layer.split("/")) for layer in layers}),
         "weights": dict(sorted(collections.Counter(f["weight"] for f in features).items())),
-        "hideRules": sum(1 for r in rules if r.get("hide") is True),
+        "hideRules": len(hidden),
+        "hideKeys": hidden,
         "surfaceTrue": len(surface_true),
         "surfaceTrueKeys": surface_true,
+        "surfaceFalse": len(surface_false),
+        "textSizes": texts,
+        "utilityTyped": sum(typed.values()),
+        "utilityTypes": dict(sorted(typed.items())),
+        "checkZones": {"%s=%s" % k: v for k, v in sorted(zones.items())},
         "pipeRules": by_sets["pipe"],
         "attributeRules": by_sets["attributes"],
         "attributesPrompted": sum(1 for a in attributes if not a.get("value")),
@@ -139,7 +156,7 @@ def main(argv):
         print(json.dumps(figures, indent=1, sort_keys=True))
         return 0
     for name, value in figures.items():
-        if name == "surfaceTrueKeys":
+        if name in ("surfaceTrueKeys", "hideKeys"):
             value = " ".join(value)
         elif isinstance(value, dict):
             value = " ".join("%s:%s" % item for item in value.items())

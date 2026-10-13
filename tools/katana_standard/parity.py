@@ -16,11 +16,12 @@ keyed by them. Tests: tools/katana_standard/test_parity.py.
 WHAT IT REPORTS, in the order it is printed
   1. KEYS      keys the reference has and the candidate lacks, and the reverse. Byte for byte: `AB*`, `AB`,
                `AB1*` and `*` are four keys.
-  2. STRUCTURE for each key held by both, the candidate's rules against the reference's EFFECTIVE rules. A rule
-               of the reference is effective when it is the first of its kind (`sets`) under its key: a lookup
-               takes a field from the first rule that says it, so every later rule of that kind is a duplicate or
-               shadowed in CODE CHECK's words (or, for the few it lets through because they add an attribute
-               name, in the words of the field they set). Compared per rule, in order:
+  2. STRUCTURE for each key held by both, the candidate's rules against the reference's EFFECTIVE rules. The
+               effective rule of one kind (`sets`) under a key is what a lookup makes of the key's rules of that
+               kind: each field comes from the first rule that says it (`SurveyMap::lookup`), so a later rule is
+               a duplicate or shadowed in CODE CHECK's words unless it says a field the earlier ones leave
+               unsaid, and then the effective rule carries that field (the reference's second file hides the
+               symbol of four keys that its first file left unsaid). Compared per rule, in order:
                  feature    draw (line, point or none), that a layer is given, the state of the colour name
                  symbol     that a symbol is named, hide (absent reads as false)
                  text       units, size, justifyX, justifyY, the state of the colour name
@@ -44,6 +45,9 @@ WHAT IT REPORTS, in the order it is printed
                                               as its LINESTYLE, which draws the symbol at each point but is a
                                               fault CODE CHECK reports; the candidate says it properly, with a
                                               symbol rule after the feature rule
+                 nsw-fields-merged            a later rule of a kind said a field the first left unsaid and so
+                                              changed the effective structure (a symbol's hide); the candidate's
+                                              one rule of that kind carries the field
                An entry that explains nothing is itself an error, so the list cannot go stale.
   4. DEFECTS   in the CANDIDATE, by the notions of CODE CHECK (src/katana_cad/customisation/code_table.cpp): a
                duplicate rule, a shadowed rule, an unknown colour, a linestyle or symbol nothing defines, a
@@ -74,7 +78,8 @@ DUPLICATE = "nsw-duplicate-collapsed"
 SHADOWED = "nsw-shadowed-collapsed"
 COLOUR = "nsw-unknown-colour-replaced"
 LINESTYLE_SYMBOL = "nsw-linestyle-symbol-resolved"
-REASONS = (DUPLICATE, SHADOWED, COLOUR, LINESTYLE_SYMBOL)
+MERGED = "nsw-fields-merged"
+REASONS = (DUPLICATE, SHADOWED, COLOUR, LINESTYLE_SYMBOL, MERGED)
 
 SETS = ("feature", "symbol", "text", "pipe", "vertexPipe", "segmentPipe", "attributes", "vertexAttributes",
         "surface")
@@ -208,6 +213,30 @@ def first_of_each_kind(rules, indices):
             seen.add(rules[index]["sets"])
             kept.append(index)
     return kept
+
+
+def merged_rule(rules, indices):
+    """The one rule a lookup makes of `indices`, rules of one kind under one key, in order: each field from the
+    first rule that says it, attribute lists accumulating by name (`SurveyMap::lookup`). A field a rule holds
+    at its default (an empty text) says nothing; `hide: false` does say something."""
+    out = {}
+    for index in indices:
+        for name, value in rules[index].items():
+            if name in ATTRIBUTE_SCOPES:
+                have = out.setdefault(name, [])
+                known = {a.get("name") for a in have if isinstance(a, dict)}
+                have.extend(a for a in value if not isinstance(a, dict) or a.get("name") not in known)
+            elif name not in out and value not in ("", None):
+                out[name] = value
+    return out
+
+
+def kinds_under(rules, indices):
+    """[(kind, [indices of that kind])] in the order the kinds first appear under the key."""
+    table = collections.OrderedDict()
+    for index in indices:
+        table.setdefault(rules[index]["sets"], []).append(index)
+    return list(table.items())
 
 
 def layer_problem(layer):
@@ -348,11 +377,11 @@ def effective_structure(document, indices, colours):
     """The structure a clean rule set for one key of `document` has, in order, and whether a symbol was said
     through a linestyle (so the clean set holds a symbol rule the key's rules do not)."""
     rules = document["codes"]
-    kept = first_of_each_kind(rules, indices)
-    expected = [structure(rules[i], colours) for i in kept]
+    merged = [merged_rule(rules, of_kind) for _, of_kind in kinds_under(rules, indices)]
+    expected = [structure(rule, colours) for rule in merged]
     if "symbol" not in {e["sets"] for e in expected}:
-        for position, index in enumerate(kept):
-            if rules[index]["sets"] == "feature" and names_a_symbol(rules[index], document):
+        for position, rule in enumerate(merged):
+            if rule["sets"] == "feature" and names_a_symbol(rule, document):
                 expected.insert(position + 1, {"sets": "symbol", "symbol": "named", "hide": False})
                 return expected, True
     return expected, False
@@ -420,8 +449,19 @@ def compare(reference, candidate, exceptions=(), allow_extras=True, allow_candid
     collapsible = {}
     for key, indices in ref_keys.items():
         kept = set(first_of_each_kind(ref_rules, indices))
-        collapsible[key] = collections.Counter(
-            DUPLICATE if ref_status[i] == "duplicate" else SHADOWED for i in indices if i not in kept)
+        counts = collections.Counter()
+        for _, of_kind in kinds_under(ref_rules, indices):
+            for position, index in enumerate(of_kind):
+                if index in kept:
+                    continue
+                if ref_status[index] == "duplicate":
+                    counts[DUPLICATE] += 1
+                    continue
+                # Does this rule change what the key's rules of its kind make, once the ones before it are in?
+                before = structure(merged_rule(ref_rules, of_kind[:position]), ref_colours)
+                after = structure(merged_rule(ref_rules, of_kind[:position + 1]), ref_colours)
+                counts[MERGED if before != after else SHADOWED] += 1
+        collapsible[key] = counts
 
     report = {
         "missing_keys": [k for k in ref_keys if k not in cand_keys],

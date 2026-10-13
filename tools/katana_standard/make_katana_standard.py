@@ -74,12 +74,13 @@ class Data:
         self.classes = len(self.codes_module.TAXONOMY)
 
     def description(self):
-        return ("%s, edition %d: an original survey feature library for Katana, with %d linestyles, %d symbols "
-                "and %d survey codes in %d classes." % (NAME, EDITION, len(self.linestyles), len(self.symbols),
-                                                         len(self.codes), self.classes))
+        return ("%s, edition %d: Katana's own linestyles, symbols, layers and colours for %d survey codes, with %d "
+                "linestyles and %d symbols. The survey code keys are the other built-in library's, for field-data "
+                "compatibility." % (NAME, EDITION, len(self.codes), len(self.linestyles), len(self.symbols)))
 
     NOTICE = ["Katana Standard is original work made for Katana.",
-              "It contains no third-party customisation, style library or survey code file.",
+              "Its survey code keys follow those of the other built-in library, reused for field-data compatibility "
+              "on the owner's decision; everything else in it is Katana's own.",
               "Its licence is that of the Katana repository."]
 
 
@@ -292,7 +293,7 @@ def stats(data):
             "definitions": len(data.linestyles) + len(data.symbols),
             "groups": len({d["group"] for d in data.linestyles + data.symbols}),
             "codes": len(data.codes), "rules": len(data.rules), "colours": len(data.colours.COLOURS),
-            "layers": len({c["layer"] for c in data.codes}), "classes": data.classes}
+            "layers": len({r["layer"] for r in data.rules if r["sets"] == "feature"}), "classes": data.classes}
 
 
 def main(argv):

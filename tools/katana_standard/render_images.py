@@ -6,7 +6,7 @@
 `DIR` is the folder holding `katana.exe` (default: build/release/bin of this checkout, else KATANA_BIN). Needs
 Pillow (to crop, tile and shrink what Katana draws) and a built `katana`; the run is headless
 (QT_QPA_PLATFORM=offscreen) and reads no per-user file (KATANA_BUILTIN_CUSTOMISATION=none, so the library is
-the only customisation in the session). Without a sheet named, all three are drawn.
+the only customisation in the session). Without a sheet named, all four are drawn.
 
 What each sheet is, and what is Katana's and what is Pillow's:
 
@@ -70,6 +70,21 @@ def modules():
     return codes, colours, linestyles, symbols
 
 
+def field_code(key):
+    """A field code that a key answers: a prefix key without its star, an exact key as it is."""
+    return key[:-1] if key.endswith("*") else key
+
+
+def matched_key(code, keys):
+    """The most specific key that answers `code` (showcase.matched_key): the exact key, else the longest prefix."""
+    if code in keys:
+        return code
+    for n in range(len(code), 0, -1):
+        if code[:n] + "*" in keys:
+            return code[:n] + "*"
+    return None
+
+
 def hex_rgb(text):
     return tuple(int(text[i:i + 2], 16) for i in (1, 3, 5))
 
@@ -130,8 +145,9 @@ def draw_symbols():
     codes_module, colours_module, _, symbols_module = modules()
     colour_of = {}
     for c in codes_module.CODES:
-        if c.get("symbol") and c["symbol"] not in colour_of:
-            colour_of[c["symbol"]] = hex_rgb(colours_module.COLOURS[c["colour"]])
+        st = codes_module.styling(c)
+        if st["symbol"] and st["symbol"] not in colour_of:
+            colour_of[st["symbol"]] = hex_rgb(colours_module.COLOURS[st["colour"]])
     by_group = {}
     for d in symbols_module.SYMBOLS:
         by_group.setdefault(d["group"], []).append(d["name"])
@@ -140,7 +156,7 @@ def draw_symbols():
     # subgroup at a time, since the grid shows four rows of five.
     rows = []
     for top in codes_module.TAXONOMY:
-        subs = {sub[1]: by_group.get(top[1] + "/" + sub[1], []) for sub in top[4]}
+        subs = {sub[0]: by_group.get(top[1] + "/" + sub[0], []) for sub in top[4]}
         if top[0] == "U":
             subs["All Services"] = by_group.get("Utilities/All Services", [])
         total = sum(len(v) for v in subs.values())
@@ -229,16 +245,21 @@ def mm(paper):
 def draw_linestyles():
     from PIL import Image
     codes_module, colours_module, linestyles_module, _ = modules()
+    keys = {c["key"] for c in codes_module.CODES}
     user = {}
     for c in codes_module.CODES:
-        if c.get("linestyle") and c["linestyle"] != "continuous" and c["linestyle"] not in user:
-            user[c["linestyle"]] = c["key"]
+        name = codes_module.styling(c)["linestyle"]
+        if name and name != "continuous" and name not in user:
+            code = field_code(c["key"])
+            # a code that the key itself answers, so the library styles the sample by that key
+            if matched_key(code, keys) == c["key"]:
+                user[name] = code
     groups = []
     for top in codes_module.TAXONOMY:
         for sub in top[4]:
-            g = top[1] + "/" + sub[1]
+            g = top[1] + "/" + sub[0]
             names = [d["name"] for d in linestyles_module.LINESTYLES if d["group"] == g]
-            if top[0] == "U" and sub[0] == "X":
+            if top[0] == "U" and sub[0] == "Unknown Services":
                 names += [d["name"] for d in linestyles_module.LINESTYLES if d["group"] == "Utilities/All Services"]
             if names:
                 groups.append((g, names))
@@ -321,20 +342,21 @@ def crop_plot(image, shrink=0.5):
 
 # ---- plan: the window after the import -----------------------------------------------------------------------
 
-# What the plan sheet labels: the code, the colour's role, and where its words go, as pixels from the anchor (a point of
-# the field file, in metres): "right" and "start" put the words' first letter at the anchor plus the offset, "above"
-# and "below" centre them on it.
+# What the plan sheet labels: the field code, the colour's role, and where its words go, as pixels from the anchor (a
+# point of the field file, in metres): "right" and "start" put the words' first letter at the anchor plus the offset,
+# "above" and "below" centre them on it. PWSW is the mistyped code, which no key answers.
+UNMATCHED = "PWSW"
 PLAN_LABELS = (
-    ("CBT", (330000.0, 6250030.0), "start", (-4, -38)),
-    ("MCC", (330020.0, 6250030.0), "right", (30, 0)),
-    ("UWQ", (330005.0, 6250020.0), "right", (24, 0)),
-    ("VTB", (330008.0, 6250012.0), "below", (0, 42)),
-    ("FFP", (330030.0, 6250010.0), "right", (24, 0)),
-    ("KPG", (330006.0, 6249991.0), "above", (0, -34)),
-    ("KKT", (330024.0, 6249990.0), "right", (40, 0)),
-    ("UWV", (330012.0, 6249980.0), "below", (0, 54)),
-    ("UWM", (330024.0, 6249980.0), "right", (40, 0)),
-    ("UED", (330020.0, 6249970.0), "right", (40, 0)),
+    ("BT", (330000.0, 6250030.0), "start", (-4, -38)),
+    ("PBMK", (330020.0, 6250030.0), "right", (30, 0)),
+    (UNMATCHED, (330005.0, 6250020.0), "right", (24, 0)),
+    ("PT04", (330008.0, 6250012.0), "below", (0, 42)),
+    ("FE", (330030.0, 6250010.0), "right", (24, 0)),
+    ("PGUL", (330006.0, 6249991.0), "above", (0, -34)),
+    ("KB", (330024.0, 6249990.0), "right", (40, 0)),
+    ("PWSV", (330012.0, 6249980.0), "below", (0, 54)),
+    ("WM", (330024.0, 6249980.0), "right", (40, 0)),
+    ("EU", (330020.0, 6249970.0), "right", (40, 0)),
 )
 
 
@@ -364,8 +386,11 @@ def draw_plan():
     near, far = shot.width, 0
     for key, (x, y), where, (dx, dy) in PLAN_LABELS:
         px, py = (x - x0) * per_metre + dx, (ytop - y) * per_metre + dy
-        hexcolour = hex_rgb(colours_module.COLOURS[by_key[key]["colour"]]) if key != "UWQ" else (154, 163, 174)
-        words = by_key[key]["comment"] if key != "UWQ" else "no rule"
+        if key == UNMATCHED:
+            hexcolour, words = (154, 163, 174), "no rule"
+        else:
+            st = codes_module.styling(by_key[matched_key(key, set(by_key))])
+            hexcolour, words = hex_rgb(colours_module.COLOURS[st["colour"]]), st["comment"]
         key_w = draw.textlength(key + "  ", font=key_face)
         total = key_w + draw.textlength(words, font=word_face)
         left = px if where in ("right", "start") else px - total / 2
