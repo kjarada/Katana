@@ -25,10 +25,13 @@
 // the copy that was run stays where it is, and what a sweep cannot delete is not queued in
 // U/cleanup.list. A folder under R/.update that would not go needs no list: it keeps its
 // journal (remove_tree.hpp) and is found and swept again at the next start. The copy is left
-// for a program that may write per-user state, and NOTHING REMOVES IT YET: one helper's size
-// stays in U for each update that needed a recovery - one that a crash interrupted, and one
-// whose rollback failed and which `--recover` put right later (Applier::finish, apply.cpp,
-// keeps that copy off cleanup.list because the RunOnce entry runs `--recover` from it).
+// for a program that may write per-user state: the window a person uses, whose start lists it
+// for removal from what the install's own R/.update/recovery.log names (UpdateWorkbench::start,
+// src/katana_qt/update_workbench.cpp; recover.hpp says which transactions, and that the form of
+// the log's lines is therefore read). Until that start one helper's size stays in U for each
+// update that needed a recovery - one that a crash interrupted, and one whose rollback failed
+// and which `--recover` put right later (Applier::finish, apply.cpp, keeps that copy off
+// cleanup.list because the RunOnce entry runs `--recover` from it).
 
 #include "katana/update/recover.hpp"
 
@@ -301,7 +304,8 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
 
     // The helper has exited and put everything back. Its copy U/run-<tx>/ is of no use any
     // more, and it STAYS: deleting it, or listing it in U/cleanup.list, would be a headless
-    // program changing per-user state (recover.hpp; the top of this file says what that costs).
+    // program changing per-user state (recover.hpp). The window's start lists it (the top of
+    // this file says from what).
     return {};
 }
 

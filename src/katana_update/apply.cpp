@@ -595,7 +595,10 @@ core::Status restoreFromDisk(FsOps& fs, const Path& root, const Path& work, Jour
 }
 
 // What a skipped journal record is reported in. A line per record, appended; nothing is
-// created when nothing was skipped.
+// created when nothing was skipped. The window reads this file for the transactions a recovery
+// found (recover.hpp, "THE FORM OF THOSE LINES IS READ"), and a record's text is anybody's: it
+// names nothing there because the line's second word is `journal`, and because it stays ONE
+// line (oneLine), so that a forged record cannot begin a line of its own.
 void reportRefusals(FsOps& fs, const Path& root, const std::string& transaction,
                     const JournalPlan& plan)
 {

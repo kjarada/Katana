@@ -2988,6 +2988,7 @@ environment, the job runner - and does what they say:
 | `updateStagedAfter` | whether a downloaded release is still one to install after a check answered |
 | `updateViewOfLastResult` | how the last apply's result is shown at the next start |
 | `updateAutomaticCheckIsDue` | whether the window checks by itself now |
+| `updateRecoveredTransactions` | which helper copies a start may remove: those of this install's updates that a recovery put right and that are over |
 | `updateStatusButtonText` | the status-bar button's words, and that it is hidden |
 | `updateReplyValue`, `updateStagedOfReply` | a record of a reply, by its key |
 | `updateLoggedLine`, `updateLoggedReply` | what the log may show of a line, and of the verbs' answer to it |
@@ -3141,10 +3142,14 @@ workbench reads the last apply's result from the update state folder, clears
 it, and - unless it was a success, which is one line in the log - opens the
 dialog on it: Rolled back, or Blocked with the programs to close and a Retry
 that applies the still-downloaded release again. It also removes what an
-earlier update could not delete, and offers again, as Ready, a release that
-was downloaded in an earlier session and not installed - with two
-exceptions, which are the rule that a skipped or blocked release is not
-offered (`updateStagedToOffer`):
+earlier update could not delete - and with it the helper's copy of each
+update of this install that a recovery put right. A recovery writes nothing
+per user, so nothing in the update state folder names that copy; the
+install's own `recovery.log` does, and a copy is removed only once its
+update is over (`updateRecoveredTransactions`; `update.md`, "Recovery").
+And it offers again, as Ready, a release that was downloaded in an earlier
+session and not installed - with two exceptions, which are the rule that a
+skipped or blocked release is not offered (`updateStagedToOffer`):
 
 - one the person **skipped** since it was downloaded;
 - one that was **rolled back here**. A release that was installed and did

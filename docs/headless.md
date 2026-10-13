@@ -566,10 +566,12 @@ state folder, to find the copy of the helper the interrupted update ran from
 (`run-<tx>/` there: it is outside the install, so it still runs when the
 install's own `bin/` is half swapped), and that is all it does there. It
 makes, changes and deletes nothing in that folder - no `cleanup.list` is
-begun, and the copy it ran stays where it was
+begun, and the copy it ran is left where it was
 (`RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
-compares the folder before and after, entry by entry and byte by byte;
-`docs/update.md`, "Recovery", and "Not done" for the copy that stays). A
+compares the folder before and after, entry by entry and byte by byte).
+That copy is removed at the next start of an interactive window of the
+installed copy, which learns of it from the install's own `recovery.log`;
+no headless run removes it (`docs/update.md`, "Recovery"). A
 recovery that fails is said on stderr with the command that puts the install
 right by hand, and the run goes on.
 

@@ -143,9 +143,9 @@ trust: nothing in U is believed without a signature check.
 | `state.json` | `last_check`, `auto`, `skipped` (a version) and `blocked` (the sequences of releases that were installed here and did not start) |
 | `last.json` | how the last swap ended: `status`, `reason`, `holder`, `version`, `tx`. The window shows it once at its next start and clears it |
 | `stage-<sequence>/` | the downloaded files of one release at their root-relative paths, and last of all `manifest.json` and `manifest.json.sig`, whose presence means "complete"; `stage-<sequence>.lock` beside it |
-| `run-<tx>/` | the copy of the helper that runs the swap. A swap that ends puts the folder on `cleanup.list`; one that was interrupted and recovered leaves it ("Not done") |
+| `run-<tx>/` | the copy of the helper that runs the swap. A swap that ends puts the folder on `cleanup.list` itself. The copy of a swap that was interrupted and recovered is listed there by the next start of an interactive window of that install, which learns of it from `R/.update/recovery.log` ("Recovery") |
 | `healthy-<tx>` | the marker a new version writes to say it starts |
-| `cleanup.list` | what a held lock kept from being deleted; the next start of the window removes it |
+| `cleanup.list` | what is to be deleted and could not be at the time: what a held lock kept the helper from deleting, the helper copy of a request that nobody started, and the helper copy of a recovered swap, which the window's start lists itself. An interactive window of an installed copy removes what it names at its next start |
 
 A headless run and `katana_mcp` are given no state folder: they read and
 write none of this ("The three surfaces").
@@ -635,10 +635,58 @@ READS U, to find the helper copy `U/run-<tx>/katana_updater`, and that is
 all it does there: it makes, changes and deletes nothing in U, whichever
 program calls it. No `cleanup.list` is begun for what a lock kept in
 `R/.update` - the next start of any program finds that folder again and
-deletes what is left of it - and the helper copy it ran stays where it was
-("Not done").
+deletes what is left of it - and the helper copy it ran is left by recovery:
+the window's next start removes it.
 `RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
 compares U before and after, entry by entry and byte by byte.
+
+**The copy a recovery ran from** is removed by the one program that may
+write per-user state: an interactive window of that install, at its next
+start (`UpdateWorkbench::start`, on Windows, where an update can have run).
+Nothing in U names the copy - a swap that a crash ended never listed its
+own, and one whose rollback failed keeps its copy off the list on purpose,
+for the `RunOnce` entry to run - so the INSTALL names it. The window reads
+`R/.update/recovery.log`, in which every `--recover` that found something
+wrote a line
+
+```
+<UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>
+```
+
+and takes each transaction of a `found=` list whose folder `R/.update/<tx>`
+is gone: that update is over, rolled back or healthy, and nothing starts its
+helper again. Its `U/run-<tx>` goes on `cleanup.list`, and the sweep of the
+same start removes it. A transaction whose folder is still there keeps its
+copy - a rollback that failed runs from it at the next try. A copy that is
+gone already, which is every start but the first after a recovery, is not
+listed again.
+
+The log is no more trusted than the journal beside it. A line counts only
+when it is whole, ended by its line feed, and has that form - the same file
+quotes the journal records a rollback refused, whose text is anybody's - and
+an id counts only when it is a transaction id
+(`update::isValidTransactionId`), so a line names no place but `U/run-<id>`.
+Which transactions a log names is `updateRecoveredTransactions`
+(`src/katana_qt/update_dialog.hpp`), a function of the log's text and of
+which folders are gone
+(`TheHelperCopyOfARecoveredUpdateIsListedOnlyOnceItsTransactionIsOver`,
+`OnlyAWholeLineThatARecoveryWroteNamesATransaction`,
+`WhatIsNoTransactionIdInARecoveryLineNamesNoFolder`). Reading the file - not
+through a link, and not one longer than 1 MiB - and listing the copies are
+the workbench's (`src/katana_qt/update_workbench.cpp`), which no test builds
+("Not done").
+
+*Rejected: sweeping every `run-<tx>` in U that no transaction of this
+install owns.* U is one folder for every copy of Katana a person runs, and
+such a folder is also what `UPDATE APPLY CONFIRM` has just made, here or in
+another install, for a helper that has not started yet. Only an id that this
+install's own recovery named is known to be this install's, and begun.
+
+What is left: a COPY of an install folder made while an update in it was
+half done carries the transaction with it. Once the copy has been put right,
+its window removes the helper copy the original would have run, and the
+original's recovery then runs its own `R/bin/katana_updater` - as recovery
+does whenever that copy is gone (the table above).
 
 **The residual.** A program started during the commit - about a second -
 may fail to load, half its libraries being new; it is started again. And a
@@ -764,12 +812,13 @@ self-test - run as background jobs.
   `OFF`), what a check sends (`settingsUpdateSends`), the access token
   (`settingsUpdateToken`, Save and Clear), and "Offer the skipped version
   again" (`settingsUpdateUnskip`, `UPDATE SKIP NONE`).
-- **At a start** an interactive window removes what `cleanup.list` names,
-  shows and clears `last.json`, and offers again, as Ready, a release that
-  was downloaded in an earlier session - unless it was skipped since, or
-  rolled back here. A development copy does none of this: it shares the
-  per-user folder with an installed copy on the same machine and must leave
-  it alone.
+- **At a start** an interactive window lists in `cleanup.list` the helper
+  copy of each update of its install that a recovery put right
+  ("Recovery"), removes what the list names, shows and clears `last.json`,
+  and offers again, as Ready, a release that was downloaded in an earlier
+  session - unless it was skipped since, or rolled back here. A development
+  copy does none of this: it shares the per-user folder with an installed
+  copy on the same machine and must leave it alone.
 
 ### katana_mcp
 
@@ -1046,21 +1095,6 @@ whatever more the manifest's parser allows (4 GiB).
   A copy unpacked where its user may not write is offered a release like
   any other; the helper refuses at the swap (`last=refused:root_not_writable`),
   after the download.
-- **The helper copy of a recovered update is removed by nothing.** A swap
-  that ends puts `U/run-<tx>` on `cleanup.list` itself. A swap that a crash
-  or a power cut ended did not get there, and one whose rollback failed
-  leaves its copy off the list on purpose, for the `RunOnce` entry to run.
-  Both are put right by `katana_updater --recover R`, which writes nothing
-  per user; and `update::recover`, which starts it from `katana_cli`,
-  `katana_mcp` and a headless window as well as from the window a person
-  uses, leaves U as it found it ("Recovery"). So nothing names the folder
-  afterwards, and the window's start removes what `cleanup.list` names and
-  nothing else: the copy - one folder holding one program - stays in
-  `U/run-<tx>` until a program that may write per-user state removes it.
-  The start of an interactive window of an installed copy is where that
-  sweep belongs, and it has not been given it. Open with it: U is one
-  folder for every copy of Katana a person runs, so a `run-<tx>` that no
-  transaction of THIS install owns may be another install's, in use now.
 - **No resume inside a file.** A download resumes file by file; a large
   file that was half fetched is fetched again.
 - **No beta channel**, no installing an older version, no installing at

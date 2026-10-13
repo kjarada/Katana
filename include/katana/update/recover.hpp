@@ -52,10 +52,18 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     appended for each run that found something to put right
 //     (`<UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>`, and
 //     `detail=` after a failure), and one for each journal record the rollback
-//     would not follow. A run that found nothing writes nothing, and where
+//     would not follow (`<tx> journal record refused: <record>`, the record on
+//     one line). A run that found nothing writes nothing, and where
 //     R/.update is not a folder of the install itself (a link) nothing is read
 //     or written through it. When everything is back it removes the RunOnce
 //     entry the interrupted swap left.
+//     THE FORM OF THOSE LINES IS READ, by the window (the last point below
+//     says what for): a transaction is named to it by a whole line whose
+//     second word is `recover`, whose third is `found=<tx,...>` and whose
+//     fourth begins `result=` - which the line of a refused record, its
+//     second word `journal`, never is. Neither form changes without
+//     updateRecoveredTransactions (src/katana_qt/update_dialog.cpp) and its
+//     tests (tests/qt_widgets/test_update_dialog.cpp).
 //   - last.json is written by ONE program in ONE mode: the helper run for the
 //     window, the swap itself (`--state U`, apply.hpp). A recovery started from
 //     katana_cli or katana_mcp therefore never leaves a "the last update ..."
@@ -69,15 +77,23 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     from katana_cli or katana_mcp leaves the per-user folder byte for byte
 //     as it found it, the helper copy it ran included, and no cleanup.list is
 //     begun. What a sweep of R/.update/<tx> could not delete is found there
-//     again at the next start. The copy stays: removing it is for a program
-//     that may write per-user state, and none does yet, so one helper's size
-//     is left in U for each update that needed a recovery. That is an update
-//     a crash interrupted (its helper died before it could list its own
-//     copy), and equally one whose rollback failed and which `--recover` put
-//     right later: Applier::finish (apply.cpp) keeps the copy off
-//     cleanup.list after a rollback that failed, because the RunOnce entry
-//     runs `--recover` from that very copy, and the recovery then lists
-//     nothing.
+//     again at the next start. The copy stays, here: removing it is for a
+//     program that may write per-user state, and that is the window a person
+//     uses. Its start (UpdateWorkbench::start,
+//     src/katana_qt/update_workbench.cpp: on Windows, not a headless run, not
+//     a development tree) reads THIS install's recovery.log, puts on
+//     U/cleanup.list the copy U/run-<tx> of each transaction a recovery found
+//     and whose folder R/.update/<tx> is gone, and sweeps the list
+//     (listRecoveredCopies there; which transactions, and why the install's
+//     log and not the names in U, is updateRecoveredTransactions',
+//     src/katana_qt/update_dialog.hpp). Until that start one helper's size is
+//     left in U for each update that needed a recovery - which is for as long
+//     as only katana_cli and katana_mcp are started. That is an update a
+//     crash interrupted (its helper died before it could list its own copy),
+//     and equally one whose rollback failed and which `--recover` put right
+//     later: Applier::finish (apply.cpp) keeps the copy off cleanup.list
+//     after a rollback that failed, because the RunOnce entry runs
+//     `--recover` from that very copy, and the recovery then lists nothing.
 [[nodiscard]] core::Status recover(const std::filesystem::path& root);
 
 // Roll back every transaction under R/.update whose journal needs it, in
