@@ -22,6 +22,9 @@
 ;   * Put down over a copy that was not uninstalled first, it removes the updater's record of that
 ;     copy's version and the working folder of an update that was cut short (the installer's own
 ;     section says why), and it stops at a file that is in use, never skips it.
+;   * A copy that is already installed is uninstalled first (asked; a silent run does not ask).
+;     An entry in Settings > Apps whose uninstaller is no longer there, because the folder was
+;     deleted by hand, is no such copy, and the install goes ahead.
 ;   * /S (silent) and /D=<folder> work as in any NSIS installer; README.md documents them. A silent
 ;     run never waits for an answer: every MessageBox has a /SD default.
 ;
@@ -599,14 +602,6 @@ Function .onInit
   ReadRegStr $0 HKCU "${KATANA_UNINSTALL_KEY}" "UninstallString"
   StrCmp $0 "" onInitDone
 
-  ReadRegStr $1 HKCU "${KATANA_UNINSTALL_KEY}" "DisplayName"
-  MessageBox MB_YESNOCANCEL|MB_ICONEXCLAMATION \
-  "$1 is already installed.$\r$\n$\r$\nDo you want to uninstall the old version before installing the new one?" \
-  /SD IDYES IDYES onInitUninstall IDNO onInitDone
-  Abort
-
-  onInitUninstall:
-  ClearErrors
   ; UninstallString is quoted; the path is wanted without the quotes.
   StrCpy $2 $0 1 0
   StrCmp $2 "$\"" 0 +2
@@ -615,6 +610,21 @@ Function .onInit
   StrCmp $2 "$\"" 0 +2
   StrCpy $0 $0 -1
 
+  ; An entry whose uninstaller is no longer there is no installed copy: the folder was deleted
+  ; by hand, which is easy to do in one's own profile, and the entry in Settings > Apps stayed
+  ; behind. There is nothing to ask about and nothing to run, and trying to run it would fail
+  ; and stop this install, every time, and a silent one with no way round it. The install goes
+  ; ahead and writes the entry anew.
+  IfFileExists "$0" 0 onInitDone
+
+  ReadRegStr $1 HKCU "${KATANA_UNINSTALL_KEY}" "DisplayName"
+  MessageBox MB_YESNOCANCEL|MB_ICONEXCLAMATION \
+  "$1 is already installed.$\r$\n$\r$\nDo you want to uninstall the old version before installing the new one?" \
+  /SD IDYES IDYES onInitUninstall IDNO onInitDone
+  Abort
+
+  onInitUninstall:
+  ClearErrors
   StrLen $2 "\@CPACK_NSIS_UNINSTALL_NAME@.exe"
   StrCpy $3 $0 -$2
   ; _?= runs the uninstaller where it is, not from a copy, so that this waits for it.
