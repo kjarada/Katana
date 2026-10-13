@@ -294,9 +294,12 @@ from the install's own record, and hashes every file it is about to put in
 place. A stage folder that somebody altered is found there.
 
 **The trust root is a parameter, never a global.** `update::productionTrust`
-is what the four programs pass. Only the test executables
-(`katana_update_tests`, `katana_update_e2e`, `katana_updater_test`, none of
-them installed) pass a test key, the published RFC 8032 vectors. So no
+is what the four programs pass. Only test executables pass a test key, the
+published RFC 8032 vectors, and none of them is installed:
+`katana_update_tests`, `katana_update_e2e` and `katana_updater_test`, which
+link the test trust root (`tests/update/test_key.cpp`), and
+`katana_app_tests`, which builds the same trust from the two public keys for
+the verbs' tests (`tests/app/test_update_verbs.cpp`). So no
 variable, file or switch at run time changes whose signature counts, and the
 test `update_test_keys_are_in_no_shipped_program` reads the bytes of the four
 programs to see that no test key is in them.
@@ -407,7 +410,7 @@ web server does, and Settings > Updates says so.
 | `available` | a verified release above the installed version (or the same version with a higher sequence, for a copy an update installed) | `notify_only` for a release that is only announced |
 | `current` | the feed's release is not above it | `skipped` when it is, and the person skipped that version |
 | `blocked` | this very release was installed here and put back | `blocked_before` |
-| `unreachable` | the feed could not be read, or did not verify | `offline`, `http_404`, `http_403`, `http_429`, `http_<n>`, `html_page` (a sign-in page where the file should be), `too_large`, `bad_signature`, `untrusted_key`, `placeholder_keys`, `malformed`, `wrong_product`, `wrong_target`, `wrong_channel`, `verify_unavailable`, `asset_missing`, `cancelled`, `no_transport` |
+| `unreachable` | the feed could not be read, or did not verify | `offline`, `http_404`, `http_403`, `http_429`, `http_<n>`, `html_page` (a sign-in page where the file should be), `bad_redirect` (a redirect to an address that cannot be used: none, or one that is not https), `too_many_redirects` (a sixth), `too_large`, `bad_signature`, `untrusted_key`, `placeholder_keys`, `malformed`, `wrong_product`, `wrong_target`, `wrong_channel`, `verify_unavailable`, `asset_missing`, `cancelled`, `no_transport`, and `error` for a failure the transport gave no token of its own |
 | `unsupported` | this copy cannot update | `development_tree`, `disabled_build`, `install_record`, `no_network` (a build without the HTTP stack, `-DKATANA_BUILD_IO=OFF`) |
 
 A fresh install is not offered the release it came from: it has no record
@@ -514,7 +517,9 @@ and the fault loops break it before each of its file operations
 2. **Wait** for the window's process to exit (60 s), then for every process
    that was started from a file under R (30 s). Past that the outcome is
    `blocked`, naming them; nothing was touched. The helper NEVER kills a
-   process.
+   process it did not start: a program somebody is using is waited for and
+   then named. The one process it does stop is its own health run of step 7,
+   when that outlasts its wait (`SpawnRequest::timeout`).
 3. **Plan, changing nothing under R.** Hash every file the manifest lists.
    Equal: keep. Otherwise the staged file must exist and is COPIED - not
    renamed: the stage folder is user-writable, and a file in R must take R's
@@ -642,7 +647,7 @@ line a person would type, and `HELP UPDATE` prints the family.
 |---|---|
 | `UPDATE CHECK` | `update=available\|current\|unreachable\|unsupported\|blocked installed=<v> latest=<v> files=<changed>/<total> download_bytes=<n> notes_url=<url> reason=<token> detail="<sentence>"`; `information=old` when the release's `expires` has passed |
 | `UPDATE STATUS` | `installed=<v> target=<t\|none> kind=installer\|archive\|development staged=<v\|none> skipped=<v\|none> auto=on\|off last_check=<UTC\|never> token=present\|absent last=<status>[:<reason>]` |
-| `UPDATE DOWNLOAD CONFIRM` | `progress bytes=<done>/<total> files=<done>/<total>` lines, then `staged=<v>`. With nothing to download: `UPDATE CHECK`'s record, which says why, then `staged=none` |
+| `UPDATE DOWNLOAD CONFIRM` | `progress bytes=<done>/<total> files=<done>/<total>` lines, then `staged=<v>`. With nothing to download: `UPDATE CHECK`'s record, which says why, then `staged=none`. In a session that keeps no update folder: `staged=none reason=no_state`, and nothing is asked of the feed. A download that FAILS is an error, not a reply (below) |
 | `UPDATE APPLY CONFIRM` | `ready=<v> transaction=<tx>`; the caller then ends its session and starts the helper |
 | `UPDATE SKIP <version>`, `UPDATE SKIP NONE` | `skipped=<v\|none>` |
 | `UPDATE SET AUTO ON\|OFF` | `auto=on\|off` |
@@ -678,6 +683,18 @@ unchanged files between them.)
   `UPDATE DOWNLOAD` or `UPDATE APPLY` without it is refused, saying what the
   line with it would do, so the word is typed knowing it
   (`cli.update_download_without_confirm_is_refused_saying_what_confirm_does`).
+- **A download that fails is an error, with `reason=` first in its
+  context**, as a refused `APPLY CONFIRM` is: `plan_failed` (the installed
+  files could not be compared, so nothing was asked for), `low_disk_space`,
+  `stage_busy`, `write_failed`, `staged_corrupt` and `staged_hash` (a member
+  that does not unpack, or is not the signed file), `short_range`, the
+  private route's `no_token`, `asset_missing`, `payload_mismatch` and
+  `malformed`, `platform` where this version does not install, or the
+  transport's own token: `offline`, `http_<n>`, `html_page`,
+  `partial_downloads`, `bad_range`, `bad_redirect`, `too_many_redirects`,
+  `cancelled` (`include/katana/update/stage.hpp` lists the engine's). What
+  was staged before the failure stays, and the next download does not ask
+  for it again.
 - **`APPLY CONFIRM` changes nothing in the install.** It finds the newest
   complete download whose records verify, runs the preflight, and hands its
   caller the request to start the helper with. It is refused, with
