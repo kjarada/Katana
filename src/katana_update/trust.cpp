@@ -66,6 +66,22 @@ Trust buildProductionTrust()
     return trust;
 }
 
+// verifyEd25519 under a key the TRUST lists. A key that is no usable public key is not a bad
+// signature: it is a trust that was built wrongly (a mistyped pin), and it would refuse every
+// release of every install. verifyEd25519 answers that with InvalidArgument, the code of a
+// forged signature, which the callers hold to be unreachable for a genuine release; so the key
+// is checked first and its failure is reported as Internal, "could not check", with its reason.
+core::Status verifyWithPinnedKey(const PublicKey& key, std::string_view signedBytes, const SignatureBytes& signature)
+{
+    const core::Status usable = checkPublicKey(key);
+    if (!usable.ok()) {
+        const core::Error& why = usable.error();
+        return core::makeError(core::ErrorCode::Internal, "a key of the update trust cannot be used: " + why.message,
+                               why.context);
+    }
+    return verifyEd25519(key, signedBytes, signature);
+}
+
 } // namespace
 
 const Trust& productionTrust()
@@ -115,15 +131,20 @@ core::Result<Manifest> verifyManifest(std::string_view json, std::string_view si
     //    is a Trust somebody built wrongly, and counts as absent.
     // 4. The signature over the exact bytes. Every listed key with the named id is tried, in the
     //    order listed (active, then spare): two keys share an id with probability 2^-64, but a
-    //    Trust is a parameter and need not come from the generator.
+    //    Trust is a parameter and need not come from the generator. What is reported: a key that
+    //    accepts wins; else a failure to check (Internal) over a refusal, so that "could not
+    //    look" is never hidden behind "forged"; else the first refusal.
     std::optional<core::Status> outcome;
     for (const TrustedKey& candidate : trust.keys) {
         if (candidate.id != line.value().keyId || keyIdOf(candidate.key) != candidate.id) {
             continue;
         }
-        core::Status attempt = verifyEd25519(candidate.key, signedJson, line.value().signature);
+        core::Status attempt = verifyWithPinnedKey(candidate.key, signedJson, line.value().signature);
         const bool accepted = attempt.ok();
-        if (accepted || !outcome) { // the first refusal is the one reported, unless a later key accepts
+        const bool outranks = !accepted && outcome && !outcome->ok() &&
+                              attempt.error().code == core::ErrorCode::Internal &&
+                              outcome->error().code != core::ErrorCode::Internal;
+        if (accepted || !outcome || outranks) {
             outcome = std::move(attempt);
         }
         if (accepted) {

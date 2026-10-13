@@ -60,6 +60,14 @@ struct SignatureLine {
 [[nodiscard]] core::Status verifyEd25519(const PublicKey& key, std::string_view message,
                                          const SignatureBytes& signature);
 
+// OK when `key` passes the key check that verifyEd25519 makes: it is the canonical encoding of a
+// point of the prime-order subgroup, and not the neutral element. InvalidArgument (the message
+// says "the public key is not accepted" and why) when it is not; Internal, and only then, when
+// the check itself could not run. For a caller that holds a key of its own - the trust a build
+// pins (trust.hpp) - and must tell "this key is unusable" from "this signature is wrong": a
+// refusal of the key says nothing about any signature.
+[[nodiscard]] core::Status checkPublicKey(const PublicKey& key);
+
 // The first thing the helper's main() does (src/katana_updater, task T9): removes OPENSSL_CONF,
 // OPENSSL_MODULES and OPENSSL_ENGINES from this process's environment and initialises libcrypto
 // without reading a configuration file. Not called by katana, katana_cli or katana_mcp: they
@@ -67,10 +75,11 @@ struct SignatureLine {
 // verifyEd25519 makes the same initialisation on its first use, so a program that skips this
 // still never loads a configuration through this library - provided nothing else in the process
 // initialised libcrypto first. Not thread-safe against other threads reading the environment, so
-// call it before starting any. Idempotent. Internal if libcrypto cannot be initialised. The three
-// variables are gone for the rest of the process's life, so a program it starts inherits none of
-// them: the helper that relaunches katana (T9) reads them BEFORE this call if it means to hand the
-// user's own values on, and builds the child's environment from that copy.
+// call it before starting any. Idempotent. Internal if libcrypto cannot be initialised or if one
+// of the three variables is still set afterwards (the other two are removed all the same). The
+// three variables are gone for the rest of the process's life, so a program it starts inherits
+// none of them: the helper that relaunches katana (T9) reads them BEFORE this call if it means to
+// hand the user's own values on, and builds the child's environment from that copy.
 [[nodiscard]] core::Status hardenOpenSslEnvironment();
 
 } // namespace katana::update

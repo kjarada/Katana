@@ -11,15 +11,9 @@
 // -rawin`). No test key is in any program that ships: the Trust is a PARAMETER and these tests
 // build theirs (tests/update/test_key.hpp).
 //
-// The cases that need the manifest PARSER (task T4) start with requireManifestParser(): until
-// that task lands parseManifest is a stub that says "not implemented", and they are skipped,
-// visibly, rather than failed or faked. The cases that stop before the parse - everything about
-// the signature, the keys and the placeholders - run now.
-//
-// WHEN T4 IS MERGED (the integration step): `ctest -R "^Trust\."` must show 0 skipped, and
-// manifestParserIsImplemented, REQUIRE_THE_MANIFEST_PARSER and passedTheSignatureGate below are
-// deleted in the same change, so that a later parser regression fails these cases instead of
-// skipping them. (Run against T4's parser on a throwaway merge, all of them pass: see the T5 report.)
+// Nothing here skips: every case runs against the real manifest reader (src/katana_update/
+// manifest.cpp), so a regression of the reader fails the cases that read a Manifest instead of
+// passing quietly.
 
 #include <gtest/gtest.h>
 
@@ -82,24 +76,6 @@ update::PublicKey keyFromHex(std::string_view hex)
     return key;
 }
 
-// parseManifest is task T4's. While it is the skeleton's stub, it answers any text with
-// Unsupported "not implemented: parseManifest"; the cases that need a real parse skip.
-bool manifestParserIsImplemented()
-{
-    static const bool implemented = [] {
-        const auto parsed = update::parseManifest("{}");
-        return parsed.ok() || parsed.error().message.rfind("not implemented", 0) != 0;
-    }();
-    return implemented;
-}
-
-#define REQUIRE_THE_MANIFEST_PARSER()                                                                       \
-    do {                                                                                                    \
-        if (!manifestParserIsImplemented()) {                                                               \
-            GTEST_SKIP() << "parseManifest is still the skeleton's stub; this case runs when task T4 lands"; \
-        }                                                                                                   \
-    } while (false)
-
 bool contains(const std::string& text, std::string_view part)
 {
     return text.find(part) != std::string::npos;
@@ -133,21 +109,17 @@ std::string keysCmakeValue(const std::string& file, std::string_view name)
     return value;
 }
 
-// True when `key` passes the key check of verifyEd25519: a signature that is wrong for a key the
-// check accepts is a MISMATCH, and for one it does not accept, "public key is not accepted".
+// True when `key` passes the key check of verifyEd25519 (a prime-order point). Held to the
+// signature layer's own answer too: a signature that is wrong for a key the check accepts is a
+// MISMATCH, and for one it does not accept, "public key is not accepted".
 bool keyIsAcceptedAsAKey(const update::PublicKey& key)
 {
+    const bool checked = update::checkPublicKey(key).ok();
     const core::Status status = update::verifyEd25519(key, "x", update::SignatureBytes{});
-    return !status.ok() && contains(status.error().message, "does not match");
-}
-
-// The gate let the signature through: the whole thing is OK, or - until task T4 writes
-// parseManifest, whose skeleton stub answers "not implemented" - the refusal is the parser's.
-// Every refusal of the gate before the parse (the line, the trust, the key, the signature) is
-// something else, so a case with this does not need the parser to show a signature was accepted.
-bool passedTheSignatureGate(const core::Result<update::Manifest>& result)
-{
-    return result.ok() || result.error().message.rfind("not implemented", 0) == 0;
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(checked, !status.ok() && contains(status.error().message, "does not match"))
+        << "checkPublicKey and verifyEd25519 disagree about the key";
+    return checked;
 }
 
 // The macOS notify-only manifest of the fixtures with its channel changed to "beta" (and
@@ -373,17 +345,19 @@ TEST(Trust, APlaceholderKeyNamedByTheSignatureLineStillVerifiesNothingEvenWithTh
 {
     // A trust whose keys are the placeholders but whose flag is wrongly off (the configure step
     // refuses that pairing, but the engine does not rely on it): a line naming a placeholder's
-    // id finds the key, and the key is refused in the signature layer, not accepted.
+    // id finds the key, and the key is refused as no public key, not accepted. The code is
+    // Internal ("could not check", trust.hpp), not a forged signature's InvalidArgument: a key of
+    // the trust that is no key says nothing about the release it was asked about.
     const update::Trust trust = trustOf({kPlaceholderActiveHex, kPlaceholderSpareHex}, false);
     const Release release = readRelease("v2");
     const std::string sig = "ed25519 504c414345484f4c " + release.sig.substr(25);
     const auto verified = update::verifyManifest(release.json, sig, trust, installFor("win64"));
     ASSERT_FALSE(verified.ok());
-    EXPECT_EQ(verified.error().code, core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(verified.error().code, core::ErrorCode::Internal) << verified.error().describe();
     EXPECT_TRUE(contains(verified.error().message, "public key is not accepted")) << verified.error().describe();
 }
 
-// ---- the gate, in the header's order, as far as it goes without a parser -----------------------
+// ---- the gate, in the header's order, up to the parse -------------------------------------------
 
 TEST(Trust, AnEmptyManifestIsRefusedBeforeAnythingElseIsLooked)
 {
@@ -464,8 +438,8 @@ TEST(Trust, AListedKeyWhoseIdIsNotTheIdOfItsBytesIsNotATrustedSigner)
 TEST(Trust, AFlippedBitIsRefusedByTheSignatureBeforeTheTextIsParsed)
 {
     // The answer is the signature's, InvalidArgument "does not match" - not the parser's. Held
-    // by the code of the error: the skeleton's parse stub and a real one both answer something
-    // else (Unsupported, ParseFailure), so a verifier that parsed first would fail this.
+    // by the code of the error: the parser answers ParseFailure (or another code) for a manifest
+    // it dislikes, so a verifier that parsed first could not give this one.
     const Release release = readRelease("bad/flipped-manifest-bit");
     const auto verified = update::verifyManifest(release.json, release.sig, update::testTrust(), installFor("win64"));
     ASSERT_FALSE(verified.ok());
@@ -486,7 +460,6 @@ TEST(Trust, ATextThatIsNotAManifestAndIsNotSignedIsRefusedForItsSignatureNotItsS
 
 TEST(Trust, ASignedTextThatIsNotAManifestPassesTheSignatureAndIsRefusedByTheParser)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     // The signature verifies (checked at the signature layer first), so the refusal is the parse.
     const auto line = update::parseSignatureLine(kSignedGarbageLine);
     ASSERT_TRUE(line.ok());
@@ -544,75 +517,128 @@ TEST(Trust, TheActiveKeysSignatureIsNotAcceptedAsTheSpareSOrTheOtherWayAround)
     EXPECT_EQ(second.error().code, core::ErrorCode::InvalidArgument);
 }
 
-// ---- the signature gate's accept path, which does not need the parser --------------------------------
+// ---- the accept paths and the keys the trust lists ---------------------------------------------------
 
-TEST(Trust, TheActiveAndTheSpareKeysBothGetPastTheSignatureGate)
+TEST(Trust, TheActiveAndTheSpareKeysBothPassTheWholeGate)
 {
-    // The accept path of the gate, shown now: a good signature by either key reaches the parse
-    // (or passes the whole gate, once T4 has written one). The cases that read the parsed
-    // Manifest are the skipped ones below.
     const update::Trust trust = update::testTrust();
     const Release active = readRelease("v2");
-    EXPECT_TRUE(passedTheSignatureGate(update::verifyManifest(active.json, active.sig, trust, installFor("win64"))));
+    EXPECT_TRUE(update::verifyManifest(active.json, active.sig, trust, installFor("win64")).ok());
     const Release spare = readRelease("v2-spare-signed");
-    EXPECT_TRUE(passedTheSignatureGate(update::verifyManifest(spare.json, spare.sig, trust, installFor("win64"))));
+    EXPECT_TRUE(update::verifyManifest(spare.json, spare.sig, trust, installFor("win64")).ok());
 
     // A CRLF line end is part of the line's grammar, not of the signed bytes.
     const std::string crlf = active.sig.substr(0, active.sig.size() - 1) + "\r\n";
-    EXPECT_TRUE(passedTheSignatureGate(update::verifyManifest(active.json, crlf, trust, installFor("win64"))));
+    EXPECT_TRUE(update::verifyManifest(active.json, crlf, trust, installFor("win64")).ok());
 
     // Dropping the active key from the trust (a rotation) leaves the spare's release verifying
     // and the active's not trusted.
     update::Trust spareOnly;
     spareOnly.keys.push_back(trust.keys[1]);
-    EXPECT_TRUE(passedTheSignatureGate(update::verifyManifest(spare.json, spare.sig, spareOnly, installFor("win64"))));
+    EXPECT_TRUE(update::verifyManifest(spare.json, spare.sig, spareOnly, installFor("win64")).ok());
     const auto refused = update::verifyManifest(active.json, active.sig, spareOnly, installFor("win64"));
     ASSERT_FALSE(refused.ok());
-    EXPECT_FALSE(passedTheSignatureGate(refused));
     EXPECT_EQ(refused.error().code, core::ErrorCode::Unsupported) << refused.error().describe();
 
-    // The control of the helper itself: a refusal of the gate is not "passed".
+    // The control: a release the signature layer refuses does not pass.
     const Release flipped = readRelease("bad/flipped-manifest-bit");
-    EXPECT_FALSE(passedTheSignatureGate(update::verifyManifest(flipped.json, flipped.sig, trust, installFor("win64"))));
+    EXPECT_FALSE(update::verifyManifest(flipped.json, flipped.sig, trust, installFor("win64")).ok());
 }
+
+namespace {
+
+// Keys with TEST 1's first 8 bytes - so the same key id - that are no public key at all: after
+// those bytes only byte 8 is set (to 1, or to 2), so y is a number of about 2^71 for which no x
+// exists (RFC 8032, 5.1.3). Found, and the two checked, with a pure-Python decoder written from
+// the RFC (which decodes the three RFC keys and does not decode y = 2 or the placeholders).
+update::TrustedKey unusableKeyWithTheIdOfTestOne(std::uint8_t ninth = 1)
+{
+    update::PublicKey key = update::testTrust().keys[0].key;
+    std::fill(key.begin() + 8, key.end(), static_cast<std::uint8_t>(0));
+    key[8] = ninth;
+    return update::TrustedKey{update::keyIdOf(key), key};
+}
+
+} // namespace
 
 TEST(Trust, EveryListedKeyWithTheNamedIdIsTriedNotJustTheFirst)
 {
-    // Two entries with one id: the id is the first 8 bytes, so a key that differs in its last byte
-    // has the same one. (Real keys collide with probability 2^-64; a Trust is a parameter and need
-    // not come from the generator.) The first is not the signer's key: it is refused by the
-    // signature layer, and the second, the signer's, must still be tried.
-    update::PublicKey impostor = update::testTrust().keys[0].key;
-    impostor[31] = static_cast<std::uint8_t>(impostor[31] ^ 0x01);
+    // Two entries with one id (real keys collide with probability 2^-64; a Trust is a parameter
+    // and need not come from the generator). The one that is no key must not hide the signer's,
+    // whichever is listed first.
     const update::TrustedKey real = update::testTrust().keys[0];
-    const update::TrustedKey fake{update::keyIdOf(impostor), impostor};
-    ASSERT_EQ(fake.id, real.id);
-    ASSERT_NE(fake.key, real.key);
+    const update::TrustedKey unusable = unusableKeyWithTheIdOfTestOne();
+    ASSERT_EQ(unusable.id, real.id);
+    ASSERT_NE(unusable.key, real.key);
 
     const Release release = readRelease("v2");
     for (const std::vector<update::TrustedKey>& order :
-         {std::vector<update::TrustedKey>{fake, real}, std::vector<update::TrustedKey>{real, fake}}) {
+         {std::vector<update::TrustedKey>{unusable, real}, std::vector<update::TrustedKey>{real, unusable}}) {
         update::Trust trust;
         trust.keys = order;
-        EXPECT_TRUE(passedTheSignatureGate(update::verifyManifest(release.json, release.sig, trust, installFor("win64"))));
+        const auto verified = update::verifyManifest(release.json, release.sig, trust, installFor("win64"));
+        EXPECT_TRUE(verified.ok()) << (verified.ok() ? "" : verified.error().describe());
     }
-
-    // Two keys of that id and neither is the signer's: refused as a bad signature (the first
-    // refusal is the one reported), not as an unknown signer.
-    update::PublicKey another = impostor;
-    another[30] = static_cast<std::uint8_t>(another[30] ^ 0x01);
-    update::Trust neither;
-    neither.keys = {fake, update::TrustedKey{update::keyIdOf(another), another}};
-    const auto refused = update::verifyManifest(release.json, release.sig, neither, installFor("win64"));
-    ASSERT_FALSE(refused.ok());
-    EXPECT_EQ(refused.error().code, core::ErrorCode::InvalidArgument) << refused.error().describe();
 }
 
-// ---- the whole gate, with the parser (task T4) ---------------------------------------------------
+TEST(Trust, AListedKeyThatIsNoPublicKeyIsACouldNotCheckAndNeverAForgery)
+{
+    // A mistyped pin: the key the line names is not a point of the prime-order subgroup. Every
+    // release of every install would be refused for it, and the code that says so must not be the
+    // one of a forged signature (InvalidArgument), which callers hold to be unreachable for a
+    // genuine release: it is Internal, "could not check", with the reason.
+    const update::TrustedKey real = update::testTrust().keys[0];
+    const update::TrustedKey unusable = unusableKeyWithTheIdOfTestOne();
+    ASSERT_EQ(unusable.id, real.id);
+    ASSERT_FALSE(update::checkPublicKey(unusable.key).ok()); // the premise, from the signature layer
+    const Release release = readRelease("v2");
+
+    update::Trust onlyUnusable;
+    onlyUnusable.keys = {unusable};
+    const auto alone = update::verifyManifest(release.json, release.sig, onlyUnusable, installFor("win64"));
+    ASSERT_FALSE(alone.ok());
+    EXPECT_EQ(alone.error().code, core::ErrorCode::Internal) << alone.error().describe();
+    EXPECT_TRUE(contains(alone.error().message, "cannot be used")) << alone.error().describe();
+    EXPECT_TRUE(contains(alone.error().message, "public key is not accepted")) << alone.error().describe();
+    EXPECT_TRUE(contains(alone.error().context, real.id)) << alone.error().describe();
+
+    // The control: the genuine key with a signature that is wrong IS the forgery's code.
+    const Release flipped = readRelease("bad/flipped-manifest-bit");
+    update::Trust onlyReal;
+    onlyReal.keys = {real};
+    const auto forged = update::verifyManifest(flipped.json, flipped.sig, onlyReal, installFor("win64"));
+    ASSERT_FALSE(forged.ok());
+    EXPECT_EQ(forged.error().code, core::ErrorCode::InvalidArgument) << forged.error().describe();
+
+    // Both listed, the signature wrong for the real one: a failure to check outranks a refusal,
+    // whichever order they are listed in, so that the one key that could not be looked at is not
+    // hidden behind the other's "does not match".
+    for (const std::vector<update::TrustedKey>& order :
+         {std::vector<update::TrustedKey>{real, unusable}, std::vector<update::TrustedKey>{unusable, real}}) {
+        update::Trust both;
+        both.keys = order;
+        const auto verified = update::verifyManifest(flipped.json, flipped.sig, both, installFor("win64"));
+        ASSERT_FALSE(verified.ok());
+        EXPECT_EQ(verified.error().code, core::ErrorCode::Internal) << verified.error().describe();
+        EXPECT_TRUE(contains(verified.error().message, "cannot be used")) << verified.error().describe();
+    }
+
+    // Two of them, neither usable: still a failure to check, not an unknown signer.
+    const update::TrustedKey another = unusableKeyWithTheIdOfTestOne(2);
+    ASSERT_EQ(another.id, real.id);
+    ASSERT_NE(another.key, unusable.key);
+    ASSERT_FALSE(update::checkPublicKey(another.key).ok());
+    update::Trust neither;
+    neither.keys = {unusable, another};
+    const auto refused = update::verifyManifest(release.json, release.sig, neither, installFor("win64"));
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, core::ErrorCode::Internal) << refused.error().describe();
+}
+
+// ---- the whole gate: the result carries the manifest ---------------------------------------------
 
 TEST(Trust, ARealReleaseSignedByTheActiveKeyVerifiesAndCarriesTheBytesThatWereSigned)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     const Release release = readRelease("v2");
     const auto verified = update::verifyManifest(release.json, release.sig, update::testTrust(), installFor("win64"));
     ASSERT_TRUE(verified.ok()) << verified.error().describe();
@@ -631,7 +657,6 @@ TEST(Trust, ARealReleaseSignedByTheActiveKeyVerifiesAndCarriesTheBytesThatWereSi
 
 TEST(Trust, TheSpareKeyVerifiesToo)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     const Release release = readRelease("v2-spare-signed");
     const auto verified = update::verifyManifest(release.json, release.sig, update::testTrust(), installFor("win64"));
     ASSERT_TRUE(verified.ok()) << verified.error().describe();
@@ -641,7 +666,6 @@ TEST(Trust, TheSpareKeyVerifiesToo)
 
 TEST(Trust, ASpareOnlyTrustVerifiesTheSpareAndRefusesTheActive)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     update::Trust spareOnly;
     spareOnly.keys.push_back(update::testTrust().keys[1]);
     const Release spare = readRelease("v2-spare-signed");
@@ -654,7 +678,6 @@ TEST(Trust, ASpareOnlyTrustVerifiesTheSpareAndRefusesTheActive)
 
 TEST(Trust, ALineEndOfCrlfIsAcceptedAndKeptAsReceived)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     const Release release = readRelease("v2");
     const std::string crlf = release.sig.substr(0, release.sig.size() - 1) + "\r\n";
     const auto verified = update::verifyManifest(release.json, crlf, update::testTrust(), installFor("win64"));
@@ -664,7 +687,6 @@ TEST(Trust, ALineEndOfCrlfIsAcceptedAndKeptAsReceived)
 
 TEST(Trust, ANotifyOnlyManifestVerifiesForItsOwnTarget)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     const Release release = readRelease("v2-macos-notify", "macos-arm64");
     const auto verified = update::verifyManifest(release.json, release.sig, update::testTrust(), installFor("macos-arm64"));
     ASSERT_TRUE(verified.ok()) << verified.error().describe();
@@ -674,7 +696,6 @@ TEST(Trust, ANotifyOnlyManifestVerifiesForItsOwnTarget)
 
 TEST(Trust, AValidlySignedManifestOfAnotherTargetIsNotAnUpdateForThisInstall)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     const Release release = readRelease("v2");
     for (const char* target : {"win-arm64", "linux-x86_64", "linux-aarch64", "macos-arm64", "", "WIN64", "win64 "}) {
         const auto verified = update::verifyManifest(release.json, release.sig, update::testTrust(), installFor(target));
@@ -686,7 +707,6 @@ TEST(Trust, AValidlySignedManifestOfAnotherTargetIsNotAnUpdateForThisInstall)
 
 TEST(Trust, AValidlySignedManifestOfAnotherProductIsNotAnUpdateForThisInstall)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     const Release release = readRelease("v2");
     update::Install install = installFor("win64");
     install.product = "other";
@@ -698,7 +718,6 @@ TEST(Trust, AValidlySignedManifestOfAnotherProductIsNotAnUpdateForThisInstall)
 
 TEST(Trust, AValidlySignedManifestOfAnotherChannelIsRefused)
 {
-    REQUIRE_THE_MANIFEST_PARSER();
     // The control first: the same install takes the stable notify-only manifest of the
     // fixtures, so the refusal below is about the channel and not the shape of this one.
     const Release stable = readRelease("v2-macos-notify", "macos-arm64");

@@ -263,11 +263,23 @@ class Field {
         }
         return Num(raw);
     }
-    // A square root of `a` modulo p, or an empty pointer when `a` is not a square (and then
-    // BN_mod_sqrt has left an entry in the error queue, cleared by the caller's guard).
+    // A square root of `a` modulo p, or an empty pointer when `a` is not a square. BN_mod_sqrt
+    // answers null for that and for a failure of its own (memory), and only the first is a
+    // property of the key: the reason in the error queue tells them apart, so that "could not
+    // check" is never read as "no such point". (The queue is cleared first, so that the reason
+    // read is this call's; the caller's guard clears it again on the way out.)
     [[nodiscard]] Num sqrt(const Num& a) const
     {
-        return Num(BN_mod_sqrt(nullptr, a.get(), prime_.get(), context_.get()));
+        ERR_clear_error();
+        BIGNUM* root = BN_mod_sqrt(nullptr, a.get(), prime_.get(), context_.get());
+        if (root != nullptr) {
+            return Num(root);
+        }
+        const unsigned long reason = ERR_peek_last_error();
+        if (ERR_GET_LIB(reason) == ERR_LIB_BN && ERR_GET_REASON(reason) == BN_R_NOT_A_SQUARE) {
+            return Num();
+        }
+        throw BigNumFailure{};
     }
 
     [[nodiscard]] bool isAtLeastPrime(const Num& a) const { return BN_cmp(a.get(), prime_.get()) >= 0; }
@@ -565,22 +577,48 @@ core::Status verifyEd25519(const PublicKey& key, std::string_view message, const
     return core::makeError(core::ErrorCode::Internal, "OpenSSL could not complete the verification", context);
 }
 
+core::Status checkPublicKey(const PublicKey& key)
+{
+    const ClearErrorQueueOnExit clearErrors;
+    if (!opensslIsInitialised()) {
+        return core::makeError(core::ErrorCode::Internal, "libcrypto could not be initialised",
+                               "key " + keyIdOf(key));
+    }
+    if (const KeyVerdict verdict = classifyPublicKey(key); verdict != KeyVerdict::Accepted) {
+        return refusedKey(verdict, key);
+    }
+    return {};
+}
+
 core::Status hardenOpenSslEnvironment()
 {
     // The three variables that make OpenSSL read a file or load code from a place the
     // environment names (a configuration, a provider module, an engine). The same list as
     // tools/update_make_manifest.py gives the openssl it runs.
     constexpr const char* kVariables[] = {"OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"};
+    const char* stillSet = nullptr;
     for (const char* name : kVariables) {
 #ifdef _WIN32
         // An empty value removes the variable; the C runtime matches the name without regard to
         // case, as Windows does.
-        _putenv_s(name, "");
+        const bool called = _putenv_s(name, "") == 0;
 #else
-        unsetenv(name);
+        const bool called = unsetenv(name) == 0;
 #endif
+        // Trusted on neither the return value nor on its own: the variable is looked for, and a
+        // survivor is reported after the others have had their turn.
+        if ((!called || std::getenv(name) != nullptr) && stillSet == nullptr) {
+            stillSet = name;
+        }
     }
-    if (!opensslIsInitialised()) {
+    // Initialised even when a variable survived: with the flag that keeps the configuration
+    // unread, so the survivor still cannot decide anything through this library.
+    const bool initialised = opensslIsInitialised();
+    if (stillSet != nullptr) {
+        return core::makeError(core::ErrorCode::Internal, "an OpenSSL environment variable could not be removed",
+                               stillSet);
+    }
+    if (!initialised) {
         return core::makeError(core::ErrorCode::Internal, "libcrypto could not be initialised");
     }
     return {};

@@ -46,7 +46,13 @@
 #include <thread>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <sys/wait.h>
 #endif
 
@@ -637,6 +643,8 @@ TEST(Signature, APublicKeyThatIsNotAPrimeOrderPointIsRefusedWhateverTheSignature
         // ... and with a signature of zeros, the shape of a forgery.
         expectRefused(update::verifyEd25519(keyFromHex(key.hex), bytesFromHex(vector.message), update::SignatureBytes{}),
                       kKeyNotAccepted);
+        // The key check on its own (what the trust gate asks of a pinned key) says the same.
+        expectRefused(update::checkPublicKey(keyFromHex(key.hex)), kKeyNotAccepted);
     }
 }
 
@@ -669,6 +677,8 @@ TEST(Signature, TheRfcKeysAreAcceptedAsPrimeOrderPoints)
         const core::Status status = update::verifyEd25519(keyFromHex(vector.publicKey), bytesFromHex(vector.message), wrong);
         ASSERT_FALSE(status.ok());
         EXPECT_FALSE(contains(status.error().message, kKeyNotAccepted)) << vector.name << ": " << status.error().describe();
+        const core::Status checked = update::checkPublicKey(keyFromHex(vector.publicKey));
+        EXPECT_TRUE(checked.ok()) << vector.name << ": " << (checked.ok() ? "" : checked.error().describe());
     }
 }
 
@@ -765,6 +775,7 @@ TEST(Signature, TwentyFourKeysGeneratedAndSignedByOpensslAreAcceptedAndVerify)
         const update::SignatureBytes signature = signatureFromHex(entry.signature);
         const core::Status good = update::verifyEd25519(key, entry.message, signature);
         EXPECT_TRUE(good.ok()) << entry.publicKey << ": " << (good.ok() ? "" : good.error().describe());
+        EXPECT_TRUE(update::checkPublicKey(key).ok()) << entry.publicKey;
 
         // One bit of the message: a MISMATCH for this key, so the key was accepted as a key.
         std::string altered = entry.message;
@@ -895,11 +906,14 @@ namespace {
 constexpr const char* kOpenSslVariables[] = {"OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"};
 // The one that marks the program started again by the configuration test at the end of this file.
 constexpr const char* kHostileChildMarker = "KATANA_T5_HOSTILE_CHILD";
+// The same for the program started by the inheritance test.
+constexpr const char* kInheritanceChildMarker = "KATANA_T5_INHERITANCE_CHILD";
 // Every variable a test of this file sets, for the guard to put back whatever way the test ends
 // (an ASSERT returns early).
 constexpr const char* kVariablesTheTestsSet[] = {"OPENSSL_CONF",        "OPENSSL_MODULES",
                                                  "OPENSSL_ENGINES",     "OPENSSL_CONF_INCLUDE",
-                                                 "KATANA_T5_UNRELATED", kHostileChildMarker};
+                                                 "KATANA_T5_UNRELATED", kHostileChildMarker,
+                                                 kInheritanceChildMarker};
 
 void setVariable(const char* name, const char* value)
 {
@@ -1068,29 +1082,76 @@ struct ScratchFolder {
 };
 
 // Runs `program --gtest_filter=<filter>` with `folder` as its working directory, both of its
-// streams into `output`; its exit code, or -1 when it could not be started. The folder is how the
-// child names its configuration file by a relative, ASCII-only path whatever the user's profile
-// folder is called: OPENSSL_CONF reaches OpenSSL in the ANSI code page, so an absolute path under
-// a profile named outside ASCII could not be named to it.
+// streams into `output`; its exit code, or -1 when it could not be started or did not end within
+// two minutes. The folder is how the child names its configuration file by a relative, ASCII-only
+// path whatever the user's profile folder is called: OPENSSL_CONF reaches OpenSSL in the ANSI code
+// page, so an absolute path under a profile named outside ASCII could not be named to it.
+//
+// No shell on Windows: the program is started directly, so a checkout or temporary folder whose
+// name holds & % ^ or ( ) is not read by cmd.exe as anything but a name. (A Windows path cannot
+// hold a double quote, so the one pair around the program's name is the whole of the quoting.)
+// The child inherits this process's environment as it is now, which is what the cases rely on.
+#ifdef _WIN32
 int runProgramOnOneCase(const std::filesystem::path& program, const std::string& filter,
                         const std::filesystem::path& folder, const std::filesystem::path& output)
 {
-#ifdef _WIN32
-    // cmd.exe /c drops the first and the last quote of a command that begins with a quote and
-    // holds more of them, so the whole command is wrapped in one more pair.
-    const std::wstring command = L"\"cd /d \"" + folder.wstring() + L"\" && \"" + program.wstring() +
-                                 L"\" --gtest_color=no --gtest_filter=" +
-                                 std::wstring(filter.begin(), filter.end()) + L" > \"" + output.wstring() +
-                                 L"\" 2>&1\"";
-    return _wsystem(command.c_str());
+    SECURITY_ATTRIBUTES inheritable{};
+    inheritable.nLength = sizeof(inheritable);
+    inheritable.bInheritHandle = TRUE;
+    const HANDLE file = CreateFileW(output.wstring().c_str(), GENERIC_WRITE, FILE_SHARE_READ, &inheritable,
+                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES; // no standard input: the child is given none
+    startup.hStdOutput = file;
+    startup.hStdError = file;
+    std::wstring command = L"\"" + program.wstring() + L"\" --gtest_color=no --gtest_filter=" +
+                           std::wstring(filter.begin(), filter.end());
+    const std::wstring workingFolder = folder.wstring();
+    PROCESS_INFORMATION process{};
+    const BOOL started = CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                                        workingFolder.c_str(), &startup, &process);
+    CloseHandle(file); // the child holds its own copy
+    if (!started) {
+        return -1;
+    }
+    int exitCode = -1;
+    if (WaitForSingleObject(process.hProcess, 120000) == WAIT_OBJECT_0) {
+        DWORD code = 0;
+        if (GetExitCodeProcess(process.hProcess, &code)) {
+            exitCode = static_cast<int>(code);
+        }
+    } else {
+        TerminateProcess(process.hProcess, 1);
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return exitCode;
+}
 #else
-    const std::string command = "cd '" + folder.string() + "' && '" + program.string() +
-                                "' --gtest_color=no --gtest_filter=" + filter + " > '" + output.string() +
-                                "' 2>&1";
+// 'text' for a POSIX shell: a quote inside it is closed, escaped and opened again.
+std::string shellQuoted(const std::string& text)
+{
+    std::string quoted = "'";
+    for (const char c : text) {
+        quoted += c == '\'' ? std::string("'\''") : std::string(1, c);
+    }
+    return quoted + "'";
+}
+
+int runProgramOnOneCase(const std::filesystem::path& program, const std::string& filter,
+                        const std::filesystem::path& folder, const std::filesystem::path& output)
+{
+    const std::string command = "cd " + shellQuoted(folder.string()) + " && " + shellQuoted(program.string()) +
+                                " --gtest_color=no --gtest_filter=" + filter + " > " +
+                                shellQuoted(output.string()) + " 2>&1";
     const int status = std::system(command.c_str());
     return status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-#endif
 }
+#endif
 
 } // namespace
 
@@ -1141,6 +1202,63 @@ TEST(Signature, AConfigurationFileNamedByTheEnvironmentDoesNotChangeWhatVerifies
 
     EXPECT_EQ(exitCode, 0) << text;
     // One case ran in the child (a filter that matched nothing would also exit 0) and it passed.
+    EXPECT_TRUE(contains(text, "[  PASSED  ] 1 test.")) << text;
+    EXPECT_FALSE(contains(text, "SKIPPED")) << text;
+}
+
+// ---- what a program this one starts inherits ---------------------------------------------------------
+//
+// signature.hpp promises that after hardenOpenSslEnvironment() a program the process starts holds
+// none of the three variables, which is what the helper's relaunch of katana relies on. Reading them
+// back with getenv proves only this process's view of its environment; this case starts the program
+// again after the call, and the child reports what IT was handed.
+
+TEST(Signature, HardeningLeavesNoneOfTheThreeVariablesToAProgramThisOneStarts)
+{
+    if (std::getenv(kInheritanceChildMarker) != nullptr) {
+        // The child. What it holds is what it inherited.
+        for (const char* name : kOpenSslVariables) {
+            EXPECT_EQ(std::getenv(name), nullptr) << name << " reached the child";
+        }
+#ifdef _WIN32
+        for (const char* name : {"openssl_conf", "OpenSSL_Modules", "OPENSSL_engines"}) {
+            EXPECT_EQ(std::getenv(name), nullptr) << name << " reached the child";
+        }
+#endif
+        // The controls: the environment was inherited at all, and a variable of another name
+        // survived the call.
+        ASSERT_NE(std::getenv("KATANA_T5_UNRELATED"), nullptr) << "the child inherited nothing";
+        EXPECT_STREQ(std::getenv("KATANA_T5_UNRELATED"), "inherited");
+        return;
+    }
+
+    const std::filesystem::path program = thisProgram();
+    ASSERT_TRUE(!program.empty() && std::filesystem::exists(program))
+        << "cannot find this program: '" << program.string() << "'";
+    const ScratchFolder scratch;
+    ASSERT_TRUE(std::filesystem::is_directory(scratch.path));
+    const std::filesystem::path output = scratch.path / "child_output.txt";
+
+    const RestoreOpenSslVariables restore;
+    for (const char* name : kOpenSslVariables) {
+        setVariable(name, "somewhere-an-attacker-chose");
+    }
+#ifdef _WIN32
+    // Spelled in another case, which is the same variable on Windows.
+    setVariable("openssl_conf", "somewhere-an-attacker-chose");
+#endif
+    setVariable("KATANA_T5_UNRELATED", "inherited");
+    setVariable(kInheritanceChildMarker, "1");
+    ASSERT_TRUE(update::hardenOpenSslEnvironment().ok());
+
+    const ::testing::TestInfo* const info = ::testing::UnitTest::GetInstance()->current_test_info();
+    const std::string filter = std::string(info->test_suite_name()) + "." + info->name();
+    const int exitCode = runProgramOnOneCase(program, filter, scratch.path, output);
+    const core::Result<std::string> childOutput = core::readFileBytes(output);
+    const std::string text =
+        childOutput.ok() ? childOutput.value() : "(no output: " + childOutput.error().describe() + ")";
+
+    EXPECT_EQ(exitCode, 0) << text;
     EXPECT_TRUE(contains(text, "[  PASSED  ] 1 test.")) << text;
     EXPECT_FALSE(contains(text, "SKIPPED")) << text;
 }
