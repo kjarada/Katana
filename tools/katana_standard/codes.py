@@ -13,12 +13,15 @@ code is for. A rule's `comment` is the legend label.
 
 THE GRAMMAR
 
-1. THE KEYS ARE ANOTHER LIBRARY'S, AND NOTHING ELSE OF THEM IS. Katana has two built-in customisations, this one
-   and the NSW one (resources/customisation/nsw.customisation.json). By the owner's decision they use the SAME
-   survey code keys, byte for byte, so that a field file coded for either draws in both. The keys are all that
-   is taken: every layer, colour, weight, linestyle, symbol, text style, group and legend label, and every
-   sentence of the meanings and of this document, is Katana's own. No key is ours: the keys are the other
-   library's identifiers, reused for field-data compatibility, and the licence notes say so (LICENSING.md).
+1. THE KEYS ARE ANOTHER LIBRARY'S, AND SO IS WHAT EACH KEY STANDS FOR. Katana has two built-in customisations,
+   this one and the NSW one (resources/customisation/nsw.customisation.json). By the owner's decision they use
+   the SAME survey code keys, byte for byte, so that a field file coded for either draws in both. With a key
+   comes what it is: the thing it codes, read from the other library's label for it (with the size or the
+   model zone that library gives it), and the kinds of rule it has (rule 6). Nothing the other library NAMES,
+   DRAWS or WORDS is taken: every layer, colour, weight, linestyle, symbol, attribute name, text style, group and
+   legend label, and every sentence of the meanings and of this document, is Katana's own. No key is ours: the
+   keys are the other library's identifiers, reused for field-data compatibility, and the licence notes say so
+   (LICENSING.md).
 2. A key is an exact code or a prefix. `PBMK` matches the code PBMK and no other; `AC*` matches every code that
    begins AC (AC, AC1, AC01, ACE); the bare `*` matches every code. A code meets every key that fits it, and
    for each field the most specific rule that says anything about it wins: an exact key before a prefix, a
@@ -33,9 +36,11 @@ THE GRAMMAR
 4. Control words follow the code, after a space: `ST` first point, `END` last point, `CL` last point and close,
    `BC` and `EC` begin and end a curve (three points fix an arc), `JPN n` also join to point number n, `RECT`
    the third point of a rectangle. These are Katana's default spellings; the library says nothing about them,
-   so loading it never resets a colleague's own. The first token of a point's code is always the key, so a
-   point coded `CL` is a string called CL, answered by the key `CL*`, even though four keys (`BC*`, `CL*`,
-   `EC*` and `ST*`) are spelled like a default control word: a control word is read only after the key.
+   so loading it never resets a colleague's own. The first token of a point's code is always the key, and a
+   control word is read only after it. So a control word typed ALONE is a code, and six of the seven are
+   answered: four keys are spelled like one (`BC*`, `CL*`, `EC*` and `ST*`: a point coded `CL` is a string
+   called CL) and two more answer one by prefix (`EN*` answers `END`, `RE*` answers `RECT`); only `JPN` is
+   answered by no key.
 5. There is no left or right suffix: the rule engine matches a key exactly or by prefix and has nothing else.
    A handed pair is two keys (`CV*` and `CY*` chevrons, `DA*` and `DC*` dragons teeth, `LH*` and `LR*` broken
    barrier lines, `HE*` and `HR*` wall hatching). Otherwise handedness is by walking direction: ticks, barbs,
@@ -66,7 +71,8 @@ THE GRAMMAR
    they are (a model zone to check, a point code), and one more is added to a code that stands for a buried or
    strung service, last: `utility.type` set to the service word, then the prompts Owner, Depth (m) (Height (m)
    for a line strung overhead) and Condition; a pipe also Material and Diameter (mm), a box culvert Width (mm)
-   and Height (mm). Where the code states the size (a 300 mm pipe, a culvert 1200 mm high) the size is applied.
+   and Height (mm). Where the key stands for a size (a 300 mm pipe, a culvert 1200 mm high: the other library's
+   label for the key gives it, the key itself states none) the size is applied.
    Those are the words Katana's utility tools read, so a coded string is already typed for UTILITY DRAW.
    Stormwater pits and pipes are services too, though they are catalogued with drainage. The prompts use the
    library's own names, not `utility.owner`, so an empty prompt never reads as "recorded". The added rule makes
@@ -312,7 +318,7 @@ SECTIONS = [
         code("BO*", "A cadastral boundary whose position is good to about a tenth of a metre.",
              line("cadastre/lots/title", "boundary", "0.35", "Boundary good to 0.1 m")),
         code("BT*", "A title boundary measured on the ground and good to about two centimetres.",
-             line("cadastre/lots/title", "boundary", "0.50", "Title boundary", "Title Boundary")),
+             line("cadastre/lots/title", "boundary", "0.50", "Surveyed title boundary", "Surveyed Boundary")),
         code("BY*", "A proposed boundary that marks land to be acquired.",
              line("cadastre/lots/special", "boundary", "0.35", "Boundary to be acquired",
                   "Acquisition Boundary")),
@@ -387,7 +393,7 @@ SECTIONS = [
              symbol("Survey Spike")),
         code("PSTA", "A star picket, a steel picket with a star-shaped section, driven in as a survey mark.",
              point("cadastre/marks/found", "boundary", "0.25", "Star picket mark"),
-             symbol("Star Picket")),
+             symbol("Steel Picket")),
         code("PSTA*", "Keeps star pickets out of the ground surface, since they mark a position and not the ground.",
              surface(False)),
     ]),
@@ -405,7 +411,7 @@ SECTIONS = [
              line("roads/carriageway/edge", "pavement", "0.35", "Pavement edge")),
         code("OF*", "Crown of a carriageway shot where it is offset from the road centreline, checked in model zone "
              "1.",
-             line("roads/carriageway/centreline", "pavement", "0.25", "Offset carriageway crown, zone 1",
+             line("roads/carriageway/centreline", "pavement", "0.25", "Surveyed offset crown",
                   "Road Centreline"),
              attrs("Check Zone=1")),
         code("RC*", "Centre of the road, shot along the middle of the carriageway.",
@@ -512,7 +518,7 @@ SECTIONS = [
              symbol("Double Sided Sign Post")),
         code("PSIN", "A post that carries a single sign face.",
              point("street/signs/sign", "street", "0.25", "Single-faced sign post"),
-             symbol("Sign Post")),
+             symbol("Plain Sign Post")),
         code("S1*", "Stretch of road signed with a speed limit of 100 km/h; the string runs along the zone.",
              line("street/signs/speed-zone", "street", "0.25", "Speed limit 100 km/h",
                   "Hundred Speed Zone Line"),
@@ -567,7 +573,7 @@ SECTIONS = [
     ("S", "Posts and Barriers", [
         code("AC*", "A fixed bollard, shot as a single point and drawn with the bollard symbol.",
              point("street/barriers/post", "street", "0.25", "Fixed bollard"),
-             symbol("Bollard")),
+             symbol("Bollard Post")),
         code("FG*", "Steel beam barrier on posts that guards the edge of a road.",
              line("street/barriers/guard-rail", "street", "0.35", "Roadside guard fence", "Guard Rail Line")),
         code("FW*", "Safety barrier of tensioned steel cables on posts beside or between traffic lanes.",
@@ -596,10 +602,10 @@ SECTIONS = [
              symbol("Bus Stop Sign")),
         code("PFPL", "A built fireplace, such as a barbecue hearth, in a park, camp or picnic area.",
              point("street/amenities/furniture", "street", "0.25", "Outdoor fireplace"),
-             symbol("Fireplace")),
+             symbol("Barbecue Hearth")),
         code("PKME", "A kerbside meter that collects the fee for a parking bay.",
              point("street/amenities/furniture", "street", "0.25", "Kerbside meter"),
-             symbol("Parking Meter")),
+             symbol("Kerbside Meter")),
         code("PMBX", "A letterbox at the property frontage, shot at the middle of its base.",
              point("street/amenities/furniture", "street", "0.25", "Letterbox"),
              symbol("Letterbox")),
@@ -642,10 +648,10 @@ SECTIONS = [
              line("drainage/kerbs/gutter", "kerb", "0.25", "Gutter invert line", "Gutter Lip Line"),
              attrs("Check Zone=3")),
         code("KB*", "Top edge of a kerb, shot on the road side and checked in model zone 3.",
-             line("drainage/kerbs/top", "kerb", "0.35", "Kerb top edge, zone 3"),
+             line("drainage/kerbs/top", "kerb", "0.35", "Kerb top edge"),
              attrs("Check Zone=3")),
         code("LP*", "Lip of the gutter beside a kerb, shot along its line and checked in model zone 1.",
-             line("drainage/kerbs/gutter", "kerb", "0.25", "Gutter lip, zone 1", "Gutter Lip Line"),
+             line("drainage/kerbs/gutter", "kerb", "0.25", "Gutter lip", "Gutter Lip Line"),
              attrs("Check Zone=1")),
         code("TM*", "Top edge of a raised median or traffic island.",
              line("drainage/kerbs/median", "kerb", "0.35", "Median top edge")),
@@ -682,15 +688,15 @@ SECTIONS = [
              attrs("utility.type=stormwater", "Owner", "Condition")),
         code("PGUL", "A stormwater gully pit that takes surface runoff, shot at the middle of its grate.",
              point("drainage/structures/pit", "stormwater", "0.25", "Stormwater gully pit"),
-             symbol("Gully Pit"),
+             symbol("Gully Grate"),
              attrs("utility.type=stormwater", "Owner", "Depth (m)", "Condition")),
         code("PHWB", "The foot of a pipe headwall, shot where the wall meets the pipe or the ground.",
              point("drainage/structures/outlet", "stormwater", "0.25", "Headwall foot"),
-             symbol("Headwall"),
+             symbol("Pipe Headwall"),
              attrs("utility.type=stormwater", "Owner", "Condition")),
         code("PHWT", "The top edge of a pipe headwall, shot on its coping.",
              point("drainage/structures/outlet", "stormwater", "0.25", "Headwall crest point"),
-             symbol("Headwall"),
+             symbol("Pipe Headwall"),
              attrs("utility.type=stormwater", "Owner", "Condition")),
         code("PILT", "The point where drainage flows into a sump, shot at the mouth of the inlet.",
              point("drainage/structures/pit", "stormwater", "0.25", "Sump inlet"),
@@ -1022,7 +1028,7 @@ SECTIONS = [
              surface(False)),
         code("PRBX", "A box beside the track that houses railway control equipment.",
              point("rail/track/lineside", "rail", "0.25", "Lineside control box"),
-             symbol("Rail Control Box")),
+             symbol("Trackside Control Box")),
         code("PRCC", "A trough beside the track that carries signalling cables, taken as a single point.",
              point("rail/track/lineside", "rail", "0.25", "Signalling cable trough"),
              symbol("Rail Cable Trough")),
@@ -1065,7 +1071,7 @@ SECTIONS = [
              attrs("utility.type=water", "Owner", "Depth (m)", "Condition")),
         code("PWCP", "Fitting on a water main where pressure or electrical readings are taken.",
              point("utilities/water/fitting", "water", "0.25", "Main test point"),
-             symbol("Test Point"),
+             symbol("Pipeline Test Point"),
              attrs("utility.type=water", "Owner", "Depth (m)", "Condition")),
         code("PWEP", "Pump that lifts or boosts water, shot as a point.",
              point("utilities/water/structure", "water", "0.25", "Water pump"),
@@ -1077,7 +1083,7 @@ SECTIONS = [
              attrs("utility.type=water", "Owner", "Depth (m)", "Condition")),
         code("PWHY", "Hydrant on a drinking water main, used for flushing and for fire fighting.",
              point("utilities/water/fitting", "water", "0.25", "Mains water hydrant"),
-             symbol("Fire Hydrant"),
+             symbol("Fire Service Hydrant"),
              attrs("utility.type=water", "Owner", "Condition")),
         code("PWMM", "Post or plate that shows the route of a water main.",
              point("utilities/water/fitting", "water", "0.25", "Water main marker post"),
@@ -1089,15 +1095,15 @@ SECTIONS = [
              attrs("utility.type=water", "Owner", "Depth (m)", "Condition")),
         code("PWSR", "Valve at a low point of a main that empties it for cleaning or repair.",
              point("utilities/water/fitting", "water", "0.25", "Drain-off valve"),
-             symbol("Scour Valve"),
+             symbol("Washout Valve"),
              attrs("utility.type=water", "Owner", "Depth (m)", "Condition")),
         code("PWSV", "Valve that shuts off the flow in a water main.",
              point("utilities/water/fitting", "water", "0.25", "Isolating valve"),
              symbol("Water Isolation Valve"),
              attrs("utility.type=water", "Owner", "Depth (m)", "Condition")),
         code("PWTP", "Tap on a water supply, such as a standpipe or a garden tap.",
-             point("utilities/water/fitting", "water", "0.25", "Water tap"),
-             symbol("Tap"),
+             point("utilities/water/fitting", "water", "0.25", "Water supply tap"),
+             symbol("Standpipe Tap"),
              attrs("utility.type=water", "Owner", "Condition")),
         code("RE*", "Outline of a water storage reservoir, traced round its walls.",
              line("utilities/water/structure", "water", "0.25", "Reservoir outline"),
@@ -1215,7 +1221,7 @@ SECTIONS = [
              attrs("utility.type=gas", "Owner", "Condition")),
         code("PGTP", "A surface fitting on a gas pipeline where its protection or pressure can be tested.",
              point("utilities/gas/fitting", "gas", "0.25", "Gas test terminal"),
-             symbol("Test Point"),
+             symbol("Pipeline Test Point"),
              attrs("utility.type=gas", "Owner", "Condition")),
         code("PGVP", "A vent riser on a gas main or casing that lets gas escape safely to the open air.",
              point("utilities/gas/fitting", "gas", "0.25", "Gas vent riser"),
@@ -1305,7 +1311,7 @@ SECTIONS = [
              attrs("utility.type=electricity", "Owner", "Depth (m)", "Condition")),
         code("PSPL", "A short pole that carries the stay wire bracing another pole.",
              point("utilities/electricity/structure", "electricity", "0.25", "Short bracing pole"),
-             symbol("Stay Pole"),
+             symbol("Stay Wire Pole"),
              attrs("utility.type=electricity", "Owner", "Depth (m)", "Condition")),
         code("SC*", "Stay wire that braces a pole or mast, drawn from the pole to its ground anchor.",
              line("utilities/electricity/overhead", "electricity", "0.18", "Pole stay wire", "Overhead Line"),
@@ -1364,7 +1370,7 @@ SECTIONS = [
              attrs("utility.type=telecommunications", "Owner", "Depth (m)", "Condition")),
         code("PTBX", "Public telephone box or booth standing on the footpath.",
              point("utilities/telecommunications/structure", "telecom", "0.25", "Telephone booth"),
-             symbol("Telephone Box"),
+             symbol("Public Telephone"),
              attrs("utility.type=telecommunications", "Owner", "Condition")),
         code("PTCM", "Marker that shows the route of a buried telephone cable.",
              point("utilities/telecommunications/fitting", "telecom", "0.25", "Communications cable marker"),
@@ -1402,7 +1408,7 @@ SECTIONS = [
                   "Communications Cable"),
              attrs("utility.type=telecommunications", "Owner", "Depth (m)", "Condition")),
         code("TS*", "Outline of a telephone sump, checked in the third model zone (road side).",
-             line("utilities/telecommunications/structure", "telecom", "0.25", "Telephone sump, zone 3"),
+             line("utilities/telecommunications/structure", "telecom", "0.25", "Telephone sump outline"),
              attrs("Check Zone=3")),
         code("TX*", "Plan outline of a public telephone box.",
              line("utilities/telecommunications/structure", "telecom", "0.25", "Telephone box outline"),
@@ -1430,7 +1436,7 @@ SECTIONS = [
              attrs("utility.type=recycled-water", "Owner", "Depth (m)", "Condition")),
         code("PRHY", "A hydrant on a recycled water main.",
              point("utilities/recycled-water/fitting", "recycled", "0.25", "Recycled hydrant"),
-             symbol("Fire Hydrant"),
+             symbol("Fire Service Hydrant"),
              attrs("utility.type=recycled-water", "Owner", "Depth (m)", "Condition")),
         code("PRMM", "A marker that shows where a recycled water main runs.",
              point("utilities/recycled-water/fitting", "recycled", "0.25", "Recycled main marker"),
@@ -1446,7 +1452,7 @@ SECTIONS = [
              attrs("utility.type=recycled-water", "Owner", "Depth (m)", "Condition")),
         code("PRTP", "A tap on a recycled water supply, such as an outlet or a standpipe.",
              point("utilities/recycled-water/fitting", "recycled", "0.25", "Recycled tap"),
-             symbol("Tap"),
+             symbol("Standpipe Tap"),
              attrs("utility.type=recycled-water", "Owner", "Depth (m)", "Condition")),
         code("RM*", "Main that carries recycled water, shot along its centre.",
              line("utilities/recycled-water/main", "recycled", "0.35", "Recycled water main",
@@ -1459,7 +1465,7 @@ SECTIONS = [
     ("U", "Fire Service", [
         code("PWFB", "Hydrant on a fire service main, for the fire brigade's hoses.",
              point("utilities/fire-service/fitting", "fire", "0.25", "Fire service hydrant"),
-             symbol("Fire Hydrant"),
+             symbol("Fire Service Hydrant"),
              attrs("utility.type=fire-service", "Owner", "Condition")),
     ]),
 
@@ -1487,7 +1493,7 @@ SECTIONS = [
              attrs("utility.type=fuel", "Owner", "Condition")),
         code("PPET", "A petrol pump at a service station, shot at the middle of its base.",
              point("utilities/fuel/structure", "fuel", "0.25", "Fuel dispenser"),
-             symbol("Petrol Pump"),
+             symbol("Fuel Dispenser"),
              attrs("utility.type=fuel", "Owner", "Condition")),
     ]),
 
@@ -1716,7 +1722,7 @@ SECTIONS = [
              line("buildings/outline/hidden", "building", "0.13", "Ruin outline", "Hidden Outline")),
         code("PAWN", "A survey point on the edge of an awning.",
              point("buildings/outline/roof", "building", "0.25", "Point on an awning"),
-             symbol("Awning Point")),
+             symbol("Awning Mark")),
         code("PAWN*", "Keeps awning points out of the ground surface.",
              surface(False)),
         code("PCBU", "A building corner shot at natural surface level, where the wall meets the ground.",
@@ -1767,10 +1773,10 @@ SECTIONS = [
              symbol("Bridge Column")),
         code("PFLG", "A flagpole, shot at its base.",
              point("buildings/structures/structure", "building", "0.35", "Flag mast"),
-             symbol("Flagpole")),
+             symbol("Flagstaff")),
         code("PWML", "Windmill, usually one that pumps water, shot at the middle of its tower.",
              point("buildings/structures/structure", "building", "0.25", "Windmill tower"),
-             symbol("Windmill")),
+             symbol("Windmill Tower")),
         code("UC*", "Line on the ground under a bridge that marks the limit of its clearance overhead.",
              line("buildings/structures/bridge", "building", "0.13", "Bridge clearance limit", "Hidden Outline"),
              surface(False)),
@@ -1795,8 +1801,8 @@ SECTIONS = [
     ("F", "Fences", [
         code("FC*", "Fence of a construction that no other fence code covers.",
              line("fences/fence/general", "fence", "0.25", "Other fence")),
-        code("FE*", "Ordinary property or paddock fence of wire on posts.",
-             line("fences/fence/wire", "fence", "0.25", "General fence", "Post and Wire Fence"),
+        code("FE*", "Ordinary fence of a property or a paddock, whatever it is built of; drawn as posts on a wire.",
+             line("fences/fence/general", "fence", "0.25", "General fence", "Post and Wire Fence"),
              attrs("Check Zone=2")),
         code("FL*", "Fence of unrecorded construction, shot as a plain line.",
              line("fences/fence/general", "fence", "0.18", "Fence, type unstated")),
@@ -1841,7 +1847,7 @@ SECTIONS = [
              line("terrain/breaklines/ridge-gully", "breakline", "0.18", "Ridge or crest line", "Ridge Line")),
         code("NS*", "A line of ground shots along the natural surface where there is no sharper break, checked in "
              "model zone 2.",
-             line("terrain/breaklines/general", "ground", "0.18", "Natural ground line, zone 2",
+             line("terrain/breaklines/general", "ground", "0.18", "Natural ground line",
                   "Soft Breakline"),
              attrs("Check Zone=2")),
         code("PBRK", "A ground point lying on a breakline, shot where the grade changes so that the surface model "
@@ -1907,7 +1913,7 @@ SECTIONS = [
     ("M", "Control Marks", [
         code("PAPN", "An alignment pin: a pin set in the ground to mark a design alignment for setting out.",
              point("control/marks/control", "control", "0.25", "Pin on a design alignment"),
-             symbol("Alignment Pin")),
+             symbol("Setting Out Pin")),
         code("PAPN*", "Keeps alignment pins out of the ground surface.",
              surface(False)),
         code("PBLT", "A bolt set in concrete or rock as a survey mark, shot at the centre of its head.",
@@ -1923,7 +1929,7 @@ SECTIONS = [
              symbol("Level Benchmark", hide=True)),
         code("PCMK", "A permanent control mark of the road authority, used to tie road work into the survey network.",
              point("control/marks/control", "control", "0.25", "Road authority control mark"),
-             symbol("Control Mark")),
+             symbol("Traverse Mark")),
         code("PCMK*", "Keeps the road authority's control marks out of the ground surface.",
              surface(False)),
         code("PDPY", "A temporary peg driven into the ground to carry a height for a dumpy level.",
@@ -1939,13 +1945,13 @@ SECTIONS = [
              surface(False)),
         code("PHCP", "A control point held in plan only, with no level, used to control photogrammetry.",
              point("control/marks/control", "control", "0.25", "Plan-only control mark"),
-             symbol("Control Mark")),
+             symbol("Traverse Mark")),
         code("PMCP", "A minor control point set to support the main control network.",
-             point("control/marks/control", "control", "0.25", "Minor control mark"),
-             symbol("Control Mark")),
+             point("control/marks/control", "control", "0.25", "Supplementary control mark"),
+             symbol("Traverse Mark")),
         code("PPCN", "The ground point at the centre of an aerial photograph, used to position and orient the image.",
              point("control/marks/control", "control", "0.25", "Photo centre mark"),
-             symbol("Photo Centre")),
+             symbol("Aerial Photo Centre")),
         code("PPSM", "A permanent survey mark with coordinates, which the survey can be tied to.",
              point("control/marks/control", "control", "0.25", "Coordinated survey mark"),
              symbol("Fixed Survey Mark", hide=True)),
@@ -1954,7 +1960,7 @@ SECTIONS = [
              surface(False)),
         code("PSSA", "A survey mark of unspecified type, used when the kind of mark is not given.",
              point("control/marks/control", "control", "0.25", "Survey mark, type unstated"),
-             symbol("Control Mark")),
+             symbol("Traverse Mark")),
         code("PSSB", "The broad arrow cut in stone or a kerb to mark a bench level.",
              point("control/marks/level", "control", "0.25", "Broad arrow bench mark"),
              symbol("Level Benchmark")),
@@ -1972,10 +1978,10 @@ SECTIONS = [
              symbol("Trigonometric Station")),
         code("PSSG", "A mark of the permanent, state or project control networks, used as a survey station.",
              point("control/marks/control", "control", "0.25", "Network control mark"),
-             symbol("Control Mark")),
+             symbol("Traverse Mark")),
         code("PSSM", "A mark of the state geodetic network, with published coordinates and heights.",
              point("control/marks/control", "control", "0.25", "State geodetic mark"),
-             symbol("Control Mark")),
+             symbol("Traverse Mark")),
         code("PTSS", "Trigonometric station built as a concrete pillar.",
              point("control/marks/control", "control", "0.25", "Concrete survey pillar"),
              symbol("Trigonometric Station")),
@@ -1990,10 +1996,10 @@ SECTIONS = [
     ("M", "Investigation Points", [
         code("PBHX", "A borehole, shot at the centre of its collar.",
              point("control/investigation/ground", "control", "0.25", "Borehole point"),
-             symbol("Borehole")),
+             symbol("Investigation Bore")),
         code("PGEO", "A pit excavated to inspect the ground or to expose a buried service, shot at its centre.",
              point("control/investigation/ground", "control", "0.25", "Geotechnical test pit"),
-             symbol("Test Pit")),
+             symbol("Trial Pit")),
         code("PHNL", "A pothole dug to expose a service, recorded without a level on the service.",
              point("control/investigation/pothole", "control", "0.25", "Pothole, no level"),
              symbol("Pothole")),
@@ -2090,7 +2096,7 @@ SECTIONS = [
              surface(False)),
         code("PHST", "A grave headstone in a cemetery, shot at the middle of its base.",
              point("miscellaneous/hazards/heritage", "note", "0.25", "Grave headstone"),
-             symbol("Headstone")),
+             symbol("Grave Marker")),
     ]),
 
     # ---- Miscellaneous / General (3) -----------------------------------------------------------------------------
@@ -2124,24 +2130,24 @@ SECTIONS = [
 
     # ---- Design and Setting Out / Road Design Strings (27) --------------------------------------------------------
     ("D", "Road Design Strings", [
-        code("BD*", "A road design string with no named role, left free for a design package to give its own "
-             "meaning.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18", "Spare road string, first")),
-        code("C9*", "A road design string with no named role, left free for a design package to give its own "
-             "meaning.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18", "Spare road string, second")),
-        code("CL*", "A road design string with no named role, left free for a design package to give its own "
-             "meaning.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18", "Spare road string, third")),
-        code("CM*", "A road design string with no named role, left free for a design package to give its own "
-             "meaning.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18", "Spare road string, fourth")),
-        code("CR*", "A road design string with no named role, left free for a design package to give its own "
-             "meaning.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18", "Spare road string, fifth")),
-        code("CS*", "A road design string with no named role, left free for a design package to give its own "
-             "meaning.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18", "Spare road string, sixth")),
+        code("BD*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
+        code("C9*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
+        code("CL*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
+        code("CM*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
+        code("CR*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
+        code("CS*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
         code("E0*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
              "plots.",
              line("design/road-design-strings/unclassified-e", "pavement", "0.18", "Unclassified road string")),
@@ -2196,14 +2202,12 @@ SECTIONS = [
         code("I7*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
              "plots.",
              line("design/road-design-strings/unclassified-i", "pavement", "0.18", "Unclassified road string")),
-        code("I8*", "A road design string with no role assigned yet; the first of two spare classes held for the "
-             "designer's own use.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18",
-                  "Unassigned road string, first")),
-        code("I9*", "A road design string with no role assigned yet; the second of two spare classes held for the "
-             "designer's own use.",
-             line("design/road-design-strings/unclassified", "pavement", "0.18",
-                  "Unassigned road string, second")),
+        code("I8*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
+        code("I9*", "Road design string of a kind that has no recorded purpose, kept so that a design file still "
+             "plots.",
+             line("design/road-design-strings/unclassified", "pavement", "0.18", "Unclassified road string")),
         code("R*", "Road design string starting with R that no more specific code claims.",
              line("design/road-design-strings/unclassified", "pavement", "0.25", "Unclassified road string")),
     ]),
@@ -2397,7 +2401,7 @@ SECTIONS = [
         code("AD*", "Intended position of a bollard on a design, set out as a point and drawn with the bollard "
              "symbol.",
              point("design/barrier-and-fence-design/barrier", "street", "0.25", "Designed bollard"),
-             symbol("Bollard")),
+             symbol("Bollard Post")),
         code("BF*", "Design line for a W-beam or thrie-beam guard rail on the left-hand side of the alignment.",
              line("design/barrier-and-fence-design/barrier", "street", "0.35", "Left guard rail design",
                   "Guard Rail Line")),
@@ -2583,6 +2587,8 @@ RULE_MEMBERS = {
 KEY_PATTERN = re.compile(r"\*|[A-Z0-9]+\*?")
 # Words that name a measured quantity: an attribute that has one carries its unit, as `Depth (m)`.
 QUANTITY = ("depth", "diameter", "height", "width", "capacity", "level", "voltage", "rating", "size")
+# The group of the definitions that several services share. No code is in it, so a code of any group may name one.
+SHARED_GROUP = "Utilities/All Services"
 # The one utility code whose attribute list the other library fixes, so it cannot also say its service.
 NOT_TYPED = {"TS*": "its only attributes rule is the model zone to check, and the entries of that rule are fixed"}
 
@@ -2792,16 +2798,23 @@ def check():
             err("%s (%s): rule repeated" % (r["key"], r["sets"]))
         once.add((r["key"], r["sets"]))
 
-    # Every definition is named by a code, and every colour of the palette is used.
+    # Every definition is named by a code, and by a code of its OWN group, so that a definition is catalogued
+    # beside the codes that draw with it and a sheet shows it in a colour of its group. The one group that no
+    # code has holds what several services share (a duct, a marker post, a washout valve): any code may name those.
     used_ls, used_sy = definitions_used()
-    if ls_module:
-        for d in ls_module.LINESTYLES:
-            if d["name"] not in used_ls:
-                err("linestyle %r is defined and no code names it" % d["name"])
-    if sy_module:
-        for d in sy_module.SYMBOLS:
-            if d["name"] not in used_sy:
-                err("symbol %r is defined and no code names it" % d["name"])
+    used_in = {}
+    for c in CODES:
+        st = styling(c)
+        for name in (st["linestyle"], st["symbol"]):
+            if name:
+                used_in.setdefault(name, set()).add(c["group"])
+    for kind, module, used in (("linestyle", ls_module, used_ls), ("symbol", sy_module, used_sy)):
+        for d in (module.LINESTYLES if kind == "linestyle" else module.SYMBOLS) if module else ():
+            if d["name"] not in used:
+                err("%s %r is defined and no code names it" % (kind, d["name"]))
+            elif d["group"] != SHARED_GROUP and d["group"] not in used_in.get(d["name"], ()):
+                err("%s %r is in the group %s and no code of that group names it (its codes: %s)"
+                    % (kind, d["name"], d["group"], ", ".join(sorted(used_in.get(d["name"], ())))))
     if palette:
         for name in sorted(palette - used_colours):
             err("colour %r is in the palette and no code uses it" % name)

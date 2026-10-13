@@ -5,7 +5,7 @@
   "description": "Katana Standard, edition 1: Katana's own linestyles, symbols, layers and colours for 632 survey codes, with 98 linestyles and 123 symbols. The survey code keys are the other built-in library's, for field-data compatibility.",
   "notice": [
     "Katana Standard was made for Katana: its linestyles, symbols, layers, colours and words are Katana's own.",
-    "Its survey code keys are those of the other built-in library, kept so that the same field data works with either, on the owner's decision; nothing else of that library is in it.",
+    "Its survey code keys, what each key stands for and the kinds of rule each key has are those of the other built-in library, kept so that the same field data works with either, on the owner's decision.",
     "Its licence is that of the Katana repository, whose LICENSING.md says what that leaves open for the keys."
   ],
   "colours": {
@@ -93,7 +93,7 @@
       ["move", 3, 0],
       ["draw", 3, 2.4]
     ]},
-    {"name": "Bicycle Crossing Marking", "group": "Roads and Pavements/Markings", "units": "paper", "length": 2.4, "strokes": [
+    {"name": "Bicycle Crossing Marking", "group": "Design and Setting Out/Lane Marking Design", "units": "paper", "length": 2.4, "strokes": [
       ["move", 0.6, 0.9],
       ["draw", 1.8, 0.9],
       ["draw", 1.8, 2.1],
@@ -105,7 +105,7 @@
       ["draw", 0.6, -0.9],
       ["draw", 0.6, -2.1]
     ]},
-    {"name": "Bicycle Lane Marking", "group": "Roads and Pavements/Markings", "units": "paper", "length": 10, "strokes": [
+    {"name": "Bicycle Lane Marking", "group": "Design and Setting Out/Lane Marking Design", "units": "paper", "length": 10, "strokes": [
       ["move", 0, 0],
       ["draw", 1, 0],
       ["draw", 2, 0],
@@ -151,7 +151,7 @@
       ["move", 5.5, 0],
       ["draw", 5.5, 1]
     ]},
-    {"name": "Chain Mesh Fence", "group": "Fences and Walls/Fences", "units": "paper", "length": 8, "strokes": [
+    {"name": "Chain Mesh Fence", "group": "Design and Setting Out/Barrier and Fence Design", "units": "paper", "length": 8, "strokes": [
       ["move", 0, 0],
       ["draw", 1, 0],
       ["draw", 2, 0],
@@ -320,7 +320,7 @@
       ["draw", 4, 0],
       ["draw", 5.5, 1.4]
     ]},
-    {"name": "Dividing Line Marking", "group": "Roads and Pavements/Markings", "units": "paper", "length": 12, "strokes": [
+    {"name": "Dividing Line Marking", "group": "Design and Setting Out/Lane Marking Design", "units": "paper", "length": 12, "strokes": [
       ["move", 0, 0],
       ["draw", 1, 0],
       ["draw", 2, 0],
@@ -603,7 +603,7 @@
       ["draw", 6.65, 0],
       ["draw", 7.6, 0]
     ]},
-    {"name": "Hazard Boundary", "group": "Miscellaneous/Hazards and Heritage", "units": "paper", "length": 10, "strokes": [
+    {"name": "Hazard Boundary", "group": "Design and Setting Out/Design General", "units": "paper", "length": 10, "strokes": [
       ["move", 0, 0],
       ["draw", 1, 0],
       ["draw", 2, 0],
@@ -952,7 +952,7 @@
       ["move", 2.5, 0],
       ["draw", 2.5, 1.2]
     ]},
-    {"name": "Post and Rail Fence", "group": "Fences and Walls/Fences", "units": "paper", "length": 12, "strokes": [
+    {"name": "Post and Rail Fence", "group": "Design and Setting Out/Barrier and Fence Design", "units": "paper", "length": 12, "strokes": [
       ["move", 0, 0.5],
       ["draw", 1, 0.5],
       ["draw", 2, 0.5],
@@ -1477,7 +1477,7 @@
       ["draw", 6, 0.6],
       ["draw", 6, -0.6]
     ]},
-    {"name": "Subsoil Drain Line", "group": "Kerbs and Drainage/Pipes and Culverts", "units": "paper", "length": 9, "strokes": [
+    {"name": "Subsoil Drain Line", "group": "Design and Setting Out/Drainage Design", "units": "paper", "length": 9, "strokes": [
       ["move", 0, 0],
       ["draw", 0.6, 0],
       ["move", 1.5, 0],
@@ -1498,18 +1498,7 @@
       ["move", 7.5, -1],
       ["draw", 7.5, 1]
     ]},
-    {"name": "Temporary Works Line", "group": "Design and Setting Out/Master Strings", "units": "paper", "length": 10, "strokes": [
-      ["move", 0, 0],
-      ["draw", 1, 0],
-      ["draw", 2, 0],
-      ["draw", 3, 0],
-      ["draw", 4, 0],
-      ["draw", 5, 0],
-      ["draw", 6, 0],
-      ["move", 8, 0],
-      ["text", {"text": "T", "height": 2.4, "justify": "middle-centre"}]
-    ]},
-    {"name": "Title Boundary", "group": "Boundaries and Cadastre/Lot Boundaries", "units": "paper", "length": 25, "strokes": [
+    {"name": "Surveyed Boundary", "group": "Boundaries and Cadastre/Lot Boundaries", "units": "paper", "length": 25, "strokes": [
       ["move", 0, 0],
       ["draw", 1, 0],
       ["draw", 2, 0],
@@ -1538,6 +1527,17 @@
       ["draw", 25, 0],
       ["move", 12.5, -1.6],
       ["draw", 12.5, 1.6]
+    ]},
+    {"name": "Temporary Works Line", "group": "Design and Setting Out/Master Strings", "units": "paper", "length": 10, "strokes": [
+      ["move", 0, 0],
+      ["draw", 1, 0],
+      ["draw", 2, 0],
+      ["draw", 3, 0],
+      ["draw", 4, 0],
+      ["draw", 5, 0],
+      ["draw", 6, 0],
+      ["move", 8, 0],
+      ["text", {"text": "T", "height": 2.4, "justify": "middle-centre"}]
     ]},
     {"name": "Track Centreline", "group": "Rail and Transit/Track", "units": "paper", "length": 14, "strokes": [
       ["move", 0, 0],
@@ -1676,6 +1676,19 @@
     ]}
   ],
   "symbols": [
+    {"name": "Aerial Photo Centre", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 1.8],
+      ["move", -1, -1],
+      ["draw", 1, -1],
+      ["draw", 1, 1],
+      ["draw", -1, 1],
+      ["draw", -1, -1],
+      ["move", -0.7, 0],
+      ["draw", 0.7, 0],
+      ["move", 0, -0.7],
+      ["draw", 0, 0.7]
+    ]},
     {"name": "Air Release Valve", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.6, 0.5],
       ["draw", 1.6, -1.3],
@@ -1688,19 +1701,7 @@
       ["draw", 0, 1.5],
       ["draw", 0.5, 1]
     ]},
-    {"name": "Alignment Pin", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 0.85],
-      ["move", 0, 0],
-      ["circle", 0.26],
-      ["move", 0, 0],
-      ["dot", 0.26],
-      ["move", 1.15, 0],
-      ["draw", 2.15, 0],
-      ["move", -1.15, 0],
-      ["draw", -2.15, 0]
-    ]},
-    {"name": "Awning Point", "group": "Buildings and Structures/Buildings", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Awning Mark", "group": "Buildings and Structures/Buildings", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.6, -0.4],
       ["draw", -1.6, 0.8],
       ["draw", 1.6, 0.8],
@@ -1714,11 +1715,40 @@
       ["move", 1.2, -0.4],
       ["arc", 0.4, 180, 360]
     ]},
-    {"name": "Bollard", "group": "Street Furniture and Signs/Posts and Barriers", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 1],
-      ["move", 0, 0],
-      ["circle", 0.45]
+    {"name": "Barbecue Hearth", "group": "Street Furniture and Signs/Amenities", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -1.5, -1.5],
+      ["draw", 1.5, -1.5],
+      ["draw", 1.5, 1.5],
+      ["draw", -1.5, 1.5],
+      ["draw", -1.5, -1.5],
+      ["move", -0.7, -0.5],
+      ["draw", -0.706, -0.226],
+      ["draw", -0.658, 0.004],
+      ["draw", -0.565, 0.202],
+      ["draw", -0.437, 0.381],
+      ["draw", -0.287, 0.553],
+      ["draw", -0.123, 0.73],
+      ["draw", 0.042, 0.925],
+      ["draw", 0.2, 1.15],
+      ["draw", 0.324, 0.921],
+      ["draw", 0.433, 0.716],
+      ["draw", 0.525, 0.527],
+      ["draw", 0.6, 0.344],
+      ["draw", 0.656, 0.158],
+      ["draw", 0.692, -0.038],
+      ["draw", 0.707, -0.255],
+      ["draw", 0.7, -0.5],
+      ["move", 0, -0.5],
+      ["arc", 0.7, 180, 360],
+      ["move", -0.2, -0.75],
+      ["draw", -0.22, -0.58],
+      ["draw", -0.209, -0.439],
+      ["draw", -0.173, -0.319],
+      ["draw", -0.119, -0.212],
+      ["draw", -0.053, -0.11],
+      ["draw", 0.018, -0.005],
+      ["draw", 0.088, 0.113],
+      ["draw", 0.15, 0.25]
     ]},
     {"name": "Bollard Light", "group": "Street Furniture and Signs/Lighting", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -1732,25 +1762,11 @@
       ["move", 0, -0.95],
       ["draw", 0, -1.55]
     ]},
-    {"name": "Borehole", "group": "Survey Control and Annotation/Investigation Points", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Bollard Post", "group": "Street Furniture and Signs/Posts and Barriers", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
-      ["circle", 1.7],
-      ["move", -1.7, 0],
-      ["draw", 1.7, 0],
-      ["move", 0, -1.7],
-      ["draw", 0, 1.7],
-      ["move", 0.7, 0],
-      ["draw", 0, 0.7],
-      ["move", -0.7, 0],
-      ["draw", 0, -0.7],
-      ["move", 1.4, 0],
-      ["draw", 0, 1.4],
-      ["move", -1.4, 0],
-      ["draw", 0, -1.4],
-      ["move", 1.635, 0.465],
-      ["draw", 0.465, 1.635],
-      ["move", -1.635, -0.465],
-      ["draw", -0.465, -1.635]
+      ["circle", 1],
+      ["move", 0, 0],
+      ["circle", 0.45]
     ]},
     {"name": "Bottom Abutment Point", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.4, -1.4],
@@ -1767,7 +1783,7 @@
       ["move", 0.6, -0.8],
       ["draw", 1.2, -1.4]
     ]},
-    {"name": "Breakline Point", "group": "Terrain and Breaklines/Ground Points", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Breakline Point", "group": "Terrain and Breaklines/Breaklines", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 0.26],
       ["move", 0, 0],
@@ -1800,7 +1816,7 @@
       ["draw", 0, 0],
       ["draw", 0, -1.2]
     ]},
-    {"name": "Bus Stop Sign", "group": "Street Furniture and Signs/Signs", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Bus Stop Sign", "group": "Street Furniture and Signs/Amenities", "units": "paper", "atVertices": true, "strokes": [
       ["move", -0.9, 1.6],
       ["draw", 0.9, 1.6],
       ["move", 1.6, 0.9],
@@ -1897,18 +1913,6 @@
       ["move", 1.175, 0],
       ["text", {"text": "C", "height": 2.4, "justify": "middle-centre"}]
     ]},
-    {"name": "Control Mark", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 1.5],
-      ["move", -2.3, 0],
-      ["draw", 2.3, 0],
-      ["move", 0, -2.3],
-      ["draw", 0, 2.3],
-      ["move", 0, 0],
-      ["circle", 0.26],
-      ["move", 0, 0],
-      ["dot", 0.26]
-    ]},
     {"name": "Corner Peg", "group": "Boundaries and Cadastre/Boundary Marks", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.6, -1.6],
       ["draw", 1.6, -1.6],
@@ -1992,7 +1996,7 @@
       ["draw", -0.6, 0.6],
       ["draw", -0.6, -0.6]
     ]},
-    {"name": "Fire Hydrant", "group": "Utilities/Fire Service", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Fire Service Hydrant", "group": "Utilities/Fire Service", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 1.5],
       ["move", -0.7, 0],
@@ -2003,41 +2007,6 @@
       ["draw", 2.3, 0],
       ["move", -1.5, 0],
       ["draw", -2.3, 0]
-    ]},
-    {"name": "Fireplace", "group": "Street Furniture and Signs/Amenities", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -1.5, -1.5],
-      ["draw", 1.5, -1.5],
-      ["draw", 1.5, 1.5],
-      ["draw", -1.5, 1.5],
-      ["draw", -1.5, -1.5],
-      ["move", -0.7, -0.5],
-      ["draw", -0.706, -0.226],
-      ["draw", -0.658, 0.004],
-      ["draw", -0.565, 0.202],
-      ["draw", -0.437, 0.381],
-      ["draw", -0.287, 0.553],
-      ["draw", -0.123, 0.73],
-      ["draw", 0.042, 0.925],
-      ["draw", 0.2, 1.15],
-      ["draw", 0.324, 0.921],
-      ["draw", 0.433, 0.716],
-      ["draw", 0.525, 0.527],
-      ["draw", 0.6, 0.344],
-      ["draw", 0.656, 0.158],
-      ["draw", 0.692, -0.038],
-      ["draw", 0.707, -0.255],
-      ["draw", 0.7, -0.5],
-      ["move", 0, -0.5],
-      ["arc", 0.7, 180, 360],
-      ["move", -0.2, -0.75],
-      ["draw", -0.22, -0.58],
-      ["draw", -0.209, -0.439],
-      ["draw", -0.173, -0.319],
-      ["draw", -0.119, -0.212],
-      ["draw", -0.053, -0.11],
-      ["draw", 0.018, -0.005],
-      ["draw", 0.088, 0.113],
-      ["draw", 0.15, 0.25]
     ]},
     {"name": "Fixed Survey Mark", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 1.8],
@@ -2050,13 +2019,27 @@
       ["move", 0, 0],
       ["dot", 0.3]
     ]},
-    {"name": "Flagpole", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Flagstaff", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
       ["move", -0.75, 0],
       ["circle", 0.6],
       ["move", -0.15, 0.45],
       ["draw", 1.5, 0],
       ["draw", -0.15, -0.45],
       ["draw", -0.15, 0.45]
+    ]},
+    {"name": "Fuel Dispenser", "group": "Utilities/Fuel", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -1.2, -1.6],
+      ["draw", 1.2, -1.6],
+      ["draw", 1.2, 1.6],
+      ["draw", -1.2, 1.6],
+      ["draw", -1.2, -1.6],
+      ["move", 0, 0],
+      ["text", {"text": "P", "height": 2.4, "justify": "middle-centre"}],
+      ["move", 1.2, 0.6],
+      ["draw", 2, 0.6],
+      ["draw", 2, -0.4],
+      ["move", 1.7, -0.7],
+      ["draw", 2.3, -0.7]
     ]},
     {"name": "Gas Flow Meter", "group": "Utilities/Gas", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -2117,6 +2100,18 @@
       ["move", 0.45, 0],
       ["draw", 3.1, 0]
     ]},
+    {"name": "Grave Marker", "group": "Miscellaneous/Hazards and Heritage", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -0.9, 0.5],
+      ["draw", -0.9, -1.4],
+      ["draw", 0.9, -1.4],
+      ["draw", 0.9, 0.5],
+      ["move", 0, 0.5],
+      ["arc", 0.9, 0, 180],
+      ["move", -0.35, 0.2],
+      ["draw", 0.35, 0.2],
+      ["move", 0, -0.15],
+      ["draw", 0, 0.55]
+    ]},
     {"name": "Ground Shot", "group": "Terrain and Breaklines/Ground Points", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 0.22],
@@ -2127,7 +2122,7 @@
       ["move", 0, -0.75],
       ["draw", 0, 0.75]
     ]},
-    {"name": "Gully Pit", "group": "Kerbs and Drainage/Pits and Structures", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Gully Grate", "group": "Kerbs and Drainage/Pits and Structures", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.6, -1.6],
       ["draw", 1.6, -1.6],
       ["draw", 1.6, 1.6],
@@ -2185,28 +2180,6 @@
       ["move", 0, -0.35],
       ["text", {"text": "!", "height": 2.4, "justify": "middle-centre"}]
     ]},
-    {"name": "Headstone", "group": "Miscellaneous/Hazards and Heritage", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -0.9, 0.5],
-      ["draw", -0.9, -1.4],
-      ["draw", 0.9, -1.4],
-      ["draw", 0.9, 0.5],
-      ["move", 0, 0.5],
-      ["arc", 0.9, 0, 180],
-      ["move", -0.35, 0.2],
-      ["draw", 0.35, 0.2],
-      ["move", 0, -0.15],
-      ["draw", 0, 0.55]
-    ]},
-    {"name": "Headwall", "group": "Kerbs and Drainage/Pits and Structures", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -2.2, 1.2],
-      ["draw", 2.4, 1.2],
-      ["draw", 2.4, -1.2],
-      ["draw", -2.2, -1.2],
-      ["move", -2.2, 1.2],
-      ["draw", -2.9, 1.9],
-      ["move", -2.2, -1.2],
-      ["draw", -2.9, -1.9]
-    ]},
     {"name": "Heritage Item", "group": "Miscellaneous/Hazards and Heritage", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 1.809],
       ["draw", -0.47, 0.456],
@@ -2247,13 +2220,33 @@
       ["move", 0, 0],
       ["dot", 0.2]
     ]},
-    {"name": "Invert Level", "group": "Terrain and Breaklines/Ground Points", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Invert Level", "group": "Kerbs and Drainage/Pipes and Culverts", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 1],
       ["move", 0, -0.476],
       ["draw", -0.55, 0.476],
       ["draw", 0.55, 0.476],
       ["draw", 0, -0.476]
+    ]},
+    {"name": "Investigation Bore", "group": "Survey Control and Annotation/Investigation Points", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 1.7],
+      ["move", -1.7, 0],
+      ["draw", 1.7, 0],
+      ["move", 0, -1.7],
+      ["draw", 0, 1.7],
+      ["move", 0.7, 0],
+      ["draw", 0, 0.7],
+      ["move", -0.7, 0],
+      ["draw", 0, -0.7],
+      ["move", 1.4, 0],
+      ["draw", 0, 1.4],
+      ["move", -1.4, 0],
+      ["draw", 0, -1.4],
+      ["move", 1.635, 0.465],
+      ["draw", 0.465, 1.635],
+      ["move", -1.635, -0.465],
+      ["draw", -0.465, -1.635]
     ]},
     {"name": "Iron Pin", "group": "Boundaries and Cadastre/Boundary Marks", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -2283,6 +2276,19 @@
       ["draw", 1.6, 1.6],
       ["move", -1.6, 1.6],
       ["draw", 1.6, -1.6]
+    ]},
+    {"name": "Kerbside Meter", "group": "Street Furniture and Signs/Amenities", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 0.8],
+      ["move", 0, 0],
+      ["circle", 0.2],
+      ["move", 0, 0],
+      ["dot", 0.2],
+      ["move", -0.95, 0.8],
+      ["draw", 0.95, 0.8],
+      ["draw", 0.95, 1.4],
+      ["draw", -0.95, 1.4],
+      ["draw", -0.95, 0.8]
     ]},
     {"name": "Large Tree Canopy", "group": "Vegetation and Landscape/Trees", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -2350,7 +2356,7 @@
       ["draw", 0.55, -0.526],
       ["draw", 0, 0.426]
     ]},
-    {"name": "Mast", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Mast", "group": "Utilities/Communications", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.3, -2],
       ["draw", 0, 1.4],
       ["draw", 1.3, -2],
@@ -2399,7 +2405,7 @@
       ["move", 0, 0],
       ["dot", 0.3]
     ]},
-    {"name": "Obvert Level", "group": "Terrain and Breaklines/Ground Points", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Obvert Level", "group": "Kerbs and Drainage/Pipes and Culverts", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 1.1],
       ["move", 0, -0.15],
@@ -2422,46 +2428,6 @@
       ["move", 1.2, 0.6],
       ["draw", 2.2, 0.6]
     ]},
-    {"name": "Parking Meter", "group": "Street Furniture and Signs/Amenities", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 0.8],
-      ["move", 0, 0],
-      ["circle", 0.2],
-      ["move", 0, 0],
-      ["dot", 0.2],
-      ["move", -0.95, 0.8],
-      ["draw", 0.95, 0.8],
-      ["draw", 0.95, 1.4],
-      ["draw", -0.95, 1.4],
-      ["draw", -0.95, 0.8]
-    ]},
-    {"name": "Petrol Pump", "group": "Utilities/Fuel", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -1.2, -1.6],
-      ["draw", 1.2, -1.6],
-      ["draw", 1.2, 1.6],
-      ["draw", -1.2, 1.6],
-      ["draw", -1.2, -1.6],
-      ["move", 0, 0],
-      ["text", {"text": "P", "height": 2.4, "justify": "middle-centre"}],
-      ["move", 1.2, 0.6],
-      ["draw", 2, 0.6],
-      ["draw", 2, -0.4],
-      ["move", 1.7, -0.7],
-      ["draw", 2.3, -0.7]
-    ]},
-    {"name": "Photo Centre", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 1.8],
-      ["move", -1, -1],
-      ["draw", 1, -1],
-      ["draw", 1, 1],
-      ["draw", -1, 1],
-      ["draw", -1, -1],
-      ["move", -0.7, 0],
-      ["draw", 0.7, 0],
-      ["move", 0, -0.7],
-      ["draw", 0, 0.7]
-    ]},
     {"name": "Pile Cap", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.5, -1.5],
       ["draw", 1.5, -1.5],
@@ -2470,6 +2436,37 @@
       ["draw", -1.5, -1.5],
       ["move", 0, 0],
       ["circle", 0.85]
+    ]},
+    {"name": "Pipe Headwall", "group": "Kerbs and Drainage/Pits and Structures", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -2.2, 1.2],
+      ["draw", 2.4, 1.2],
+      ["draw", 2.4, -1.2],
+      ["draw", -2.2, -1.2],
+      ["move", -2.2, 1.2],
+      ["draw", -2.9, 1.9],
+      ["move", -2.2, -1.2],
+      ["draw", -2.9, -1.9]
+    ]},
+    {"name": "Pipeline Test Point", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 0.8],
+      ["move", 0, 0.8],
+      ["draw", 0, 1.5],
+      ["move", -0.7, 1.5],
+      ["draw", 0.7, 1.5]
+    ]},
+    {"name": "Plain Sign Post", "group": "Street Furniture and Signs/Signs", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 0.8],
+      ["move", 0, 0],
+      ["circle", 0.2],
+      ["move", 0, 0],
+      ["dot", 0.2],
+      ["move", 0.8, -0.9],
+      ["draw", 1.2, -0.9],
+      ["draw", 1.2, 0.9],
+      ["draw", 0.8, 0.9],
+      ["draw", 0.8, -0.9]
     ]},
     {"name": "Pothole", "group": "Survey Control and Annotation/Investigation Points", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -2519,6 +2516,19 @@
       ["move", -1.515, 1.061],
       ["draw", -2.007, 1.405]
     ]},
+    {"name": "Public Telephone", "group": "Utilities/Communications", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -2.2, -2.2],
+      ["draw", 2.2, -2.2],
+      ["draw", 2.2, 2.2],
+      ["draw", -2.2, 2.2],
+      ["draw", -2.2, -2.2],
+      ["move", 0, -1.55],
+      ["arc", 2.2, 52, 128],
+      ["move", -1.35, 0],
+      ["circle", 0.5],
+      ["move", 1.35, 0],
+      ["circle", 0.5]
+    ]},
     {"name": "Pumping Station", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
       ["move", -2.7, -2.7],
       ["draw", 2.7, -2.7],
@@ -2533,7 +2543,7 @@
       ["draw", 0.8, 0],
       ["draw", 0.35, -0.4]
     ]},
-    {"name": "Query Point", "group": "Miscellaneous/General", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Query Point", "group": "Utilities/Unknown Services", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 1.7],
       ["move", 0, 0],
@@ -2549,17 +2559,6 @@
       ["draw", -0.57, -0.6],
       ["move", 0.57, 0.6],
       ["draw", 0.57, -0.6]
-    ]},
-    {"name": "Rail Control Box", "group": "Rail and Transit/Track", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -1.4, -1.4],
-      ["draw", 1.4, -1.4],
-      ["draw", 1.4, 1.4],
-      ["draw", -1.4, 1.4],
-      ["draw", -1.4, -1.4],
-      ["move", -0.9, 0.45],
-      ["draw", 0.9, 0.45],
-      ["move", -0.9, -0.45],
-      ["draw", 0.9, -0.45]
     ]},
     {"name": "Raised Pavement Marker", "group": "Roads and Pavements/Markings", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -2598,18 +2597,6 @@
       ["draw", 0.7, -0.62],
       ["draw", 0.7, 0.62]
     ]},
-    {"name": "Scour Valve", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -1.6, 1.3],
-      ["draw", 1.6, -0.5],
-      ["draw", 1.6, 1.3],
-      ["draw", -1.6, -0.5],
-      ["draw", -1.6, 1.3],
-      ["move", 0, 0.4],
-      ["draw", 0, -1.5],
-      ["move", -0.5, -1],
-      ["draw", 0, -1.5],
-      ["draw", 0.5, -1]
-    ]},
     {"name": "Seismic Shot Point", "group": "Survey Control and Annotation/Investigation Points", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 0.3],
@@ -2623,6 +2610,18 @@
       ["arc", 1.4, -38, 38],
       ["move", 0, 0],
       ["arc", 1.4, 142, 218]
+    ]},
+    {"name": "Setting Out Pin", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 0.85],
+      ["move", 0, 0],
+      ["circle", 0.26],
+      ["move", 0, 0],
+      ["dot", 0.26],
+      ["move", 1.15, 0],
+      ["draw", 2.15, 0],
+      ["move", -1.15, 0],
+      ["draw", -2.15, 0]
     ]},
     {"name": "Sewer Inspection Opening", "group": "Utilities/Sewer", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
@@ -2655,19 +2654,6 @@
       ["move", -0.8, 1.45],
       ["draw", 0, 2.1],
       ["draw", 0.8, 1.45]
-    ]},
-    {"name": "Sign Post", "group": "Street Furniture and Signs/Signs", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 0.8],
-      ["move", 0, 0],
-      ["circle", 0.2],
-      ["move", 0, 0],
-      ["dot", 0.2],
-      ["move", 0.8, -0.9],
-      ["draw", 1.2, -0.9],
-      ["draw", 1.2, 0.9],
-      ["draw", 0.8, 0.9],
-      ["draw", 0.8, -0.9]
     ]},
     {"name": "Signal Controller Cabinet", "group": "Street Furniture and Signs/Traffic Control", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.6, -1.6],
@@ -2733,19 +2719,15 @@
       ["move", 0, 0],
       ["circle", 0.75]
     ]},
-    {"name": "Star Picket", "group": "Boundaries and Cadastre/Boundary Marks", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Standpipe Tap", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
-      ["circle", 0.3],
-      ["move", 0, 0],
-      ["dot", 0.3],
-      ["move", 0, 0.6],
-      ["draw", 0, 1.55],
-      ["move", -0.52, -0.3],
-      ["draw", -1.342, -0.775],
-      ["move", 0.52, -0.3],
-      ["draw", 1.342, -0.775]
+      ["circle", 0.8],
+      ["move", 0, 0.8],
+      ["draw", 0, 1.5],
+      ["draw", 0.9, 1.5],
+      ["draw", 0.9, 1]
     ]},
-    {"name": "Stay Pole", "group": "Utilities/Electricity", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Stay Wire Pole", "group": "Utilities/Electricity", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 0.8],
       ["move", 0, 0],
@@ -2757,7 +2739,19 @@
       ["move", 1, 1.8],
       ["draw", 1.8, 1]
     ]},
-    {"name": "Storage Tank", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Steel Picket", "group": "Boundaries and Cadastre/Boundary Marks", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 0.3],
+      ["move", 0, 0],
+      ["dot", 0.3],
+      ["move", 0, 0.6],
+      ["draw", 0, 1.55],
+      ["move", -0.52, -0.3],
+      ["draw", -1.342, -0.775],
+      ["move", 0.52, -0.3],
+      ["draw", 1.342, -0.775]
+    ]},
+    {"name": "Storage Tank", "group": "Utilities/Unknown Services", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 2.9],
       ["move", 0, 0],
@@ -2844,27 +2838,6 @@
       ["move", 0.7, 0],
       ["draw", 0.7, 1.1]
     ]},
-    {"name": "Tap", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 0.8],
-      ["move", 0, 0.8],
-      ["draw", 0, 1.5],
-      ["draw", 0.9, 1.5],
-      ["draw", 0.9, 1]
-    ]},
-    {"name": "Telephone Box", "group": "Utilities/Communications", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -2.2, -2.2],
-      ["draw", 2.2, -2.2],
-      ["draw", 2.2, 2.2],
-      ["draw", -2.2, 2.2],
-      ["draw", -2.2, -2.2],
-      ["move", 0, -1.55],
-      ["arc", 2.2, 52, 128],
-      ["move", -1.35, 0],
-      ["circle", 0.5],
-      ["move", 1.35, 0],
-      ["circle", 0.5]
-    ]},
     {"name": "Temporary Control", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 1.8],
       ["draw", 1.8, 0],
@@ -2875,26 +2848,6 @@
       ["draw", 0.8, 0],
       ["move", 0, -0.8],
       ["draw", 0, 0.8]
-    ]},
-    {"name": "Test Pit", "group": "Survey Control and Annotation/Investigation Points", "units": "paper", "atVertices": true, "strokes": [
-      ["move", -1.7, -1.7],
-      ["draw", 1.7, -1.7],
-      ["draw", 1.7, 1.7],
-      ["draw", -1.7, 1.7],
-      ["draw", -1.7, -1.7],
-      ["move", 0, 1.7],
-      ["draw", 1.7, 0],
-      ["draw", 0, -1.7],
-      ["draw", -1.7, 0],
-      ["draw", 0, 1.7]
-    ]},
-    {"name": "Test Point", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
-      ["move", 0, 0],
-      ["circle", 0.8],
-      ["move", 0, 0.8],
-      ["draw", 0, 1.5],
-      ["move", -0.7, 1.5],
-      ["draw", 0.7, 1.5]
     ]},
     {"name": "Three Hundred Millimetre Tree Trunk", "group": "Vegetation and Landscape/Trees", "units": "paper", "atVertices": true, "strokes": [
       ["move", 1.7, 0.704],
@@ -2935,6 +2888,17 @@
       ["draw", 0.4, 1.4],
       ["move", 0.6, 0.8],
       ["draw", 1.2, 1.4]
+    ]},
+    {"name": "Trackside Control Box", "group": "Rail and Transit/Track", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -1.4, -1.4],
+      ["draw", 1.4, -1.4],
+      ["draw", 1.4, 1.4],
+      ["draw", -1.4, 1.4],
+      ["draw", -1.4, -1.4],
+      ["move", -0.9, 0.45],
+      ["draw", 0.9, 0.45],
+      ["move", -0.9, -0.45],
+      ["draw", 0.9, -0.45]
     ]},
     {"name": "Traffic Systems Pit", "group": "Utilities/Traffic Systems", "units": "paper", "atVertices": true, "strokes": [
       ["move", -1.7, -1.7],
@@ -2990,6 +2954,30 @@
       ["draw", 0.4, 0.4],
       ["move", 0, 0],
       ["circle", 0.5]
+    ]},
+    {"name": "Traverse Mark", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
+      ["move", 0, 0],
+      ["circle", 1.5],
+      ["move", -2.3, 0],
+      ["draw", 2.3, 0],
+      ["move", 0, -2.3],
+      ["draw", 0, 2.3],
+      ["move", 0, 0],
+      ["circle", 0.26],
+      ["move", 0, 0],
+      ["dot", 0.26]
+    ]},
+    {"name": "Trial Pit", "group": "Survey Control and Annotation/Investigation Points", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -1.7, -1.7],
+      ["draw", 1.7, -1.7],
+      ["draw", 1.7, 1.7],
+      ["draw", -1.7, 1.7],
+      ["draw", -1.7, -1.7],
+      ["move", 0, 1.7],
+      ["draw", 1.7, 0],
+      ["draw", 0, -1.7],
+      ["draw", -1.7, 0],
+      ["draw", 0, 1.7]
     ]},
     {"name": "Trigonometric Station", "group": "Survey Control and Annotation/Control Marks", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 2.775],
@@ -3049,6 +3037,18 @@
       ["move", 0, 0],
       ["dot", 0.3]
     ]},
+    {"name": "Washout Valve", "group": "Utilities/All Services", "units": "paper", "atVertices": true, "strokes": [
+      ["move", -1.6, 1.3],
+      ["draw", 1.6, -0.5],
+      ["draw", 1.6, 1.3],
+      ["draw", -1.6, -0.5],
+      ["draw", -1.6, 1.3],
+      ["move", 0, 0.4],
+      ["draw", 0, -1.5],
+      ["move", -0.5, -1],
+      ["draw", 0, -1.5],
+      ["draw", 0.5, -1]
+    ]},
     {"name": "Water Flow Meter", "group": "Utilities/Water", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],
       ["circle", 1.7],
@@ -3095,7 +3095,7 @@
       ["move", 0, 0],
       ["dot", 0.35]
     ]},
-    {"name": "Windmill", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
+    {"name": "Windmill Tower", "group": "Buildings and Structures/Structures", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0.5, 0],
       ["draw", 1.472, 0.85],
       ["draw", 2.971, 0.418],
@@ -3146,7 +3146,7 @@
     {"key": "BM*", "sets": "feature", "layer": "cadastre/lots/compiled", "colour": "katana boundary", "draw": "line", "linestyle": "Digital Boundary", "weight": "0.18", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Digital boundary"},
     {"key": "BN*", "sets": "feature", "layer": "cadastre/lots/compiled", "colour": "katana boundary", "draw": "line", "linestyle": "Estimated Boundary", "weight": "0.25", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Boundary good to 0.5 m"},
     {"key": "BO*", "sets": "feature", "layer": "cadastre/lots/title", "colour": "katana boundary", "draw": "line", "linestyle": "continuous", "weight": "0.35", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Boundary good to 0.1 m"},
-    {"key": "BT*", "sets": "feature", "layer": "cadastre/lots/title", "colour": "katana boundary", "draw": "line", "linestyle": "Title Boundary", "weight": "0.50", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Title boundary"},
+    {"key": "BT*", "sets": "feature", "layer": "cadastre/lots/title", "colour": "katana boundary", "draw": "line", "linestyle": "Surveyed Boundary", "weight": "0.50", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Surveyed title boundary"},
     {"key": "BY*", "sets": "feature", "layer": "cadastre/lots/special", "colour": "katana boundary", "draw": "line", "linestyle": "Acquisition Boundary", "weight": "0.35", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Boundary to be acquired"},
     {"key": "BZ*", "sets": "feature", "layer": "cadastre/lots/special", "colour": "katana boundary", "draw": "line", "linestyle": "Stratum Parcel Edge", "weight": "0.25", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Parcel stratum limit"},
     {"key": "JL*", "sets": "feature", "layer": "cadastre/lots/join", "colour": "katana boundary", "draw": "line", "linestyle": "Survey Join Line", "weight": "0.13", "group": "Boundaries and Cadastre/Lot Boundaries", "comment": "Boundary join line"},
@@ -3183,14 +3183,14 @@
     {"key": "PSKI", "sets": "feature", "layer": "cadastre/marks/found", "colour": "katana boundary", "draw": "point", "weight": "0.25", "group": "Boundaries and Cadastre/Boundary Marks", "comment": "Survey spike"},
     {"key": "PSKI", "sets": "symbol", "symbol": {"name": "Survey Spike", "colour": "katana boundary"}},
     {"key": "PSTA", "sets": "feature", "layer": "cadastre/marks/found", "colour": "katana boundary", "draw": "point", "weight": "0.25", "group": "Boundaries and Cadastre/Boundary Marks", "comment": "Star picket mark"},
-    {"key": "PSTA", "sets": "symbol", "symbol": {"name": "Star Picket", "colour": "katana boundary"}},
+    {"key": "PSTA", "sets": "symbol", "symbol": {"name": "Steel Picket", "colour": "katana boundary"}},
     {"key": "PSTA*", "sets": "surface", "surface": false},
     {"key": "EJ*", "sets": "feature", "layer": "roads/carriageway/edge", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Roads and Pavements/Carriageway", "comment": "Formation edge"},
     {"key": "EK*", "sets": "feature", "layer": "roads/carriageway/edge", "colour": "katana pavement", "draw": "line", "linestyle": "Unsealed Road Edge", "weight": "0.18", "group": "Roads and Pavements/Carriageway", "comment": "Track edge"},
     {"key": "EM*", "sets": "feature", "layer": "roads/carriageway/edge", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.35", "group": "Roads and Pavements/Carriageway", "comment": "Edge of a median strip"},
     {"key": "EM*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "1"}]},
     {"key": "EP*", "sets": "feature", "layer": "roads/carriageway/edge", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.35", "group": "Roads and Pavements/Carriageway", "comment": "Pavement edge"},
-    {"key": "OF*", "sets": "feature", "layer": "roads/carriageway/centreline", "colour": "katana pavement", "draw": "line", "linestyle": "Road Centreline", "weight": "0.25", "group": "Roads and Pavements/Carriageway", "comment": "Offset carriageway crown, zone 1"},
+    {"key": "OF*", "sets": "feature", "layer": "roads/carriageway/centreline", "colour": "katana pavement", "draw": "line", "linestyle": "Road Centreline", "weight": "0.25", "group": "Roads and Pavements/Carriageway", "comment": "Surveyed offset crown"},
     {"key": "OF*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "1"}]},
     {"key": "RC*", "sets": "feature", "layer": "roads/carriageway/centreline", "colour": "katana pavement", "draw": "line", "linestyle": "Road Centreline", "weight": "0.18", "group": "Roads and Pavements/Carriageway", "comment": "Carriageway centre"},
     {"key": "SG*", "sets": "feature", "layer": "roads/carriageway/grid", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Roads and Pavements/Carriageway", "comment": "Cattle grid outline"},
@@ -3238,7 +3238,7 @@
     {"key": "PSDS", "sets": "feature", "layer": "street/signs/sign", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Signs", "comment": "Double-faced sign post"},
     {"key": "PSDS", "sets": "symbol", "symbol": {"name": "Double Sided Sign Post", "colour": "katana street"}},
     {"key": "PSIN", "sets": "feature", "layer": "street/signs/sign", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Signs", "comment": "Single-faced sign post"},
-    {"key": "PSIN", "sets": "symbol", "symbol": {"name": "Sign Post", "colour": "katana street"}},
+    {"key": "PSIN", "sets": "symbol", "symbol": {"name": "Plain Sign Post", "colour": "katana street"}},
     {"key": "S1*", "sets": "feature", "layer": "street/signs/speed-zone", "colour": "katana street", "draw": "line", "linestyle": "Hundred Speed Zone Line", "weight": "0.25", "group": "Street Furniture and Signs/Signs", "comment": "Speed limit 100 km/h"},
     {"key": "S1*", "sets": "surface", "surface": false},
     {"key": "S2*", "sets": "feature", "layer": "street/signs/speed-zone", "colour": "katana street", "draw": "line", "linestyle": "Hundred and Ten Speed Zone Line", "weight": "0.25", "group": "Street Furniture and Signs/Signs", "comment": "Speed limit 110 km/h"},
@@ -3267,7 +3267,7 @@
     {"key": "PLSU", "sets": "feature", "layer": "street/lighting/light", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Lighting", "comment": "Hanging light"},
     {"key": "PLSU", "sets": "symbol", "symbol": {"name": "Hanging Light", "colour": "katana street"}},
     {"key": "AC*", "sets": "feature", "layer": "street/barriers/post", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Posts and Barriers", "comment": "Fixed bollard"},
-    {"key": "AC*", "sets": "symbol", "symbol": {"name": "Bollard", "colour": "katana street"}},
+    {"key": "AC*", "sets": "symbol", "symbol": {"name": "Bollard Post", "colour": "katana street"}},
     {"key": "FG*", "sets": "feature", "layer": "street/barriers/guard-rail", "colour": "katana street", "draw": "line", "linestyle": "Guard Rail Line", "weight": "0.35", "group": "Street Furniture and Signs/Posts and Barriers", "comment": "Roadside guard fence"},
     {"key": "FW*", "sets": "feature", "layer": "street/barriers/guard-rail", "colour": "katana street", "draw": "line", "linestyle": "Wire Rope Barrier Line", "weight": "0.35", "group": "Street Furniture and Signs/Posts and Barriers", "comment": "Cable safety barrier"},
     {"key": "KJ*", "sets": "feature", "layer": "street/barriers/guard-rail", "colour": "katana street", "draw": "line", "linestyle": "Concrete Barrier Line", "weight": "0.35", "group": "Street Furniture and Signs/Posts and Barriers", "comment": "Concrete safety barrier"},
@@ -3281,9 +3281,9 @@
     {"key": "PBUS", "sets": "feature", "layer": "street/amenities/furniture", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Amenities", "comment": "Bus stop position"},
     {"key": "PBUS", "sets": "symbol", "symbol": {"name": "Bus Stop Sign", "colour": "katana street"}},
     {"key": "PFPL", "sets": "feature", "layer": "street/amenities/furniture", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Amenities", "comment": "Outdoor fireplace"},
-    {"key": "PFPL", "sets": "symbol", "symbol": {"name": "Fireplace", "colour": "katana street"}},
+    {"key": "PFPL", "sets": "symbol", "symbol": {"name": "Barbecue Hearth", "colour": "katana street"}},
     {"key": "PKME", "sets": "feature", "layer": "street/amenities/furniture", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Amenities", "comment": "Kerbside meter"},
-    {"key": "PKME", "sets": "symbol", "symbol": {"name": "Parking Meter", "colour": "katana street"}},
+    {"key": "PKME", "sets": "symbol", "symbol": {"name": "Kerbside Meter", "colour": "katana street"}},
     {"key": "PMBX", "sets": "feature", "layer": "street/amenities/furniture", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Street Furniture and Signs/Amenities", "comment": "Letterbox"},
     {"key": "PMBX", "sets": "symbol", "symbol": {"name": "Letterbox", "colour": "katana street"}},
     {"key": "SE*", "sets": "feature", "layer": "street/amenities/furniture", "colour": "katana street", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Street Furniture and Signs/Amenities", "comment": "Seat outline"},
@@ -3305,9 +3305,9 @@
     {"key": "DD*", "sets": "feature", "layer": "drainage/kerbs/dish-drain", "colour": "katana kerb", "draw": "line", "linestyle": "Dish Drain Edge", "weight": "0.25", "group": "Kerbs and Drainage/Kerbs", "comment": "V-shaped concrete drain"},
     {"key": "FI*", "sets": "feature", "layer": "drainage/kerbs/gutter", "colour": "katana kerb", "draw": "line", "linestyle": "Gutter Lip Line", "weight": "0.25", "group": "Kerbs and Drainage/Kerbs", "comment": "Gutter invert line"},
     {"key": "FI*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "3"}]},
-    {"key": "KB*", "sets": "feature", "layer": "drainage/kerbs/top", "colour": "katana kerb", "draw": "line", "linestyle": "continuous", "weight": "0.35", "group": "Kerbs and Drainage/Kerbs", "comment": "Kerb top edge, zone 3"},
+    {"key": "KB*", "sets": "feature", "layer": "drainage/kerbs/top", "colour": "katana kerb", "draw": "line", "linestyle": "continuous", "weight": "0.35", "group": "Kerbs and Drainage/Kerbs", "comment": "Kerb top edge"},
     {"key": "KB*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "3"}]},
-    {"key": "LP*", "sets": "feature", "layer": "drainage/kerbs/gutter", "colour": "katana kerb", "draw": "line", "linestyle": "Gutter Lip Line", "weight": "0.25", "group": "Kerbs and Drainage/Kerbs", "comment": "Gutter lip, zone 1"},
+    {"key": "LP*", "sets": "feature", "layer": "drainage/kerbs/gutter", "colour": "katana kerb", "draw": "line", "linestyle": "Gutter Lip Line", "weight": "0.25", "group": "Kerbs and Drainage/Kerbs", "comment": "Gutter lip"},
     {"key": "LP*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "1"}]},
     {"key": "TM*", "sets": "feature", "layer": "drainage/kerbs/median", "colour": "katana kerb", "draw": "line", "linestyle": "continuous", "weight": "0.35", "group": "Kerbs and Drainage/Kerbs", "comment": "Median top edge"},
     {"key": "DP*", "sets": "feature", "layer": "drainage/structures/pit", "colour": "katana stormwater", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Kerbs and Drainage/Pits and Structures", "comment": "Drainage pit outline"},
@@ -3329,13 +3329,13 @@
     {"key": "PEWW", "sets": "symbol", "symbol": {"name": "Wingwall End", "colour": "katana stormwater"}},
     {"key": "PEWW", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "stormwater"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PGUL", "sets": "feature", "layer": "drainage/structures/pit", "colour": "katana stormwater", "draw": "point", "weight": "0.25", "group": "Kerbs and Drainage/Pits and Structures", "comment": "Stormwater gully pit"},
-    {"key": "PGUL", "sets": "symbol", "symbol": {"name": "Gully Pit", "colour": "katana stormwater"}},
+    {"key": "PGUL", "sets": "symbol", "symbol": {"name": "Gully Grate", "colour": "katana stormwater"}},
     {"key": "PGUL", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "stormwater"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PHWB", "sets": "feature", "layer": "drainage/structures/outlet", "colour": "katana stormwater", "draw": "point", "weight": "0.25", "group": "Kerbs and Drainage/Pits and Structures", "comment": "Headwall foot"},
-    {"key": "PHWB", "sets": "symbol", "symbol": {"name": "Headwall", "colour": "katana stormwater"}},
+    {"key": "PHWB", "sets": "symbol", "symbol": {"name": "Pipe Headwall", "colour": "katana stormwater"}},
     {"key": "PHWB", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "stormwater"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PHWT", "sets": "feature", "layer": "drainage/structures/outlet", "colour": "katana stormwater", "draw": "point", "weight": "0.25", "group": "Kerbs and Drainage/Pits and Structures", "comment": "Headwall crest point"},
-    {"key": "PHWT", "sets": "symbol", "symbol": {"name": "Headwall", "colour": "katana stormwater"}},
+    {"key": "PHWT", "sets": "symbol", "symbol": {"name": "Pipe Headwall", "colour": "katana stormwater"}},
     {"key": "PHWT", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "stormwater"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PILT", "sets": "feature", "layer": "drainage/structures/pit", "colour": "katana stormwater", "draw": "point", "weight": "0.25", "group": "Kerbs and Drainage/Pits and Structures", "comment": "Sump inlet"},
     {"key": "PILT", "sets": "symbol", "symbol": {"name": "Sump Inlet", "colour": "katana stormwater"}},
@@ -3518,7 +3518,7 @@
     {"key": "PRAL", "sets": "symbol", "symbol": {"name": "Spot Level", "colour": "katana rail"}},
     {"key": "PRAL*", "sets": "surface", "surface": false},
     {"key": "PRBX", "sets": "feature", "layer": "rail/track/lineside", "colour": "katana rail", "draw": "point", "weight": "0.25", "group": "Rail and Transit/Track", "comment": "Lineside control box"},
-    {"key": "PRBX", "sets": "symbol", "symbol": {"name": "Rail Control Box", "colour": "katana rail"}},
+    {"key": "PRBX", "sets": "symbol", "symbol": {"name": "Trackside Control Box", "colour": "katana rail"}},
     {"key": "PRCC", "sets": "feature", "layer": "rail/track/lineside", "colour": "katana rail", "draw": "point", "weight": "0.25", "group": "Rail and Transit/Track", "comment": "Signalling cable trough"},
     {"key": "PRCC", "sets": "symbol", "symbol": {"name": "Rail Cable Trough", "colour": "katana rail"}},
     {"key": "PRTM", "sets": "feature", "layer": "rail/track/lineside", "colour": "katana rail", "draw": "point", "weight": "0.25", "group": "Rail and Transit/Track", "comment": "Track survey monument"},
@@ -3537,7 +3537,7 @@
     {"key": "PWAV", "sets": "symbol", "symbol": {"name": "Air Release Valve", "colour": "katana water"}},
     {"key": "PWAV", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PWCP", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Main test point"},
-    {"key": "PWCP", "sets": "symbol", "symbol": {"name": "Test Point", "colour": "katana water"}},
+    {"key": "PWCP", "sets": "symbol", "symbol": {"name": "Pipeline Test Point", "colour": "katana water"}},
     {"key": "PWCP", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PWEP", "sets": "feature", "layer": "utilities/water/structure", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Water pump"},
     {"key": "PWEP", "sets": "symbol", "symbol": {"name": "Pumping Station", "colour": "katana water"}},
@@ -3546,7 +3546,7 @@
     {"key": "PWET", "sets": "symbol", "symbol": {"name": "Earthing Point", "colour": "katana water"}},
     {"key": "PWET", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PWHY", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Mains water hydrant"},
-    {"key": "PWHY", "sets": "symbol", "symbol": {"name": "Fire Hydrant", "colour": "katana water"}},
+    {"key": "PWHY", "sets": "symbol", "symbol": {"name": "Fire Service Hydrant", "colour": "katana water"}},
     {"key": "PWHY", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PWMM", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Water main marker post"},
     {"key": "PWMM", "sets": "symbol", "symbol": {"name": "Marker Post", "colour": "katana water"}},
@@ -3555,13 +3555,13 @@
     {"key": "PWMR", "sets": "symbol", "symbol": {"name": "Water Flow Meter", "colour": "katana water"}},
     {"key": "PWMR", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PWSR", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Drain-off valve"},
-    {"key": "PWSR", "sets": "symbol", "symbol": {"name": "Scour Valve", "colour": "katana water"}},
+    {"key": "PWSR", "sets": "symbol", "symbol": {"name": "Washout Valve", "colour": "katana water"}},
     {"key": "PWSR", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PWSV", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Isolating valve"},
     {"key": "PWSV", "sets": "symbol", "symbol": {"name": "Water Isolation Valve", "colour": "katana water"}},
     {"key": "PWSV", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
-    {"key": "PWTP", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Water tap"},
-    {"key": "PWTP", "sets": "symbol", "symbol": {"name": "Tap", "colour": "katana water"}},
+    {"key": "PWTP", "sets": "feature", "layer": "utilities/water/fitting", "colour": "katana water", "draw": "point", "weight": "0.25", "group": "Utilities/Water", "comment": "Water supply tap"},
+    {"key": "PWTP", "sets": "symbol", "symbol": {"name": "Standpipe Tap", "colour": "katana water"}},
     {"key": "PWTP", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "RE*", "sets": "feature", "layer": "utilities/water/structure", "colour": "katana water", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Utilities/Water", "comment": "Reservoir outline"},
     {"key": "RE*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
@@ -3637,7 +3637,7 @@
     {"key": "PGRB", "sets": "symbol", "symbol": {"name": "Gas Pressure Regulator", "colour": "katana gas"}},
     {"key": "PGRB", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "gas"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PGTP", "sets": "feature", "layer": "utilities/gas/fitting", "colour": "katana gas", "draw": "point", "weight": "0.25", "group": "Utilities/Gas", "comment": "Gas test terminal"},
-    {"key": "PGTP", "sets": "symbol", "symbol": {"name": "Test Point", "colour": "katana gas"}},
+    {"key": "PGTP", "sets": "symbol", "symbol": {"name": "Pipeline Test Point", "colour": "katana gas"}},
     {"key": "PGTP", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "gas"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PGVP", "sets": "feature", "layer": "utilities/gas/fitting", "colour": "katana gas", "draw": "point", "weight": "0.25", "group": "Utilities/Gas", "comment": "Gas vent riser"},
     {"key": "PGVP", "sets": "symbol", "symbol": {"name": "Gas Vent", "colour": "katana gas"}},
@@ -3697,7 +3697,7 @@
     {"key": "PSAP", "sets": "symbol", "symbol": {"name": "Guy Anchor", "colour": "katana electricity"}},
     {"key": "PSAP", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "electricity"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PSPL", "sets": "feature", "layer": "utilities/electricity/structure", "colour": "katana electricity", "draw": "point", "weight": "0.25", "group": "Utilities/Electricity", "comment": "Short bracing pole"},
-    {"key": "PSPL", "sets": "symbol", "symbol": {"name": "Stay Pole", "colour": "katana electricity"}},
+    {"key": "PSPL", "sets": "symbol", "symbol": {"name": "Stay Wire Pole", "colour": "katana electricity"}},
     {"key": "PSPL", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "electricity"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "SC*", "sets": "feature", "layer": "utilities/electricity/overhead", "colour": "katana electricity", "draw": "line", "linestyle": "Overhead Line", "weight": "0.18", "group": "Utilities/Electricity", "comment": "Pole stay wire"},
     {"key": "SC*", "sets": "surface", "surface": false},
@@ -3733,7 +3733,7 @@
     {"key": "PT3P", "sets": "symbol", "symbol": {"name": "Communications Triple Pit", "colour": "katana telecom"}},
     {"key": "PT3P", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "telecommunications"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PTBX", "sets": "feature", "layer": "utilities/telecommunications/structure", "colour": "katana telecom", "draw": "point", "weight": "0.25", "group": "Utilities/Communications", "comment": "Telephone booth"},
-    {"key": "PTBX", "sets": "symbol", "symbol": {"name": "Telephone Box", "colour": "katana telecom"}},
+    {"key": "PTBX", "sets": "symbol", "symbol": {"name": "Public Telephone", "colour": "katana telecom"}},
     {"key": "PTBX", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "telecommunications"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PTCM", "sets": "feature", "layer": "utilities/telecommunications/fitting", "colour": "katana telecom", "draw": "point", "weight": "0.25", "group": "Utilities/Communications", "comment": "Communications cable marker"},
     {"key": "PTCM", "sets": "symbol", "symbol": {"name": "Marker Post", "colour": "katana telecom"}},
@@ -3760,7 +3760,7 @@
     {"key": "TD*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "telecommunications"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "TN*", "sets": "feature", "layer": "utilities/telecommunications/copper", "colour": "katana telecom", "draw": "line", "linestyle": "Communications Cable", "weight": "0.25", "group": "Utilities/Communications", "comment": "Buried phone line"},
     {"key": "TN*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "telecommunications"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
-    {"key": "TS*", "sets": "feature", "layer": "utilities/telecommunications/structure", "colour": "katana telecom", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Utilities/Communications", "comment": "Telephone sump, zone 3"},
+    {"key": "TS*", "sets": "feature", "layer": "utilities/telecommunications/structure", "colour": "katana telecom", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Utilities/Communications", "comment": "Telephone sump outline"},
     {"key": "TS*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "3"}]},
     {"key": "TX*", "sets": "feature", "layer": "utilities/telecommunications/structure", "colour": "katana telecom", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Utilities/Communications", "comment": "Telephone box outline"},
     {"key": "TX*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "telecommunications"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
@@ -3776,7 +3776,7 @@
     {"key": "PRET", "sets": "symbol", "symbol": {"name": "Earthing Point", "colour": "katana recycled"}},
     {"key": "PRET", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "recycled-water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PRHY", "sets": "feature", "layer": "utilities/recycled-water/fitting", "colour": "katana recycled", "draw": "point", "weight": "0.25", "group": "Utilities/Recycled Water", "comment": "Recycled hydrant"},
-    {"key": "PRHY", "sets": "symbol", "symbol": {"name": "Fire Hydrant", "colour": "katana recycled"}},
+    {"key": "PRHY", "sets": "symbol", "symbol": {"name": "Fire Service Hydrant", "colour": "katana recycled"}},
     {"key": "PRHY", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "recycled-water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PRMM", "sets": "feature", "layer": "utilities/recycled-water/fitting", "colour": "katana recycled", "draw": "point", "weight": "0.25", "group": "Utilities/Recycled Water", "comment": "Recycled main marker"},
     {"key": "PRMM", "sets": "symbol", "symbol": {"name": "Marker Post", "colour": "katana recycled"}},
@@ -3788,12 +3788,12 @@
     {"key": "PRSV", "sets": "symbol", "symbol": {"name": "Recycled Isolation Valve", "colour": "katana recycled"}},
     {"key": "PRSV", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "recycled-water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "PRTP", "sets": "feature", "layer": "utilities/recycled-water/fitting", "colour": "katana recycled", "draw": "point", "weight": "0.25", "group": "Utilities/Recycled Water", "comment": "Recycled tap"},
-    {"key": "PRTP", "sets": "symbol", "symbol": {"name": "Tap", "colour": "katana recycled"}},
+    {"key": "PRTP", "sets": "symbol", "symbol": {"name": "Standpipe Tap", "colour": "katana recycled"}},
     {"key": "PRTP", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "recycled-water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
     {"key": "RM*", "sets": "feature", "layer": "utilities/recycled-water/main", "colour": "katana recycled", "draw": "line", "linestyle": "Recycled Water Pipe", "weight": "0.35", "group": "Utilities/Recycled Water", "comment": "Recycled water main"},
     {"key": "RM*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "recycled-water"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}, {"type": "text", "name": "Material"}, {"type": "integer", "name": "Diameter (mm)"}]},
     {"key": "PWFB", "sets": "feature", "layer": "utilities/fire-service/fitting", "colour": "katana fire", "draw": "point", "weight": "0.25", "group": "Utilities/Fire Service", "comment": "Fire service hydrant"},
-    {"key": "PWFB", "sets": "symbol", "symbol": {"name": "Fire Hydrant", "colour": "katana fire"}},
+    {"key": "PWFB", "sets": "symbol", "symbol": {"name": "Fire Service Hydrant", "colour": "katana fire"}},
     {"key": "PWFB", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "fire-service"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "FU*", "sets": "feature", "layer": "utilities/fuel/main", "colour": "katana fuel", "draw": "line", "linestyle": "Fuel Supply Pipe", "weight": "0.35", "group": "Utilities/Fuel", "comment": "Other fuel pipeline"},
     {"key": "FU*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "fuel"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}, {"type": "text", "name": "Material"}, {"type": "integer", "name": "Diameter (mm)"}]},
@@ -3810,7 +3810,7 @@
     {"key": "POHM", "sets": "symbol", "symbol": {"name": "Marker Post", "colour": "katana fuel"}},
     {"key": "POHM", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "fuel"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "PPET", "sets": "feature", "layer": "utilities/fuel/structure", "colour": "katana fuel", "draw": "point", "weight": "0.25", "group": "Utilities/Fuel", "comment": "Fuel dispenser"},
-    {"key": "PPET", "sets": "symbol", "symbol": {"name": "Petrol Pump", "colour": "katana fuel"}},
+    {"key": "PPET", "sets": "symbol", "symbol": {"name": "Fuel Dispenser", "colour": "katana fuel"}},
     {"key": "PPET", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "fuel"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Condition"}]},
     {"key": "IT*", "sets": "feature", "layer": "utilities/its/main", "colour": "katana its", "draw": "line", "linestyle": "Traffic Systems Cable", "weight": "0.25", "group": "Utilities/Traffic Systems", "comment": "Traffic systems cable"},
     {"key": "IT*", "sets": "attributes", "attributes": [{"type": "text", "name": "utility.type", "value": "its"}, {"type": "text", "name": "Owner"}, {"type": "text", "name": "Depth (m)"}, {"type": "text", "name": "Condition"}]},
@@ -3935,7 +3935,7 @@
     {"key": "LB*", "sets": "feature", "layer": "buildings/outline/detail", "colour": "katana building", "draw": "line", "linestyle": "Platform Edge Line", "weight": "0.25", "group": "Buildings and Structures/Buildings", "comment": "Loading dock edge"},
     {"key": "OR*", "sets": "feature", "layer": "buildings/outline/hidden", "colour": "katana building", "draw": "line", "linestyle": "Hidden Outline", "weight": "0.13", "group": "Buildings and Structures/Buildings", "comment": "Ruin outline"},
     {"key": "PAWN", "sets": "feature", "layer": "buildings/outline/roof", "colour": "katana building", "draw": "point", "weight": "0.25", "group": "Buildings and Structures/Buildings", "comment": "Point on an awning"},
-    {"key": "PAWN", "sets": "symbol", "symbol": {"name": "Awning Point", "colour": "katana building"}},
+    {"key": "PAWN", "sets": "symbol", "symbol": {"name": "Awning Mark", "colour": "katana building"}},
     {"key": "PAWN*", "sets": "surface", "surface": false},
     {"key": "PCBU", "sets": "feature", "layer": "buildings/outline/detail", "colour": "katana building", "draw": "point", "weight": "0.35", "group": "Buildings and Structures/Buildings", "comment": "Building corner at ground"},
     {"key": "PCBU", "sets": "symbol", "symbol": {"name": "Building Corner", "colour": "katana building"}},
@@ -3962,9 +3962,9 @@
     {"key": "PBPI", "sets": "feature", "layer": "buildings/structures/bridge", "colour": "katana building", "draw": "point", "weight": "0.35", "group": "Buildings and Structures/Structures", "comment": "Bridge pier or column"},
     {"key": "PBPI", "sets": "symbol", "symbol": {"name": "Bridge Column", "colour": "katana building"}},
     {"key": "PFLG", "sets": "feature", "layer": "buildings/structures/structure", "colour": "katana building", "draw": "point", "weight": "0.35", "group": "Buildings and Structures/Structures", "comment": "Flag mast"},
-    {"key": "PFLG", "sets": "symbol", "symbol": {"name": "Flagpole", "colour": "katana building"}},
+    {"key": "PFLG", "sets": "symbol", "symbol": {"name": "Flagstaff", "colour": "katana building"}},
     {"key": "PWML", "sets": "feature", "layer": "buildings/structures/structure", "colour": "katana building", "draw": "point", "weight": "0.25", "group": "Buildings and Structures/Structures", "comment": "Windmill tower"},
-    {"key": "PWML", "sets": "symbol", "symbol": {"name": "Windmill", "colour": "katana building"}},
+    {"key": "PWML", "sets": "symbol", "symbol": {"name": "Windmill Tower", "colour": "katana building"}},
     {"key": "UC*", "sets": "feature", "layer": "buildings/structures/bridge", "colour": "katana building", "draw": "line", "linestyle": "Hidden Outline", "weight": "0.13", "group": "Buildings and Structures/Structures", "comment": "Bridge clearance limit"},
     {"key": "UC*", "sets": "surface", "surface": false},
     {"key": "UT*", "sets": "feature", "layer": "buildings/structures/tank", "colour": "katana building", "draw": "line", "linestyle": "Hidden Outline", "weight": "0.25", "group": "Buildings and Structures/Structures", "comment": "Buried tank outline"},
@@ -3974,7 +3974,7 @@
     {"key": "SO*", "sets": "feature", "layer": "buildings/access/steps", "colour": "katana building", "draw": "line", "linestyle": "Steps Edge", "weight": "0.25", "group": "Buildings and Structures/Steps and Access", "comment": "External stair nosing"},
     {"key": "SO*", "sets": "surface", "surface": false},
     {"key": "FC*", "sets": "feature", "layer": "fences/fence/general", "colour": "katana fence", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Fences and Walls/Fences", "comment": "Other fence"},
-    {"key": "FE*", "sets": "feature", "layer": "fences/fence/wire", "colour": "katana fence", "draw": "line", "linestyle": "Post and Wire Fence", "weight": "0.25", "group": "Fences and Walls/Fences", "comment": "General fence"},
+    {"key": "FE*", "sets": "feature", "layer": "fences/fence/general", "colour": "katana fence", "draw": "line", "linestyle": "Post and Wire Fence", "weight": "0.25", "group": "Fences and Walls/Fences", "comment": "General fence"},
     {"key": "FE*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "2"}]},
     {"key": "FL*", "sets": "feature", "layer": "fences/fence/general", "colour": "katana fence", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Fences and Walls/Fences", "comment": "Fence, type unstated"},
     {"key": "FM*", "sets": "feature", "layer": "fences/fence/palisade", "colour": "katana fence", "draw": "line", "linestyle": "Metal Palisade Fence", "weight": "0.25", "group": "Fences and Walls/Fences", "comment": "Security fence"},
@@ -3990,7 +3990,7 @@
     {"key": "BB*", "sets": "feature", "layer": "terrain/breaklines/bank", "colour": "katana breakline", "draw": "line", "linestyle": "Bank Toe Edge", "weight": "0.25", "group": "Terrain and Breaklines/Breaklines", "comment": "Bank toe"},
     {"key": "CU*", "sets": "feature", "layer": "terrain/breaklines/bank", "colour": "katana breakline", "draw": "line", "linestyle": "Bank Top Edge", "weight": "0.25", "group": "Terrain and Breaklines/Breaklines", "comment": "Cutting crest"},
     {"key": "NB*", "sets": "feature", "layer": "terrain/breaklines/ridge-gully", "colour": "katana breakline", "draw": "line", "linestyle": "Ridge Line", "weight": "0.18", "group": "Terrain and Breaklines/Breaklines", "comment": "Ridge or crest line"},
-    {"key": "NS*", "sets": "feature", "layer": "terrain/breaklines/general", "colour": "katana ground", "draw": "line", "linestyle": "Soft Breakline", "weight": "0.18", "group": "Terrain and Breaklines/Breaklines", "comment": "Natural ground line, zone 2"},
+    {"key": "NS*", "sets": "feature", "layer": "terrain/breaklines/general", "colour": "katana ground", "draw": "line", "linestyle": "Soft Breakline", "weight": "0.18", "group": "Terrain and Breaklines/Breaklines", "comment": "Natural ground line"},
     {"key": "NS*", "sets": "attributes", "attributes": [{"type": "integer", "name": "Check Zone", "value": "2"}]},
     {"key": "PBRK", "sets": "feature", "layer": "terrain/breaklines/general", "colour": "katana breakline", "draw": "point", "weight": "0.18", "group": "Terrain and Breaklines/Breaklines", "comment": "Breakline point"},
     {"key": "PBRK", "sets": "symbol", "symbol": {"name": "Breakline Point", "colour": "katana breakline"}},
@@ -4016,7 +4016,7 @@
     {"key": "JR*", "sets": "feature", "layer": "terrain/rock/edge", "colour": "katana contour", "draw": "line", "linestyle": "Rock Outcrop Edge", "weight": "0.18", "group": "Terrain and Breaklines/Rock and Cliff", "comment": "Rock area outline"},
     {"key": "VC*", "sets": "feature", "layer": "terrain/rock/edge", "colour": "katana contour", "draw": "line", "linestyle": "Cliff Edge", "weight": "0.25", "group": "Terrain and Breaklines/Rock and Cliff", "comment": "Escarpment crest"},
     {"key": "PAPN", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Pin on a design alignment"},
-    {"key": "PAPN", "sets": "symbol", "symbol": {"name": "Alignment Pin", "colour": "katana control"}},
+    {"key": "PAPN", "sets": "symbol", "symbol": {"name": "Setting Out Pin", "colour": "katana control"}},
     {"key": "PAPN*", "sets": "surface", "surface": false},
     {"key": "PBLT", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Survey bolt"},
     {"key": "PBLT", "sets": "symbol", "symbol": {"name": "Survey Spike", "colour": "katana control"}},
@@ -4026,7 +4026,7 @@
     {"key": "PBMZ", "sets": "feature", "layer": "control/marks/level", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Bench mark, separate list"},
     {"key": "PBMZ", "sets": "symbol", "hide": true, "symbol": {"name": "Level Benchmark", "colour": "katana control"}},
     {"key": "PCMK", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Road authority control mark"},
-    {"key": "PCMK", "sets": "symbol", "symbol": {"name": "Control Mark", "colour": "katana control"}},
+    {"key": "PCMK", "sets": "symbol", "symbol": {"name": "Traverse Mark", "colour": "katana control"}},
     {"key": "PCMK*", "sets": "surface", "surface": false},
     {"key": "PDPY", "sets": "feature", "layer": "control/marks/temporary", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Levelling peg"},
     {"key": "PDPY", "sets": "symbol", "symbol": {"name": "Temporary Control", "colour": "katana control"}},
@@ -4035,16 +4035,16 @@
     {"key": "PDSM", "sets": "symbol", "symbol": {"name": "Fixed Survey Mark", "colour": "katana control"}},
     {"key": "PDSM*", "sets": "surface", "surface": false},
     {"key": "PHCP", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Plan-only control mark"},
-    {"key": "PHCP", "sets": "symbol", "symbol": {"name": "Control Mark", "colour": "katana control"}},
-    {"key": "PMCP", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Minor control mark"},
-    {"key": "PMCP", "sets": "symbol", "symbol": {"name": "Control Mark", "colour": "katana control"}},
+    {"key": "PHCP", "sets": "symbol", "symbol": {"name": "Traverse Mark", "colour": "katana control"}},
+    {"key": "PMCP", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Supplementary control mark"},
+    {"key": "PMCP", "sets": "symbol", "symbol": {"name": "Traverse Mark", "colour": "katana control"}},
     {"key": "PPCN", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Photo centre mark"},
-    {"key": "PPCN", "sets": "symbol", "symbol": {"name": "Photo Centre", "colour": "katana control"}},
+    {"key": "PPCN", "sets": "symbol", "symbol": {"name": "Aerial Photo Centre", "colour": "katana control"}},
     {"key": "PPSM", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Coordinated survey mark"},
     {"key": "PPSM", "sets": "symbol", "hide": true, "symbol": {"name": "Fixed Survey Mark", "colour": "katana control"}},
     {"key": "PSS*", "sets": "surface", "surface": false},
     {"key": "PSSA", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Survey mark, type unstated"},
-    {"key": "PSSA", "sets": "symbol", "symbol": {"name": "Control Mark", "colour": "katana control"}},
+    {"key": "PSSA", "sets": "symbol", "symbol": {"name": "Traverse Mark", "colour": "katana control"}},
     {"key": "PSSB", "sets": "feature", "layer": "control/marks/level", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Broad arrow bench mark"},
     {"key": "PSSB", "sets": "symbol", "symbol": {"name": "Level Benchmark", "colour": "katana control"}},
     {"key": "PSSC", "sets": "feature", "layer": "control/marks/temporary", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Station peg"},
@@ -4056,18 +4056,18 @@
     {"key": "PSSF", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Trigonometric station"},
     {"key": "PSSF", "sets": "symbol", "symbol": {"name": "Trigonometric Station", "colour": "katana control"}},
     {"key": "PSSG", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Network control mark"},
-    {"key": "PSSG", "sets": "symbol", "symbol": {"name": "Control Mark", "colour": "katana control"}},
+    {"key": "PSSG", "sets": "symbol", "symbol": {"name": "Traverse Mark", "colour": "katana control"}},
     {"key": "PSSM", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "State geodetic mark"},
-    {"key": "PSSM", "sets": "symbol", "symbol": {"name": "Control Mark", "colour": "katana control"}},
+    {"key": "PSSM", "sets": "symbol", "symbol": {"name": "Traverse Mark", "colour": "katana control"}},
     {"key": "PTSS", "sets": "feature", "layer": "control/marks/control", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Concrete survey pillar"},
     {"key": "PTSS", "sets": "symbol", "symbol": {"name": "Trigonometric Station", "colour": "katana control"}},
     {"key": "PTSS*", "sets": "surface", "surface": false},
     {"key": "PVCP", "sets": "feature", "layer": "control/marks/level", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Control Marks", "comment": "Height control point"},
     {"key": "PVCP", "sets": "symbol", "symbol": {"name": "Level Benchmark", "colour": "katana control"}},
     {"key": "PBHX", "sets": "feature", "layer": "control/investigation/ground", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Investigation Points", "comment": "Borehole point"},
-    {"key": "PBHX", "sets": "symbol", "symbol": {"name": "Borehole", "colour": "katana control"}},
+    {"key": "PBHX", "sets": "symbol", "symbol": {"name": "Investigation Bore", "colour": "katana control"}},
     {"key": "PGEO", "sets": "feature", "layer": "control/investigation/ground", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Investigation Points", "comment": "Geotechnical test pit"},
-    {"key": "PGEO", "sets": "symbol", "symbol": {"name": "Test Pit", "colour": "katana control"}},
+    {"key": "PGEO", "sets": "symbol", "symbol": {"name": "Trial Pit", "colour": "katana control"}},
     {"key": "PHNL", "sets": "feature", "layer": "control/investigation/pothole", "colour": "katana control", "draw": "point", "weight": "0.25", "group": "Survey Control and Annotation/Investigation Points", "comment": "Pothole, no level"},
     {"key": "PHNL", "sets": "symbol", "symbol": {"name": "Pothole", "colour": "katana control"}},
     {"key": "PHNL*", "sets": "surface", "surface": false},
@@ -4113,7 +4113,7 @@
     {"key": "PHNI", "sets": "symbol", "symbol": {"name": "Heritage Item", "colour": "katana note"}},
     {"key": "PHNI*", "sets": "surface", "surface": false},
     {"key": "PHST", "sets": "feature", "layer": "miscellaneous/hazards/heritage", "colour": "katana note", "draw": "point", "weight": "0.25", "group": "Miscellaneous/Hazards and Heritage", "comment": "Grave headstone"},
-    {"key": "PHST", "sets": "symbol", "symbol": {"name": "Headstone", "colour": "katana note"}},
+    {"key": "PHST", "sets": "symbol", "symbol": {"name": "Grave Marker", "colour": "katana note"}},
     {"key": "HP*", "sets": "feature", "layer": "miscellaneous/general/generic", "colour": "katana note", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Miscellaneous/General", "comment": "Area for attention"},
     {"key": "HP*", "sets": "surface", "surface": false},
     {"key": "PVID", "sets": "feature", "layer": "miscellaneous/general/generic", "colour": "katana note", "draw": "point", "weight": "0.25", "group": "Miscellaneous/General", "comment": "Crossing of two lines"},
@@ -4126,12 +4126,12 @@
     {"key": "OH*", "sets": "feature", "layer": "miscellaneous/land-use/area", "colour": "katana breakline", "draw": "line", "linestyle": "Bank Toe Edge", "weight": "0.18", "group": "Miscellaneous/Land Use Areas", "comment": "Stockpile outline"},
     {"key": "OO*", "sets": "feature", "layer": "miscellaneous/land-use/area", "colour": "katana building", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Miscellaneous/Land Use Areas", "comment": "Sporting arena outline"},
     {"key": "OP*", "sets": "feature", "layer": "miscellaneous/land-use/area", "colour": "katana planting", "draw": "line", "linestyle": "Grass Edge", "weight": "0.18", "group": "Miscellaneous/Land Use Areas", "comment": "Park or open space outline"},
-    {"key": "BD*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Spare road string, first"},
-    {"key": "C9*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Spare road string, second"},
-    {"key": "CL*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Spare road string, third"},
-    {"key": "CM*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Spare road string, fourth"},
-    {"key": "CR*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Spare road string, fifth"},
-    {"key": "CS*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Spare road string, sixth"},
+    {"key": "BD*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
+    {"key": "C9*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
+    {"key": "CL*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
+    {"key": "CM*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
+    {"key": "CR*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
+    {"key": "CS*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "E0*", "sets": "feature", "layer": "design/road-design-strings/unclassified-e", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "E3*", "sets": "feature", "layer": "design/road-design-strings/unclassified-e", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "E4*", "sets": "feature", "layer": "design/road-design-strings/unclassified-e", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
@@ -4150,8 +4150,8 @@
     {"key": "I5*", "sets": "feature", "layer": "design/road-design-strings/unclassified-i", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "I6*", "sets": "feature", "layer": "design/road-design-strings/unclassified-i", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "I7*", "sets": "feature", "layer": "design/road-design-strings/unclassified-i", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
-    {"key": "I8*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unassigned road string, first"},
-    {"key": "I9*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unassigned road string, second"},
+    {"key": "I8*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
+    {"key": "I9*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.18", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "R*", "sets": "feature", "layer": "design/road-design-strings/unclassified", "colour": "katana pavement", "draw": "line", "linestyle": "continuous", "weight": "0.25", "group": "Design and Setting Out/Road Design Strings", "comment": "Unclassified road string"},
     {"key": "L0*", "sets": "feature", "layer": "design/lane-marking-design/dividing", "colour": "katana pavement", "draw": "line", "linestyle": "Bicycle Lane Marking", "weight": "0.18", "group": "Design and Setting Out/Lane Marking Design", "comment": "Bike path separation, type 4"},
     {"key": "L2*", "sets": "feature", "layer": "design/lane-marking-design/dividing", "colour": "katana pavement", "draw": "line", "linestyle": "Dividing Line Marking", "weight": "0.25", "group": "Design and Setting Out/Lane Marking Design", "comment": "Multi-lane dividing line"},
@@ -4220,7 +4220,7 @@
     {"key": "DV*", "sets": "feature", "layer": "design/drainage-design/pipe", "colour": "katana stormwater", "draw": "line", "linestyle": "Culvert Outline", "weight": "0.35", "group": "Design and Setting Out/Drainage Design", "comment": "Designed culvert"},
     {"key": "SH*", "sets": "feature", "layer": "design/drainage-design/subsoil", "colour": "katana stormwater", "draw": "line", "linestyle": "Subsoil Drain Line", "weight": "0.18", "group": "Design and Setting Out/Drainage Design", "comment": "Designed subsoil drain edge"},
     {"key": "AD*", "sets": "feature", "layer": "design/barrier-and-fence-design/barrier", "colour": "katana street", "draw": "point", "weight": "0.25", "group": "Design and Setting Out/Barrier and Fence Design", "comment": "Designed bollard"},
-    {"key": "AD*", "sets": "symbol", "symbol": {"name": "Bollard", "colour": "katana street"}},
+    {"key": "AD*", "sets": "symbol", "symbol": {"name": "Bollard Post", "colour": "katana street"}},
     {"key": "BF*", "sets": "feature", "layer": "design/barrier-and-fence-design/barrier", "colour": "katana street", "draw": "line", "linestyle": "Guard Rail Line", "weight": "0.35", "group": "Design and Setting Out/Barrier and Fence Design", "comment": "Left guard rail design"},
     {"key": "BG*", "sets": "feature", "layer": "design/barrier-and-fence-design/barrier", "colour": "katana street", "draw": "line", "linestyle": "Guard Rail Line", "weight": "0.35", "group": "Design and Setting Out/Barrier and Fence Design", "comment": "Right guard rail design"},
     {"key": "FN*", "sets": "feature", "layer": "design/barrier-and-fence-design/fence", "colour": "katana fence", "draw": "line", "linestyle": "Chain Mesh Fence", "weight": "0.25", "group": "Design and Setting Out/Barrier and Fence Design", "comment": "Designed boundary fence"},

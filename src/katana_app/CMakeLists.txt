@@ -2093,8 +2093,8 @@ endif()
 #       30, so 100 round and 600 square;
 #   KB string 1, P05 to P07, along y = 6249990 from 330000 to 330024: a kerb
 #       top 24 long;
-#   FE string 1, P08 to P10, along x = 330030 from 6250005 to 6250015: a wire
-#       fence 10 long;
+#   FE string 1, P08 to P10, along x = 330030 from 6250005 to 6250015: a
+#       general fence 10 long;
 #   WM string 1, P11 to P13, along y = 6249980 from 330000 to 330024: a water
 #       main, 24 long;
 #   EU string 1, P14 and P15, 20 long: a buried power line;
@@ -2124,8 +2124,8 @@ if(KATANA_BUILD_TESTS)
         "cadastre/lots/title 330020,6250030" "cadastre/lots/title 330000,6250030"
         "drainage/kerbs/top 330000,6249990" "drainage/kerbs/top 330012,6249990"
         "drainage/kerbs/top 330024,6249990"
-        "fences/fence/wire 330030,6250005" "fences/fence/wire 330030,6250010"
-        "fences/fence/wire 330030,6250015"
+        "fences/fence/general 330030,6250005" "fences/fence/general 330030,6250010"
+        "fences/fence/general 330030,6250015"
         "utilities/water/main 330000,6249980" "utilities/water/main 330012,6249980"
         "utilities/water/main 330024,6249980"
         "utilities/electricity/main 330000,6249970" "utilities/electricity/main 330020,6249970"
@@ -2140,13 +2140,13 @@ if(KATANA_BUILD_TESTS)
         string(APPEND _ks_points_regex "[^\r\n]*Point +layer=${_layer} +at ${_at}${_eol}")
     endforeach()
     set(_ks_lines_regex
-        "[^\r\n]*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=fences/fence/wire +vertices=3 +open +length=10${_eol}[^\r\n]*Polyline +layer=utilities/water/main +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=utilities/electricity/main +vertices=2 +open +length=20${_eol}")
+        "[^\r\n]*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=fences/fence/general +vertices=3 +open +length=10${_eol}[^\r\n]*Polyline +layer=utilities/water/main +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=utilities/electricity/main +vertices=2 +open +length=20${_eol}")
     # `weight` is stored and not yet applied (docs/katana_standard.md, "Pen weights"), so every style here keeps
     # the entity's own 0.25 whatever the rules say (0.18 for a trunk, 0.50 for a boundary); this test is about the
     # colour, the linestyle and the symbol, and its weight is any number so that the day weights are applied it
     # does not fail for a reason that has nothing to do with them.
     set(_ks_styles_regex
-        " *Gully Pit +linetype=continuous +weight=[0-9.]+ +colour=#00A800 +symbol=Gully Pit[^\r\n]*${_eol} *Level Benchmark +linetype=continuous +weight=[0-9.]+ +colour=#0999C9 +symbol=Level Benchmark[^\r\n]*${_eol} *Narrow Tree Trunk +linetype=continuous +weight=[0-9.]+ +colour=#5C8627 +symbol=Narrow Tree Trunk[^\r\n]*${_eol} *Plain +linetype=continuous +weight=[0-9.]+ +colour=#907368[^\r\n]*${_eol} *Post and Wire Fence +linetype=Post and Wire Fence +weight=[0-9.]+ +colour=#A18C65[^\r\n]*${_eol} *Title Boundary +linetype=Title Boundary +weight=[0-9.]+ +colour=#796EDA[^\r\n]*${_eol} *Underground Cable +linetype=Underground Cable +weight=[0-9.]+ +colour=#E07000[^\r\n]*${_eol} *Water Isolation Valve +linetype=continuous +weight=[0-9.]+ +colour=#2F80ED +symbol=Water Isolation Valve[^\r\n]*${_eol} *Water Supply Pipe +linetype=Water Supply Pipe +weight=[0-9.]+ +colour=#2F80ED[^\r\n]*${_eol}")
+        " *Gully Grate +linetype=continuous +weight=[0-9.]+ +colour=#00A800 +symbol=Gully Grate[^\r\n]*${_eol} *Level Benchmark +linetype=continuous +weight=[0-9.]+ +colour=#0999C9 +symbol=Level Benchmark[^\r\n]*${_eol} *Narrow Tree Trunk +linetype=continuous +weight=[0-9.]+ +colour=#5C8627 +symbol=Narrow Tree Trunk[^\r\n]*${_eol} *Plain +linetype=continuous +weight=[0-9.]+ +colour=#907368[^\r\n]*${_eol} *Post and Wire Fence +linetype=Post and Wire Fence +weight=[0-9.]+ +colour=#A18C65[^\r\n]*${_eol} *Surveyed Boundary +linetype=Surveyed Boundary +weight=[0-9.]+ +colour=#796EDA[^\r\n]*${_eol} *Underground Cable +linetype=Underground Cable +weight=[0-9.]+ +colour=#E07000[^\r\n]*${_eol} *Water Isolation Valve +linetype=continuous +weight=[0-9.]+ +colour=#2F80ED +symbol=Water Isolation Valve[^\r\n]*${_eol} *Water Supply Pipe +linetype=Water Supply Pipe +weight=[0-9.]+ +colour=#2F80ED[^\r\n]*${_eol}")
     # A ';' in a regex would make two regexes either of which passes the test, so the reduction
     # warning's own semicolon is written '.' below.
     add_test(NAME cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code

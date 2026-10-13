@@ -139,12 +139,16 @@ def _reference_figures(data, root):
         return None
     parity = _sibling("parity")
     reference = parity.load_document(path)
-    candidate = {"format": "katana-customisation", "version": 1, "name": "Katana Standard",
-                 "colours": data.colours.COLOURS, "linestyles": data.linestyles, "symbols": data.symbols,
-                 "codes": data.rules}
     exceptions = parity.load_exceptions(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                      "parity_exceptions.json"))
-    return parity.compare(reference, candidate, exceptions), exceptions, parity
+    return parity.compare(reference, _candidate(data), exceptions), exceptions, parity
+
+
+def _candidate(data):
+    """The library as a customisation document, from the data in memory."""
+    return {"format": "katana-customisation", "version": 1, "name": "Katana Standard",
+            "colours": data.colours.COLOURS, "linestyles": data.linestyles, "symbols": data.symbols,
+            "codes": data.rules}
 
 
 def catalogue(data, root):
@@ -205,6 +209,25 @@ def catalogue(data, root):
         ref = report["reference"]
     else:
         report = exceptions = parity = None
+
+    def applied(name):
+        """How many keys apply a value to the attribute `name`."""
+        return sum(1 for c in codes for r in c["rules"] if r["sets"] in ("attributes", "vertexAttributes")
+                   for a in r["attributes"] if a["name"] == name and a["value"])
+
+    # What comes from the other library beside the keys, by count, and how many labels are near its own.
+    shared = {"diameters": applied("Diameter (mm)"), "heights": applied("Height (mm)"),
+              "zones": applied("Check Zone"), "texts": kinds.get("text", 0),
+              "near_labels": "(at 0.85 alike or more)"}
+    if figures:
+        scan = _sibling("originality").scan(parity.load_document(os.path.join(root, REFERENCE)),
+                                            _candidate(data))
+        shared["near_labels"] = "(%d at 0.85 alike or more)" % len(scan["same_key_labels"])
+    no_symbol = [c["key"] for c in codes if codes_module.kind_of(c) == "point" and not styled[c["key"]]["symbol"]]
+    labelled = {}
+    for c in codes:
+        if styled[c["key"]]["comment"]:
+            labelled.setdefault(styled[c["key"]]["comment"], []).append(c)
     off_centre = []
     for warning in sym_module.check()[1]:
         match = re.match(r"(.+?): centre \(([-0-9.]+), ([-0-9.]+)\) is a little off the origin", warning)
@@ -218,11 +241,12 @@ def catalogue(data, root):
     w("Katana Standard is a survey feature library written for Katana: one Katana customisation file, "
       "`resources/customisation/katana-standard.customisation.json`, with %d linestyles, %d symbols and %d survey "
       "codes (%d rules), a palette of %d colours and %d layers. Its survey code **keys** are the NSW "
-      "customisation's, byte for byte, and each key has the same kind of rules there as here, so a field file "
-      "coded for one is read by the other and makes the same kinds of entity in both. That is the owner's "
-      "decision, and it is all that is shared: every linestyle and symbol, every layer path, colour, pen weight, "
-      "text style and legend label is Katana's own, designed and written for it (\"What is shared and what is "
-      "not\", below). This document is its catalogue: how to load it, how to read a code, every definition and "
+      "customisation's, byte for byte, and each key stands for the same thing and has the same kinds of rule "
+      "there as here, so a field file coded for one is read by the other and makes the same kinds of entity in "
+      "both. That is the owner's decision. What the library names, draws and words is Katana's own: every "
+      "linestyle and symbol, every layer path, colour, pen weight, text style and legend label was designed and "
+      "written for it (\"What is shared and what is not\", below, says exactly what comes from the other "
+      "library). This document is its catalogue: how to load it, how to read a code, every definition and "
       "every code, and what Katana does and does not yet do with what the file says."
       % (n_ls, n_sy, n_codes, n_rules, len(colours.COLOURS), len(layers)))
     w("")
@@ -244,7 +268,7 @@ def catalogue(data, root):
     w("**Contents.** [At a glance](#at-a-glance) · [Using it](#using-it) · [Reading a code](#reading-a-code) · "
       "[What is shared and what is not](#what-is-shared-and-what-is-not) · "
       "[The palette](#the-palette) · [Linestyles](#linestyles) · [Symbols](#symbols) · [The codes](#the-codes) · "
-      "[Alphabetical index](#the-codes-in-alphabetical-order) · "
+      "[Index by key](#the-codes-in-alphabetical-order) · [Index by label](#the-codes-by-label) · "
       "[Decisions](#decisions-and-what-was-rejected) · [How it is made and held](#how-it-is-made-and-held) · "
       "[Not done](#not-done)")
     w("")
@@ -258,9 +282,9 @@ def catalogue(data, root):
         ["Survey codes", "%d keys: %d prefix keys that end in `*`, %d exact keys and the bare `*`; in %d classes "
                          "and %d groups; %d rules" % (n_codes, n_prefix, n_exact, data.classes - 0, n_groups_codes,
                                                       n_rules)],
-        ["The keys", "the other built-in's, byte for byte; the rule kinds, draw modes, text and pipe rules and "
-                     "surface flags of each key follow the other built-in's too (\"What is shared and what is "
-                     "not\")"],
+        ["The keys", "the other built-in's, byte for byte; what each key stands for (with the size or the model "
+                     "zone the other gives it) and its rule kinds, draw mode, text and pipe rules and surface "
+                     "flag follow the other built-in's too (\"What is shared and what is not\")"],
         ["Layers", "%d, always three levels (`class/group/family`), lower case" % len(layers)],
         ["Palette", "%d named colours, each at least 3:1 against the plan view's ground and against white paper "
                     "as it prints (yellow gas and cream sewer, which are AS 5488's, print light); the service "
@@ -317,8 +341,9 @@ def catalogue(data, root):
     w("")
     w("![The street corner field file after SURVEY IMPORT, in the plan view](" + IMAGES + "plan.png)")
     w("")
-    w("*After the import, from the top: the closed lot boundary with its bench mark and its tree trunk; the wire "
-      "fence beside it; the kerb with a gully pit; the water main with its valve; the buried power line. The "
+    w("*After the import, from the top: the closed lot boundary with its bench mark and its tree trunk; the "
+      "fence beside it, drawn as posts on a wire; the kerb with a gully pit; the water main with its valve; the "
+      "buried power line. The "
       "plain cross inside the lot is `PWSW`, the point no rule answers. Pen weights are not yet applied, so the "
       "boundary is no heavier than the fence. The words beside each feature are laid on the screenshot "
       "afterwards, from the library's own legend labels.*")
@@ -347,7 +372,12 @@ def catalogue(data, root):
     w("")
     w("The bare `*` belongs to no class. What each kind of code draws, by count:")
     w("")
-    kind_words = [("line", "a line, joined from the points"), ("point", "a point, with a symbol"),
+    point_words = "a point, with a symbol"
+    if no_symbol:
+        point_words += " (all but %s, which %s none and %s as a plain point)" % (
+            comma_list("`%s`" % k for k in no_symbol), "name" if len(no_symbol) > 1 else "names",
+            "draw" if len(no_symbol) > 1 else "draws")
+    kind_words = [("line", "a line, joined from the points"), ("point", point_words),
                   ("both", "a line with a symbol at every vertex"), ("text", "text of a size"),
                   ("layer", "the layer of the text codes"), ("surface", "a surface flag and nothing else"),
                   ("pipe", "the round pipe section of any string that carries a diameter")]
@@ -373,32 +403,52 @@ def catalogue(data, root):
     # ---- shared ---------------------------------------------------------------------------------------------
     w("## What is shared and what is not")
     w("")
-    w("**Shared, by the owner's decision: the survey code keys, and what each key does.** Katana Standard has "
-      "the same %d keys as the NSW customisation, including every prefix rule ending in `*`, the numbered "
-      "families and the bare `*`; and for each key the same kinds of rule in the same order, the same draw mode "
-      "(line or point), the same hide and surface flags, text rules where the other has them and pipe rules "
-      "where the other has them. A field file therefore makes the same kinds of entity in either. The keys are "
-      "the other library's identifiers, reused for field-data compatibility; they are the only thing taken "
-      "(`LICENSING.md`). `tools/katana_standard/parity.py` compares the two files and the tests hold the result."
-      % n_codes)
+    w("**Shared, by the owner's decision: the survey code keys, what each key stands for, and what it does.** "
+      "Three things come from the NSW customisation, and each is a fact about a key and not a name, a drawing "
+      "or a sentence:")
     w("")
-    w("**Katana's own: everything you can see.** Linestyles and symbols (every one drawn here, from a written "
-      "brief and looked at in Katana's own renderer), group paths, layer paths, colours and the colour table, "
-      "pen weights, text styles, legend labels, and every sentence of every meaning and of this document. "
-      "`tools/katana_standard/originality.py` scans the two files for what a person could copy and the test "
+    w("1. **The keys.** The same %d keys, byte for byte, including every prefix rule ending in `*`, the "
+      "numbered families and the bare `*`." % n_codes)
+    w("2. **What each key stands for.** A key says nothing by itself: that `AC*` is a bollard and `U3*` a "
+      "375 mm pipe is read from the other library's label for the key, and so is every size and number a code "
+      "here states. %d keys apply a pipe diameter and %d a culvert height that the other library's label "
+      "gives and the key does not; %d keys apply the model zone of the other library's attributes rule; the "
+      "%d text keys have its text sizes. The reading is this library's, worded in its own sentences (\"Not "
+      "done\" says where a label left the purpose open)."
+      % (shared["diameters"], shared["heights"], shared["zones"], shared["texts"]))
+    w("3. **What each key does.** The same kinds of rule in the same order, the same draw mode (line or "
+      "point), the same hide and surface flags, a text rule of the same units, size and justification where "
+      "the other has one, and pipe rules of the same justification and shape where the other has them. A field "
+      "file therefore makes the same kinds of entity in either.")
+    w("")
+    w("These are the other library's identifiers and its facts about them, reused for field-data compatibility "
+      "(`LICENSING.md` says what that leaves open). `tools/katana_standard/parity.py` compares the two files "
+      "and the tests hold the result.")
+    w("")
+    w("**Katana's own: everything the library names, draws and words.** Linestyles and symbols (every one "
+      "drawn here, from a written brief and looked at in Katana's own renderer) and their names, group paths, "
+      "layer paths, colours and the colour table, pen weights, attribute names, text styles, legend labels, and "
+      "every sentence of every meaning and of this document. `tools/katana_standard/originality.py` scans the "
+      "two files for what a person could copy and the test "
       "`KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the result: no definition "
       "name, group path, layer path, legend label, colour name, attribute name or text style is the same in "
       "both, and no stroke list is, exactly, moved or scaled, beyond the dash, the plus and the square that any "
-      "library draws. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for "
+      "library draws. A name is the same when its letters and digits are, whatever its case, blanks and "
+      "punctuation; and a definition name is compared with everything the other library calls a thing: its "
+      "definition names, those names without the capitals it puts in front of them, and its legend labels, "
+      "since a symbol named after the other library's label would be its name for the thing all the same. "
+      "None is. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for "
       "communications and which every drawing system has. The script and the tests excuse that one white, the "
       "communications colour of `utilityTypeColour`, and no other value: a second white would fail them.")
     w("")
-    w("**What two libraries cannot help sharing** is the trade's own names for real things. A give way line, a "
-      "sewage pumping station and a culvert by its height are called that by anyone, so some legend labels here "
-      "are near the other library's label for the same key without being it; `originality.py` counts them (at "
-      "0.85 alike or more) and prints this library's side, as a figure to read. The meanings are sentences "
-      "written for this document, and where one uses a term of the trade or of the law (a permanent survey "
-      "mark, an endangered ecological community) it is because that is the thing's name.")
+    w("**What two libraries cannot help sharing** is the trade's own names for real things, and the sizes "
+      "above. A give way line, a sewage pumping station and a culvert by its height are called that by anyone, "
+      "so some legend labels here are near the other library's label for the same key without being it: "
+      "`originality.py` counts them %s and prints this library's side, "
+      "as a figure to read. No definition name and no legend label is that near (0.9) to a name or a label of "
+      "the other library under another key. The meanings are sentences written for this document, and where "
+      "one uses a term of the trade or of the law (a permanent survey mark, an endangered ecological "
+      "community) it is because that is the thing's name." % shared["near_labels"])
     w("")
     if figures:
         w("**One field file, the same kinds of entity.** A code is answered by several keys at once, the exact "
@@ -570,19 +620,24 @@ def catalogue(data, root):
     # ---- codes ------------------------------------------------------------------------------------------------
     w("## The codes")
     w("")
-    w("%d codes by class and group. *Draws* is the linestyle or symbol, the colour and the pen weight; *Also* is "
-      "what the code does besides drawing: whether its points join a surface, and the attributes it applies "
-      "(in backticks) or asks the surveyor for. Where a code draws the plain continuous line, Katana's own "
-      "word `continuous` is its linestyle. A field-book code is a key and a string number, `WM1 ST, WM1, WM1 "
-      "END`." % n_codes)
+    w("%d codes by class and group. *Label* is the code's legend label, the name a plot legend prints in "
+      "capitals and `CODE LIST` shows as the rule's comment; a key that draws nothing of its own (a surface "
+      "flag, a text size, the bare `*`) has none. *Draws* is the linestyle or symbol, the colour and the pen "
+      "weight; *Also* is what the code does besides drawing: whether its points join a surface, and the "
+      "attributes it applies (in backticks) or asks the surveyor for. Where a code draws the plain continuous "
+      "line, Katana's own word `continuous` is its linestyle. A field-book code is a key and a string number, "
+      "`WM1 ST, WM1, WM1 END`. To find a code from what it is called, use [the index by label]"
+      "(#the-codes-by-label); from its key, [the index by key](#the-codes-in-alphabetical-order)." % n_codes)
     w("")
     w("### Every code: the bare `*`")
     w("")
     w("The bare `*` matches every code, so it holds only what applies to any string.")
     w("")
+    code_header = ["Code", "Label", "Draws", "Layer", "Also", "What it is"]
     star = [c for c in codes if c["class"] == "-"]
-    w(table(["Code", "Draws", "Layer", "Also", "What it is"],
-            [["`%s`" % c["key"], _draws(c, colours, codes_module), "", _also(c), c["meaning"]] for c in star]))
+    w(table(code_header,
+            [["`%s`" % c["key"], styled[c["key"]]["comment"] or "", _draws(c, colours, codes_module), "", _also(c),
+              c["meaning"]] for c in star]))
     w("")
     for top in taxonomy:
         w("### Class %s: %s" % (top[0], top[1]))
@@ -601,17 +656,30 @@ def catalogue(data, root):
             body = []
             for c in rows:
                 layer = styled[c["key"]]["layer"]
-                body.append(["`%s`" % c["key"], _draws(c, colours, codes_module), "`%s`" % layer if layer else "",
-                             _also(c), c["meaning"]])
-            w(table(["Code", "Draws", "Layer", "Also", "What it is"], body))
+                body.append(["`%s`" % c["key"], styled[c["key"]]["comment"] or "", _draws(c, colours, codes_module),
+                             "`%s`" % layer if layer else "", _also(c), c["meaning"]])
+            w(table(code_header, body))
             w("")
 
     w("### The codes in alphabetical order")
     w("")
-    w("Every code once, for looking one up: the key, where it is catalogued and what it is.")
+    w("Every code once, for looking one up by its key: the key, its legend label, where it is catalogued and "
+      "what it is.")
     w("")
-    w(table(["Code", "Class and group", "Meaning"],
-            [["`%s`" % c["key"], c["group"] or "(no class)", c["meaning"]] for c in sorted(codes, key=lambda c: c["key"])]))
+    w(table(["Code", "Label", "Class and group", "Meaning"],
+            [["`%s`" % c["key"], styled[c["key"]]["comment"] or "", c["group"] or "(no class)", c["meaning"]]
+             for c in sorted(codes, key=lambda c: c["key"])]))
+    w("")
+    w("### The codes by label")
+    w("")
+    w("Every legend label once, in alphabetical order, for looking a code up by what it is called: %d labels "
+      "for the %d keys that have one. A label that several keys share is listed once with all of them."
+      % (len(labelled), sum(len(v) for v in labelled.values())))
+    w("")
+    w(table(["Label", "Code", "Class and group"],
+            [[label, " ".join("`%s`" % c["key"] for c in sorted(users, key=lambda c: c["key"])),
+              "; ".join(sorted({c["group"] for c in users}))]
+             for label, users in sorted(labelled.items(), key=lambda item: (item[0].lower(), item[0]))]))
     w("")
 
     # ---- decisions --------------------------------------------------------------------------------------------
@@ -661,9 +729,10 @@ def catalogue(data, root):
       "and culverts of class K set `utility.type` to `stormwater`, though they are catalogued as drainage; the "
       "kerbs, channels and creeks do not. Rejected: leaving them untyped, which makes `UTILITY DRAW` read a "
       "coded stormwater pipe as an unknown service.")
-    w("- **A size the key states is applied.** A pipe `U3*` is 375 mm, an invert `PI04` is in a 450 mm pipe and "
-      "a box culvert `D1*` is 1200 mm high, so each applies `Diameter (mm)` or `Height (mm)`; the surveyor is "
-      "not asked what the code says.")
+    w("- **A size a key stands for is applied.** The key itself states none: a pipe `U3*` is 375 mm, an invert "
+      "`PI04` is in a 450 mm pipe and a box culvert `D1*` is 1200 mm high because the other library's labels "
+      "for those keys say so (\"What is shared and what is not\"). Each applies `Diameter (mm)` or "
+      "`Height (mm)`, so the surveyor is not asked what the code already means.")
     w("")
 
     w("## How it is made and held")
@@ -740,9 +809,18 @@ def catalogue(data, root):
       "strings and close one with opcode 20; control words (`BC`, `EC`, `ST`, `END`, `CL`, `RECT`) reach the "
       "linework only from a code kept in a point's property, so the curve and the rectangle are tested through "
       "`LINEWORK PROPERTY` and not through an import.")
-    w("- **Four keys are spelled like a control word** (`BC*`, `CL*`, `EC*`, `ST*`), as in the other library. "
-      "A control word is read only after the key, so a point coded `ST` is a string called ST, a septic tank. "
-      "Nothing is lost, but a surveyor who types a control word in the code column gets a feature.")
+    w("- **A control word typed alone is a code, and six of the seven are answered.** Four keys are spelled like "
+      "a default control word (`BC*`, `CL*`, `EC*`, `ST*`) and two more answer one by prefix (`EN*` answers "
+      "`END` and `RE*` answers `RECT`), as in the other library; only `JPN` is answered by no key. A control "
+      "word is read only after the key, so a point coded `ST` is a string called ST, a septic tank, and one "
+      "coded `END` an electrical sump. Nothing is lost, but a surveyor who types a control word in the code "
+      "column gets a feature.")
+    w("- **A pipe is sized from this library's own attribute.** The pipe rules of the bare `*` take a size from "
+      "`Diameter (mm)`. The other library's take theirs from attributes of other names (and have culvert "
+      "rules sized from a width and a height, where this library keeps the one round-pipe rule its lookup "
+      "resolves to), so a field file that carries those attributes will size no pipe here on the day Katana "
+      "applies pipe rules, and the unit is millimetres by the attribute's name alone: nothing converts a "
+      "value. Nothing differs today, since pipe rules are stored and not applied.")
     w("- **Undo leaves the parent layers.** Katana's layer table makes every ancestor of a layer path a layer of "
       "its own, and Undo removes the layer a command made and not its ancestors: `LAYER NEW x/y/z` then `UNDO` "
       "leaves `x` and `x/y`. The library's layers are three levels deep, so one undo of the street corner's import "

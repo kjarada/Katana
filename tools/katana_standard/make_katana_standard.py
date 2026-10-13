@@ -81,8 +81,8 @@ class Data:
 
     NOTICE = ["Katana Standard was made for Katana: its linestyles, symbols, layers, colours and words are Katana's "
               "own.",
-              "Its survey code keys are those of the other built-in library, kept so that the same field data works "
-              "with either, on the owner's decision; nothing else of that library is in it.",
+              "Its survey code keys, what each key stands for and the kinds of rule each key has are those of the "
+              "other built-in library, kept so that the same field data works with either, on the owner's decision.",
               "Its licence is that of the Katana repository, whose LICENSING.md says what that leaves open for the keys."]
 
 

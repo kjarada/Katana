@@ -85,6 +85,9 @@ G_STRUCT = "Buildings and Structures/Structures"
 G_SIGN = "Street Furniture and Signs/Signs"
 G_ITS = "Utilities/Traffic Systems"
 G_DESIGN = "Design and Setting Out/Design General"
+G_LANE = "Design and Setting Out/Lane Marking Design"
+G_DRAIN = "Design and Setting Out/Drainage Design"
+G_BARRIER = "Design and Setting Out/Barrier and Fence Design"
 
 CHORD = 1.0  # the longest straight chord of any run of ink, in mm
 DOT = 0.6    # a dot is a dash this long, in mm
@@ -222,7 +225,7 @@ def _dash(pen, length, dash, y=0.0):
 # Boundaries and Cadastre
 # ---------------------------------------------------------------------------------------------------------
 
-@_style("Title Boundary", G_LOT, 25,
+@_style("Surveyed Boundary", G_LOT, 25,
         "Unbroken line crossed by a short tick every 25 mm: the registered title boundary, the firmest line in the cadastre.")
 def _(p):
     p.run(0, 25)
@@ -320,7 +323,7 @@ def _(p):
     _dash(p, 10, 5)
 
 
-@_style("Dividing Line Marking", G_MARK, 12,
+@_style("Dividing Line Marking", G_LANE, 12,
         "Long paint dashes, 9 on and 3 off: the broken line that divides opposing traffic, told from the lane line by its long dash.")
 def _(p):
     _dash(p, 12, 9)
@@ -386,7 +389,7 @@ def _(p):
     p.trace([(5, 0), (3, -3), (1, 0)])
 
 
-@_style("Bicycle Lane Marking", G_MARK, 10,
+@_style("Bicycle Lane Marking", G_LANE, 10,
         "Dashes with a pair of small rings, like bicycle wheels, in each gap: the broken line beside a bicycle lane or along a bicycle path.")
 def _(p):
     x = _dash(p, 10, 5)
@@ -394,7 +397,7 @@ def _(p):
     p.circle(x + 0.95, 0, 0.5)
 
 
-@_style("Bicycle Crossing Marking", G_MARK, 2.4,
+@_style("Bicycle Crossing Marking", G_LANE, 2.4,
         "Two rows of small squares 3 mm apart with no baseline, the line running between them: a bicycle crossing painted across the carriageway.")
 def _(p):
     p.square(1.2, 1.5, 1.2)
@@ -543,7 +546,7 @@ def _(p):
     _gap_pipe(p, 16, 5, "D")
 
 
-@_style("Subsoil Drain Line", G_PIPE, 9,
+@_style("Subsoil Drain Line", G_DRAIN, 9,
         "Two dots and a dash in turn, written in the digitising direction: a perforated subsoil drain.", "none")
 def _(p):
     p.run(0, DOT)
@@ -760,14 +763,14 @@ def _(p):
 # Fences
 # ---------------------------------------------------------------------------------------------------------
 
-@_style("Chain Mesh Fence", G_FENCE, 8,
+@_style("Chain Mesh Fence", G_BARRIER, 8,
         "Unbroken line with a small cross every 8 mm: a wire mesh fence on steel posts.")
 def _(p):
     p.run(0, 8)
     p.cross(4, 0, 0.8)
 
 
-@_style("Post and Rail Fence", G_FENCE, 12,
+@_style("Post and Rail Fence", G_BARRIER, 12,
         "Two parallel rails 1 mm apart with a square post every 12 mm: a timber or steel post and rail fence.")
 def _(p):
     p.run(0, 12, 0.5)
@@ -900,7 +903,7 @@ def _(p):
     p.tick(x, -1.0, 1.0)
 
 
-@_style("Hazard Boundary", G_HAZ, 10,
+@_style("Hazard Boundary", G_DESIGN, 10,
         "Dashes with an exclamation mark in each gap: the boundary of a hazardous area.")
 def _(p):
     p.text(_dash(p, 10, 6), 0, "!")

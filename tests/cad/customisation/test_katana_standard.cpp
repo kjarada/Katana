@@ -39,7 +39,9 @@
 // entity, from the two tracked files, at run time. What else the two share is
 // counted by tools/katana_standard/originality.py (nothing: no name, group,
 // layer, label, colour name, attribute name or text style, and of colour
-// values only the white of communications) and held here by count.
+// values only the white of communications; a name is also compared with the
+// other's names less their lead-in of capitals and with its legend labels,
+// and a label with its names) and held here by count.
 
 #include <gtest/gtest.h>
 
@@ -57,6 +59,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/customisation_host.hpp"
@@ -257,7 +260,7 @@ TEST(KatanaStandard, ItHoldsTheCountsOfItsIndependentCensus)
     EXPECT_EQ(strokes[StrokeOp::Move], 701u);
     EXPECT_EQ(strokes[StrokeOp::Text], 54u);
     EXPECT_EQ(strokes[StrokeOp::Pen], 0u) << "no stroke names a pen: the rule gives the colour";
-    EXPECT_EQ(katana::entity::styleGroups(file.library).size(), 48u);
+    EXPECT_EQ(katana::entity::styleGroups(file.library).size(), 51u);
     EXPECT_EQ(file.map.size(), 1103u);
     EXPECT_EQ(file.map.keys().size(), 632u);
     EXPECT_EQ(file.colours.size(), 28u);
@@ -529,7 +532,7 @@ TEST(KatanaStandard, TheKerbTopIsAPlainLineAndItsBackAndItsGutterLipHavePatterns
     }
 }
 
-TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundredAndSixtyOne)
+TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundredAndSixty)
 {
     KS_LOAD();
     const std::regex word("[a-z]+(-[a-z]+)*");
@@ -546,7 +549,7 @@ TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundre
             EXPECT_TRUE(std::regex_match(level, word)) << key << " level '" << level << "'";
         }
     }
-    EXPECT_EQ(layers.size(), 161u);
+    EXPECT_EQ(layers.size(), 160u);
 }
 
 TEST(KatanaStandard, EveryGroupIsTwoLevelsDeepAndThereAreFiftyEightInAll)
@@ -564,13 +567,16 @@ TEST(KatanaStandard, EveryGroupIsTwoLevelsDeepAndThereAreFiftyEightInAll)
         EXPECT_EQ(std::count(group.begin(), group.end(), '/'), 1) << group;
     }
     // 57 groups of the codes: 13 classes and their groups, every one of them
-    // holding a code. The definitions' 48 are the groups that have a
-    // definition; of the codes' 57, 10 have none (seven design groups drawn
-    // with other groups' definitions, the paths, the land use areas and the
-    // text codes), and the shapes every service shares have a group no code
-    // has (Utilities/All Services): 57 + 1 = 58 groups in all.
+    // holding a code. The definitions' 51 are the groups that have a
+    // definition; of the codes' 57, 7 have none (four design groups drawn
+    // with plain lines or with another group's definitions - the road design
+    // strings, earthworks, kerb and carriageway, and bridge design - the
+    // paths, the land use areas and the text codes), and the shapes every
+    // service shares have a group no code has (Utilities/All Services):
+    // 57 - 7 + 1 = 51 groups with a definition and 57 + 1 = 58 in all.
     EXPECT_EQ(ofRules.size(), 57u);
-    EXPECT_EQ(ofDefinitions.size(), 48u);
+    EXPECT_EQ(ofDefinitions.size(), 51u);
+    EXPECT_EQ(57u - 7u + 1u, 51u);
     EXPECT_EQ(everyGroup.size(), 58u);
     EXPECT_EQ(ofRules.count("Utilities/All Services"), 0u);
     EXPECT_EQ(ofDefinitions.count("Utilities/All Services"), 1u);
@@ -1037,7 +1043,7 @@ TEST(KatanaStandard, ANumberedStringAnswersItsKeysRuleAndATypoAnswersNone)
     EXPECT_EQ(bin.resolved.breakline, katana::entity::SurveyBreakline::Line);
     ASSERT_TRUE(bin.resolved.symbol.has_value());
     EXPECT_EQ(bin.resolved.symbol->style, "Litter Bin");
-    // A wire fence is a line with no symbol.
+    // The general fence is a line with no symbol, drawn as posts on a wire.
     const auto fence = map.lookup("FE3");
     EXPECT_EQ(fence.resolved.linestyle, "Post and Wire Fence");
     EXPECT_FALSE(fence.resolved.symbol.has_value());
@@ -1046,7 +1052,7 @@ TEST(KatanaStandard, ANumberedStringAnswersItsKeysRuleAndATypoAnswersNone)
     EXPECT_EQ(pit.kind, katana::entity::SurveyMatchKind::Exact);
     EXPECT_EQ(pit.resolved.breakline, katana::entity::SurveyBreakline::Point);
     ASSERT_TRUE(pit.resolved.symbol.has_value());
-    EXPECT_EQ(pit.resolved.symbol->style, "Gully Pit");
+    EXPECT_EQ(pit.resolved.symbol->style, "Gully Grate");
     EXPECT_FALSE(map.lookup("PGUL1").matched());
     // The valve and the water main share a colour and not a layer.
     EXPECT_EQ(map.lookup("PWSV").resolved.colour, map.lookup("WM").resolved.colour);
@@ -1091,13 +1097,29 @@ TEST(KatanaStandard, EveryDefinitionAndEveryCodeIsCataloguedInTheDocument)
         }
     });
     for (const std::string& key : file.map.keys()) {
-        // Once in its table and once in the alphabetical index.
+        // Once in its table and once in the index by key.
         const std::string row = "\n| `" + key + "` |";
         const auto first = doc.find(row);
         ASSERT_NE(first, std::string::npos) << key << " is not catalogued";
         EXPECT_NE(doc.find(row, first + 1), std::string::npos) << key << " is not in the index";
     }
     EXPECT_EQ(missing, 0u);
+    // A code is looked up by what it is called as often as by its key: every
+    // legend label opens a line of the index by label, and the key that has
+    // it is on that line.
+    std::size_t labels = 0;
+    for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
+        ASSERT_FALSE(rule->comment.empty()) << key << " has a feature rule and no legend label";
+        ++labels;
+        const auto at = doc.find("\n| " + rule->comment + " | ");
+        ASSERT_NE(at, std::string::npos) << key << ": '" << rule->comment << "' is not in the index";
+        const auto end = doc.find('\n', at + 1);
+        const std::string line = doc.substr(at, end == std::string::npos ? end : end - at);
+        EXPECT_NE(line.find("`" + key + "`"), std::string::npos)
+            << key << " is not on the line of its label '" << rule->comment << "'";
+    }
+    // The 572 keys that have a feature rule (census.py: rulesBySets feature).
+    EXPECT_EQ(labels, 572u);
 }
 
 // ---- the keys of the NSW built-in ------------------------------------------------------------
@@ -1270,7 +1292,7 @@ TEST(KatanaStandard, FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBui
                   sectionsOf(other.value, key, false, true));
 
         // 2. The first attributes rule of the other library: the same entries
-        //    (a type and whether a value is given), then maybe more.
+        //    (a type and whether a value is given), no more and no fewer.
         if (otherHasAttributes) {
             const SurveyRule* theirs = nullptr;
             for (const SurveyRule& r : other.value.map.rules()) {
@@ -1365,6 +1387,57 @@ std::set<std::string> textStylesOf(const Customisation& library)
     return styles;
 }
 
+// The letters and digits of a name, in lower case, and nothing else: two names
+// are the same name when these are, so a blank, a hyphen or a comma more or
+// less does not make a name another name (originality.py, "squeeze"). ASCII
+// by hand, so that the answer does not depend on the locale.
+std::string squeezed(std::string_view text)
+{
+    std::string out;
+    for (const char c : text) {
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            out.push_back(c);
+        } else if (c >= 'A' && c <= 'Z') {
+            out.push_back(static_cast<char>(c - 'A' + 'a'));
+        }
+    }
+    return out;
+}
+
+// Every shorter form of a definition name that taking a lead-in off its front
+// gives: a word of two or more capitals and digits, with or without a single
+// capital before it, when more follows. "E WALL Stone Line" gives "Stone
+// Line"; "AB CD Peg" gives "CD Peg" and "Peg"; "Stone Line" gives nothing
+// (originality.py, "without_lead_ins").
+std::vector<std::string> withoutLeadIns(const std::string& name)
+{
+    static const std::regex leadIn("^(?:[A-Z]\\s+)?[A-Z0-9]{2,}\\s+(?=\\S)");
+    std::vector<std::string> shorter;
+    std::string rest = name;
+    for (;;) {
+        std::string next =
+            std::regex_replace(rest, leadIn, "", std::regex_constants::format_first_only);
+        if (next == rest) {
+            return shorter;
+        }
+        shorter.push_back(next);
+        rest = std::move(next);
+    }
+}
+
+// A legend label less the lead-ins the other library may give one: a "[KEY]"
+// in brackets, then a single capital and a word of two to eight capitals and
+// digits (originality.py, "clean_label").
+std::string withoutLabelLeadIns(const std::string& comment)
+{
+    static const std::regex key("^\\[[^\\]]*\\]\\s*");
+    static const std::regex leadIn("^[A-Z]\\s+[A-Z0-9]{2,8}\\s+");
+    std::string text = comment;
+    text.erase(0, text.find_first_not_of(" \t\r\n")); // all of it when it is all blanks
+    text = std::regex_replace(text, key, "", std::regex_constants::format_first_only);
+    return std::regex_replace(text, leadIn, "", std::regex_constants::format_first_only);
+}
+
 // Whether the survey code keys of the library compared with are promised to
 // be this library's: they are the NSW customisation's, on the owner's
 // decision, and nothing is said of any other library a build compiles in.
@@ -1383,6 +1456,45 @@ void expectNothingButTheKeysInCommonWith(const Customisation& file, const Custom
         sharedNames += other.library.contains(style.name) ? 1 : 0;
     });
     EXPECT_EQ(sharedNames, 0u) << "definition names in common";
+
+    // Nor is a definition called what the other calls a thing in any of the
+    // three ways it does: by a definition name (equal as letters and digits,
+    // whatever the blanks and punctuation), by such a name less its lead-in of
+    // capitals, or by a legend label. A symbol named after the other's label
+    // for the thing would be the other's name for it as much as one named
+    // after its symbol (tools/katana_standard/originality.py counts all three
+    // at none, and a label of this library that is a definition name of the
+    // other's at none too).
+    std::set<std::string> otherNames;
+    std::set<std::string> otherNamesLessLeadIn;
+    other.library.forEach([&](const LineStyle& style) {
+        otherNames.insert(squeezed(style.name));
+        for (const std::string& shorter : withoutLeadIns(style.name)) {
+            otherNamesLessLeadIn.insert(squeezed(shorter));
+        }
+    });
+    std::set<std::string> otherLabels;
+    for (const auto& rule : other.map.rules()) {
+        otherLabels.insert(squeezed(withoutLabelLeadIns(rule.comment)));
+    }
+    for (std::set<std::string>* names : {&otherNames, &otherNamesLessLeadIn, &otherLabels}) {
+        names->erase(std::string{}); // a name of punctuation alone is no name
+    }
+    std::size_t namesEqual = 0;
+    std::size_t namesLessLeadIn = 0;
+    std::size_t namesThatAreLabels = 0;
+    std::size_t definitions = 0;
+    file.library.forEach([&](const LineStyle& style) {
+        const std::string name = squeezed(style.name);
+        ++definitions;
+        namesEqual += otherNames.count(name);
+        namesLessLeadIn += otherNamesLessLeadIn.count(name);
+        namesThatAreLabels += otherLabels.count(name);
+    });
+    EXPECT_GT(definitions, 0u);
+    EXPECT_EQ(namesEqual, 0u) << "definition names in common, as letters and digits";
+    EXPECT_EQ(namesLessLeadIn, 0u) << "definition names that are the other's less a lead-in";
+    EXPECT_EQ(namesThatAreLabels, 0u) << "definition names that are legend labels of the other";
 
     std::set<std::string> otherGroups;
     for (const std::string& group : katana::entity::styleGroups(other.library)) {
@@ -1483,26 +1595,19 @@ void expectNothingButTheKeysInCommonWith(const Customisation& file, const Custom
     EXPECT_EQ(sharedLayers, 0u) << "layer paths in common";
 
     // And no legend label is one of the other's: the labels are the comments
-    // of the feature rules, with the other's own "[KEY]" lead-in taken off.
-    std::set<std::string> otherLabels;
-    for (const auto& rule : other.map.rules()) {
-        std::string comment = rule.comment;
-        if (!comment.empty() && comment.front() == '[') {
-            const auto close = comment.find(']');
-            if (close != std::string::npos) {
-                comment = comment.substr(close + 1);
-                comment.erase(0, comment.find_first_not_of(' '));
-            }
-        }
-        if (!comment.empty()) {
-            otherLabels.insert(lower(comment));
-        }
-    }
+    // of the feature rules, the other's with its own lead-ins taken off (a
+    // "[KEY]", then a single capital and a word of capitals), compared as
+    // letters and digits. Nor is a label a definition name of the other's,
+    // whole or less its lead-in.
     std::size_t sharedLabels = 0;
+    std::size_t labelsThatAreNames = 0;
     for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
-        sharedLabels += otherLabels.count(lower(rule->comment));
+        const std::string label = squeezed(rule->comment);
+        sharedLabels += otherLabels.count(label);
+        labelsThatAreNames += otherNames.count(label) + otherNamesLessLeadIn.count(label);
     }
     EXPECT_EQ(sharedLabels, 0u) << "legend labels in common";
+    EXPECT_EQ(labelsThatAreNames, 0u) << "legend labels that are definition names of the other";
 }
 
 } // namespace
