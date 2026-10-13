@@ -41,7 +41,9 @@
 //       release's, the old ones it moved aside are all kept, U is the folder the update was
 //       applied from (it holds that update's helper copy, so a marker missing from it was never
 //       written) and no program of the install is running; else left as it is, with the RunOnce
-//       entry registered again so that the next logon comes back. It starts no program.
+//       entry registered again so that the next logon comes back - which is also what becomes of
+//       an install whose update folder, or a journal in it, could not be read: it MAY hold such
+//       an update, and "could not look" is not "there is none". It starts no program.
 //   katana_updater --selftest
 //       proves this binary starts, links and can verify an Ed25519 signature: it checks a
 //       published known-answer vector (below), prints what it found with its version, and exits
@@ -1169,11 +1171,14 @@ int runRecover(const Path& root, const std::string& argv0, Rig& rig)
                  "previous version is in place again";
         break;
     case upd::Settled::Left:
-        detail = "left: an update that never said it starts is in place and could not be judged "
-                 "now (a program of the install is running; its files, or the old ones kept to "
-                 "put it back from, are not as the update left them; this run looks in another "
-                 "per-user folder than the update used; or something could not be examined); "
-                 "the next logon, or Katana's window, settles it: " +
+        // "Or may be": where the update folder, or the journal of a transaction in it, could
+        // not be read, it is not known what is there, and that is left like one that is known.
+        detail = "left: an update that never said it starts is in place, or may be, and could "
+                 "not be judged now (a program of the install is running; its files, or the old "
+                 "ones kept to put it back from, are not as the update left them; this run looks "
+                 "in another per-user folder than the update used; or something - the update "
+                 "folder, a journal in it - could not be examined); the next logon, or Katana's "
+                 "window, settles it: " +
                  joined(left);
         break;
     case upd::Settled::Busy:

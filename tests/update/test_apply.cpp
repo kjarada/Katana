@@ -19,6 +19,8 @@
 #include "apply_harness.hpp"
 #include "command_line.hpp"
 #include "recover_internal.hpp"
+#include "katana/update/install.hpp"
+#include "katana/update/version.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -59,6 +61,19 @@ LastResult lastOf(const Scenario& s)
     return read.ok() && read->has_value() ? **read : LastResult{};
 }
 
+// The versions of the releases this file writes out itself, for an update from the one to the
+// other. They are versions no build of Katana has, on purpose. The installed version is the
+// HIGHER of the install record's and the program's own (install.hpp), and the swap reads it with
+// this build's version. A record below that version reads as the program's, and the staged
+// release is then the newer one only while the project's version has not passed it: at 0.1.0
+// installed and 0.2.0 staged these updates went through while the project was 0.2.0 - by their
+// sequences - and every one of them was a `downgrade` the day it became 0.3.0. With the record
+// above any project version, what is installed is what the record says, and the cases do not
+// know which build they are (TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild holds that).
+// The rule itself, for a program below, at and above a record: tests/update/test_state.cpp.
+constexpr const char* kOldVersion = "900.1.0";
+constexpr const char* kNewVersion = "900.2.0";
+
 ReleaseSpec smallRelease(const std::string& version, std::uint64_t sequence)
 {
     ReleaseSpec release;
@@ -77,8 +92,8 @@ ReleaseSpec smallRelease(const std::string& version, std::uint64_t sequence)
 // source). Everything in the install is v1's; the stage is v2's.
 void buildSmallScenario(Scenario& s)
 {
-    s.v1 = smallRelease("0.1.0", 100);
-    s.v2 = smallRelease("0.2.0", 200);
+    s.v1 = smallRelease(kOldVersion, 100);
+    s.v2 = smallRelease(kNewVersion, 200);
     writeInstall(s.root, s.v1);
     writeStage(s.stage, s.v2);
     s.v1Hash = treeHash(s.root);
@@ -589,6 +604,29 @@ TEST(Apply, ARepeatedUpdateToTheSameReleaseIsRefusedAsNotNewer)
     EXPECT_EQ(treeHash(s.root), installed);
 }
 
+TEST(Apply, TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild)
+{
+    // The premise of every case that updates a release this file writes out (kOldVersion, at the
+    // top): the installed version the swap reads is the one the RECORD names, because no build
+    // of Katana is that high. Were it the program's instead, those cases would rest on the
+    // version this suite happened to be built as, and say nothing when it stopped holding.
+    Scenario s("apply-small-versions");
+    buildSmallScenario(s);
+    const core::Result<Version> own = programVersion();
+    ASSERT_TRUE(own.ok()) << own.error().describe();
+    const core::Result<Version> old = parseVersion(kOldVersion);
+    const core::Result<Version> next = parseVersion(kNewVersion);
+    ASSERT_TRUE(old.ok() && next.ok());
+    EXPECT_TRUE(own.value() < old.value()) << "this build is " << programVersionText();
+    EXPECT_TRUE(old.value() < next.value());
+
+    FakeRegistry registry;
+    const core::Result<Install> install = readInstall(s.root, registry);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(toString(install->version), kOldVersion) << "read as the program's version, not the record's";
+    EXPECT_EQ(install->sequence, 100u);
+}
+
 // ---- refusals: the signature, the release, the install -----------------------------------------------------------
 
 TEST(ApplyRefusals, ATreeThatIsNotAnInstallIsNeverUpdated)
@@ -684,7 +722,7 @@ TEST(ApplyRefusals, AManifestForAnotherTargetIsRefused)
     REQUIRE_CAN_SIGN();
     Scenario s("apply-other-target");
     buildSmallScenario(s);
-    ReleaseSpec other = smallRelease("0.2.0", 200);
+    ReleaseSpec other = smallRelease(kNewVersion, 200);
     other.target = "linux-x86_64";
     writeStage(s.stage, other);
     StdFs disk;
@@ -703,11 +741,13 @@ TEST(ApplyRefusals, AnAnnouncementOnlyManifestIsNotAnUpdate)
     REQUIRE_CAN_SIGN();
     Scenario s("apply-notify-only");
     buildSmallScenario(s);
+    const std::string version = kNewVersion;
     const std::string json =
         "{\"applier\":1,\"channel\":\"stable\",\"expires\":\"2030-01-01T00:00:00Z\",\"files\":[],"
-        "\"notes_url\":\"https://github.com/kjarada/Katana/releases/tag/v0.2.0\",\"notify_only\":true,"
+        "\"notes_url\":\"https://github.com/kjarada/Katana/releases/tag/v" + version +
+        "\",\"notify_only\":true,"
         "\"product\":\"katana\",\"published\":\"2026-10-01T00:00:00Z\",\"schema\":1,\"sequence\":200,"
-        "\"tag\":\"v0.2.0\",\"target\":\"win64\",\"version\":\"0.2.0\"}\n";
+        "\"tag\":\"v" + version + "\",\"target\":\"win64\",\"version\":\"" + version + "\"}\n";
     writeText(s.stage / "manifest.json", json);
     writeText(s.stage / "manifest.json.sig", signLine(json));
     StdFs disk;
@@ -1604,11 +1644,11 @@ TEST(ApplyRemovals, AFolderTheRemovalEmptiedIsRemovedButNeverOneOfTheFourTopFold
     REQUIRE_CAN_SIGN();
     Scenario s("apply-prune");
     // v1 has bin/only.dll and share/katana/a/b/deep.txt; v2 has neither (and keeps bin/other.dll).
-    s.v1.version = "0.1.0";
-    s.v1.tag = "v0.1.0";
+    s.v1.version = kOldVersion;
+    s.v1.tag = std::string("v") + kOldVersion;
     s.v1.sequence = 1;
-    s.v2.version = "0.2.0";
-    s.v2.tag = "v0.2.0";
+    s.v2.version = kNewVersion;
+    s.v2.tag = std::string("v") + kNewVersion;
     s.v2.sequence = 2;
     s.v1.files = {{"bin/only.dll", "x", FileClass::Lib, false},
                   {"share/katana/a/b/deep.txt", "y", FileClass::Data, false},
@@ -2251,8 +2291,8 @@ TEST(ApplyPlan, TheFolderOfTheRecordsIsHeldToTheSameRuleAsEveryOtherFolder)
     // No file of either release lives in share/katana, so only the three records the helper
     // itself writes there would go through a link at share/katana.
     Scenario s("apply-reparse-records");
-    s.v1 = smallRelease("0.1.0", 100);
-    s.v2 = smallRelease("0.2.0", 200);
+    s.v1 = smallRelease(kOldVersion, 100);
+    s.v2 = smallRelease(kNewVersion, 200);
     for (ReleaseSpec* release : {&s.v1, &s.v2}) {
         for (FileSpec& file : release->files) {
             if (file.path == "share/katana/data.txt") {
@@ -2281,8 +2321,8 @@ TEST(ApplyCommit, AFileWithTwoDotsInsideItsNameIsPutBackLikeAnyOther)
     // "a..b.dat" is a legal name (only "." and ".." as a whole component are not), and a
     // release may ship one. If rollback refused it, its old file would be lost with the folder.
     Scenario s("apply-dots-in-name");
-    s.v1 = smallRelease("0.1.0", 100);
-    s.v2 = smallRelease("0.2.0", 200);
+    s.v1 = smallRelease(kOldVersion, 100);
+    s.v2 = smallRelease(kNewVersion, 200);
     s.v1.files.push_back({"share/katana/a..b.dat", "a..b of the old version\n", FileClass::Data, false});
     s.v2.files.push_back({"share/katana/a..b.dat", "a..b of the new version\n", FileClass::Data, false});
     writeInstall(s.root, s.v1);
@@ -2309,8 +2349,8 @@ TEST(ApplyCommit, AFolderTheReleaseBringsForTheFirstTimeIsGoneAgainAfterARollbac
     // etc and lib are folders of their own in the journal (a bare name that checkJournalPath
     // refuses for a file); rollback must remove them, or the tree is not the old version's.
     Scenario s("apply-new-top-folders");
-    s.v1 = smallRelease("0.1.0", 100);
-    s.v2 = smallRelease("0.2.0", 200);
+    s.v1 = smallRelease(kOldVersion, 100);
+    s.v2 = smallRelease(kNewVersion, 200);
     s.v2.files.push_back({"etc/katana/new.cfg", "a new setting\n", FileClass::Data, false});
     s.v2.files.push_back({"lib/plugins/x.dat", "a new plug-in\n", FileClass::Data, false});
     writeInstall(s.root, s.v1);
@@ -2553,8 +2593,8 @@ TEST(ApplyOnWindows, ANameThatDiffersOnlyInCaseIsOneFileAndIsNotRemovedAfterItIs
     // v2's does not (to a byte-wise comparison), but removing "Old.dll" after "old.dll" was
     // installed would delete what was just put in place.
     Scenario s("apply-case-removal");
-    s.v1 = smallRelease("0.1.0", 100);
-    s.v2 = smallRelease("0.2.0", 200);
+    s.v1 = smallRelease(kOldVersion, 100);
+    s.v2 = smallRelease(kNewVersion, 200);
     s.v1.files.push_back({"bin/Old.dll", "the old Old.dll\n", FileClass::Lib, false});
     s.v2.files.push_back({"bin/old.dll", "the new old.dll\n", FileClass::Lib, false});
     writeInstall(s.root, s.v1);
@@ -2575,8 +2615,8 @@ TEST(ApplyOnWindows, ARealJunctionInsideTheInstallRefusesTheUpdateAndNothingBeyo
 {
     REQUIRE_CAN_SIGN();
     Scenario s("apply-junction");
-    s.v1 = smallRelease("0.1.0", 100);
-    s.v2 = smallRelease("0.2.0", 200);
+    s.v1 = smallRelease(kOldVersion, 100);
+    s.v2 = smallRelease(kNewVersion, 200);
     s.v2.files.push_back({"share/katana/ext/new.dat", "must not leave the install\n", FileClass::Data, false});
     writeInstall(s.root, s.v1);
     writeStage(s.stage, s.v2);

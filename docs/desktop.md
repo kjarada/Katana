@@ -2799,7 +2799,7 @@ Each now reaches the same code on every front end
   "Placing an import").
 - `UPDATE`, the whole family, is the session's
   (`src/katana_app/update_verbs.hpp`): `CHECK`, `STATUS`, `DOWNLOAD CONFIRM`,
-  `APPLY CONFIRM`, `SKIP`, `SET AUTO` and `TOKEN`.
+  `APPLY CONFIRM`, `SKIP`, `BLOCKED CLEAR`, `SET AUTO` and `TOKEN`.
   `MainWindow::runWorkbenchLine` takes it before every other family and the
   update workbench runs it - the three lines that take time as jobs, the rest
   at once ("Help > Check for Updates", below). A headless window answers
@@ -3007,9 +3007,10 @@ environment, the job runner - and does what they say:
 | `updateEffectOfLine` | what a line that was run at once and carried out does to what the dialog shows: `UPDATE SKIP NONE` and `UPDATE BLOCKED CLEAR` take back what their own list set aside, `UPDATE SKIP <version>` the release that was offered |
 | `updateStagedToOffer` | whether the release `UPDATE STATUS` says is downloaded is offered as Ready when the window starts |
 | `updateStagedAfter` | whether a downloaded release is still one to install after a check answered |
-| `updateViewOfLastResult` | how the last apply's result is shown at the next start |
+| `updateViewOfLastResult` | how the last apply's result is shown at the next start, and for which endings the view carries the command that puts the install right by hand |
 | `updateAutomaticCheckIsDue` | whether the window checks by itself now |
-| `updateSkippedOfState`, `updatePutBackOfState` | what Settings > Updates is told of the state file: the skipped version, and whether a release was put back - and nothing at all for a file that does not read, never "none" ("The Updates page") |
+| `updateSkippedOfState`, `updatePutBackOfState` | what Settings > Updates is told of the state file: the skipped version, and whether a release that was put back can still be offered here - and nothing at all for a file that does not read, never "none" ("The Updates page") |
+| `updateTellsOfSetAside` | whether the dialog is telling of a release that is set aside, which keeps the page's button on while the dialog points at it |
 | `updateStartMayConfirm` | whether a window that has come idle is the proof that an update starts: only in a copy with an install record whose installed version is the program's own, which refuses a record that names a version above the program's ("An update that was never said to start", below) |
 | `updateFailureIsBoxed` | whether an update that could not be started is said in a message box as well as on stderr: only in a run that was given no line to run. It is `main()`'s decision, here with the others so that a test can ask it |
 | `updateRecoveredTransactions` | which helper copies a start may remove: those of this install's updates that a recovery put right and that are over |
@@ -3033,7 +3034,7 @@ hidden, which the headless `--press` refuses.
 | Downloading | "Downloading 31 of 71 MB (12 of 23 files)." / "You can keep working.", and `updateProgress` | Cancel |
 | Ready | "Katana 0.3.0 is ready." / "Katana will close, update and reopen in a few seconds." | Restart and update, Later |
 | Blocked | "Close these first: katana_mcp.exe (4412)." / "Then press Retry." | Retry |
-| RolledBack | "Katana 0.3.0 could not be installed, so 0.2.0 was restored." / "Reason: ...", and after it, when the reason is that the new version did not start, "A later release will be offered, and Settings > Updates offers this one again." | none: it is read and closed |
+| RolledBack | "Katana 0.3.0 could not be installed, so 0.2.0 was restored." / "Reason: ...", and after it, when the reason is that the new version did not start, "A later release will be offered, and Settings > Updates offers this one again." An apply that was refused says "Katana 0.3.0 could not be installed; nothing was changed." with its reason, and one refused because an earlier update is not settled yet adds "Update again; if this is said again, close Katana and run: katana_updater --recover ..." | none: it is read and closed |
 | CheckFailed | "Could not check for updates: ...", or for a feed that answers 404 "No update information found." / "If the releases are private, add an access token in Settings > Updates." | Retry |
 | Unsupported | "Updates are not available for this copy of Katana: ..." | none |
 
@@ -3059,7 +3060,9 @@ and refuses nothing; a copy that cannot replace its own files (the macOS
 bundle, and Linux until its apply is written) is told of the release, sent to
 its notes, and offered neither Update nor Download only; and an apply that
 ended `refused` or `rollback_incomplete` is not called restored - the second
-names the command that puts the install right by hand.
+names the command that puts the install right by hand, and so does the first
+when it was refused over an earlier update ("A refusal over an earlier update
+says what to do", below).
 
 Where a person can do something about a reason, its words say what. A Katana
 that was started as administrator installs no update - the helper would run
@@ -3076,6 +3079,28 @@ for the token wherever it arrives without one. And `interrupted_update` reads
 helper answers while an earlier update is neither confirmed nor put back
 ("An update that was never said to start", below;
 `AnEarlierUpdateThatIsStillOpenIsSaidToBeUnsettledNotFailed`).
+
+**A refusal over an earlier update says what to do** (2026-10-14). The helper
+names the way out of `interrupted_update` in its own `detail` - "... or run:
+katana_updater --recover ..." - which goes to a console nobody sees: the
+result it leaves for the next start keeps the reason's token alone
+(`update::LastResult`). So in an install whose window could not confirm the
+earlier update, each Restart and update closed Katana and reopened it on
+"Reason: an earlier update is not settled yet." with nothing to do, and the
+release was Ready again. `updateViewOfLastResult` now gives that ending the
+command it gives `rollback_incomplete`, and the sentence after the reason is
+"Update again; if this is said again, close Katana and run: katana_updater
+--recover "C:\Programs\Katana"" - the install's folder, as the platform
+writes it. Update again FIRST, because the start that shows the sentence is
+what settles most such updates: every start puts back what a crash
+interrupted (`update::recover`), and a window of the installed version
+confirms an update that was never said to start. Where the refusal comes
+again - a window that may not confirm, a release that does not start - only
+the helper's recovery, run by hand with Katana closed, settles it
+(`AnUpdateRefusedOverAnEarlierOneThatIsNotSettledNamesTheCommandThatSettlesIt`).
+The sentence is in the command log too, as every ending is. `UPDATE STATUS`
+still gives the token alone (`last=refused:interrupted_update`), on every
+surface.
 
 **A release that was set aside says where the way back is.** A release that
 is installed, does not prove that it starts and is put back goes on the
@@ -3380,6 +3405,14 @@ Not done:
 - **Settings does not say WHICH version was put back.** The state keeps the
   build that was set aside, by its sequence, and no version; the page says
   only that one is, and the update dialog names it when a check finds it.
+- **Settings can still tell of a build that no longer matters, or miss one
+  that does, where only a version would say.** A fresh install has no record
+  of its own build, so it is told of every build on the list - one an older
+  copy set aside included, though the fresh copy may be a later version. And
+  a build made BEFORE the installed one, yet of a higher version, is told of
+  only once a check has met it and the dialog says so; until then the page
+  says "No version was put back." ("The Updates page"). The list itself is
+  shortened by `UPDATE BLOCKED CLEAR` alone.
 
 ## File > Drawing Summary
 
@@ -4250,7 +4283,7 @@ reason it exists.
 | Checking | `settingsUpdateAuto`, `settingsUpdateSends` | "Check for updates automatically": toggled, `UPDATE SET AUTO ON` or `UPDATE SET AUTO OFF`, and the box then shows what the state has - a line that was refused puts it back, as the automation boxes go back to the Document. Under it, what a check sends: only the user agent (`Katana/0.2.0 (win64)`), nothing about the person, their files or their drawings - and that the server it asks sees the computer's network address, as every website does |
 | Access token | `settingsUpdateToken`, `settingsUpdateTokenSave`, `settingsUpdateTokenClear`, `settingsUpdateTokenState` | a token for private releases, typed as dots. **Save writes the credential store directly** (`CredentialStore::write`) and runs no line. Clear runs `UPDATE TOKEN CLEAR`. The label says whether a token is stored and where, never the token |
 | Skipped version | `settingsUpdateSkipped`, `settingsUpdateUnskip` | the version `UPDATE SKIP` set aside, and "Offer the skipped version again": `UPDATE SKIP NONE`. Disabled while none is skipped; when nobody can say - a state file that does not read - the label is empty and the button stays on |
-| Version that was put back | `settingsUpdateBlocked`, `settingsUpdateUnblock` | whether a version is set aside because it was installed here, did not start and was put back ("A version that was installed here did not start and was put back: it is not offered." or "No version was put back."), and "Offer the version that was put back again": `UPDATE BLOCKED CLEAR`. Disabled while none was put back; when nobody can say, the label is empty and the button stays on |
+| Version that was put back | `settingsUpdateBlocked`, `settingsUpdateUnblock` | whether a version is set aside because it was installed here, did not start and was put back, and can still be offered to this install ("A version that was installed here did not start and was put back: it is not offered." or "No version was put back."), and "Offer the version that was put back again": `UPDATE BLOCKED CLEAR`. Disabled while none is set aside; when nobody can say, the label is empty and the button stays on |
 
 **The version that was put back** (2026-10-14). An update that is installed
 and does not prove that it starts is put back, and its release is set aside:
@@ -4288,6 +4321,39 @@ once the file is put right). The skipped version's label and button had the
 same fault and follow the same rule. The automatic box does not: a state
 file that does not read is carried on from as the defaults are, for the
 check and so for the box.
+
+**A version that stopped mattering is not told of** (2026-10-14). The list of
+builds that were put back is only ever added to, until `UPDATE BLOCKED CLEAR`
+empties it, and it is one list for every copy of Katana a person runs. So
+once 0.3.0 had been put back, and 0.4.0 installed later and found to start,
+the page went on saying "A version that was installed here did not start and
+was put back: it is not offered." with its button on - of a release no feed
+offers over 0.4.0, and with a button that changed nothing a check could show.
+The list keeps a build by its sequence, the time it was made, and no version;
+the install's record keeps the sequence of the build an update put there. So
+the window tells the page of a build only while it can still be offered to
+this install (`updatePutBackOfState`, given what the window knows as
+`UpdatePutBackFacts`;
+`AVersionThatWasPutBackIsToldOfOnlyWhileItCanStillBeOfferedHere`):
+
+- a build made AFTER the one installed here - a sequence above the install
+  record's - or any build where the install has no record of its own (a fresh
+  install: nothing says when its build was made);
+- or any build at all, while the update dialog is telling of a release that
+  is set aside (`updateTellsOfSetAside`). A build made before the installed
+  one can still be of a higher version - a release line that went back to an
+  older version, which was installed, and forward again - and the list cannot
+  tell. A check that meets such a release can, and its sentence sends the
+  person to this button, which must then be on
+  (`TheDialogTellsOfAReleaseThatIsSetAsideExactlyWhereItPointsAtSettings`).
+
+Otherwise the page says "No version was put back." and the button is off.
+Nothing of this changes the state file: the build stays on the list.
+*Rejected: dropping the older builds from the list when an update commits
+healthy.* The list is one per user and an install's record is its own, so one
+copy's update would decide for every other copy; decided where it is read,
+each install answers for itself, and a build that a later check does meet is
+still refused and still told of.
 
 The update dialog's two sentences about a release that was put back point
 here ("Help > Check for Updates", "A release that was set aside says where

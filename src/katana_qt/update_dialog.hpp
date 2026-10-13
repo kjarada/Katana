@@ -66,10 +66,13 @@
 //                the release aside, "A later release will be offered, and
 //                Settings > Updates offers this one again." after it;
 //                "refused": "Katana 0.3.0 could not be installed; nothing was
-//                changed."; "rollback_incomplete": "Katana 0.3.0 could not be
-//                installed, and 0.2.0 could not be put back completely." with
-//                "Close Katana and run: <recoverCommand>" after the reason.
-//                No button: it is read and closed.
+//                changed." - and, when the reason is that an earlier update
+//                is not settled yet (interrupted_update), "Update again; if
+//                this is said again, close Katana and run: <recoverCommand>"
+//                after the reason; "rollback_incomplete": "Katana 0.3.0 could
+//                not be installed, and 0.2.0 could not be put back
+//                completely." with "Close Katana and run: <recoverCommand>"
+//                after the reason. No button: it is read and closed.
 //   CheckFailed  "Could not check for updates: <reason>."  [Retry]; for the
 //                reason http_404, "No update information found." / "If the
 //                releases are private, add an access token in Settings >
@@ -164,9 +167,12 @@ struct UpdateView {
     // The engine's token (check.hpp, apply.hpp): CheckFailed, Unsupported, NotOffered,
     // RolledBack.
     QString reason;
-    QString holders;        // Blocked: "katana_mcp.exe (4412)"
-    QString lastStatus;     // RolledBack: "rolled_back", "refused" or "rollback_incomplete"
-    QString recoverCommand; // RolledBack, rollback_incomplete: the command to run by hand
+    QString holders;    // Blocked: "katana_mcp.exe (4412)"
+    QString lastStatus; // RolledBack: "rolled_back", "refused" or "rollback_incomplete"
+    // RolledBack, for the two endings the helper's recovery settles
+    // (rollback_incomplete, and refused over an earlier update that is not
+    // settled): the command to run by hand.
+    QString recoverCommand;
     // One sentence: what the owner could not do at the last press. Shown in
     // updateProblemText in any state; empty hides it.
     QString problem;
@@ -373,9 +379,14 @@ updateStagedToOffer(const katana::app::UpdateStatus& status,
 // How the last apply ended (U/last.json, update::LastResult) as the dialog
 // shows it at the next start. nullopt for "committed": a success is one line
 // in the log, not a dialog. "blocked" is the Blocked state with the programs
-// to close; every other status is RolledBack with that status and the reason,
-// and "rollback_incomplete" with the command that puts the install right by
-// hand, which names `installRoot` (the folder as the platform writes it).
+// to close; every other status is RolledBack with that status and the reason.
+// Two of those carry the command that puts the install right by hand, which
+// names `installRoot` (the folder as the platform writes it):
+// "rollback_incomplete", and "refused" for the reason interrupted_update - an
+// earlier update of the install is neither confirmed nor put back, and no new
+// one starts over it. The helper names the command for that refusal in its
+// own `detail` and nowhere else, and the result it leaves for the next start
+// keeps the token alone, so the view is where a person is told it.
 [[nodiscard]] std::optional<UpdateView>
 updateViewOfLastResult(const katana::update::LastResult& last, const QString& installedVersion,
                        const QString& installRoot);
@@ -399,20 +410,65 @@ struct UpdateAutoCheckFacts {
                                              const katana::update::UpdateState& state,
                                              std::int64_t nowEpoch, std::chrono::seconds jitter);
 
+// Whether `view` tells of a release that is set aside because it did not
+// start here - the two views whose second sentence ends "Settings > Updates
+// offers this one again.": a check's NotOffered "blocked_before", and the
+// last apply's ending, RolledBack, when the release was put back for not
+// starting (rolled_back for health_exit or health_timeout, the endings after
+// which the helper blocks it).
+[[nodiscard]] bool updateTellsOfSetAside(const UpdateView& view);
+
+// What the window knows beside the state file when Settings > Updates asks
+// whether a release is set aside (updatePutBackOfState, below).
+struct UpdatePutBackFacts {
+    // The install has a record of the build an update put there
+    // (installed.json: update::Install::hasInstalledRecord), and that build's
+    // sequence (update::Install::sequence). Without a record the sequence is
+    // a placeholder, and is not read.
+    bool hasInstalledRecord = false;
+    std::uint64_t installedSequence = 0;
+    // The update dialog is telling of a release that is set aside now
+    // (updateTellsOfSetAside of the view it shows).
+    bool dialogTellsOfOne = false;
+};
+
 // What Settings > Updates is told of the state file (U/state.json), from a
 // read of it (update::readState): the version UPDATE SKIP set aside, empty
 // when none is; and whether a release is set aside because it was installed
-// here, did not start and was put back - the list of blocked releases holds
-// one. BOTH ARE nullopt FOR A FILE THAT DID NOT READ. Nobody can say then,
-// and "none" would be a guess that switches the page's button off: with
-// nullopt the page says nothing of it and leaves the button on, so the line
-// is run and the verbs say why they refuse it (a state file that does not
-// read is not written over, src/katana_app/update_verbs.hpp). A file that is
-// not there reads as the defaults - none skipped, none put back.
+// here, did not start and was put back. BOTH ARE nullopt FOR A FILE THAT DID
+// NOT READ. Nobody can say then, and "none" would be a guess that switches
+// the page's button off: with nullopt the page says nothing of it and leaves
+// the button on, so the line is run and the verbs say why they refuse it (a
+// state file that does not read is not written over,
+// src/katana_app/update_verbs.hpp). A file that is not there reads as the
+// defaults - none skipped, none put back.
+//
+// WHICH BLOCKED BUILDS THE PAGE IS TOLD OF. The state's list of blocked
+// releases is only ever added to, until UPDATE BLOCKED CLEAR empties it, and
+// it is one list for every copy of Katana a person runs (U is per user). So
+// it goes on holding builds that have stopped mattering to this install:
+// 0.3.0 was put back, then 0.4.0 was installed and started, and no feed
+// offers 0.3.0 over it. Told of that one, the page said for good that a
+// version "is not offered", with a button that changed nothing a check could
+// show. The list keeps each build by its sequence - the time it was made -
+// and no version, so a release is said to be set aside when the list holds
+//   - a build made AFTER the one installed here: a sequence above
+//     `facts.installedSequence` - or any build at all where the install has
+//     no record of its own (a fresh install: nothing says when its build was
+//     made);
+//   - or any build, while the update dialog is telling of a release that is
+//     set aside (`facts.dialogTellsOfOne`). A build made before the installed
+//     one can still be of a higher version - a release line that went back
+//     to an older version, which was installed, and forward again - and only
+//     a check that met it knows. The dialog's sentence then sends the person
+//     to the page's button, which must be on.
+// An empty list is "none" whatever the dialog shows: the list is what the
+// button empties.
 [[nodiscard]] std::optional<QString>
 updateSkippedOfState(const katana::core::Result<katana::update::UpdateState>& state);
 [[nodiscard]] std::optional<bool>
-updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state);
+updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state,
+                     const UpdatePutBackFacts& facts);
 
 // What a window knows when it asks whether its own start settles an update
 // that was installed and never said to start (below).

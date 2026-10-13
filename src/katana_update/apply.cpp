@@ -848,12 +848,15 @@ std::optional<Failure> Applier::begin()
                           "\", which confirms it or puts it back - then update again");
     }
     if (earlier.unread) {
-        // Not "nothing is left": the folder could not be looked through, so an update that is
-        // not settled may be in it, and planning over one is what this step exists to prevent.
+        // Not "nothing is left": the folder could not be looked through - it would not be
+        // listed, or the journal of a transaction in it would not be read (a scanner has it
+        // open) - so an update that is not settled may be in it, and planning over one is what
+        // this step exists to prevent. That covers the step before as well: recoverLocked passes
+        // over a folder whose journal it cannot read, and such a folder may be a half swap.
         return refuse("interrupted_update",
                       "the install's update folder could not be read, so it is not known whether "
-                      "an earlier update is still to be confirmed, and no new one is started. "
-                      "Update again; if it stays so, run: katana_updater --recover \"" +
+                      "an earlier update is still to be put back or confirmed, and no new one is "
+                      "started. Update again; if it stays so, run: katana_updater --recover \"" +
                           core::pathToUtf8(root_) + "\"");
     }
     if (!earlier.healthy.empty()) {

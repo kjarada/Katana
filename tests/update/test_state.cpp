@@ -60,10 +60,12 @@
 using namespace katana;
 namespace fs = std::filesystem;
 
-// Not in any public header. state.cpp's readInstall for a program of any version: readInstall
-// answers the higher of the record's version and the program's own, and with the program's
-// version handed in both sides of that are written in the test, so no answer moves when the
-// project's version does. spawn_win.cpp's one decision about a token, apart from asking
+// Not in any public header. state.cpp's readInstall for a program of any version: of a package
+// that names no version of its own readInstall answers the higher of the record's version and
+// the program's own, and with the program's version handed in both sides of that are written in
+// the test, so no answer moves when the project's version does. It is also how a package that
+// DOES name its version is shown to be read the same by every program ("a package that names
+// its own build", below). spawn_win.cpp's one decision about a token, apart from asking
 // Windows for it: every kind of token can be put to it whatever token this run holds.
 namespace katana::update::detail {
 core::Result<Install> readInstallAs(const std::filesystem::path& root,
@@ -900,6 +902,270 @@ TEST(InstallRecords, AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBac
     EXPECT_EQ(update::toString(before->version), "0.3.0");
     EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 4, 0, 0, 3), 400), *before));
     EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 3, 0, 0, 3), 300), *before));
+}
+
+// ---- a package that names its own build -----------------------------------------------------
+//
+// Every install.json above says its target and no more, and the program that asks then stands
+// for the copy. install.json may also say what the package IS (state.cpp, packageBuild): the
+// version it was built as and, for a package of a release, the sequence of that release. The
+// copy's own build is then the package's word, and the asking program is not asked. Each answer
+// below is that rule worked by hand, with the order isNewerThan (trust.hpp) writes:
+//   - with no record of the helper's, the installed version is the package's, the sequence is
+//     the placeholder 0 and there is no record;
+//   - with one, the installed build is the higher of the record's and the package's - by
+//     version first, number by number, and with the versions equal by sequence. A package that
+//     names no sequence raises the version alone, and the record's sequence stays.
+
+namespace {
+
+// install.json for target win64 with `build` after it: R"("version":"0.3.0","sequence":300)".
+std::string packageRecordOf(const std::string& build)
+{
+    return R"({"schema":1,"target":"win64",)" + build + "}";
+}
+
+} // namespace
+
+TEST(InstallRecords, AFreshInstallThatNamesItsVersionIsThatVersionWhicheverProgramReadsIt)
+{
+    Root world;
+    world.installJson(packageRecordOf(R"("version":"0.3.0","sequence":300)"));
+    FakeRegistry registry;
+    // A program below the package, one of it, and one above it - which is what the helper of a
+    // later release is, when that release brings its own.
+    for (const update::Version& program :
+         {versionOf(0, 2, 0, 0, 3), versionOf(0, 3, 0, 0, 3), versionOf(0, 5, 0, 0, 3)}) {
+        const auto install = update::detail::readInstallAs(world.root, registry, program);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->kind, update::InstallKind::Archive);
+        EXPECT_EQ(install->target, "win64");
+        EXPECT_EQ(update::toString(install->version), "0.3.0")
+            << "for a program of " << update::toString(program);
+        EXPECT_EQ(install->sequence, 0u) << "nothing the helper wrote: the placeholder";
+        EXPECT_FALSE(install->hasInstalledRecord);
+    }
+}
+
+TEST(InstallRecords, AReleasesOwnHelperFindsItsReleaseNewerWhereThePackageNamesItsVersion)
+{
+    // The helper that installs a release is that release's OWN when the release needs a newer
+    // helper than the installed one (stage.hpp, preflight). So the program that reads the
+    // install is then of the version it is about to install: here a helper of 0.5.0, asked to
+    // install 0.5.0 (build 500).
+    const update::Version helper = versionOf(0, 5, 0, 0, 3);
+    const update::Manifest release = aReleaseOf(versionOf(0, 5, 0, 0, 3), 500);
+    FakeRegistry registry;
+    {
+        // A copy of 0.3.0 that never updated, and says so: 0.5.0 is above it (5 > 3).
+        Root world;
+        world.installJson(packageRecordOf(R"("version":"0.3.0","sequence":300)"));
+        const auto install = update::detail::readInstallAs(world.root, registry, helper);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(update::toString(install->version), "0.3.0");
+        EXPECT_TRUE(update::isNewerThan(release, *install));
+    }
+    {
+        // The version alone is enough for that: a package built outside the release workflow.
+        Root world;
+        world.installJson(packageRecordOf(R"("version":"0.3.0")"));
+        const auto install = update::detail::readInstallAs(world.root, registry, helper);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(update::toString(install->version), "0.3.0");
+        EXPECT_TRUE(update::isNewerThan(release, *install));
+    }
+    {
+        // A copy that updated itself to 0.3.1, a later build of an older line: its sequence,
+        // 600, is ABOVE the release's 500. The install is 0.3.1 and 0.5.0 is above it by its
+        // version (5 > 3), where the sequences are not asked.
+        Root world;
+        world.installJson(packageRecordOf(R"("version":"0.3.0","sequence":300)"));
+        world.installedJson(installedRecordOf("0.3.1", 600));
+        const auto install = update::detail::readInstallAs(world.root, registry, helper);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(update::toString(install->version), "0.3.1");
+        EXPECT_EQ(install->sequence, 600u);
+        EXPECT_TRUE(update::isNewerThan(release, *install));
+    }
+}
+
+TEST(InstallRecords, AReleasesOwnHelperRefusesACopyWhosePackageNamesNoVersion)
+{
+    // THE LIMIT of a package that says its target and no more, written down so that the first
+    // release to raise the helper's protocol does not meet it in the field. Such a copy is
+    // stood for by the program that asks, and to a release's own helper that is the version it
+    // is about to install: 0.5.0, build 500, as in the test above.
+    const update::Version helper = versionOf(0, 5, 0, 0, 3);
+    const update::Manifest release = aReleaseOf(versionOf(0, 5, 0, 0, 3), 500);
+    FakeRegistry registry;
+    {
+        // A copy that never updated: the same version, and no record whose sequence could tell
+        // the two builds apart, is not newer (isNewerThan) - the helper's `downgrade`.
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        const auto install = update::detail::readInstallAs(world.root, registry, helper);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(update::toString(install->version), "0.5.0");
+        EXPECT_FALSE(install->hasInstalledRecord);
+        EXPECT_FALSE(update::isNewerThan(release, *install));
+    }
+    {
+        // A copy that updated itself to 0.3.1 at sequence 600: the version is raised to the
+        // helper's 0.5.0 and the record's sequence stays, and 500 is not above 600.
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        world.installedJson(installedRecordOf("0.3.1", 600));
+        const auto install = update::detail::readInstallAs(world.root, registry, helper);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(update::toString(install->version), "0.5.0");
+        EXPECT_EQ(install->sequence, 600u);
+        EXPECT_FALSE(update::isNewerThan(release, *install));
+    }
+    {
+        // What does pass with such a package: a record of an earlier sequence than the
+        // release's (300 < 500), which is every copy whose releases were built in the order of
+        // their versions.
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        world.installedJson(installedRecordOf("0.3.0", 300));
+        const auto install = update::detail::readInstallAs(world.root, registry, helper);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_TRUE(update::isNewerThan(release, *install));
+    }
+}
+
+TEST(InstallRecords, ASecondBuildUnpackedOverAnUpdatedCopyBringsItsOwnFloorWithinItsVersion)
+{
+    // A copy updated itself to 0.3.0 (build 300). 0.5.0 was built twice: build 500 was
+    // withdrawn and build 550 took its place. The zip of build 550 is unpacked over the copy by
+    // hand, so the helper's record still says 0.3.0 at 300 and the zip's install.json says
+    // 0.5.0 at 550. The installed build is the higher of the two: 0.5.0 (5 > 3), at 550.
+    Root world;
+    world.installJson(packageRecordOf(R"("version":"0.5.0","sequence":550)"));
+    world.installedJson(installedRecordOf("0.3.0", 300));
+    FakeRegistry registry;
+    const update::Version program = versionOf(0, 5, 0, 0, 3);
+    const auto install = update::detail::readInstallAs(world.root, registry, program);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(update::toString(install->version), "0.5.0");
+    EXPECT_EQ(install->sequence, 550u);
+    EXPECT_TRUE(install->hasInstalledRecord) << "the helper's record is there, stale as it is";
+
+    // The withdrawn build is signed, and it is the way back: the same version, and 500 < 550.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 0, 0, 3), 500), *install));
+    // The build that is installed is no update of itself; a third build (551 > 550) is one.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 0, 0, 3), 550), *install));
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 0, 0, 3), 551), *install));
+    // Below the programs, whatever the sequence: the release between the two, and a later
+    // build of the one the record names.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 4, 0, 0, 3), 9999), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 3, 0, 0, 3), 9999), *install));
+    // Above them, whatever the sequence.
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 1, 0, 3), 1), *install));
+
+    // The same copy where the zip says its target and no more. The program stands for it and
+    // a program has no sequence: the version rises to 0.5.0, the sequence stays the record's
+    // 300, and the withdrawn build (500 > 300) is let back in. That is what the package's own
+    // sequence closes.
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    const auto unnamed = update::detail::readInstallAs(world.root, registry, program);
+    ASSERT_TRUE(unnamed.ok()) << unnamed.error().describe();
+    EXPECT_EQ(update::toString(unnamed->version), "0.5.0");
+    EXPECT_EQ(unnamed->sequence, 300u);
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 0, 0, 3), 500), *unnamed));
+}
+
+TEST(InstallRecords, OfTheHelpersRecordAndThePackagesOwnBuildTheHigherIsTheInstalledOne)
+{
+    FakeRegistry registry;
+    // The helper's record is build 400 of 0.4.0 throughout.
+    const struct {
+        const char* package; // what install.json says after its target
+        const char* version;
+        std::uint64_t sequence;
+    } cases[] = {
+        // The record is the higher, by version (4 > 3): a sequence under a lower version
+        // counts for nothing.
+        {R"("version":"0.3.9","sequence":999)", "0.4.0", 400},
+        // The versions equal: the later build of the two.
+        {R"("version":"0.4.0","sequence":399)", "0.4.0", 400},
+        {R"("version":"0.4.0","sequence":400)", "0.4.0", 400},
+        {R"("version":"0.4.0","sequence":401)", "0.4.0", 401},
+        // The versions equal and the package names no sequence: the record's is all there is.
+        {R"("version":"0.4.0")", "0.4.0", 400},
+        // The package is the higher, by version: its own sequence with it, lower as it is.
+        {R"("version":"0.4.1","sequence":100)", "0.4.1", 100},
+        // By number and not by text: 10 > 4.
+        {R"("version":"0.10.0","sequence":1000)", "0.10.0", 1000},
+        // By its first number, and written with two.
+        {R"("version":"1.0","sequence":7)", "1.0", 7},
+        // The higher version with no sequence of its own: the record's stays.
+        {R"("version":"0.5.0")", "0.5.0", 400},
+    };
+    for (const auto& c : cases) {
+        Root world;
+        world.installJson(packageRecordOf(c.package));
+        world.installedJson(installedRecordOf("0.4.0", 400));
+        // A program below every version here and one above every one: neither is asked.
+        for (const update::Version& program :
+             {versionOf(0, 1, 0, 0, 3), versionOf(9, 0, 0, 0, 3)}) {
+            const auto install = update::detail::readInstallAs(world.root, registry, program);
+            ASSERT_TRUE(install.ok()) << c.package << ": " << install.error().describe();
+            EXPECT_EQ(update::toString(install->version), c.version)
+                << c.package << " for a program of " << update::toString(program);
+            EXPECT_EQ(install->sequence, c.sequence) << c.package;
+            EXPECT_TRUE(install->hasInstalledRecord) << c.package;
+            EXPECT_EQ(install->target, "win64") << c.package;
+        }
+    }
+}
+
+TEST(InstallRecords, APackagesOwnBuildOfFourComponentsAndASequenceBeyondTwoToTheFiftyThirdIsRead)
+{
+    Root world;
+    world.installJson(packageRecordOf(R"("version":"1.2.3.4","sequence":18446744073709551615)"));
+    world.installedJson(installedRecordOf("1.2.3.4", 5));
+    FakeRegistry registry;
+    const auto install =
+        update::detail::readInstallAs(world.root, registry, versionOf(0, 1, 0, 0, 3));
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(install->version, versionOf(1, 2, 3, 4, 4));
+    EXPECT_EQ(update::toString(install->version), "1.2.3.4");
+    EXPECT_EQ(install->sequence, UINT64_MAX) << "the same version: the later build, 2^64 - 1";
+}
+
+TEST(InstallRecords, AnInstallJsonWhoseOwnBuildDoesNotReadIsRefused)
+{
+    const char* const cases[] = {
+        R"("version":5)",      // not text
+        R"("version":null)",
+        R"("version":"")",
+        R"("version":"nine")",
+        R"("version":"1")",    // one component
+        R"("version":"0.3.0","sequence":-1)",
+        R"("version":"0.3.0","sequence":"5")",
+        R"("version":"0.3.0","sequence":1.5)",
+        R"("version":"0.3.0","sequence":null)",
+        R"("version":"0.3.0","sequence":18446744073709551616)", // 2^64
+        R"("sequence":5)",     // a sequence, and no version it could belong to
+    };
+    FakeRegistry registry;
+    for (const char* build : cases) {
+        // With and without a record of the helper's beside it: the copy is not read either way.
+        for (const bool updated : {false, true}) {
+            Root world;
+            world.installJson(packageRecordOf(build));
+            if (updated) {
+                world.installedJson(installedRecordOf("0.9.0", 5));
+            }
+            const auto install =
+                update::detail::readInstallAs(world.root, registry, versionOf(0, 3, 0, 0, 3));
+            ASSERT_FALSE(install.ok()) << build;
+            EXPECT_EQ(install.error().code, core::ErrorCode::ParseFailure) << build;
+            EXPECT_NE(install.error().context.find("install.json"), std::string::npos)
+                << "the file is named: " << install.error().context;
+        }
+    }
 }
 
 TEST(InstallRecords, TheInstalledManifestCountsOnlyWithItsSignatureBesideIt)

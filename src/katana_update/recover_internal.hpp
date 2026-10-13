@@ -105,13 +105,19 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
                                          const std::filesystem::path& stateDirectory);
 
 // recover() (recover.hpp) with its seams given: the file system, the launcher that runs the
-// helper copy, the state folder U, and how long a live holder of the lock is waited for.
+// helper copy, the state folder U, how long a live holder of the lock is waited for, and
+// whether the calling program was started as administrator (process.hpp, processIsElevated:
+// recover() hands its answer on, a test says which).
 // `stateDirectory` (U, or empty) is only READ, to find the helper copy U/run-<tx>/: nothing in
 // it is made, changed or deleted, whichever program calls (recover.hpp).
+// With `elevated` the copy in U is not even looked for: U is a folder the same person's
+// programs without administrator rights can write, and nothing is run with those rights from
+// it. The install's own R/bin/katana_updater is run, or - where that is not there - the answer
+// is NotFound with the command to run by hand.
 [[nodiscard]] core::Status recoverWith(const std::filesystem::path& root, FsOps& fs,
                                        Launcher& launcher,
                                        const std::filesystem::path& stateDirectory,
-                                       std::chrono::milliseconds lockWait);
+                                       std::chrono::milliseconds lockWait, bool elevated);
 
 // ---- an update that is installed and was never said to start ------------------------------------
 //
@@ -133,9 +139,11 @@ struct PendingOutcome {
     // which says HEALTHY, so every later start sweeps it: remove_tree.hpp). Reported, not
     // queued: of the three callers one may not write the per-user folder.
     std::vector<std::filesystem::path> leftovers;
-    // The pass could not look at every folder: R/.update could not be listed, or the pass was
-    // cut short. The lists above are then what it got to, and an empty `left` is NOT "none is
-    // left": a caller that goes on only when everything is settled must not go on.
+    // The pass could not look at every folder: R/.update could not be listed, a transaction's
+    // folder could not be examined or its journal is there and would not be read (a scanner or
+    // a backup has it open), or the pass was cut short. The lists above are then what it got
+    // to, and an empty `left` is NOT "none is left": a caller that goes on only when everything
+    // is settled must not go on.
     bool unread = false;
 };
 
@@ -165,6 +173,10 @@ struct PendingOutcome {
 //                case writes a value: a marker that IS there and a HEALTHY record that cannot
 //                be appended. The version Settings > Apps shows was rewritten before the
 //                append, and it names what is installed either way.)
+//
+// A folder whose journal could not be READ is none of the three: what it holds is not known, so
+// nothing is done to it, and the outcome says `unread` - it may be such an update, and no caller
+// may take the pass for one that saw everything.
 //
 // `stateDirectory` (U, or empty: then there is no evidence, and nothing is decided) is only
 // READ. Starts no program. Throws nothing but a FaultFs's SimulatedCrash.

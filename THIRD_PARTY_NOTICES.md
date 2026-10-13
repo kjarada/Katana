@@ -280,15 +280,16 @@ it is possible: see `LICENSING.md`, "What the licence does not cover".
 
 Not audited. The Linux and macOS packages are built against the conda-forge
 packages named in `tools/setup_linux_toolchain.py` (`qt6-main`, `cgal-cpp`,
-`eigen` 3.4, `proj`, `gdal`, `pdal`, `nlohmann_json`, `libsqlite`, `gmp`,
-`mpfr`, `libboost-headers`), and the libraries `KatanaDeployUnix.cmake.in`
-copies beside the programs are those packages' dependencies, so the list differs
-from section 3. The Windows ARM64 package is built from MSYS2's CLANGARM64
-packages. Section 1 holds for all platforms, because it comes from Katana's
-sources. For the others, each package's licence is in its `info/licenses`
-folder and `conda-meta/<package>.json` inside the toolchain prefix; the
-packaging step should generate this table from them for each platform and add
-it to the package.
+`eigen` 3.4, `proj`, `gdal`, `pdal`, `nlohmann_json`, `openssl`, `zlib`,
+`libsqlite`, `gmp`, `mpfr`, `libboost-headers`), and the libraries
+`KatanaDeployUnix.cmake.in` copies beside the programs are those packages'
+dependencies, so the list differs from section 3. The Windows ARM64 package
+is built from MSYS2's CLANGARM64 packages. Section 1 holds for all
+platforms, because it comes from Katana's sources. For the others, each
+package's licence is in its `info/licenses` folder and
+`conda-meta/<package>.json` inside the toolchain prefix; the packaging step
+should generate this table from them for each platform and add it to the
+package.
 
 ## 7. Not verified
 

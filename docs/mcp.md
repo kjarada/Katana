@@ -690,9 +690,12 @@ for all of it:
 - **`check`** is `UPDATE CHECK`'s record: `update` is `available`, `current`,
   `unreachable` (the feed could not be read or did not verify: `reason` is the
   token - `offline`, `http_404`, `bad_signature` ... - and `detail` the
-  failure's own sentence), `unsupported` (this copy cannot update:
-  `development_tree`, `disabled_build`, `no_network`, `install_record`) or
-  `blocked` (this very release was rolled back here before). `files` is
+  failure's own sentence) or `unsupported` (this copy cannot update:
+  `development_tree`, `disabled_build`, `no_network`, `install_record`).
+  `UPDATE CHECK`'s fifth answer, `blocked` - this very release was installed
+  here before, did not start and was put back - is never given by this tool:
+  the list of such releases is kept per user, and the tool reads nothing per
+  user ("It keeps nothing per user", below). `files` is
   `"<changed>/<total>"` and `download_bytes` a number, both only for
   `available`, where the installed files were hashed to say what would be
   fetched; `information` is `old` when the release's own expiry has passed.
@@ -729,12 +732,20 @@ What is decided here, and why:
   agent is sent.
 - **It keeps nothing per user.** The surface `UpdateSurface::Mcp` is given no
   update state folder and no credential store but the environment variable
-  `KATANA_UPDATE_TOKEN` of its own run. So the check is not recorded, a
-  version the person skipped in the window is still reported `available`
-  here, and `staged`, `skipped`, `auto`, `last_check` and `last` are what a
-  copy with nothing kept says (`none`, `none`, `on`, `never`, `none`). The
-  same call answers the same on every machine, which is what "read-only" has
-  to mean for a server a client starts unattended
+  `KATANA_UPDATE_TOKEN` of its own run. So the check is not recorded, and
+  `staged`, `skipped`, `auto`, `last_check` and `last` are what a copy with
+  nothing kept says (`none`, `none`, `on`, `never`, `none`). What a person
+  decided about a release is not applied either: a version they skipped in
+  the window is still reported `available` here, and so is a release that
+  was installed on this machine, did not start and was put back. The window
+  and `katana_cli` answer `update=blocked` for that one and offer it no
+  more until `UPDATE BLOCKED CLEAR`; that answer, and the sentence that
+  names the line, never reach an agent. So `available` from this tool means
+  that the feed holds a release above this copy, not that the window will
+  offer it to this person, and an agent that reports it should say so
+  (`UpdateVerbs.KatanaMcpsSurfaceReportsAReleaseThisPersonSetAsideAsAvailable`).
+  The same call answers the same on every machine, which is what "read-only"
+  has to mean for a server a client starts unattended
   (`UpdateVerbs.KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse`,
   `UpdateVerbs.TheCheckUpdateToolGivesTheTwoRecordsAsTextAndAsObjects`).
   What the copy *is* is another matter and is read for every surface: on

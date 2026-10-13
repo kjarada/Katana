@@ -12,6 +12,13 @@
 //   - No holder and a journal in state Planned, Committing or RollingBack
 //     (journal.hpp, needsRecovery): run the helper copy (U/run-<tx>/, else
 //     R/bin/katana_updater) with `--recover R`, which calls recoverInProcess.
+//     A PROGRAM STARTED AS ADMINISTRATOR (process.hpp, processIsElevated) runs
+//     R/bin/katana_updater and never the copy: U is a folder the same person's
+//     programs without those rights can write, and no helper is run with
+//     administrator rights from it - the reason `UPDATE APPLY CONFIRM` is
+//     refused there (src/katana_app/update_verbs.hpp, reason=elevated). Where
+//     the install's own helper is not there either, the answer is the error
+//     that names the command to run by hand.
 //   - Otherwise nothing: a cheap check (one directory listing) that costs a
 //     start no measurable time when there is nothing to do.
 //
@@ -100,7 +107,8 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     swap's own helper got to write one.
 //   - In the calling program this function READS the state folder, to find the
 //     helper copy U/run-<tx>/ (it is outside R, so it still runs when R's own
-//     bin/ is half swapped) - and that is all it does there. It makes, changes
+//     bin/ is half swapped; a program started as administrator does not look
+//     for it, see the top) - and that is all it does there. It makes, changes
 //     and deletes nothing in U, whichever program calls it: a recovery started
 //     from katana_cli or katana_mcp leaves the per-user folder byte for byte
 //     as it found it, the helper copy it ran included, and no cleanup.list is
@@ -149,7 +157,10 @@ enum class Settled {
     // from are not all kept; `evidenceDirectory` is not the folder the update was applied from
     // (it holds no U/run-<tx>), so a marker missing there proves nothing; the scan, the marker
     // or the folder could not be asked; or the lock could not be taken for a reason other than
-    // a holder. In each of those the RunOnce entry is registered, so a logon comes back to it.
+    // a holder. Also when it is not even KNOWN whether the install holds one: R/.update would
+    // not be listed, or a transaction's folder or its journal would not be read (a scanner or a
+    // backup has the journal open at the logon) - "could not look" is never "there is none".
+    // In each of those the RunOnce entry is registered, so a logon comes back to it.
     // (Also the answer when the run stopped on an unexpected error, before anything was done.)
     Left,
     Busy,               // the update lock stayed held: a helper is alive. Nothing was written
@@ -163,7 +174,11 @@ enum class Settled {
 // `evidenceDirectory` the per-user folder U.
 //
 // With no folder under R/.update whose journal says COMMITTED_PENDING_HEALTH:
-// Nothing, and the lock is not asked for. Otherwise the lock is taken, polled the
+// Nothing, and the lock is not asked for - when that could be SEEN. Where
+// R/.update would not be listed, or a transaction's folder or journal would not
+// be read, the install may hold such an update, and the run goes on as if it did
+// (the rule then says that it could not look, and the answer is Left, with the
+// RunOnce entry registered). Otherwise the lock is taken, polled the
 // way recoverInProcess polls it (kRecoverWait, shortened by the timings); a lock
 // that stays held is Busy, with nothing written, the registry included. A lock
 // that cannot be opened at all is no helper's: Left, with the RunOnce entry
@@ -214,12 +229,14 @@ enum class Settled {
 
 enum class Confirmed {
     Nothing, // nothing to confirm: the install holds no update that was never said to
-             // start (or its folder could not be looked at, which asking again does not mend)
+             // start (or the lock file cannot be opened at all, which asking again does not mend)
     Done,    // it is settled healthy
     // Not now: the update lock is held - a helper is alive, or a scanner has the lock file
-    // for a moment - or the marker or the record could not be written, or the folder could
-    // not be read through. Nothing is settled, the RunOnce entry is as it was, and the caller
-    // asks again later (the window: every 5 s, 12 times).
+    // for a moment - or the marker or the record could not be written, or R/.update could not
+    // be listed, or a transaction's folder or journal in it could not be read (at the first
+    // look as at any later one: a folder that was not seen may hold the update). Nothing is
+    // settled, the RunOnce entry is as it was, and the caller asks again later (the window:
+    // every 5 s, 12 times).
     Busy,
 };
 

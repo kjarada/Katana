@@ -1220,10 +1220,18 @@ SettingsUpdates UpdateWorkbench::settingsUpdates()
             return updateSkippedOfState(katana::update::readState(stateDirectory));
         };
         // The releases that were put back here, as the engine's own file has
-        // them (UPDATE STATUS does not say them): any at all is what the page
-        // tells of, and what its button - UPDATE BLOCKED CLEAR - empties.
-        updates.putBack = [stateDirectory] {
-            return updatePutBackOfState(katana::update::readState(stateDirectory));
+        // them (UPDATE STATUS does not say them), against the build this
+        // install's record names: the list is never shortened but by UPDATE
+        // BLOCKED CLEAR, and the page is told only of a build that can still
+        // be offered here (updatePutBackOfState) - one made after the build
+        // installed, or the one the dialog is telling of when the page asks.
+        UpdatePutBackFacts installed;
+        installed.hasInstalledRecord = made.install.hasInstalledRecord;
+        installed.installedSequence = made.install.sequence;
+        updates.putBack = [this, alive = std::weak_ptr<int>(alive_), stateDirectory, installed] {
+            UpdatePutBackFacts facts = installed;
+            facts.dialogTellsOfOne = !alive.expired() && updateTellsOfSetAside(view_);
+            return updatePutBackOfState(katana::update::readState(stateDirectory), facts);
         };
     }
     updates.credentials = made.credentials;

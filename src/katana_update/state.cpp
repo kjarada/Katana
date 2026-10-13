@@ -12,11 +12,13 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <compare>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -381,6 +383,75 @@ bool isRegularFile(const stdfs::path& path)
     return stdfs::is_regular_file(path, error);
 }
 
+// A build of Katana as one of the two records names it: its version, and the sequence of its
+// release where the record has one.
+struct RecordedBuild {
+    Version version;
+    std::optional<std::uint64_t> sequence;
+};
+
+// The record's "version": a string that is a version (version.hpp), or the record does not read.
+core::Result<Version> versionMember(const Json& json, const stdfs::path& file)
+{
+    const core::Result<std::string> text = stringMember(json, "version", true, file);
+    if (!text) {
+        return text.error();
+    }
+    core::Result<Version> version = parseVersion(*text);
+    if (!version) {
+        return parseFailure("\"version\" is not a version: " + version.error().describe(), file);
+    }
+    return version;
+}
+
+// The record's "sequence": a whole number, not negative, that fits 64 bits.
+core::Result<std::uint64_t> sequenceMember(const Json& json, const stdfs::path& file)
+{
+    const auto sequence = json.find("sequence");
+    if (sequence == json.end() || !sequence->is_number_unsigned()) {
+        return parseFailure("\"sequence\" is not a whole number", file);
+    }
+    return sequence->get<std::uint64_t>();
+}
+
+// What a package says of ITSELF in install.json, beside its target:
+//
+//   {"schema":1,"target":"win64","version":"0.5.0","sequence":1792312800}
+//
+// `version` is the version the package was built as, and `sequence` the sequence of the release
+// it belongs to: the number the release workflow settles before it builds and writes into that
+// release's update manifests. A package built outside the workflow has no release and names its
+// version alone. One that names neither says nothing of itself (std::nullopt): the record as it
+// was before it carried them, which every test tree that only says its target still is. A
+// sequence with no version to belong to is no record of a build, and does not read.
+core::Result<std::optional<RecordedBuild>> packageBuild(const Json& record,
+                                                        const stdfs::path& file)
+{
+    const bool namesSequence = record.contains("sequence");
+    if (!record.contains("version")) {
+        if (namesSequence) {
+            return parseFailure("the record has a \"sequence\" and no \"version\" it could "
+                                "belong to",
+                                file);
+        }
+        return std::optional<RecordedBuild>{};
+    }
+    const core::Result<Version> version = versionMember(record, file);
+    if (!version) {
+        return version.error();
+    }
+    RecordedBuild build;
+    build.version = *version;
+    if (namesSequence) {
+        const core::Result<std::uint64_t> sequence = sequenceMember(record, file);
+        if (!sequence) {
+            return sequence.error();
+        }
+        build.sequence = *sequence;
+    }
+    return std::optional<RecordedBuild>(build);
+}
+
 // Whether the folder the installer recorded is the install root: the same folder when both
 // exist (case, junctions and trailing separators then do not matter), else the same text.
 bool sameFolder(const stdfs::path& recorded, const stdfs::path& root)
@@ -424,11 +495,12 @@ stdfs::path updateWorkDirectory(const stdfs::path& root)
 namespace detail {
 
 // readInstall (install.hpp) for a program of version `program`: all of it, with the version of
-// the program that asks handed in instead of taken from this build. The installed version is
-// the higher of the record's and the program's own, so what readInstall answers depends on the
-// version of the binary it is linked into. This is the same reading without that: the rule
-// can be shown for a program below, at and above a record without a build of each, and a
-// record that names a fixed version can be read by a build of any version.
+// the program that asks handed in instead of taken from this build. Where the package does not
+// name its own version (packageBuild above) the installed version is the higher of the helper's
+// record and the program's own, so what readInstall answers there depends on the version of the
+// binary it is linked into. This is the same reading without that: the rule can be shown for a
+// program below, at and above a record without a build of each, and a record that names a fixed
+// version can be read by a build of any version.
 // In no public header (tests/update/test_state.cpp declares it); readInstall below is its one
 // caller in the library.
 core::Result<Install> readInstallAs(const stdfs::path& root, const RegistryOps& registry,
@@ -470,6 +542,29 @@ core::Result<Install> readInstallAs(const stdfs::path& root, const RegistryOps& 
     }
     install.target = *target;
 
+    // THE COPY'S OWN BUILD, apart from anything an update recorded here: what the package says
+    // of itself. A package that says nothing (one made before install.json carried it) is
+    // stood for by the program that asks - the version it was built as, and no sequence.
+    //
+    // Where the package does say, the asking program is NOT asked as well, and that is on
+    // purpose. The program that reads an install need not be one of its programs: the helper
+    // runs from a copy in the per-user folder, and the helper that installs a release may be
+    // that release's own (stage.hpp, preflight: a manifest whose `applier` is above what the
+    // installed helper speaks). Its version is then the version it is about to install, and
+    // taken for the install's it would make every such release "not newer" - a `downgrade`
+    // refused on a copy that never updated, and on one whose record carries a later sequence
+    // than the release's (a later build of an older line).
+    const core::Result<std::optional<RecordedBuild>> package = packageBuild(*record, installFile);
+    if (!package) {
+        return package.error();
+    }
+    RecordedBuild own;
+    if (package->has_value()) {
+        own = **package;
+    } else {
+        own.version = program;
+    }
+
     // The registry decides installer or archive on Windows; elsewhere it has nothing, and a
     // registry that cannot be read is no reason to refuse to update: the difference is only
     // whether Settings > Apps shows the new version.
@@ -490,43 +585,52 @@ core::Result<Install> readInstallAs(const stdfs::path& root, const RegistryOps& 
         if (!installedRecord) {
             return installedRecord.error();
         }
-        const core::Result<std::string> versionText =
-            stringMember(*installedRecord, "version", true, installedFile);
-        if (!versionText) {
-            return versionText.error();
-        }
-        const core::Result<Version> version = parseVersion(*versionText);
+        const core::Result<Version> version = versionMember(*installedRecord, installedFile);
         if (!version) {
-            return parseFailure("\"version\" is not a version: " + version.error().describe(),
-                                installedFile);
+            return version.error();
         }
-        const auto sequence = installedRecord->find("sequence");
-        if (sequence == installedRecord->end() || !sequence->is_number_unsigned()) {
-            return parseFailure("\"sequence\" is not a whole number", installedFile);
+        const core::Result<std::uint64_t> sequence =
+            sequenceMember(*installedRecord, installedFile);
+        if (!sequence) {
+            return sequence.error();
         }
         install.version = *version;
-        install.sequence = sequence->get<std::uint64_t>();
+        install.sequence = *sequence;
         install.hasInstalledRecord = true;
-        // THE FLOOR AGAINST GOING BACK is the higher of what the record says and the version of
-        // the program that asks (`program`: for readInstall, what this build was built as). The
-        // record is the helper's, written when an update commits, and nothing else keeps it
-        // true: a newer zip unpacked by hand over a copy that had updated itself leaves it
-        // saying the older version, and read alone it would let an earlier signed release pass
-        // for a newer one (isNewerThan, trust.hpp) and be installed over the programs that are
-        // there. A program is never older than itself.
+        // THE FLOOR AGAINST GOING BACK is the higher of the build the helper recorded and the
+        // copy's own (`own`, above), as isNewerThan (trust.hpp) orders builds: by version, and
+        // within one version by sequence. The record is the helper's, written when an update
+        // commits, and nothing else keeps it true: a newer zip unpacked by hand over a copy
+        // that had updated itself leaves it saying the older build, and read alone it would
+        // let an earlier signed release pass for a newer one and be installed over the
+        // programs that are there. The zip brings its own install.json, and with it its floor.
         //
-        // Only the version is raised. The sequence and `hasInstalledRecord` stay the record's:
-        // with the versions equal isNewerThan compares the sequences, and the helper that
-        // installs a release may be that release's own (stage.hpp, preflight: a manifest whose
-        // `applier` is above what the installed helper speaks) - its version is then the
-        // version it is installing, and it must still find the release above the build the
-        // record names. So a copy overwritten by hand is offered its own release once, which
-        // changes no file and writes the records that were stale.
-        if (program > install.version) {
-            install.version = program;
+        // Both halves of the build are raised where the copy's own has both. A version alone
+        // would leave the record's stale sequence under it, and a manifest of that same
+        // version is judged by the sequences: the first of two builds of one version would be
+        // "newer" than the second build unpacked over a copy of an older version.
+        //
+        // That is what remains where the copy's own build has no sequence - a package that
+        // names its version alone, or none, so that the asking program stands for it: only
+        // the version is raised, the sequence stays the record's, and such a copy is offered
+        // the release of its own version once more, which changes no file where the files are
+        // that release's already and writes the records that were stale. `hasInstalledRecord`
+        // says that the helper's record is there, whichever build is the higher.
+        const std::strong_ordering order = own.version <=> install.version;
+        if (order == std::strong_ordering::greater) {
+            install.version = own.version;
+            if (own.sequence.has_value()) {
+                install.sequence = *own.sequence;
+            }
+        } else if (order == std::strong_ordering::equal && own.sequence.has_value() &&
+                   *own.sequence > install.sequence) {
+            install.sequence = *own.sequence;
         }
     } else {
-        install.version = program; // a fresh install: the version it was built as, sequence 0
+        // A fresh install: the copy's own version. The sequence stays 0 and there is no record,
+        // so a release of this same version is not an update (isNewerThan), whatever sequence
+        // the package names.
+        install.version = own.version;
     }
 
     install.hasInstalledManifest =

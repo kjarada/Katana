@@ -476,12 +476,17 @@ void putACompleteStageOfV2In(const fs::path& state)
                bytesOf(release / "Katana-update-win64.json.sig"));
 }
 
-// The two records of an install in `root` (update/install.hpp): install.json
-// as packaging writes it, and installed.json as the helper does for 0.9.0.
+// The two records of an install in `root` (update/install.hpp): a copy that
+// was installed as 0.8.0 and then updated itself to 0.9.0, the older release
+// of the fixtures. install.json names the package's own build beside its
+// target (update/state.cpp, packageBuild) - an earlier one than the fixtures'
+// (8 < 9, and 1780000000 < 1790000000) - and installed.json is what the
+// helper wrote for 0.9.0.
 void writeInstallRecords(const fs::path& root)
 {
     const fs::path records = root / "share" / "katana";
-    writeBytes(records / "install.json", "{\"schema\":1,\"target\":\"win64\"}\n");
+    writeBytes(records / "install.json", "{\"schema\":1,\"target\":\"win64\",\"version\":\"0.8.0\","
+                                         "\"sequence\":1780000000}\n");
     writeBytes(records / "installed.json",
                "{\"schema\":1,\"product\":\"katana\",\"version\":\"0.9.0\","
                "\"sequence\":1790000000,\"tag\":\"v0.9.0\",\"target\":\"win64\"}\n");
@@ -1598,6 +1603,63 @@ TEST(UpdateVerbs, KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse)
     EXPECT_FALSE(fs::exists(rig.state)) << "an agent's check keeps nothing";
 }
 
+TEST(UpdateVerbs, KatanaMcpsSurfaceReportsAReleaseThisPersonSetAsideAsAvailable)
+{
+    // What a person decided about a release is kept per user (update/state.hpp)
+    // and katana_mcp is given no state folder, so its check is the feed's
+    // answer with nothing applied to it: the release the head of this file
+    // works out, available. The person's own program says of the same release
+    // `blocked` once it was put back here, and `current` once they skipped it.
+    // `blocked` is an answer this surface never gives (docs/mcp.md, "Updates").
+    Rig rig;
+    rig.serveV2();
+    const UpdateContext agent = rig.context(UpdateSurface::Mcp);
+    ASSERT_TRUE(agent.stateDirectory.empty());
+
+    // The release was installed here, did not start and was put back.
+    update::UpdateState state;
+    state.blockedSequences = {kV2Sequence};
+    ASSERT_TRUE(update::writeState(rig.state, state).ok());
+    {
+        const core::Result<UpdateReply> person = runUpdateLine(rig.context(), "UPDATE CHECK");
+        ASSERT_TRUE(person.ok()) << said(person);
+        EXPECT_TRUE(startsWith(person->text, "update=blocked ")) << person->text;
+
+        const std::map<std::string, std::string> kept = treeOf(rig.state);
+        const core::Result<UpdateReply> checked = runUpdateLine(agent, "UPDATE CHECK");
+        ASSERT_TRUE(checked.ok()) << said(checked);
+        EXPECT_EQ(checked->text, kAvailable);
+        const katana::app::mcp::ToolReply tool = katana::app::mcp::checkUpdateReply(agent);
+        EXPECT_FALSE(tool.isError) << tool.text;
+        EXPECT_EQ(tool.structured["check"]["update"], "available");
+        EXPECT_FALSE(tool.structured["check"].contains("reason"));
+        EXPECT_FALSE(tool.structured["check"].contains("detail"))
+            << "the sentence that names UPDATE BLOCKED CLEAR is the person's program's alone";
+        EXPECT_EQ(treeOf(rig.state), kept) << "and nothing the person keeps was written";
+    }
+
+    // The same release, skipped instead.
+    state.blockedSequences.clear();
+    state.skippedVersion = "0.10.0";
+    ASSERT_TRUE(update::writeState(rig.state, state).ok());
+    {
+        const core::Result<UpdateReply> person = runUpdateLine(rig.context(), "UPDATE CHECK");
+        ASSERT_TRUE(person.ok()) << said(person);
+        EXPECT_EQ(person->text, "update=current installed=0.9.0 latest=0.10.0 notes_url=" +
+                                    kNotes + " reason=skipped");
+
+        const std::map<std::string, std::string> kept = treeOf(rig.state);
+        const core::Result<UpdateReply> checked = runUpdateLine(agent, "UPDATE CHECK");
+        ASSERT_TRUE(checked.ok()) << said(checked);
+        EXPECT_EQ(checked->text, kAvailable);
+        const katana::app::mcp::ToolReply tool = katana::app::mcp::checkUpdateReply(agent);
+        EXPECT_FALSE(tool.isError) << tool.text;
+        EXPECT_EQ(tool.structured["check"]["update"], "available");
+        EXPECT_EQ(tool.structured["status"]["skipped"], "none");
+        EXPECT_EQ(treeOf(rig.state), kept);
+    }
+}
+
 // ---- katana_mcp's tool --------------------------------------------------------------------------
 
 TEST(UpdateVerbs, TheCheckUpdateToolGivesTheTwoRecordsAsTextAndAsObjects)
@@ -1722,18 +1784,12 @@ TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
     writeInstallRecords(rig.root);
     const fs::path program = rig.root / "bin" / "katana_cli.exe";
     ASSERT_TRUE(fs::exists(program));
-    // The record says 0.9.0, the older release of the fixtures, and what is
-    // installed is the higher of the record's version and this program's own
-    // (update/install.hpp, readInstall). So what follows is the record's for
-    // as long as this project's version is not above 0.9.0. Past that the
-    // expectations below have to move, with the fixtures' pair they stand on
-    // (0.9.0 and 0.10.0): said here, where it would otherwise first show as a
-    // wrong version in a reply.
-    const core::Result<update::Version> own = update::programVersion();
-    ASSERT_TRUE(own.ok());
-    ASSERT_LE(*own, update::parseVersion("0.9.0").value())
-        << "this program is above the record this test writes: see the comment above";
-
+    // What is installed is the higher of the two builds the records name:
+    // the helper's 0.9.0, above the package's own 0.8.0 (9 > 8). The package
+    // names its version, so the program that reads it does not stand for the
+    // copy (update/state.cpp, readInstall), and nothing below depends on the
+    // version this project has reached - which it did while install.json
+    // said the target and no more. That reading has its own test, next.
     UpdateContext context = katana::app::makeUpdateContext(UpdateSurface::Cli, program);
     EXPECT_EQ(context.surface, UpdateSurface::Cli);
     EXPECT_TRUE(context.installProblem.empty()) << context.installProblem;
@@ -1776,9 +1832,11 @@ TEST(UpdateVerbs, TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProg
 {
     // What a newer zip unpacked by hand over a copy that had updated itself
     // leaves: the helper's record of the older version beside the programs of
-    // the newer one. The installed version is the higher of the two
-    // (update/install.hpp, readInstall), so that the record cannot lower what
-    // a release must be above. 0.1.0 is a version this project left behind.
+    // the newer one. This zip's install.json says its target and no more, so
+    // the program that reads it stands for the copy, and the installed
+    // version is the higher of the record's and this program's own
+    // (update/install.hpp, readInstall): the record cannot lower what a
+    // release must be above. 0.1.0 is a version this project left behind.
     katana::app::tests::ScopedVariable token("KATANA_UPDATE_TOKEN", "ghp_from_the_environment");
     Rig rig;
     katana::app::tests::ScopedVariable folder("KATANA_UPDATE_STATE_DIR", rig.state);

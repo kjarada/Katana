@@ -179,10 +179,11 @@ struct SettingsUpdates {
     // so that the verb answers.
     std::function<std::optional<QString>()> skippedVersion{};
     // Whether a version is set aside because it was installed here, did not
-    // start and was put back (the state's list of blocked releases holds one;
-    // which version is not kept, only which build). Asked likewise, and
-    // nullopt and an empty function mean the same: the page says nothing of
-    // it and the button stays on.
+    // start and was put back (the state's list of blocked releases holds one
+    // that can still be offered to this install, which the window decides:
+    // updatePutBackOfState, update_dialog.hpp; which version is not kept,
+    // only which build). Asked likewise, and nullopt and an empty function
+    // mean the same: the page says nothing of it and the button stays on.
     std::function<std::optional<bool>()> putBack{};
     // Where the access token is kept: Save writes it here and the page says
     // whether one is stored - never the token itself. Null: Save is disabled.

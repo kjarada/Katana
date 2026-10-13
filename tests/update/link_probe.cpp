@@ -1,12 +1,17 @@
-// A probe that proves the way the helper is LINKED, which no other program does yet.
+// A probe that proves the way the helper is LINKED, which the helper's own import check
+// proves for one of its two libraries only.
 //
 // katana_updater must import nothing but the operating system's DLLs, and the way to that is
 // STATIC OpenSSL and zlib (src/katana_update/CMakeLists.txt, katana_update_third_party) plus
-// -static. While the helper is a stub it references neither library, so the linker pulls in
-// nothing of either and tests/update/check_updater_imports.cmake would pass on any link line
-// at all. This program uses exactly what the engine will - Ed25519 verification through EVP,
-// raw inflate, crc32 - through the same third-party target and the same link options, so the
-// import check on IT is a check of the link line, and its run is a check that the static
+// -static. The helper's own listing (test katana_updater_imports_only_os_dlls) speaks for
+// libcrypto, which it carries: it checks every signature itself. For zlib it says nothing.
+// The helper never inflates - a release is inflated when it is staged, by the program that
+// downloads it, and the helper moves what was staged - so the linker takes no member of
+// libz.a into it, and tests/update/check_updater_imports.cmake would pass on a link line
+// that named zlib's DLL. This program calls what the engine calls of the two libraries -
+// Ed25519 verification through EVP, raw inflate - and zlib's crc32 as well, through the same
+// third-party target and the same link options, so the import check on IT is a check of the
+// whole link line and the only evidence for zlib, and its run is a check that the static
 // libraries work (a link that succeeded with the wrong flags can still fail to start or to
 // verify).
 //

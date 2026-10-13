@@ -2,7 +2,10 @@
 //
 // recover() is the first thing every program does, so its cost when there is nothing to do is
 // the point: one stat of R/.update, and a listing and one small file per transaction folder in
-// it - nothing when the folder is absent, which is every install that has never updated.
+// it - nothing when the folder is absent, which is every install that has never updated. (And
+// one question of the process's own token, which touches no disk: whether this program was
+// started as administrator, for then the helper copy in the per-user folder is not the one it
+// runs. recoverWithUnguarded says why.)
 //
 // What it does with a transaction folder depends on where its journal stands:
 //   Empty, Planned, Committing, RollingBack   the crash left it half done: rolled back.
@@ -21,6 +24,11 @@
 //                                             a release for ever. recover() sweeps these itself,
 //                                             without starting the helper: there is no tree to
 //                                             put back.
+//   a journal that is there and cannot be     not known to be any of these. recover() and
+//   read (a scanner, a backup, the disk)      recoverInProcess pass over it - they can do no
+//                                             more, and a start is not held up - but it is NOT
+//                                             taken for "no such folder": to the settlers of the
+//                                             second half it is an update that may be there.
 //
 // recover() is called by katana_cli and katana_mcp too, and a headless program writes no
 // per-user state (recover.hpp, "WHAT RECOVERY WRITES, AND WHERE"). So the state folder U is
@@ -90,29 +98,40 @@ bool isHeld(const core::Error& error)
 
 struct Found {
     std::string name;
-    JournalState state = JournalState::Empty;
+    // Where the journal stands - or nothing, when that could not be found out: the folder could
+    // not be examined, or its journal is there and would not be read (a scanner or a backup has
+    // it open at a logon, the disk would not answer). That is NOT a journal that is absent, which
+    // is Empty. Of such a folder nothing is known, so nothing here acts on it and nothing here
+    // takes it for a folder that is not there: it may be an update that is not settled.
+    std::optional<JournalState> state;
 };
 
 // A folder with no complete record at all is what a crash during planning leaves: copies and
 // nothing moved. It is junk to clear, and counts as work.
-bool needsWork(JournalState state)
+bool needsWork(const Found& one)
 {
-    return state == JournalState::Empty || needsRecovery(state);
+    return one.state && (*one.state == JournalState::Empty || needsRecovery(*one.state));
 }
 
-bool isFinished(JournalState state)
+bool isFinished(const Found& one)
 {
-    return state == JournalState::RolledBack || state == JournalState::Healthy;
+    return one.state == JournalState::RolledBack || one.state == JournalState::Healthy;
 }
 
 // Installed, and never said to start (the second half of this file).
-bool isUnproved(JournalState state)
+bool isUnproved(const Found& one)
 {
-    return state == JournalState::CommittedPendingHealth;
+    return one.state == JournalState::CommittedPendingHealth;
+}
+
+// Could not be looked at (see Found): it may be any of the three above.
+bool isUnread(const Found& one)
+{
+    return !one.state.has_value();
 }
 
 // The transaction folders under R/.update, with where each journal stands, in the order of
-// their names.
+// their names. A folder that could not be read is among them, and says so (Found::state).
 core::Result<std::vector<Found>> transactions(const FsOps& fs, const Path& root)
 {
     const Path directory = updateWorkDirectory(root);
@@ -136,15 +155,23 @@ core::Result<std::vector<Found>> transactions(const FsOps& fs, const Path& root)
             continue;
         }
         const core::Result<EntryInfo> folder = fs.stat(entry);
-        if (!folder.ok() || folder->kind != EntryKind::Directory || folder->reparsePoint) {
+        if (!folder.ok()) {
+            found.push_back({name, std::nullopt}); // it cannot be examined: see Found
             continue;
         }
-        JournalState state = JournalState::Empty;
+        if (folder->kind != EntryKind::Directory || folder->reparsePoint) {
+            continue;
+        }
+        std::optional<JournalState> state = JournalState::Empty;
         const core::Result<std::string> text = fs.readFile(entry / core::pathFromUtf8(kJournalName));
         if (text.ok()) {
             state = parseJournal(text.value()).state;
         } else if (text.error().code != core::ErrorCode::NotFound) {
-            continue; // unreadable: neither this nor the helper can do more
+            // There, and not to be read just now. Reported, not dropped: dropped, an update
+            // that was never said to start read as "this install holds none" - to the logon's
+            // `--recover`, which then left its RunOnce entry away for good, and to the next
+            // swap, which then planned a new update over it.
+            state.reset();
         }
         found.push_back({name, state});
     }
@@ -155,29 +182,45 @@ core::Result<std::vector<Found>> transactions(const FsOps& fs, const Path& root)
 
 // Only the ones recovery has something to do with (see the top of the file): the ones to put
 // back and the ones to sweep. An update that is installed and not yet proved is not among
-// them.
+// them. Nor is a folder that could not be read: neither recover() nor the helper it would start
+// can do more with one, and a start is not held up by it. (It is the settlers of the second
+// half of this file that must not take it for nothing: settlePending and its callers.)
 core::Result<std::vector<Found>> actionable(const FsOps& fs, const Path& root)
 {
     core::Result<std::vector<Found>> all = transactions(fs, root);
     if (!all.ok()) {
         return all;
     }
-    std::erase_if(all.value(), [](const Found& one) {
-        return !needsWork(one.state) && !isFinished(one.state);
-    });
+    std::erase_if(all.value(),
+                  [](const Found& one) { return !needsWork(one) && !isFinished(one); });
     return all;
 }
 
 bool anyNeedsWork(const std::vector<Found>& found)
 {
     return std::any_of(found.begin(), found.end(),
-                       [](const Found& one) { return needsWork(one.state); });
+                       [](const Found& one) { return needsWork(one); });
 }
 
 bool anyUnproved(const std::vector<Found>& found)
 {
     return std::any_of(found.begin(), found.end(),
-                       [](const Found& one) { return isUnproved(one.state); });
+                       [](const Found& one) { return isUnproved(one); });
+}
+
+bool anyUnread(const std::vector<Found>& found)
+{
+    return std::any_of(found.begin(), found.end(),
+                       [](const Found& one) { return isUnread(one); });
+}
+
+// Whether a look found nothing for a settler to do: it could be made, and it shows no update
+// that was never said to start and no folder that could not be read. A look that FAILED is not
+// that, and neither is a folder whose journal would not be read: "could not look" is "it may
+// hold one", for whoever must not leave such an update without somebody to come back to it.
+bool holdsNoneToSettle(const core::Result<std::vector<Found>>& looked)
+{
+    return looked.ok() && !anyUnproved(looked.value()) && !anyUnread(looked.value());
 }
 
 // Deletes a folder through FsOps; what cannot be deleted now (a file something holds open) is
@@ -416,7 +459,7 @@ core::Status recoverLocked(const Path& rootGiven, const ApplyServices& services,
         if (one.name == except) {
             continue;
         }
-        if (isFinished(one.state)) {
+        if (isFinished(one)) {
             sweep(fs, updateWorkDirectory(root) / core::pathFromUtf8(one.name), stateDirectory,
                   kJournalName);
             continue;
@@ -452,7 +495,14 @@ PendingOutcome settlePending(const Path& rootGiven, const ApplyServices& service
             return outcome;
         }
         for (const Found& one : all.value()) {
-            if (isUnproved(one.state) && one.name != except) {
+            if (one.name == except) {
+                continue;
+            }
+            if (isUnread(one)) {
+                // It may be an update that is not settled. Nothing is done to it, and the
+                // caller hears what it hears when the listing fails: not everything was seen.
+                outcome.unread = true;
+            } else if (isUnproved(one)) {
                 settleOne(root, services, one.name, stateDirectory, mayRollBack, outcome);
             }
         }
@@ -483,7 +533,8 @@ void forgetSettled(FsOps& fs, const Path& stateDirectory, const PendingOutcome& 
 namespace {
 
 core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& launcher,
-                                  const Path& stateDirectory, std::chrono::milliseconds lockWait)
+                                  const Path& stateDirectory, std::chrono::milliseconds lockWait,
+                                  bool elevated)
 {
     const Path root = normalizedRoot(rootGiven);
     if (root.empty()) {
@@ -511,7 +562,7 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
         const core::Result<std::vector<Found>> again = actionable(fs, root);
         if (again.ok()) {
             for (const Found& one : again.value()) {
-                if (isFinished(one.state)) {
+                if (isFinished(one)) {
                     // No state folder to queue in: this may be a headless program, which
                     // begins no cleanup.list. What is still held stays, under its journal, and
                     // the next start comes here again.
@@ -551,11 +602,23 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
     // The helper copy the interrupted update ran from, if it is still there: it is outside
     // R, so it works when R's own bin/ is half swapped. Else the install's own. Looking for
     // the copy is all that is done in the state folder.
+    //
+    // NOT THE COPY, when this program was started as administrator (`elevated`: process.hpp,
+    // processIsElevated). The copy is in the per-user folder, which the same person's programs
+    // WITHOUT those rights can write - and so is all that sends this function there: a
+    // journal with one PLAN record under R/.update/<tx> (its check is no key's) and a file
+    // named katana_updater in U/run-<tx>. Run from here, that file would have administrator
+    // rights before this program has done anything else. `UPDATE APPLY CONFIRM` is refused in
+    // such a program for the same reason (src/katana_app/update_verbs.hpp, reason=elevated);
+    // this is the other way to a helper in U, and it is closed the same way. The install's own
+    // helper is no new risk: it is beside the very program that is running with those rights.
+    // Where that one is not there (a commit cut off between the two renames of that very
+    // file), the answer is the error that names the command to run by hand.
     const Path stem = installedProgram(Path(), kHelperStem).filename();
     Path helper;
     for (const Found& one : pending) {
-        if (stateDirectory.empty()) {
-            break; // no state folder, so no copies in it
+        if (stateDirectory.empty() || elevated) {
+            break; // no state folder, so no copies in it - or none this program may run
         }
         const Path copy = runPath(stateDirectory, one.name) / stem;
         const core::Result<EntryInfo> info = fs.stat(copy);
@@ -573,8 +636,13 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
     }
     if (helper.empty()) {
         return core::makeError(core::ErrorCode::NotFound,
-                               "an interrupted update was found and there is no update helper to "
-                               "put it back with; " + byHand(root));
+                               elevated
+                                   ? "an interrupted update was found, and Katana was started as "
+                                     "administrator, so only the install's own update helper may "
+                                     "put it back, and that one is not there; start Katana the "
+                                     "ordinary way, or " + byHand(root)
+                                   : "an interrupted update was found and there is no update "
+                                     "helper to put it back with; " + byHand(root));
     }
 
     SpawnRequest request;
@@ -638,7 +706,12 @@ Confirmed confirmStartedUnguarded(const Path& rootGiven, const Path& stateDirect
         return Confirmed::Nothing;
     }
     const core::Result<std::vector<Found>> first = transactions(fs, root);
-    if (!first.ok() || !anyUnproved(first.value())) {
+    if (!first.ok()) {
+        // Could not look, which is not "there is none": a folder that will not be listed just
+        // now may hold the update this window is the proof of. It asks again.
+        return Confirmed::Busy;
+    }
+    if (holdsNoneToSettle(first)) {
         return Confirmed::Nothing; // every start but the one after a helper died
     }
     // One attempt. A lock that is held is a helper that is alive and doing its own health run
@@ -652,15 +725,21 @@ Confirmed confirmStartedUnguarded(const Path& rootGiven, const Path& stateDirect
 
     // Under the lock, look again: the helper that held it may have settled its own.
     const core::Result<std::vector<Found>> pending = transactions(fs, root);
-    if (!pending.ok() || !anyUnproved(pending.value())) {
+    if (!pending.ok()) {
+        return Confirmed::Busy; // as above: not seen is not settled
+    }
+    if (holdsNoneToSettle(pending)) {
         return Confirmed::Nothing;
     }
     // The proof first, and on disk before anything is settled by it: this window is at its
     // first idle turn, which is what the health run is started to reach. Cut off after this
     // line, the update is settled healthy by whoever comes next - the logon's `--recover`
-    // too, which would otherwise put a working release back.
+    // too, which would otherwise put a working release back. Only for a journal that was READ
+    // and says the update is pending: a folder whose journal would not be read may be one a
+    // crash cut off in its commit, and this window is no proof of that. The rule below says
+    // of such a folder that it was not seen, and the window asks again.
     for (const Found& one : pending.value()) {
-        if (!isUnproved(one.state) || proofOf(fs, stateDirectory, one.name) != Proof::Absent) {
+        if (!isUnproved(one) || proofOf(fs, stateDirectory, one.name) != Proof::Absent) {
             continue; // written already, by the health run of the helper that died
         }
         if (fs.makeDirectories(stateDirectory).ok()) {
@@ -690,10 +769,11 @@ Confirmed confirmStartedUnguarded(const Path& rootGiven, const Path& stateDirect
 // The entry of recover(): an exception from a name or a folder somebody else can write becomes
 // an error to report, never a program that dies in its first lines at every start.
 core::Status recoverWith(const Path& rootGiven, FsOps& fs, Launcher& launcher,
-                         const Path& stateDirectory, std::chrono::milliseconds lockWait)
+                         const Path& stateDirectory, std::chrono::milliseconds lockWait,
+                         bool elevated)
 {
     try {
-        return recoverWithUnguarded(rootGiven, fs, launcher, stateDirectory, lockWait);
+        return recoverWithUnguarded(rootGiven, fs, launcher, stateDirectory, lockWait, elevated);
     } catch (const std::exception& error) {
         return core::makeError(core::ErrorCode::Internal,
                                "looking for an interrupted update stopped on an unexpected error",
@@ -777,12 +857,21 @@ Settled settleUnprovedUnguarded(const Path& rootGiven, const Path& helper,
         return Settled::Nothing;
     }
     const core::Result<std::vector<Found>> first = transactions(fs, root);
-    if (!first.ok() || !anyUnproved(first.value())) {
+    if (holdsNoneToSettle(first)) {
         return Settled::Nothing; // the cheap answer, without touching the lock
     }
+    // From here the install holds such an update - or MAY: R/.update would not be listed, or a
+    // folder in it, or its journal, would not be read (a scanner or a backup at the logon).
+    // That is not "none". Started by the RunOnce entry, this run is the last one Windows starts
+    // unless the entry is put back; taken for "none", an update whose release does not start
+    // would have nobody come back to it. So it goes the way of one that is there: the lock,
+    // the entry, the rule - which says that it could not look, and the answer is Left.
 
     // The logon net: `<helper> --recover <R>`, the very text the swap registered. Best effort,
-    // like the swap's own registration.
+    // like the swap's own registration. (And one value for every copy of Katana a person runs:
+    // the name is kRunOnceName whatever R is, so a swap or a confirmation in ANOTHER copy
+    // replaces or removes this entry, and this copy's net is then gone until its next
+    // `--recover`. Known, and not changed here: the uninstaller removes the value by that name.)
     const auto rearm = [&] {
         if (!helper.empty()) {
             (void)services.registry.setRunOnce(kRunOnceName,
@@ -822,9 +911,10 @@ Settled settleUnprovedUnguarded(const Path& rootGiven, const Path& helper,
     }
 
     // Under the lock, look again: the helper that was waited for may have settled its own. A
-    // look that fails now is not "it has": the rule below looks once more and says so.
+    // look that fails now, or a folder that will not be read, is not "it has": the rule below
+    // looks once more and says so.
     const core::Result<std::vector<Found>> pending = transactions(fs, root);
-    if (pending.ok() && !anyUnproved(pending.value())) {
+    if (holdsNoneToSettle(pending)) {
         return Settled::Nothing;
     }
 
@@ -896,7 +986,8 @@ core::Status recover(const Path& root)
     try {
         const std::unique_ptr<FsOps> fs = makeSystemFsOps();
         const std::unique_ptr<Launcher> launcher = makeSystemLauncher();
-        return detail::recoverWith(root, *fs, *launcher, stateDirectory(), kRecoverWait);
+        return detail::recoverWith(root, *fs, *launcher, stateDirectory(), kRecoverWait,
+                                   processIsElevated());
     } catch (const std::exception& error) {
         return core::makeError(core::ErrorCode::Internal,
                                "looking for an interrupted update stopped on an unexpected error",

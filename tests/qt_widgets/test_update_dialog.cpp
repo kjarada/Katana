@@ -51,12 +51,17 @@
 // H1, 2026-10-14); a line that empties a list takes back what the dialog said
 // that list set aside, and no other (H5); a state file that does not read is
 // "nobody can say" and never "none" (H5: the verb refuses such a file and
-// says why, which only a button that is on lets a person read); and an update
-// that could not be started is said in a message box only in a window nobody
-// drove (the same pass, for main()). The records are written by hand: the
-// design's 0.2.0 and 0.3.0, its sequence 1792312800, its `expires` of
-// 2027-04-18T08:00:00Z - which is 1 808 035 200 seconds after 1970 (20 926
-// days: 57 years of 365, 14 leap days, 31 + 28 + 31 + 17; and 8 hours).
+// says why, which only a button that is on lets a person read); a build that
+// was put back is told of there only while it can still be offered to this
+// install - made after the build installed, or the one the dialog is telling
+// of - and an apply that was refused over an earlier update that is not
+// settled carries the command that settles it (both the pass's integration
+// review); and an update that could not be started is said in a message box
+// only in a window nobody drove (the same pass, for main()). The records are
+// written by hand: the design's 0.2.0 and 0.3.0, its sequence 1792312800, its
+// `expires` of 2027-04-18T08:00:00Z - which is 1 808 035 200 seconds after
+// 1970 (20 926 days: 57 years of 365, 14 leap days, 31 + 28 + 31 + 17; and 8
+// hours).
 //
 // The recovery log's lines (the last UpdateDecisions tests) are written by hand
 // in the two forms the engine states: include/katana/update/recover.hpp for a
@@ -1030,6 +1035,31 @@ TEST(UpdateWords, AnEarlierUpdateThatIsStillOpenIsSaidToBeUnsettledNotFailed)
     EXPECT_EQ(said(dialog),
               QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed. Reason: "
                              "an earlier update is not settled yet."));
+
+    // With the command the owner gives it for this ending
+    // (updateViewOfLastResult), the dialog says what to do, in the order the
+    // helper's own `detail` gives the two steps (src/katana_update/apply.cpp,
+    // Applier::begin: "Katana's window confirms it when it starts - or run:
+    // katana_updater --recover ... - then update again"): the start that
+    // shows this has confirmed it or not, so update again first, and the
+    // command by hand where that is refused again. Nothing to press: it is
+    // read and closed.
+    view.recoverCommand = QStringLiteral("katana_updater --recover \"C:/Programs/Katana\"");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateStateText"),
+              QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed."));
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Reason: an earlier update is not settled yet. Update again; if this "
+                             "is said again, close Katana and run: katana_updater --recover "
+                             "\"C:/Programs/Katana\""));
+    EXPECT_TRUE(shownButtons(dialog).isEmpty());
+
+    // The command is for that refusal alone: another one names none, whatever
+    // the view carries.
+    view.reason = QStringLiteral("space");
+    dialog.setView(view);
+    EXPECT_EQ(shown(dialog, "updateDetailText"),
+              QStringLiteral("Reason: there is not enough free disk space."));
 }
 
 TEST(UpdateWords, ACaptivePortalAndAFullDiskAreSaidInWordsNotAsTheirTokens)
@@ -1508,6 +1538,63 @@ TEST(UpdateDecisions, HowTheLastUpdateEndedIsItsOwnStateAndASuccessIsNone)
                              "\"C:\\Programs\\Katana\""));
 }
 
+TEST(UpdateDecisions, AnUpdateRefusedOverAnEarlierOneThatIsNotSettledNamesTheCommandThatSettlesIt)
+{
+    // The helper refuses an apply as interrupted_update while an earlier
+    // update of the install is neither confirmed nor put back, and names the
+    // way out in its own `detail` alone (src/katana_update/apply.cpp,
+    // Applier::begin: "... or run: katana_updater --recover \"<root>\" ...").
+    // The result it leaves for the next start has no detail
+    // (update::LastResult: status, reason, holder, version, transaction). So
+    // in an install whose window could not confirm the earlier update, each
+    // "Restart and update" closed Katana and reopened it on a sentence with
+    // nothing to do, and the release was offered as Ready again. The view
+    // carries the command for this ending now, built as it is for
+    // rollback_incomplete: the helper's name, --recover, and the install's
+    // folder in quotes, as the platform writes it.
+    using katana::qt::updateViewOfLastResult;
+    const QString installed = QStringLiteral("0.2.0");
+    const QString root = QStringLiteral("C:\\Programs\\Katana");
+    katana::update::LastResult last;
+    last.version = "0.3.0";
+    last.transaction = "0a1b2c3d";
+    last.status = "refused";
+    last.reason = "interrupted_update";
+    const std::optional<UpdateView> view = updateViewOfLastResult(last, installed, root);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->state, UpdateDialogState::RolledBack);
+    EXPECT_EQ(view->recoverCommand,
+              QStringLiteral("katana_updater --recover \"C:\\Programs\\Katana\""));
+    EXPECT_EQ(saidBy(*view),
+              QStringLiteral("Katana 0.3.0 could not be installed; nothing was changed. Reason: "
+                             "an earlier update is not settled yet. Update again; if this is said "
+                             "again, close Katana and run: katana_updater --recover "
+                             "\"C:\\Programs\\Katana\""));
+    EXPECT_TRUE(katana::qt::updateStatusButtonText(*view).isEmpty());
+
+    // Every other refusal changed nothing and left nothing to settle: no
+    // command is carried and none is said (tokens of apply.hpp's list of what
+    // an apply is refused for).
+    for (const char* reason : {"space", "downgrade", "staged_hash", "platform"}) {
+        last.reason = reason;
+        const std::optional<UpdateView> other = updateViewOfLastResult(last, installed, root);
+        ASSERT_TRUE(other.has_value()) << reason;
+        EXPECT_TRUE(other->recoverCommand.isEmpty()) << reason;
+        EXPECT_FALSE(saidBy(*other).contains(QStringLiteral("katana_updater"))) << reason;
+    }
+
+    // And it is that refusal, not the token under any ending: an install that
+    // was changed and put back is told what was restored, and no command.
+    last.status = "rolled_back";
+    last.reason = "interrupted_update";
+    const std::optional<UpdateView> restored = updateViewOfLastResult(last, installed, root);
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_TRUE(restored->recoverCommand.isEmpty());
+    EXPECT_EQ(saidBy(*restored),
+              QStringLiteral("Katana 0.3.0 could not be installed, so 0.2.0 was restored. Reason: "
+                             "an earlier update is not settled yet."));
+}
+
 TEST(UpdateDecisions, TheWindowChecksByItselfOnlyWhenEveryConditionHolds)
 {
     using katana::qt::updateAutomaticCheckIsDue;
@@ -1747,12 +1834,16 @@ TEST(UpdateDecisions, AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone)
     using katana::qt::updatePutBackOfState;
     using katana::qt::updateSkippedOfState;
     using State = katana::core::Result<katana::update::UpdateState>;
+    // The install the page is asked in: a fresh one, with no record of its
+    // own build, for which every build on the list counts. Which builds count
+    // for an install that has a record is the next test's.
+    const katana::qt::UpdatePutBackFacts fresh;
 
     for (const ErrorCode code : {ErrorCode::ParseFailure, ErrorCode::Unsupported}) {
         const State unreadable =
             katana::core::makeError(code, "the update settings could not be read");
         EXPECT_FALSE(updateSkippedOfState(unreadable).has_value());
-        EXPECT_FALSE(updatePutBackOfState(unreadable).has_value());
+        EXPECT_FALSE(updatePutBackOfState(unreadable, fresh).has_value());
     }
 
     // A file that is not there reads as the defaults, and those ARE known:
@@ -1761,7 +1852,7 @@ TEST(UpdateDecisions, AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone)
     const std::optional<QString> noneSkipped = updateSkippedOfState(defaults);
     ASSERT_TRUE(noneSkipped.has_value());
     EXPECT_TRUE(noneSkipped->isEmpty());
-    const std::optional<bool> nonePutBack = updatePutBackOfState(defaults);
+    const std::optional<bool> nonePutBack = updatePutBackOfState(defaults, fresh);
     ASSERT_TRUE(nonePutBack.has_value());
     EXPECT_FALSE(*nonePutBack);
 
@@ -1773,7 +1864,7 @@ TEST(UpdateDecisions, AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone)
     const std::optional<QString> skipped = updateSkippedOfState(State(kept));
     ASSERT_TRUE(skipped.has_value());
     EXPECT_EQ(*skipped, QStringLiteral("0.3.0"));
-    const std::optional<bool> putBack = updatePutBackOfState(State(kept));
+    const std::optional<bool> putBack = updatePutBackOfState(State(kept), fresh);
     ASSERT_TRUE(putBack.has_value());
     EXPECT_TRUE(*putBack);
 
@@ -1781,7 +1872,7 @@ TEST(UpdateDecisions, AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone)
     // other way about.
     katana::update::UpdateState onlySkipped;
     onlySkipped.skippedVersion = "0.3.0";
-    const std::optional<bool> notPutBack = updatePutBackOfState(State(onlySkipped));
+    const std::optional<bool> notPutBack = updatePutBackOfState(State(onlySkipped), fresh);
     ASSERT_TRUE(notPutBack.has_value());
     EXPECT_FALSE(*notPutBack);
     katana::update::UpdateState onlyPutBack;
@@ -1789,6 +1880,149 @@ TEST(UpdateDecisions, AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone)
     const std::optional<QString> notSkipped = updateSkippedOfState(State(onlyPutBack));
     ASSERT_TRUE(notSkipped.has_value());
     EXPECT_TRUE(notSkipped->isEmpty());
+}
+
+TEST(UpdateDecisions, AVersionThatWasPutBackIsToldOfOnlyWhileItCanStillBeOfferedHere)
+{
+    // THE REGRESSION. The state's list of blocked releases is only ever added
+    // to (src/katana_update/apply.cpp, Applier::fail) until UPDATE BLOCKED
+    // CLEAR empties it. So after 0.3.0 was put back, and 0.4.0 was installed
+    // later and started, Settings > Updates went on saying "A version that
+    // was installed here did not start and was put back: it is not offered."
+    // with its button on - of a release no feed offers over 0.4.0, and with a
+    // button that changed nothing a check could show.
+    //
+    // The list keeps a build by its sequence, "UTC epoch seconds at build"
+    // (include/katana/update/manifest.hpp), and no version; the install's
+    // record keeps the sequence of the build an update put there
+    // (include/katana/update/install.hpp). The builds here, by hand: 0.3.0 is
+    // the design's; 0.2.0 was made a week before it and 0.4.0 a week after
+    // it, a week being 7 x 86 400 = 604 800 seconds.
+    using katana::qt::UpdatePutBackFacts;
+    using katana::qt::updatePutBackOfState;
+    using State = katana::core::Result<katana::update::UpdateState>;
+    constexpr std::uint64_t kWeek = 604'800;
+    constexpr std::uint64_t kBuildOfTheOldVersion = kSequence - kWeek;  // 0.2.0
+    constexpr std::uint64_t kBuildOfTheNextVersion = kSequence + kWeek; // 0.4.0
+    // The answer for a file that read; one that did not fails here.
+    const auto told = [](const katana::update::UpdateState& state,
+                         const UpdatePutBackFacts& facts) {
+        const std::optional<bool> answer = updatePutBackOfState(State(state), facts);
+        EXPECT_TRUE(answer.has_value());
+        return answer.value_or(false);
+    };
+    katana::update::UpdateState putBack;
+    putBack.blockedSequences = {kSequence}; // 0.3.0 did not start here
+
+    // 0.2.0 is installed, by an update that recorded its build. 0.3.0 was
+    // made after it and is what a feed offers over it: it is told of.
+    UpdatePutBackFacts onTheOldVersion;
+    onTheOldVersion.hasInstalledRecord = true;
+    onTheOldVersion.installedSequence = kBuildOfTheOldVersion;
+    EXPECT_TRUE(told(putBack, onTheOldVersion));
+
+    // 0.4.0 was installed since, and started: the build that was put back
+    // was made before the one installed, and is not told of.
+    UpdatePutBackFacts onTheNextVersion;
+    onTheNextVersion.hasInstalledRecord = true;
+    onTheNextVersion.installedSequence = kBuildOfTheNextVersion;
+    EXPECT_FALSE(told(putBack, onTheNextVersion));
+
+    // "After" is strictly after: a build is not offered over itself.
+    UpdatePutBackFacts onThatVeryBuild;
+    onThatVeryBuild.hasInstalledRecord = true;
+    onThatVeryBuild.installedSequence = kSequence;
+    EXPECT_FALSE(told(putBack, onThatVeryBuild));
+
+    // One build made before the installed one and one made after it (0.5.0,
+    // a week after 0.4.0): the later one is enough, wherever it stands.
+    katana::update::UpdateState two;
+    two.blockedSequences = {kSequence, kBuildOfTheNextVersion + kWeek};
+    EXPECT_TRUE(told(two, onTheNextVersion));
+    two.blockedSequences = {kBuildOfTheNextVersion + kWeek, kSequence};
+    EXPECT_TRUE(told(two, onTheNextVersion));
+
+    // A fresh install has no record of its build: its sequence is a
+    // placeholder (install.hpp: "the sequence is 0 and `hasInstalledRecord`
+    // is false") and is not read, whatever it holds. Nothing says the build
+    // on the list is one this install has passed, so it is told of.
+    UpdatePutBackFacts fresh;
+    EXPECT_TRUE(told(putBack, fresh));
+    fresh.installedSequence = kBuildOfTheNextVersion;
+    EXPECT_TRUE(told(putBack, fresh));
+
+    // A build made before the installed one can still be of a higher version
+    // (a release line that went back and forward again), and the list has no
+    // version to tell. A check that meets it does, and the dialog then says
+    // "Settings > Updates offers this one again": while it says so the page
+    // is told of the build, so that its button is on.
+    UpdatePutBackFacts whileTheDialogTellsOfIt = onTheNextVersion;
+    whileTheDialogTellsOfIt.dialogTellsOfOne = true;
+    EXPECT_TRUE(told(putBack, whileTheDialogTellsOfIt));
+    // The list is what the button empties: with nothing on it, none is told
+    // of, whatever the dialog still shows.
+    EXPECT_FALSE(told(katana::update::UpdateState{}, whileTheDialogTellsOfIt));
+    EXPECT_FALSE(told(katana::update::UpdateState{}, onTheOldVersion));
+
+    // And a file that does not read is nobody can say, under every fact.
+    const State unreadable = katana::core::makeError(katana::core::ErrorCode::ParseFailure,
+                                                     "the update settings could not be read");
+    for (const UpdatePutBackFacts& facts :
+         {onTheOldVersion, onTheNextVersion, fresh, whileTheDialogTellsOfIt}) {
+        EXPECT_FALSE(updatePutBackOfState(unreadable, facts).has_value());
+    }
+}
+
+TEST(UpdateDecisions, TheDialogTellsOfAReleaseThatIsSetAsideExactlyWhereItPointsAtSettings)
+{
+    // What keeps the page's button on while the dialog points at it. The two
+    // sentences that tell of a release that is set aside end "Settings >
+    // Updates offers this one again." (the hardening pass's ruling H5: "the
+    // dialog's sentence for a blocked release says where that button is"): a
+    // check's `update=blocked`, and the last apply's ending when the release
+    // was put back for not starting - rolled_back for health_exit or
+    // health_timeout, the endings after which the helper blocks it
+    // (src/katana_update/apply.cpp, Applier::fail). updateTellsOfSetAside
+    // holds for exactly the views that say it.
+    using katana::qt::updateTellsOfSetAside;
+    const QString again = QStringLiteral("Settings > Updates offers this one again.");
+    const auto ended = [](const char* status, const char* reason) {
+        UpdateView view = viewOf(UpdateDialogState::RolledBack);
+        view.lastStatus = QString::fromLatin1(status);
+        view.reason = QString::fromLatin1(reason);
+        return view;
+    };
+    const auto withReason = [](UpdateDialogState state, const char* reason) {
+        UpdateView view = viewOf(state);
+        view.reason = QString::fromLatin1(reason);
+        return view;
+    };
+
+    for (const UpdateView& view :
+         {withReason(UpdateDialogState::NotOffered, "blocked_before"),
+          ended("rolled_back", "health_exit"), ended("rolled_back", "health_timeout")}) {
+        EXPECT_TRUE(updateTellsOfSetAside(view)) << saidBy(view).toStdString();
+        EXPECT_TRUE(katana::qt::updateDetailText(view).endsWith(again))
+            << saidBy(view).toStdString();
+    }
+
+    // A skipped release is another list's; an install that was put back for
+    // another reason, or not put back, set nothing aside; and the token under
+    // a state that does not read it tells of nothing.
+    for (const UpdateView& view :
+         {withReason(UpdateDialogState::NotOffered, "skipped"),
+          ended("rolled_back", "rename_failed"), ended("refused", "health_exit"),
+          ended("rollback_incomplete", "health_timeout"), ended("rolled_back", ""),
+          withReason(UpdateDialogState::Available, "blocked_before"),
+          withReason(UpdateDialogState::CheckFailed, "blocked_before"),
+          viewOf(UpdateDialogState::Idle), viewOf(UpdateDialogState::Checking),
+          viewOf(UpdateDialogState::Current), viewOf(UpdateDialogState::Downloading),
+          viewOf(UpdateDialogState::Ready), viewOf(UpdateDialogState::Blocked),
+          viewOf(UpdateDialogState::Unsupported)}) {
+        EXPECT_FALSE(updateTellsOfSetAside(view)) << saidBy(view).toStdString();
+        EXPECT_FALSE(katana::qt::updateDetailText(view).endsWith(again))
+            << saidBy(view).toStdString();
+    }
 }
 
 TEST(UpdateDecisions, AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove)

@@ -62,6 +62,16 @@ COMMON_SPECS = [
     "gdal",
     "pdal",
     "nlohmann_json",
+    # The update engine's own two, which src/katana_update/CMakeLists.txt asks
+    # for by name: Ed25519 from libcrypto, raw inflate from zlib. The solve
+    # holds both without them - openssl through Qt, GDAL and libcurl, but zlib
+    # only because geotiff, libspatialite and prometheus-cpp name it rather
+    # than libzlib, which is the shared library alone: no zlib.h and no
+    # libz.so for a linker to ask for. Named so that a moved SNAPSHOT cannot
+    # drop the headers and leave the configure to a distribution's copy under
+    # /usr.
+    "openssl",
+    "zlib",
     "libsqlite",
     "gmp",
     "mpfr",

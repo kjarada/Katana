@@ -78,6 +78,12 @@ inline void PrintTo(Confirmed confirmed, std::ostream* out)
 
 namespace {
 
+// The last argument of detail::recoverWith: whether the program that calls recover() was started
+// as administrator (process.hpp, processIsElevated). A test SAYS which; how this run of the
+// suite was itself started is nothing a test may rest on.
+constexpr bool kOrdinaryStart = false;
+constexpr bool kStartedAsAdministrator = true;
+
 // The operations of a clean apply of the fixture release, by number.
 struct Points {
     std::uint64_t plan = 0;       // the PLAN group is appended
@@ -184,6 +190,29 @@ class UnlistableFrom final : public ForwardingFs {
 
   private:
     int from_;
+};
+
+// A file system on which the journal of a transaction is THERE and cannot be read: a scanner or
+// a backup has it open. That is a failure to read, with the system's code for a sharing
+// violation (32), and not "no such file" - the real file system answers NotFound only for a
+// file that is absent (src/katana_update/fsops_win.cpp, readFile). The folder lists and every
+// other file reads as it does. `heldFor` reads of a journal are refused, then they succeed
+// (-1: all of them).
+class JournalHeld final : public ForwardingFs {
+  public:
+    using ForwardingFs::ForwardingFs;
+    core::Result<std::string> readFile(const Path& p) const override
+    {
+        if (p.filename() == "journal") {
+            ++asked;
+            if (heldFor < 0 || asked <= heldFor) {
+                return osError(core::ErrorCode::FileImportFailure, "the file cannot be opened", p, 32);
+            }
+        }
+        return inner_.readFile(p);
+    }
+    int heldFor = -1;
+    mutable int asked = 0;
 };
 
 // A process seam that answers each question about the programs under the root from a list: the
@@ -765,7 +794,7 @@ TEST(RecoverBoundary, AnExceptionFromTheFileSystemIsAnErrorToReportAndNotACrash)
     FakeLauncher launcher;
     core::Status withHelper;
     EXPECT_NO_THROW(withHelper = detail::recoverWith(f.s.root, throwing, launcher, f.s.state,
-                                                      std::chrono::milliseconds(50)));
+                                                      std::chrono::milliseconds(50), kOrdinaryStart));
     EXPECT_FALSE(withHelper.ok()) << "recover() says so rather than dying: the caller reports it";
     EXPECT_TRUE(launcher.ran.empty());
     EXPECT_EQ(readText(f.s.root / "bin/lib.dll"), "the new lib\n") << "and nothing was touched";
@@ -801,7 +830,8 @@ TEST(RecoverBoundary, ANameThatIsNotTextInTheUpdateFolderOrInTheOldFilesCannotSt
     // The system seams too: recover() is the first thing a program does.
     FakeLauncher launcher;
     core::Status first;
-    EXPECT_NO_THROW(first = detail::recoverWith(f.s.root, disk, launcher, f.s.state, std::chrono::milliseconds(50)));
+    EXPECT_NO_THROW(first = detail::recoverWith(f.s.root, disk, launcher, f.s.state, std::chrono::milliseconds(50),
+                                                 kOrdinaryStart));
     EXPECT_TRUE(first.ok()) << (first.ok() ? "" : first.error().describe());
     fs::remove(oddFolder, ec);
 }
@@ -1027,11 +1057,24 @@ TEST(RecoverBeforeApply, AnInterruptedUpdateThatCannotBePutBackStopsTheNewOneBef
 
 namespace {
 
+// The versions of the releases an update is APPLIED from and to in this file's own scenarios.
+// They are versions no build of Katana has, on purpose: the installed version is the higher of
+// the install record's and the program's own (install.hpp), so a record BELOW the version this
+// suite was built as reads as the program's version, and a staged release is then the newer one
+// only while the project's version has not passed it - after that every such update is refused
+// as a `downgrade`, by a suite that had passed the day before. Above any project version, what
+// is installed is what the record says, and these tests do not know which build they are.
+// (The installs that are only recovered, never updated, keep their small versions: nothing
+// compares them. That the HIGHER of the two is taken is tests/update/test_state.cpp's.)
+constexpr const char* kFirstVersion = "900.1.0";
+constexpr const char* kSecondVersion = "900.2.0";
+constexpr const char* kThirdVersion = "900.3.0";
+
 // v1 installed and v2 staged, from small specifications; `expected` is v2's tree.
 void buildTinyLoop(Scenario& s)
 {
-    s.v1 = tiny("0.1.0", 100);
-    s.v2 = tiny("0.2.0", 200);
+    s.v1 = tiny(kFirstVersion, 100);
+    s.v2 = tiny(kSecondVersion, 200);
     writeInstall(s.root, s.v1);
     writeStage(s.stage, s.v2);
     writeInstall(s.expected, s.v2);
@@ -1074,7 +1117,7 @@ TEST(RecoverSuperseded, AnUpdateThatProvesHealthyDeletesThePendingFolderAnEarlie
     ASSERT_TRUE(isPresent(healthMarkerPath(s.state, first))) << "written when it was started";
 
     // A later release, installed by a window that was running tx1's version.
-    const ReleaseSpec v3 = tiny("0.3.0", 300);
+    const ReleaseSpec v3 = tiny(kThirdVersion, 300);
     fs::remove_all(s.stage);
     writeStage(s.stage, v3);
     const Path expected3 = s.scratch.path() / "expected3";
@@ -1109,7 +1152,7 @@ TEST(RecoverSuperseded, AnEarlierUpdateWhoseMarkerIsThereIsSettledFirstWhateverB
     ASSERT_TRUE(isPresent(healthMarkerPath(s.state, first))) << "the premise: its marker is there";
 
     fs::remove_all(s.stage);
-    writeStage(s.stage, tiny("0.3.0", 300));
+    writeStage(s.stage, tiny(kThirdVersion, 300));
     StdFs disk;
     Rig second(s, disk, "bbbbbbbb");
     second.launcher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
@@ -1140,7 +1183,7 @@ TEST(RecoverSuperseded, AnEarlierUpdateThatWasNeverSaidToStartStopsTheNextOneBef
     // Nothing says that the second release ever started: its marker is not there.
     fs::remove(healthMarkerPath(s.state, first));
 
-    const ReleaseSpec v3 = tiny("0.3.0", 300);
+    const ReleaseSpec v3 = tiny(kThirdVersion, 300);
     fs::remove_all(s.stage);
     writeStage(s.stage, v3);
     const std::map<std::string, std::string> installBefore = wholeInstall(s);
@@ -1199,7 +1242,7 @@ TEST(RecoverSuperseded, TheLogonEntryOfAnEarlierUpdateGoesWithItsHelperCopyEvenW
     ASSERT_TRUE(isPresent(healthMarkerPath(s.state, first))) << "the premise: its marker is there";
 
     fs::remove_all(s.stage);
-    writeStage(s.stage, tiny("0.3.0", 300));
+    writeStage(s.stage, tiny(kThirdVersion, 300));
     StdFs disk;
     Rig second(s, disk, "bbbbbbbb");
     second.registry.runOnce[std::string(kRunOnceName)] = "the dead helper's entry";
@@ -1236,7 +1279,7 @@ TEST(RecoverSuperseded, AnUpdateFolderThatCannotBeReadThroughStopsTheNextUpdateA
     fs::remove(healthMarkerPath(s.state, first)); // nothing says the second release starts
 
     fs::remove_all(s.stage);
-    writeStage(s.stage, tiny("0.3.0", 300));
+    writeStage(s.stage, tiny(kThirdVersion, 300));
     const std::map<std::string, std::string> installBefore = wholeInstall(s);
     const std::map<std::string, std::string> stageBefore = snapshot(s.stage);
 
@@ -1256,6 +1299,61 @@ TEST(RecoverSuperseded, AnUpdateFolderThatCannotBeReadThroughStopsTheNextUpdateA
     EXPECT_TRUE(second.launcher.ran.empty());
     EXPECT_TRUE(second.registry.runOnceHistory.empty());
     EXPECT_EQ(difference(stageBefore, snapshot(s.stage)), "") << "and the download is kept";
+}
+
+TEST(RecoverSuperseded, AnEarlierUpdateWhoseJournalCannotBeReadStopsTheNextUpdateAsAnUnsettledOneDoes)
+{
+    // Here R/.update lists, and it is the JOURNAL of the earlier update that will not be read: a
+    // scanner or a backup has it open. A folder that was dropped from the list for that was in
+    // nobody's count - not "left", not "could not look" - and a third release was planned over a
+    // second that nobody had shown to start; after which `--recover` could not put the second
+    // back either, the tree being no longer its release. The rule (recover_internal.hpp): a
+    // folder that could not be read may be such an update, and the swap does not go on.
+    REQUIRE_CAN_SIGN();
+    Loop loop("superseded-journal-held", buildTinyLoop);
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.healthy);
+    ASSERT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    const std::string first = onlyTransaction(s);
+    writeText(s.state / ("run-" + first) / "katana_updater.exe", "the dead helper's copy");
+    fs::remove(healthMarkerPath(s.state, first)); // nothing says the second release starts
+
+    const ReleaseSpec v3 = tiny(kThirdVersion, 300);
+    fs::remove_all(s.stage);
+    writeStage(s.stage, v3);
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> stageBefore = snapshot(s.stage);
+
+    StdFs disk;
+    {
+        JournalHeld held(disk);
+        Rig second(s, held, "bbbbbbbb");
+        const ApplyResult result = second.run();
+        EXPECT_GE(held.asked, 1) << "the premise: the journal was asked for, and would not be read";
+        EXPECT_EQ(result.outcome, ApplyOutcome::Refused);
+        EXPECT_EQ(result.reason, "interrupted_update") << result.detail;
+        // The sentence of the refusal that could not look, as when the folder will not list.
+        EXPECT_NE(result.detail.find("could not be read"), std::string::npos) << result.detail;
+        EXPECT_EQ(treeHash(s.root), s.v2Hash) << "the second release is still what is installed";
+        EXPECT_FALSE(isPresent(s.root / ".update" / "bbbbbbbb")) << "the new update made no folder of its own";
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+        EXPECT_TRUE(second.launcher.ran.empty());
+        EXPECT_TRUE(second.registry.runOnceHistory.empty());
+        EXPECT_EQ(second.registry.runOnceCleared, 0);
+        EXPECT_EQ(difference(stageBefore, snapshot(s.stage)), "") << "and the download is kept";
+    }
+
+    // The scanner gone, and the second release having said that it starts (its window writes
+    // the marker): the very same update goes through, over a tree that nothing had touched.
+    writeText(healthMarkerPath(s.state, first), "ok\n");
+    const Path expected3 = s.scratch.path() / "expected3";
+    writeInstall(expected3, v3);
+    Rig third(s, disk, "cccccccc");
+    const ApplyResult again = third.run();
+    ASSERT_EQ(again.outcome, ApplyOutcome::Committed) << again.reason << ": " << again.detail;
+    EXPECT_EQ(treeHash(s.root), treeHash(expected3));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
 }
 
 // ---- an update that is in place and was never said to start ------------------------------------------------------------------
@@ -2034,6 +2132,122 @@ TEST(SettleUnproved, AFolderThatCannotBeReadThroughIsNotAFolderWithNothingToSett
     }
 }
 
+// ---- "could not look" at the FIRST look ------------------------------------------------------------------------------------
+//
+// The case above fails a look that comes AFTER the first one. These fail the first: R/.update
+// will not be listed, or it lists and the journal of the update will not be read (a scanner or
+// a backup at the logon has it open). Until 2026-10-14 the first look of `--recover` and of the
+// window answered "this install holds no such update" for both, and a folder whose journal
+// could not be read was not even counted. The rule they are held to now is the one of H1
+// ("no update stays unproved for ever ... or is left for a start that can decide, and such a
+// start comes"): a look that could not be made decides nothing, so `--recover` leaves the
+// update WITH the logon entry registered again - Windows took it away before it started this
+// run - and the window is told to ask again. Nothing of the update is written in either.
+
+TEST(SettleUnproved, AJournalThatCannotBeReadIsAnUpdateThatMayBeThereItIsLeftAndTheLogonEntryIsPutBack)
+{
+    Unproved u("settle-journal-held");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker); // once it can be read, this update is put back: nobody is running
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    StdFs disk;
+    {
+        JournalHeld held(disk);
+        FaultFs counting(held);
+        Rig rig(s, counting, "eeeeeeee"); // its registry holds no entry: Windows has consumed it
+        // `katana_updater --recover` is a recovery and then a settlement. The recovery can do
+        // nothing with a folder it cannot read, and that is no failure of it.
+        const core::Status recovered = recoverInProcess(s.root, rig.services());
+        EXPECT_TRUE(recovered.ok()) << (recovered.ok() ? std::string() : recovered.error().describe());
+        EXPECT_EQ(settle(u, rig.services()), Settled::Left);
+
+        EXPECT_GE(held.asked, 2) << "the premise: both asked for the journal, and it would not be read";
+        EXPECT_EQ(counting.mutatingOperations(), 0u) << "nothing is written for a folder that was not read";
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+        EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+        EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+        EXPECT_EQ(rig.processes.scans.load(), 0) << "nothing is judged of an update that was not read";
+        EXPECT_EQ(rig.registry.runOnce, armed(u)) << "no logon would come back to an update that may be there";
+        EXPECT_EQ(rig.registry.runOnceCleared, 0);
+        EXPECT_TRUE(rig.launcher.ran.empty());
+        EXPECT_TRUE(rig.launcher.started.empty());
+    }
+
+    // That logon, the scanner gone: the journal is read, and the update - no marker, the files
+    // that release's, nobody running - is put back.
+    Rig rig(s, disk, "eeeeeeee");
+    EXPECT_EQ(settle(u, rig.services()), Settled::RolledBack);
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_TRUE(rig.registry.runOnce.empty()) << "nothing is left for a logon to do";
+}
+
+TEST(SettleUnproved, AJournalHeldOnlyAtTheFirstLookIsReadUnderTheLockAndTheUpdateIsSettled)
+{
+    // The scanner has the journal for one read: the first look does not see what the folder
+    // is. That is no reason to go away - the look under the lock reads it, and the rule is
+    // applied to what it says. With the marker there the update is confirmed.
+    Unproved u("settle-journal-blip");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    StdFs disk;
+    JournalHeld held(disk);
+    held.heldFor = 1;
+    WatchedFs watched(held);
+    Rig rig(s, watched, "eeeeeeee");
+    EXPECT_EQ(settle(u, rig.services()), Settled::Healthy);
+    EXPECT_GE(held.asked, 2) << "the premise: refused once, then read";
+    EXPECT_EQ(watched.locks, 1) << "the lock was asked for, though the first look saw no pending update";
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_EQ(rig.registry.runOnceHistory, std::vector<std::string>{u.command()});
+    EXPECT_TRUE(rig.registry.runOnce.empty());
+}
+
+TEST(SettleUnproved, AnUpdateFolderThatCannotBeListedAtTheFirstLookIsNotAnInstallWithNothingToSettle)
+{
+    Unproved u("settle-unlisted-first");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    // `katana_updater --recover`'s settlement: no look at R/.update succeeds, the first included.
+    {
+        StdFs disk;
+        UnlistableFrom unread(disk, 1);
+        FaultFs counting(unread);
+        Rig rig(s, counting, "eeeeeeee");
+        EXPECT_EQ(settle(u, rig.services()), Settled::Left);
+        EXPECT_GE(unread.asked, 1) << "the premise: the first look failed";
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(rig.processes.scans.load(), 0);
+        EXPECT_EQ(rig.registry.runOnce, armed(u)) << "no logon would come back to an update that may be there";
+        EXPECT_EQ(rig.registry.runOnceCleared, 0);
+    }
+    // The window: told to ask again, with nothing written - its marker neither - and the logon
+    // entry as the dead helper left it.
+    {
+        StdFs disk;
+        UnlistableFrom unread(disk, 1);
+        FaultFs counting(unread);
+        FakeRegistry registry;
+        registry.runOnce[std::string(kRunOnceName)] = u.command();
+        EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, counting, registry), Confirmed::Busy);
+        EXPECT_GE(unread.asked, 1) << "the premise: the first look failed";
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(registry.runOnce, armed(u));
+        EXPECT_EQ(registry.runOnceCleared, 0);
+        EXPECT_TRUE(isPresent(u.helper));
+    }
+    EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+    EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+}
+
 TEST(SettleUnproved, TheProgramsAreAskedForBeforeTheReleaseInTheTreeIsReadAndAgainAfterItAndNothingChangesUntilThen)
 {
     // "Asked before the hashing, and again as the last thing" (recover_internal.hpp). The
@@ -2418,6 +2632,42 @@ TEST(ConfirmStarted, AWindowThatCannotWriteItsMarkerSettlesNothingAndNeverPutsAn
     EXPECT_TRUE(isPresent(u.helper)) << "and so does the helper the entry names";
 }
 
+TEST(ConfirmStarted, AJournalThatCannotBeReadJustNowIsAskedAboutAgainAndNoMarkerIsWrittenForIt)
+{
+    // The journal of the update is there and will not be read (a scanner has it open). The
+    // window does not know what the folder is, so it is not "nothing to confirm" - and it is not
+    // a thing to write a marker for either: a folder that was not read may be an update a crash
+    // cut off in its commit, of which a window that starts is no proof. Asked again later, with
+    // the journal readable, it is the proof and settles the update (recover.hpp, Confirmed).
+    Unproved u("confirm-journal-held");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker); // so that a marker this call wrote would be seen
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    StdFs disk;
+    FakeRegistry registry;
+    registry.runOnce[std::string(kRunOnceName)] = u.command();
+    {
+        JournalHeld held(disk);
+        FaultFs counting(held);
+        EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, counting, registry), Confirmed::Busy);
+        EXPECT_GE(held.asked, 1) << "the premise: the journal was asked for, and would not be read";
+        EXPECT_EQ(counting.mutatingOperations(), 0u) << "its marker included";
+    }
+    EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+    EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    EXPECT_EQ(registry.runOnce, armed(u)) << "the logon net stays for an update that is not settled";
+    EXPECT_EQ(registry.runOnceCleared, 0);
+
+    EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, disk, registry), Confirmed::Done);
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_TRUE(registry.runOnce.empty());
+}
+
 // ---- a journal that is not whole ----------------------------------------------------------------------------------------------
 
 namespace {
@@ -2598,7 +2848,7 @@ TEST(RecoverWith, TheHelperCopyIsRunWithRecoverAndTheRootFromItsOwnFolderAndTheS
     ASSERT_TRUE(before.contains("run-" + x.transaction)) << "the premise: the copy's folder is in U";
     StdFs disk;
     FakeLauncher launcher;
-    const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait);
+    const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart);
     ASSERT_TRUE(status.ok()) << status.error().describe();
 
     ASSERT_EQ(launcher.ran.size(), 1u);
@@ -2624,7 +2874,7 @@ TEST(RecoverWith, TheRootIsPassedWithoutATrailingSeparator)
     writeText(x.copy(), "stand-in");
     StdFs disk;
     FakeLauncher launcher;
-    ASSERT_TRUE(detail::recoverWith(Path(core::pathToUtf8(s.root) + "/"), disk, launcher, s.state, kShortWait).ok());
+    ASSERT_TRUE(detail::recoverWith(Path(core::pathToUtf8(s.root) + "/"), disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     ASSERT_EQ(launcher.ran.size(), 1u);
     EXPECT_EQ(launcher.ran[0].arguments,
               (std::vector<std::string>{"--recover", core::pathToUtf8(s.root)}));
@@ -2639,7 +2889,7 @@ TEST(RecoverWith, TheCopyOutsideTheInstallIsPreferredAndTheInstallsOwnIsTheFallb
         writeText(x.own(), "the install's own");
         StdFs disk;
         FakeLauncher launcher;
-        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
         ASSERT_EQ(launcher.ran.size(), 1u);
         EXPECT_EQ(launcher.ran[0].executable, x.copy());
         EXPECT_TRUE(isPresent(x.own())) << "the install's own helper is not the copy's to delete";
@@ -2650,10 +2900,68 @@ TEST(RecoverWith, TheCopyOutsideTheInstallIsPreferredAndTheInstallsOwnIsTheFallb
         writeText(x.own(), "the install's own");
         StdFs disk;
         FakeLauncher launcher;
-        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
         ASSERT_EQ(launcher.ran.size(), 1u);
         EXPECT_EQ(launcher.ran[0].executable, x.own());
         EXPECT_EQ(launcher.ran[0].workingDirectory, x.own().parent_path());
+    }
+}
+
+TEST(RecoverWith, AProgramStartedAsAdministratorRunsTheInstallsOwnHelperAndNeverTheCopyInThePerUserFolder)
+{
+    // The ruling this holds recover() to is H4's: no helper runs with administrator rights from
+    // the per-user folder, which the same person's programs WITHOUT those rights can write.
+    // `UPDATE APPLY CONFIRM` is refused in such a Katana for it; recover() is the other way to a
+    // helper in U, and all that sends it there is writable by those programs too - a journal
+    // under R/.update, a file named katana_updater in U/run-<tx>. So, started as administrator:
+    // the install's own helper, or nothing and the command to run by hand.
+    {
+        // Both are there. The ordinary start prefers the copy (the case above); this one may not.
+        Interrupted x("recoverwith-elevated-own");
+        Scenario& s = x.scenario();
+        writeText(x.copy(), "the copy in the per-user folder");
+        writeText(x.own(), "the install's own");
+        const std::map<std::string, std::string> userBefore = snapshot(s.state);
+        StdFs disk;
+        FakeLauncher launcher;
+        const core::Status status =
+            detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kStartedAsAdministrator);
+        ASSERT_TRUE(status.ok()) << status.error().describe();
+        ASSERT_EQ(launcher.ran.size(), 1u);
+        EXPECT_EQ(launcher.ran[0].executable, x.own());
+        EXPECT_EQ(launcher.ran[0].arguments,
+                  (std::vector<std::string>{"--recover", core::pathToUtf8(s.root)}));
+        EXPECT_EQ(launcher.ran[0].workingDirectory, x.own().parent_path());
+        EXPECT_TRUE(launcher.started.empty());
+        EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    }
+    {
+        // Only the copy is there: it is NOT run, and the answer is the error that names the
+        // command to run by hand. Nothing of the install is touched.
+        Interrupted x("recoverwith-elevated-none");
+        Scenario& s = x.scenario();
+        writeText(x.copy(), "the copy in the per-user folder");
+        ASSERT_FALSE(isPresent(x.own())) << "the premise: the install has no helper of its own";
+        const std::string crashed = treeHash(s.root);
+        StdFs disk;
+        FakeLauncher launcher;
+        const core::Status status =
+            detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kStartedAsAdministrator);
+        ASSERT_FALSE(status.ok()) << "the helper copy in the per-user folder was taken";
+        EXPECT_EQ(status.error().code, core::ErrorCode::NotFound);
+        EXPECT_NE(status.error().message.find("katana_updater --recover"), std::string::npos)
+            << status.error().describe();
+        EXPECT_NE(status.error().message.find(core::pathToUtf8(s.root)), std::string::npos);
+        EXPECT_TRUE(launcher.ran.empty()) << "a file of the per-user folder was run with administrator rights";
+        EXPECT_TRUE(launcher.started.empty());
+        EXPECT_EQ(treeHash(s.root), crashed);
+        EXPECT_TRUE(isPresent(x.copy())) << "and it is not this program's to delete either";
+
+        // The same install and the same copy, from a program started the ordinary way: the copy
+        // is what runs. The refusal above was the administrator's, not the copy's.
+        ASSERT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
+        ASSERT_EQ(launcher.ran.size(), 1u);
+        EXPECT_EQ(launcher.ran[0].executable, x.copy());
     }
 }
 
@@ -2669,7 +2977,7 @@ TEST(RecoverWith, AHelperThatFailsLeavesItsCopyForTheRunOnceEntryAndSaysTheComma
         failed.exitCode = 2;
         return failed;
     };
-    const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait);
+    const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart);
     ASSERT_FALSE(status.ok());
     EXPECT_NE(status.error().message.find("katana_updater --recover"), std::string::npos);
     EXPECT_NE(status.error().context.find("2"), std::string::npos) << status.error().describe();
@@ -2681,7 +2989,7 @@ TEST(RecoverWith, AHelperThatFailsLeavesItsCopyForTheRunOnceEntryAndSaysTheComma
         hung.timedOut = true;
         return hung;
     };
-    EXPECT_FALSE(detail::recoverWith(s.root, disk, timedOutLauncher, s.state, kShortWait).ok());
+    EXPECT_FALSE(detail::recoverWith(s.root, disk, timedOutLauncher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(isPresent(x.copy()));
 }
 
@@ -2716,7 +3024,7 @@ TEST(RecoverWith, WhatALockKeptFromBeingDeletedAfterARollbackIsSweptAtTheNextSta
 
     // The next start: the file is free. recover() sweeps it without starting anything.
     FakeLauncher launcher;
-    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(leftoversInUpdate(s.root).empty());
     EXPECT_TRUE(launcher.ran.empty());
     EXPECT_EQ(treeHash(s.root), s.v1Hash);
@@ -2757,7 +3065,7 @@ TEST(RecoverWith, WhatIsStillHeldAtTheNextStartStaysUnderItsJournalAndIsNotQueue
     // the journal is the last thing a sweep deletes (remove_tree.hpp), so the folder still says
     // that its transaction is over ...
     FakeLauncher launcher;
-    EXPECT_TRUE(detail::recoverWith(s.root, holding, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, holding, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(launcher.ran.empty());
     EXPECT_FALSE(leftoversInUpdate(s.root).empty()) << "a file in it is held";
     EXPECT_EQ(journalStateOf(s.root), JournalState::RolledBack);
@@ -2765,7 +3073,7 @@ TEST(RecoverWith, WhatIsStillHeldAtTheNextStartStaysUnderItsJournalAndIsNotQueue
     EXPECT_EQ(difference(before, snapshot(s.state)), "") << "recover() changed the per-user state folder";
 
     // ... and the start after that, with the file free, finds it and sweeps it.
-    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(leftoversInUpdate(s.root).empty());
     EXPECT_TRUE(launcher.ran.empty());
     EXPECT_EQ(difference(before, snapshot(s.state)), "");
@@ -2784,10 +3092,10 @@ TEST(RecoverWith, ASweepIsLeftToTheUpdateThatIsRunningIfThereIsOne)
     ASSERT_TRUE(taken.ok());
     std::unique_ptr<FileLock> holder = std::move(taken).value();
     FakeLauncher launcher;
-    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_FALSE(leftoversInUpdate(s.root).empty()) << "an update is running: it is cleaning up after itself";
     holder.reset();
-    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(leftoversInUpdate(s.root).empty());
 }
 
@@ -2799,11 +3107,11 @@ TEST(RecoverWith, NothingToDoStartsNothingAndTakesNoLock)
     StdFs disk;
     WatchedFs watched(disk);
     FakeLauncher launcher;
-    EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(launcher.ran.empty());
     EXPECT_EQ(watched.locks, 0);
     writeText(s.root / ".update" / "lock", "");
-    EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_EQ(watched.locks, 0);
 }
 
@@ -2831,7 +3139,7 @@ TEST(RecoverWith, AnUpdateThatWasNeverSaidToStartIsLeftExactlyAsItIsWithNoLockAn
         WatchedFs watched(disk);
         FaultFs counting(watched);
         FakeLauncher launcher;
-        EXPECT_TRUE(detail::recoverWith(s.root, counting, launcher, s.state, kShortWait).ok());
+        EXPECT_TRUE(detail::recoverWith(s.root, counting, launcher, s.state, kShortWait, kOrdinaryStart).ok());
         EXPECT_EQ(watched.locks, 0);
         EXPECT_TRUE(launcher.ran.empty());
         EXPECT_TRUE(launcher.started.empty());
@@ -2881,7 +3189,7 @@ TEST(RecoverEmptyRoot, NoInstallFolderIsNotTheDotUpdateOfTheCurrentFolder)
     Rig rig(s, watching);
 
     // recover(): nothing to recover where there is no install.
-    EXPECT_TRUE(detail::recoverWith(Path(), watching, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(detail::recoverWith(Path(), watching, launcher, s.state, kShortWait, kOrdinaryStart).ok());
     EXPECT_TRUE(launcher.ran.empty());
     // The helper's --recover and a rollback are told a folder explicitly: an empty one is a
     // mistake, and an error.
@@ -2947,6 +3255,17 @@ struct SystemRecovery {
     std::string transaction;
 };
 
+// recover() itself asks the system whether THIS process was started as administrator, and such
+// a process never runs the helper copy in the per-user folder (recover.hpp). How this run of
+// the suite was started is not a test's to assume (docs/testing.md, "How the suite was
+// started"), so the cases below that put a helper in that folder say what recover() must do
+// for either answer. WHICH helper each answer picks is held through the seam, where a test
+// says the answer: RecoverWith.AProgramStartedAsAdministratorRunsTheInstallsOwnHelper...
+bool thisRunWasStartedAsAdministrator()
+{
+    return processIsElevated();
+}
+
 } // namespace
 
 TEST(RecoverOnWindows, NothingInterruptedIsOkWithoutRunningAnything)
@@ -2966,7 +3285,15 @@ TEST(RecoverOnWindows, AnInterruptedUpdateRunsTheHelperCopyWithRecoverAndTheRoot
     Scenario& s = r.loop.scenario();
     EnvironmentVariable state("KATANA_UPDATE_STATE_DIR", core::pathToUtf8(s.state));
     r.helperIn(s.state / ("run-" + r.transaction), "cmd.exe"); // exits 0
-    EXPECT_TRUE(recover(s.root).ok());
+    const core::Status status = recover(s.root);
+    if (thisRunWasStartedAsAdministrator()) {
+        // The copy is the only helper there is, and it is not this process's to run.
+        ASSERT_FALSE(status.ok()) << "a helper in the per-user folder was run with administrator rights";
+        EXPECT_EQ(status.error().code, core::ErrorCode::NotFound);
+        EXPECT_NE(status.error().message.find("katana_updater --recover"), std::string::npos);
+    } else {
+        EXPECT_TRUE(status.ok()) << (status.ok() ? std::string() : status.error().describe());
+    }
 }
 
 TEST(RecoverOnWindows, TheHelperCopyOutsideTheInstallIsPreferredToTheInstallsOwn)
@@ -2977,7 +3304,14 @@ TEST(RecoverOnWindows, TheHelperCopyOutsideTheInstallIsPreferredToTheInstallsOwn
         EnvironmentVariable state("KATANA_UPDATE_STATE_DIR", core::pathToUtf8(s.state));
         r.helperIn(s.state / ("run-" + r.transaction), "cmd.exe");        // exits 0
         r.helperIn(s.root / "bin", "where.exe");                          // exits 2
-        EXPECT_TRUE(recover(s.root).ok()) << "the copy ran, not bin/katana_updater";
+        const core::Status status = recover(s.root);
+        if (thisRunWasStartedAsAdministrator()) {
+            // The other way round there: the install's own ran, and that one fails.
+            ASSERT_FALSE(status.ok()) << "the copy in the per-user folder ran with administrator rights";
+            EXPECT_EQ(status.error().code, core::ErrorCode::InvalidState) << status.error().describe();
+        } else {
+            EXPECT_TRUE(status.ok()) << "the copy ran, not bin/katana_updater";
+        }
     }
     {
         SystemRecovery r("recover-sys-falls-back");
@@ -3019,7 +3353,10 @@ TEST(RecoverOnWindows, ALiveHolderOfTheLockIsWaitedForBeforeTheHelperIsRun)
     SystemRecovery r("recover-sys-lock");
     Scenario& s = r.loop.scenario();
     EnvironmentVariable state("KATANA_UPDATE_STATE_DIR", core::pathToUtf8(s.state));
+    // The same stand-in in both places a helper is looked for, so that the wait is what is
+    // measured whichever of them this process may run (above).
     r.helperIn(s.state / ("run-" + r.transaction), "cmd.exe");
+    r.helperIn(s.root / "bin", "cmd.exe");
     const auto disk = makeSystemFsOps();
     auto holder = std::make_unique<core::Result<std::unique_ptr<FileLock>>>(disk->tryLock(s.root / ".update" / "lock"));
     ASSERT_TRUE(holder->ok());

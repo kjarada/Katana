@@ -1065,12 +1065,16 @@ const std::vector<Tool>& tools()
             "development copy (a build tree) asks nobody and answers "
             "update=unsupported reason=development_tree. The reply is two records, in "
             "structuredContent as the objects check and status. check: update=available, "
-            "current, unreachable, unsupported or blocked, with installed, latest, files "
+            "current, unreachable or unsupported, with installed, latest, files "
             "(changed/total), download_bytes, notes_url, and reason and detail when there is "
             "something to say. status: installed, target, kind=installer, archive or "
             "development, staged, skipped, auto, last_check, token=present or absent (never "
             "the token) and last. No per-user setting is read here, so staged, skipped, auto, "
-            "last_check and last are what a copy with none says.",
+            "last_check and last are what a copy with none says, and what a person decided "
+            "about a release is not applied: a version they skipped, and a release that was "
+            "installed on this machine, did not start and was put back - which the window and "
+            "katana_cli answer as update=blocked and no longer offer - are both reported "
+            "available here. update=blocked is never answered by this tool.",
             objectSchema(Json::object()), hints(true, false, true, true),
             [](Session&, const Json&) {
                 return checkUpdateReply(katana::app::makeUpdateContext(UpdateSurface::Mcp));

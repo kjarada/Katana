@@ -190,6 +190,31 @@ bool wasSetAside(const UpdateView& view)
             view.reason == QLatin1String("health_timeout"));
 }
 
+// Whether the apply this view tells of was refused because an earlier update
+// of the install is still open, neither confirmed nor put back
+// (src/katana_update/apply.cpp, Applier::begin: no new update starts over
+// one).
+bool wasRefusedOverAnEarlierUpdate(const UpdateView& view)
+{
+    return view.lastStatus == QLatin1String("refused") &&
+           view.reason == QLatin1String("interrupted_update");
+}
+
+// What is said after the reason of such a refusal. The helper names the way
+// out in its own `detail`, on a console nobody sees, and the result it leaves
+// keeps the token alone - so the dialog says it. The start that shows this is
+// itself what settles most such updates: every start puts back what a crash
+// interrupted (update::recover), and a window of the installed version
+// confirms an update that was never said to start (updateStartMayConfirm). So
+// the first thing to do is to update again; where that is refused again -
+// a window that may not confirm, an update that does not start - nothing but
+// the helper's recovery, run by hand with Katana closed, settles it.
+QString unsettledWords(const QString& recoverCommand)
+{
+    return QStringLiteral("Update again; if this is said again, close Katana and run: %1")
+        .arg(recoverCommand);
+}
+
 // The buttons a state shows; the others are hidden.
 struct ShownButtons {
     bool checkNow = false;
@@ -476,6 +501,9 @@ QString updateDetailText(const UpdateView& view)
             return with(reason,
                         QStringLiteral("Close Katana and run: %1").arg(view.recoverCommand));
         }
+        if (wasRefusedOverAnEarlierUpdate(view) && !view.recoverCommand.isEmpty()) {
+            return with(reason, unsettledWords(view.recoverCommand));
+        }
         // The release that was put back is not offered again by itself.
         return wasSetAside(view) ? with(reason, setAsideWords()) : reason;
     }
@@ -739,7 +767,10 @@ std::optional<UpdateView> updateViewOfLastResult(const katana::update::LastResul
     }
     view.state = UpdateDialogState::RolledBack;
     view.lastStatus = QString::fromStdString(last.status);
-    if (last.status == "rollback_incomplete") {
+    // The two endings the helper's recovery settles: a tree that could not be
+    // put back completely, and a refusal over an earlier update that is still
+    // open (updateDetailText says what to do with the command for each).
+    if (last.status == "rollback_incomplete" || wasRefusedOverAnEarlierUpdate(view)) {
         view.recoverCommand = QStringLiteral("katana_updater --recover \"%1\"").arg(installRoot);
     }
     return view;
@@ -765,13 +796,48 @@ updateSkippedOfState(const katana::core::Result<katana::update::UpdateState>& st
     return QString::fromStdString(state->skippedVersion);
 }
 
+bool updateTellsOfSetAside(const UpdateView& view)
+{
+    switch (view.state) {
+    case UpdateDialogState::NotOffered:
+        return view.reason == QLatin1String("blocked_before");
+    case UpdateDialogState::RolledBack:
+        return wasSetAside(view);
+    case UpdateDialogState::Idle:
+    case UpdateDialogState::Checking:
+    case UpdateDialogState::Current:
+    case UpdateDialogState::Available:
+    case UpdateDialogState::Downloading:
+    case UpdateDialogState::Ready:
+    case UpdateDialogState::Blocked:
+    case UpdateDialogState::CheckFailed:
+    case UpdateDialogState::Unsupported:
+        break;
+    }
+    return false;
+}
+
 std::optional<bool>
-updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state)
+updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state,
+                     const UpdatePutBackFacts& facts)
 {
     if (!state) {
         return std::nullopt; // nobody can say: never "none"
     }
-    return !state->blockedSequences.empty();
+    const std::vector<std::uint64_t>& blocked = state->blockedSequences;
+    if (blocked.empty()) {
+        return false;
+    }
+    // Nothing says when this install's build was made, or the dialog is
+    // telling of one of them now: any build on the list counts.
+    if (!facts.hasInstalledRecord || facts.dialogTellsOfOne) {
+        return true;
+    }
+    // Otherwise only a build made after the one installed here: an earlier
+    // one is, as far as the list can say, a release this install has passed.
+    return std::any_of(blocked.begin(), blocked.end(), [&facts](std::uint64_t sequence) {
+        return sequence > facts.installedSequence;
+    });
 }
 
 bool updateStartMayConfirm(const UpdateConfirmFacts& facts)
