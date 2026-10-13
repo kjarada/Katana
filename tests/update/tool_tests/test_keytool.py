@@ -42,6 +42,22 @@ _REAL_FILE_AT_START = REAL_FILE.read_bytes()
 PLACEHOLDER_ACTIVE = "504c414345484f4c4445522d4143544956452d4e4f542d412d4b45592d30302d"
 PLACEHOLDER_SPARE = "504c414345484f4c4445522d53504152452d4e4f542d412d4b45592d2d30302d"
 
+# The command that gives CI the signing key, as docs/release.md ("Update signing", step 3) gives it to the
+# owner: a secret of the GitHub environment `release`, which only the Publish job runs in. Without
+# `--env release` the same command makes a secret of the repository, which every workflow there can read.
+SECRET_COMMAND = "gh secret set UPDATE_SIGNING_KEY --env release"
+
+
+def secret_commands(text: str) -> list[str]:
+    """Every `gh secret set ...` in `text`, up to the `<` that feeds it the key (or the line's end).
+
+    Whatever it sets and however it is spaced, as it stands in the text. The tests require the whole list to
+    be the one command, so a second form of it (an option before the name, two spaces between the words) has
+    to be FOUND here to be refused there: a reader of the one spelling returns nothing for it, and "in no
+    other form" then passes over the very thing it is for.
+    """
+    return [found.strip() for found in re.findall(r"\bgh\s+secret\s+set\b[^<\r\n]*", text)]
+
 
 def with_placeholders(data: bytes) -> bytes:
     """`data` with only the block between the marker lines replaced by the placeholder settings."""
@@ -314,6 +330,20 @@ class Pinning(ToolTest):
         self.assertNotIn(b"PRIVATE", self.scratch.read_bytes())
         self.assertNotIn("PRIVATE", done.stdout + done.stderr)
 
+    def test_after_pinning_it_gives_the_command_that_sets_the_secret_of_the_environment_release(self) -> None:
+        done = self.pub("--allow-test-keys")
+        self.assert_tool_ok(done)
+        # The whole command, with the active key's own file after the `<` and never the spare's.
+        self.assertIn(f"{SECRET_COMMAND} < {self.active}", done.stdout)
+        self.assertNotIn(str(self.spare), done.stdout.split("gh secret set", 1)[1])
+        # And in no other form: a command without --env release would make a secret every workflow can read.
+        self.assertEqual(secret_commands(done.stdout), [SECRET_COMMAND])
+
+    def test_a_refused_pair_is_given_no_command_for_the_secret(self) -> None:
+        done = self.pub()                                              # published test keys, no flag: refused
+        self.assert_tool_failed(done, "published test key")
+        self.assertEqual(secret_commands(done.stdout + done.stderr), [])
+
 
 class TheCommandLine(ToolTest):
     def test_there_is_no_gen_command(self) -> None:
@@ -327,10 +357,39 @@ class TheCommandLine(ToolTest):
             "openssl genpkey -algorithm ed25519 -out update-signing.pem",
             "openssl genpkey -algorithm ed25519 -out update-spare.pem",
             "python tools/update_keytool.py pub update-signing.pem update-spare.pem",
-            "gh secret set UPDATE_SIGNING_KEY < update-signing.pem",
+            f"{SECRET_COMMAND} < update-signing.pem",
         ):
             self.assertIn(command, text)
         self.assertIn("NO `gen`", text)
+
+    def test_help_gives_the_secret_command_only_for_the_environment_release(self) -> None:
+        # Once, and with --env release: the help must not also offer the repository-wide form as a first step
+        # "until the environment exists", which is the form that would then be the one run.
+        text = run_tool("update_keytool.py", "--help").stdout
+        self.assertEqual(secret_commands(text), [SECRET_COMMAND])
+        self.assertNotIn("add --env release", text)
+
+    def test_the_reader_of_secret_commands_finds_the_command_however_it_is_spelled(self) -> None:
+        # The helper the tests above lean on, held to texts written here.
+        self.assertEqual(secret_commands("x\n   gh secret set UPDATE_SIGNING_KEY < update-signing.pem\n"),
+                         ["gh secret set UPDATE_SIGNING_KEY"])
+        self.assertEqual(secret_commands("one:  gh secret set UPDATE_SIGNING_KEY --env release < a.pem\r\n"
+                                         "two: gh secret set UPDATE_SIGNING_KEY\r\n"),
+                         [SECRET_COMMAND, "gh secret set UPDATE_SIGNING_KEY"])
+        # The repository-wide command spelled another way: an option before the name, two spaces, a tab. Each
+        # comes back as it was written, which is not SECRET_COMMAND, so the tests above refuse it.
+        self.assertEqual(secret_commands("or: gh secret set -a actions UPDATE_SIGNING_KEY < a.pem\n"),
+                         ["gh secret set -a actions UPDATE_SIGNING_KEY"])
+        self.assertEqual(secret_commands("gh  secret set  UPDATE_SIGNING_KEY\n"),
+                         ["gh  secret set  UPDATE_SIGNING_KEY"])
+        self.assertEqual(secret_commands("gh\tsecret\tset UPDATE_SIGNING_KEY --env release < a.pem"),
+                         ["gh\tsecret\tset UPDATE_SIGNING_KEY --env release"])
+        # A command that sets another secret is one too: the key tool has no business printing it.
+        self.assertEqual(secret_commands("gh secret set RELEASES_REPO_TOKEN"), ["gh secret set RELEASES_REPO_TOKEN"])
+        # What is no such command: the secret's name in a sentence, another `gh secret` command, a longer word.
+        self.assertEqual(secret_commands("the secret UPDATE_SIGNING_KEY of the environment `release`\n"
+                                         "gh secret list --env release\n"
+                                         "gh secret settle UPDATE_SIGNING_KEY\n"), [])
 
 
 if __name__ == "__main__":

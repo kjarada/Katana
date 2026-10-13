@@ -15,9 +15,11 @@ The owner's steps, once (design section 3, docs/update.md):
   2. Pin their public halves in the tree (this tool):
          python tools/update_keytool.py pub update-signing.pem update-spare.pem
      then commit cmake/KatanaUpdateKeys.cmake.
-  3. Give CI the active key only (never the spare):
-         gh secret set UPDATE_SIGNING_KEY < update-signing.pem
-     (add --env release once the GitHub Environment `release` exists).
+  3. On GitHub, make the environment `release`, restricted to the default branch (docs/release.md,
+     "Update signing"), and give that environment the active key only (never the spare):
+         gh secret set UPDATE_SIGNING_KEY --env release < update-signing.pem
+     Make the environment first. Without `--env release` the secret would be the repository's, which
+     every workflow there can read; a secret of the environment reaches only the Publish job.
   4. Install the first updater-bearing release by hand; the next one is the first live update.
 
 Until step 2 the file holds PLACEHOLDER keys that no private key matches, and KATANA_REQUIRE_UPDATE_KEYS
@@ -157,7 +159,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  active key {active_id}")
     print(f"  spare  key {spare_id}")
     print("Next: commit that file (public data). Keep both .pem files offline and never commit them;")
-    print("give CI only the active one:  gh secret set UPDATE_SIGNING_KEY < " + str(args.active))
+    # As a secret of the environment `release`, never of the repository: only the Publish job runs in that
+    # environment, while a repository secret can be read by every workflow (docs/release.md, "Update signing").
+    print("give CI only the active one:  gh secret set UPDATE_SIGNING_KEY --env release < " + str(args.active))
+    print("(make the GitHub environment `release` first: docs/release.md, \"Update signing\", step 3)")
     return 0
 
 
