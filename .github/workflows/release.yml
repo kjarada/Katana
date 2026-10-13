@@ -227,33 +227,50 @@ jobs:
       # The release preset, with the compiler and prefix of the environment
       # the action installed (the preset names C:/msys64/ucrt64, a
       # developer's default). What makes it a RELEASE and not a developer's
-      # build: the update keys must be real ones, and the repository an
+      # build: the update keys must be real ones, the repository an
       # installed copy asks for the next version is the one this run
-      # publishes in.
+      # publishes in, and the package says which build of its version it
+      # is - the run's sequence, which CPack writes beside the version into
+      # share/katana/install.json (cmake/KatanaPackaging.cmake,
+      # "install.json") and the Publish job into the release's update
+      # manifests.
       #
-      # Both settings must have reached the project, not only its command
-      # line: CMake takes a -D the project has no use for with a warning and
-      # builds without it, and no program says which repository it asks. So
-      # the cache must hold each as the option the project declares (a -D
-      # nothing declares stays there as UNINITIALIZED), and the repository
-      # must be on the update library's compile line. Through tr, and grep
-      # without -q: on Windows CMake writes these files with CR LF, and this
-      # shell runs with pipefail, which a grep leaving early would trip. The
-      # two files are read as bytes (LC_ALL=C): macOS's sed and tr stop at a
-      # byte that is no character of the locale.
+      # All three settings must have reached the project, not only its
+      # command line: CMake takes a -D the project has no use for with a
+      # warning and builds without it, and no program says which repository
+      # it asks. So the cache must hold each as the option the project
+      # declares (a -D nothing declares stays there as UNINITIALIZED), and
+      # the repository must be on the update library's compile line; the
+      # sequence is read again where it ends up, in the package (the smoke
+      # test). Through tr, and grep without -q: on Windows CMake writes
+      # these files with CR LF, and this shell runs with pipefail, which a
+      # grep leaving early would trip. The two files are read as bytes
+      # (LC_ALL=C): macOS's sed and tr stop at a byte that is no character
+      # of the locale.
       - name: Configure
         env:
           UPDATE_REPO: ${{ needs.version.outputs.repo }}
+          UPDATE_SEQUENCE: ${{ needs.version.outputs.sequence }}
         run: |
+          # An empty sequence would configure, and package a Katana that
+          # names its version alone, as a build outside this workflow does.
+          case "$UPDATE_SEQUENCE" in
+            '' | *[!0-9]*)
+              echo "::error::the Version job gave no sequence for the package's install record (got '$UPDATE_SEQUENCE')"
+              exit 1
+              ;;
+          esac
           prefix=$(cygpath -m "$MINGW_PREFIX")
           cmake --preset release \
             -DCMAKE_CXX_COMPILER="$prefix/bin/${{ matrix.compiler }}" -DCMAKE_PREFIX_PATH="$prefix" \
             ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} \
             -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
-            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
+            -DKATANA_UPDATE_SEQUENCE="$UPDATE_SEQUENCE"
           export LC_ALL=C
           cache=build/release/CMakeCache.txt
-          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO" \
+            "KATANA_UPDATE_SEQUENCE:STRING=$UPDATE_SEQUENCE"; do
             tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
               echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
               exit 1
@@ -292,6 +309,12 @@ jobs:
       # PROJ's database, import through PDAL and GDAL, and the window must
       # build itself headless.
       #
+      # First what the package says of itself, in share/katana/install.json:
+      # the target it is named for, the version, and this run's sequence -
+      # the build the Publish job will sign a manifest for under that same
+      # number. It is the proof that -DKATANA_UPDATE_SEQUENCE went all the
+      # way into the package.
+      #
       # It is also what an update is made from, so the producer and the
       # independent recheck run on it here, unsigned and into a scratch
       # folder, before any program has run in the tree: a file the update
@@ -314,11 +337,24 @@ jobs:
             tr -s ' \t\r' '\n' < "$1" > "$1.words"
             grep -qxF -- "$2" "$1.words" || { echo "::error::$1 does not say $2"; return 1; }
           }
+          # records <install.json> <member>: the install record holds exactly
+          # that member. The record is one object of plain members, so cut at
+          # its commas it is one member a line. Through a pipe, so that
+          # nothing is written beside the record, where the producer below
+          # would take it for a file of the package; grep without -q reads
+          # the pipe to its end, and the log shows what the package says.
+          records() {
+            tr -d '{} \t\r\n' < "$1" | tr ',' '\n' | grep -xF -- "$2" || { echo "::error::$1 does not hold $2"; return 1; }
+          }
           version="${{ needs.version.outputs.version }}"
+          sequence="${{ needs.version.outputs.sequence }}"
           package="Katana-$version-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
           unzip -q "build/release/$package.zip" -d smoke
           root="smoke/$package"
+          records "$root/share/katana/install.json" "\"target\":\"${{ matrix.package }}\""
+          records "$root/share/katana/install.json" "\"version\":\"$version\""
+          records "$root/share/katana/install.json" "\"sequence\":$sequence"
           cp -r samples/site_plan smoke/project
           python tools/update_make_manifest.py --tree "$root" --out smoke/update \
             --version "$version" --target "${{ matrix.package }}" --sequence 1 \
@@ -444,20 +480,30 @@ jobs:
           for tool in cmake ctest cpack ninja; do
             ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$KATANA_TOOLCHAIN/bin-tools/$tool"
           done
-      # A release, not a developer's build: real update keys, and the
-      # repository this run publishes in as the one an installed copy asks
-      # for the next version - and both must have reached the project, in
-      # its cache and on the update library's compile line (see the Windows
+      # A release, not a developer's build: real update keys, the repository
+      # this run publishes in as the one an installed copy asks for the next
+      # version, and the run's sequence for the package's install record -
+      # and all three must have reached the project, in its cache and, the
+      # repository, on the update library's compile line (see the Windows
       # job, whose check this is).
       - name: Configure
         env:
           UPDATE_REPO: ${{ needs.version.outputs.repo }}
+          UPDATE_SEQUENCE: ${{ needs.version.outputs.sequence }}
         run: |
+          case "$UPDATE_SEQUENCE" in
+            '' | *[!0-9]*)
+              echo "::error::the Version job gave no sequence for the package's install record (got '$UPDATE_SEQUENCE')"
+              exit 1
+              ;;
+          esac
           cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
-            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO"
+            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
+            -DKATANA_UPDATE_SEQUENCE="$UPDATE_SEQUENCE"
           export LC_ALL=C
           cache=build/${{ matrix.preset }}/CMakeCache.txt
-          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO"; do
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO" \
+            "KATANA_UPDATE_SEQUENCE:STRING=$UPDATE_SEQUENCE"; do
             tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
               echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
               exit 1
@@ -539,6 +585,10 @@ jobs:
       # macOS has no timeout(1); the step's own limit stands in for it, so a
       # window that waits on a dialog fails the job instead of holding it.
       #
+      # First what the package says of itself in its install record, as in
+      # the Windows job: its target, its version and this run's sequence. In
+      # the bundle the record is under Contents/Resources.
+      #
       # The Linux tarball is also what an update is made from, so the
       # producer and the independent recheck run on it here, unsigned and
       # into a scratch folder, before any program has run in the tree (see
@@ -558,7 +608,14 @@ jobs:
             tr -s ' \t\r' '\n' < "$1" > "$1.words"
             grep -qxF -- "$2" "$1.words" || { echo "::error::$1 does not say $2"; return 1; }
           }
+          # records <install.json> <member>: the install record holds exactly
+          # that member (see the Windows job). Through a pipe: nothing is
+          # written into the tree, which the producer below reads.
+          records() {
+            tr -d '{} \t\r\n' < "$1" | tr ',' '\n' | grep -xF -- "$2" || { echo "::error::$1 does not hold $2"; return 1; }
+          }
           version="${{ needs.version.outputs.version }}"
+          sequence="${{ needs.version.outputs.sequence }}"
           package="Katana-$version-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
           if [ "${{ matrix.archive }}" = dmg ]; then
@@ -571,9 +628,16 @@ jobs:
             test -s smoke/Katana.app/Contents/Resources/katana.icns
             codesign --verify --deep --strict --verbose=2 smoke/Katana.app
             bin="smoke/Katana.app/Contents/MacOS"
+            record="smoke/Katana.app/Contents/Resources/share/katana/install.json"
           else
             tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C smoke
             bin="smoke/$package/bin"
+            record="smoke/$package/share/katana/install.json"
+          fi
+          records "$record" "\"target\":\"${{ matrix.package }}\""
+          records "$record" "\"version\":\"$version\""
+          records "$record" "\"sequence\":$sequence"
+          if [ "${{ matrix.archive }}" != dmg ]; then
             python3 tools/update_make_manifest.py --tree "smoke/$package" --out smoke/update \
               --version "$version" --target "${{ matrix.package }}" --sequence 1 \
               --seed "$UPDATE_SEED" --exclude "$UPDATE_EXCLUDE" --exclude "$UPDATE_EXCLUDE_LINUX"
@@ -740,11 +804,24 @@ jobs:
             esac
             tree="trees/$token/Katana-$VERSION-$token"
             # The manifest about to be made is offered to the installs whose
-            # install.json names this target, so the package must be one.
-            grep -qF "\"target\":\"$token\"" "$tree/share/katana/install.json" || {
-              echo "::error::share/katana/install.json of the $token package does not name the target $token"
-              exit 1
-            }
+            # install.json names this target, so the package must be one. And
+            # it must be the build the manifest describes: its record names
+            # the version and the sequence the manifest is about to carry. A
+            # copy of the package unpacked over one that had updated itself
+            # is placed by its own record (docs/update.md, "The installed
+            # version"); under another sequence than its manifest's it would
+            # be offered the files it already has, or not be offered a later
+            # build of this version. The record is one object of plain
+            # members: cut at its commas, one member a line. Through a pipe,
+            # so that nothing is written into the tree the producer is about
+            # to read.
+            record="$tree/share/katana/install.json"
+            for member in "\"target\":\"$token\"" "\"version\":\"$VERSION\"" "\"sequence\":$SEQUENCE"; do
+              tr -d '{} \t\r\n' < "$record" | tr ',' '\n' | grep -xF -- "$member" || {
+                echo "::error::share/katana/install.json of the $token package does not hold $member: the package is not the build of $TAG, sequence $SEQUENCE, that its manifest would describe"
+                exit 1
+              }
+            done
             python3 tools/update_make_manifest.py --tree "$tree" --target "$token" "${options[@]}" \
               --seed "$UPDATE_SEED" --exclude "$UPDATE_EXCLUDE" "${extra[@]}"
           done

@@ -666,6 +666,68 @@ class FakeProcesses final : public ProcessOps {
     mutable std::atomic<int> scans{0};
 };
 
+// A process seam that answers each question about the programs under the root from a list.
+// FakeProcesses above can say "these programs, for the first n questions, and then nobody"; the
+// opposite - nobody at first, and somebody at a LATER question - is what a program started
+// while the helper works looks like, and this gives each question its own answer: the swap's
+// two looks (test_apply.cpp) and the two a recovery takes before it puts an update back
+// (test_recover.cpp).
+class ScriptedProcesses final : public ProcessOps {
+  public:
+    // What one question is answered with.
+    struct Answer {
+        std::vector<RunningProgram> holders; // empty: nobody is running
+        bool fails = false;                  // the scan itself fails (no answer at all)
+    };
+
+    // The k-th question (from 1) gets the k-th answer; past the list nobody is running.
+    explicit ScriptedProcesses(std::vector<Answer> answers = {}) : answers_(std::move(answers)) {}
+
+    std::uint64_t pid = 1;
+    // Called at each question with its number, before it is answered: where a test looks at the
+    // disk as it stands at that moment, or notes how far the work had got.
+    std::function<void(int)> onScan;
+    mutable int scans = 0;
+
+    std::uint64_t currentPid() const override { return pid; }
+    // No window is waited for in the cases that use this seam (waitPid is 0).
+    bool isAlive(std::uint64_t) const override { return false; }
+    core::Result<std::vector<RunningProgram>> holdersUnder(const Path&) const override
+    {
+        const int asked = ++scans;
+        if (onScan) {
+            onScan(asked);
+        }
+        if (asked > static_cast<int>(answers_.size())) {
+            return std::vector<RunningProgram>{};
+        }
+        const Answer& answer = answers_[static_cast<std::size_t>(asked - 1)];
+        if (answer.fails) {
+            return core::makeError(core::ErrorCode::Internal, "the snapshot failed");
+        }
+        return answer.holders;
+    }
+
+  private:
+    std::vector<Answer> answers_;
+};
+
+// The three answers a question can get.
+inline ScriptedProcesses::Answer nobody()
+{
+    return ScriptedProcesses::Answer{};
+}
+
+inline ScriptedProcesses::Answer somebody(std::uint64_t pid, const char* image)
+{
+    return ScriptedProcesses::Answer{{RunningProgram{pid, core::pathFromUtf8(image)}}, false};
+}
+
+inline ScriptedProcesses::Answer noAnswer()
+{
+    return ScriptedProcesses::Answer{{}, true};
+}
+
 class FakeLauncher final : public Launcher {
   public:
     std::vector<SpawnRequest> ran;
@@ -818,8 +880,13 @@ struct FileSpec {
 };
 
 struct ReleaseSpec {
-    std::string version = "0.2.0";
-    std::string tag = "v0.2.0";
+    // A version no build of Katana has, on purpose, for a release that is given none. The
+    // default was 0.2.0, the project's version of the day; a release that is the version of
+    // the build that reads it, or below it, is an update or not by that build wherever the
+    // program stands for the copy (install.hpp, the floor against going back). Every release
+    // the tests write out names its own version, so no case rests on this one.
+    std::string version = "900.2.0";
+    std::string tag = "v900.2.0";
     std::uint64_t sequence = 1000;
     std::string target = "win64";
     std::vector<FileSpec> files;
@@ -896,7 +963,29 @@ inline std::string installedJson(const ReleaseSpec& release)
            release.version + "\"}\n";
 }
 
-inline constexpr std::string_view kInstallJson = "{\"schema\":1,\"target\":\"win64\"}";
+// install.json of every install the harness writes: a win64 package that NAMES THE VERSION IT
+// WAS BUILT AS (install.hpp; no sequence, as a package of no release names none).
+//
+// Why it names one. A record that says its target and no more leaves the program that asks to
+// stand for the copy, and the installed version is then the higher of installed.json's and
+// THIS BUILD's. The updates of the fixtures, of the forty-file pair and of the helper's own
+// tests are 0.9.0 to 0.10.0: by their versions while the project is below 0.10.0, by their
+// sequences alone at 0.10.0, and every one of them a `downgrade` from the first version above
+// that - the swap's tests failing for a change of the project's version and of nothing else.
+// With the package's own version in the record the asking program is not asked at all
+// (state.cpp, packageBuild), so what is installed is what the records say, whichever build
+// reads them.
+//
+// Why 0.1.0, and one text for every install. An update never writes install.json: the tree a
+// good update leaves still has the record of the package the copy came from, which is neither
+// release's own. So the expected trees are written with this same text (writeInstall of the
+// new release into `expected`), and the tests that read the record back compare with it. It is
+// the package the copy CAME FROM, then, and 0.1.0 is at or below every release a test installs
+// (0.1.0, 0.9.0, 0.10.0 and the 900s): the copy's own build is never above installed.json's,
+// and the installed version and sequence are the record's. A scenario that installs a release
+// BELOW 0.1.0 would read as 0.1.0 - give that one a record of its own.
+inline constexpr std::string_view kInstallJson =
+    "{\"schema\":1,\"target\":\"win64\",\"version\":\"0.1.0\"}";
 
 // The files of a release at R, plus the install record that makes R an install.
 inline void writeFiles(const Path& root, const ReleaseSpec& release)
@@ -1136,12 +1225,15 @@ inline void copyTree(const Path& from, const Path& to)
 // stage is the fixtures' v2 files with the manifest and signature of release folder
 // `stageRelease` ("v2", or "bad/downgrade-version", ...). With the defaults - v1 installed, v2
 // staged - `expected` is the tree the update must leave: v2's files, the seed as v1 had it,
-// and v2's records.
+// and v2's records. install.json is the harness's (kInstallJson) in R and in `expected`: the
+// fixture trees' own says its target and no more, which would leave the installed version to
+// the build that reads it.
 inline void buildFixtureScenario(Scenario& s, const std::string& installed = "v1",
                                  const std::string& stageRelease = "v2")
 {
     const Path fixtures = fixtureFolder();
     copyTree(fixtures / "install" / installed, s.root);
+    writeText(s.root / "share/katana/install.json", kInstallJson);
     const bool v1 = installed == "v1";
     writeText(s.root / "share/katana/installed.json",
               std::string("{\"product\":\"katana\",\"schema\":1,\"sequence\":") +
@@ -1161,6 +1253,7 @@ inline void buildFixtureScenario(Scenario& s, const std::string& installed = "v1
 
     if (v1 && stageRelease == "v2") {
         copyTree(fixtures / "install" / "v2", s.expected);
+        writeText(s.expected / "share/katana/install.json", kInstallJson); // R's: no update writes it
         writeText(s.expected / "etc/katana/settings.ini",
                   readText(fixtures / "install/v1/etc/katana/settings.ini"));
         writeText(s.expected / "share/katana/installed.json",

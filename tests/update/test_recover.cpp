@@ -215,63 +215,6 @@ class JournalHeld final : public ForwardingFs {
     mutable int asked = 0;
 };
 
-// A process seam that answers each question about the programs under the root from a list: the
-// k-th question (from 1) gets the k-th answer, and past the list nobody is running. The harness's
-// FakeProcesses can say "these programs, and then nobody"; a program started while a recovery is
-// deciding is the opposite. (The same double is in test_apply.cpp, for the swap's two questions:
-// both belong beside FakeProcesses in apply_harness.hpp.)
-class ScriptedProcesses final : public ProcessOps {
-  public:
-    struct Answer {
-        std::vector<RunningProgram> holders; // empty: nobody is running
-        bool fails = false;                  // the scan itself fails (no answer at all)
-    };
-
-    explicit ScriptedProcesses(std::vector<Answer> answers = {}) : answers_(std::move(answers)) {}
-
-    std::uint64_t pid = 1;
-    // Called at each question with its number, before it is answered: where a test notes how
-    // far the work had got at that moment.
-    std::function<void(int)> onScan;
-    mutable int scans = 0;
-
-    std::uint64_t currentPid() const override { return pid; }
-    bool isAlive(std::uint64_t) const override { return false; }
-    core::Result<std::vector<RunningProgram>> holdersUnder(const Path&) const override
-    {
-        const int asked = ++scans;
-        if (onScan) {
-            onScan(asked);
-        }
-        if (asked > static_cast<int>(answers_.size())) {
-            return std::vector<RunningProgram>{};
-        }
-        const Answer& answer = answers_[static_cast<std::size_t>(asked - 1)];
-        if (answer.fails) {
-            return core::makeError(core::ErrorCode::Internal, "the snapshot failed");
-        }
-        return answer.holders;
-    }
-
-  private:
-    std::vector<Answer> answers_;
-};
-
-ScriptedProcesses::Answer nobody()
-{
-    return ScriptedProcesses::Answer{};
-}
-
-ScriptedProcesses::Answer somebody(std::uint64_t pid, const char* image)
-{
-    return ScriptedProcesses::Answer{{RunningProgram{pid, core::pathFromUtf8(image)}}, false};
-}
-
-ScriptedProcesses::Answer noAnswer()
-{
-    return ScriptedProcesses::Answer{{}, true};
-}
-
 } // namespace
 
 // ---- every state a journal can be left in ------------------------------------------------------------------
@@ -1058,14 +1001,18 @@ TEST(RecoverBeforeApply, AnInterruptedUpdateThatCannotBePutBackStopsTheNewOneBef
 namespace {
 
 // The versions of the releases an update is APPLIED from and to in this file's own scenarios.
-// They are versions no build of Katana has, on purpose: the installed version is the higher of
-// the install record's and the program's own (install.hpp), so a record BELOW the version this
-// suite was built as reads as the program's version, and a staged release is then the newer one
-// only while the project's version has not passed it - after that every such update is refused
-// as a `downgrade`, by a suite that had passed the day before. Above any project version, what
-// is installed is what the record says, and these tests do not know which build they are.
+// They are versions no build of Katana has, on purpose, and these tests do not know which build
+// they are for two reasons (test_apply.cpp, at its kOldVersion, has both and the cases that
+// hold them). The harness's install.json names the version of its package (apply_harness.hpp,
+// kInstallJson), and the program that reads such an install is not asked for its own
+// (install.hpp): what is installed is what the records say. And should that record say its
+// target and no more again - the installed version is then the higher of installed.json's and
+// the asking program's, so a record BELOW the version this suite was built as reads as the
+// program's version, and a staged release is the newer one only while the project's version has
+// not passed it; after that every such update is refused as a `downgrade`, by a suite that had
+// passed the day before - above any project version installed.json is still the higher.
 // (The installs that are only recovered, never updated, keep their small versions: nothing
-// compares them. That the HIGHER of the two is taken is tests/update/test_state.cpp's.)
+// compares them. The rule itself, both halves of it, is tests/update/test_state.cpp's.)
 constexpr const char* kFirstVersion = "900.1.0";
 constexpr const char* kSecondVersion = "900.2.0";
 constexpr const char* kThirdVersion = "900.3.0";

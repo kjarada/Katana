@@ -188,8 +188,11 @@ Three consequences follow from the same rule:
   `src/`, so that the swap and its recovery are driven in process by tests.
   One question about the machine has no interface: whether the process
   was started as administrator (`update::processIsElevated`). It is asked
-  once, when a program's update context is made, and handed on as a member
-  of that context (`UpdateContext::elevated`), which is what a test sets.
+  in two places and handed on from each, so that a test gives the answer
+  and never the machine: when a program's update context is made, as a
+  member of that context (`UpdateContext::elevated`); and by
+  `update::recover`, the first act of every program, which hands it to the
+  recovery its tests drive (`detail::recoverWith`).
 - **Its two libraries stay behind `src/`** like every other (Rule 4):
   OpenSSL's libcrypto for the signature and zlib for inflating, both linked
   statically on Windows so that the helper imports only the operating
@@ -401,6 +404,8 @@ the program, and not static linking" moved there from this document.
 | The update helper itself dies while the new version is proving that it starts | the tree is a whole new version that nothing has confirmed, and no program's recovery touches it. It is settled from what is on the disk, under the update lock, by `katana_updater --recover` at the next logon, by a window of that version at its first idle turn, or by the next update: confirmed on the new version's marker; put back only by `--recover`, and only when the files are still that release's and no program of the install is running; otherwise left for a start that can decide (`docs/update.md`, "An update whose helper died during the health check") |
 | A program of the install is started while an update is being prepared | the helper lists the running programs a second time, after its plan and before the first file moves, and gives way: nothing is touched and the download is kept (`docs/update.md`, "The swap", step 4) |
 | Katana was started as administrator and asked to install an update | refused before the helper is copied (`reason=elevated`): the helper would run with those rights from a folder ordinary programs can write. Started the ordinary way it installs the release, which stays downloaded (`docs/update.md`, "The three kinds") |
+| Katana was started as administrator and finds an update that a crash interrupted | its recovery runs the install's own `bin/katana_updater` and never the helper copy in the per-user folder, for the same reason; where the install's own is not there, nothing is run and stderr names the two ways out (`docs/update.md`, "The three kinds") |
+| A scanner or a backup has an update's journal open when it is looked for | what could not be read is never taken for "no update here": the logon's `--recover` leaves it with its entry registered again, a window asks again, and a new update is refused until the journal reads (`docs/update.md`, "An update whose helper died during the health check") |
 
 ## Section and phase numbers in older comments
 

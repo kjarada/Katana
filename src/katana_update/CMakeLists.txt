@@ -76,8 +76,10 @@ katana_target_defaults(katana_update)
 # temporary folder, with no bin/ beside it), and a static library cannot hand it a
 # DLL it did not ask for. libcrypto.a and libz.a are in MSYS2 UCRT64; libcrypto needs
 # ws2_32 and crypt32 after it. The resulting imports are MEASURED on tests/update's
-# katana_update_link_probe, which uses Ed25519 through EVP, raw inflate and crc32 through
-# this target with the helper's link options: ADVAPI32, CRYPT32, KERNEL32, USER32, WS2_32
+# katana_update_link_probe, which uses what the engine uses - Ed25519 through EVP, raw
+# inflate - and zlib's crc32 as well (the engine calls none of zlib's: the journal's CRC-32
+# is its own, journal.cpp, and a member's is not checked, inflate.cpp), through this target
+# with the helper's link options: ADVAPI32, CRYPT32, KERNEL32, USER32, WS2_32
 # and the api-ms-win-crt set, nothing else (test katana_update_link_probe_imports_only_os_dlls).
 # The helper is held to the same list (katana_updater_imports_only_os_dlls), and its own
 # listing speaks for libcrypto, which it carries: it checks every signature itself. For zlib

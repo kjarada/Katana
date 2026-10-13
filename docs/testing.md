@@ -439,7 +439,20 @@ a held lock is a live helper, and then not even the registry is written
 (`AHeldLockIsALiveHelperAndNothingIsWrittenNotEvenTheRunOnceEntry`); a marker
 missing from another per-user folder, old files that are not all kept, a
 lock that cannot be opened and a folder that cannot be read through decide
-nothing. The window's half is `detail::confirmStartedWith`
+nothing. Nor does a journal that is there and cannot be read, which a file
+system double gives by refusing that one read as a scanner holding the file
+does: the settlement leaves the update with the logon entry registered,
+changes nothing and asks no scan
+(`AJournalThatCannotBeReadIsAnUpdateThatMayBeThereItIsLeftAndTheLogonEntryIsPutBack`,
+and for an `R/.update` that will not be listed
+`AnUpdateFolderThatCannotBeListedAtTheFirstLookIsNotAnInstallWithNothingToSettle`);
+a journal held for the first look alone is read under the lock
+(`AJournalHeldOnlyAtTheFirstLookIsReadUnderTheLockAndTheUpdateIsSettled`);
+the window is told to ask again and writes no marker
+(`AJournalThatCannotBeReadJustNowIsAskedAboutAgainAndNoMarkerIsWrittenForIt`);
+and the next swap is refused with the install and the download as they
+were (`AnEarlierUpdateWhoseJournalCannotBeReadStopsTheNextUpdateAsAnUnsettledOneDoes`).
+The window's half is `detail::confirmStartedWith`
 (`TheWindowOfTheNewVersionSettlesTheUpdateHealthyAndClearsWhatTheDeadHelperLeft`,
 `AHeldLockIsALiveHelperTheWindowAsksOnceAndChangesNothing`), and the next
 swap's is step 1 of the swap itself
@@ -589,7 +602,17 @@ that cannot see a violation passes as quietly as one that finds none:
 - the installer: `packaging_nsis_template_is_per_user` holds the installer
   script's text to its rules, and each `packaging_nsis_check_catches_*`
   breaks one rule in that text (`docs/release.md`, "The Windows
-  installer").
+  installer");
+- the install record: the `packaging_install_record_*` tests run the
+  script CPack runs, on a staged folder of their own that is emptied
+  first, and hold the `install.json` it leaves to the whole text written
+  out in the test - this build's, one of a release (the version, then the
+  sequence) and one of no release (the version alone). The rule a
+  sequence is held to when a build is configured is put to the least and
+  the greatest a manifest may carry and to what is refused - nought, a
+  sign, a fraction, an exponent, a leading zero, a number past the
+  greatest - by `packaging_takes_a_release_sequence_and_refuses_what_no_manifest_could_carry`
+  (`cmake/KatanaPackaging.cmake`, "install.json").
 
 **The surfaces.** The verbs run for real over a fake transport, a scratch
 install and the signed fixtures (`tests/app/test_update_verbs.cpp`, suite
@@ -620,29 +643,69 @@ runs on:
   Windows itself calls not elevated
   (`TheAnswerIsSteadyAndIsNeverYesForATokenWindowsCallsNotElevated`). A
   "yes" from the system is seen only by a suite that holds the elevated
-  half of a split token.
-- **Which version the suite was built as.** The installed version is the
-  higher of the install record's and the program's own, so what
-  `update::readInstall` answers depends on the build. The rule is therefore
-  shown through `detail::readInstallAs`, the same reading with the
-  program's version handed in, for a program below, at and above a record
-  (`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`,
-  `AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`); the
-  cases that read with this build's own version place their record by
+  half of a split token. Recovery is told in the same way: `update::recover`
+  hands the answer to `detail::recoverWith`, and the test hands it both
+  answers - started as administrator, the install's own helper is run and
+  never the copy in the per-user folder, and with only the copy there
+  nothing is run
+  (`AProgramStartedAsAdministratorRunsTheInstallsOwnHelperAndNeverTheCopyInThePerUserFolder`).
+- **Which version the suite was built as.** A copy whose `install.json`
+  says its target and no more is stood for by the program that reads it:
+  its installed version is the higher of the helper's record and the
+  program's own, so what `update::readInstall` answers for it depends on
+  the build (`docs/update.md`, "The installed version"). The rule is
+  therefore shown through `detail::readInstallAs`, the same reading with
+  the program's version handed in, for a program below, at and above a
+  record (`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`,
+  `AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`), and so
+  is the reading of a package that names its own build, which no
+  program's version moves
+  (`OfTheHelpersRecordAndThePackagesOwnBuildTheHigherIsTheInstalledOne`);
+  the cases that read with this build's own version place their record by
   `KATANA_EXPECTED_VERSION`, which the build hands the suite from
-  `project(Katana VERSION ...)`. The verbs' tests that read the fixtures'
-  record of 0.9.0 through this program say so and stop being true when the
-  project's version passes it
-  (`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords` asserts the
-  premise first). The swap's in-process tests are the other place the
-  build's version reaches, and they assert no such premise: their small
-  releases are 0.1.0 installed and 0.2.0 staged (`buildSmallScenario` in
-  `tests/update/test_apply.cpp`, `buildTinyLoop` in
-  `tests/update/test_recover.cpp`), and 0.2.0 is the project's own version
-  today. So the installed version reads there as the program's, and it is
-  the SEQUENCES that make the staged release the newer one. A project
-  version above 0.2.0 turns each of those updates into a `downgrade`, and
-  the versions of those releases have to move before it does.
+  `project(Katana VERSION ...)`.
+
+  The verbs' test that reads an install's records through this program
+  asserts no premise about the project's version any more. Its install
+  names the package's own build, 0.8.0, under the helper's record of the
+  fixtures' 0.9.0, so the program is not asked and the answer is 0.9.0
+  whatever the suite was built as
+  (`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords`). The reading
+  that does follow the build is the test beside it, whose record is 0.1.0,
+  a version the project left behind
+  (`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
+
+  The swap's tests are the other place the build's version reaches, since
+  the helper reads the install it updates. Every install their harness
+  writes therefore names the version of the package it came from
+  (`kInstallJson` in `tests/update/apply_harness.hpp`: 0.1.0, at or below
+  every release a test installs), and a scenario that copies a fixture
+  tree, whose own record says the target alone, gives it that record. So
+  what is installed there is what the helper's record says, whichever
+  build reads it - shown where it makes a difference, on an install of
+  0.1.0, which is below this build
+  (`AnInstallTheHarnessWritesIsReadAsItsRecordsSayAndNotAsThisBuild`). The
+  releases a test writes out for itself are 900.1.0 installed and 900.2.0
+  staged (`buildSmallScenario` in `tests/update/test_apply.cpp`,
+  `buildTinyLoop` in `tests/update/test_recover.cpp`) - versions no build
+  of Katana has, as is the version of a release that is given none
+  (`TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild`); the fixtures'
+  pair and the forty-file pair are 0.9.0 and 0.10.0. Under a record that
+  said the target alone each of those updates would rest on the project's
+  version: an install whose record is below the program reads as the
+  program's version, and the staged release is then the newer one only
+  while the project has not passed it.
+
+  The end-to-end tests are NOT yet free of it. Their driver writes the
+  record with the target alone (`INSTALL_RECORD` in
+  `tests/update/update_e2e.py`), and their installs are read by
+  `katana_update_e2e` and `katana_updater_test`, which are built as the
+  project's version. Its expectation that the fixtures' first install
+  says `installed` 0.9.0 holds while the project's version is not above
+  0.9.0; its updates from 0.9.0 to 0.10.0 are updates until the project
+  passes 0.10.0 - by their versions below it, by their sequences at it -
+  and each a `downgrade` above. The driver's record, or the fixtures'
+  two versions, has to move before the project's does.
 - **What the person kept.** `UPDATE BLOCKED CLEAR` is run by `katana_cli`
   against a state file a CMake script wrote by hand - two releases blocked,
   a version skipped, the switch off, a time of the last check - and the

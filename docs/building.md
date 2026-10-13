@@ -99,14 +99,36 @@ ctest --preset linux-release -j 4
 **The toolchain** (`tools/setup_linux_toolchain.py`) is one prefix of
 conda-forge packages: GCC 16.2 (the version MSYS2 gives the Windows build),
 CMake, Ninja, clang-format, Qt 6, CGAL, Eigen, PROJ, GDAL, PDAL, SQLite,
-nlohmann-json, GoogleTest and Google Benchmark. It is solved and installed by
-py-rattler, from PyPI, so it needs neither conda nor root beyond write access
-to the prefix, and it reaches only `conda.anaconda.org` and `pypi.org`. The
-solve is frozen at a date (`SNAPSHOT` in the script), so every machine gets
-the same versions until that date is moved; a prefix whose stamp matches is
-left alone, so running it again takes a second. On 2026-09-26 the snapshot
-resolved to GCC 16.2.0, Qt 6.11.2, CGAL 6.1.1, PROJ 9.8.1, GDAL 3.13.2,
-PDAL 2.10.1, Eigen 3.4.0, GoogleTest 1.18.0 and Google Benchmark 1.9.5.
+nlohmann-json, OpenSSL, zlib, GoogleTest and Google Benchmark. It is solved
+and installed by py-rattler, from PyPI, so it needs neither conda nor root
+beyond write access to the prefix, and it reaches only `conda.anaconda.org`
+and `pypi.org`. The solve is frozen at a date (`SNAPSHOT` in the script), so
+every machine gets the same versions until that date is moved; a prefix
+whose stamp matches is left alone, so running it again takes a second. On
+2026-09-26 the snapshot resolved to GCC 16.2.0, Qt 6.11.2, CGAL 6.1.1,
+PROJ 9.8.1, GDAL 3.13.2, PDAL 2.10.1, Eigen 3.4.0, GoogleTest 1.18.0 and
+Google Benchmark 1.9.5.
+
+**OpenSSL and zlib are named**, since 2026-10-14, because the update layer
+asks for both by name (`src/katana_update/CMakeLists.txt`: Ed25519 from
+libcrypto, raw inflate from zlib; "The update layer", below) and until then
+had them only as other packages' dependencies. The solve was read that day,
+without installing anything, for the three platforms the script serves -
+`linux-64`, `linux-aarch64` and `osx-arm64` - at the script's own `SNAPSHOT`,
+once as the list stood and once with the two names added. Naming them added
+no package and removed none: 280, 280 and 239 packages before and after,
+with OpenSSL 3.6.4 and zlib 1.3.2 in each. What the names change is what
+holds them there. OpenSSL was asked for by 34 packages in each solve, Qt,
+GDAL and libcurl among them. `zlib` - the package with `zlib.h`, `libz.a`
+and the `libz.so` a linker asks for - came through three alone: `geotiff`,
+`libspatialite` and `prometheus-cpp`. What everything else that inflates
+names is `libzlib` (58 packages on Linux, 63 on macOS), which is the
+shared library under its versioned names and nothing else: two files, no
+`zlib.h` and no `libz.so` (on macOS no `libz.dylib`). So a moved `SNAPSHOT` in which those
+three had stopped naming `zlib` would have left a prefix without the
+header, and the configure to whatever copy a distribution keeps under
+`/usr`. The two names are part of the prefix's stamp, like every other, so
+a prefix made before them is installed again by the next run.
 
 **The toolchain file** `cmake/toolchains/katana-linux.cmake`, which the
 `linux-*` presets name, points CMake at that prefix: its compilers, its
@@ -272,6 +294,7 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_UPDATE_REPO` | `kjarada/Katana` | `owner/name` of the GitHub repository whose latest release an installed copy asks for updates; compiled into the update library ("The update layer") |
 | `KATANA_UPDATE_FEED` | empty | the base URL of a release host of the owner's own, in the place of GitHub; it must honour `Range`. With this and `KATANA_UPDATE_REPO` both empty the build has no update feed |
 | `KATANA_REQUIRE_UPDATE_KEYS` | `OFF` | fail the configure while `cmake/KatanaUpdateKeys.cmake` holds the placeholder keys: ON in every job of the release workflow, so that no release ships with keys nobody holds |
+| `KATANA_UPDATE_SEQUENCE` | empty | the sequence of the release this build is packaged for - the number that release's update manifests carry, UTC seconds - which `package` writes beside the version into the copy's install record; the release workflow gives every job its run's. Empty: the package names its version alone. Digits only, from 1 to 4102444800, or the configure fails. A cache entry, so a build directory that packaged one release must be given the next one's before it packages again ("The update layer") |
 
 `KATANA_MODULE_FILTER` makes a small build quick: the numerics and survey
 modules alone are a few minutes, the whole application most of an hour of
@@ -600,9 +623,10 @@ build:
   `kjarada/Katana`, is public, so the default feed is read with no token; a
   build that names a PRIVATE repository can still be updated by a person
   who holds a read-only token for it (`docs/update.md`, "The access
-  token"). That version is also the floor against going back: an installed
-  copy's version is the higher of its install record's and the program's
-  own (`docs/update.md`, "The installed version").
+  token"). That version is also what a package says it is, in its install
+  record (below), and so the floor against going back: an installed copy's
+  build is the higher of the one an update recorded and the one its
+  package names (`docs/update.md`, "The installed version").
 - **The keys.** `cmake/KatanaUpdateKeys.cmake`, included by the root
   `CMakeLists.txt`, holds the two public keys every program verifies a
   release with; they reach one source file, `src/katana_update/trust.cpp`.
@@ -612,8 +636,16 @@ build:
   the configure fails instead. A build with real keys says `Update keys:
   pinned, active <key id>, spare <key id>`. The file is rewritten by
   `python tools/update_keytool.py pub`, never by hand.
-- **What makes a copy a release.** `share/katana/install.json`, which names
-  the package's target (`win64`, `win-arm64`, `linux-x86_64` ...), is written
+- **What makes a copy a release.** `share/katana/install.json` says what
+  the package is: its target (`win64`, `win-arm64`, `linux-x86_64` ...), the
+  version it was built as - `project(Katana VERSION ...)`, always - and,
+  where the configure was given `-DKATANA_UPDATE_SEQUENCE`, the sequence of
+  the release it is packaged for; a package built by hand belongs to no
+  release and names none. Never a sequence without a version: the engine
+  does not read such a record, and a copy whose record does not read cannot
+  be updated. The `packaging_install_record_*` tests run the script on a
+  staged folder and read the record back, for this build, for a package of
+  a release and for one of none. The record is written
   by a script CPack runs on the tree it stages and by nothing else. That
   script is `<build>/KatanaInstallRecord.cmake`, which is no file of the
   repository: `cmake/KatanaPackaging.cmake` ("install.json") writes it into

@@ -65,8 +65,10 @@ a tag included.
 Each Windows and Linux archive holds `bin/katana`, `bin/katana_cli`,
 `bin/katana_mcp` and `bin/katana_updater` (the helper that swaps an install's
 files for an update's), the libraries they load, `share/katana/samples`, and
-`share/katana/install.json`, which names the package's target and is what
-makes a copy a release the updater will touch; each disk image holds
+`share/katana/install.json`, which names the package's target, its version
+and the sequence of the run that built it ("Update assets", "The package
+names its own build") and is what makes a copy a release the updater will
+touch; each disk image holds
 `Katana.app`, with the first three programs in `Contents/MacOS` ("macOS").
 How a user installs each is the root readme's job, not this document's.
 
@@ -110,8 +112,11 @@ serves, from the packages themselves, in its step "Update assets":
 
 1. **Unpack** the four packages an update can be applied to file by file:
    `win64`, `win-arm64`, `linux-x86_64`, `linux-aarch64`. Each must hold a
-   `share/katana/install.json` that names its own target, or the step stops:
-   a manifest is offered to the installs whose record names its target.
+   `share/katana/install.json` that names its own target, the version being
+   published and the run's sequence, or the step stops before it makes a
+   manifest: a manifest is offered to the installs whose record names its
+   target, and it must describe the build the package says it is ("The
+   package names its own build", below).
 2. **Produce.** `tools/update_make_manifest.py` runs once for each tree and
    writes its manifest and its update zip; once more, with `--notify-only`
    and no tree, for `macos-arm64`, whose manifest lists no file: a file
@@ -137,7 +142,7 @@ What the producer is told about a tree:
 
 | Option | Value | Why |
 |---|---|---|
-| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`isNewerThan`, `include/katana/update/trust.hpp`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
+| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests, and the one the five packages were configured with | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`isNewerThan`, `include/katana/update/trust.hpp`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
 | `--seed` | `share/katana/samples/*` | a seed is written only where it is absent. Opening a sample project changes it in place, so as ordinary data every update would fetch the samples again and write over what the user had done in them |
 | `--exclude` | `LICENSE`, and for Linux `ssl/*` | a manifest names files under `bin`, `share`, `etc` and `lib` and nowhere else, and the producer refuses a tree that holds anything more rather than leave it out unasked. The licence text lies beside those folders; the Linux tree keeps its certificate bundle in `ssl/`, where the bundled libcurl looks ("How the Linux and macOS packages are made self-contained"). Neither is ever updated |
 | `--version`, `--tag`, `--repo` | what is being published, and where | what a manifest offers, and its link to the release notes |
@@ -147,6 +152,44 @@ The seed and the excluded names are written once, at the top of the workflow
 (`UPDATE_SEED`, `UPDATE_EXCLUDE`, `UPDATE_EXCLUDE_LINUX`), for the Publish job
 and the rehearsal below alike. `share/katana/install.json` needs no option:
 the producer leaves the install record out by itself.
+
+**The package names its own build.** The run's sequence goes to the builds
+as well as to the producer. Every job configures with
+`-DKATANA_UPDATE_SEQUENCE=<sequence>`, and CPack writes it beside the
+version into the package's install record (`cmake/KatanaPackaging.cmake`,
+"install.json"):
+
+```
+{"schema":1,"target":"win64","version":"X.Y.Z","sequence":1792312800}
+```
+
+A package built outside the workflow is given no sequence and names its
+version alone. The record is the copy's own account of which build it is,
+and the updater goes by it where a zip was unpacked by hand over a copy that
+had updated itself: that copy is placed by the higher of the helper's record
+and the package's, by version and within a version by sequence
+(`docs/update.md`, "The installed version"). With the release's own
+sequence in the package, such a copy is not offered the release it already
+is, and is offered a later build of its version. So the number in a package
+and the number in its manifest must be ONE number, and the workflow holds
+them together in three places:
+
+* each Configure step refuses a sequence that is not a number before CMake
+  runs - an empty one would configure, and package a Katana that names its
+  version alone - and then finds it in the cache as the option the project
+  declares ("What each job does");
+* each job's smoke test reads the record out of the package it unpacked:
+  the target, the version and the sequence, each a member of its own ("The
+  smoke test");
+* the Publish job reads the record of each of the four packages it unpacks
+  against the version and the sequence it is about to write into their
+  manifests, and stops before it makes one. It does not open the disk
+  image, which a Linux runner cannot mount: that package's record is read
+  in its own job only.
+
+A freshly installed copy is not placed by its sequence at all: with no
+record of an update beside it, a release of its own version is not an
+update whatever the two numbers are (`isNewerThan`).
 
 **The Windows packages are unpacked on Linux,** where the execute bits a zip
 made on Windows carries (its archiver's guess from the file names) become
@@ -224,13 +267,22 @@ the run:
 * The Version job's step "Update keys" ends `Update keys: pinned, active
   <key id>, spare <key id>`, with no warning: the key check ran under the
   runner's own CMake. The job's first step prints the run's sequence.
-* Each Configure step prints `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON` and
-  `KATANA_UPDATE_REPO:STRING=<repo>` after CMake's own output, and goes on:
-  both settings reached the project ("What each job does").
+* Each Configure step prints `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON`,
+  `KATANA_UPDATE_REPO:STRING=<repo>` and
+  `KATANA_UPDATE_SEQUENCE:STRING=<the sequence the first job printed>`
+  after CMake's own output, and goes on: the three settings reached the
+  project ("What each job does").
 * The Linux, macOS and Windows ARM64 jobs configure and build at all: they
   are the first places the update library, and the helper with it (not on
   macOS), meets those systems - on Linux and macOS OpenSSL and zlib as the
   toolchain prefix has them, on Windows ARM64 their static libraries.
+* Each job's smoke test prints, before any program runs, the three members
+  it found in the package's install record: `"target":"<token>"`,
+  `"version":"X.Y.Z"` and `"sequence":<that same sequence>` ("Update
+  assets", "The package names its own build"). It is the first time the
+  packaging writes a sequence on a runner; and where the record lies in the
+  macOS bundle, `Contents/Resources/share/katana/install.json`, was read
+  from the packaging and not seen on a Mac.
 * Each Windows and Linux job's smoke test prints `selftest=ok` and
   `keys=pinned`, and all five print `target=<token>` and `kind=archive`
   ("The smoke test").
@@ -238,7 +290,8 @@ the run:
   the number of files it reports is the package's. A refusal names every
   file it is about.
 * The Publish job waits for approval, if the environment `release` has
-  required reviewers; its step "Update assets" then ends
+  required reviewers; its step "Update assets" then prints the same three
+  members for each of the four packages it unpacks and ends
   `verified 5 manifest(s) in dist`, after a line `signature verified by key
   <key id> (active)` for each manifest.
 
@@ -291,24 +344,34 @@ way of building.
 | Linux ARM64 | `ubuntu-24.04-arm` | the same script, which installs conda-forge's `linux-aarch64` GCC 16.2 on an ARM machine | `cmake --preset linux-release` |
 | macOS arm64 | `macos-15` | the same script, conda-forge's `osx-arm64` clang 23 | `cmake --preset macos-release` |
 
-Two more settings make each of them a RELEASE and not a developer's build.
+Three more settings make each of them a RELEASE and not a developer's build.
 `-DKATANA_REQUIRE_UPDATE_KEYS=ON` fails the configure while
 `cmake/KatanaUpdateKeys.cmake` holds the placeholder update keys, since a
 program built with them can never be updated. `-DKATANA_UPDATE_REPO=<owner/name>`
 is the repository an installed copy asks for the next version: the one the
 run publishes in, which is this repository unless the input `publish_repo`
-names another.
+names another. `-DKATANA_UPDATE_SEQUENCE=<sequence>` is the run's sequence,
+the number the Version job read before anything was built: CPack writes it
+beside the version into the package's install record, and the Publish job
+writes it into the release's update manifests ("Update assets", "The
+package names its own build"). The step refuses a sequence that is not a
+number before it starts CMake.
 
 CMake takes a `-D` the project has no use for with a warning and builds
 without it, and no program says which repository it asks, so a renamed
 option would give green jobs and programs that ask the default repository
-for ever. Each Configure step therefore ends by checking that both settings
-arrived. In `CMakeCache.txt` each must stand as the option the project
-declares, `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON` and
-`KATANA_UPDATE_REPO:STRING=<owner/name>`: a `-D` nothing declares stays
+for ever. Each Configure step therefore ends by checking that the three
+settings arrived. In `CMakeCache.txt` each must stand as the option the
+project declares, `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON`,
+`KATANA_UPDATE_REPO:STRING=<owner/name>` and
+`KATANA_UPDATE_SEQUENCE:STRING=<sequence>`: a `-D` nothing declares stays
 there as `UNINITIALIZED`. And in `build.ninja` the update library's compile
 line must define `KATANA_UPDATE_REPO` as that repository and as nothing
-else. The check stops at the compile line on purpose. Looking for the name
+else. The sequence is compiled into no program, so there is no compile
+line to look for it on: the cache says the project took it, before anything
+is built, and the smoke test reads it where it ends up, in the package's
+install record. The check of the repository stops at the compile line on
+purpose. Looking for the name
 in the built programs was considered and not done: a short text assigned to
 a string may be compiled into the instructions that store it, piece by
 piece, so its absence from the file's bytes would prove nothing and could
@@ -458,7 +521,14 @@ hardware:
 ### The smoke test
 
 Each package is unpacked into a fresh directory and run from there, as a
-user would run it:
+user would run it. First, before any program runs, what the package says
+of itself: `share/katana/install.json` (in the bundle, under
+`Contents/Resources`) must hold `"target":"<token>"`, `"version":"X.Y.Z"`
+and `"sequence":<the run's sequence>`, each as a whole member, so a sequence
+that only begins with the run's is refused ("Update assets", "The package
+names its own build"). The record is read through a pipe and nothing is
+written beside it: a file left in the tree would be taken for one of the
+package's by the rehearsal that follows. Then:
 
 * `katana_cli -c "RECT 0,0 30,20" -c "SAVE ..."` must write a project;
 * `INFO samples/gis/terrain.asc` must name its coordinate system as
@@ -1025,6 +1095,20 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   was not put through a YAML parser again (the machine had none), and no
   runner has yet fetched an action by these digits: the first run shows it,
   in each job's "Set up job" step.
+* **Nor since the packages were given the run's sequence** (2026-10-14,
+  "Update assets", "The package names its own build"). What was done
+  instead: the workflow's bash scripts passed `bash -n` again (the two
+  PowerShell steps did not change); the reading of the install record was
+  run on made-up records - one as the packaging writes it, one spread over
+  lines with white space, one with its members in another order, one
+  without a sequence, one whose sequence only begins with the run's, one of
+  another target and version, and none at all; and the cache check was run
+  on the cache CMake wrote for a project that declares
+  `KATANA_UPDATE_SEQUENCE` and for one that does not. No package was built
+  with the option, and the file was not put through a YAML parser (the
+  machine had none; the edit is comments, two `env` entries and lines
+  inside `run` blocks that were there). The first run shows the rest ("To
+  verify on the first release").
 * **Nothing in the repository holds the workflow.** The checks above were
   made with scripts of the sessions that wrote and changed the workflow;
   they are not in the repository and not in ctest. So no test fails if a

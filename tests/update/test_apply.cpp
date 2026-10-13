@@ -62,15 +62,23 @@ LastResult lastOf(const Scenario& s)
 }
 
 // The versions of the releases this file writes out itself, for an update from the one to the
-// other. They are versions no build of Katana has, on purpose. The installed version is the
-// HIGHER of the install record's and the program's own (install.hpp), and the swap reads it with
-// this build's version. A record below that version reads as the program's, and the staged
-// release is then the newer one only while the project's version has not passed it: at 0.1.0
-// installed and 0.2.0 staged these updates went through while the project was 0.2.0 - by their
-// sequences - and every one of them was a `downgrade` the day it became 0.3.0. With the record
-// above any project version, what is installed is what the record says, and the cases do not
-// know which build they are (TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild holds that).
-// The rule itself, for a program below, at and above a record: tests/update/test_state.cpp.
+// other. They are versions no build of Katana has, on purpose, and that is the second of two
+// things that keep these cases from knowing which build they are.
+//
+// The first is the harness's: every install it writes has an install.json that names the
+// version its package was built as (apply_harness.hpp, kInstallJson), and where the package
+// names its version the program that reads the install is not asked for its own (install.hpp).
+// What is installed is then what the records say - also for the fixture and the forty-file
+// updates, 0.9.0 to 0.10.0, which a build above 0.10.0 would otherwise refuse as a `downgrade`.
+// AnInstallTheHarnessWritesIsReadAsItsRecordsSayAndNotAsThisBuild holds that.
+//
+// The second is for a record that says its target and no more, as the harness's did: the
+// installed version is then the HIGHER of installed.json's and the asking program's, and a
+// release below this build's version reads as the build's. At 0.1.0 installed and 0.2.0 staged
+// these updates went through while the project was 0.2.0 - by their sequences - and every one
+// of them would have been a `downgrade` at 0.3.0. Above any project version the record is the
+// higher whoever is asked (TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild holds that).
+// The rule itself, both halves of it: tests/update/test_state.cpp.
 constexpr const char* kOldVersion = "900.1.0";
 constexpr const char* kNewVersion = "900.2.0";
 
@@ -415,7 +423,9 @@ TEST(Apply, TheFixtureUpdateDoesWhatTheReleaseSaysFileByFile)
               readText(fixtureFolder() / "release/v2/Katana-update-win64.json"));
     EXPECT_EQ(readText(root / "share/katana/installed.manifest.json.sig"),
               readText(fixtureFolder() / "release/v2/Katana-update-win64.json.sig"));
-    // install.json is the installer's and the update never writes it.
+    // install.json is the installer's and the update never writes it: it is still the record
+    // the scenario gave this install - the harness's, which names its package's version, and
+    // not the fixture tree's own, which says its target and no more.
     EXPECT_EQ(readText(root / "share/katana/install.json"), std::string(kInstallJson));
 }
 
@@ -606,10 +616,13 @@ TEST(Apply, ARepeatedUpdateToTheSameReleaseIsRefusedAsNotNewer)
 
 TEST(Apply, TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild)
 {
-    // The premise of every case that updates a release this file writes out (kOldVersion, at the
-    // top): the installed version the swap reads is the one the RECORD names, because no build
-    // of Katana is that high. Were it the program's instead, those cases would rest on the
-    // version this suite happened to be built as, and say nothing when it stopped holding.
+    // The second premise at the top (kOldVersion): no build of Katana is as high as the releases
+    // this file writes out, so installed.json is the higher of the two even where the asking
+    // program IS asked - under an install.json that says its target and no more. The harness's
+    // names its version, and the reading below is the record's for that reason already (the next
+    // case); this is what is left should it stop naming one. Without either, the cases that
+    // update these releases would rest on the version this suite happened to be built as, and
+    // say nothing when it stopped holding.
     Scenario s("apply-small-versions");
     buildSmallScenario(s);
     const core::Result<Version> own = programVersion();
@@ -625,6 +638,32 @@ TEST(Apply, TheReleasesWrittenOutHereAreAboveTheVersionOfAnyBuild)
     ASSERT_TRUE(install.ok()) << install.error().describe();
     EXPECT_EQ(toString(install->version), kOldVersion) << "read as the program's version, not the record's";
     EXPECT_EQ(install->sequence, 100u);
+}
+
+TEST(Apply, AnInstallTheHarnessWritesIsReadAsItsRecordsSayAndNotAsThisBuild)
+{
+    // The first premise at the top, and the only one the fixture and the forty-file cases have:
+    // the harness's install.json names the version of its package (kInstallJson), so the build
+    // that reads the install is not asked for its own. Shown where that makes a difference
+    // whichever build this is: a release BELOW this build's version - 0.1.0, and the project
+    // has been above it since 0.2.0 - which an install.json that said its target alone would
+    // read as the build's, the higher of the two. What is expected is what the release below is
+    // given: its version and its sequence, as installed.json records them.
+    const core::Result<Version> own = programVersion();
+    ASSERT_TRUE(own.ok()) << own.error().describe();
+    const core::Result<Version> below = parseVersion("0.1.0");
+    ASSERT_TRUE(below.ok());
+    ASSERT_TRUE(below.value() < own.value()) << "this build is " << programVersionText();
+
+    Scenario s("apply-harness-record");
+    s.v1 = smallRelease("0.1.0", 100);
+    writeInstall(s.root, s.v1);
+    FakeRegistry registry;
+    const core::Result<Install> install = readInstall(s.root, registry);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(toString(install->version), "0.1.0") << "read as this build's version, not the record's";
+    EXPECT_EQ(install->sequence, 100u);
+    EXPECT_TRUE(install->hasInstalledRecord);
 }
 
 // ---- refusals: the signature, the release, the install -----------------------------------------------------------
@@ -1406,68 +1445,9 @@ TEST(ApplyWait, ACancelWhileWaitingEndsTheWaitWithoutTouchingAnything)
 
 namespace {
 
-// A process seam that answers each question about the programs under the root from a list. The
-// harness's FakeProcesses can say "these programs, for the first n questions, and then nobody";
-// the opposite - nobody at first, and somebody at a LATER question - is what a program started
-// while the helper works looks like, and this gives each question its own answer. (The same
-// double is in test_recover.cpp, for the recovery's two questions: both belong beside
-// FakeProcesses in apply_harness.hpp.)
-class ScriptedProcesses final : public ProcessOps {
-  public:
-    // What one question is answered with.
-    struct Answer {
-        std::vector<RunningProgram> holders; // empty: nobody is running
-        bool fails = false;                  // the scan itself fails (no answer at all)
-    };
-
-    // The k-th question (from 1) gets the k-th answer; past the list nobody is running.
-    explicit ScriptedProcesses(std::vector<Answer> answers = {}) : answers_(std::move(answers)) {}
-
-    std::uint64_t pid = 1;
-    // Called at each question with its number, before it is answered: where a test looks at the
-    // disk as it stands at that moment.
-    std::function<void(int)> onScan;
-    mutable int scans = 0;
-
-    std::uint64_t currentPid() const override { return pid; }
-    // No window is waited for in the cases that use this seam (waitPid is 0).
-    bool isAlive(std::uint64_t) const override { return false; }
-    core::Result<std::vector<RunningProgram>> holdersUnder(const Path&) const override
-    {
-        const int asked = ++scans;
-        if (onScan) {
-            onScan(asked);
-        }
-        if (asked > static_cast<int>(answers_.size())) {
-            return std::vector<RunningProgram>{};
-        }
-        const Answer& answer = answers_[static_cast<std::size_t>(asked - 1)];
-        if (answer.fails) {
-            return core::makeError(core::ErrorCode::Internal, "the snapshot failed");
-        }
-        return answer.holders;
-    }
-
-  private:
-    std::vector<Answer> answers_;
-};
-
-ScriptedProcesses::Answer nobody()
-{
-    return ScriptedProcesses::Answer{};
-}
-
-ScriptedProcesses::Answer somebody(std::uint64_t pid, const char* image)
-{
-    return ScriptedProcesses::Answer{{RunningProgram{pid, core::pathFromUtf8(image)}}, false};
-}
-
-ScriptedProcesses::Answer noAnswer()
-{
-    return ScriptedProcesses::Answer{{}, true};
-}
-
-// One run of the swap with that seam in the place of the rig's.
+// One run of the swap with a process seam of the test's own in the place of the rig's: the
+// harness's ScriptedProcesses, which gives each question about the programs under the root its
+// own answer (apply_harness.hpp, beside FakeProcesses).
 ApplyResult runWith(Rig& rig, ProcessOps& processes)
 {
     const ApplyServices services{*rig.fs, processes, rig.launcher, rig.registry, testTrust(), rig.timings};

@@ -94,8 +94,8 @@ records beside the programs say what R is (`include/katana/update/install.hpp`):
 
 | Record | Written by | Says |
 |---|---|---|
-| `R/share/katana/install.json` | packaging only: CPack's pre-build script (`cmake/KatanaPackaging.cmake`) | `{"schema":1,"target":"win64"}`: this copy is a RELEASE, and which target to ask the feed for. The target comes from here and never from the operating system: Windows on ARM running the x64 zip stays `win64` |
-| `R/share/katana/installed.json` | the helper, at commit | the version, sequence, tag and target of the release an update put here. Absent on a fresh install, whose version is then the one the program was built as. Never believed below the program that reads it ("The installed version", below) |
+| `R/share/katana/install.json` | packaging only: CPack's pre-build script (`cmake/KatanaPackaging.cmake`) | `{"schema":1,"target":"win64","version":"0.3.0","sequence":1792312800}`: this copy is a RELEASE, which target to ask the feed for, and which BUILD the package is - the version it was built as and, for a package of a release, that release's sequence. A package built outside the release workflow names its version and no sequence. The target comes from here and never from the operating system: Windows on ARM running the x64 zip stays `win64`. The build is the copy's OWN, apart from anything an update recorded here ("The installed version", below) |
+| `R/share/katana/installed.json` | the helper, at commit | the version, sequence, tag and target of the release an update put here. Absent on a fresh install, whose version is then the one its package names. Never believed below the copy's own build ("The installed version", below) |
 | `R/share/katana/installed.manifest.json`, `.sig` | the helper, at commit | the signed manifest of the installed version: what a later update, and the uninstaller, may remove |
 | `R/.update/` | the helper | the update lock, one folder per transaction (`journal`, `new/`, `old/`) and `recovery.log`; inside R so that every rename stays on one volume |
 
@@ -104,36 +104,107 @@ carry them.
 
 ### The installed version
 
-The installed version of a copy - what a release must be above to be an
-update - is the HIGHER of the version `installed.json` names and the version
-of the program that reads it (`update::readInstall`). The record is the
-helper's, written when an update commits, and nothing else keeps it true: a
-newer zip unpacked by hand over a copy that had updated itself leaves it
-naming the older version. Believed alone, that record would lower the floor
-against going back, and an EARLIER signed release - a later build of the
-version the record names, say - would pass for a newer one and be installed
-over the programs that are there. A program is never older than itself, so
-a record can raise the installed version and never lower it.
+The installed build of a copy - what a release must be above to be an
+update - is the HIGHER of two (`update::readInstall`): the build the helper
+recorded in `installed.json` when an update committed, and THE COPY'S OWN,
+which is what its package says of itself in `install.json`. The two are
+compared as a release is compared with an install (`update::isNewerThan`):
+by version, number by number, and within one version by sequence.
 
-Only the version is raised: the sequence, and that there is a record at all,
-stay the record's. With the versions equal the sequences decide, so a copy
-overwritten by hand is offered the release of its own version once more:
-where its files are that release's already, the update changes none of them
-and writes the records that were stale. The other order is left as it is:
-under a record ABOVE the program - an older zip unpacked over a newer copy -
-the installed version is the record's, and only a release above the record
-is an update.
+The helper's record alone cannot be the answer, because nothing else keeps
+it true: a newer zip unpacked by hand over a copy that had updated itself
+leaves it naming the older build. Believed alone, that record would lower
+the floor against going back, and an EARLIER signed release - a later build
+of the version the record names, say - would pass for a newer one and be
+installed over the programs that are there. The zip brings its own
+`install.json`, and with it its floor: a record can raise the installed
+build and never lower it.
 
-The rule is shown for a program below, at and above a record without a
-build of each (`detail::readInstallAs`, the same reading with the program's
-version handed in:
-`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), for
-this build's own version
-(`ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion`),
-against the order itself
-(`AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`) and at the
-verbs
-(`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
+**What a package says of itself** (`packageBuild` in
+`src/katana_update/state.cpp`). `version` is the version the package was
+built as: CPack's script writes `project(Katana VERSION ...)` there, always.
+`sequence` is that of the release the package belongs to, the number that
+release's manifests carry. The release workflow settles it before anything
+is built and hands it to every build as `-DKATANA_UPDATE_SEQUENCE`, so a
+package and its manifest carry ONE number (`docs/release.md`, "Update
+assets"); a package built outside the workflow belongs to no release and
+names its version alone. To the reader both members are optional. A
+`sequence` with no `version` to belong to, or a member that does not read,
+is an install record that does not read: `reason=install_record`, and
+nothing is downloaded or applied.
+
+- **With no record of the helper's** - a fresh install - the installed
+  version is the package's. The sequence stays the placeholder 0 and there
+  is no record, whatever sequence the package names: a release of that same
+  version is not an update of a fresh install.
+- **With one**, the higher build is the installed one - BOTH halves of it
+  where the package names both. A second build of 0.5.0, unpacked over a
+  copy that had updated itself to 0.3.0, is 0.5.0 at ITS OWN sequence. The
+  withdrawn first build of 0.5.0 - signed, the same version, a lower
+  sequence - is not let back in; the build that is installed is no update
+  of itself; a third build is one. With the version alone raised, the
+  record's stale sequence would lie under it and the first build would be
+  the "newer" one.
+- **A package that names its version and no sequence** raises the version
+  alone: the sequence, and that there is a record at all, stay the record's.
+  Such a copy, overwritten by hand, is offered the release of its own
+  version once more: where its files are that release's already, the update
+  changes none of them and writes the records that were stale.
+- **The other order is left as it is**: under a record ABOVE the package -
+  an older zip unpacked over a newer copy - the installed build is the
+  record's, and only a release above the record is an update.
+
+**The program that asks is not asked**, where the package names its
+version, and that is on purpose. The program that reads an install need not
+be one of its programs: the helper runs from a copy in the per-user folder,
+and the helper that installs a release is that release's OWN when the
+release needs a newer helper than the installed one (`applier`, "The
+manifest"). Its version is then the version it is about to install. Taken
+for the install's, it would find its own release "not newer" and refuse it
+as a `downgrade` - on a copy that never updated, and on one whose record
+carries a later sequence than the release's.
+
+**A record that says its target and no more** - `{"schema":1,"target":"win64"}`,
+what packaging wrote until 2026-10-14 and what the tests' fixture trees
+still say - leaves the program that asks to stand for the copy: the version
+it was built as, and no sequence. No release was ever published with such a
+record, so no installed copy holds one. Where one is read, the rule is the
+one above with the program's version in the package's place and no
+sequence, and what that cannot do is written down as tests: a release's own
+helper refuses such a copy
+(`AReleasesOwnHelperRefusesACopyWhosePackageNamesNoVersion`), and a
+withdrawn build of the version a zip brought is let back in (the last lines
+of `ASecondBuildUnpackedOverAnUpdatedCopyBringsItsOwnFloorWithinItsVersion`).
+Under such a record, too, whoever settles an update healthy after its
+helper died would write to Settings > Apps the installed version as IT
+reads it, its own where it is the newer program; with the package's
+version in the record that is the version the update installed, whoever
+settles it.
+
+The answers are the rule worked by hand through `detail::readInstallAs` -
+the same reading with the program's version handed in - so that they do not
+rest on the version the suite was built as; the few that read with this
+build's own version place their record by it. For a package that names its
+build: a fresh install read by a program below, of and above it
+(`AFreshInstallThatNamesItsVersionIsThatVersionWhicheverProgramReadsIt`),
+the helper's record against the package's in both orders and within one
+version (`OfTheHelpersRecordAndThePackagesOwnBuildTheHigherIsTheInstalledOne`),
+a release's own helper
+(`AReleasesOwnHelperFindsItsReleaseNewerWhereThePackageNamesItsVersion`),
+and a build that does not read
+(`AnInstallJsonWhoseOwnBuildDoesNotReadIsRefused`). For a record that says
+its target alone: a program below, at and above the helper's record
+(`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), this
+build's own version
+(`ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion`) and
+the order itself
+(`AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`). At the
+verbs, one of each
+(`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords`,
+`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
+What CPack's script writes is read back from a staged tree by the
+`packaging_install_record_*` tests, for a package of a release and for one
+of none.
 
 ### The three kinds
 
@@ -182,6 +253,24 @@ one token and no unelevated half that could interfere, and are not refused
 (`update::processIsElevated`, `include/katana/update/process.hpp`: Windows'
 `TokenElevationType` is `TokenElevationTypeFull`; a process that cannot ask,
 and every system but Windows, is "not elevated").
+
+**Nor does such a Katana recover from that folder.** Recovery is the other
+way to a helper in U, and it is closed the same way. `update::recover`, the
+first act of every program ("Recovery"), puts an interrupted update back by
+running a helper, and by preference the copy `U/run-<tx>/katana_updater`
+the update ran from. All that sends it there can be written by the same
+person's programs WITHOUT administrator rights: a journal under
+`R/.update/<tx>`, whose check is no key's, and a file named
+`katana_updater` in `U/run-<tx>`. So
+in a program that was started as administrator - the same question,
+`update::processIsElevated` - `update::recover` does not look for the copy.
+It runs `R/bin/katana_updater`, the install's own, which lies beside the
+very program that holds those rights and is no new risk; NEVER the copy in
+U. Where the install's own helper is not there either - a commit cut off
+between the two renames of that very file - nothing is run, and the start
+says so on stderr with the two ways out: start Katana the ordinary way, or
+run `katana_updater --recover` by hand
+(`AProgramStartedAsAdministratorRunsTheInstallsOwnHelperAndNeverTheCopyInThePerUserFolder`).
 
 ### The per-user folder
 
@@ -345,9 +434,10 @@ install's. "Newer than what is installed" is decided after it, by
 
 **The helper trusts nobody's answer.** It verifies the staged manifest again
 with its own pinned keys before it touches a file, repeats the "newer" test
-from the install's own record - never read as less than the helper's own
-version ("The installed version") - and hashes every file it is about to
-put in place. A stage folder that somebody altered is found there.
+from the install's own records - the helper's record of the last update,
+never read as less than the build the package names ("The installed
+version") - and hashes every file it is about to put in place. A stage
+folder that somebody altered is found there.
 
 **The trust root is a parameter, never a global.** `update::productionTrust`
 is what the four programs pass. Only test executables pass a test key, the
@@ -478,8 +568,10 @@ web server does, and Settings > Updates says so.
 | `unreachable` | the feed could not be read, or did not verify | `offline`, `http_404`, `http_403`, `http_429`, `http_<n>`, `html_page` (a sign-in page where the file should be), `bad_redirect` (a redirect to an address that cannot be used: none, or one that is not https), `too_many_redirects` (a sixth), `too_large`, `bad_signature`, `untrusted_key`, `placeholder_keys`, `malformed`, `wrong_product`, `wrong_target`, `wrong_channel`, `verify_unavailable`, `asset_missing`, `cancelled`, `no_transport`, and `error` for a failure the transport gave no token of its own |
 | `unsupported` | this copy cannot update | `development_tree`, `disabled_build`, `install_record`, `no_network` (a build without the HTTP stack, `-DKATANA_BUILD_IO=OFF`) |
 
-A fresh install is not offered the release it came from: it has no record
-of its own sequence, so only a higher VERSION is newer for it.
+A fresh install is not offered the release it came from: with no record of
+an update beside it, it counts as the release it was made from, and only a
+higher VERSION is newer for it - whatever sequence its package names ("The
+installed version").
 
 **The plan** (`update::plan`) hashes every installed file the manifest
 lists, FRESH each time - never from a cache, which would skip a file that
@@ -539,7 +631,8 @@ closed. Nothing in it asks for administrator rights, and an install that
 cannot be written as it stands is refused, never retried with more. Nor is
 it started with more than it needs: a Katana that was started as
 administrator is refused the apply before the copy is made
-(`reason=elevated`, "The three kinds").
+(`reason=elevated`), and its recovery runs the install's own helper and
+never a copy in U ("The three kinds").
 
 ```
 katana_updater --root R --stage S --state U --tx T --wait-pid P --relaunch <path|none>
@@ -590,8 +683,9 @@ and the fault loops break it before each of its file operations
    when its marker `U/healthy-<tx>` is there, and is never put back from
    here: a swap is not the place to judge a release somebody may be running
    from. Where the first cannot be put back, the second has no marker, or
-   `R/.update` cannot be read to know, nothing new is started
-   (`interrupted_update`; the `detail` says which, and what settles it).
+   `R/.update` - or a journal in it - cannot be read to know, nothing new
+   is started (`interrupted_update`; the `detail` says which, and what
+   settles it).
    Then verify the staged manifest with the helper's own keys -
    `staged_manifest`, `notify_only`, `applier_too_new`, `downgrade`.
 2. **Wait** for the window's process to exit (60 s), then for every process
@@ -677,8 +771,10 @@ and the fault loops break it before each of its file operations
 
 If the ROLLBACK ITSELF fails - a file that stays locked, a failing disk -
 the outcome is `rollback_incomplete`, never "rolled back": nothing is
-started, the `RunOnce` entry stays for the next logon, and `last.json` and
-the dialog name the command to run, `katana_updater --recover <R>`.
+started, the `RunOnce` entry stays for the next logon, `last.json` says
+so, and the helper's `detail=` and the dialog at the window's next start
+name the command to run, `katana_updater --recover <R>`. (When that
+logon's run fails too, no entry is left for a third try: "Not done".)
 
 If THE HELPER DIES in step 7 - between its `COMMITTED_PENDING_HEALTH`
 record and its `HEALTHY` one: power, a shutdown, the process ended - the
@@ -747,9 +843,10 @@ has never updated.
 
 | The journal says | Recovery |
 |---|---|
-| nothing complete, `PLAN`, `COMMITTING`, `ROLLING_BACK` | a crash left it half done: rolled back, by running the helper copy `U/run-<tx>/katana_updater` (it is outside R, so it works when R's own `bin/` is half swapped), else `R/bin/katana_updater`, with `--recover R` |
+| nothing complete, `PLAN`, `COMMITTING`, `ROLLING_BACK` | a crash left it half done: rolled back, by running the helper copy `U/run-<tx>/katana_updater` (it is outside R, so it works when R's own `bin/` is half swapped), else `R/bin/katana_updater`, with `--recover R`. A program that was started as administrator runs `R/bin/katana_updater` and never the copy ("The three kinds") |
 | `COMMITTED_PENDING_HEALTH` | left exactly as it is, with no lock asked for and nothing started: the tree is a whole version, and the helper that owns the folder may be alive and waiting for the very program that asks. When that helper has died, it is settled by others ("An update whose helper died during the health check", below) |
 | `ROLLED_BACK`, `HEALTHY` | over: what is left of the folder is deleted |
+| a journal that is there and cannot be read (a scanner or a backup has it open, the disk does not answer), or a transaction's folder that cannot be examined | not known to be any of these. Recovery passes over it - it can do no more, and a start is not held up - but it is NOT taken for a folder that is not there: to whoever settles an update that was never said to start it is one that MAY be there (below) |
 
 An update that is running now holds the lock; recovery waits up to 20 s for
 it and then leaves it alone. A recovery that fails is said on stderr with the
@@ -764,9 +861,10 @@ update's marker `U/healthy-<tx>` is there, and its helper copy `U/run-<tx>`
 that found something to put right.
 
 `update::recover` keeps the same rule in the program that called it. It
-READS U, to find the helper copy `U/run-<tx>/katana_updater`, and that is
-all it does there: it makes, changes and deletes nothing in U, whichever
-program calls it. No `cleanup.list` is begun for what a lock kept in
+READS U, to find the helper copy `U/run-<tx>/katana_updater` (a program
+started as administrator does not look for it), and that is all it does
+there: it makes, changes and deletes nothing in U, whichever program calls
+it. No `cleanup.list` is begun for what a lock kept in
 `R/.update` - the next start of any program finds that folder again and
 deletes what is left of it - and the helper copy it ran is left by recovery:
 the window's next start removes it.
@@ -881,17 +979,42 @@ back under a running program, or over files that are no longer that release
 (`NothingIsPutBackUnderARunningProgramOrOverFilesThatAreNoLongerThatRelease`,
 `TheProgramsAreAskedForBeforeTheReleaseInTheTreeIsReadAndAgainAfterItAndNothingChangesUntilThen`).
 
+**"Could not look" is never "there is none".** The rule is for a journal
+that was READ and says `COMMITTED_PENDING_HEALTH`. A transaction's folder
+that cannot be examined, or a journal that is there and cannot be read - a
+virus scanner or a backup has it open at the logon, the disk does not
+answer - is none of the three rows. What it holds is not known, so nothing
+is done to it, and the pass says that it did not see everything
+(`PendingOutcome::unread`, which is also what a pass says when `R/.update`
+itself will not be listed). No caller may take such a pass for one that
+found nothing, and each answers it as it answers an update it could not
+judge:
+
+| Caller | A transaction's folder, or its journal, that cannot be read |
+|---|---|
+| `katana_updater --recover` | `left:`, with the `RunOnce` entry registered again, so that a logon comes back to it |
+| a window of the new version | `Busy`: it asks again, as it does while a helper holds the lock; it writes no marker for what it did not read, and the entry stays |
+| the next swap | refused, `interrupted_update`, with nothing touched and the download kept |
+
+Until 2026-10-14 a folder whose journal would not be read was dropped from
+the list and so was in nobody's count. The logon's `--recover` then
+answered "nothing to do" with its entry consumed and none registered again,
+and the next swap planned a new update over one that nobody had shown to
+start - after which nothing could put the earlier one back, the tree being
+no longer its release.
+
 **Three callers**, which differ only in what they may do
 (`include/katana/update/recover.hpp`):
 
 1. **`katana_updater --recover R`** - the `RunOnce` entry at the next logon,
    or a person. It first does what it always did, unchanged
    (`update::recoverInProcess`), and when that is OK calls
-   `update::settleUnproved`. With no such update: nothing, and no lock is
-   asked for. Otherwise the lock is polled as recovery polls it, up to 20 s;
-   a lock that stays held is a live helper's health run, which is not this
-   run's to judge: `busy`, with nothing of the update written - no journal
-   record, nothing in U, no registry value. Then, FIRST, the `RunOnce` entry
+   `update::settleUnproved`. With no such update - where that can be SEEN -
+   nothing, and no lock is asked for. Otherwise the lock is polled as
+   recovery polls it, up to 20 s; a lock that stays held is a live helper's
+   health run, which is not this run's to judge: `busy`, with nothing of
+   the update written - no journal record, nothing in U, no registry
+   value. Then, FIRST, the `RunOnce` entry
    is registered again, for the helper that is running and R - the very text
    the swap registered, when it was that entry which started the run:
    Windows removes an entry before it runs it, so a run that lost power in
@@ -901,7 +1024,22 @@ back under a running program, or over files that are no longer that release
    transaction folder is left under `R/.update`; an update that was left, or
    a putting back that did not finish, keeps it. (A lock that cannot be
    opened at all is no helper's: the update is left, with the entry
-   registered again.) U is only READ - the marker stays where it is - so the
+   registered again.) Where it cannot be SEEN whether the install holds
+   such an update - a transaction's folder that cannot be examined, a
+   journal in it that cannot be read, `R/.update` not listed when this half
+   looks - the run goes the way of one that is there: the lock, the entry
+   registered again, the rule, which says that it could not look. Its
+   answer is `left:`; nothing of the update is written, nobody is asked
+   who is running - nothing is judged of what was not read - and the entry
+   stays
+   (`AJournalThatCannotBeReadIsAnUpdateThatMayBeThereItIsLeftAndTheLogonEntryIsPutBack`,
+   `AnUpdateFolderThatCannotBeListedAtTheFirstLookIsNotAnInstallWithNothingToSettle`).
+   A journal that a scanner held for the first look alone is read under
+   the lock, and the update is settled by what it says
+   (`AJournalHeldOnlyAtTheFirstLookIsReadUnderTheLockAndTheUpdateIsSettled`).
+   That is this half. An `R/.update` that will not be listed when the run's
+   FIRST half looks fails the run there, before any entry is registered
+   ("Not done"). U is only READ - the marker stays where it is - so the
    headless rule above holds for this too
    (`AnUpdateWhoseMarkerIsThereIsSettledHealthyAndThePerUserFolderIsOnlyRead`).
    The run prints `recover=ok`, exit 0, and a `detail=` that begins with
@@ -936,7 +1074,14 @@ back under a running program, or over files that are no longer that release
    such update, nothing - a listing of one folder. One attempt at the lock,
    since a window does not wait; while it is held the window asks again
    every 5 s, 12 times - the minute a helper waits at most - and then leaves
-   it to the next start or the next logon. Else the marker `U/healthy-<tx>`
+   it to the next start or the next logon. It asks again in the same way
+   when `R/.update` will not be listed or a journal in it cannot be read:
+   a folder that was not seen may hold the update this window is the proof
+   of. No marker is written for a journal that was not read - such a folder
+   may be an update a crash cut off in its commit, of which a window that
+   starts is no proof - and the `RunOnce` entry stays
+   (`AJournalThatCannotBeReadJustNowIsAskedAboutAgainAndNoMarkerIsWrittenForIt`).
+   Else the marker `U/healthy-<tx>`
    is written FIRST, so that a crash from there on is settled healthy by the
    next `--recover` too; the rule settles the update healthy, and never puts
    anything back; the marker and `U/run-<tx>` are deleted, what will not go
@@ -950,6 +1095,14 @@ back under a running program, or over files that are no longer that release
    install holds ONE such update at most
    (`AnEarlierUpdateWhoseMarkerIsThereIsSettledFirstWhateverBecomesOfTheNextOne`,
    `AnEarlierUpdateThatWasNeverSaidToStartStopsTheNextOneBeforeItTouchesAnything`).
+   The refusal is the same where the folder could not be read through -
+   `R/.update` not listed, or a journal in it that would not be read - and
+   its `detail` then says that it is not known whether an earlier update is
+   still to be put back or confirmed. That covers the putting back of the
+   line before as well: recovery passes over a folder whose journal it
+   cannot read, and such a folder may be a half swap
+   (`AnUpdateFolderThatCannotBeReadThroughStopsTheNextUpdateAsAnUnsettledOneDoes`,
+   `AnEarlierUpdateWhoseJournalCannotBeReadStopsTheNextUpdateAsAnUnsettledOneDoes`).
 
 `update::recover` itself - the first act of every program, the health run
 included - is unchanged and asks for no lock over such an update
@@ -979,6 +1132,10 @@ starts a program.
 - *A program's own recovery starts `--recover`* (it found a half-swapped
   tree). That program runs from R, so the scan names it and nothing of this
   kind is put back under it.
+- *A scanner or a backup has the journal open.* Nobody decides on what was
+  not read, and nobody takes it for nothing: `--recover` leaves the update
+  with its entry registered again, the window asks again, and a swap is
+  refused. Each decides the moment the journal reads.
 
 What this leaves open is under "Not done".
 
@@ -1006,9 +1163,12 @@ follows its record as `warning text="..."`.
 
 A v1 install asking about the tests' second release, and then downloading it
 (the expectations of `tests/app/test_update_verbs.cpp`, worked out there from
-the fixtures; `installed=0.9.0` is the fixtures' record, which stands while
-the program that reads it is not built as a version above it - "The
-installed version"):
+the fixtures; `installed=0.9.0` is the fixtures' first release, which the
+tests hand to the lines. Read by a program from an install's records it is
+the helper's record of 0.9.0 above a package that names 0.8.0, and so the
+same whatever version that program was built as:
+`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords`, "The installed
+version"):
 
 ```
 > UPDATE STATUS
@@ -1166,6 +1326,12 @@ self-test - run as background jobs.
   that the verb answers
   (`OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse`,
   `qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`).
+  Of the builds that were put back the page is told only of one that can
+  still be offered to THIS install: a build made after the one installed
+  here, or the one the dialog is telling of when the page asks
+  (`updatePutBackOfState`, `updateTellsOfSetAside`;
+  `AVersionThatWasPutBackIsToldOfOnlyWhileItCanStillBeOfferedHere`). The
+  list itself is shortened by `UPDATE BLOCKED CLEAR` alone.
 - **The dialog says where that button is.** Both sentences that tell of a
   release that was set aside - a check's `update=blocked`, and the last
   apply's ending when its reason is `health_exit` or `health_timeout` - end
@@ -1176,7 +1342,15 @@ self-test - run as background jobs.
   include `platform`, `elevated` ("Katana was started as administrator;
   start it the ordinary way, not as administrator, and update again - the
   download is kept") and `interrupted_update` as "an earlier update is not
-  settled yet".
+  settled yet". After that last reason the dialog says the way out, which
+  the helper named only on a console nobody sees: "Update again; if this
+  is said again, close Katana and run: katana_updater --recover "<R>"",
+  with the install's folder as the platform writes it. Update again FIRST,
+  because the start that shows the sentence is what settles most such
+  updates
+  (`AnUpdateRefusedOverAnEarlierOneThatIsNotSettledNamesTheCommandThatSettlesIt`).
+  The sentence is in the command log too; `UPDATE STATUS` gives the token
+  alone, `last=refused:interrupted_update`.
 - **The Command Reference** (Help) has an Updates section, which is
   `app::updateHelpText` - what `HELP UPDATE` prints - and its Window list
   names `UPDATE` (`TheUpdatesSectionIsTheUpdateVerbsOwnHelp`).
@@ -1476,10 +1650,18 @@ changed nothing and are under "Not done"):
 - **H2, the second scan is one question and not a second wait.** The first
   look already waited for whoever was closing; a wait here would let the
   files the plan hashed grow old under a program that is running.
-- **H3, a record never lowers the installed version.** Only the version is
-  raised to the program's own; the sequence stays the record's, because the
-  helper of a release that brings its own helper is that release's version
-  and must still find the release above the build the record names.
+- **H3, a record never lowers the installed build, and the floor under it
+  is the PACKAGE's word.** The helper's record is believed no lower than
+  the build `install.json` names: its version, and with it its release's
+  sequence. *Rejected, after it was built: the version of the program that
+  reads the record.* A program has a version and no sequence, so a raised
+  version kept the record's stale sequence under it, and the withdrawn
+  first build of a version was "newer" than its second, unpacked by hand.
+  The program that reads an install need not be the install's: a release's
+  own helper is the version it is about to install, and refused that
+  release as a `downgrade`. And the swap's tests rested on the version the
+  suite was built as. That reading stays for a record that says its target
+  and no more, which no package writes now ("The installed version").
 - **H4, an administrator's session is refused the apply, and only that.**
   The download is not refused, and nothing is refused where the token was
   never split - User Account Control off, the built-in administrator -
@@ -1575,8 +1757,15 @@ whatever more the manifest's parser allows (4 GiB).
 - **Nothing lists the releases that are blocked.** `UPDATE STATUS` does not
   say them (its reply did not change when `UPDATE BLOCKED CLEAR` came), and
   Settings > Updates says only that a version is set aside, not which: the
-  state keeps sequences and no version. A check that meets a blocked
-  release names it.
+  state keeps sequences and no version. Nor does the page tell of every
+  build on the list. The list is one for every copy a person runs and is
+  only ever added to, so the page tells only of a build made AFTER the one
+  installed here - a sequence above the install record's, or any build
+  where the install has no record - or of the one the update dialog is
+  telling of at that moment (`updatePutBackOfState`; `docs/desktop.md`,
+  "The Updates page"). A build made before the installed one and yet of a
+  higher version is therefore told of only once a check has met it. A
+  check that meets a blocked release names it.
 
 What the hardening pass of 2026-10-14 left open, by its rulings:
 
@@ -1600,8 +1789,41 @@ What the hardening pass of 2026-10-14 left open, by its rulings:
   starts, and step 1 of the next swap does when its marker is there; with
   no marker that step refuses (`interrupted_update`) and settles nothing.
   For a release that does not start, what remains is
-  `katana_updater --recover` by hand with nothing of the install running,
-  which the refusal `interrupted_update` names.
+  `katana_updater --recover` by hand with nothing of the install running.
+  That refusal is where a person is told the command, in two places: in
+  the helper's own `detail=` line, which goes to a console nobody sees;
+  and - `last.json` keeping the reason's token alone - at the window's
+  next start, in the update dialog and in the command log, as "Update
+  again; if this is said again, close Katana and run: katana_updater
+  --recover "<R>"" (`docs/desktop.md`, "Help > Check for Updates": "A
+  refusal over an earlier update says what to do"). `UPDATE STATUS` gives
+  the token alone, `last=refused:interrupted_update`, on every surface.
+- **H1: the logon net is ONE registry value for every copy of Katana a
+  person runs.** The `RunOnce` entry has one name, `KatanaUpdateRecover`,
+  whatever R is (`update::kRunOnceName`). A person who runs two copies -
+  an installed one and a zip unpacked beside it - has one entry for both.
+  A swap in the other copy replaces it with its own command when it
+  commits, and that swap's ending, the other copy's window when it
+  confirms and the other copy's `--recover` when it finishes remove the
+  value, THIS copy's entry with it. This copy's net is then gone until a
+  `--recover` of its own registers it again. What it keeps is what holds
+  without the entry: `update::recover` at the next start of any of its
+  programs, and a window that confirms. Known, and not changed: the
+  uninstaller removes the value by that name (`cmake/NSIS.template.in`).
+- **H1: a `--recover` at logon that fails leaves no entry.** Windows
+  removes a `RunOnce` entry before it runs it, and the run registers it
+  again only on its way to settling an update that was never said to
+  start (`update::settleUnproved`) - which it reaches only when its first
+  half, putting back what a crash left (`update::recoverInProcess`), was
+  OK. A logon's run that FAILS there - a half-swapped tree whose putting
+  back does not finish or whose lock cannot be opened, an `R/.update`
+  that will not be listed - prints `recover=failed`, exit 12, writes its
+  line in `recovery.log` where it can, and leaves no entry: no later
+  logon tries again by itself. The swap whose own rollback failed did
+  keep its entry ("The swap"), so this is the second failure in a row.
+  What remains is `update::recover` at the next start of any program of
+  the install, which runs the same command and, where that fails, says on
+  stderr the command to run by hand; and that command.
 - **H1: a window of the old files can confirm a second build of its own
   version.** The window confirms when the install record's version is its
   own (`updateStartMayConfirm`). A window of the old files that was started
@@ -1612,17 +1834,6 @@ What the hardening pass of 2026-10-14 left open, by its rulings:
   a build it is not. The record's sequence does tell the two builds apart,
   but a program is built with a version and no sequence of its own to hold
   against it.
-- **H1 and H3: a helper newer than the update it settles writes its own
-  version to Settings > Apps.** A healthy settlement writes the installed
-  version as `update::readInstall` gives it, which is the HIGHER of the
-  record's and the settler's own ("The installed version"). The helper
-  that made the swap writes the manifest's version instead. The two differ
-  when the settler is newer than the update it settles: step 1 of a swap
-  run by a STAGED helper (a release whose `applier` is above the installed
-  helper's protocol), or `--recover` run by hand from a newer copy. The
-  entry then names a version that is not installed until the next healthy
-  update. Latent today: the protocol is 1 and the release workflow asks for
-  no other, so the installed helper runs every swap.
 - **H1: a program started while such an update is being put back may fail
   to load**, as one started during a commit may ("The residual").
 - **H1: two states are left as they are at every logon.** A run of

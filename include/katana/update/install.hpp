@@ -5,7 +5,8 @@
 // that holds bin/ and share/ (the folder of the unpacked archive, or the
 // per-user installer's folder):
 //
-//   R/share/katana/install.json              {"schema":1,"target":"win64"}
+//   R/share/katana/install.json              what the package is:
+//        {"schema":1,"target":"win64","version":"0.3.0","sequence":N}
 //        Written ONLY by the CPack install (cmake/KatanaPackaging.cmake, the
 //        pre-build script KatanaInstallRecord.cmake) - never by `cmake
 //        --install`, the `bundle` target, or the build tree. Without it the
@@ -13,16 +14,43 @@
 //        runs (tools/check_install_rules.cmake asserts this). The target comes
 //        from here, never from the operating system: Windows on ARM running
 //        the x64 zip stays win64.
+//        `version` and `sequence` are OPTIONAL. They are THE COPY'S OWN BUILD,
+//        apart from anything an update recorded here: the version the package was
+//        built as, and the sequence of the release it belongs to - the number that
+//        release's update manifests carry. A package built outside the release
+//        workflow belongs to no release and names its version alone. A sequence
+//        with no version to belong to does not read (ParseFailure). A record that
+//        names neither - one made before the record carried them, and every test
+//        tree that says its target and no more - leaves the program that asks to
+//        stand for the copy: programVersion(), and no sequence.
+//        Where the package names its version the asking program is NOT asked as
+//        well. The program that reads an install need not be one of its programs:
+//        the helper runs from a copy outside R and may be a later release's own
+//        (stage.hpp, preflight), and its version is then the one it is about to
+//        install, not the install's.
 //   R/share/katana/installed.json            written by the helper at commit:
 //        {"schema":1,"product":"katana","version":"0.3.0","sequence":N,"tag":"v0.3.0",
 //         "target":"win64"}
-//        Absent on a fresh install: the installed version is then programVersion(),
-//        the sequence is 0 and `hasInstalledRecord` is false. A fresh install is
-//        NOT offered the release it came from: isNewerThan (trust.hpp) ignores the
-//        sequence while there is no record, because the zip carries no sequence to
-//        compare with the manifest's (one is written when the release is built, the
-//        other when its manifest is). Only a record the helper wrote says "this is
-//        the build with sequence N".
+//        Absent on a fresh install: the installed version is then the copy's own
+//        (above), the sequence is 0 - whatever sequence the package names - and
+//        `hasInstalledRecord` is false. A fresh install is NOT offered the release
+//        it came from: isNewerThan (trust.hpp) ignores the sequence while there is
+//        no record, and the copy counts as the release it was made from.
+//        THE FLOOR AGAINST GOING BACK. Where the record is there it is not believed
+//        below the copy's own build: the installed build is the HIGHER of the two,
+//        in the order isNewerThan writes - by version, and within one version by
+//        sequence. The record is the helper's, and nothing else keeps it true: a
+//        newer zip unpacked by hand over a copy that had updated itself leaves it
+//        naming the older build, and read alone it would let an earlier signed
+//        release pass for a newer one and be installed over the programs that are
+//        there. So where the copy's own version is the higher, it is the installed
+//        version, and its sequence comes with it where it has one (a package of a
+//        release); where the versions are equal, the higher sequence is the
+//        installed one. A copy's own build with no sequence - a package that names
+//        its version alone, or the asking program - raises the version alone and
+//        the sequence stays the record's: such a copy is offered the release of its
+//        own version once more, which changes no file that is that release's
+//        already and writes the records that were stale.
 //   R/share/katana/installed.manifest.json   the signed manifest of the
 //   R/share/katana/installed.manifest.json.sig   installed version, kept so
 //        that a later update removes only files that version put there.
@@ -72,10 +100,19 @@ struct Install {
     std::string target;          // "" for Development
     InstallKind kind = InstallKind::Development;
     std::string product = "katana";
-    Version version;             // installed.json's, else programVersion()
-    std::uint64_t sequence = 0;  // installed.json's, else 0
-    // installed.json was present: `version` and `sequence` are what the helper recorded.
-    // False on a fresh install, where `sequence` is a placeholder (see above and isNewerThan).
+    // The installed build: what a release must be above to be an update (isNewerThan).
+    // `version` is the higher of installed.json's and the copy's own (install.json's, else
+    // programVersion()); with no installed.json it is the copy's own, and in a development
+    // tree programVersion().
+    Version version;
+    // installed.json's - or the PACKAGE's (install.json's), where the package's build is the
+    // higher of the two and names one ("THE FLOOR" above). 0 with no installed.json, also
+    // where the package names a sequence.
+    std::uint64_t sequence = 0;
+    // installed.json was present: `version` and `sequence` are what the helper recorded, each
+    // raised to the copy's own build where that is the higher. It says that the helper's
+    // record is there, whichever build is the higher. False on a fresh install, where
+    // `sequence` is a placeholder (see above and isNewerThan).
     bool hasInstalledRecord = false;
     bool hasInstalledManifest = false;
 };

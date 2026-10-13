@@ -22,7 +22,8 @@
 #     etc/ssl/certs/ca-bundle.crt        what libcurl checks https:// against
 #     share/katana/samples               a project to open
 #     share/katana/install.json          CPack's package only: says this is a release and
-#                                        names its target (see "install.json" below)
+#                                        names its target and its version (see
+#                                        "install.json" below)
 #
 # bin/ beside share/ is not arbitrary: PROJ looks for its database at
 # <directory of the PROJ DLL>/../share/proj, so this layout is found without
@@ -351,12 +352,17 @@ endif()
 
 # --- install.json ---------------------------------------------------------------------
 #
-# share/katana/install.json, {"schema":1,"target":"<token>"}, is what makes an install a
-# RELEASE: without it a tree is a development tree, the update engine refuses to apply
-# anything to it and no automatic check runs. So it is written ONLY into the tree CPack
-# stages for a package - by the script below, which CPack runs before it signs (a file
-# added after the signature would break a macOS bundle's seal) - and NEVER by an install
-# rule. The install itself has sealed a macOS bundle by then, ad hoc
+# share/katana/install.json is what makes an install a RELEASE: without it a tree is a
+# development tree, the update engine refuses to apply anything to it and no automatic
+# check runs. It says what the package is:
+#
+#   {"schema":1,"target":"<token>","version":"<version>"}                 built anywhere
+#   {"schema":1,"target":"<token>","version":"<version>","sequence":<n>}  built for a release
+#
+# So it is written ONLY into the tree CPack stages for a package - by the script below,
+# which CPack runs before it signs (a file added after the signature would break a macOS
+# bundle's seal) - and NEVER by an install rule. The install itself has sealed a macOS
+# bundle by then, ad hoc
 # (KatanaDeployUnix.cmake.in, step 5), and the record is a file that seal does not list:
 # that is why KatanaSign.cmake seals a bundle again even when no certificate is named.
 # `cmake --install`, the `bundle` target and build/<preset>/bin are development
@@ -368,18 +374,198 @@ endif()
 # The target is the token above and not the machine's: Windows on ARM running the x64 zip
 # is win64 and must be updated with the x64 files. The script is written here, at
 # configure time, because the token and the data directory are known only here.
-file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake" @ONLY CONTENT [==[
+#
+# The version is PROJECT_VERSION, always: the version these programs were built as. The
+# engine takes it for the copy's own build whichever program asks (src/katana_update/state.cpp,
+# packageBuild): the helper that reads an install may be a later release's, and its own
+# version is then not the install's. It is also the floor a stale installed.json cannot
+# lower, where a newer zip was unpacked by hand over a copy that had updated itself.
+#
+# The sequence is a RELEASE's, and a package built by hand belongs to none: the release
+# workflow settles one number for a run before anything is built, and every update manifest
+# of that release carries it (tools/update_make_manifest.py --sequence). A configure that
+# packages for a release is given the same number here; with none the record names the
+# version alone. Never a sequence without a version - the engine does not read such a record
+# (ParseFailure), and a copy whose record does not read cannot be updated at all - which is
+# why the version is no option, and why the script below writes it first and the sequence
+# only after it.
+#
+# A cache entry, so it stays until a configure gives another: a build directory that packaged
+# one release must be given the next one's (or -UKATANA_UPDATE_SEQUENCE) before it packages
+# again. The record script prints the record it writes, so a package's log shows which.
+set(KATANA_UPDATE_SEQUENCE "" CACHE STRING
+    "Sequence of the release this build is packaged for, the number its update manifests carry (UTC epoch seconds); empty: the package names its version alone")
+
+# What is wrong with `sequence` as the sequence of a release, in `out`; nothing ("") for a
+# sequence that is one and for the empty text, which names none. The rule is the one a
+# manifest is held to - UTC epoch seconds from 1 to 4102444800, the first second of 2100, by
+# the producer (tools/update_make_manifest.py, MAX_SEQUENCE) and by the engine that reads it
+# (src/katana_update/manifest.cpp) - so that a package cannot name a sequence no manifest
+# could carry, above every release of its own version for good. Digits alone, because the
+# text goes into the record as a JSON number as it is: a sign, a fraction, an exponent or a
+# leading zero would be a record that does not read, or a number other than the manifests'.
+function(katana_update_sequence_problem sequence out)
+    set(_problem "")
+    if(NOT "${sequence}" STREQUAL "")
+        string(LENGTH "${sequence}" _digits)
+        if(NOT "${sequence}" MATCHES "^[1-9][0-9]*$")
+            set(_problem "is not a whole number of 1 or more, written in digits alone")
+        elseif(_digits GREATER 10 OR "${sequence}" GREATER 4102444800)
+            set(_problem "is above 4102444800, the last sequence an update manifest may carry (UTC epoch seconds, the year 2100)")
+        endif()
+    endif()
+    set(${out} "${_problem}" PARENT_SCOPE)
+endfunction()
+
+# Writes the record script `output`: run by CPack, it writes <staged tree>/<datadir>/katana/
+# install.json for a package of `target`, built as `version`, of the release `sequence` ("" for
+# none). A function, so that the tests below read back records made with and without a
+# sequence whatever this configure was given.
+function(katana_write_install_record_script output target version sequence datadir)
+    # 2 to 4 components of digits, as update::parseVersion reads a version (version.hpp):
+    # project(VERSION) cannot give a fifth, and could give one alone.
+    if(NOT "${version}" MATCHES "^[0-9]+[.][0-9]+([.][0-9]+)?([.][0-9]+)?$")
+        message(FATAL_ERROR
+            "The install record cannot name the version '${version}': the update engine reads "
+            "MAJOR.MINOR, MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH.BUILD, and a package whose "
+            "record does not read can never be updated")
+    endif()
+    katana_update_sequence_problem("${sequence}" _problem)
+    if(_problem)
+        message(FATAL_ERROR
+            "KATANA_UPDATE_SEQUENCE '${sequence}' ${_problem}. Give the sequence of the release "
+            "this build is packaged for, or leave it empty for a package of no release")
+    endif()
+    set(KATANA_RECORD_TARGET "${target}")
+    set(KATANA_RECORD_VERSION "${version}")
+    set(KATANA_RECORD_SEQUENCE "${sequence}")
+    set(KATANA_RECORD_DATADIR "${datadir}")
+    get_filename_component(_output_directory "${output}" DIRECTORY)
+    file(MAKE_DIRECTORY "${_output_directory}")
+    file(CONFIGURE OUTPUT "${output}" @ONLY CONTENT [==[
 # Written by cmake/KatanaPackaging.cmake; run by CPack on the staged tree, before the
 # signing script. Not part of any install rule: see "install.json" there.
 if(NOT CPACK_TEMPORARY_INSTALL_DIRECTORY)
     message(FATAL_ERROR "KatanaInstallRecord.cmake is a CPack script: it runs on the tree CPack stages")
 endif()
-set(_directory "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/@KATANA_INSTALL_DATADIR@/katana")
+set(_directory "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/@KATANA_RECORD_DATADIR@/katana")
 file(MAKE_DIRECTORY "${_directory}")
+# The version always and first; the sequence only where the configure named one, and so
+# never without a version (the engine does not read such a record).
+set(_record "{\"schema\":1,\"target\":\"@KATANA_RECORD_TARGET@\",\"version\":\"@KATANA_RECORD_VERSION@\"")
+set(_sequence "@KATANA_RECORD_SEQUENCE@")
+if(NOT "${_sequence}" STREQUAL "")
+    string(APPEND _record ",\"sequence\":${_sequence}")
+endif()
+string(APPEND _record "}")
 # No trailing newline: file(WRITE) writes a line break as CRLF on Windows and LF elsewhere,
 # and nothing is gained by the file differing between the packages.
-file(WRITE "${_directory}/install.json" "{\"schema\":1,\"target\":\"@KATANA_UPDATE_TARGET@\"}")
-message(STATUS "Katana install record: @KATANA_UPDATE_TARGET@")
+file(WRITE "${_directory}/install.json" "${_record}")
+message(STATUS "Katana install record: ${_record}")
 ]==])
+endfunction()
+katana_write_install_record_script("${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake"
+    "${KATANA_UPDATE_TARGET}" "${PROJECT_VERSION}" "${KATANA_UPDATE_SEQUENCE}"
+    "${KATANA_INSTALL_DATADIR}")
+
+if(KATANA_BUILD_TESTS)
+    # The record, read back from a tree the script wrote it into, as CPack runs the script:
+    # the real one of this build, and two made here with a fixed target and version - one of
+    # a release, one of none - so that both shapes are read in every build. The expected
+    # texts are the two shapes drawn under "install.json" above, written out by hand, and
+    # the example of src/katana_update/state.cpp (packageBuild) for the one of a release.
+    #
+    # The reader is written to the build directory, as the record script is: the staged
+    # folder is emptied first, so a record left by an earlier run cannot stand for one the
+    # script no longer writes, and the text is printed between < and >, so that a line
+    # break or anything else after the closing brace fails the test.
+    file(WRITE "${CMAKE_BINARY_DIR}/KatanaReadInstallRecord.cmake" [==[
+# Written by cmake/KatanaPackaging.cmake for its tests of the install record.
+#   cmake -DRECORD_SCRIPT=<record script> -DSTAGE=<folder to stage in> -DRECORD=<install.json, under it> -P <this>
+foreach(_argument IN ITEMS RECORD_SCRIPT STAGE RECORD)
+    if(NOT ${_argument})
+        message(FATAL_ERROR "Pass -DRECORD_SCRIPT=<script> -DSTAGE=<folder> -DRECORD=<path of install.json under it>")
+    endif()
+endforeach()
+file(REMOVE_RECURSE "${STAGE}")
+set(CPACK_TEMPORARY_INSTALL_DIRECTORY "${STAGE}")
+include("${RECORD_SCRIPT}")
+if(NOT EXISTS "${STAGE}/${RECORD}")
+    message(FATAL_ERROR "${RECORD_SCRIPT} wrote no ${RECORD} into the staged tree")
+endif()
+file(READ "${STAGE}/${RECORD}" _text)
+message(STATUS "The record as written: <${_text}>")
+]==])
+    # The test packaging_install_record_<name>: `script` run on a staged folder of its own, and
+    # the record it leaves under `datadir` held to `expected`, a regular expression of the
+    # whole text (the reader's < and > included).
+    function(katana_add_install_record_test name script datadir expected)
+        add_test(NAME packaging_install_record_${name}
+            COMMAND ${CMAKE_COMMAND} "-DRECORD_SCRIPT=${script}"
+                    "-DSTAGE=${CMAKE_BINARY_DIR}/install_record_staged/${name}"
+                    "-DRECORD=${datadir}/katana/install.json"
+                    -P "${CMAKE_BINARY_DIR}/KatanaReadInstallRecord.cmake")
+        set_tests_properties(packaging_install_record_${name} PROPERTIES
+            PASS_REGULAR_EXPRESSION "${expected}"
+            FAIL_REGULAR_EXPRESSION "CMake Error")
+    endfunction()
+
+    # This build's: its own target and version, and its sequence where the configure was
+    # given one. A dot of the version is a dot, not any character.
+    string(REPLACE "." "[.]" _katana_record_version "${PROJECT_VERSION}")
+    set(_katana_record_of_this_build
+        "<[{]\"schema\":1,\"target\":\"${KATANA_UPDATE_TARGET}\",\"version\":\"${_katana_record_version}\"")
+    if(NOT "${KATANA_UPDATE_SEQUENCE}" STREQUAL "")
+        string(APPEND _katana_record_of_this_build ",\"sequence\":${KATANA_UPDATE_SEQUENCE}")
+    endif()
+    string(APPEND _katana_record_of_this_build "[}]>")
+    katana_add_install_record_test(names_this_builds_target_and_version
+        "${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake" "${KATANA_INSTALL_DATADIR}"
+        "${_katana_record_of_this_build}")
+
+    # The two shapes, on fixed values: 0.5.0 for win64, of the release 1792312800 and of none.
+    set(_katana_record_fixtures "${CMAKE_BINARY_DIR}/install_record_fixtures")
+    katana_write_install_record_script("${_katana_record_fixtures}/of_a_release/KatanaInstallRecord.cmake"
+        "win64" "0.5.0" "1792312800" "share")
+    katana_write_install_record_script("${_katana_record_fixtures}/of_no_release/KatanaInstallRecord.cmake"
+        "win64" "0.5.0" "" "share")
+    katana_add_install_record_test(of_a_release_names_its_version_and_then_its_sequence
+        "${_katana_record_fixtures}/of_a_release/KatanaInstallRecord.cmake" "share"
+        "<[{]\"schema\":1,\"target\":\"win64\",\"version\":\"0[.]5[.]0\",\"sequence\":1792312800[}]>")
+    katana_add_install_record_test(of_no_release_names_its_version_and_no_sequence
+        "${_katana_record_fixtures}/of_no_release/KatanaInstallRecord.cmake" "share"
+        "<[{]\"schema\":1,\"target\":\"win64\",\"version\":\"0[.]5[.]0\"[}]>")
+
+    # The rule a sequence is held to, on what a configure may be given: the least and the
+    # greatest a manifest may carry (1 and 4102444800) and one between; and what is refused -
+    # nought, a leading zero, a sign, a fraction, an exponent, a word, two numbers, the first
+    # number above the greatest, and one beyond 64 bits. Worked out at configure time, which
+    # is when the rule is applied, and reported by an echo test as the link closure is.
+    set(_katana_sequences_taken "")
+    set(_katana_sequences_refused "")
+    foreach(_sequence IN ITEMS 1 1792312800 4102444800
+            0 01 -1 +1 1.0 1e9 abc "1 2" 4102444801 18446744073709551616)
+        katana_update_sequence_problem("${_sequence}" _problem)
+        if(_problem)
+            list(APPEND _katana_sequences_refused "${_sequence}")
+        else()
+            list(APPEND _katana_sequences_taken "${_sequence}")
+        endif()
+    endforeach()
+    katana_update_sequence_problem("" _problem)
+    if(_problem)
+        set(_katana_no_sequence "refused")
+    else()
+        set(_katana_no_sequence "no sequence")
+    endif()
+    list(JOIN _katana_sequences_taken ", " _katana_sequences_taken)
+    list(JOIN _katana_sequences_refused ", " _katana_sequences_refused)
+    add_test(NAME packaging_takes_a_release_sequence_and_refuses_what_no_manifest_could_carry
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Sequences taken: ${_katana_sequences_taken}. Refused: ${_katana_sequences_refused}. The empty text: ${_katana_no_sequence}.")
+    set_tests_properties(packaging_takes_a_release_sequence_and_refuses_what_no_manifest_could_carry PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "Sequences taken: 1, 1792312800, 4102444800[.] Refused: 0, 01, -1, [+]1, 1[.]0, 1e9, abc, 1 2, 4102444801, 18446744073709551616[.] The empty text: no sequence[.]")
+endif()
 
 include(CPack)

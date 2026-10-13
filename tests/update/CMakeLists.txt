@@ -249,7 +249,8 @@ endif()
 # is OpenSSL alone: the helper checks signatures and never inflates (a release is inflated
 # when it is staged, by the program that downloads it), so the linker takes nothing of zlib
 # into it and its check would pass on a link line that named zlib's DLL. This executable uses
-# what the engine uses - Ed25519 through EVP, raw inflate, crc32 - through the same third-party
+# what the engine uses - Ed25519 through EVP, raw inflate - and zlib's crc32 as well (the
+# engine's own CRC-32 is the journal's, and it calls none of zlib's), through the same third-party
 # target and the same link options as the helper, so the import check on IT is a check of the
 # whole link line (a static OpenSSL and a static zlib, nothing of the toolchain's DLLs), and
 # running it is a check that the static libraries work. Never installed.

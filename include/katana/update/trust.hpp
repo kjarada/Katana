@@ -81,12 +81,13 @@ struct Trust {
                                                     const Trust& trust, const Install& install);
 
 // True when the manifest is above what is installed: a higher version; or the same
-// version with a higher sequence, but only when the install has a record of its own
-// sequence (Install::hasInstalledRecord). A fresh install has none - the zip carries
-// no sequence to compare with - so the same version is NOT newer: otherwise every
-// fresh install would be offered the very release it was made from. A lower version
-// is never newer. The one place the order is written (check() and the helper both
-// call it). FINISHED, with tests, in src/katana_update/contract.cpp: task T5 keeps it.
+// version with a higher sequence, but only when the install has the helper's record
+// of its build (Install::hasInstalledRecord). A fresh install has none - its sequence
+// is the placeholder 0, whatever its package names (install.hpp) - so the same version
+// is NOT newer: otherwise a fresh install would be offered the very release it was
+// made from. A lower version is never newer. The one place the order is written
+// (check() and the helper both call it). FINISHED, with tests, in
+// src/katana_update/contract.cpp: task T5 keeps it.
 [[nodiscard]] bool isNewerThan(const Manifest& manifest, const Install& install);
 
 } // namespace katana::update
