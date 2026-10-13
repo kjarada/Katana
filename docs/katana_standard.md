@@ -840,14 +840,14 @@ Pegs, pins, nails and the other marks found or placed at corners, and the marks 
 |---|---|---|---|---|
 | `PBDY` | point, symbol `Iron Pin` (hidden); `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A boundary mark of any kind, shot as a point. |
 | `PBPG` | point, symbol `Corner Peg`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A peg set at a boundary corner, shot at its top. |
-| `PBPG*` | nothing |  | kept out of surfaces | Keeps boundary pegs out of the ground surface when the code carries a string number. |
+| `PBPG*` | nothing |  | kept out of surfaces | Keeps boundary pegs out of the ground surface. |
 | `PCRM` | point, symbol `Fixed Survey Mark` (hidden); `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A mark set to reference cadastral corners, so that the corners can be re-established if their own marks are lost. |
 | `PDHL` | point, symbol `Winged Drill Hole`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A hole drilled in rock or concrete, with a chiselled wing cut beside it to make it easy to find. |
-| `PDHL*` | nothing |  | kept out of surfaces | Keeps winged drill holes out of the ground surface when the code carries a string number. |
+| `PDHL*` | nothing |  | kept out of surfaces | Keeps winged drill holes out of the ground surface. |
 | `PGIN` | point, symbol `Survey Spike`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A galvanised iron nail driven into a hard surface as a survey mark. |
-| `PGIN*` | nothing |  | kept out of surfaces | Keeps galvanised nails out of the ground surface when the code carries a string number. |
+| `PGIN*` | nothing |  | kept out of surfaces | Keeps galvanised nails out of the ground surface. |
 | `PGPI` | point, symbol `Iron Pipe`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A galvanised iron pipe driven in as a survey mark. |
-| `PGPI*` | nothing |  | kept out of surfaces | Keeps galvanised pipes out of the ground surface when the code carries a string number. |
+| `PGPI*` | nothing |  | kept out of surfaces | Keeps galvanised pipes out of the ground surface. |
 | `PMSM` | point, symbol `Fixed Survey Mark`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` |  | A survey mark of a kind no other code covers, shot at its centre. |
 | `PMSM*` | nothing |  | kept out of surfaces | Keeps miscellaneous survey marks out of the ground surface. |
 | `PNAL` | point, symbol `Survey Spike`; `katana boundary` (#796EDA); 0.25 mm | `cadastre/marks/found` | each point `Point Code=PNAL` | A nail driven into a hard surface as a survey mark; each shot also records its code. |
@@ -1351,29 +1351,29 @@ Trunks by diameter, canopies by spread, and outlines of foliage. (51 codes)
 | Code | Draws | Layer | Also | What it is |
 |---|---|---|---|---|
 | `PF01` | point, symbol `Tiny Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about one metre across, drawn as a canopy ring of that size. |
-| `PF01*` | nothing |  | kept out of surfaces | Keeps the one-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF01*` | nothing |  | kept out of surfaces | Keeps the one-metre canopy marks out of the ground surface. |
 | `PF02` | point, symbol `Tiny Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about two metres across, drawn as a canopy ring of that size. |
-| `PF02*` | nothing |  | kept out of surfaces | Keeps the two-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF02*` | nothing |  | kept out of surfaces | Keeps the two-metre canopy marks out of the ground surface. |
 | `PF03` | point, symbol `Small Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about three metres across, drawn as a canopy ring of that size. |
-| `PF03*` | nothing |  | kept out of surfaces | Keeps the three-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF03*` | nothing |  | kept out of surfaces | Keeps the three-metre canopy marks out of the ground surface. |
 | `PF04` | point, symbol `Small Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about four metres across, drawn as a canopy ring of that size. |
-| `PF04*` | nothing |  | kept out of surfaces | Keeps the four-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF04*` | nothing |  | kept out of surfaces | Keeps the four-metre canopy marks out of the ground surface. |
 | `PF05` | point, symbol `Medium Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about five metres across, drawn as a canopy ring of that size. |
-| `PF05*` | nothing |  | kept out of surfaces | Keeps the five-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF05*` | nothing |  | kept out of surfaces | Keeps the five-metre canopy marks out of the ground surface. |
 | `PF06` | point, symbol `Medium Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about six metres across, drawn as a canopy ring of that size. |
-| `PF06*` | nothing |  | kept out of surfaces | Keeps the six-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF06*` | nothing |  | kept out of surfaces | Keeps the six-metre canopy marks out of the ground surface. |
 | `PF07` | point, symbol `Large Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about seven metres across, drawn as a canopy ring of that size. |
-| `PF07*` | nothing |  | kept out of surfaces | Keeps the seven-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF07*` | nothing |  | kept out of surfaces | Keeps the seven-metre canopy marks out of the ground surface. |
 | `PF08` | point, symbol `Large Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about eight metres across, drawn as a canopy ring of that size. |
-| `PF08*` | nothing |  | kept out of surfaces | Keeps the eight-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF08*` | nothing |  | kept out of surfaces | Keeps the eight-metre canopy marks out of the ground surface. |
 | `PF09` | point, symbol `Broad Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about nine metres across, drawn as a canopy ring of that size. |
-| `PF09*` | nothing |  | kept out of surfaces | Keeps the nine-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF09*` | nothing |  | kept out of surfaces | Keeps the nine-metre canopy marks out of the ground surface. |
 | `PF10` | point, symbol `Broad Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about ten metres across, drawn as a canopy ring of that size. |
-| `PF10*` | nothing |  | kept out of surfaces | Keeps the ten-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF10*` | nothing |  | kept out of surfaces | Keeps the ten-metre canopy marks out of the ground surface. |
 | `PF12` | point, symbol `Giant Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about twelve metres across, drawn as a canopy ring of that size. |
-| `PF12*` | nothing |  | kept out of surfaces | Keeps the twelve-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF12*` | nothing |  | kept out of surfaces | Keeps the twelve-metre canopy marks out of the ground surface. |
 | `PF15` | point, symbol `Giant Tree Canopy`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/canopy` |  | A tree whose crown spreads about fifteen metres across, drawn as a canopy ring of that size. |
-| `PF15*` | nothing |  | kept out of surfaces | Keeps the fifteen-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF15*` | nothing |  | kept out of surfaces | Keeps the fifteen-metre canopy marks out of the ground surface. |
 | `PT01` | point, symbol `Hundred Millimetre Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | A tree whose trunk is about 100 mm across, taken at the trunk. |
 | `PT01*` | nothing |  | kept out of surfaces | Keeps 100 mm tree trunks out of the ground surface, since a trunk is not the ground. |
 | `PT02` | point, symbol `Two Hundred Millimetre Tree Trunk`; `katana tree` (#5C8627); 0.18 mm | `vegetation/trees/trunk` |  | A tree whose trunk is about 200 mm across, taken at the trunk. |
@@ -1434,10 +1434,10 @@ Walls, eaves, awnings, doors, slabs and floor levels. (14 codes)
 | `LB*` | line `Platform Edge Line`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/detail` |  | Edge of a loading bay or loading dock, shot as a line along the raised platform. |
 | `OR*` | line `Hidden Outline`; `katana building` (#627B8C); 0.13 mm | `buildings/outline/hidden` |  | Outline of a ruin, the remains of a building that is no longer whole. |
 | `PAWN` | point, symbol `Awning Point`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/roof` |  | A survey point on the edge of an awning. |
-| `PAWN*` | nothing |  | kept out of surfaces | Awning points that carry a string number, which are kept out of the surface model. |
+| `PAWN*` | nothing |  | kept out of surfaces | Keeps awning points out of the ground surface. |
 | `PCBU` | point, symbol `Building Corner`; `katana building` (#627B8C); 0.35 mm | `buildings/outline/detail` |  | A building corner shot at natural surface level, where the wall meets the ground. |
 | `PFLR` | point, symbol `Spot Level`; `katana building` (#627B8C); 0.18 mm | `buildings/outline/detail` |  | A spot level taken on the finished floor of a building. |
-| `PFLR*` | nothing |  | kept out of surfaces | Keeps floor levels out of the ground surface when the code carries a string number. |
+| `PFLR*` | nothing |  | kept out of surfaces | Keeps floor levels out of the ground surface. |
 | `TW*` | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/wall` |  | Line along the top of a wall. |
 | `VE*` | line `continuous`; `katana building` (#627B8C); 0.25 mm | `buildings/outline/slab` |  | Edge of a concrete slab laid flat on the ground. |
 
@@ -1584,17 +1584,17 @@ Bench marks, survey marks, stations, pegs, bolts and the marks a job sets and us
 | Code | Draws | Layer | Also | What it is |
 |---|---|---|---|---|
 | `PAPN` | point, symbol `Alignment Pin`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | An alignment pin: a pin set in the ground to mark a design alignment for setting out. |
-| `PAPN*` | nothing |  | kept out of surfaces | Alignment pins that carry a string number, which are kept out of the surface model. |
+| `PAPN*` | nothing |  | kept out of surfaces | Keeps alignment pins out of the ground surface. |
 | `PBLT` | point, symbol `Survey Spike`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A bolt set in concrete or rock as a survey mark, shot at the centre of its head. |
-| `PBLT*` | nothing |  | kept out of surfaces | Survey bolts that carry a string number, which are kept out of the surface model. |
+| `PBLT*` | nothing |  | kept out of surfaces | Keeps survey bolts out of the ground surface. |
 | `PBMK` | point, symbol `Level Benchmark`; `katana control` (#0999C9); 0.25 mm | `control/marks/level` |  | A bench mark: a mark of known height that levelling is run from. |
 | `PBMZ` | point, symbol `Level Benchmark` (hidden); `katana control` (#0999C9); 0.25 mm | `control/marks/level` |  | A bench mark kept under its own separate code so it can be listed and checked on its own. |
 | `PCMK` | point, symbol `Control Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A permanent control mark of the road authority, used to tie road work into the survey network. |
-| `PCMK*` | nothing |  | kept out of surfaces | Keeps the road authority's control marks out of the ground surface when the code carries a string number. |
+| `PCMK*` | nothing |  | kept out of surfaces | Keeps the road authority's control marks out of the ground surface. |
 | `PDPY` | point, symbol `Temporary Control`; `katana control` (#0999C9); 0.25 mm | `control/marks/temporary` |  | A temporary peg driven into the ground to carry a height for a dumpy level. |
-| `PDPY*` | nothing |  | kept out of surfaces | Keeps levelling pegs out of the ground surface when the code carries a string number. |
+| `PDPY*` | nothing |  | kept out of surfaces | Keeps levelling pegs out of the ground surface. |
 | `PDSM` | point, symbol `Fixed Survey Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A permanent survey mark placed by the water authority and used as a height or position reference. |
-| `PDSM*` | nothing |  | kept out of surfaces | Keeps the water authority's survey marks out of the ground surface when the code carries a string number. |
+| `PDSM*` | nothing |  | kept out of surfaces | Keeps the water authority's survey marks out of the ground surface. |
 | `PHCP` | point, symbol `Control Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A control point held in plan only, with no level, used to control photogrammetry. |
 | `PMCP` | point, symbol `Control Mark`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | A minor control point set to support the main control network. |
 | `PPCN` | point, symbol `Photo Centre`; `katana control` (#0999C9); 0.25 mm | `control/marks/control` |  | The ground point at the centre of an aerial photograph, used to position and orient the image. |
@@ -2168,19 +2168,19 @@ Every code once, for looking one up: the key, where it is catalogued and what it
 | `PABB` | Buildings and Structures/Structures | Survey point on the bottom of a bridge abutment. |
 | `PABT` | Buildings and Structures/Structures | Survey point on the top of a bridge abutment. |
 | `PAPN` | Survey Control and Annotation/Control Marks | An alignment pin: a pin set in the ground to mark a design alignment for setting out. |
-| `PAPN*` | Survey Control and Annotation/Control Marks | Alignment pins that carry a string number, which are kept out of the surface model. |
+| `PAPN*` | Survey Control and Annotation/Control Marks | Keeps alignment pins out of the ground surface. |
 | `PAWN` | Buildings and Structures/Buildings | A survey point on the edge of an awning. |
-| `PAWN*` | Buildings and Structures/Buildings | Awning points that carry a string number, which are kept out of the surface model. |
+| `PAWN*` | Buildings and Structures/Buildings | Keeps awning points out of the ground surface. |
 | `PBCP` | Buildings and Structures/Structures | Point where a bridge pile meets its cap. |
 | `PBDY` | Boundaries and Cadastre/Boundary Marks | A boundary mark of any kind, shot as a point. |
 | `PBHX` | Survey Control and Annotation/Investigation Points | A borehole, shot at the centre of its collar. |
 | `PBIN` | Street Furniture and Signs/Amenities | A rubbish bin, shot at its centre. |
 | `PBLT` | Survey Control and Annotation/Control Marks | A bolt set in concrete or rock as a survey mark, shot at the centre of its head. |
-| `PBLT*` | Survey Control and Annotation/Control Marks | Survey bolts that carry a string number, which are kept out of the surface model. |
+| `PBLT*` | Survey Control and Annotation/Control Marks | Keeps survey bolts out of the ground surface. |
 | `PBMK` | Survey Control and Annotation/Control Marks | A bench mark: a mark of known height that levelling is run from. |
 | `PBMZ` | Survey Control and Annotation/Control Marks | A bench mark kept under its own separate code so it can be listed and checked on its own. |
 | `PBPG` | Boundaries and Cadastre/Boundary Marks | A peg set at a boundary corner, shot at its top. |
-| `PBPG*` | Boundaries and Cadastre/Boundary Marks | Keeps boundary pegs out of the ground surface when the code carries a string number. |
+| `PBPG*` | Boundaries and Cadastre/Boundary Marks | Keeps boundary pegs out of the ground surface. |
 | `PBPI` | Buildings and Structures/Structures | The centre of a bridge pier or column, shot where it meets the ground. |
 | `PBRK` | Terrain and Breaklines/Breaklines | A ground point lying on a breakline, shot where the grade changes so that the surface model can join it to its neighbours. |
 | `PBUS` | Street Furniture and Signs/Amenities | The position of a bus stop, shot at the foot of its sign post. |
@@ -2188,16 +2188,16 @@ Every code once, for looking one up: the key, where it is catalogued and what it
 | `PCBU` | Buildings and Structures/Buildings | A building corner shot at natural surface level, where the wall meets the ground. |
 | `PCFU` | Street Furniture and Signs/Traffic Control | The flash lamp that lights a vehicle for an enforcement camera, shot at its pole. |
 | `PCMK` | Survey Control and Annotation/Control Marks | A permanent control mark of the road authority, used to tie road work into the survey network. |
-| `PCMK*` | Survey Control and Annotation/Control Marks | Keeps the road authority's control marks out of the ground surface when the code carries a string number. |
+| `PCMK*` | Survey Control and Annotation/Control Marks | Keeps the road authority's control marks out of the ground surface. |
 | `PCRM` | Boundaries and Cadastre/Boundary Marks | A mark set to reference cadastral corners, so that the corners can be re-established if their own marks are lost. |
 | `PCTV` | Street Furniture and Signs/Traffic Control | A closed-circuit television camera watching the road, shot at the pole that carries it. |
 | `PDHL` | Boundaries and Cadastre/Boundary Marks | A hole drilled in rock or concrete, with a chiselled wing cut beside it to make it easy to find. |
-| `PDHL*` | Boundaries and Cadastre/Boundary Marks | Keeps winged drill holes out of the ground surface when the code carries a string number. |
+| `PDHL*` | Boundaries and Cadastre/Boundary Marks | Keeps winged drill holes out of the ground surface. |
 | `PDJM` | Kerbs and Drainage/Pits and Structures | A stormwater maintenance hole at the point where two or more drainage lines meet. |
 | `PDPY` | Survey Control and Annotation/Control Marks | A temporary peg driven into the ground to carry a height for a dumpy level. |
-| `PDPY*` | Survey Control and Annotation/Control Marks | Keeps levelling pegs out of the ground surface when the code carries a string number. |
+| `PDPY*` | Survey Control and Annotation/Control Marks | Keeps levelling pegs out of the ground surface. |
 | `PDSM` | Survey Control and Annotation/Control Marks | A permanent survey mark placed by the water authority and used as a height or position reference. |
-| `PDSM*` | Survey Control and Annotation/Control Marks | Keeps the water authority's survey marks out of the ground surface when the code carries a string number. |
+| `PDSM*` | Survey Control and Annotation/Control Marks | Keeps the water authority's survey marks out of the ground surface. |
 | `PECM` | Utilities/Electricity | A marker on the surface showing the route of a buried power cable. |
 | `PEFP` | Utilities/Electricity | A point where a fuse protects a distribution cable, on a pole or in a cabinet. |
 | `PEJB` | Utilities/Electricity | A box in which electricity cables are joined, shot at its lid. |
@@ -2206,33 +2206,33 @@ Every code once, for looking one up: the key, where it is catalogued and what it
 | `PEUP` | Utilities/Electricity | A pillar above ground where a customer is supplied from the underground power cable. |
 | `PEWW` | Kerbs and Drainage/Pits and Structures | The free end of a wing wall that flanks a culvert or a drain outlet. |
 | `PF01` | Vegetation and Landscape/Trees | A tree whose crown spreads about one metre across, drawn as a canopy ring of that size. |
-| `PF01*` | Vegetation and Landscape/Trees | Keeps the one-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF01*` | Vegetation and Landscape/Trees | Keeps the one-metre canopy marks out of the ground surface. |
 | `PF02` | Vegetation and Landscape/Trees | A tree whose crown spreads about two metres across, drawn as a canopy ring of that size. |
-| `PF02*` | Vegetation and Landscape/Trees | Keeps the two-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF02*` | Vegetation and Landscape/Trees | Keeps the two-metre canopy marks out of the ground surface. |
 | `PF03` | Vegetation and Landscape/Trees | A tree whose crown spreads about three metres across, drawn as a canopy ring of that size. |
-| `PF03*` | Vegetation and Landscape/Trees | Keeps the three-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF03*` | Vegetation and Landscape/Trees | Keeps the three-metre canopy marks out of the ground surface. |
 | `PF04` | Vegetation and Landscape/Trees | A tree whose crown spreads about four metres across, drawn as a canopy ring of that size. |
-| `PF04*` | Vegetation and Landscape/Trees | Keeps the four-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF04*` | Vegetation and Landscape/Trees | Keeps the four-metre canopy marks out of the ground surface. |
 | `PF05` | Vegetation and Landscape/Trees | A tree whose crown spreads about five metres across, drawn as a canopy ring of that size. |
-| `PF05*` | Vegetation and Landscape/Trees | Keeps the five-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF05*` | Vegetation and Landscape/Trees | Keeps the five-metre canopy marks out of the ground surface. |
 | `PF06` | Vegetation and Landscape/Trees | A tree whose crown spreads about six metres across, drawn as a canopy ring of that size. |
-| `PF06*` | Vegetation and Landscape/Trees | Keeps the six-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF06*` | Vegetation and Landscape/Trees | Keeps the six-metre canopy marks out of the ground surface. |
 | `PF07` | Vegetation and Landscape/Trees | A tree whose crown spreads about seven metres across, drawn as a canopy ring of that size. |
-| `PF07*` | Vegetation and Landscape/Trees | Keeps the seven-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF07*` | Vegetation and Landscape/Trees | Keeps the seven-metre canopy marks out of the ground surface. |
 | `PF08` | Vegetation and Landscape/Trees | A tree whose crown spreads about eight metres across, drawn as a canopy ring of that size. |
-| `PF08*` | Vegetation and Landscape/Trees | Keeps the eight-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF08*` | Vegetation and Landscape/Trees | Keeps the eight-metre canopy marks out of the ground surface. |
 | `PF09` | Vegetation and Landscape/Trees | A tree whose crown spreads about nine metres across, drawn as a canopy ring of that size. |
-| `PF09*` | Vegetation and Landscape/Trees | Keeps the nine-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF09*` | Vegetation and Landscape/Trees | Keeps the nine-metre canopy marks out of the ground surface. |
 | `PF10` | Vegetation and Landscape/Trees | A tree whose crown spreads about ten metres across, drawn as a canopy ring of that size. |
-| `PF10*` | Vegetation and Landscape/Trees | Keeps the ten-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF10*` | Vegetation and Landscape/Trees | Keeps the ten-metre canopy marks out of the ground surface. |
 | `PF12` | Vegetation and Landscape/Trees | A tree whose crown spreads about twelve metres across, drawn as a canopy ring of that size. |
-| `PF12*` | Vegetation and Landscape/Trees | Keeps the twelve-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF12*` | Vegetation and Landscape/Trees | Keeps the twelve-metre canopy marks out of the ground surface. |
 | `PF15` | Vegetation and Landscape/Trees | A tree whose crown spreads about fifteen metres across, drawn as a canopy ring of that size. |
-| `PF15*` | Vegetation and Landscape/Trees | Keeps the fifteen-metre canopy marks out of the ground surface when the code carries a string number. |
+| `PF15*` | Vegetation and Landscape/Trees | Keeps the fifteen-metre canopy marks out of the ground surface. |
 | `PFHT` | Terrain and Breaklines/Water Edges | The level that a flood is known to have reached, shot at the mark it left. |
 | `PFLG` | Buildings and Structures/Structures | A flagpole, shot at its base. |
 | `PFLR` | Buildings and Structures/Buildings | A spot level taken on the finished floor of a building. |
-| `PFLR*` | Buildings and Structures/Buildings | Keeps floor levels out of the ground surface when the code carries a string number. |
+| `PFLR*` | Buildings and Structures/Buildings | Keeps floor levels out of the ground surface. |
 | `PFPL` | Street Furniture and Signs/Amenities | A built fireplace, such as a barbecue hearth, in a park, camp or picnic area. |
 | `PFPM` | Utilities/Fuel | A marker on the surface showing the route of a buried fuel pipeline. |
 | `PGAS` | Utilities/Gas | The box over a gas valve, shot at its lid. |
@@ -2241,10 +2241,10 @@ Every code once, for looking one up: the key, where it is catalogued and what it
 | `PGHL` | Utilities/Gas | A manhole giving access to a gas main, shot at its cover. |
 | `PGHM` | Utilities/Gas | A marker on the surface showing the route of a high-pressure gas main. |
 | `PGIN` | Boundaries and Cadastre/Boundary Marks | A galvanised iron nail driven into a hard surface as a survey mark. |
-| `PGIN*` | Boundaries and Cadastre/Boundary Marks | Keeps galvanised nails out of the ground surface when the code carries a string number. |
+| `PGIN*` | Boundaries and Cadastre/Boundary Marks | Keeps galvanised nails out of the ground surface. |
 | `PGMR` | Utilities/Gas | A gas meter, shot at its centre. |
 | `PGPI` | Boundaries and Cadastre/Boundary Marks | A galvanised iron pipe driven in as a survey mark. |
-| `PGPI*` | Boundaries and Cadastre/Boundary Marks | Keeps galvanised pipes out of the ground surface when the code carries a string number. |
+| `PGPI*` | Boundaries and Cadastre/Boundary Marks | Keeps galvanised pipes out of the ground surface. |
 | `PGPM` | Utilities/Gas | A marker on the surface showing the route of a buried gas main. |
 | `PGRB` | Utilities/Gas | The cabinet that houses a gas pressure regulator, shot at the middle of the box. |
 | `PGTP` | Utilities/Gas | A surface fitting on a gas pipeline where its protection or pressure can be tested. |
