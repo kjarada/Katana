@@ -705,7 +705,8 @@ TEST_F(McpServer, AnUpdateLineIsRefusedInEveryToolThatRunsLinesNamingTheUpdateTo
     initialize();
     for (const char* line :
          {"UPDATE CHECK", "UPDATE STATUS", "update download confirm", "UPDATE APPLY CONFIRM",
-          "UPDATE SKIP 1.0", "UPDATE SET AUTO OFF", "UPDATE TOKEN STATUS", "  UPDATE"}) {
+          "UPDATE SKIP 1.0", "UPDATE BLOCKED CLEAR", "update blocked clear", "UPDATE SET AUTO OFF",
+          "UPDATE TOKEN STATUS", "  UPDATE"}) {
         const Json ran = runLine(line);
         EXPECT_TRUE(ran["isError"].get<bool>()) << line;
         const std::string text = textOf(ran);

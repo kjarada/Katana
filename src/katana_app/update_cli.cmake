@@ -166,7 +166,7 @@ add_test(NAME cli.update_help_prints_the_grammar
             $<TARGET_FILE:katana_cli> -c "HELP UPDATE" -c "help update")
 set_tests_properties(cli.update_help_prints_the_grammar PROPERTIES
     PASS_REGULAR_EXPRESSION
-    "Update    UPDATE CHECK .*UPDATE STATUS .*UPDATE DOWNLOAD CONFIRM .*UPDATE APPLY CONFIRM .*UPDATE SKIP <version> [|] UPDATE SKIP NONE .*UPDATE SET AUTO ON[|]OFF .*UPDATE TOKEN STATUS [|] UPDATE TOKEN CLEAR .*katana_check_update.*Update    UPDATE CHECK "
+    "Update    UPDATE CHECK .*UPDATE STATUS .*UPDATE DOWNLOAD CONFIRM .*UPDATE APPLY CONFIRM .*reason=elevated.*UPDATE SKIP <version> [|] UPDATE SKIP NONE .*UPDATE BLOCKED CLEAR .*UPDATE SET AUTO ON[|]OFF .*UPDATE TOKEN STATUS [|] UPDATE TOKEN CLEAR .*katana_check_update.*Update    UPDATE CHECK "
     FAIL_REGULAR_EXPRESSION "error")
 add_test(NAME cli.update_verbs_are_in_the_help
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -177,7 +177,7 @@ add_test(NAME cli.update_verbs_are_in_the_help
             $<TARGET_FILE:katana_cli> --help)
 set_tests_properties(cli.update_verbs_are_in_the_help PROPERTIES
     PASS_REGULAR_EXPRESSION
-    "usage: katana_cli .*Update    UPDATE CHECK .*UPDATE APPLY CONFIRM .*UPDATE TOKEN STATUS [|] UPDATE TOKEN CLEAR .*Window    PLOT, PLOTSHEETS")
+    "usage: katana_cli .*Update    UPDATE CHECK .*UPDATE APPLY CONFIRM .*UPDATE BLOCKED CLEAR .*UPDATE TOKEN STATUS [|] UPDATE TOKEN CLEAR .*Window    PLOT, PLOTSHEETS")
 
 # A word that is no action is refused with the usage, and stops the batch.
 # ("\\;": a bare semicolon would end the expression and begin a second one.)
@@ -190,7 +190,7 @@ add_test(NAME cli.update_refuses_a_word_that_is_no_action
             $<TARGET_FILE:katana_cli> -c "UPDATE NOW" -c "POINT 1,1")
 set_tests_properties(cli.update_refuses_a_word_that_is_no_action PROPERTIES
     PASS_REGULAR_EXPRESSION
-    "error: InvalidArgument: 'NOW' is not an UPDATE action\\; usage: UPDATE CHECK [|] UPDATE STATUS [|] UPDATE DOWNLOAD CONFIRM [|] UPDATE APPLY CONFIRM [|] UPDATE SKIP <version>[|]NONE [|] UPDATE SET AUTO ON[|]OFF [|] UPDATE TOKEN STATUS[|]CLEAR"
+    "error: InvalidArgument: 'NOW' is not an UPDATE action\\; usage: UPDATE CHECK [|] UPDATE STATUS [|] UPDATE DOWNLOAD CONFIRM [|] UPDATE APPLY CONFIRM [|] UPDATE SKIP <version>[|]NONE [|] UPDATE BLOCKED CLEAR [|] UPDATE SET AUTO ON[|]OFF [|] UPDATE TOKEN STATUS[|]CLEAR"
     FAIL_REGULAR_EXPRESSION "point created")
 
 # No line takes a token, because lines are logged: one typed after TOKEN is
