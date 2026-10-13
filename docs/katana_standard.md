@@ -88,7 +88,7 @@ The bare `*` belongs to no class. What each kind of code draws, by count:
 | text | 7 | text of a size |
 | layer | 7 | the layer of the text codes |
 | surface | 52 | a surface flag and nothing else |
-| pipe | 1 | the round pipe section of any string that carries a diameter |
+| pipe | 1 | nothing yet: the pipe rules, which say that any string carrying a diameter is a round pipe, and which Katana stores and does not apply |
 
 ### Pen weights
 
@@ -121,13 +121,13 @@ These are the other library's identifiers and its facts about them, reused for f
 
 **One field file, the same kinds of entity.** A code is answered by several keys at once, the exact key and every prefix key that fits it, and each field comes from the most specific rule that says it; so beside comparing key with key, `parity.py` looks up 2292 codes in both files as the program does (every key's own code, alone and followed by a string number, a padded one and a letter) and compares what comes out: the draw mode, the surface flag, whether a symbol is drawn and whether it is hidden, the text and the pipe rules. They are the same for every one.
 
-**Where the other library is not clean, this one is.** The NSW customisation holds 1624 rules over 632 keys. 446 of the rules repeat an earlier rule of their key exactly and 257 add nothing to an earlier one, in 465 of the keys; 5 more say something the first rule of their kind leaves unsaid, which a lookup then takes (in 4 keys a `hide`, so the symbol is hidden); 3 keys name a pen colour that resolves to nothing; 1 draws its symbol through the linestyle slot, which `CODE CHECK` reports as a linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in which a rule can be for one case of an attribute, carry those cases as attributes, which a lookup here applies to every code (4 of them). Katana Standard keeps one clean rule set per key: one rule of each kind, every name resolved, the symbol said in a symbol rule, `hide` said where the lookup makes it true, and no attribute on a pipe rule. Those 669 differences are listed in `tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and `parity.py` fails on an entry that explains nothing or a difference that has none.
+**Where the other library is not clean, this one is.** The NSW customisation holds 1624 rules over 632 keys. 446 of the rules repeat an earlier rule of their key exactly and 257 are shadowed, in the sense `CODE CHECK` gives the word (every field such a rule sets, an earlier rule of its key has set, so a lookup takes nothing from it), in 465 of the keys; 5 more say something the rules before them leave unsaid, which a lookup then takes (in 4 keys a `hide`, so the symbol is hidden); 3 keys name a pen colour that resolves to nothing; 1 draws its symbol through the linestyle slot, which `CODE CHECK` reports as a linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in which a rule can be for one case of an attribute, carry those cases as attributes, which a lookup here applies to every code (4 of them). Katana Standard keeps one clean rule set per key: one rule of each kind, every name resolved, the symbol said in a symbol rule, `hide` said where the lookup makes it true, and no attribute on a pipe rule. Those 669 differences are listed in `tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and `parity.py` fails on an entry that explains nothing or a difference that has none.
 
 | Reason | Keys | What the other library does and this one does not |
 |---|---|---|
 | nsw-duplicate-collapsed | 445 | repeats a rule of the key field for field |
-| nsw-shadowed-collapsed | 214 | has a later rule of a kind that says nothing the earlier one of the key did not |
-| nsw-fields-merged | 5 | has a later rule that says a field, or names an attribute, that the first leaves unsaid; here the one rule says the field |
+| nsw-shadowed-collapsed | 214 | has a later rule of a kind that `CODE CHECK` calls shadowed: it sets no field and names no attribute that an earlier rule of the key has not |
+| nsw-fields-merged | 5 | has a later rule of a kind that says a field, or names an attribute, that the rules before it leave unsaid; here the one rule says the field |
 | nsw-unknown-colour-replaced | 3 | names a pen colour that resolves to nothing |
 | nsw-linestyle-symbol-resolved | 1 | names a symbol as a linestyle; here a symbol rule follows the feature rule |
 | nsw-pipe-attributes-left-out | 1 | carries attributes on its pipe rules, which a lookup applies to every code the key answers; here a pipe rule carries none |
@@ -836,7 +836,7 @@ The bare `*` matches every code, so it holds only what applies to any string.
 
 | Code | Label | Draws | Layer | Also | What it is |
 |---|---|---|---|---|---|
-| `*` |  | a round pipe from `Diameter (mm)` |  |  | Any string that carries a Diameter attribute is also drawn as a round pipe section, measured down from its top (the obvert). |
+| `*` |  | nothing yet: its pipe rules (a round pipe sized from `Diameter (mm)`) are stored and not applied |  |  | A string that carries a Diameter attribute is a round pipe, measured down from its top (the obvert). Katana stores this pipe rule and does not yet draw by it. |
 
 ### Class C: Boundaries and Cadastre
 
@@ -1926,7 +1926,7 @@ Every code once, for looking one up by its key: the key, its legend label, where
 
 | Code | Label | Class and group | Meaning |
 |---|---|---|---|
-| `*` |  | (no class) | Any string that carries a Diameter attribute is also drawn as a round pipe section, measured down from its top (the obvert). |
+| `*` |  | (no class) | A string that carries a Diameter attribute is a round pipe, measured down from its top (the obvert). Katana stores this pipe rule and does not yet draw by it. |
 | `1` |  | Survey Control and Annotation/Text and Notes | Plan text 1.5 mm high on paper, the finest size, for crowded detail. |
 | `1*` | Finest text | Survey Control and Annotation/Text and Notes | Layer and pen for 1.5 mm plan text, so it can be switched off with the other notes. |
 | `2` |  | Survey Control and Annotation/Text and Notes | Plan text 2.5 mm high on paper, the everyday size for notes and labels. |

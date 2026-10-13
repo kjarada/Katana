@@ -121,7 +121,8 @@ def _draws(c, colours, codes_module):
     elif kind == "layer":
         parts.append("the layer of the text")
     elif kind == "pipe":
-        parts.append("a round pipe from `Diameter (mm)`")
+        # Katana stores a pipe rule and applies none, so this code draws nothing today.
+        parts.append("nothing yet: its pipe rules (a round pipe sized from `Diameter (mm)`) are stored and not applied")
     elif kind == "surface":
         parts.append("nothing")
     if st["colour"]:
@@ -386,7 +387,8 @@ def catalogue(data, root):
     kind_words = [("line", "a line, joined from the points"), ("point", point_words),
                   ("both", "a line with a symbol at every vertex"), ("text", "text of a size"),
                   ("layer", "the layer of the text codes"), ("surface", "a surface flag and nothing else"),
-                  ("pipe", "the round pipe section of any string that carries a diameter")]
+                  ("pipe", "nothing yet: the pipe rules, which say that any string carrying a diameter is a round "
+                           "pipe, and which Katana stores and does not apply")]
     w(table(["Kind", "Codes", "Meaning"], [[k, kinds.get(k, 0), words] for k, words in kind_words if kinds.get(k)]))
     w("")
     w("### Pen weights")
@@ -472,13 +474,15 @@ def catalogue(data, root):
         n_hidden = sum(1 for st in styled.values() if st["hide"])
         pipe_attributes = sum(count or 1 for _, reason, count in exceptions if reason == parity.PIPE_ATTRIBUTES)
         w("**Where the other library is not clean, this one is.** The NSW customisation holds %d rules over %d "
-          "keys. %d of the rules repeat an earlier rule of their key exactly and %d add nothing to an earlier "
-          "one, in %d of the keys; %d more say something the first rule of their kind leaves unsaid, which a "
-          "lookup then takes (in %d keys a `hide`, so the symbol is hidden); %d keys name a pen colour that "
-          "resolves to nothing; %d draws its symbol through the linestyle slot, which `CODE CHECK` reports as a "
-          "linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in which a rule "
-          "can be for one case of an attribute, carry those cases as attributes, which a lookup here applies to "
-          "every code (%d of them). Katana Standard keeps one clean rule set per key: one rule of each kind, "
+          "keys. %d of the rules repeat an earlier rule of their key exactly and %d are shadowed, in the sense "
+          "`CODE CHECK` gives the word (every field such a rule sets, an earlier rule of its key has set, so a "
+          "lookup takes nothing from it), in %d of the keys; %d more say something the rules before them leave "
+          "unsaid, which a lookup then takes (in %d keys a `hide`, so the symbol is hidden); %d keys name a pen "
+          "colour that resolves to nothing; %d draws its symbol through the linestyle slot, which `CODE CHECK` "
+          "reports as a linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in "
+          "which a rule can be for one case of an attribute, carry those cases as attributes, which a lookup "
+          "here applies to every code (%d of them). Katana Standard keeps one clean rule set per key: one rule "
+          "of each kind, "
           "every name resolved, the symbol said in a symbol rule, `hide` said where the lookup makes it true, "
           "and no attribute on a pipe rule. Those %d differences are listed in "
           "`tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and `parity.py` "
@@ -490,10 +494,11 @@ def catalogue(data, root):
         w(table(["Reason", "Keys", "What the other library does and this one does not"], [
             [parity.DUPLICATE, by_reason.get(parity.DUPLICATE, 0), "repeats a rule of the key field for field"],
             [parity.SHADOWED, by_reason.get(parity.SHADOWED, 0),
-             "has a later rule of a kind that says nothing the earlier one of the key did not"],
+             "has a later rule of a kind that `CODE CHECK` calls shadowed: it sets no field and names no "
+             "attribute that an earlier rule of the key has not"],
             [parity.MERGED, by_reason.get(parity.MERGED, 0),
-             "has a later rule that says a field, or names an attribute, that the first leaves unsaid; here the "
-             "one rule says the field"],
+             "has a later rule of a kind that says a field, or names an attribute, that the rules before it "
+             "leave unsaid; here the one rule says the field"],
             [parity.COLOUR, by_reason.get(parity.COLOUR, 0), "names a pen colour that resolves to nothing"],
             [parity.LINESTYLE_SYMBOL, by_reason.get(parity.LINESTYLE_SYMBOL, 0),
              "names a symbol as a linestyle; here a symbol rule follows the feature rule"],
