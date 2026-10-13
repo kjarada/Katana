@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
@@ -46,7 +47,6 @@
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/update/apply.hpp"
-#include "katana/update/fsops.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/recover.hpp"
 #include "katana/update/state.hpp"
@@ -90,11 +90,14 @@ void recoverInterruptedUpdate()
 }
 
 // --update-health TX: the marker that tells the update helper this version
-// starts, U/healthy-<TX> (update/state.hpp), written through the engine's own
-// file operations so that it is on the disk when the helper looks. False,
-// said, when it could not be written - the helper then finds no marker and
-// puts the old version back, which is the right answer to a copy that cannot
-// say it started.
+// starts, U/healthy-<TX> (update/state.hpp). The helper looks for it once this
+// process has exited, so a file written and closed is enough; it is the
+// marker's presence that counts, and "ok" is only something to find in it.
+// Written with Qt's file, not the engine's file operations: those are the
+// apply's seam, and are not written for every platform this program runs on.
+// False, said, when it could not be written - the helper then finds no marker
+// and puts the old version back, which is the right answer to a copy that
+// cannot say it started.
 bool writeHealthMarker(const QString& transaction)
 {
     const std::filesystem::path state = katana::update::stateDirectory();
@@ -102,18 +105,19 @@ bool writeHealthMarker(const QString& transaction)
         std::fprintf(stderr, "--update-health: this session has no update state folder\n");
         return false;
     }
-    const std::unique_ptr<katana::update::FsOps> files = katana::update::makeSystemFsOps();
-    // There already: the helper runs from a folder inside it.
-    if (const auto made = files->makeDirectories(state); !made) {
-        std::fprintf(stderr, "--update-health: %s\n", made.error().describe().c_str());
+    // There already when the helper asks: it runs from a folder inside it.
+    std::error_code failed;
+    std::filesystem::create_directories(state, failed);
+    const std::filesystem::path marker =
+        katana::update::healthMarkerPath(state, transaction.toStdString());
+    QFile file(QString::fromStdWString(marker.wstring()));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write("ok\n") != 3 ||
+        !file.flush()) {
+        std::fprintf(stderr, "--update-health: the marker %s could not be written: %s\n",
+                     qPrintable(file.fileName()), qPrintable(file.errorString()));
         return false;
     }
-    const auto written = files->writeDurable(
-        katana::update::healthMarkerPath(state, transaction.toStdString()), "ok\n");
-    if (!written) {
-        std::fprintf(stderr, "--update-health: %s\n", written.error().describe().c_str());
-        return false;
-    }
+    file.close();
     return true;
 }
 

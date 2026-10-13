@@ -2797,6 +2797,16 @@ Each now reaches the same code on every front end
   once taken for part of the path. `ALONGSIDE` and `OFFSET=dE,dN` work the
   same way, and the import dialogs offer all of them (`docs/interop.md`,
   "Placing an import").
+- `UPDATE`, the whole family, is the session's
+  (`src/katana_app/update_verbs.hpp`): `CHECK`, `STATUS`, `DOWNLOAD CONFIRM`,
+  `APPLY CONFIRM`, `SKIP`, `SET AUTO` and `TOKEN`.
+  `MainWindow::runWorkbenchLine` takes it before every other family and the
+  update workbench runs it - the three lines that take time as jobs, the rest
+  at once ("Help > Check for Updates", below). A headless window answers
+  `CHECK` and `STATUS` when they are typed and has `DOWNLOAD` and `APPLY`
+  answered `reason=headless`
+  (`qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless`,
+  `qt_a_typed_update_download_and_apply_say_a_headless_run_does_neither_headless`).
 
 ## Run Script: a katana_cli script in the window
 
@@ -2929,6 +2939,217 @@ the two cannot disagree.
 
 Tested in `tests/qt_widgets/test_command_reference.cpp` and, through the Help
 menu, by `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`.
+
+## Help > Check for Updates
+
+Katana replaces itself with a newer release. The engine that checks,
+downloads and swaps the files, the helper program that does the swap and the
+release feed are the update system's own (its document is `update.md`); the
+verbs are the session's, shared with `katana_cli`
+(`src/katana_app/update_verbs.hpp`: `UPDATE CHECK`, `STATUS`, `DOWNLOAD
+CONFIRM`, `APPLY CONFIRM`, `SKIP`, `SET AUTO`, `TOKEN`). This section is what
+the WINDOW adds: a menu item, a status-bar button, a dialog, a page of
+Settings ("The Updates page", under "Settings"), and the close that lets the
+helper run.
+
+**Where it is.** Help > "Check for Updates..." (`helpCheckForUpdates`, the
+letter U, the icon `Icon::Download` - a cloud with the accent arrow coming
+down out of it; its data names `updateDialog`, which is how `--dialog` finds
+the dialog), above About. And a button in the status bar,
+`statusUpdateAvailable`, reading "Update 0.3.0": hidden until a newer release
+is known, shown while there is one to act on - offered, on its way,
+downloaded, or waiting for other programs to close. Both open the dialog.
+
+**Two classes.** `UpdateDialog` (`src/katana_qt/update_dialog.hpp`) shows and
+asks; `UpdateWorkbench` (`src/katana_qt/update_workbench.hpp`) owns it and
+does everything else, built as the geoprocessing and utility workbenches are.
+The dialog needs no window and no engine: it is given an `UpdateView` - plain
+data - and a context of callbacks, so the widget tests drive it alone
+(`tests/qt_widgets/test_update_dialog.cpp`). A press changes no text in it:
+what a line did comes back as the next view, never as a guess of the
+dialog's (`APressChangesNoSentenceByItselfTheNextViewDoes`).
+
+**The states.** The first sentence is `updateStateText`, the rest
+`updateDetailText`, and exactly these buttons are shown; the others are
+hidden, which the headless `--press` refuses.
+
+| State | What it says | Buttons |
+|---|---|---|
+| Idle | "Katana 0.2.0" / "Not checked for updates yet." | Check now |
+| Checking | "Checking for updates..." / "You can keep working." | Cancel |
+| Current | "Katana 0.2.0 is up to date." / "Last checked 14:02." | Check now |
+| NotOffered | a newer release this copy does not offer: one the person skipped ("Katana 0.3.0 is available, and you chose to skip it." / "Settings > Updates offers it again.") or one that was rolled back here ("Katana 0.3.0 could not be installed here before, and is not offered again.") | Check now |
+| Available | "Update Available" / "Katana 0.3.0 (you have 0.2.0). 23 of 411 files changed, 71 MB to download." | Update, Download only, Skip this version, Release notes, Later |
+| Downloading | "Downloading 31 of 71 MB (12 of 23 files)." / "You can keep working.", and `updateProgress` | Cancel |
+| Ready | "Katana 0.3.0 is ready." / "Katana will close, update and reopen in a few seconds." | Restart and update, Later |
+| Blocked | "Close these first: katana_mcp.exe (4412)." / "Then press Retry." | Retry |
+| RolledBack | "Katana 0.3.0 could not be installed, so 0.2.0 was restored." / "Reason: ..." | none: it is read and closed |
+| CheckFailed | "Could not check for updates: ...", or for a feed that answers 404 "No update information found." / "If the releases are private, add an access token in Settings > Updates." | Retry |
+| Unsupported | "Updates are not available for this copy of Katana: ..." | none |
+
+Idle, Checking and NotOffered are not in the design's list and a window
+cannot do without them: something is shown before the first answer and while
+one is on its way, and `UPDATE CHECK` has two answers that name a newer
+release without offering it. The reason in a sentence is a person's words for
+the engine's token (`updateReasonWords`: `offline` is "this computer is
+offline, or the release server did not answer", `http_503` "the release
+server answered with error 503"; a token it does not know is shown as it
+came, and `EveryReasonTheEngineGivesHasWordsOfItsOwn` holds the table to the
+tokens the engine's headers list). A megabyte is a million bytes, rounded to
+the nearest, and a download is never said to be 0 MB. The files of
+"12 of 23 files" are said only when the download's progress says how many are
+staged - a word `files=<done>/<all>` in a progress line - and left out
+otherwise ("Downloading 31 of 71 MB."). Three variants: a manifest past its
+`expires` adds "The update information is old: a newer release may exist."
+and refuses nothing; a copy that cannot replace its own files (the macOS
+bundle, and Linux until its apply is written) is told of the release, sent to
+its notes, and offered neither Update nor Download only; and an apply that
+ended `refused` or `rollback_incomplete` is not called restored - the second
+names the command that puts the install right by hand.
+
+**What each button does.** It builds the line a person would type and hands
+it to the window's one executor ("One executor: the command runner"), or
+calls one callback (`EachButtonBuildsExactlyItsLineOrCallsExactlyItsCallback`):
+
+| Button | Object name | Does |
+|---|---|---|
+| Check now | `updateCheckNow` | `UPDATE CHECK` |
+| Retry | `updateRetry` | what failed, again: `UPDATE CHECK` after a failed check, `UPDATE APPLY CONFIRM` for a copy that was blocked |
+| Update | `updateInstall` | the one click, below - more than one line, so a callback |
+| Download only | `updateDownloadOnly` | `UPDATE DOWNLOAD CONFIRM` |
+| Skip this version | `updateSkip` | `UPDATE SKIP 0.3.0` |
+| Release notes | `updateNotes` | the notes' address opened in the browser - https only; in a headless run, logged as `notes_url=` |
+| Restart and update | `updateRestart` | `UPDATE APPLY CONFIRM` |
+| Cancel | `updateCancel` | stops the running check or download; what was downloaded is kept, and the next download starts from it |
+| Later | `updateLater` | hides the dialog; a Restart and update that has not closed the window yet is taken back |
+
+A line the executor refused is said under the two sentences, in the error
+colour (`updateProblemText`), and so is what the workbench could not do at
+the last press ("The download did not finish: this network does not allow
+partial downloads."); both go with the next view. No button is a default.
+
+**The lines that take time are jobs.** `UPDATE CHECK`, `UPDATE DOWNLOAD
+CONFIRM` and `UPDATE APPLY CONFIRM` - whose preflight copies the helper and
+runs its self-test - are run by `app::runUpdateLine` on a worker thread
+("Geoprocessing jobs", below, for the runner: progress and Cancel in the
+status bar), with a COPY of the verbs' context taken on the interface thread,
+and their reply is logged on the interface thread when they end, as a typed
+line's is. Nothing of the workbench goes to the worker. `STATUS`, `SKIP`,
+`SET` and `TOKEN` read and write small files and are answered at once; while
+a job runs, every line but `STATUS` is refused, because a check records when
+it ran in the state file those lines write. `MainWindow::runWorkbenchLine`
+takes `UPDATE` lines before every other family, as the session does, so a
+`DOWNLOAD` or an `APPLY` typed on the command line goes exactly the way the
+buttons go - the buttons build those very lines. `HELP UPDATE` prints the
+verbs' own help, and `HELP` alone includes it.
+
+**The context** (`app::UpdateContext`) is made once, at first use -
+`app::makeUpdateContext` for the surface the window turned out to be,
+`Window` or `HeadlessWindow`, which it knows only after `main()` has said so
+- and given this process's id and this program's path: what the helper waits
+for before it touches a file, and what it starts again afterwards. It is made
+again after a token was saved or cleared, since it carries the token it was
+made with.
+
+**The automatic check.** `UpdateWorkbench::start`, called by `main()` once an
+interactive window is shown, and then an hourly look at whether one is due.
+It runs only when ALL of these hold: the window is one a person uses (never
+headless); the copy was installed by packaging (a build tree, which has no
+install record, stays offline - so does a `--command` run in one); the
+state's automatic flag is on; `update::checkIsDue` says so (every 24 hours and
+up to 2 more, the jitter drawn once per process); and the environment
+variable `KATANA_UPDATE_DISABLE` is not set to anything. It is QUIET: when it
+learns nothing - offline, a 404, a signature that does not verify - nothing
+is logged and nothing shown. A release the person skipped, or one that was
+rolled back here, is not offered (`update::applyUpdateState`). When there is
+news, the line and its reply are logged as a typed check's are and the
+status-bar button appears; the dialog is not opened unasked.
+
+**One click.** Update is `UPDATE DOWNLOAD CONFIRM`, then - when its reply says
+the release is staged - `UPDATE APPLY CONFIRM`, then the window's ordinary
+`close()`. Each line goes through the executor, so the log reads as if both
+had been typed. `APPLY CONFIRM` changes nothing in the install: it returns
+the request the helper is to be started with. The close is the one File >
+Quit makes, so the Format managers' unapplied edits and the unsaved-changes
+question are asked as ever:
+
+- **Cancel there**, and the window stays, the request is dropped, and the
+  dialog says Ready with the release still downloaded.
+- **A job is running** - a geoprocessing run, say - and the close waits for
+  it, since a window that closes stops its jobs: the dialog says "Katana will
+  close when the running job has finished, then update and reopen.", and
+  Later takes the press back.
+- **The close succeeds**, and only then does
+  `MainWindow::takePendingUpdate` hand `main()` the request, after the event
+  loop has ended; `main()` calls `update::launchApply` as its last act, and
+  the helper swaps the files once this process has gone. A window the PERSON
+  closes while an update waits installs nothing.
+
+**How the last one ended** is shown once. At the next interactive start the
+workbench reads the last apply's result from the update state folder, clears
+it, and - unless it was a success, which is one line in the log - opens the
+dialog on it: Rolled back, or Blocked with the programs to close and a Retry
+that applies the still-downloaded release again. It also removes what an
+earlier update could not delete, and offers again, as Ready, a release that
+was downloaded in an earlier session and not installed.
+
+**`main()`** (`src/katana_qt/main.cpp`) does three things for updates: before
+Qt is started, `update::recover` for the install the program is in, so that
+an update a crash interrupted is put right before anything else runs (a
+listing of one folder when there is nothing to do); the switch
+`--update-health`, by which the helper asks a version it has just put in
+place whether it starts (`docs/headless.md`, "Updates in a headless run");
+and the helper's start described above.
+
+Decisions, and what was rejected:
+
+- *Rejected: the dialog reading the engine.* It would then need a feed and an
+  install to be tested, and its sentences would be a second reading of the
+  verbs' replies. It shows what it is handed.
+- *Rejected: opening the dialog when the automatic check finds a release.* A
+  window that opens over the drawing at start-up, unasked, is an
+  interruption; the button in the status bar is there until it is wanted.
+- *Rejected: logging every automatic check.* One that found nothing would add
+  two lines to the command log at each day's first start. What a check sends
+  is said where the check is switched on and off (Settings > Updates).
+- *Decided: a development copy is told so without a line.* Help > Check for
+  Updates in a build tree shows Unsupported from the install's own record,
+  which is what `UPDATE CHECK` would answer; nothing is asked of any server,
+  in a headless run either.
+- *Decided: the health run exits.* The design had the relaunched window write
+  the marker and carry on. The engine as built waits for the EXIT of the copy
+  it started with `--update-health`, and stops one that is still running when
+  its wait ends, so a window that carried on would be closed under the person
+  a minute later. The health run is therefore a window that is built, never
+  shown, and gone again; the helper then starts Katana as a person would.
+
+Tested in `tests/qt_widgets/test_update_dialog.cpp` (the dialog and the
+words) and in the real window by `tests/update/headless/update_window.cmake`:
+`qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless`,
+`qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless`
+and `qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_its_own_headless`
+(`--check-menus` and `--check-shortcuts` with the item in the menu).
+
+Not done:
+
+- **The workbench has no test of its own.** It needs the window, so it is
+  not in the widget tests' library; the headless checks reach what a build
+  tree can reach - a development copy, which never checks, downloads or
+  applies. The jobs, the one click, the close and the last result are
+  exercised only by the update system's end-to-end tests and by a release.
+- **A cancelled close leaves the helper's copy behind.** `APPLY CONFIRM` has
+  copied the helper by the time the unsaved-changes question is asked; Cancel
+  there drops the request, and the folder stays until the engine's own
+  clean-up finds it.
+- **No "Open Releases" button** for a network that does not allow partial
+  downloads: the sentence says why the download did not finish, and Release
+  notes, in the Available state, is the way to the page.
+- **Windows only installs.** Elsewhere a release is told of and not offered
+  to be installed (the design's platform table).
+- **The Command Reference has no Updates section**, and the Window section's
+  list does not name `UPDATE`: both are in
+  `src/katana_qt/command_reference_dialog.cpp`, which that change did not
+  touch. `HELP UPDATE` prints the text.
 
 ## File > Drawing Summary
 
@@ -3548,9 +3769,10 @@ workbench (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
 The action's data names the dialog, which is how `--dialog fileSettings`
 finds it in a headless run.
 
-A page list (`settingsPages`) beside a stack (`settingsStack`). One page
-today, Customisation (`settingsCustomisation`); a second is one more
-`addPage`.
+A page list (`settingsPages`) beside a stack (`settingsStack`). Two pages:
+Customisation (`settingsCustomisation`), which the table below and the rest
+of this section describe, and Updates (`settingsUpdates`; "The Updates page",
+at the end of this section). A third is one more `addPage`.
 
 | Part | Object names | What it shows or runs |
 |---|---|---|
@@ -3781,6 +4003,61 @@ Not done:
   nothing notifies it of.
 - **Export writes the whole session.** The parts (`CODES`, `ONLY`) are the
   two managers' export buttons.
+
+### The Updates page
+
+Settings' second page (`settingsUpdates`, "Updates" in `settingsPages`) is of
+the PROGRAM, not of the drawing: how Katana checks for a newer version of
+itself ("Help > Check for Updates", above). It needs no Document - it works
+in a Settings opened on no drawing and after the drawing has closed
+(`ThePageWorksWithNoDrawingAndAfterOneHasClosed`) - and like the first page
+it runs lines and changes nothing itself, with one exception that is the
+reason it exists.
+
+| Part | Object names | What it shows or runs |
+|---|---|---|
+| Note | `settingsUpdateNote` | one sentence, hidden when there is nothing to say: that a headless run keeps no update settings, that a development build is never updated, or that `KATANA_UPDATE_DISABLE` is set |
+| Checking | `settingsUpdateAuto`, `settingsUpdateSends` | "Check for updates automatically": toggled, `UPDATE SET AUTO ON` or `UPDATE SET AUTO OFF`, and the box then shows what the state has - a line that was refused puts it back, as the automation boxes go back to the Document. Under it, what a check sends: only the user agent (`Katana/0.2.0 (win64)`), nothing about the person, their files or their drawings - and that the server it asks sees the computer's network address, as every website does |
+| Access token | `settingsUpdateToken`, `settingsUpdateTokenSave`, `settingsUpdateTokenClear`, `settingsUpdateTokenState` | a token for private releases, typed as dots. **Save writes the credential store directly** (`CredentialStore::write`) and runs no line. Clear runs `UPDATE TOKEN CLEAR`. The label says whether a token is stored and where, never the token |
+| Skipped version | `settingsUpdateSkipped`, `settingsUpdateUnskip` | the version `UPDATE SKIP` set aside, and "Offer the skipped version again": `UPDATE SKIP NONE`. Disabled while none is skipped |
+
+**Why Save is not a line.** Every other button in Settings builds a line so
+that it is echoed in the command log and done by the one code path a typed
+line takes. A token on a line would be echoed there too, and into a script's
+output, and a headless run's stderr. So there is no `UPDATE TOKEN SET`
+(`src/katana_app/update_verbs.hpp`), and Save is the one thing the dialog does
+itself: the store's `write`, then the field emptied. Nothing of the token is
+said anywhere - the status says only that one was saved and where, a refusal
+shows the store's own message, which names the rule and the place and never
+the value, and `SaveWritesTheCredentialStoreAndNeverProducesALine` reads the
+status, every label, the log and the lines run for it. A script gives a run a
+token with the environment variable `KATANA_UPDATE_TOKEN` instead.
+
+**How the page gets what it shows.** The Format workbench makes the Settings
+dialog and knows nothing of updates, so the page's services
+(`SettingsUpdates`: how to read the automatic flag and the skipped version,
+the credential store, the user agent, the note) are handed over by the
+window: `SettingsDialog::setUpdates`, called each time File > Settings is
+triggered, after the workbench's own slot has made the dialog (Qt calls an
+action's slots in the order they were connected). The page is filled again
+at each opening and each time it is turned to, so a `UPDATE SET AUTO OFF`
+typed meanwhile is shown (`TurningToThePageReadsTheStateAgainAndRunsNothing`).
+Given no services - a widget test's bare dialog - every control on it is
+disabled (`WithNothingGivenThePagesControlsAreOffAndItSaysWhyNoTokenIsKept`).
+*Rejected: a `CustomisationServices` member for them*, which is the tidier
+wiring and one line in the workbench; it was outside the files of the change
+that added the page, and is the first thing to do when that workbench is next
+edited.
+
+**In a headless run** the page says so and keeps nothing: no state to read,
+so the box is off and disabled, and no credential store, so Save is disabled
+(`qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless`,
+`qt_a_headless_run_saves_no_access_token_headless`). Clear and the skipped
+version's button still build their lines, which the verbs answer for that
+surface.
+
+Tested in `tests/qt_widgets/test_update_dialog.cpp` (the `SettingsUpdates`
+cases).
 
 ## The rules a dialog or panel follows
 

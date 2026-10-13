@@ -848,10 +848,10 @@ void UpdateWorkbench::start()
     }
     started_ = true;
     const katana::app::UpdateContext& made = context();
-    if (!made.stateDirectory.empty()) {
-        // What a lock kept an earlier update from deleting (update/state.hpp).
-        // A leftover that stays is tried again at the next start: said, not
-        // an error of this session.
+    if (kAppliesHere && !made.stateDirectory.empty()) {
+        // What a lock kept an earlier update from deleting (update/state.hpp);
+        // only where an update can have run at all. A leftover that stays is
+        // tried again at the next start: said, not an error of this session.
         const std::unique_ptr<katana::update::FsOps> files = katana::update::makeSystemFsOps();
         if (const katana::core::Status swept = katana::update::processCleanupList(
                 made.stateDirectory, made.install.root, *files);

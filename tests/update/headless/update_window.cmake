@@ -115,6 +115,49 @@ add_test(NAME qt_a_headless_run_saves_no_access_token_headless
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_settings_no_token_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
+# --update-health TX: what the update helper runs to learn whether the version
+# it has just put in place starts (include/katana/update/apply.hpp, step 7:
+# "it writes the marker after its first idle turn and exits"). Three tests in
+# order, held together as fixtures, on a state folder of their own:
+#   - the folder is emptied, so a marker left by an earlier run cannot pass;
+#   - the REAL window is built - never shown - writes healthy-<TX> and exits 0.
+#     The helper waits for that exit and would stop a copy still running at the
+#     end of its wait, so "exits" is the property, not "started";
+#   - the marker is there. "ok" is what the engine's own tests write in one;
+#     only its presence is read.
+# The id is the shape the helper makes (update::isValidTransactionId: 1 to 64
+# of 0-9 and a-f).
+set(_update_health_state "${CMAKE_CURRENT_BINARY_DIR}/update_health_state")
+add_test(NAME update_health_state_folder_is_emptied_before_the_health_run
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_update_health_state}")
+add_test(NAME qt_the_health_run_writes_its_marker_and_exits_headless
+    COMMAND $<TARGET_FILE:katana> --update-health 0a1b2c3d)
+add_test(NAME update_health_marker_is_there_after_the_health_run
+    COMMAND ${CMAKE_COMMAND} -E cat "${_update_health_state}/healthy-0a1b2c3d")
+set_tests_properties(update_health_state_folder_is_emptied_before_the_health_run
+    PROPERTIES FIXTURES_SETUP update_health_state_emptied)
+set_tests_properties(qt_the_health_run_writes_its_marker_and_exits_headless
+    PROPERTIES FIXTURES_REQUIRED update_health_state_emptied
+               FIXTURES_SETUP update_health_run_made
+               ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:;KATANA_UPDATE_STATE_DIR=set:${_update_health_state}"
+               TIMEOUT 180)
+set_tests_properties(update_health_marker_is_there_after_the_health_run
+    PROPERTIES FIXTURES_REQUIRED update_health_run_made
+               PASS_REGULAR_EXPRESSION "^ok")
+
+# What comes with the switch names a file in the state folder, so only an id is
+# taken: anything else - here, a path that climbs out of the folder - ends the
+# run before a window is built, saying so, and writes nothing.
+add_test(NAME qt_a_health_run_given_no_transaction_id_is_refused_headless
+    COMMAND $<TARGET_FILE:katana> --update-health ../healthy)
+set_tests_properties(qt_a_health_run_given_no_transaction_id_is_refused_headless
+    PROPERTIES PASS_REGULAR_EXPRESSION
+        "--update-health needs the transaction id the update helper gives it"
+               ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:;KATANA_UPDATE_STATE_DIR=set:${_update_health_state}_refused"
+               TIMEOUT 180)
+
 set_tests_properties(
     qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless
     qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless
