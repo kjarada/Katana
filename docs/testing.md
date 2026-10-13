@@ -517,8 +517,9 @@ What no test covers:
   (`src/katana_app/update_transport.cpp`) over libcurl, `gis::httpExchange`
   - is run against a server only by the two `OnlineLive` cases of
   `tests/interop/test_online_fetch.cpp`, which need `KATANA_ONLINE_TESTS=1`
-  and a real host; no test in the ordinary run puts it in front of the fake
-  feed. A release is the first place it meets a `Range` answer.
+  and a real host, and which ask for no byte range; no test in the ordinary
+  run puts it in front of the fake feed. A release is the first place it
+  meets a `Range` answer.
 - **A shipped program updating an installed copy.** The shipped programs
   cannot be given a test key, which is the point of them; so the few lines
   that only they have - the window's close-and-apply, `katana_cli` starting

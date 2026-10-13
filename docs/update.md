@@ -77,7 +77,10 @@ Everything the engine does to the machine goes through an interface, so that
 the swap, its rollback and its recovery are driven in-process by tests with
 fakes: `FsOps` (every change to the disk), `ProcessOps` (who is running),
 `Launcher` (starting a program), `RegistryOps` (three per-user registry
-values), `CredentialStore` (the one secret) and `Fetch` (the network).
+values), `CredentialStore` (the one secret) and `Fetch` (the network). The
+tests, their fake feed (`tools/update_fake_feed.py`) and the generator of
+their signed fixtures (`tools/update_make_fixtures.py`) are `docs/testing.md`,
+"The update system's tests".
 
 ## What is an install
 
@@ -374,10 +377,11 @@ No script and no agent makes or sees a private key. These are the steps
 2. Actions > Release > Run workflow, with the tag `vX.Y.Z`. The Publish job
    runs in the environment `release`; approve it on the run's page when the
    environment names reviewers.
-3. The job makes a manifest and an update zip for each target, signs each
-   manifest with the secret, rechecks every hash and signature with
-   `tools/update_verify_release.py`, and creates the release marked latest.
-   From that moment installed copies are offered it.
+3. The job makes a manifest for each of the five targets and an update zip
+   for each but macOS, signs each manifest with the secret, rechecks every
+   hash and signature with `tools/update_verify_release.py` - which uses
+   none of the producer's code - and creates the release marked latest.
+   From that moment installed copies are offered it, each at its next check.
 
 For a key that never leaves the owner's machine the workflow's input `sign`
 is set to `offline`: the release is left a DRAFT, which no installed copy
@@ -849,6 +853,17 @@ first real release; no agent creates a repository, a release or a secret.
   `Content-Range` asked for, by Katana's own transport and not only by
   `curl` (with which single ranges were measured on 2026-10-08, and
   multi-range requests answered 501).
+- **The shipped transport itself.** The programs fetch through
+  `app::makeUpdateFetch`: the engine's rules over libcurl
+  (`gis::httpExchange`). The rules are tested to the letter and end to end,
+  but the end-to-end tests fetch with a client of their own on plain
+  sockets, which is what keeps them on the machine; the libcurl half meets
+  a server only in two tests that need `KATANA_ONLINE_TESTS=1` (a redirect
+  is handed back and not followed; no credential configured for GDAL is
+  sent), and no test gives it a `Range` answer or a body to cut off at its
+  bound. So the first release is the first time the transport a person's
+  copy uses fetches a byte range (`docs/testing.md`, "The update system's
+  tests").
 - **The redirect that must not carry the token.** On the private route, that
   `api.github.com/repos/<repo>/releases/assets/<id>` answers 302 to a signed
   storage address, that the storage host serves it WITHOUT an `Authorization`
@@ -1025,5 +1040,10 @@ whatever more the manifest's parser allows (4 GiB).
   lines of `katana_cli`'s `main()` that start the helper (`docs/mcp.md`).
   The shipped programs cannot be given a test key, which is the point of
   them.
+- **No test in the ordinary run puts the shipped transport in front of a
+  server** (`src/katana_app/update_transport.cpp` over libcurl): "To verify
+  on first release". A test that ran it against the fake feed would have to
+  link `katana_app` and be held to the loopback by something other than its
+  own construction.
 - **The Command Reference has no Updates section** (`docs/desktop.md`);
   `HELP UPDATE` prints the text.
