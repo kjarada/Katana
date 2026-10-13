@@ -1546,7 +1546,7 @@ TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
     EXPECT_EQ(update::toString(context.install.version), "0.9.0");
     EXPECT_EQ(context.install.sequence, kV1Sequence);
     EXPECT_TRUE(context.install.hasInstalledRecord);
-    EXPECT_EQ(context.feed.target, "win64") << "the feed is asked for what the copy was packaged as";
+    EXPECT_EQ(context.feed.target, "win64") << "the feed is asked for the copy's own target";
     EXPECT_EQ(context.feed.token, "ghp_from_the_environment");
     EXPECT_EQ(context.stateDirectory, rig.state);
     EXPECT_EQ(context.pid, 0u) << "left for the caller";
