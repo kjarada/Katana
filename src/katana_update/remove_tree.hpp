@@ -24,8 +24,13 @@
 
 namespace katana::update::detail {
 
+// How many folders deep removeTree goes. A transaction folder is new/<top>/<path>, and the path
+// rules (paths.hpp) keep a manifest path far shallower than this.
+inline constexpr int kRemoveTreeMaxDepth = 64;
+
 inline void removeTree(FsOps& fs, const std::filesystem::path& directory,
-                       std::vector<std::filesystem::path>& leftovers, std::string_view last = {})
+                       std::vector<std::filesystem::path>& leftovers, std::string_view last = {},
+                       int depth = 0)
 {
     const core::Result<EntryInfo> info = fs.stat(directory);
     if (!info.ok()) {
@@ -47,6 +52,12 @@ inline void removeTree(FsOps& fs, const std::filesystem::path& directory,
         }
         return;
     }
+    // Deeper than any install is: a folder somebody planted to make the clean-up recurse until
+    // the stack is gone, in the first lines of every program. It is left, and reported.
+    if (depth >= kRemoveTreeMaxDepth) {
+        leftovers.push_back(directory);
+        return;
+    }
     const core::Result<std::vector<std::filesystem::path>> children = fs.listDirectory(directory);
     if (!children.ok()) {
         leftovers.push_back(directory);
@@ -59,7 +70,7 @@ inline void removeTree(FsOps& fs, const std::filesystem::path& directory,
             deferred = child;
             continue;
         }
-        removeTree(fs, child, leftovers);
+        removeTree(fs, child, leftovers, {}, depth + 1);
     }
     // The journal goes only when everything else has: while a file is still held, it stays and
     // keeps saying what the folder is.

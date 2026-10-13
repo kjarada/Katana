@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cstdint>
 #include <functional>
@@ -60,6 +61,11 @@ constexpr std::string_view kProgramStem = "katana";
 // Room for the journal, the three records and the directory entries, on top of the bytes
 // the changed files take under new/ (old/ is a rename and takes none).
 constexpr std::uint64_t kSpaceMargin = 1024 * 1024;
+// A lock that is held is looked at again for this long before it is believed. A virus scanner
+// or an indexer that has the lock file open for a moment fails the share-0 open exactly as
+// another helper holding it does, and a helper that gave up at once would close the window and
+// start nothing: the person would see Katana vanish.
+constexpr std::chrono::milliseconds kLockGrace{2000};
 
 // ---- text and paths ---------------------------------------------------------------------
 
@@ -402,7 +408,14 @@ void collectFiles(const FsOps& fs, const Path& folder, const std::string& prefix
         return;
     }
     for (const Path& child : children.value()) {
-        const std::string name = core::pathToUtf8(child.filename());
+        const std::optional<std::string> text = detail::nameAsText(child);
+        if (!text) {
+            // A name that is not valid text (an unpaired surrogate) is no name an update writes.
+            skipped.push_back((prefix.empty() ? std::string() : prefix + "/") +
+                              "(a name that is not text)");
+            continue;
+        }
+        const std::string& name = *text;
         const std::string relative = prefix.empty() ? name : prefix + "/" + name;
         const core::Result<EntryInfo> info = fs.stat(child);
         if (!info.ok()) {
@@ -494,9 +507,19 @@ core::Status restoreFromDisk(FsOps& fs, const Path& root, const Path& work, Jour
         const Path target = under(root, entry->path);
         const Path oldPath = under(oldRoot, entry->path);
         const Path newPath = under(newRoot, entry->path);
-        if (const std::optional<Failure> bad = guard.check(target.parent_path())) {
-            fail(core::makeError(core::ErrorCode::InvalidState, bad->detail,
-                                 bad->reason + " " + entry->path));
+        // All three sides of a move are held to the rule, not only the install's: old/<dir> and
+        // new/<dir> can be links as well, and a file renamed through one comes from, or goes to,
+        // a place outside the install.
+        std::optional<Failure> unsafe = guard.check(target.parent_path());
+        if (!unsafe) {
+            unsafe = guard.check(oldPath.parent_path());
+        }
+        if (!unsafe) {
+            unsafe = guard.check(newPath.parent_path());
+        }
+        if (unsafe) {
+            fail(core::makeError(core::ErrorCode::InvalidState, unsafe->detail,
+                                 unsafe->reason + " " + entry->path));
             continue;
         }
         const core::Result<EntryInfo> inTree = fs.stat(target);
@@ -592,7 +615,7 @@ void reportRefusals(FsOps& fs, const Path& root, const std::string& transaction,
     }
     std::string text;
     for (const std::string& line : plan.refused) {
-        text += transaction + " journal record refused: " + line + "\n";
+        text += transaction + " journal record refused: " + detail::oneLine(line) + "\n";
     }
     (void)fs.appendDurable(updateWorkDirectory(root) / core::pathFromUtf8(kRecoveryLogName), text);
 }
@@ -628,6 +651,8 @@ class Applier {
     }
 
     ApplyResult run();
+    // How a run ends when an exception cut it short (apply() below catches it).
+    ApplyResult unexpected(const std::string& what);
 
   private:
     // ---- the steps
@@ -646,6 +671,7 @@ class Applier {
     ApplyResult finish(ApplyResult result, bool silent = false);
     void discardWork();
     void finishHealthy();
+    void sweepSuperseded(std::vector<Path>& leftovers);
 
     [[nodiscard]] bool cancelled() const { return stop_.stop_requested(); }
     void pause() const { std::this_thread::sleep_for(services_.timings.pollInterval); }
@@ -671,16 +697,27 @@ class Applier {
     std::set<std::string> madeBeforehand_; // the same, as a set, for the commit
     bool runOnceSet_ = false;
     bool journalWritten_ = false;
+    // This run made R/.update/<tx>, so it is this run's to delete if the plan does not finish.
+    bool workMade_ = false;
+    // The window that asked for the update did not exit: it is still there, and it must not be
+    // started a second time beside itself.
+    bool windowStillRunning_ = false;
+    // The new version proved it starts. What is left is the clean-up, and a failure there does
+    // not undo an update that is good.
+    bool provedHealthy_ = false;
     std::optional<Journal> journal_;
 };
 
 ApplyResult Applier::run()
 {
     root_ = request_.root.empty() ? Path() : detail::normalizedRoot(request_.root);
-    if (root_.empty() || !isValidTransactionId(request_.transaction)) {
+    // The state folder is where the health marker is looked for: without it a start that hung,
+    // or exited without saying it had started, could not be told from one that was fine.
+    if (root_.empty() || request_.stateDirectory.empty() ||
+        !isValidTransactionId(request_.transaction)) {
         return finish(fail(refuse("invalid_request", "the helper was started with an empty "
-                                                     "install folder or a transaction id that is "
-                                                     "not lower-case hexadecimal"),
+                                                     "install or state folder or a transaction "
+                                                     "id that is not lower-case hexadecimal"),
                            false));
     }
     updateDir_ = updateWorkDirectory(root_);
@@ -717,6 +754,7 @@ ApplyResult Applier::run()
     if (const std::optional<Failure> failure = watchHealth()) {
         return finish(fail(*failure, true));
     }
+    provedHealthy_ = true;
     // Settings > Apps names the new version only once it has proved it starts: written before,
     // a release that is rolled back would still be the one the person is told they have.
     if (install_.kind == InstallKind::Installer) {
@@ -747,10 +785,21 @@ std::optional<Failure> Applier::begin()
         return refuse("reparse_point", ".update is not an ordinary folder: " +
                                            core::pathToUtf8(updateDir_));
     }
-    core::Result<std::unique_ptr<FileLock>> lock =
-        fs_.tryLock(updateDir_ / core::pathFromUtf8(kLockName));
+    const Path lockPath = updateDir_ / core::pathFromUtf8(kLockName);
+    const auto isHeld = [](const core::Error& error) {
+        return error.code == core::ErrorCode::InvalidState && error.message == "held";
+    };
+    core::Result<std::unique_ptr<FileLock>> lock = fs_.tryLock(lockPath);
+    // The grace is cut to the holders' wait, so the tests that shorten that shorten this too.
+    const std::chrono::milliseconds grace =
+        std::min<std::chrono::milliseconds>(kLockGrace, services_.timings.waitForHolders);
+    const Clock::time_point lockStart = Clock::now();
+    while (!lock.ok() && isHeld(lock.error()) && Clock::now() - lockStart < grace && !cancelled()) {
+        pause();
+        lock = fs_.tryLock(lockPath);
+    }
     if (!lock.ok()) {
-        if (lock.error().code == core::ErrorCode::InvalidState && lock.error().message == "held") {
+        if (isHeld(lock.error())) {
             Failure held = refuse("locked", "another update is running");
             held.silent = true;
             return held;
@@ -857,6 +906,7 @@ std::optional<Failure> Applier::waitForQuiet()
                 return refuse("cancelled", "the update was cancelled");
             }
             if (Clock::now() - start >= timings.waitForParent) {
+                windowStillRunning_ = true;
                 Failure blocked;
                 blocked.outcome = ApplyOutcome::Blocked;
                 blocked.reason = "blocked";
@@ -1098,6 +1148,7 @@ std::optional<Failure> Applier::plan()
         return refuse("transaction_exists", "the transaction folder exists already: " +
                                                 core::pathToUtf8(work_));
     }
+    workMade_ = true; // from here a failure leaves a folder of ours, even half made
     if (const core::Status made = fs_.makeDirectories(newRoot()); !made.ok()) {
         return refuse("root_not_writable", "the transaction folder cannot be made", made.error());
     }
@@ -1297,12 +1348,9 @@ std::optional<Failure> Applier::watchHealth()
     if (!ran.ok()) {
         return refuse("health_exit", "the new version could not be started", ran.error());
     }
-    bool marker = true;
-    if (!request_.stateDirectory.empty()) {
-        const core::Result<EntryInfo> info =
-            fs_.stat(healthMarkerPath(request_.stateDirectory, request_.transaction));
-        marker = info.ok() && info->kind == EntryKind::File;
-    }
+    const core::Result<EntryInfo> info =
+        fs_.stat(healthMarkerPath(request_.stateDirectory, request_.transaction));
+    const bool marker = info.ok() && info->kind == EntryKind::File;
     if (marker && (ran->timedOut || ran->exitCode == 0)) {
         return std::nullopt;
     }
@@ -1329,6 +1377,7 @@ void Applier::finishHealthy()
 
     std::vector<Path> leftovers;
     detail::removeTree(fs_, work_, leftovers, kJournalName);
+    sweepSuperseded(leftovers);
 
     const Path stage = request_.stageDirectory;
     for (const ManifestFile& file : manifest_->files) {
@@ -1352,6 +1401,41 @@ void Applier::finishHealthy()
         for (const Path& leftover : leftovers) {
             (void)appendCleanup(request_.stateDirectory, leftover, fs_);
         }
+    }
+}
+
+// An earlier transaction whose helper died after it committed and before its health check was
+// over is left in COMMITTED_PENDING_HEALTH for ever: recovery leaves such a folder as it is,
+// because the tree is a whole version and the folder is what a health rollback would need. Once
+// a LATER update has proved healthy the folder is of no use any more - the window that asked for
+// this update was running the version that update installed, so that version starts, and its old
+// files are older than what is installed now - so its copies (the size of the release), the
+// helper copy it ran from and its marker are deleted. Nothing is removed that the journal does
+// not call COMMITTED_PENDING_HEALTH, and never a link.
+void Applier::sweepSuperseded(std::vector<Path>& leftovers)
+{
+    const core::Result<std::vector<Path>> entries = fs_.listDirectory(updateDir_);
+    if (!entries.ok()) {
+        return;
+    }
+    for (const Path& entry : entries.value()) {
+        const std::optional<std::string> name = detail::nameAsText(entry);
+        if (!name || *name == request_.transaction || !isValidTransactionId(*name)) {
+            continue;
+        }
+        const core::Result<EntryInfo> info = fs_.stat(entry);
+        if (!info.ok() || info->kind != EntryKind::Directory || info->reparsePoint) {
+            continue;
+        }
+        const core::Result<std::string> text =
+            fs_.readFile(entry / core::pathFromUtf8(kJournalName));
+        if (!text.ok() ||
+            parseJournal(text.value()).state != JournalState::CommittedPendingHealth) {
+            continue;
+        }
+        detail::removeTree(fs_, entry, leftovers, kJournalName);
+        detail::removeTree(fs_, runPath(request_.stateDirectory, *name), leftovers);
+        (void)fs_.removeFile(healthMarkerPath(request_.stateDirectory, *name));
     }
 }
 
@@ -1449,13 +1533,60 @@ ApplyResult Applier::finish(ApplyResult result, bool silent)
     }
     // A half-swapped tree is not started: its programs may not load, and a person who sees
     // nothing happen reads last.json at the next start instead.
-    if (!request_.relaunch.empty() && result.outcome != ApplyOutcome::RollbackIncomplete) {
+    // Nor a window that is still running: a second one would open beside the one that hung.
+    if (!request_.relaunch.empty() && result.outcome != ApplyOutcome::RollbackIncomplete &&
+        !windowStillRunning_) {
         SpawnRequest again;
         again.executable = request_.relaunch;
         again.workingDirectory = request_.relaunch.parent_path();
         (void)services_.launcher.startDetached(again);
     }
     return result;
+}
+
+// The end of a run that an exception cut short (a std::exception from a file system or a
+// conversion: nothing here throws on purpose). It is ended the way a failure at that point
+// would have been: before the journal there is only a folder of copies to delete; after it the
+// tree is put back from the disk, which is what every other failure does; once the new version
+// has proved itself only the clean-up was lost, and the update stands. If even that throws, the
+// outcome says what is known and names the command that puts a half-swapped tree right.
+ApplyResult Applier::unexpected(const std::string& what)
+{
+    const std::string reason = "internal_error";
+    const std::string message = "the update stopped on an unexpected error: " + what;
+    try {
+        if (provedHealthy_) {
+            ApplyResult result;
+            result.outcome = ApplyOutcome::Committed;
+            result.detail = "Katana " + toString(manifest_->version) +
+                            " is installed; clearing up after the update was cut short.";
+            return finish(std::move(result));
+        }
+        if (workMade_ && !journalWritten_) {
+            discardWork();
+        }
+        return finish(fail(refuse(reason, message), journalWritten_));
+    } catch (const std::exception& again) {
+        lock_.reset();
+        ApplyResult result;
+        if (provedHealthy_) {
+            // Only the clean-up and the report failed; the new version is in and works.
+            result.outcome = ApplyOutcome::Committed;
+            result.detail = "the update is installed; clearing up after it stopped on an error: " +
+                            std::string(again.what());
+        } else if (journalWritten_) {
+            result.outcome = ApplyOutcome::RollbackIncomplete;
+            result.reason = "rollback_failed";
+            result.detail = message + ", and then putting the old version back stopped on "
+                            "another (" + std::string(again.what()) + "). The install may be "
+                            "half updated: run katana_updater --recover <the install folder>.";
+        } else {
+            result.outcome = ApplyOutcome::Refused;
+            result.reason = reason;
+            result.detail = message;
+        }
+        return result;
+    }
 }
 
 } // namespace
@@ -1542,15 +1673,20 @@ std::string newTransactionId()
 {
     // Unique across runs without relying on random_device, which some MinGW runtimes seed
     // with a constant: the clocks, a counter, the address of a local and the thread, hashed.
-    static std::uint64_t counter = 0;
+    static std::atomic<std::uint64_t> counter{0};
     int marker = 0;
     std::string seed = std::to_string(Clock::now().time_since_epoch().count());
     seed += ':' + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     seed += ':' + std::to_string(++counter);
     seed += ':' + std::to_string(reinterpret_cast<std::uintptr_t>(&marker));
     seed += ':' + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()));
-    std::random_device device;
-    seed += ':' + std::to_string(device());
+    // An extra, not the only source: a system with no random device throws, and an id is
+    // asked for at the moment an update is wanted.
+    try {
+        std::random_device device;
+        seed += ':' + std::to_string(device());
+    } catch (const std::exception&) {
+    }
     return core::sha256Hex(seed).substr(0, 32);
 }
 
@@ -1559,12 +1695,25 @@ std::string newTransactionId()
 ApplyResult apply(const ApplyRequest& request, const ApplyServices& services, std::stop_token stop)
 {
     Applier applier(request, services, std::move(stop));
-    return applier.run();
+    // The one place an exception is caught: SimulatedCrash is not a std::exception, so a crash
+    // injected by a FaultFs still goes through to the test that injected it.
+    try {
+        return applier.run();
+    } catch (const std::exception& error) {
+        return applier.unexpected(error.what());
+    }
 }
 
-core::Status rollback(const Path& rootGiven, const std::string& transaction,
-                      const ApplyServices& services)
+namespace {
+
+core::Status rollbackTransaction(const Path& rootGiven, const std::string& transaction,
+                                 const ApplyServices& services)
 {
+    if (rootGiven.empty()) {
+        // updateWorkDirectory("") is ".update" under the current folder: not an install.
+        return core::makeError(core::ErrorCode::InvalidArgument,
+                               "no install folder to roll back in", transaction);
+    }
     if (!isValidTransactionId(transaction)) {
         return core::makeError(core::ErrorCode::InvalidArgument,
                                "a transaction id is 1 to 64 characters of 0-9 and a-f", transaction);
@@ -1614,6 +1763,21 @@ core::Status rollback(const Path& rootGiven, const std::string& transaction,
     }
     detail::removeTree(fs, work, leftovers, kJournalName);
     return {};
+}
+
+} // namespace
+
+core::Status rollback(const Path& rootGiven, const std::string& transaction,
+                      const ApplyServices& services)
+{
+    // An exception becomes an error: recovery runs first in every program, and a name or a
+    // folder somebody planted must not be able to stop one from starting.
+    try {
+        return rollbackTransaction(rootGiven, transaction, services);
+    } catch (const std::exception& error) {
+        return core::makeError(core::ErrorCode::Internal,
+                               "the rollback stopped on an unexpected error", error.what());
+    }
 }
 
 core::Status launchApply(const ApplyRequest& request)

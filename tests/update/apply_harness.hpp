@@ -761,6 +761,18 @@ inline bool inContinuousIntegration()
         GTEST_SKIP() << "OpenSSL headers are not available to sign the test manifests"; \
     }
 
+// For a test that needs something of the machine it runs on (PowerShell that can compile the
+// probe, a console to detach from). On a developer's machine, where Constrained Language Mode or
+// a missing tool is likely, it is skipped and says why; in continuous integration it is a
+// FAILURE, because a skip passes - and a test that skips everywhere checks nothing.
+#define SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI(message)                                    \
+    do {                                                                                \
+        if (::katana::update::harness::inContinuousIntegration()) {                     \
+            FAIL() << "needed in continuous integration, not skipped: " << (message);   \
+        }                                                                               \
+        GTEST_SKIP() << (message);                                                      \
+    } while (false)
+
 // The signature line of `message` under the test key whose seed is `seedHex` (the active key
 // by default): `ed25519 <keyid> <base64>` and a line feed.
 inline std::string signLine(std::string_view message,
