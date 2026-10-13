@@ -171,7 +171,10 @@ per-machine installer.
 * **Silent.** `/S` and `/D=<folder>` (last, unquoted) work as in any NSIS
   installer, and no question is asked without a default answer. Installing over
   an installed copy asks whether to uninstall the old one first, and a silent
-  run does so without asking; that is also the way to repair a copy.
+  run does so without asking; that is also the way to repair a copy. An entry
+  in **Settings > Apps** whose uninstaller is no longer there, because the
+  folder was deleted by hand, is no installed copy: nothing is asked, nothing
+  is run, and the install goes ahead and writes the entry anew.
 * **Over a copy that was not uninstalled first** (the answer to that question
   was No, or the registry does not know the copy in the chosen folder) the
   installer removes `share/katana/installed.json` and `.update` before it puts
@@ -196,9 +199,19 @@ per-machine installer.
   template stops there with "Plugin not found". The official and Chocolatey builds
   (the ARM64 job) are x86 and need nothing said. A missing template is not an
   error to CPack, only another installer, so the configure fails without it.
-* **Tests.** `packaging_nsis_template_is_per_user` holds the template's text to
-  all of the above on any host, and each `packaging_nsis_check_catches_*` test
-  breaks one rule in that text and requires the check to name it. Where NSIS is
+* **Tests.** `packaging_nsis_template_is_per_user` holds the template's text,
+  on any host, to the rules listed at the top of
+  `tests/update/check_nsis_script.cmake`: no elevation and nothing machine-wide,
+  the folder and the registry values above, the folder tried before anything is
+  cleared or written, what an install over a copy clears, an entry whose
+  uninstaller is gone, what the uninstaller removes, in which order, and what it
+  keeps, and a default answer to every question. It reads text. What only a run
+  shows (the exit code of a refused folder, the size in **Settings > Apps**, the
+  shortcuts) it does not hold; a block comment and a condition it cannot
+  evaluate it refuses, and what is inside a false condition it leaves out, as
+  NSIS does; an instruction that is compiled and never reached it cannot see.
+  Each `packaging_nsis_check_catches_*` test breaks one rule in that text and
+  requires the check to name it. Where NSIS is
   installed, `packaging_nsis_installer_builds_from_the_real_configuration` runs
   the build's own CPack configuration over a small tree, compiles the installer
   with `makensis` and holds the script CPack generated to the same rules, and
@@ -207,11 +220,16 @@ per-machine installer.
   runs them over small trees whose manifests have hostile entries, inside the
   build tree (no registry, no Start menu, a stand-in for `%LOCALAPPDATA%`); the
   `packaging_nsis_uninstaller_test_catches_*` tests break one of those functions'
-  rules each. (A build folder with a space in its path has none of the
-  uninstaller tests: NSIS takes the folder as the unquoted end of a command
-  line.) None of them runs Katana's installer: that writes the user's
-  registry and Start menu. **An install, an update and an uninstall on a clean
-  Windows machine, by hand, is the owner's acceptance step**; the release
+  rules each, and run only where the unbroken run passes (it is their fixture).
+  Those programs are new to the machine each time, and a scanner that looks at
+  a new program before it runs takes some seconds over each: the script gives
+  each a minute and stops at the first that does not come back. (A build folder
+  with a space in its path has none of the uninstaller tests: NSIS takes the
+  folder as the unquoted end of a command line.) None of them runs Katana's
+  installer: that writes the user's registry and Start menu. **An install, an
+  update and an uninstall on a clean Windows machine, by hand, is the owner's
+  acceptance step**, and with it an install after the folder was deleted by
+  hand, which needs the registry and so has no test that runs it; the release
   workflow's installer smoke test (above) covers the silent install and
   uninstall only.
 
