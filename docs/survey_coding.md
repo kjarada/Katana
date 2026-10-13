@@ -645,8 +645,9 @@ it is:
 Katana customisation files are compiled into `katana_cad` with `#embed`
 (`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
 is: one is the default and the others alternates (`docs/customisation.md`, "The
-built-in"). The files are in the repository - the default is original, and the
-alternate is third-party material, tracked on the owner's decision of
+built-in"). The files are in the repository - the default is Katana's own but
+for its survey code keys, which are the alternate's, and the alternate is
+third-party material, tracked on the owner's decision of
 2026-10-08 - so a clean checkout and every CI build have them; a build whose
 path names no file does not offer it, and that is a state the program runs in
 rather than a fault:
