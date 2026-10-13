@@ -1404,7 +1404,12 @@ TEST(SettleUnproved, NothingIsPutBackUnderARunningProgramOrOverFilesThatAreNoLon
         {"the first scan fails, which is not 'nobody'", {}, {noAnswer()}},
         {"the second scan fails", {}, {nobody(), noAnswer()}},
         {"one file of the release was overwritten",
-         [&] { writeText(s.root / "share/katana/readme.txt", "changed by hand\n"); },
+         [&] {
+             // Deleted and written anew, never written in place: a Loop's install shares the
+             // bytes of the files an update keeps with its pristine copy (replaceTree).
+             fs::remove(s.root / "share/katana/readme.txt");
+             writeText(s.root / "share/katana/readme.txt", "changed by hand\n");
+         },
          {}},
         {"one file of the release is gone", [&] { fs::remove(s.root / "bin/libnew-2.dll"); }, {}},
         {"the journal's PLAN names another release than the manifest in the tree",
