@@ -4,12 +4,20 @@
 //
 // GDAL already carries an HTTP client - libcurl, with the proxy, certificate
 // and retry handling every one of its web drivers (WMS, WMTS, WFS, OAPIF,
-// /vsicurl/) uses - so Katana does not link a second one. A request goes
+// /vsicurl/) uses - so Katana brings no second one. A request goes
 // through CPLHTTPFetchEx, which means the proxy a person configured for GDAL
 // (GDAL_HTTP_PROXY, or the ordinary HTTPS_PROXY environment libcurl reads) and
 // the certificate bundle it trusts (CURL_CA_BUNDLE, SSL_CERT_FILE) apply to
 // Katana's own requests and to GDAL's reads alike: one network stack, one set
 // of settings to get right.
+//
+// The one request CPLHTTPFetchEx cannot make - a request that does not follow
+// a redirect, httpExchange below - is made on a libcurl handle of this file's
+// own, which GDAL's CPLHTTPSetOptions configures. For that this library links
+// libcurl by name (src/katana_io/CMakeLists.txt), and it must be THE libcurl
+// GDAL itself loads: a handle made by one copy of the library and configured
+// by another is not a handle. One libcurl in the link is a thing the build has
+// to hold, on every platform.
 //
 // Nothing here knows what a web map service IS. Building the URLs, paging,
 // caching and choosing what to ask for belongs to katana::interop
@@ -97,30 +105,45 @@ using TransferProgress = std::function<void(std::uint64_t received, std::uint64_
 //     empty); a redirect is NOT followed, its Location is returned;
 //   - every HTTP status that arrives is a result, 3xx, 4xx and 5xx included: the caller reads
 //     it. Only a failure to get an HTTP answer is an error;
-//   - a 200 or 206 body is collected up to request.maxBytes and the transfer abandoned the
-//     moment it is passed (Unsupported); the body of any other status is kept to 64 KiB;
+//   - a body is read up to a bound and no further: request.maxBytes for a 200 or 206, 64 KiB
+//     for any other status (an error's page, of which the beginning is all anybody reads). An
+//     answer that is longer is ended the moment it passes the bound - the rest is not waited
+//     for - and is still a result, with `truncated` set: its status and headers arrived, and
+//     they are what tell a caller a sign-in page from a file that is too long. Of a 200 or 206
+//     that was cut NOTHING is handed over (`body` is empty): a beginning must never pass for
+//     the file. Of any other status the first 64 KiB are;
 //   - the body is the server's bytes as it holds them: no Accept-Encoding is sent and nothing
 //     is decompressed, so a `Range` header asks for, and a count measures, those bytes;
 //   - retries (request.retries, doubling from retryDelaySeconds) are for what is worth another
 //     try: a dropped or timed-out connection, and a 502, 503 or 504 answer. A 429 is returned
 //     at once - a rate limit that says wait an hour is not helped by a second.
 // Proxy, certificates, timeouts and the User-Agent are set exactly as httpFetch sets them
-// (GDAL's own option handling is applied to the same libcurl handle), with one exception: a
-// request with an Authorization (or Proxy-Authorization) header always has the server's
-// certificate checked, even where GDAL_HTTP_UNSAFESSL turns the check off for everything
-// else, so that a credential is never handed to an unverified server. Errors: InvalidArgument
-// (not http or https, or a body), InvalidState (cancelled), Unsupported (body past maxBytes),
+// (GDAL's own option handling is applied to the same libcurl handle), with two exceptions.
+//   - An exchange sends what its request names and NOTHING a person configured for GDAL's own
+//     requests: no ~/.netrc entry (GDAL_HTTP_NETRC), no GDAL_HTTP_USERPWD, no GDAL_HTTP_AUTH or
+//     GDAL_HTTP_BEARER, no GDAL_HTTP_HEADERS or GDAL_HTTP_HEADER_FILE header, no cookie, no
+//     client certificate; and CPL_CURL_VERBOSE does not print its headers. Those are settings
+//     for a map service, and a hop of a caller that follows redirects by hand may be any host.
+//     The proxy and the proxy's own credentials stay: they are how the network is reached.
+//   - A request with an Authorization (or Proxy-Authorization) header always has the server's
+//     certificate checked, even where GDAL_HTTP_UNSAFESSL turns the check off for everything
+//     else, so that a credential is never handed to an unverified server.
+// Errors: InvalidArgument (not http or https, or a body), InvalidState (cancelled),
 // FileImportFailure (no HTTP answer: explainHttpFailure's words - except a timeout, which says
 // how long was waited and gives no advice about map areas - with the address through
-// redactUrl and then libcurl's own message in the context). The request's headers are never
-// put in an error or a log. redactUrl keeps a query it does not know for a secret, so a caller
-// whose addresses are secret as a whole (a signed download address) rewrites the context.
+// redactUrl and then libcurl's own message in the context, "<address>: <message>"). The
+// request's headers are never put in an error or a log. redactUrl keeps a query it does not
+// know for a secret, so a caller whose addresses are secret as a whole (a signed download
+// address) takes the message from the context and leaves the address.
 struct HttpExchange {
     int status = 0;            // the HTTP status of the last response on the connection
     std::string contentType;   // "" when none
     std::string location;      // the Location header, "" when none
     std::string contentRange;  // the Content-Range header, "" when none
     std::string body;
+    // The answer was longer than its bound and was ended there (see above): `body` is empty
+    // for a 200 or 206, and the first 64 KiB for any other status.
+    bool truncated = false;
 };
 [[nodiscard]] katana::core::Result<HttpExchange>
 httpExchange(const HttpRequest& request, const std::stop_token& stop = {},

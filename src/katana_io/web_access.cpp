@@ -465,7 +465,8 @@ struct ExchangeState {
     std::string location;
     std::string contentRange;
     std::string body;
-    bool tooLarge = false;
+    // The body passed its bound and the transfer was ended here, by onExchangeBody.
+    bool truncated = false;
 };
 
 std::size_t onExchangeHeader(char* buffer, std::size_t size, std::size_t count, void* user)
@@ -514,15 +515,23 @@ std::size_t onExchangeBody(char* data, std::size_t size, std::size_t count, void
     if (state.stop != nullptr && state.stop->stop_requested()) {
         return 0;
     }
-    if (state.status == 200 || state.status == 206) {
-        if (state.body.size() + bytes > state.maxBytes) {
-            state.tooLarge = true;
-            return 0; // aborts the transfer
+    // A 200 or a 206 is the file that was asked for, bounded by the request. Any other status
+    // carries a page about itself, of which the beginning is all anybody reads.
+    const bool file = state.status == 200 || state.status == 206;
+    const std::uint64_t bound = file ? state.maxBytes : std::uint64_t{kErrorBodyBytes};
+    if (state.body.size() + bytes > bound) {
+        // Longer than is read, and the rest is not waited for: a server that never stops
+        // sending would otherwise hold the request until its timeout, once for every retry.
+        // A file that was cut is no file, so none of it is kept; of a page, its beginning is.
+        if (file) {
+            state.body.clear();
+        } else {
+            state.body.append(data, static_cast<std::size_t>(bound - state.body.size()));
         }
-        state.body.append(data, bytes);
-    } else if (state.body.size() < kErrorBodyBytes) {
-        state.body.append(data, std::min(bytes, kErrorBodyBytes - state.body.size()));
+        state.truncated = true;
+        return 0; // fewer bytes than were offered (there was at least one): the transfer ends
     }
+    state.body.append(data, bytes);
     return bytes;
 }
 
@@ -536,9 +545,45 @@ int onExchangeProgress(void* user, curl_off_t total, curl_off_t received, curl_o
     return state.stop != nullptr && state.stop->stop_requested() ? 1 : 0; // non-zero aborts
 }
 
+// An exchange sends what its request says and nothing else. CPLHTTPSetOptions puts on the
+// handle whatever the person has configured for GDAL's own requests, and some of that is
+// credentials: an entry of ~/.netrc (GDAL_HTTP_NETRC is on unless turned off), GDAL_HTTP_USERPWD,
+// GDAL_HTTP_AUTH with GDAL_HTTP_BEARER, GDAL_HTTP_COOKIE and its files, a client certificate
+// (GDAL_HTTP_SSLCERT) - and CPL_CURL_VERBOSE, which prints every request header to stderr, an
+// Authorization among them. Those are a person's settings for a map service. An exchange is
+// used by a caller that decides hop by hop what each host is told, and a hop may be a host that
+// a redirect chose; so they are taken off the handle again, each one. (The headers of
+// GDAL_HTTP_HEADERS and GDAL_HTTP_HEADER_FILE come back from CPLHTTPSetOptions as a list, which
+// performExchange drops.) What stays is how this computer reaches the network, which is not
+// something said to a server: the proxy and the proxy's own credentials, the certificate
+// bundle, the timeouts.
+//
+// The list is GDAL's (port/cpl_http.cpp, CPLHTTPSetOptions; read against libgdal 3.13's option
+// names). An upgrade of GDAL that teaches it another way to send a credential needs a line here.
+void sendNothingAmbient(CURL* curl)
+{
+    const char* const none = nullptr;
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+    curl_easy_setopt(curl, CURLOPT_NETRC, static_cast<long>(CURL_NETRC_IGNORED));
+    curl_easy_setopt(curl, CURLOPT_NETRC_FILE, none);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, none);
+    curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, none);
+    // No authentication scheme of libcurl's own: an Authorization the request names is a header
+    // like any other and is sent all the same.
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, static_cast<long>(CURLAUTH_NONE));
+    curl_easy_setopt(curl, CURLOPT_COOKIE, none);
+    // In this order: naming a jar - even none - starts libcurl's cookie engine, and a null list
+    // of cookie files is what stops it and forgets what it read.
+    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, none);
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, none);
+    curl_easy_setopt(curl, CURLOPT_SSLCERT, none);
+    curl_easy_setopt(curl, CURLOPT_SSLKEY, none);
+    curl_easy_setopt(curl, CURLOPT_KEYPASSWD, none);
+}
+
 // One request on a fresh libcurl handle, configured by GDAL's own option handling
-// (CPLHTTPSetOptions: proxy, certificate bundle, timeouts, user agent) and then told not to
-// follow a redirect.
+// (CPLHTTPSetOptions: proxy, certificate bundle, timeouts, user agent), then told to send
+// nothing the request does not name and not to follow a redirect.
 CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::string& message)
 {
     CURL* curl = curl_easy_init();
@@ -552,17 +597,33 @@ CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::
                          std::to_string(std::max(1, request.connectTimeoutSeconds)).c_str());
     options.SetNameValue("LOW_SPEED_LIMIT", "16");
     options.SetNameValue("LOW_SPEED_TIME", "30");
+    // Asked of GDAL here, and set on the handle again in sendNothingAmbient.
+    options.SetNameValue("NETRC", "NO");
     if (!request.userAgent.empty()) {
         options.SetNameValue("USERAGENT", request.userAgent.c_str());
     }
     CPLErrorReset();
     CPLPushErrorHandler(CPLQuietErrorHandler);
-    // GDAL returns the header list it built; the caller attaches and frees it.
-    curl_slist* headers =
-        static_cast<curl_slist*>(CPLHTTPSetOptions(curl, request.url.c_str(), options.List()));
+    // GDAL returns the header list it built - from GDAL_HTTP_HEADERS and GDAL_HTTP_HEADER_FILE,
+    // since no HEADERS option is passed - for the caller to attach and free. It is not attached:
+    // a header a person set for a map service is not this request's to send.
+    curl_slist_free_all(
+        static_cast<curl_slist*>(CPLHTTPSetOptions(curl, request.url.c_str(), options.List())));
     CPLPopErrorHandler();
+    sendNothingAmbient(curl);
+
+    curl_slist* headers = nullptr;
     for (const std::string& header : request.headers) {
-        headers = curl_slist_append(headers, header.c_str());
+        curl_slist* const longer = curl_slist_append(headers, header.c_str());
+        if (longer == nullptr) {
+            // Never a request with some of its headers: one without its Range would be answered
+            // with the whole file.
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
+            message = "out of memory";
+            return CURLE_OUT_OF_MEMORY;
+        }
+        headers = longer;
     }
 
     char errorBuffer[CURL_ERROR_SIZE] = {};
@@ -642,13 +703,9 @@ Result<HttpExchange> httpExchange(const HttpRequest& request, const std::stop_to
         if (stop.stop_requested()) {
             return makeError(ErrorCode::InvalidState, "cancelled", shown);
         }
-        if (state.tooLarge) {
-            return makeError(ErrorCode::Unsupported,
-                             "the answer is larger than the " +
-                                 std::to_string(request.maxBytes) + " bytes this request allows",
-                             shown);
-        }
-        if (code == CURLE_OK) {
+        // A transfer this function ended itself, at the body's bound, is an answer like one that
+        // ran to its end: the status and the headers arrived. libcurl calls it a write error.
+        if (code == CURLE_OK || state.truncated) {
             const bool serverTrouble =
                 state.status == 502 || state.status == 503 || state.status == 504;
             if (!serverTrouble || attempt >= request.retries) {
@@ -658,6 +715,7 @@ Result<HttpExchange> httpExchange(const HttpRequest& request, const std::stop_to
                 exchange.location = std::move(state.location);
                 exchange.contentRange = std::move(state.contentRange);
                 exchange.body = std::move(state.body);
+                exchange.truncated = state.truncated;
                 return exchange;
             }
         } else if (attempt >= request.retries || !worthRetrying(0, static_cast<int>(code))) {

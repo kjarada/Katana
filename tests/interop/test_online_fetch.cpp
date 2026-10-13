@@ -953,3 +953,68 @@ TEST(OnlineLive, AnExchangeHandsBackARedirectAndDoesNotFollowIt)
     EXPECT_EQ(answer->location, "https://github.com/");
     EXPECT_LE(answer->body.size(), 64u * 1024u) << "the body of a redirect is kept to 64 KiB";
 }
+
+namespace {
+
+// One variable of this process's environment, for a scope. GDAL reads its options from the
+// environment when nothing else set them.
+class ScopedEnvironmentVariable {
+  public:
+    ScopedEnvironmentVariable(const char* name, const char* value) : name_(name)
+    {
+        if (const char* before = std::getenv(name)) {
+            had_ = true;
+            before_ = before;
+        }
+        set(value);
+    }
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
+    ~ScopedEnvironmentVariable() { set(had_ ? before_.c_str() : nullptr); }
+
+  private:
+    void set(const char* value)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name_.c_str(), value != nullptr ? value : ""); // "" removes it
+#else
+        if (value == nullptr) {
+            (void)unsetenv(name_.c_str());
+        } else {
+            (void)setenv(name_.c_str(), value, 1);
+        }
+#endif
+    }
+
+    std::string name_;
+    std::string before_;
+    bool had_ = false;
+};
+
+} // namespace
+
+TEST(OnlineLive, AnExchangeSendsNoCredentialAPersonConfiguredForGdal)
+{
+    if (!liveTestsEnabled()) {
+        GTEST_SKIP() << "set KATANA_ONLINE_TESTS=1 to reach the network";
+    }
+    // GDAL_HTTP_USERPWD is a person's setting for a map service. GDAL puts it on every libcurl
+    // handle it configures, and libcurl then sends it to whichever host is asked, as
+    // `Authorization: Basic`. gis::httpExchange is configured by GDAL and must send none of it
+    // (web_access.hpp): its caller decides hop by hop what each host is told. api.github.com
+    // tells the two apart by itself - a request with credentials it does not know is answered
+    // 401 "Bad credentials" (GitHub's REST documentation, "Failed login limit"), the same
+    // request with none is answered. A rate limit (403) is neither, so the test asks only that
+    // the answer is not the one credentials get.
+    const ScopedEnvironmentVariable configured("GDAL_HTTP_USERPWD",
+                                               "katana-test-user:not-a-password");
+    gis::HttpRequest request;
+    request.url = "https://api.github.com/zen";
+    request.userAgent = OnlineEnvironment{}.userAgent;
+    request.maxBytes = 1u << 16;
+    request.retries = 1;
+    const auto answer = gis::httpExchange(request);
+    ASSERT_TRUE(answer.ok()) << answer.error().describe();
+    EXPECT_NE(answer->status, 401) << "the credentials of GDAL_HTTP_USERPWD went with the request";
+    EXPECT_EQ(answer->body.find("Bad credentials"), std::string::npos) << answer->body;
+}

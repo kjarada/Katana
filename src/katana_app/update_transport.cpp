@@ -21,39 +21,35 @@ constexpr int kConnectTimeoutSeconds = 20;
 // download is resumed at file granularity (stage.hpp), so a few are enough here.
 constexpr int kRetries = 2;
 
-// The Error of a hop that got no answer, written again from what gis::httpExchange said.
+// The Error of a hop that got no answer, written again from what gis::httpExchange said, in
+// the form update::HopFn asks for: the hop's own words and NOT the address (update::makeFetch
+// writes the address, without its query).
 //
-// Its contexts carry the address through gis::redactUrl, which hides the query parameters whose
-// NAMES look like secrets and keeps the rest. That is right for a map service's key and wrong
-// here: the address a release redirects to is a signed one, all of it query, under names
-// redactUrl has never heard of. So no context of gis's is passed on. The address is put back
-// through update::displayUrl (no query at all), and of gis's context only what follows the
-// address is kept - libcurl's own words ("Could not resolve host: ...", "SSL certificate
-// problem: ..."), which are what tell a refused certificate from a missing network.
-core::Error hopError(const core::Error& error, const update::HttpHop& hop)
+// gis's contexts are "<address>: <libcurl's message>", the address through gis::redactUrl,
+// which hides the query parameters whose NAMES look like secrets and keeps the rest. That is
+// right for a map service's key and wrong here: the address a release redirects to is a signed
+// one, all of it query, under names redactUrl has never heard of. So of gis's context only what
+// follows the address is passed on - libcurl's own words ("Could not resolve host: ...", "SSL
+// certificate problem: ..."), which are what tell a refused certificate from a missing network.
+// (makeFetch does not rely on this: it cuts the query from anything a hop quotes.)
+core::Error hopError(const core::Error& error)
 {
-    const std::string shown = update::displayUrl(hop.url);
     switch (error.code) {
     case core::ErrorCode::InvalidState: // cancelled
     case core::ErrorCode::InvalidArgument:
-        return core::makeError(error.code, error.message, shown);
-    case core::ErrorCode::Unsupported:
-        // The body passed hop.maxBytes. The message is this file's: gis's names the bound in
-        // megabytes and suggests a smaller map area.
-        return core::makeError(core::ErrorCode::Unsupported,
-                               "the answer is longer than the " + std::to_string(hop.maxBytes) +
-                                   " bytes this request allows",
-                               shown);
+        return core::makeError(error.code, error.message);
     default:
         break;
     }
-    // No HTTP answer at all: `status=0` first (update/feed.hpp, the Fetch conventions).
+    // No HTTP answer at all: `status=0` first (update/feed.hpp, the Fetch conventions). An
+    // address that update::makeFetch let through holds no blank, so the first ": " is the one
+    // gis wrote after it.
     std::string words;
     if (const std::size_t at = error.context.find(": "); at != std::string::npos) {
         words = error.context.substr(at + 2);
     }
     return core::makeError(core::ErrorCode::FileImportFailure, error.message,
-                           "status=0; " + shown + (words.empty() ? std::string() : "; " + words));
+                           words.empty() ? std::string("status=0") : "status=0; " + words);
 }
 
 core::Result<update::HttpHopReply> hopOverGis(const update::HttpHop& hop, std::stop_token stop,
@@ -67,7 +63,10 @@ core::Result<update::HttpHopReply> hopOverGis(const update::HttpHop& hop, std::s
     request.userAgent = hop.userAgent.empty()
                             ? "Katana/" + std::string(update::programVersionText())
                             : hop.userAgent;
-    request.headers = hop.headers; // the token is in here for api.github.com and nowhere else
+    // update::hopHeaders built these: the token is among them on the first hop of a request to
+    // api.github.com and on no other. gis::httpExchange adds nothing of its own to them - no
+    // credential a person configured for GDAL's requests goes with an exchange.
+    request.headers = hop.headers;
     request.timeoutSeconds = hop.timeoutSeconds;
     request.connectTimeoutSeconds = kConnectTimeoutSeconds;
     request.retries = kRetries;
@@ -80,7 +79,7 @@ core::Result<update::HttpHopReply> hopOverGis(const update::HttpHop& hop, std::s
             }
         });
     if (!exchange) {
-        return hopError(exchange.error(), hop);
+        return hopError(exchange.error());
     }
     update::HttpHopReply reply;
     reply.status = exchange.value().status;
@@ -88,6 +87,11 @@ core::Result<update::HttpHopReply> hopOverGis(const update::HttpHop& hop, std::s
     reply.location = std::move(exchange.value().location);
     reply.contentRange = std::move(exchange.value().contentRange);
     reply.body = std::move(exchange.value().body);
+    // gis ended the transfer at hop.maxBytes and kept none of the body (web_access.hpp). For a
+    // 200 or 206 that is an answer the engine must not take for the file, and the status and the
+    // content type say which kind of wrong it is (update::HttpHopReply::overran). An error's
+    // page cut at its first 64 KiB is still just that error's page.
+    reply.overran = exchange.value().truncated && (reply.status == 200 || reply.status == 206);
     return reply;
 }
 
