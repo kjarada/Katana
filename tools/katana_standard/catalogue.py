@@ -832,6 +832,12 @@ def catalogue(data, root):
       "stated purpose (the unclassified road design strings, the hinges and bases of a cross-section, a few "
       "marks and lane lines). Their meanings are worded as generally as the label allows, and the unclassified "
       "design strings share one layer family each; a surveyor who knows what one is for should say so.")
+    w("- **What the comparison of shapes does not see.** `originality.py` holds two definitions to be one shape "
+      "when they make the same marks at any place and size, turned by quarter turns or mirrored. A drawing "
+      "turned by another angle, stretched one way, a circle drawn as a ring of short lines, or a line cut in two "
+      "where another meets it makes other marks and is another shape to it, and a definition of five strokes or "
+      "fewer is not compared at all. No C++ test repeats the comparison, so it is held where Python is "
+      "(`katana_standard_originality`).")
     w("- **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's "
       "rotation, offset and raise. The library carries them for the day it does.")
     w("- **A curve cannot come from a field file.** The readers Katana has strung points by the file's own "
