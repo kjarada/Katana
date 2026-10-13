@@ -77,6 +77,11 @@ void usage(std::ostream& out)
 
 int main(int argc, char* argv[])
 {
+    // First, before a file of the install is read: an update that was
+    // interrupted is put back (session.hpp). What it says goes to stderr, the
+    // server's log; the protocol's stream is not touched.
+    katana::app::recoverInterruptedUpdate();
+
     std::string project;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];

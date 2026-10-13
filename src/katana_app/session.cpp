@@ -6,6 +6,8 @@
 
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -14,6 +16,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_host.hpp"
 #include "katana/cad/customisation_record.hpp"
@@ -21,11 +29,14 @@
 #include "katana/cad/document.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
+#include "katana/update/install.hpp"
+#include "katana/update/recover.hpp"
 #include "dxf_verbs.hpp"
 #include "ifc_verbs.hpp"
 #include "survey_verbs.hpp"
 #include "import_records.hpp"
 #include "session.hpp"
+#include "update_verbs.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
 #include "geo/geo_verbs.hpp"
@@ -63,6 +74,26 @@ std::string upperVerb(const std::string& line)
         verb += static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     }
     return verb;
+}
+
+// The line's words in capitals with one blank between them, so that a line of
+// two words is compared as one text however it was typed.
+std::string upperWords(const std::string& line)
+{
+    std::string words;
+    bool gap = false;
+    for (const char ch : line) {
+        if (ch == ' ' || ch == '\t') {
+            gap = !words.empty();
+            continue;
+        }
+        if (gap) {
+            words += ' ';
+            gap = false;
+        }
+        words += static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    }
+    return words;
 }
 
 // The desktop window's own verbs (MainWindow::dispatchLine), which this
@@ -195,6 +226,18 @@ struct InteropState {
 
 #endif // KATANA_WITH_INTEROP
 
+// What the UPDATE verbs (update_verbs.hpp) need of a session. They act on the
+// program that runs it, not on its drawing.
+struct UpdatePart {
+    // A program's session (session.hpp): there is a program for UPDATE to act on.
+    bool program = false;
+    // Whose lines these are: katana_cli's, unless katana_mcp's server said Mcp.
+    katana::app::UpdateSurface surface = katana::app::UpdateSurface::Cli;
+    // What an UPDATE APPLY CONFIRM left for the front end to launch once the
+    // session has ended (Session::takePendingApply).
+    std::optional<katana::update::ApplyRequest> pendingApply;
+};
+
 // One session's mutable state. Grouped so that adding a verb that needs more
 // context does not mean changing every signature again.
 struct SessionState {
@@ -206,7 +249,76 @@ struct SessionState {
     // its drawing, interpreter, reference rasters and surfaces.
     katana::app::geo::Context* geo = nullptr;
 #endif
+    UpdatePart updates;
 };
+
+// This process, which the update helper waits for before it swaps a file.
+std::uint64_t ownProcessId()
+{
+#if defined(_WIN32)
+    return static_cast<std::uint64_t>(_getpid());
+#else
+    return static_cast<std::uint64_t>(getpid());
+#endif
+}
+
+// An UPDATE line: the verbs' reply on std::cout, a refusal on std::cerr.
+// Returns false when the line was refused or failed.
+bool runUpdate(UpdatePart& updates, const std::string& line)
+{
+    namespace app = katana::app;
+    if (updates.surface == app::UpdateSurface::Mcp) {
+        // Refused by name, as the window's own verbs are, and whatever the
+        // line says: katana_run_commands promises its client that it reaches
+        // no network (docs/mcp.md), and an agent that could download or apply
+        // would replace the very program its client holds open.
+        std::cerr << "error: Unsupported: UPDATE lines are not run by katana_mcp: its tool "
+                     "katana_check_update checks for a newer Katana and reports this copy's "
+                     "update status, and it downloads and installs nothing; the Katana window "
+                     "or katana_cli does that\n";
+        return false;
+    }
+    if (!updates.program) {
+        std::cerr << "error: Unsupported: UPDATE acts on the program that runs it, and this "
+                     "session is no program's (session.hpp)\n";
+        return false;
+    }
+    // Made for each line: it reads the install's records and the stored token
+    // as they are now, so a line sees what the line before it changed.
+    app::UpdateContext context = app::makeUpdateContext(updates.surface);
+    context.pid = ownProcessId();
+    // `relaunch` stays empty: katana_cli starts nothing again after an update.
+    // A download is watched, so its progress is printed as it happens; the
+    // same lines are in the reply, and are not printed a second time.
+    std::vector<std::string> shown;
+    context.progressLine = [&shown](std::string_view progress) {
+        std::cout << progress << std::endl;
+        shown.emplace_back(progress);
+    };
+    const auto reply = app::runUpdateLine(context, line);
+    if (!reply) {
+        std::cerr << "error: " << reply.error().describe() << '\n';
+        return false;
+    }
+    std::size_t matched = 0;
+    for (std::string_view rest = reply->text; !rest.empty();) {
+        const std::size_t end = rest.find('\n');
+        const std::string_view one = rest.substr(0, end);
+        if (matched < shown.size() && one == shown[matched]) {
+            ++matched;
+        } else {
+            std::cout << one << '\n';
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(end + 1);
+    }
+    if (reply->apply.has_value()) {
+        updates.pendingApply = reply->apply;
+    }
+    return true;
+}
 
 // Returns false when the command failed.
 bool runLine(SessionState& session, const std::string& line)
@@ -231,9 +343,22 @@ bool runLine(SessionState& session, const std::string& line)
         std::cout << katana::app::Session::helpText() << '\n';
         return true;
     }
+    // HELP UPDATE is the session's as well: the update verbs are taken here,
+    // so the interpreter, which answers HELP with a word, has no such word.
+    if (const std::string words = upperWords(line);
+        words == "HELP UPDATE" || words == "? UPDATE") {
+        std::cout << katana::app::updateHelpText();
+        return true;
+    }
     if (const char* why = windowOnlyVerb(upperVerb(line))) {
         std::cerr << "error: Unsupported: " << upperVerb(line) << ' ' << why << '\n';
         return false;
+    }
+    // UPDATE CHECK, STATUS, DOWNLOAD, APPLY and the rest: the program's own
+    // update, through the engine and the network, which the interpreter (cad)
+    // sees neither of (update_verbs.hpp).
+    if (katana::app::isUpdateLine(line)) {
+        return runUpdate(session.updates, line);
     }
     // SURVEY READ and SURVEY IMPORT: a survey field file, through surveyio,
     // which the interpreter (cad) may not see (survey_verbs.hpp).
@@ -390,7 +515,7 @@ struct Session::State {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
 #if defined(KATANA_WITH_INTEROP)
-    SessionState session{document, interpreter, {}, nullptr};
+    SessionState session{document, interpreter, {}, nullptr, {}};
     // Derived rasters of a drawing with no project go to a folder of this
     // session's own, so two sessions never find each other's files.
     katana::app::geo::Context geo{document,
@@ -401,7 +526,7 @@ struct Session::State {
                                   {},
                                   {}};
 #else
-    SessionState session{document, interpreter};
+    SessionState session{document, interpreter, {}};
 #endif
 };
 
@@ -410,6 +535,8 @@ Session::Session(const char* executable) : state_(std::make_unique<State>())
 #if defined(KATANA_WITH_INTEROP)
     state_->session.geo = &state_->geo;
 #endif
+    // A session of no program has nothing for UPDATE to act on (session.hpp).
+    state_->session.updates.program = executable != nullptr;
     // No colour callback is handed over: the interpreter resolves a colour
     // name through the Document - the customisation's own table, then the
     // standard names - which is everything this session could have answered.
@@ -440,6 +567,36 @@ bool Session::isQuit(const std::string& line)
     return ::isQuit(line);
 }
 
+void Session::setUpdateSurface(UpdateSurface surface)
+{
+    state_->session.updates.surface = surface;
+}
+
+bool Session::isUpdateApply(const std::string& line)
+{
+    const std::string words = upperWords(line);
+    return words == "UPDATE APPLY" || words.starts_with("UPDATE APPLY ");
+}
+
+std::optional<katana::update::ApplyRequest> Session::takePendingApply()
+{
+    return std::exchange(state_->session.updates.pendingApply, std::nullopt);
+}
+
+void recoverInterruptedUpdate()
+{
+    const katana::core::Result<std::filesystem::path> root =
+        katana::update::installRootOfRunningProgram();
+    if (!root) {
+        return; // in no install: there is nothing an update could have left half done
+    }
+    if (const katana::core::Status recovered = katana::update::recover(*root); !recovered) {
+        // Said, and the program goes on: the message names the command that
+        // puts the install right by hand (recover.hpp).
+        std::cerr << "warning: " << recovered.error().describe() << '\n';
+    }
+}
+
 std::string Session::helpText()
 {
     // The interpreter's help, CUSTOMISE and CODE among it, then a blank line
@@ -456,6 +613,8 @@ std::string Session::helpText()
     text += "Interop   IMPORT <file.dxf> [LOCAL | ALONGSIDE | OFFSET=dE,dN] | EXPORT <file.dxf>\n"
             "          (this build has no GDAL: DXF only)\n";
 #endif
+    // The program's own update, which the window's HELP lists too.
+    text += katana::app::updateHelpText();
     text += "Window    PLOT, PLOTSHEETS, SNAPSHOT, ONLINE, SCRIPT, GRID and EXAGGERATION are the\n"
             "          desktop window's verbs, and VIEWS and ZOOM act on its views: all are\n"
             "          refused here. katana --plot, --plot-sheets and --command run them\n"
