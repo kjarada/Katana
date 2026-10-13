@@ -17,7 +17,11 @@
 //   ../katana_updater/main.cpp   the helper, before a swap or a recovery (apply() would say
 //                                root_not_writable, and write a last.json that said so)
 // A file system that works never answers stat() with Unsupported, so the day this file is
-// written those two questions answer themselves and neither place needs an edit.
+// written for LINUX those two questions answer themselves and neither place needs an edit.
+//
+// On macOS neither place asks: both refuse there for good, whatever this file answers, because
+// this file is compiled for macOS too and what is written here for Linux works on a Mac as well.
+// Writing it must not be what turns downloads and swaps on inside a sealed bundle.
 
 #include "katana/update/fsops.hpp"
 
