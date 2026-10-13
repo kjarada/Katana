@@ -77,7 +77,8 @@ says what an installed copy meets meanwhile). Run again by itself, from the
 run's page, the job publishes the SAME packages under the same sequence, so
 a copy that already has them is not offered them a second time; a whole new
 run for the same tag builds new packages, with a later sequence, and those
-are offered to every copy of that version an earlier run updated ("Update
+are offered to the copies an update had already brought to that version (a
+copy installed by hand keeps what it has until the next version; "Update
 assets", `--sequence`). To take a bad release out of
 circulation, mark the one before it as the latest,
 `gh release edit vPREVIOUS --latest`: installed copies read whichever release
@@ -176,7 +177,8 @@ NEXT release's manifest, in which the programs differ anyway.
 **While a release is being replaced** (the Publish job run again, or a new
 run for the same tag), its files are uploaded one after another - the
 packages and the update zips first, then the signatures, the manifests last.
-When it is a new run that replaces them, an installed copy may for a moment
+The Publish job run again by itself normally uploads what is already there. A new
+run uploads other files, and for a moment an installed copy may
 read a manifest and a signature of two different runs, or a manifest whose
 zip has already been replaced. It then verifies nothing, or a fetched
 file fails its hash; either way it changes nothing and finds the release
@@ -248,7 +250,10 @@ Only when they are first used: with `sign` set to `offline`, that
 `gh release view vX.Y.Z` and `gh release download vX.Y.Z` find the DRAFT by
 its tag (the workflow's re-run and the offline tool's printed command both
 rely on it); with `publish_repo`, that the release appears in the other
-repository, on its default branch.
+repository, on its default branch; and when the Publish job is first run
+again by itself, that its step "Update assets" prints the sequence the first
+attempt printed (GitHub gives a job that is run again the outputs its
+earlier jobs had).
 
 ## What each job does
 
