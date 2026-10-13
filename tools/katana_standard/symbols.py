@@ -1,9 +1,9 @@
-"""Katana Standard: the symbol library (113 point symbols).
+"""Katana Standard: the symbol library (175 point symbols).
 
     python tools/katana_standard/symbols.py --check [--contract contract.json]
     python tools/katana_standard/symbols.py --sheets OUTDIR --contract contract.json
 
-`SYMBOLS` is a list of 113 dicts in the customisation file's own member names (`name`, `group`, `units`,
+`SYMBOLS` is a list of 175 dicts in the customisation file's own member names (`name`, `group`, `units`,
 `atVertices`, `strokes`) plus one extra, `description` (at most 160 characters: what it looks like and when to
 use it).  Every symbol is drawn in `paper` units: 1 unit is 1 mm of page, so a symbol keeps its size as the view
 zooms and no rule scales one.  Nothing here is copied from another library: each shape is built from the
@@ -30,10 +30,16 @@ Services.  One grammar for every service, learnt once; the service colour comes 
            names the service (W water, S sewer, G gas, E electricity, C communications, R recycled, F fire,
            P fuel, I traffic systems, ? unknown).  Square = pit or box; single ring = round cover or pole;
            double ring = maintenance hole; bow-tie = valve; diamond = regulator or marker; ring with a bar =
-           meter.  A letter is inside a pit, a ring or a hole, and BELOW a valve.
+           meter.  A letter is inside a pit, a ring or a hole, and BELOW a valve.  A fitting that several
+           services share (air release valve, scour valve, test point, earthing point, tap) carries no letter:
+           the rule's colour and layer name the service.  A fitting with a lettered family keeps its letter (a
+           vent, a flow meter, a maintenance hole, a pit with two or three lids).
 Trees.     Distinguished by canopy outline, all with a trunk dot: scalloped = broadleaf, spiked star = conifer,
            curved fronds = palm, irregular lobes with branches = native gum, dashed ring with a cross = dead,
-           rings = stump; shrubs are the same scallop at a smaller size.
+           rings = stump; shrubs are the same scallop at a smaller size.  A measured crown is a plain ring with
+           a trunk dot and a radius line, in six sizes; a measured trunk is an eight-sided outline round a trunk
+           dot, in six sizes, dashed when no width was taken.  The sizes step by about 0.8 mm so each is told
+           from the next at screen size, and they are not to scale: a symbol keeps its paper size.
 Control.   Distinguished by class: triangle with ring and dot = primary station; ring with long cross-hairs and
            dot = secondary mark; ring with a bar and arrow = benchmark; diamond with dot = fixed mark; open
            diamond with a plus = temporary; ring with a compass of rays and dot = GNSS base; triangle in a ring =
@@ -88,6 +94,17 @@ def triangle(side, up=True, cx=0.0, cy=0.0):
     if up:
         return [(cx, cy + h / 2), (cx - side / 2, cy - h / 2), (cx + side / 2, cy - h / 2)]
     return [(cx, cy - h / 2), (cx - side / 2, cy + h / 2), (cx + side / 2, cy + h / 2)]
+
+
+def bezier(p0, p1, p2, p3, steps=8):
+    """Points along a cubic curve, for a smooth outline (a flame) drawn as short chords."""
+    pts = []
+    for i in range(steps + 1):
+        t = i / steps
+        u = 1 - t
+        pts.append((u ** 3 * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t ** 3 * p3[0],
+                    u ** 3 * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t ** 3 * p3[1]))
+    return pts
 
 
 def _circle_cross(c0, r0, c1, r1):
@@ -338,6 +355,7 @@ G_INVEST = "Survey Control and Annotation/Investigation Points"
 G_PLAN = "Survey Control and Annotation/Plan Marks"
 G_HAZARD = "Miscellaneous/Hazards and Heritage"
 G_GENERAL = "Miscellaneous/General"
+G_WATEREDGE = "Terrain and Breaklines/Water Edges"
 
 SYMBOLS = []
 
@@ -395,6 +413,20 @@ def _():
     return Sketch().ring(1.6).line(-1.5, -1.5, 1.5, 1.5)
 
 
+@symbol("Winged Drill Hole", G_MARKS, "Drilled Hole with an open wedge running out to +x, the wing cut beside it to lead the eye to the hole. The origin is the hole.")
+def _():
+    return Sketch().ring(1.0).cross(0.4).line(0.93, 0.36, 2.1, 0.95).line(0.93, -0.36, 2.1, -0.95)
+
+
+@symbol("Star Picket", G_MARKS, "Three arms at 120 degrees round a centre dot: the section of a steel picket driven in as a mark. The origin is its centre dot.")
+def _():
+    k = Sketch().bead(0, 0, 0.3)
+    for a in (90, 210, 330):
+        p, q = polar(0.6, a), polar(1.55, a)
+        k.line(p[0], p[1], q[0], q[1])
+    return k
+
+
 # ---- Roads and Pavements -----------------------------------------------------------------------------------
 
 @symbol("Kerb Ramp", G_ACCESS, "Trapezoid, wide at the kerb and narrowing away, with an arrow up the ramp. A pedestrian kerb ramp.")
@@ -415,6 +447,11 @@ def _():
 @symbol("Road Arrow Marking", G_MARKINGS, "Block arrow pointing +x, drawn as an outline. A painted lane arrow; turn it by drawing the line the other way.")
 def _():
     return Sketch().path([(-3, -0.45), (-0.3, -0.45), (-0.3, -1.3), (3, 0), (-0.3, 1.3), (-0.3, 0.45), (-3, 0.45)], close=True)
+
+
+@symbol("Raised Pavement Marker", G_MARKINGS, "Ring with a small solid mark each side. A domed marker fixed to the road, the dome between its two reflectors.")
+def _():
+    return Sketch().ring(0.65).bead(-1.3, 0, 0.25).bead(1.3, 0, 0.25)
 
 
 # ---- Street Furniture and Signs ---------------------------------------------------------------------------
@@ -439,6 +476,21 @@ def _():
     return Sketch().rounded_box(3.2, 3.2, 0.7).letter("i", 0, 0)
 
 
+@symbol("Bus Stop Sign", G_SIGNS, "Round-cornered square holding B. A bus stop sign face; the origin is its middle, a little off the post it stands on.")
+def _():
+    return Sketch().rounded_box(3.2, 3.2, 0.7).letter("B", 0, 0)
+
+
+@symbol("Sign Post", G_SIGNS, "Ring with a centre dot and a plate touching its right side. The post of a sign whose face is not classified.")
+def _():
+    return Sketch().ring(0.8).bead(0, 0, 0.2).box(0.4, 1.8, 1.0, 0)
+
+
+@symbol("Double Sided Sign Post", G_SIGNS, "Ring with a centre dot and a plate touching each side. A post carrying a sign face on both of its sides.")
+def _():
+    return Sketch().ring(0.8).bead(0, 0, 0.2).box(0.4, 1.8, 1.0, 0).box(0.4, 1.8, -1.0, 0)
+
+
 @symbol("Street Light", G_LIGHTING, "Ring with a centre dot and eight rays. A street light pole and its lantern.")
 def _():
     return Sketch().ring(1.0).bead(0, 0, 0.2).ticks(1.3, 2.2, range(0, 360, 45))
@@ -447,6 +499,11 @@ def _():
 @symbol("Bollard Light", G_LIGHTING, "Small ring with four short rays. A light built into a bollard.")
 def _():
     return Sketch().ring(0.7).ticks(0.95, 1.55, [0, 90, 180, 270])
+
+
+@symbol("Hanging Light", G_LIGHTING, "Ring hung from a wire by a short hanger, with five rays shining down. A light hung from an overhead wire; the origin is the ring centre.")
+def _():
+    return Sketch().ring(0.8).line(0, 0.8, 0, 1.5).line(-2.0, 1.5, 2.0, 1.5).ticks(1.1, 1.9, [180, 225, 270, 315, 0])
 
 
 @symbol("Bollard", G_POSTS, "Ring inside a ring. A fixed bollard.")
@@ -493,6 +550,25 @@ def _():
     return k
 
 
+@symbol("Fireplace", G_AMENITIES, "Square hearth holding a flame with a tongue inside it. A built fireplace or barbecue hearth.")
+def _():
+    r, cy = 0.7, -0.5                # a round foot, a left side that bellies and a right side that leans in to the tip
+    left = bezier((-r, cy), (-r - 0.1, 0.3), (-0.2, 0.5), (0.2, 1.15))
+    right = bezier((0.2, 1.15), (0.55, 0.5), (0.75, 0.2), (r, cy))
+    k = Sketch().box(3.0, 3.0).path(left + right[1:]).arc(r, 180, 360, 0, cy)
+    return k.path(bezier((-0.2, -0.75), (-0.3, -0.25), (0.0, -0.15), (0.15, 0.25)))
+
+
+@symbol("Parking Meter", G_AMENITIES, "Ring with a centre dot carrying a flat head on its top. A kerbside parking meter; the origin is the pole, the ring centre.")
+def _():
+    return Sketch().ring(0.8).bead(0, 0, 0.2).box(1.9, 0.6, 0, 1.1)
+
+
+@symbol("Letterbox", G_AMENITIES, "Wide box with a half-round lid and a slot across its face. A letterbox at a property frontage.", centre=True)
+def _():
+    return Sketch().path([(-1.4, 0.2), (-1.4, -0.9), (1.4, -0.9), (1.4, 0.2)]).arc(1.4, 0, 180, 0, 0.2).line(-0.9, -0.35, 0.9, -0.35)
+
+
 @symbol("Signal Pole", G_TRAFFIC, "Ring with a dot beside a tall box holding three lamp dots. A traffic signal pole and its signal head.")
 def _():
     k = Sketch().ring(1.1, -0.4, 0).bead(-0.4, 0, 0.16).box(1.0, 2.8, 1.5, 0)
@@ -509,6 +585,11 @@ def _():
 @symbol("Signal Controller Cabinet", G_TRAFFIC, "Square holding the letter T. The traffic signal controller cabinet.")
 def _():
     return Sketch().box(3.2, 3.2).letter("T", 0, 0)
+
+
+@symbol("Camera Strobe", G_TRAFFIC, "Ring holding a lightning bolt. The flash unit of an enforcement camera, shot at its pole.")
+def _():
+    return Sketch().ring(1.6).path([(0.45, 1.0), (-0.55, -0.15), (-0.05, -0.15), (-0.4, -1.0), (0.6, 0.2), (0.1, 0.2)], close=True)
 
 
 # ---- Kerbs and Drainage / Pits and Structures --------------------------------------------------------------
@@ -558,6 +639,18 @@ def _():
     return Sketch().ring(1.1).box(0.8, 0.8)
 
 
+@symbol("Wingwall End", G_PITS, "Short wall stub at 45 degrees, two lines apart and closed at the outer end. The free end of a wing wall; the origin is the middle of the stub.", centre=True)
+def _():
+    u, n = polar(1.0, 45), polar(1.0, 135)
+    c = [(s * u[0] + t * n[0], s * u[1] + t * n[1]) for s, t in ((0.0, -0.4), (2.6, -0.4), (2.6, 0.4), (0.0, 0.4))]
+    return Sketch().path(c)
+
+
+@symbol("Sump Inlet", G_PITS, "Square holding a downward arrow that lands on a bar. Drainage dropping into a sump.")
+def _():
+    return Sketch().box(3.2, 3.2).line(0, 1.0, 0, -0.4).path([(-0.5, 0.1), (0, -0.4), (0.5, 0.1)]).line(-0.8, -0.95, 0.8, -0.95)
+
+
 # ---- Rail and Transit ---------------------------------------------------------------------------------------
 
 @symbol("Turnout Marker", G_TRACK, "Y shape forking toward +x. The toe of a turnout (points).")
@@ -581,6 +674,16 @@ def _():
 @symbol("Overhead Mast", G_SIGNALS, "Square with a centre dot and two arms. A mast carrying overhead wires.")
 def _():
     return Sketch().box(2.4, 2.4).bead(0, 0, BEAD_SMALL).line(-2.2, 0.6, -1.2, 0.6).line(1.2, 0.6, 2.2, 0.6)
+
+
+@symbol("Rail Control Box", G_TRACK, "Square holding two parallel bars, the rails. A control or relay box beside the track.")
+def _():
+    return Sketch().box(2.8, 2.8).line(-0.9, 0.45, 0.9, 0.45).line(-0.9, -0.45, 0.9, -0.45)
+
+
+@symbol("Rail Cable Trough", G_TRACK, "Long narrow box cut into three lid slabs by two cross lines. A lineside trough carrying signalling cables.")
+def _():
+    return Sketch().box(3.4, 1.2).line(-0.57, 0.6, -0.57, -0.6).line(0.57, 0.6, 0.57, -0.6)
 
 
 # ---- Utilities (one grammar: square pit, ring cover, double ring hole, bow-tie valve, ring and bar meter) ----
@@ -636,6 +739,16 @@ def _():
     return Sketch().box(5.6, 3.4).line(0, -1.7, 0, 1.7).letter("S", -1.4, 0)
 
 
+@symbol("Sewer Isolation Valve", G_SEWER, "Bow-tie with the letter S below. A sewer stop valve; the origin is between valve and letter.")
+def _():
+    return _valve("S")
+
+
+@symbol("Sewer Inspection Opening", G_SEWER, "Single ring holding S. A small round cover giving a lamp a view along a sewer; the double ring is the man-entry hole.")
+def _():
+    return Sketch().ring(1.6).letter("S", 0, 0)
+
+
 @symbol("Gas Isolation Valve", G_GAS, "Bow-tie with the letter G below. A gas main valve; the origin is between valve and letter.")
 def _():
     return _valve("G")
@@ -654,6 +767,21 @@ def _():
 @symbol("Gas Pressure Regulator", G_GAS, "Diamond holding G. A gas pressure regulating set.")
 def _():
     return Sketch().path([(0, 1.9), (1.9, 0), (0, -1.9), (-1.9, 0)], close=True).letter("G", 0, 0)
+
+
+@symbol("Gas Maintenance Hole", G_GAS, "Double ring holding the letter G. A gas maintenance hole.")
+def _():
+    return _hole("G")
+
+
+@symbol("Gas Vent", G_GAS, "Ring holding G with a chevron above. A vent riser on a gas main or casing.")
+def _():
+    return Sketch().ring(1.4, 0, -0.55).letter("G", 0, -0.55).path([(-0.8, 1.45), (0, 2.1), (0.8, 1.45)])
+
+
+@symbol("High Pressure Marker Post", G_GAS, "Marker Post ring holding two stacked triangles. A pipeline marker for a high pressure gas main.")
+def _():
+    return Sketch().ring(1.5).path(triangle(1.0, True, 0, -0.57), close=True).path(triangle(1.0, True, 0, 0.43), close=True)
 
 
 @symbol("Power Pole", G_ELEC, "Ring, inner ring and centre dot. A power pole: the rings are the pole and its footing.")
@@ -682,6 +810,39 @@ def _():
     return _pit("E")
 
 
+@symbol("Electrical Maintenance Hole", G_ELEC, "Double ring holding the letter E. A maintenance hole giving access to underground cables.")
+def _():
+    return _hole("E")
+
+
+@symbol("Electrical Fuse", G_ELEC, "Narrow box with a line through its length that runs past both ends. A fuse on a distribution cable, in a pole or a cabinet.")
+def _():
+    return Sketch().box(2.6, 1.1).line(-1.6, 0, 1.6, 0)
+
+
+@symbol("Power and Light Pole", G_ELEC, "Power Pole with two short sprays of rays at its upper left and right. A pole carrying both power lines and a lantern.")
+def _():
+    return Sketch().ring(1.55).ring(0.8).bead(0, 0, 0.2).ticks(1.85, 2.45, [35, 55, 125, 145])
+
+
+@symbol("Stay Pole", G_ELEC, "Small ring with a centre dot and a brace running to the upper right, ending in a cross tick. A short pole carrying a stay wire; the origin is the ring centre.")
+def _():
+    return Sketch().ring(0.8).bead(0, 0, 0.2).line(0.57, 0.57, 1.4, 1.4).line(1.0, 1.8, 1.8, 1.0)
+
+
+@symbol("Transmission Pylon", G_ELEC, "Four leg squares at the corners joined by sides and diagonals round a small ring. The footprint of a lattice tower on high voltage lines.")
+def _():
+    k = Sketch()
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            k.box(1.0, 1.0, sx * 2.4, sy * 2.4)
+    k.line(-1.9, 2.4, 1.9, 2.4).line(-1.9, -2.4, 1.9, -2.4).line(-2.4, -1.9, -2.4, 1.9).line(2.4, -1.9, 2.4, 1.9)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            k.line(sx * 1.9, sy * 1.9, sx * 0.4, sy * 0.4)
+    return k.ring(0.5)
+
+
 @symbol("Communications Pit", G_COMMS, "Square holding C. A communications pit.")
 def _():
     return _pit("C")
@@ -701,6 +862,26 @@ def _():
     return k
 
 
+@symbol("Communications Twin Pit", G_COMMS, "Box of two square cells, each holding C. A communications pit with two lids side by side.")
+def _():
+    return Sketch().box(4.7, 3.0).line(0, -1.5, 0, 1.5).letter("C", -1.175, 0).letter("C", 1.175, 0)
+
+
+@symbol("Communications Triple Pit", G_COMMS, "Box of three square cells, each holding C. A communications pit with three lids in a row.")
+def _():
+    return Sketch().box(6.3, 3.0).line(-1.05, -1.5, -1.05, 1.5).line(1.05, -1.5, 1.05, 1.5).letter("C", -2.1, 0).letter("C", 0, 0).letter("C", 2.1, 0)
+
+
+@symbol("Communications Main Pit", G_COMMS, "Large square holding a smaller square lid with C. A main pit at a major cable junction, twice the size of the ordinary pit.")
+def _():
+    return Sketch().box(6.0, 6.0).box(3.4, 3.4).letter("C", 0, 0)
+
+
+@symbol("Telephone Box", G_COMMS, "Square holding a telephone handset, an arch with a ring at each end. A public call box on the footpath.")
+def _():
+    return Sketch().box(4.4, 4.4).arc(2.2, 52, 128, 0, -1.55).ring(0.5, -1.35, 0.0).ring(0.5, 1.35, 0.0)
+
+
 @symbol("Recycled Isolation Valve", G_RECYCLED, "Bow-tie with the letter R below. A recycled water valve; the origin is between valve and letter.")
 def _():
     return _valve("R")
@@ -709,6 +890,11 @@ def _():
 @symbol("Recycled Water Pit", G_RECYCLED, "Square holding R. A recycled water pit.")
 def _():
     return _pit("R")
+
+
+@symbol("Recycled Flow Meter", G_RECYCLED, "Ring holding R above a bar. A recycled water meter.")
+def _():
+    return _meter("R")
 
 
 @symbol("Fire Hydrant", G_FIRE, "Ring with a plus and a nozzle tick each side. A fire hydrant.")
@@ -729,6 +915,11 @@ def _():
 @symbol("Fuel Isolation Valve", G_FUEL, "Bow-tie with the letter P below. A fuel line valve; the origin is between valve and letter.")
 def _():
     return _valve("P")
+
+
+@symbol("Petrol Pump", G_FUEL, "Tall box holding P, with a hose running out of its side to a nozzle tick. A fuel dispenser; the origin is the middle of its body.")
+def _():
+    return Sketch().box(2.4, 3.2).letter("P", 0, 0).path([(1.2, 0.6), (2.0, 0.6), (2.0, -0.4)]).line(1.7, -0.7, 2.3, -0.7)
 
 
 @symbol("Loop Detector", G_ITS, "Square holding a three-peak zigzag. A traffic detector loop.")
@@ -764,6 +955,32 @@ def _():
 @symbol("Marker Post", G_ALL, "Ring holding an upward triangle. A route marker post for any service.")
 def _():
     return Sketch().ring(1.0).path(triangle(1.1, True, 0, -0.05), close=True)
+
+
+@symbol("Air Release Valve", G_ALL, "Bow-tie with a stem and an arrowhead rising from it. A valve that lets air out at a high point of a pressure main.")
+def _():
+    return Sketch().bowtie(3.2, 1.8, 0, -0.4).line(0, -0.4, 0, 1.5).path([(-0.5, 1.0), (0, 1.5), (0.5, 1.0)])
+
+
+@symbol("Scour Valve", G_ALL, "Bow-tie with a stem and an arrowhead falling from it. A valve that empties a main at a low point.")
+def _():
+    return Sketch().bowtie(3.2, 1.8, 0, 0.4).line(0, 0.4, 0, -1.5).path([(-0.5, -1.0), (0, -1.5), (0.5, -1.0)])
+
+
+@symbol("Test Point", G_ALL, "Small ring with a stem and a cross bar rising from it. A fitting on a pipeline where pressure or protection is tested; the origin is the ring centre.")
+def _():
+    return Sketch().ring(0.8).line(0, 0.8, 0, 1.5).line(-0.7, 1.5, 0.7, 1.5)
+
+
+@symbol("Earthing Point", G_ALL, "Small ring on a stem that ends in three bars of falling length. The point where a pipe is bonded to earth; the origin is the middle of the sign.")
+def _():
+    return (Sketch().ring(0.5, 0, 1.0).line(0, 0.5, 0, -0.2).line(-0.9, -0.2, 0.9, -0.2)
+            .line(-0.6, -0.6, 0.6, -0.6).line(-0.3, -1.0, 0.3, -1.0))
+
+
+@symbol("Tap", G_ALL, "Small ring with a spout that rises and turns down. A tap, outlet or standpipe; the origin is the ring centre.")
+def _():
+    return Sketch().ring(0.8).path([(0, 0.8), (0, 1.5), (0.9, 1.5), (0.9, 1.0)])
 
 
 # ---- Vegetation and Landscape (all trees keep a trunk dot) -------------------------------------------------
@@ -802,6 +1019,93 @@ def _():
 @symbol("Tree Stump", G_TREES, "Ring with two broken growth rings and a centre dot. A cut stump; the broken rings tell it from a bollard.")
 def _():
     return Sketch().ring(1.0).arc(0.62, 25, 155).arc(0.62, 205, 335).bead(0, 0, 0.15)
+
+
+def _canopy(across):
+    """A tree whose crown has been measured: a plain ring, a trunk dot, and a radius line to the ring.  The
+    ring grows with the spread but is not to scale, since a symbol keeps its paper size."""
+    r = across / 2.0
+    return Sketch().ring(r).bead(0, 0, 0.2).line(0.45, 0, r, 0)
+
+
+@symbol("Tiny Tree Canopy", G_TREES, "Plain ring 2.2 mm across with a trunk dot and a radius line. A tree with a measured spread of one or two metres; not to scale.")
+def _():
+    return _canopy(2.2)
+
+
+@symbol("Small Tree Canopy", G_TREES, "Plain ring 3.0 mm across with a trunk dot and a radius line. A tree with a measured spread of three or four metres; not to scale.")
+def _():
+    return _canopy(3.0)
+
+
+@symbol("Medium Tree Canopy", G_TREES, "Plain ring 3.8 mm across with a trunk dot and a radius line. A tree with a measured spread of five or six metres; not to scale.")
+def _():
+    return _canopy(3.8)
+
+
+@symbol("Large Tree Canopy", G_TREES, "Plain ring 4.6 mm across with a trunk dot and a radius line. A tree with a measured spread of seven or eight metres; not to scale.")
+def _():
+    return _canopy(4.6)
+
+
+@symbol("Broad Tree Canopy", G_TREES, "Plain ring 5.4 mm across with a trunk dot and a radius line. A tree with a measured spread of nine or ten metres; not to scale.")
+def _():
+    return _canopy(5.4)
+
+
+@symbol("Giant Tree Canopy", G_TREES, "Plain ring 6.2 mm across with a trunk dot and a radius line. A tree with a measured spread of twelve metres or more; not to scale.")
+def _():
+    return _canopy(6.2)
+
+
+def _trunk(across, bead, dashed=False):
+    """A trunk's cross-section: an eight-sided outline (so it is never mistaken for a ring) round a solid
+    centre mark.  `across` is the width between its flats."""
+    r = across / (2.0 * math.cos(math.radians(22.5)))
+    pts = ngon(8, r, 22.5)
+    k = Sketch()
+    if dashed:
+        for i in range(8):
+            a, b = pts[i], pts[(i + 1) % 8]
+            k.line(a[0] + (b[0] - a[0]) * 0.18, a[1] + (b[1] - a[1]) * 0.18, a[0] + (b[0] - a[0]) * 0.82, a[1] + (b[1] - a[1]) * 0.82)
+    else:
+        k.path(pts, close=True)
+    return k.bead(0, 0, bead)
+
+
+@symbol("Hundred Millimetre Tree Trunk", G_TREES, "Eight-sided outline 1.8 mm across round a centre dot. A tree trunk about 100 mm across, shot at its middle.")
+def _():
+    return _trunk(1.8, 0.2)
+
+
+@symbol("Two Hundred Millimetre Tree Trunk", G_TREES, "Eight-sided outline 2.6 mm across round a centre dot. A tree trunk about 200 mm across, shot at its middle.")
+def _():
+    return _trunk(2.6, 0.22)
+
+
+@symbol("Three Hundred Millimetre Tree Trunk", G_TREES, "Eight-sided outline 3.4 mm across round a centre dot. A tree trunk about 300 mm across, shot at its middle.")
+def _():
+    return _trunk(3.4, 0.26)
+
+
+@symbol("Narrow Tree Trunk", G_TREES, "Eight-sided outline 4.2 mm across round a centre dot. A tree trunk from 400 to 600 mm across, shot at its middle.")
+def _():
+    return _trunk(4.2, 0.3)
+
+
+@symbol("Medium Tree Trunk", G_TREES, "Eight-sided outline 5.2 mm across round a centre dot. A tree trunk from 700 to 900 mm across, shot at its middle.")
+def _():
+    return _trunk(5.2, 0.32)
+
+
+@symbol("Wide Tree Trunk", G_TREES, "Eight-sided outline 6.2 mm across round a centre dot. A tree trunk of 1000 mm or more across, shot at its middle.")
+def _():
+    return _trunk(6.2, 0.35)
+
+
+@symbol("Unmeasured Tree Trunk", G_TREES, "Dashed eight-sided outline 4.2 mm across round a centre dot. A tree trunk whose width was not measured.")
+def _():
+    return _trunk(4.2, 0.3, dashed=True)
 
 
 @symbol("Shrub", G_SHRUBS, "Six-lobed scallop with a centre dot. A single shrub.")
@@ -856,6 +1160,14 @@ def _():
             .line(-0.8, 0, -0.8, 1.6).arc(1.6, 0, 90, -0.8, 0))
 
 
+@symbol("Awning Point", G_BUILDINGS, "Box whose lower edge is a row of four scallops. A point on an awning or canopy over a footpath.")
+def _():
+    k = Sketch().path([(-1.6, -0.4), (-1.6, 0.8), (1.6, 0.8), (1.6, -0.4)])
+    for x in (-1.2, -0.4, 0.4, 1.2):
+        k.arc(0.4, 180, 360, x, -0.4)
+    return k
+
+
 @symbol("Bridge Column", G_STRUCTURES, "Ring crossed by an X. A bridge pier or column.")
 def _():
     return Sketch().ring(1.6).cross(1.13)
@@ -880,6 +1192,39 @@ def _():
 @symbol("Monument", G_STRUCTURES, "Square holding an eight-spoke star. A monument, memorial or statue base.")
 def _():
     return Sketch().box(3.2, 3.2).plus(1.1).cross(0.78)
+
+
+def _abutment(top):
+    """A square with a banded edge: the band is the top or the foot of the abutment."""
+    s = 1.0 if top else -1.0
+    k = Sketch().box(2.8, 2.8).line(-1.4, s * 0.8, 1.4, s * 0.8)
+    for x in (-1.0, -0.2, 0.6):
+        k.line(x, s * 0.8, x + 0.6, s * 1.4)
+    return k
+
+
+@symbol("Top Abutment Point", G_STRUCTURES, "Square with a hatched band along its upper edge. A point on the top of a bridge abutment.")
+def _():
+    return _abutment(True)
+
+
+@symbol("Bottom Abutment Point", G_STRUCTURES, "Square with a hatched band along its lower edge. A point at the foot of a bridge abutment.")
+def _():
+    return _abutment(False)
+
+
+@symbol("Pile Cap", G_STRUCTURES, "Square holding a ring. A bridge pile standing in its cap, seen from above.")
+def _():
+    return Sketch().box(3.0, 3.0).ring(0.85)
+
+
+@symbol("Windmill", G_STRUCTURES, "Four leaning kite-shaped vanes round a hub ring. A windmill, shot at the middle of its tower.")
+def _():
+    k = Sketch()
+    for i in range(4):
+        t = 90.0 * i
+        k.path([polar(0.5, t), polar(1.7, t + 30), polar(3.0, t + 8), polar(1.3, t - 20)], close=True)
+    return k.ring(0.35)
 
 
 # ---- Fences and Walls / Gates and Posts ---------------------------------------------------------------------
@@ -934,10 +1279,36 @@ def _():
     return Sketch().ring(1.0).path(triangle(1.1, False, 0, 0.0), close=True)
 
 
+@symbol("Breakline Point", G_POINTS, "Dot between two bars, a dash-dot-dash. A ground point that lies on a breakline.")
+def _():
+    return Sketch().bead(0, 0, 0.26).line(0.65, 0, 1.5, 0).line(-0.65, 0, -1.5, 0)
+
+
+@symbol("Obvert Level", G_POINTS, "Ring holding an arch over a bar. The obvert of a pipe, its highest inside point; the pair of Invert Level.")
+def _():
+    return Sketch().ring(1.1).arc(0.55, 0, 180, 0, -0.15).line(-0.8, -0.55, 0.8, -0.55)
+
+
 @symbol("Boulder", G_ROCK, "Irregular hexagon with a crack. A boulder or loose rock.")
 def _():
     pts = [polar(r, a) for r, a in ((1.7, 100), (1.45, 160), (1.65, 225), (1.55, 285), (1.75, 345), (1.4, 40))]
     return Sketch().path(pts, close=True).path([(-0.55, 0.65), (-0.1, 0.1), (-0.3, -0.5)])
+
+
+@symbol("Water Level Mark", G_WATEREDGE, "Downward triangle standing on two wavy lines. The level of a water surface, or of a flood; the origin is the triangle's point.")
+def _():
+    k = Sketch().path([(0, 0), (-1.1, 1.9), (1.1, 1.9)], close=True)
+    k.bow((-1.0, -0.35), (0, -0.35), 0.8, 1).bow((0, -0.35), (1.0, -0.35), 0.8, -1)
+    k.bow((-1.0, -0.8), (0, -0.8), 0.8, 1).bow((0, -0.8), (1.0, -0.8), 0.8, -1)
+    return k
+
+
+@symbol("Swamp", G_WATEREDGE, "Two broken dashes with three reed ticks standing on the upper one. A swamp or marsh marked by a point.")
+def _():
+    k = Sketch().line(-1.8, -0.8, -0.4, -0.8).line(0.4, -0.8, 1.8, -0.8).line(-1.0, 0, 1.0, 0)
+    for x in (-0.7, 0, 0.7):
+        k.line(x, 0, x, 1.1)
+    return k
 
 
 # ---- Survey Control and Annotation ------------------------------------------------------------------------------
@@ -981,6 +1352,16 @@ def _():
     return Sketch().ring(2.1).path(ngon(3, 1.75, 90), close=True)
 
 
+@symbol("Alignment Pin", G_CONTROL, "Ring with a centre dot between two bars that run along the alignment. A pin set on a design alignment for setting out.")
+def _():
+    return Sketch().ring(0.85).bead(0, 0, 0.26).line(1.15, 0, 2.15, 0).line(-1.15, 0, -2.15, 0)
+
+
+@symbol("Photo Centre", G_CONTROL, "Ring holding a square frame with a small plus at its middle. The centre of an aerial photograph.")
+def _():
+    return Sketch().ring(1.8).box(2.0, 2.0).plus(0.7)
+
+
 @symbol("Borehole", G_INVEST, "Ring split into quadrants, two opposite ones evenly hatched. A borehole.")
 def _():
     k = Sketch().ring(1.7).plus(1.7)
@@ -1003,6 +1384,14 @@ def _():
 @symbol("Pothole", G_INVEST, "Ring of eight dashes holding P. A pothole dug to expose a service.")
 def _():
     return Sketch().dashed_ring(1.8, 8, 0.6, 7.5).letter("P", 0, 0)
+
+
+@symbol("Seismic Shot Point", G_INVEST, "Dot with two arcs on each side, the pulse leaving it. A seismic test shot.")
+def _():
+    k = Sketch().bead(0, 0, 0.3)
+    for r in (0.85, 1.4):
+        k.arc(r, -38, 38).arc(r, 142, 218)
+    return k
 
 
 @symbol("Leader Dot", G_PLAN, "Small ring with a dot. The end of a leader line.")
@@ -1029,6 +1418,11 @@ def _():
 @symbol("Heritage Item", G_HAZARD, "Five-point star outline. A protected heritage item such as a marker stone, a post or a plaque.", centre=True)
 def _():
     return Sketch().path(star(5, 2.0, 0.8, 90), close=True)
+
+
+@symbol("Headstone", G_HAZARD, "Upright slab with an arched top and a small cross cut on its face. A grave headstone, shot at the middle of its base.")
+def _():
+    return Sketch().path([(-0.9, 0.5), (-0.9, -1.4), (0.9, -1.4), (0.9, 0.5)]).arc(0.9, 0, 180, 0, 0.5).plus(0.35, 0, 0.2)
 
 
 @symbol("Habitat Marker", G_HAZARD, "Ring holding a leaf. A habitat or protected-species marker.")
@@ -1155,8 +1549,8 @@ def _load_contract(path):
 
 
 def sheets(out_dir, contract, columns=8):
-    """Four sheets of about 28 symbols, split between groups, drawn in the service colours on the dark
-    ground (needs Pillow and preview.py beside this file)."""
+    """Four sheets of a quarter of the symbols each, split between groups, drawn in the service colours on the
+    dark ground (needs Pillow and preview.py beside this file)."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import preview
     palette = {p["name"]: p["hex"] for p in contract["palette"]}
