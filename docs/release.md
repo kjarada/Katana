@@ -125,8 +125,8 @@ the icon must be there, and `codesign --verify --deep --strict` must accept
 the bundle's seal before the programs in `Contents/MacOS` run.
 
 **The installers.** Each Windows installer is then run as a deployment script
-runs it, as the user the job runs as and with no administrator rights:
-`/S /D=<folder>`, silently, into a folder of its own. The installed
+runs it, as the user the job runs as (the installer asks for no administrator
+rights): `/S /D=<folder>`, silently, into a folder of its own. The installed
 `katana_cli` must name `EPSG:32630` as above, and the uninstaller
 (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
 remove `bin\katana_cli.exe`.
@@ -158,18 +158,34 @@ per-machine installer.
   adds files that the uninstaller, built before them, has never heard of); the
   updater's records and its working folder `.update`; what the updater staged in
   `%LOCALAPPDATA%\Katana\update` (not `state.json`, the person's choices about
-  updating); the registry keys and shortcuts above. A path read from the manifest
-  is held to the updater's rules first (one of `bin`, `share`, `etc`, `lib`
-  first, no `.` or `..` component, no wildcard, printable ASCII), so a manifest
-  that has been tampered with cannot send a delete outside the folder.
+  updating); the registry keys and shortcuts above, and the command the update
+  helper registers under `HKCU\...\RunOnce` to recover at the next logon. A path
+  read from the manifest is held to the updater's rules first (one of `bin`,
+  `share`, `etc`, `lib` first, no `.` or `..` component, no wildcard, printable
+  ASCII, at most 240 characters), so a manifest that has been tampered with
+  cannot send a delete outside the folder.
 * **What it leaves.** Anything else in the install folder, and the folder with it
   (the folder is removed only when empty and nothing in it is removed
-  recursively but `.update`); the settings under `HKCU\Software\Katana` and the
-  data under `%LOCALAPPDATA%\Katana`.
+  recursively but `.update`); the settings under `HKCU\Software\Katana` and
+  everything else under `%LOCALAPPDATA%\Katana`.
 * **Silent.** `/S` and `/D=<folder>` (last, unquoted) work as in any NSIS
   installer, and no question is asked without a default answer. Installing over
-  an installed copy runs the old uninstaller first, which is also the way to
-  repair one.
+  an installed copy asks whether to uninstall the old one first, and a silent
+  run does so without asking; that is also the way to repair a copy.
+* **Over a copy that was not uninstalled first** (the answer to that question
+  was No, or the registry does not know the copy in the chosen folder) the
+  installer removes `share/katana/installed.json` and `.update` before it puts
+  its files down. The first is the updater's record of the version the folder
+  holds, which would go on naming the old one; the second can hold the journal
+  of an update that was cut short, whose recovery at the next start would put
+  files of the old version back over the new ones. The installed manifest is
+  kept: it is how the next update and the uninstaller find the files an earlier
+  update added. A folder without `share/katana/install.json`, which is what
+  says a packaged Katana is in it, is not touched.
+* **A file in use** (a program of Katana's that is still running) stops the
+  install: the installer offers Retry and Cancel, never the skip that NSIS
+  offers by default, which would leave the old program among the new libraries
+  (`AllowSkipFiles off`).
 * **NSIS.** The template, `cmake/NSIS.template.in`, replaces CPack's: CPack's asks
   for administrator rights, writes `HKLM` and installs to Program Files. It has no
   components, no "add to PATH" and no Install Options page (Katana has never
@@ -181,14 +197,23 @@ per-machine installer.
   (the ARM64 job) are x86 and need nothing said. A missing template is not an
   error to CPack, only another installer, so the configure fails without it.
 * **Tests.** `packaging_nsis_template_is_per_user` holds the template's text to
-  all of the above on any host, and
-  `packaging_nsis_installer_builds_from_the_real_configuration` runs the build's
-  own CPack configuration over a small tree, compiles the installer with
-  `makensis` and holds the script CPack generated to the same rules. Neither runs
-  an installer: that writes the user's registry and Start menu. **An install,
-  an update and an uninstall on a clean Windows machine, by hand, is the
-  acceptance step**; the release workflow's installer smoke test (above) covers
-  the silent install and uninstall only.
+  all of the above on any host, and each `packaging_nsis_check_catches_*` test
+  breaks one rule in that text and requires the check to name it. Where NSIS is
+  installed, `packaging_nsis_installer_builds_from_the_real_configuration` runs
+  the build's own CPack configuration over a small tree, compiles the installer
+  with `makensis` and holds the script CPack generated to the same rules, and
+  `packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else` compiles
+  the uninstaller's own file-removal functions into a throwaway installer and
+  runs them over small trees whose manifests have hostile entries, inside the
+  build tree (no registry, no Start menu, a stand-in for `%LOCALAPPDATA%`); the
+  `packaging_nsis_uninstaller_test_catches_*` tests break one of those functions'
+  rules each. (A build folder with a space in its path has none of the
+  uninstaller tests: NSIS takes the folder as the unquoted end of a command
+  line.) None of them runs Katana's installer: that writes the user's
+  registry and Start menu. **An install, an update and an uninstall on a clean
+  Windows machine, by hand, is the owner's acceptance step**; the release
+  workflow's installer smoke test (above) covers the silent install and
+  uninstall only.
 
 ## How the Linux and macOS packages are made self-contained
 
@@ -407,6 +432,14 @@ without asking Apple's service, even offline.
   warns on Windows and macOS quarantines the download.
 * **The Windows ARM64 installer's own code is x86**, run emulated: NSIS has no
   ARM64 build. The programs it installs are ARM64.
+* **The per-user installer has not been through its acceptance step**: an
+  install, an update and an uninstall on a clean Windows machine, by hand
+  ("The Windows installer").
+* **Neither the installer nor its uninstaller looks for a running Katana.** The
+  installer stops at a file that is in use (Retry or Cancel; a silent run
+  fails) and never skips it, but by then it has already replaced other files;
+  the uninstaller leaves such a file behind and still removes its entry in
+  **Settings > Apps**. Close Katana first.
 * **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball.
 * **The Windows toolchain is not frozen.** MSYS2 installs what it has on the
   day; two runs a month apart may build with different GCC and Qt versions.

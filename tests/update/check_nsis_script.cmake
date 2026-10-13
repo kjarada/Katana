@@ -17,7 +17,8 @@
 #   * the folder is %LOCALAPPDATA%\Programs\Katana, and the registry holds what the updater
 #     reads and Settings > Apps shows (include/katana/update/registry.hpp);
 #   * installed over a copy of Katana, it clears the updater's record of that copy's version
-#     and the working folder of an update that was cut short;
+#     and the working folder of an update that was cut short, and a file that is in use stops
+#     it: none is skipped;
 #   * the uninstaller removes the updater's working folder .update and every file the
 #     installed manifest lists, and never removes the install folder recursively, so what a
 #     person put there stays; outside it, it clears the updater's state folder and no other,

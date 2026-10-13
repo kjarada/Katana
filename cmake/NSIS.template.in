@@ -14,9 +14,14 @@
 ;                                          InstallLocation DisplayIcon EstimatedSize NoModify NoRepair
 ;   * Its uninstaller removes the files this installer put down, AND every file the installed
 ;     manifest lists (share\katana\installed.manifest.json: an update adds files this uninstaller
-;     was not built knowing), AND the updater's working folder .update. It removes nothing else:
-;     a file the user put in the folder stays, and so does the folder. The install folder is never
-;     removed recursively, because the user may have chosen a folder with other things in it.
+;     was not built knowing), AND the updater's records and its working folder .update. Of the
+;     folder it removes nothing else: a file the user put there stays, and so does the folder. The
+;     install folder is never removed recursively, because the user may have chosen a folder with
+;     other things in it. Outside it, what the updater staged under %LOCALAPPDATA%\Katana\update
+;     goes (not state.json, the person's choices), and the registry keys and shortcuts above.
+;   * Put down over a copy that was not uninstalled first, it removes the updater's record of that
+;     copy's version and the working folder of an update that was cut short (the installer's own
+;     section says why), and it stops at a file that is in use, never skips it.
 ;   * /S (silent) and /D=<folder> work as in any NSIS installer; README.md documents them. A silent
 ;     run never waits for an answer: every MessageBox has a /SD default.
 ;
