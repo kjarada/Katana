@@ -39,6 +39,34 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 // caller carries on: that is not a failure of recovery). An error only when a
 // recovery was needed and could not be run or did not complete; the message
 // says the by-hand command (`katana_updater --recover <R>`).
+//
+// WHAT RECOVERY WRITES, AND WHERE. recover() is called first by katana_cli and
+// katana_mcp too, and a headless program writes no per-user state
+// (docs/headless.md). So the rule, which src/katana_updater/main.cpp keeps and
+// tests/update/test_helper.cpp holds it to:
+//   - `katana_updater --recover <R>` - what this function runs, what the RunOnce
+//     entry runs and what a person types - is given no state folder and writes
+//     NOTHING per-user, whoever started it: no last.json, no state.json, no
+//     cleanup.list, no health marker, and KATANA_UPDATE_STATE_DIR is not read.
+//     Its only record is in the install itself, R/.update/recovery.log: a line
+//     appended for each run that found something to put right
+//     (`<UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>`, and
+//     `detail=` after a failure), and one for each journal record the rollback
+//     would not follow. A run that found nothing writes nothing. When everything
+//     is back it removes the RunOnce entry the interrupted swap left.
+//   - last.json is written by ONE program in ONE mode: the helper run for the
+//     window, the swap itself (`--state U`, apply.hpp). A recovery started from
+//     katana_cli or katana_mcp therefore never leaves a "the last update ..."
+//     message for the window; the window learns which version is installed from
+//     the install's own records (install.hpp), and from last.json only when the
+//     swap's own helper got to write one.
+//   - In the calling program this function READS the state folder, to find the
+//     helper copy U/run-<tx>/ (it is outside R, so it still runs when R's own
+//     bin/ is half swapped), and when that helper has put everything back it
+//     deletes the copies, which nothing will run again. What it could not
+//     delete then - a copy still held open, a file of a finished transaction's
+//     folder - it names in U/cleanup.list for the window's next start. It
+//     creates and changes nothing else there.
 [[nodiscard]] core::Status recover(const std::filesystem::path& root);
 
 // Roll back every transaction under R/.update whose journal needs it, in

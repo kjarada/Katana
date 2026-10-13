@@ -24,6 +24,32 @@
 // A program's file path is a std::filesystem::path; arguments are UTF-8 and
 // reach the child as given (Windows: quoted by the CreateProcessW rules; never
 // through a shell).
+//
+// WHAT THE WINDOWS SCAN ANSWERS (src/katana_updater/process_scan_win.cpp, which
+// gives the reasons):
+//   holdersUnder  the processes STARTED FROM a file under the root, and for each
+//                 RunningProgram::image is that executable - never a module it
+//                 loaded: what must not live through a swap is a program of the
+//                 old version, the commit only renames (which a loaded DLL
+//                 allows), and listing the modules of every process fails on
+//                 exactly the protected ones. The root may be spelled in any way
+//                 that names the folder (either case, forward slashes, a
+//                 trailing separator, "." and ".." segments, the extended-length
+//                 prefix, 8.3 names, a junction); the paths are put in one form
+//                 and compared with the file system's own case folding, and
+//                 C:/Katana2 is not under C:/Katana. A root that is not there
+//                 holds nothing; an empty one is InvalidArgument. A process that
+//                 has ended is not listed. Nor is one this user may not open
+//                 (another user's, a Katana started "as administrator"): that one
+//                 still holds its files, so the commit's rename fails after its
+//                 retries and the update rolls back with "rename_failed" - whole,
+//                 but without the holder's name. No elevation is ever asked for.
+//   isAlive       asks about the ID, which Windows may hand to a new process
+//                 once the old one is gone; the interface has no creation time to
+//                 tell them apart, and the worst case is a wait for the wrong
+//                 process that ends as "blocked". A process that exists but may
+//                 not be opened is alive; 0, and a number wider than a process
+//                 id, are not.
 
 #include <chrono>
 #include <cstdint>

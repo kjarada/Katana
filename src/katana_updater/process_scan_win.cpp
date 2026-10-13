@@ -5,12 +5,14 @@
 // CMakeLists.txt), because katana, katana_cli and katana_mcp ask the same question to say
 // `blocked`, and runningPrograms() is part of the engine's API. CMake compiles it on Windows only.
 //
-// WHAT "HOLDS" THE INSTALL. The swap renames files, and a running program's own image cannot be
-// replaced or deleted, so the question is "which processes were started from a file under R".
-// Toolhelp lists every process of the session's machine; QueryFullProcessImageNameW names the
-// file each was started from. The modules a process has loaded are not asked: a DLL that is
-// loaded can be renamed (it is opened with FILE_SHARE_DELETE), which is all the commit does, and
-// listing the modules of every process fails on exactly the protected ones. What this cannot see:
+// WHAT "HOLDS" THE INSTALL. A program of the old version that stayed running through a swap would
+// go on as old code among new files, and its own file can be neither replaced nor deleted while
+// it runs; so the question is "which processes were started from a file under R". Toolhelp
+// lists every process of the machine; QueryFullProcessImageNameW names the file each was started
+// from. The modules a process has loaded are not asked: a DLL that is loaded can be renamed (it
+// is opened with FILE_SHARE_DELETE), which is all the commit does, and listing the modules of
+// every process fails on exactly the protected ones. A process that has ended is not a holder,
+// whoever still has a handle to it. What this cannot see:
 // a process the helper may not open (another user's, or an elevated Katana started with "Run as
 // administrator" while the helper is not elevated). Such a Katana still holds its files, the
 // rename fails with a sharing violation after the retries of FsOps::renameFile, and the update
@@ -315,6 +317,14 @@ class WindowsProcessOps final : public ProcessOps {
                 OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID));
             if (!process.valid()) {
                 continue; // exited since the snapshot, or not ours to open (see the top)
+            }
+            // A process that has ended holds nothing, though its id and its image name stay
+            // readable for as long as anybody keeps a handle to it (the program that started it
+            // and has not yet collected its exit code, say). An exit code of 259 itself reads as
+            // "still running", which only errs towards naming a holder.
+            DWORD exitCode = 0;
+            if (GetExitCodeProcess(process.get(), &exitCode) && exitCode != STILL_ACTIVE) {
+                continue;
             }
             DWORD length = static_cast<DWORD>(image.size());
             if (!QueryFullProcessImageNameW(process.get(), 0, image.data(), &length) ||

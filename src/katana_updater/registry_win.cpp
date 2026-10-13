@@ -31,6 +31,7 @@
 #error "registry_win.cpp is compiled on Windows only"
 #endif
 
+#include <algorithm>
 #include <cwchar>
 #include <string>
 #include <vector>
@@ -111,25 +112,32 @@ class WindowsRegistry final : public RegistryOps {
     {
         const std::wstring path = under(kLocationKey);
         std::wstring value(MAX_PATH, L'\0');
-        for (int attempt = 0; attempt < 4; ++attempt) {
+        for (int attempt = 0; attempt < 8; ++attempt) {
             DWORD bytes = static_cast<DWORD>(value.size() * sizeof(wchar_t));
             // The default value (no name), a string; environment variables in an expandable one
-            // are expanded, as the installer may have written %LOCALAPPDATA%.
+            // are expanded, as an installer may have written %LOCALAPPDATA%. RRF_RT_REG_SZ alone
+            // asks for exactly that: without RRF_NOEXPAND an expandable string is expanded and
+            // handed back AS a REG_SZ, so it passes the restriction. (The flag for the expandable
+            // type is for reading one unexpanded, with RRF_NOEXPAND; it is not wanted here.)
             const LONG status = RegGetValueW(HKEY_CURRENT_USER, path.c_str(), nullptr,
-                                             RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, nullptr,
-                                             value.data(), &bytes);
+                                             RRF_RT_REG_SZ, nullptr, value.data(), &bytes);
             if (status == ERROR_SUCCESS) {
                 // The text ends at the first NUL. For an expandable string the size reported is
                 // that of the stored text, not of the expanded one, so what follows the NUL is
                 // the stored text's leftover (measured: L"C:\\WINDOWS\\Katana\0a").
-                value.resize(wcsnlen(value.c_str(), bytes / sizeof(wchar_t)));
+                value.resize(wcsnlen(value.c_str(), std::min<std::size_t>(
+                                                        value.size(), bytes / sizeof(wchar_t))));
                 if (value.empty()) {
                     return std::optional<std::filesystem::path>{};
                 }
                 return std::optional<std::filesystem::path>(std::filesystem::path(value));
             }
             if (status == ERROR_MORE_DATA) {
-                value.assign(bytes / sizeof(wchar_t) + 1, L'\0');
+                // The size asked for can be the stored text's and not the expanded one's (the
+                // same oddity), so the buffer also at least doubles: eight rounds reach the
+                // longest path Windows has.
+                value.assign(std::max<std::size_t>(bytes / sizeof(wchar_t) + 1, value.size() * 2),
+                             L'\0');
                 continue;
             }
             if (isMissing(status) || status == ERROR_UNSUPPORTED_TYPE) {
