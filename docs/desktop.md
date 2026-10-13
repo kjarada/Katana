@@ -3091,7 +3091,10 @@ it, and - unless it was a success, which is one line in the log - opens the
 dialog on it: Rolled back, or Blocked with the programs to close and a Retry
 that applies the still-downloaded release again. It also removes what an
 earlier update could not delete, and offers again, as Ready, a release that
-was downloaded in an earlier session and not installed.
+was downloaded in an earlier session and not installed. A development copy
+does none of this: a build run from a build tree shares the per-user update
+folder with an installed copy on the same machine, and would otherwise show -
+and clear - how THAT copy's last update ended.
 
 **`main()`** (`src/katana_qt/main.cpp`) does three things for updates: before
 Qt is started, `update::recover` for the install the program is in, so that
@@ -4032,6 +4035,14 @@ shows the store's own message, which names the rule and the place and never
 the value, and `SaveWritesTheCredentialStoreAndNeverProducesALine` reads the
 status, every label, the log and the lines run for it. A script gives a run a
 token with the environment variable `KATANA_UPDATE_TOKEN` instead.
+
+A person may still TYPE a line that carries one, expecting it to work
+(`UPDATE TOKEN ghp_...`), and the window echoes a typed line before any verb
+refuses it. So the echo shows every word after `UPDATE TOKEN` that is not
+`STATUS` or `CLEAR` as `***` (`updateLoggedLine`, in both of the window's
+echoes; `WhatIsTypedWhereATokenWasHopedToGoIsNeverEchoed`), and what the
+verbs say back about such a line is logged with those words taken out. The
+line itself still reaches the verbs as typed, and is refused.
 
 **How the page gets what it shows.** The Format workbench makes the Settings
 dialog and knows nothing of updates, so the page's services

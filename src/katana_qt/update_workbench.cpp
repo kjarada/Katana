@@ -730,6 +730,13 @@ UpdateDialog& UpdateWorkbench::dialog()
 void UpdateWorkbench::open()
 {
     UpdateDialog& shown = dialog();
+    // How the last update ended is shown once (showLastResult, which shows the
+    // dialog itself): asked for again, the dialog starts over, or it would say
+    // "could not be installed" for the rest of the session with nothing to
+    // press.
+    if (running_ == JobKind::None && view_.state == UpdateDialogState::RolledBack) {
+        show(viewOf(UpdateDialogState::Idle));
+    }
     if (running_ == JobKind::None && view_.state == UpdateDialogState::Idle) {
         if (context().install.kind == katana::update::InstallKind::Development) {
             // Known without asking anyone: a copy packaging did not write is
