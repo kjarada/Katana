@@ -88,6 +88,36 @@ using TransferProgress = std::function<void(std::uint64_t received, std::uint64_
                                                            const std::stop_token& stop = {},
                                                            const TransferProgress& progress = {});
 
+// ONE exchange, as the wire had it. httpFetch follows redirects inside libcurl, re-sending
+// the request's headers to wherever it is sent, and GDAL's CPLHTTPFetch has no switch to stop
+// it (checked in libgdal 3.13: no such option exists). A caller that must decide, hop by
+// hop, which headers go where - the update engine, whose access token must reach
+// api.github.com and never the storage host that address redirects to - uses this instead:
+//   - the request is sent once to request.url (http or https; GET only, so postBody must be
+//     empty); a redirect is NOT followed, its Location is returned;
+//   - every HTTP status that arrives is a result, 3xx, 4xx and 5xx included: the caller reads
+//     it. Only a failure to get an HTTP answer is an error;
+//   - a 200 or 206 body is collected up to request.maxBytes and the transfer abandoned the
+//     moment it is passed (Unsupported); the body of any other status is kept to 64 KiB;
+//   - retries (request.retries, doubling from retryDelaySeconds) are for what is worth another
+//     try: a dropped or timed-out connection, and a 502, 503 or 504 answer. A 429 is returned
+//     at once - a rate limit that says wait an hour is not helped by a second.
+// Proxy, certificates, timeouts and the User-Agent are set exactly as httpFetch sets them
+// (GDAL's own option handling is applied to the same libcurl handle). Errors: InvalidArgument
+// (not http or https, or a body), InvalidState (cancelled), Unsupported (body past maxBytes),
+// FileImportFailure (no HTTP answer: explainHttpFailure's words, the curl code in the context).
+// The request's headers are never put in an error or a log.
+struct HttpExchange {
+    int status = 0;            // the HTTP status of the last response on the connection
+    std::string contentType;   // "" when none
+    std::string location;      // the Location header, "" when none
+    std::string contentRange;  // the Content-Range header, "" when none
+    std::string body;
+};
+[[nodiscard]] katana::core::Result<HttpExchange>
+httpExchange(const HttpRequest& request, const std::stop_token& stop = {},
+             const TransferProgress& progress = {});
+
 // A transfer that failed after its retries, as httpFetch saw it.
 struct HttpFailure {
     int status = 0;   // the HTTP status, 0 when none arrived
