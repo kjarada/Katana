@@ -19,6 +19,11 @@
 // is hashed while it is written, by a stream, so the FsOps must be one over the real disk; what
 // it adds is the real file system's long paths and its patience with a virus scanner on Windows,
 // and the tests' ability to run the same code on every platform and to break a write.
+//
+// "Hashed while it is written" is a statement about ONE writer: the hash is of the stream, and
+// what is renamed is the file. So one stage() at a time fills a folder - a lock beside it, held
+// for the whole call (stage.hpp, stageLockPath) - and a second is refused before it touches
+// anything, rather than sharing the first one's temporary files.
 
 #include "katana/update/stage.hpp"
 
@@ -161,7 +166,8 @@ void sweepOlderStages(FsOps& fsOps, const fs::path& stageDir, std::uint64_t sequ
             continue;
         }
         fs::path folder = parent / core::pathFromUtf8(name);
-        if (folder != stageDir && std::find(folders.begin(), folders.end(), folder) == folders.end()) {
+        const bool listed = std::find(folders.begin(), folders.end(), folder) != folders.end();
+        if (folder != stageDir && !listed) {
             folders.push_back(std::move(folder));
         }
     }
@@ -358,7 +364,7 @@ core::Status writeStagedRecord(FsOps& fsOps, const fs::path& scratch, const fs::
     if (core::Status written = fsOps.writeDurable(temporary, bytes); !written.ok()) {
         return writeFailed("the staged manifest could not be written", written.error());
     }
-    if (core::Status removed = fsOps.removeFile(target); !removed.ok()) {
+    if (core::Status removed = clearPlace(fsOps, target); !removed.ok()) {
         return writeFailed("an earlier staged manifest could not be removed", removed.error());
     }
     if (core::Status moved = fsOps.renameFile(temporary, target); !moved.ok()) {
@@ -486,7 +492,7 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
     // A staged manifest says "complete" (stage.hpp); this run has not completed yet, so a
     // record of an earlier one must not keep saying so if this one fails.
     for (const fs::path& stale : {stagedManifestPath(stageDir), stagedSignaturePath(stageDir)}) {
-        if (core::Status removed = fsOps.removeFile(stale); !removed.ok()) {
+        if (core::Status removed = clearPlace(fsOps, stale); !removed.ok()) {
             return writeFailed("an earlier staged manifest could not be removed",
                                removed.error());
         }

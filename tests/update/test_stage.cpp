@@ -1172,16 +1172,18 @@ TEST(Stage, ASecondStageOfTheSameFolderIsRefusedAsBusyAndTouchesNothing)
 
 TEST(Stage, WhatStandsInAStagedFilesWayIsRemovedAndTheFileIsStaged)
 {
-    // Somebody left a folder, with files in it, where bin/b.dll goes, and a file where the
-    // folder `share` goes. A stage that stopped at either would stop at it on every later run
-    // as well; the names under the stage folder are the stage's (stage.hpp), so they go and
-    // every name under the folder is again a verified file.
+    // Somebody left a folder, with files in it, where bin/b.dll goes, a file where the folder
+    // `share` goes, and a folder where the staged record goes. A stage that stopped at any of
+    // them would stop at it on every later run as well; the names under the stage folder are
+    // the stage's (stage.hpp), so they go and every name under the folder is again a verified
+    // file or a record.
     Rig rig("stage_in_the_way");
     const Built built = build(threeRanges());
     rig.use(built);
     h::writeText(rig.stageDir / "bin/b.dll" / "inner" / "x.txt", "in the way");
     h::writeText(rig.stageDir / "bin/b.dll" / "y.txt", "in the way too");
     h::writeText(rig.stageDir / "share", "a file named like a folder");
+    h::writeText(rig.stageDir / "manifest.json" / "x.txt", "a folder named like the record");
 
     PayloadServer server(built.payload);
     const core::Status status = rig.run(makeFetch(server.hop()));
@@ -1192,6 +1194,7 @@ TEST(Stage, WhatStandsInAStagedFilesWayIsRemovedAndTheFileIsStaged)
     for (const Placed& placed : built.placed) {
         EXPECT_EQ(h::readText(rig.stageDir / placed.path), placed.content) << placed.path;
     }
+    EXPECT_EQ(h::readText(stagedManifestPath(rig.stageDir)), built.json);
 }
 
 // ---- older stage folders ---------------------------------------------------------------------------------------------------------------
