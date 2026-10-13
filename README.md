@@ -51,13 +51,17 @@ you install it into, apart from your own projects and settings.
    **More info**, then **Run anyway**. This appears while the installer is
    not signed with a certificate Windows already trusts; see
    [Verify a download](#verify-a-download).
-3. Choose a folder (the default is `C:\Program Files\Katana`) and finish.
-   Katana appears in the Start menu. Uninstall it from
-   **Settings > Apps**, where the publisher is shown as Jarada.
+3. Choose a folder (the default is `%LOCALAPPDATA%\Programs\Katana`, inside
+   your own profile) and finish. The installer is for your account only, so it
+   asks for no administrator rights and shows no Windows security prompt; any
+   folder you can write to will do. Katana appears in your Start menu.
+   Uninstall it from **Settings > Apps**, where the publisher is shown as
+   Jarada.
 
 To install it without questions, for example from a deployment script, run
 the installer with `/S`, and choose the folder with `/D=`, which must come
-last and is not quoted:
+last, is not quoted, and must be a folder the account that runs it can write
+to:
 
 ```powershell
 Start-Process .\Katana-X.Y.Z-win64.exe -ArgumentList '/S','/D=C:\Katana' -Wait

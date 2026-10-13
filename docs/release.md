@@ -27,9 +27,9 @@ keys for, and publishes them.
 
 | File | What it is |
 |---|---|
-| `Katana-X.Y.Z-win64.exe` | Windows x86-64 installer (NSIS), with an uninstaller |
+| `Katana-X.Y.Z-win64.exe` | Windows x86-64 installer (NSIS), per user, with no administrator prompt (see "The Windows installer"), with an uninstaller |
 | `Katana-X.Y.Z-win64.zip` | the same tree to unzip anywhere; run `bin/katana.exe` |
-| `Katana-X.Y.Z-win-arm64.exe` | Windows 11 on ARM64 installer (NSIS), with an uninstaller |
+| `Katana-X.Y.Z-win-arm64.exe` | Windows 11 on ARM64 installer (NSIS), per user, with an uninstaller |
 | `Katana-X.Y.Z-win-arm64.zip` | the same tree to unzip anywhere |
 | `Katana-X.Y.Z-linux-x86_64.tar.gz` | Linux x86-64, glibc 2.28 or later; run `bin/katana` |
 | `Katana-X.Y.Z-linux-aarch64.tar.gz` | Linux on 64-bit ARM, glibc 2.28 or later |
@@ -124,11 +124,71 @@ and `Katana.app` copied out of it as a user drags it; `Info.plist` must parse,
 the icon must be there, and `codesign --verify --deep --strict` must accept
 the bundle's seal before the programs in `Contents/MacOS` run.
 
-**The installers.** Each Windows installer is then run as an administrator's
-deployment runs it: `/S /D=<folder>`, silently, into a folder of its own. The
-installed `katana_cli` must name `EPSG:32630` as above, and the uninstaller
+**The installers.** Each Windows installer is then run as a deployment script
+runs it, as the user the job runs as and with no administrator rights:
+`/S /D=<folder>`, silently, into a folder of its own. The installed
+`katana_cli` must name `EPSG:32630` as above, and the uninstaller
 (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
 remove `bin\katana_cli.exe`.
+
+## The Windows installer
+
+The installer is PER USER (decision D1 of the update system).
+It asks for no administrator rights and shows no UAC prompt, installs for the
+account that runs it, and writes the registry under `HKCU` only. Why: the
+updater replaces files inside the install as that same user; a per-machine
+install in `C:\Program Files` would need an elevation on every update, and
+every elevated step is one more way for an update to go wrong. No release
+had been made when this was decided, so nothing was migrated from the older
+per-machine installer.
+
+* **Where.** `%LOCALAPPDATA%\Programs\Katana` unless the person chooses another
+  folder they can write to; a folder that cannot be written to is refused with
+  a message (a silent run exits with code 2 and writes nothing). A copy that is
+  already installed is offered again as the folder, and `/D=` beats both.
+* **What it records.** `HKCU\Software\Jarada\Katana`, default value: the install
+  folder, which is how Katana and the updater tell an installed copy from an
+  unpacked archive. `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Katana`:
+  the entry in **Settings > Apps** (`DisplayName`, `DisplayVersion`, `Publisher`
+  Jarada, `UninstallString`, `InstallLocation`, `DisplayIcon`, `EstimatedSize`,
+  `NoModify`, `NoRepair`), which the updater rewrites after an update. The
+  Start-menu folder and its shortcuts are the current user's.
+* **What the uninstaller removes.** The files the installer put down; every file
+  the installed manifest lists (`share/katana/installed.manifest.json`: an update
+  adds files that the uninstaller, built before them, has never heard of); the
+  updater's records and its working folder `.update`; what the updater staged in
+  `%LOCALAPPDATA%\Katana\update` (not `state.json`, the person's choices about
+  updating); the registry keys and shortcuts above. A path read from the manifest
+  is held to the updater's rules first (one of `bin`, `share`, `etc`, `lib`
+  first, no `.` or `..` component, no wildcard, printable ASCII), so a manifest
+  that has been tampered with cannot send a delete outside the folder.
+* **What it leaves.** Anything else in the install folder, and the folder with it
+  (the folder is removed only when empty and nothing in it is removed
+  recursively but `.update`); the settings under `HKCU\Software\Katana` and the
+  data under `%LOCALAPPDATA%\Katana`.
+* **Silent.** `/S` and `/D=<folder>` (last, unquoted) work as in any NSIS
+  installer, and no question is asked without a default answer. Installing over
+  an installed copy runs the old uninstaller first, which is also the way to
+  repair one.
+* **NSIS.** The template, `cmake/NSIS.template.in`, replaces CPack's: CPack's asks
+  for administrator rights, writes `HKLM` and installs to Program Files. It has no
+  components, no "add to PATH" and no Install Options page (Katana has never
+  changed `PATH`), and it is a Unicode installer, because the default folder is
+  under the user's profile, whose name can hold any character. MSYS2's NSIS
+  (3.13) is built for x86-64 only and keeps its plugins where the default target
+  does not look, so for it the template says `Target amd64-unicode`; CPack's own
+  template stops there with "Plugin not found". The official and Chocolatey builds
+  (the ARM64 job) are x86 and need nothing said. A missing template is not an
+  error to CPack, only another installer, so the configure fails without it.
+* **Tests.** `packaging_nsis_template_is_per_user` holds the template's text to
+  all of the above on any host, and
+  `packaging_nsis_installer_builds_from_the_real_configuration` runs the build's
+  own CPack configuration over a small tree, compiles the installer with
+  `makensis` and holds the script CPack generated to the same rules. Neither runs
+  an installer: that writes the user's registry and Start menu. **An install,
+  an update and an uninstall on a clean Windows machine, by hand, is the
+  acceptance step**; the release workflow's installer smoke test (above) covers
+  the silent install and uninstall only.
 
 ## How the Linux and macOS packages are made self-contained
 
