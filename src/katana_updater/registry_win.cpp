@@ -18,6 +18,15 @@
 // treats the entry as a second safety net behind recovery at the next start of any program, and
 // goes on without it).
 //
+// THE ENTRY IS FLUSHED TO DISK BEFORE setRunOnce RETURNS (RegFlushKey). The registry writes
+// lazily - a value set now reaches the hive file some seconds later - and the one case this entry
+// exists for is the machine that loses power in the middle of the commit, with a katana.exe that
+// may no longer load: the journal's COMMITTING record is flushed (FsOps::appendDurable), and an
+// entry that was still only in memory would be gone at the very logon that needs it. Microsoft
+// calls the flush expensive, which is why nothing else here asks for one: it is paid once for an
+// update, before the first file moves. Removing the entry is not flushed: an entry that outlives
+// its transaction runs `--recover` on an install that is whole, which finds nothing to do.
+//
 // THE TEST SEAM. makeRegistryOpsUnder(base) is the same code with every key path re-rooted under
 // the HKCU subkey `base`, so that a test writes and deletes keys of its own and never the
 // machine's RunOnce or Uninstall entries. Nothing in the production programs calls it; the helper
@@ -122,11 +131,14 @@ class WindowsRegistry final : public RegistryOps {
             const LONG status = RegGetValueW(HKEY_CURRENT_USER, path.c_str(), nullptr,
                                              RRF_RT_REG_SZ, nullptr, value.data(), &bytes);
             if (status == ERROR_SUCCESS) {
-                // The text ends at the first NUL. For an expandable string the size reported is
-                // that of the stored text, not of the expanded one, so what follows the NUL is
-                // the stored text's leftover (measured: L"C:\\WINDOWS\\Katana\0a").
-                value.resize(wcsnlen(value.c_str(), std::min<std::size_t>(
-                                                        value.size(), bytes / sizeof(wchar_t))));
+                // The text ends at the first NUL of the BUFFER, which was all NULs before the
+                // call - not at the size reported. For an expandable string that size is the
+                // stored text's, not the expanded one's: after a shorter expansion the stored
+                // text's leftover follows the NUL (measured: L"C:\\WINDOWS\\Katana\0a"), and a
+                // longer one - %LOCALAPPDATA%\Programs\Katana is 30 characters and names a
+                // folder of 39 and the account's name - would be cut short by it, and the
+                // install taken for an archive because the folder is then not R.
+                value.resize(wcsnlen(value.c_str(), value.size()));
                 if (value.empty()) {
                     return std::optional<std::filesystem::path>{};
                 }
@@ -169,8 +181,9 @@ class WindowsRegistry final : public RegistryOps {
         }
         const std::wstring path = under(kRunOnceKey);
         Key key;
+        // KEY_QUERY_VALUE is what RegFlushKey asks of the handle; nothing is read through it.
         LONG status = RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0,
-                                      KEY_SET_VALUE, nullptr, key.out(), nullptr);
+                                      KEY_SET_VALUE | KEY_QUERY_VALUE, nullptr, key.out(), nullptr);
         if (status != ERROR_SUCCESS) {
             return registryError(core::ErrorCode::InvalidState, "the RunOnce key cannot be opened",
                                  status, "HKCU\\" + narrow(path));
@@ -182,6 +195,9 @@ class WindowsRegistry final : public RegistryOps {
             return registryError(core::ErrorCode::InvalidState,
                                  "the RunOnce value cannot be written", status, std::string(name));
         }
+        // To the disk now (see the top). Best effort: the value is written either way, and an
+        // entry that is only late is still better than none.
+        (void)RegFlushKey(key.get());
         return {};
     }
 
