@@ -14,9 +14,9 @@ THE HOUSE STYLE (read this once, then every symbol is learnt)
 Cell.      Three size classes by larger extent: S about 3 mm (small furniture, posts, marks), M about 4.4 mm
            (most objects), L about 6 mm (canopies, tanks, stations, primary control).  The origin is the
            centre of the bounding box, so a symbol sits on its vertex without a rule offsetting it.  Where the
-           surveyed point is NOT the box centre (a valve beside its letter, a doorway's wall line, a building
-           corner, a camera's pole, a station's dot, a north arrow's shaft) the origin is within 0.6 mm of the
-           box centre and the description says where it is; the check holds both.
+           surveyed point is NOT the box centre (a drill hole beside its wing, a picket's stem, a pole under
+           its stay, a pump beside its hose, a building corner, the point of a water level mark) the origin is
+           within 0.6 mm of the box centre and the description says where it is; the check holds both.
 Weight.    One weight: every symbol is outline.  The renderer applies the entity's own pen, so a symbol never
            carries a colour or a width.  Gaps are fixed: 0.4 mm between the rings of a double ring, 0.3 mm
            between a ring and a ray or tick, and a letter is always 2.4 mm high.
@@ -42,8 +42,8 @@ Trees.     A tree is shot by its canopy or by its trunk, and both are drawn as p
 Control.   Distinguished by class: triangle with ring and dot = primary station; ring with long cross-hairs and
            dot = secondary mark; ring with a bar and arrow = benchmark; diamond with dot = fixed mark; open
            diamond with a plus = temporary; ring and square frame with a plus = the centre of an aerial photograph.
-Direction. A symbol is not rotated, so a symbol that points (an arrow, a lens, a gate) points to +x or +y; the
-           rule and the line it sits on say the rest.
+Direction. A symbol is not rotated, so a symbol that points (an anchor's arrow, a camera's lens, a pennant)
+           points along x or y; the rule and the line it sits on say the rest.
 """
 import math
 import os
@@ -395,7 +395,7 @@ def _():
     return Sketch().ring(0.4).ticks(0.75, 1.3, [0, 90, 180, 270])
 
 
-@symbol("Winged Drill Hole", G_MARKS, "Drilled Hole with an open wedge running out to +x, the wing cut beside it to lead the eye to the hole. The origin is the hole.")
+@symbol("Winged Drill Hole", G_MARKS, "Ring with a cross, a drilled hole, and an open wedge running out to +x: the wing cut beside it to lead the eye to the hole. The origin is the hole.")
 def _():
     return Sketch().ring(1.0).cross(0.4).line(0.93, 0.36, 2.1, 0.95).line(0.93, -0.36, 2.1, -0.95)
 

@@ -226,7 +226,7 @@ def draw_symbols():
     draw = ImageDraw.Draw(sheet)
     draw.text((margin, margin - 10), "Katana Standard: %d symbols" % len(symbols_module.SYMBOLS),
               fill=(236, 240, 244), font=font(30, True))
-    draw.text((margin, margin + 30), "As the Symbol Library draws them, in the colour of the code that uses each.",
+    draw.text((margin, margin + 30), "As the Symbol Library draws them, each in the colour of a code that uses it.",
               fill=(154, 164, 176), font=font(14))
     y = margin + 76
     small = font(12)
