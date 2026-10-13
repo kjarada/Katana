@@ -24,6 +24,11 @@
 //       the swap. The window has already exited when this starts. R, S, U and the relaunch path
 //       must be absolute: the program that starts the helper knows them, and a relative one
 //       would depend on a working directory nobody chose. T is 1 to 64 characters of 0-9 a-f.
+//       The relaunch path is NOT held to lie under R, though it is R/bin/katana in every real
+//       run: R is as free on this command line as the path is, so the rule would bind nobody
+//       who wrote both; the helper has no right its caller lacks (no elevation), so it starts
+//       nothing the caller could not start; and a rule that took two spellings of one folder
+//       for two folders would end with Katana closed and nothing started again.
 //   katana_updater --recover R
 //       puts back whatever a crash or a failed rollback left half swapped under R (the RunOnce
 //       entry runs this at the next logon; recover() runs it at the next start of any program;

@@ -31,7 +31,10 @@
 //     expanded; a missing key, an empty value and a value that is not a string
 //     are all "no installer" (std::nullopt), not errors.
 //   - setRunOnce writes a REG_SZ under the given name and nothing else in the
-//     key. It REFUSES (InvalidArgument, nothing written, an older value of the
+//     key, and has it flushed to disk before it returns (RegFlushKey): the
+//     entry is there for a machine that loses power during the commit, and the
+//     registry would otherwise write it some seconds later, or never.
+//     It REFUSES (InvalidArgument, nothing written, an older value of the
 //     name left standing) a command longer than 260 characters - the limit
 //     Microsoft documents for the command line of a Run or RunOnce value -
 //     rather than write an entry that would not run. apply() goes on without
