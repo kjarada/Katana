@@ -637,6 +637,49 @@ UpdateQuietAnswer updateQuietAnswer(const UpdateView& shown, const UpdateView& a
     return UpdateQuietAnswer::Nothing;
 }
 
+namespace {
+
+// Whether `word` is the grammar's `expected`, typed in any case.
+bool isWord(const QString& word, const char* expected)
+{
+    return word.compare(QLatin1String(expected), Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
+
+UpdateLineEffect updateEffectOfLine(const UpdateView& shown, const QString& line,
+                                    const QString& reply)
+{
+    // A reply that gives a reason is one that was not carried out.
+    if (!updateReplyValue(reply, "reason").isEmpty()) {
+        return UpdateLineEffect::Nothing;
+    }
+    // The lines read here have three words each: UPDATE SKIP NONE, UPDATE
+    // SKIP <version>, UPDATE BLOCKED CLEAR.
+    const QStringList words = line.simplified().split(QChar::Space, Qt::SkipEmptyParts);
+    if (words.size() != 3 || !isWord(words[0], "UPDATE")) {
+        return UpdateLineEffect::Nothing;
+    }
+    const bool notOffered = shown.state == UpdateDialogState::NotOffered;
+    if (isWord(words[1], "SKIP")) {
+        if (isWord(words[2], "NONE")) {
+            return notOffered && shown.reason == QLatin1String("skipped")
+                       ? UpdateLineEffect::Forgotten
+                       : UpdateLineEffect::Nothing;
+        }
+        return shown.state == UpdateDialogState::Available &&
+                       updateSameVersion(shown.latestVersion, words[2])
+                   ? UpdateLineEffect::Skipped
+                   : UpdateLineEffect::Nothing;
+    }
+    if (isWord(words[1], "BLOCKED") && isWord(words[2], "CLEAR")) {
+        return notOffered && shown.reason == QLatin1String("blocked_before")
+                   ? UpdateLineEffect::Forgotten
+                   : UpdateLineEffect::Nothing;
+    }
+    return UpdateLineEffect::Nothing;
+}
+
 QString updateStagedAfter(const QString& staged, const UpdateView& answer)
 {
     if (answer.state == UpdateDialogState::Current) {
@@ -713,6 +756,24 @@ bool updateAutomaticCheckIsDue(const UpdateAutoCheckFacts& facts,
     return katana::update::checkIsDue(state, nowEpoch, jitter);
 }
 
+std::optional<QString>
+updateSkippedOfState(const katana::core::Result<katana::update::UpdateState>& state)
+{
+    if (!state) {
+        return std::nullopt; // nobody can say: never "none"
+    }
+    return QString::fromStdString(state->skippedVersion);
+}
+
+std::optional<bool>
+updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state)
+{
+    if (!state) {
+        return std::nullopt; // nobody can say: never "none"
+    }
+    return !state->blockedSequences.empty();
+}
+
 bool updateStartMayConfirm(const UpdateConfirmFacts& facts)
 {
     if (!facts.appliesHere || facts.headless || !facts.keepsState ||
@@ -720,7 +781,17 @@ bool updateStartMayConfirm(const UpdateConfirmFacts& facts)
         return false;
     }
     // As versions: "0.3" and "0.3.0" are one release (update/version.hpp).
+    // Equal, and not "not above": what `installed` can be is the reader's
+    // rule (update_dialog.hpp), and this one stands without it.
     return facts.hasInstalledRecord && facts.installed == facts.program;
+}
+
+bool updateFailureIsBoxed(const QStringList& stepKinds)
+{
+    // The two kinds of step that run a line in a window that goes on to its
+    // event loop (main(): an --enter is kept as a --command).
+    return !stepKinds.contains(QStringLiteral("--command")) &&
+           !stepKinds.contains(QStringLiteral("--run-line"));
 }
 
 std::vector<std::string>

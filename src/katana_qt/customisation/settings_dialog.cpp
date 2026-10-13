@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <initializer_list>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1276,19 +1277,21 @@ void SettingsDialog::showUpdates()
                   .arg(text(katana::update::kTokenEnvironmentVariable)));
     updateTokenClear_->setEnabled(lines);
 
-    // With nobody to say which version is skipped, the button stays on and the
-    // verb answers; with none skipped it has nothing to do.
-    const QString skipped = updates.skippedVersion ? updates.skippedVersion() : QString();
-    updateSkipped_->setText(updates.skippedVersion ? updateSkippedWords(skipped) : QString());
-    updateUnskip_->setEnabled(lines && (!updates.skippedVersion || !skipped.isEmpty()));
+    // With nobody to say which version is skipped - nobody to ask, or a state
+    // file that does not read - the page says nothing of it, the button stays
+    // on and the verb answers; with none skipped it has nothing to do.
+    const std::optional<QString> skipped =
+        updates.skippedVersion ? updates.skippedVersion() : std::nullopt;
+    updateSkipped_->setText(skipped ? updateSkippedWords(*skipped) : QString());
+    updateUnskip_->setEnabled(lines && (!skipped || !skipped->isEmpty()));
     updateUnskip_->setToolTip(QStringLiteral(
         "Forget which version was skipped, so that the next check offers it (UPDATE SKIP NONE)"));
 
     // The same of a version that was put back: on while nobody says whether
     // one was, and off when none was.
-    const bool putBack = updates.putBack && updates.putBack();
-    updateBlocked_->setText(updates.putBack ? updatePutBackWords(putBack) : QString());
-    updateUnblock_->setEnabled(lines && (!updates.putBack || putBack));
+    const std::optional<bool> putBack = updates.putBack ? updates.putBack() : std::nullopt;
+    updateBlocked_->setText(putBack ? updatePutBackWords(*putBack) : QString());
+    updateUnblock_->setEnabled(lines && putBack.value_or(true));
     updateUnblock_->setToolTip(QStringLiteral(
         "Forget which versions were put back because they did not start here, so that the next "
         "check offers the newest again and it can be installed (UPDATE BLOCKED CLEAR)"));

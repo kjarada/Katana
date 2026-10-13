@@ -115,8 +115,10 @@
 
 #include <QDialog>
 #include <QString>
+#include <QStringList>
 
 #include "command_runner.hpp"
+#include "katana/core/error.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/state.hpp"
 #include "katana/update/version.hpp"
@@ -238,9 +240,12 @@ updateFilesOfProgressLine(const QString& line);
 // ---- THE DECISIONS -----------------------------------------------------------------------------
 //
 // What the dialog's owner decides from the update engine's records: which view
-// an answer is, what is offered when the window starts, when the window checks
-// by itself, what the log may show, which helper copies a start may remove,
-// whether a start confirms an update that was never said to start.
+// an answer is, what a line that was run at once does to what is shown, what
+// is offered when the window starts, when the window checks by itself, what
+// the log may show, what Settings > Updates is told of the state file, which
+// helper copies a start may remove, whether a start confirms an update that
+// was never said to start - and, the program's own (main()), whether an update
+// that could not be started is said in a message box.
 // They are here - beside the dialog, in the library the widget tests link -
 // because their owner in the program (UpdateWorkbench) needs the whole window
 // and cannot be built in a test. Each is a function of its arguments: the
@@ -314,6 +319,34 @@ enum class UpdateQuietAnswer {
 [[nodiscard]] UpdateQuietAnswer updateQuietAnswer(const UpdateView& shown,
                                                   const UpdateView& answer);
 
+// What a line the window ran at once, and the verbs carried out, does to what
+// the dialog shows - beside what the line itself wrote to the state.
+enum class UpdateLineEffect {
+    Nothing,   // the view stays as it is
+    Forgotten, // the release the view says is not offered is set aside no longer: the
+               // view goes back to knowing nothing (Idle), and the next check offers it
+    Skipped,   // the release the view offers was skipped: NotOffered "skipped" with that
+               // version, which is no longer the release a download typed next is of
+};
+// `shown` is what the dialog shows, `line` the line as it was typed or built,
+// and `reply` what the verbs answered it - the text of a reply; a line that
+// was refused changed nothing and is not asked about. A reply that gives a
+// `reason=` was not carried out either (`skipped=none reason=no_state` and
+// `blocked=none reason=no_state`: a session with no update folder keeps
+// nothing) and is Nothing. Otherwise:
+//   UPDATE SKIP NONE       over NotOffered "skipped": Forgotten
+//   UPDATE SKIP <version>  over Available of that version ("0.3" and "0.3.0"
+//                          are one): Skipped
+//   UPDATE BLOCKED CLEAR   over NotOffered "blocked_before": Forgotten - the
+//                          dialog said the release "is not offered again",
+//                          which is so no longer
+// Each list is its own: SKIP NONE leaves a release that was put back as it is
+// shown, and BLOCKED CLEAR a skipped one. Every other line and every other
+// view is Nothing. The words of a line are taken in any case, with any blanks
+// between them.
+[[nodiscard]] UpdateLineEffect updateEffectOfLine(const UpdateView& shown, const QString& line,
+                                                  const QString& reply);
+
 // The downloaded release that is still one to install after a check answered
 // `answer`: none once the feed has nothing above this copy (Current: the
 // release was withdrawn), and none once the answer says that very version was
@@ -366,6 +399,21 @@ struct UpdateAutoCheckFacts {
                                              const katana::update::UpdateState& state,
                                              std::int64_t nowEpoch, std::chrono::seconds jitter);
 
+// What Settings > Updates is told of the state file (U/state.json), from a
+// read of it (update::readState): the version UPDATE SKIP set aside, empty
+// when none is; and whether a release is set aside because it was installed
+// here, did not start and was put back - the list of blocked releases holds
+// one. BOTH ARE nullopt FOR A FILE THAT DID NOT READ. Nobody can say then,
+// and "none" would be a guess that switches the page's button off: with
+// nullopt the page says nothing of it and leaves the button on, so the line
+// is run and the verbs say why they refuse it (a state file that does not
+// read is not written over, src/katana_app/update_verbs.hpp). A file that is
+// not there reads as the defaults - none skipped, none put back.
+[[nodiscard]] std::optional<QString>
+updateSkippedOfState(const katana::core::Result<katana::update::UpdateState>& state);
+[[nodiscard]] std::optional<bool>
+updatePutBackOfState(const katana::core::Result<katana::update::UpdateState>& state);
+
 // What a window knows when it asks whether its own start settles an update
 // that was installed and never said to start (below).
 struct UpdateConfirmFacts {
@@ -373,9 +421,15 @@ struct UpdateConfirmFacts {
     bool headless = false;    // a headless run writes no per-user state
     bool keepsState = false;  // the session has a per-user update folder
     katana::update::InstallKind kind = katana::update::InstallKind::Development;
-    // The install has a record of an update that committed (installed.json),
-    // and the version that record names.
+    // The install has a record of an update that committed (installed.json):
+    // update::Install::hasInstalledRecord.
     bool hasInstalledRecord = false;
+    // The install's version as update::readInstall gives it (Install::version).
+    // That is the HIGHER of the version the record names and the version of
+    // the program that reads it (the hardening pass's ruling H3, 2026-10-14:
+    // a record is never taken to say less than the program is), so from the
+    // reader it is never below `program`, and differs from it only when the
+    // record names a version ABOVE the program's.
     katana::update::Version installed;
     // The version this program was built as (update::programVersion).
     katana::update::Version program;
@@ -387,12 +441,30 @@ struct UpdateConfirmFacts {
 // include/katana/update/recover.hpp). Only when ALL of these hold: the copy
 // can replace its own files; the run is not headless (the confirmation writes
 // per-user state); the session has a per-user update folder; the copy is one
-// packaging installed; and the install has a record of its own whose version
-// is this program's own. The last is what tells the new version from a window
-// of the OLD files that was started while the files were being swapped: that
-// one runs old code over the new tree, its record names a version it is not,
-// and its start proves nothing about the release.
+// packaging installed; and the install has a record of its own and its
+// version (`installed`, above) is this program's own.
+//
+// WHAT THE LAST CONDITION REFUSES, with the facts the reader gives, is a
+// record that names a version ABOVE the program's: a window of the OLD files
+// that was started while the files were being swapped. That one runs old code
+// over the new tree, its record names a version it is not, and its start
+// proves nothing about the release. It does NOT refuse a record BELOW the
+// program's - a newer copy unpacked by hand over one that had updated itself
+// - because the reader has raised that version to the program's already: such
+// a window confirms. The function itself asks for the two to be equal and
+// relies on no reader: handed a version below the program's, it refuses.
 [[nodiscard]] bool updateStartMayConfirm(const UpdateConfirmFacts& facts);
+
+// Whether an update that could not be started - the window it closed is gone,
+// the helper did not start, and nothing will happen - is said in a message
+// box as well as on stderr, where main() says it always. `stepKinds` is the
+// kind of each step the run was given on its command line, as main() keeps
+// them: "--command" (an --enter is kept as one), "--run-line", "--dialog",
+// "--press" and the rest. Only a window nobody drove gets the box. A run that
+// was given a line to run (--command, --run-line) is a window all the same -
+// it is not headless - and may have nobody at it to close a box, on which it
+// would wait for ever.
+[[nodiscard]] bool updateFailureIsBoxed(const QStringList& stepKinds);
 
 // The transactions whose helper copy U/run-<tx> the window's start lists for
 // removal (update/state.hpp, cleanup.list). A swap that ends lists its own

@@ -56,6 +56,7 @@
 #include "render_view_widget.hpp"
 #include "script_runner.hpp"
 #include "tools/flyout_button.hpp"
+#include "update_dialog.hpp"
 #include "update_verbs.hpp"
 #include "viewport_widget.hpp"
 #if defined(KATANA_GPU_D3D11)
@@ -1493,11 +1494,13 @@ int main(int argc, char* argv[])
             // that was given a line to run (--command, --enter, --run-line) is
             // not headless, and still may have nobody there to close a box: it
             // would wait on one for ever (docs/headless.md, "Updates in a
-            // headless run").
-            const bool givenLines = std::ranges::any_of(surveySteps, [](const auto& step) {
-                return step.first == "--command" || step.first == "--run-line";
-            });
-            if (!givenLines) {
+            // headless run"). Which steps those are is updateFailureIsBoxed's
+            // (update_dialog.hpp, "THE DECISIONS"), where a test asks it.
+            QStringList stepKinds;
+            for (const auto& step : surveySteps) {
+                stepKinds << step.first;
+            }
+            if (katana::qt::updateFailureIsBoxed(stepKinds)) {
                 QMessageBox::warning(
                     nullptr, "Katana Update",
                     QString("The update could not be started, so nothing was changed.\n\n%1\n\n"

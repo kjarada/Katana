@@ -457,34 +457,29 @@ void UpdateWorkbench::runNow(const QString& line)
         // next use, it reads the store as the line left it.
         context_.reset();
     }
-    // A reply that gives a reason is one that was not carried out.
-    if (action == QLatin1String("SKIP") && words.size() == 3 &&
-        updateReplyValue(qs(reply->text), "reason").isEmpty()) {
-        if (words[2].compare(QLatin1String("NONE"), Qt::CaseInsensitive) == 0) {
-            if (view_.state == UpdateDialogState::NotOffered &&
-                view_.reason == QLatin1String("skipped")) {
-                show(viewOf(UpdateDialogState::Idle));
-            }
-        } else if (view_.state == UpdateDialogState::Available &&
-                   updateSameVersion(view_.latestVersion, words[2])) {
-            // What was offered is not any more: neither the dialog nor a
-            // download typed next goes on about it.
-            offer_.reset();
-            UpdateView view = viewOf(UpdateDialogState::NotOffered);
-            view.latestVersion = view_.latestVersion;
-            view.reason = QStringLiteral("skipped");
-            show(std::move(view));
-        }
-    }
-    // UPDATE BLOCKED CLEAR, carried out: no release is set aside any more, so
-    // a dialog that still says one "is not offered again" says what is no
-    // longer so. It goes back to knowing nothing, as after SKIP NONE, and the
-    // next check - Help > Check for Updates runs one - offers the release.
-    if (action == QLatin1String("BLOCKED") && words.size() == 3 &&
-        updateReplyValue(qs(reply->text), "reason").isEmpty() &&
-        view_.state == UpdateDialogState::NotOffered &&
-        view_.reason == QLatin1String("blocked_before")) {
+    // What the line, carried out, does to what the dialog shows is
+    // updateEffectOfLine's (update_dialog.hpp, "THE DECISIONS").
+    switch (updateEffectOfLine(view_, line, qs(reply->text))) {
+    case UpdateLineEffect::Forgotten:
+        // UPDATE SKIP NONE or UPDATE BLOCKED CLEAR: the release the dialog
+        // says "is not offered" is set aside no longer, and a dialog that
+        // went on saying so would say what is not so. It goes back to knowing
+        // nothing, and the next check - Help > Check for Updates runs one -
+        // offers the release.
         show(viewOf(UpdateDialogState::Idle));
+        break;
+    case UpdateLineEffect::Skipped: {
+        // What was offered is not any more: neither the dialog nor a
+        // download typed next goes on about it.
+        offer_.reset();
+        UpdateView view = viewOf(UpdateDialogState::NotOffered);
+        view.latestVersion = view_.latestVersion;
+        view.reason = QStringLiteral("skipped");
+        show(std::move(view));
+        break;
+    }
+    case UpdateLineEffect::Nothing:
+        break;
     }
 }
 
@@ -1051,7 +1046,8 @@ void UpdateWorkbench::confirmStart()
     // when the window was built: a window of the old files that was started
     // while an update was swapping them may have read the old record, which
     // names the version it is. By the time the update lock can be had the
-    // record names the new one, and that window confirms nothing.
+    // record names the new one - a version above that window's own - and it
+    // confirms nothing.
     const std::unique_ptr<katana::update::RegistryOps> registry =
         katana::update::makeSystemRegistryOps();
     const Result<katana::update::Install> install =
@@ -1068,6 +1064,9 @@ void UpdateWorkbench::confirmStart()
     facts.keepsState = !made.stateDirectory.empty();
     facts.kind = install->kind;
     facts.hasInstalledRecord = install->hasInstalledRecord;
+    // The reader's version: the higher of the record's and this program's
+    // own, so it is not this program's only when the record names a version
+    // above it - the window of the old files (updateStartMayConfirm).
     facts.installed = install->version;
     facts.program = *program;
     if (!updateStartMayConfirm(facts)) {
@@ -1214,18 +1213,17 @@ SettingsUpdates UpdateWorkbench::settingsUpdates()
                 katana::update::readState(stateDirectory);
             return state ? state->automatic : katana::update::UpdateState{}.automatic;
         };
+        // What each says of a state file that does not read - nothing, so
+        // that the page's button stays on and the verb says why it refuses -
+        // is updateSkippedOfState's and updatePutBackOfState's.
         updates.skippedVersion = [stateDirectory] {
-            const Result<katana::update::UpdateState> state =
-                katana::update::readState(stateDirectory);
-            return state ? qs(state->skippedVersion) : QString();
+            return updateSkippedOfState(katana::update::readState(stateDirectory));
         };
         // The releases that were put back here, as the engine's own file has
         // them (UPDATE STATUS does not say them): any at all is what the page
         // tells of, and what its button - UPDATE BLOCKED CLEAR - empties.
         updates.putBack = [stateDirectory] {
-            const Result<katana::update::UpdateState> state =
-                katana::update::readState(stateDirectory);
-            return state && !state->blockedSequences.empty();
+            return updatePutBackOfState(katana::update::readState(stateDirectory));
         };
     }
     updates.credentials = made.credentials;
