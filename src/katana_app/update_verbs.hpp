@@ -74,13 +74,18 @@
 //                     says why - and then staged=none; with no update folder,
 //                     staged=none reason=no_state. A download that fails is an
 //                     error whose context begins reason=<token> (stage.hpp).
+//                     It asks the feed first, as CHECK does (and records the
+//                     check), so UpdateReply::offer is set by it too.
 //   UPDATE APPLY CONFIRM
 //                     refused, with reason= first in the error's context:
-//                     not_staged, blocked_before, development_tree, no_state,
-//                     platform, or the preflight's token (stage.hpp).
+//                     not_staged, blocked_before, development_tree,
+//                     install_record, no_state, platform, or the preflight's
+//                     token (stage.hpp).
 //   UPDATE SKIP, UPDATE SET AUTO
 //                     skipped=<v|none>; auto=on|off. With no update folder:
-//                     the same with reason=no_state, and nothing is kept.
+//                     the same with reason=no_state, and nothing is kept. With
+//                     a state file that does not read: refused (InvalidState),
+//                     and the file is left as it is.
 //   UPDATE TOKEN STATUS | CLEAR
 //                     token=present|absent, and never the token. reason=
 //                     no_store, token_unusable or store_unavailable when the
