@@ -144,10 +144,11 @@ verbs
   to `%LOCALAPPDATA%\Programs\Katana` unless another folder is chosen, asks
   for no administrator rights and writes the registry under `HKCU` only
   (decision D1), so the helper replaces its files as the same user. After an
-  update that proved healthy the helper rewrites `DisplayVersion` and
-  `DisplayName` of its entry in Settings > Apps - the helper that made the
-  swap, or, when that one died first, `katana_updater --recover` as it
-  settles the update healthy.
+  update that proved healthy `DisplayVersion` and `DisplayName` of its entry
+  in Settings > Apps are rewritten: by the helper that made the swap, or,
+  when that one died first, by whoever settles the update healthy -
+  `katana_updater --recover`, a window of the new version, or step 1 of the
+  next swap ("An update whose helper died during the health check").
 - **`archive`** - a zip or a tarball unpacked into a folder: it has
   `install.json` and the registry does not name its folder (or there is no
   registry). It is updated exactly as an installed copy is, wherever the
@@ -865,9 +866,9 @@ knows that no helper is alive and waiting on the transaction.
 
 | Settled as | When | What is done |
 |---|---|---|
-| `HEALTHY` | `U/healthy-<tx>` is a file: the proof the swap itself accepts, whoever wrote it | for an installer-kind install the version shown in Settings > Apps is rewritten (the swap writes it only once the proof is there, and may have died before); `HEALTHY` is appended, one flushed record; then the folder is deleted, its journal last |
+| `HEALTHY` | `U/healthy-<tx>` is a file: the proof the swap itself accepts, whoever wrote it | for an installer-kind install the version shown in Settings > Apps is rewritten, to the installed version as the settler reads it (the swap writes it only once the proof is there, and may have died before); `HEALTHY` is appended, one flushed record; then the folder is deleted, its journal last |
 | `ROLLED_BACK` | only for the one caller that may put back, and only when ALL of these hold: there is no marker; U holds `run-<tx>`, the dead helper's copy, so U is the folder the update was applied from and the one the marker would be in; every file the PLAN's `REPLACE` and `REMOVE` records moved aside is still a file under `old/`; the tree is still that release (`detail::treeIsRelease`: `installed.manifest.json` verifies with the settler's own keys, its sequence is the PLAN's, and every file it lists that is no seed hashes as listed); and the process scan - asked before the hashing, and again as the last thing - answers and names nobody but the settler itself | `update::rollback`, as step 6 does it |
-| left as it is | every other case: a marker that cannot be looked for, a scan that fails, a tree somebody changed, old files that are not all kept, another per-user folder, a program of the install running | NOTHING is written: no journal record, no file, no registry value |
+| left as it is | every other case: a marker that cannot be looked for, a scan that fails, a tree somebody changed, old files that are not all kept, another per-user folder, a program of the install running | the rule writes NOTHING: no journal record, no file, no registry value. One case writes a value: the marker IS there and the `HEALTHY` record cannot be appended. The version in Settings > Apps was rewritten before the append, and it names what is installed either way |
 
 "No marker" and "put back" are claims too, which is why the rule looks
 before it believes either. A marker missing from ANOTHER folder than the one
@@ -889,12 +890,12 @@ back under a running program, or over files that are no longer that release
    `update::settleUnproved`. With no such update: nothing, and no lock is
    asked for. Otherwise the lock is polled as recovery polls it, up to 20 s;
    a lock that stays held is a live helper's health run, which is not this
-   run's to judge: `busy`, with nothing written, the registry included. Then,
-   FIRST, the `RunOnce` entry is registered again, for the helper that is
-   running and R - the very text the swap registered, when it was that entry
-   which started the run: Windows removes an entry before it runs it, so a
-   run that lost power in the next lines would otherwise leave no logon to
-   come back at
+   run's to judge: `busy`, with nothing of the update written - no journal
+   record, nothing in U, no registry value. Then, FIRST, the `RunOnce` entry
+   is registered again, for the helper that is running and R - the very text
+   the swap registered, when it was that entry which started the run:
+   Windows removes an entry before it runs it, so a run that lost power in
+   the next lines would otherwise leave no logon to come back at
    (`TheLogonNetIsPutBackFirstAndTheVersionIsRewrittenBeforeTheRecordIsWritten`).
    Then the rule, putting back allowed. Then the entry is removed when no
    transaction folder is left under `R/.update`; an update that was left, or
@@ -906,7 +907,11 @@ back under a running program, or over files that are no longer that release
    The run prints `recover=ok`, exit 0, and a `detail=` that begins with
    what became of the update - `confirmed:`, `put back:`, `left:` or `busy:`
    - or `recover=failed`, exit 12, when the putting back did not finish or
-   could not begin.
+   could not begin. Whatever became of it, the run writes its one line in
+   `R/.update/recovery.log`, as every `--recover` that found a transaction
+   folder does: a run that answers `left:` or `busy:` changes nothing of the
+   update and still writes that line, the update's id after `left=`
+   (`RecoverPutsNothingBackUnderARunningProgramAndPutsTheLogonEntryBackForTheNextTry`).
 
    What such a run cannot record is NOT recorded: a putting back made here
    writes no `last.json` and does not add the release to `blocked`, so the
@@ -922,8 +927,12 @@ back under a running program, or over files that are no longer that release
    install record and whose installed version is the program's own
    (`updateStartMayConfirm`, with the record read again at that moment).
    What that refuses is a window of the OLD files that was started during
-   the commit: the record then names a version above its own, and its start
-   proves nothing about the release. `update::confirmStarted` then: with no
+   the commit of an update to a HIGHER VERSION: the record then names a
+   version above its own, and its start proves nothing about the release.
+   It does not refuse that window when the update is to a second build of
+   the SAME version, which the sequences allow ("The installed version"):
+   the record's version is then the old window's too, and it confirms a
+   build it is not ("Not done"). `update::confirmStarted` then: with no
    such update, nothing - a listing of one folder. One attempt at the lock,
    since a window does not wait; while it is held the window asks again
    every 5 s, 12 times - the minute a helper waits at most - and then leaves
@@ -1587,10 +1596,33 @@ What the hardening pass of 2026-10-14 left open, by its rulings:
   is lost between Windows consuming the entry and `--recover` registering
   it again; and an entry that runs puts nothing back while a program of
   the install is running at every logon - an update with no marker is left
-  each time. A window of the new version, or step 1 of the next swap, still
-  settles a release that starts. For one that does not, what remains is
+  each time. A window of the new version still settles a release that
+  starts, and step 1 of the next swap does when its marker is there; with
+  no marker that step refuses (`interrupted_update`) and settles nothing.
+  For a release that does not start, what remains is
   `katana_updater --recover` by hand with nothing of the install running,
   which the refusal `interrupted_update` names.
+- **H1: a window of the old files can confirm a second build of its own
+  version.** The window confirms when the install record's version is its
+  own (`updateStartMayConfirm`). A window of the old files that was started
+  during the commit is refused by that only when the update raised the
+  VERSION. Where the update is to a later build of the same version, the
+  two versions are equal, and such a window - once the helper has died,
+  since a live one holds the lock - writes the marker and settles healthy
+  a build it is not. The record's sequence does tell the two builds apart,
+  but a program is built with a version and no sequence of its own to hold
+  against it.
+- **H1 and H3: a helper newer than the update it settles writes its own
+  version to Settings > Apps.** A healthy settlement writes the installed
+  version as `update::readInstall` gives it, which is the HIGHER of the
+  record's and the settler's own ("The installed version"). The helper
+  that made the swap writes the manifest's version instead. The two differ
+  when the settler is newer than the update it settles: step 1 of a swap
+  run by a STAGED helper (a release whose `applier` is above the installed
+  helper's protocol), or `--recover` run by hand from a newer copy. The
+  entry then names a version that is not installed until the next healthy
+  update. Latent today: the protocol is 1 and the release workflow asks for
+  no other, so the installed helper runs every swap.
 - **H1: a program started while such an update is being put back may fail
   to load**, as one started during a commit may ("The residual").
 - **H1: two states are left as they are at every logon.** A run of

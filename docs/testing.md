@@ -470,8 +470,11 @@ per-user folder unchanged and the entry gone
 with the marker deleted it puts the old version back and writes no
 `last.json` and no `state.json`
 (`AnUpdateWhoseNewVersionNeverSaidItStartsIsPutBackByRecoverWhenNothingOfTheInstallIsRunning`);
-with a stub running from the install it changes nothing and the entry is the
-command again
+with a stub running from the install it changes nothing of the update - the
+tree, the journal and the per-user folder are as they were - writes its one
+line in `R/.update/recovery.log`, the update's id after `left=`, and the
+entry is the command again; with the stub closed the next run puts the old
+version back
 (`RecoverPutsNothingBackUnderARunningProgramAndPutsTheLogonEntryBackForTheNextTry`);
 and killed before its own first change it had put the entry back already
 (`ARecoverThatDiesWhileItSettlesHadPutTheLogonEntryBackFirstAndTheNextOneFinishes`).
