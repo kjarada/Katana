@@ -401,6 +401,14 @@ def catalogue(data, root):
       "mark, an endangered ecological community) it is because that is the thing's name.")
     w("")
     if figures:
+        w("**One field file, the same kinds of entity.** A code is answered by several keys at once, the exact "
+          "key and every prefix key that fits it, and each field comes from the most specific rule that says "
+          "it; so beside comparing key with key, `parity.py` looks up %d codes in both files as the program "
+          "does (every key's own code, alone and followed by a string number, a padded one and a letter) and "
+          "compares what comes out: the draw mode, the surface flag, whether a symbol is drawn and whether it "
+          "is hidden, the text and the pipe rules. They are the same for every one."
+          % report["codes_resolved"])
+        w("")
         w("**Where the other library is not clean, this one is.** The NSW customisation holds %d rules over %d "
           "keys. %d of the rules repeat an earlier rule of their key exactly and %d add nothing to an earlier "
           "one, in %d of the keys; %d more add only a `hide` that the key's first symbol rule leaves unsaid, so "

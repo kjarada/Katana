@@ -322,6 +322,84 @@ class Defects(unittest.TestCase):
         self.assertEqual(self.kinds(feature("AB*"), feature("AB*", weight="0.25")), ["repeated-kind"])
 
 
+class Resolution(unittest.TestCase):
+    """Part 5: a code is answered by several keys at once, and each field comes from the most specific rule that
+    says it (SurveyMap::lookup), so the files are also compared by what every key's code resolves to."""
+
+    def resolved(self, rules, code):
+        doc = document(*rules)
+        return parity.resolve(doc, parity.by_key(doc["codes"]), code)
+
+    def test_the_rules_that_answer_a_code_are_the_exact_key_then_each_prefix_from_the_longest_to_the_bare_star(self):
+        rules = [feature("*"), feature("A*"), feature("AB*"), feature("AB1", draw="point"),
+                 feature("AB*", comment="again")]
+        index = parity.by_key(rules)
+        self.assertEqual(parity.matching_rules(index, "AB1"), [3, 2, 4, 1, 0])
+        self.assertEqual(parity.matching_rules(index, "AB"), [2, 4, 1, 0])   # AB1 is an exact key: not for AB
+        self.assertEqual(parity.matching_rules(index, "AC"), [1, 0])
+        self.assertEqual(parity.matching_rules(index, "Q"), [0])
+
+    def test_each_field_comes_from_the_most_specific_rule_that_says_it(self):
+        rules = [feature("A*"), symbol("A*", hide=True), feature("AB*", draw="point"), symbol("AB*")]
+        got = self.resolved(rules, "AB1")
+        self.assertEqual(got["answered by"], "a prefix key")
+        self.assertEqual(got["draw"], "point")       # AB* says it, before A*
+        self.assertEqual(got["hide"], True)          # AB* leaves it unsaid, so A* is heard
+        self.assertEqual(got["symbol"], "drawn")
+        self.assertEqual(self.resolved(rules, "AC")["draw"], "line")
+        # A rule that SAYS false is the one that is heard.
+        rules[3] = symbol("AB*", hide=False)
+        self.assertEqual(self.resolved(rules, "AB1")["hide"], False)
+
+    def test_an_exact_key_a_prefix_key_the_bare_star_and_nothing_are_told_apart(self):
+        star = {"key": "*", "sets": "pipe", "pipe": {"justify": "Obvert", "shape": "diameter", "size1": "$D",
+                                                     "active": True}}
+        rules = [star, feature("PQ", draw="point"), feature("RS*")]
+        self.assertEqual(self.resolved(rules, "PQ")["answered by"], "an exact key")
+        self.assertEqual(self.resolved(rules, "RS2")["answered by"], "a prefix key")
+        only_star = self.resolved(rules, "PQ1")
+        self.assertEqual(only_star["answered by"], "the bare *")
+        self.assertEqual(only_star["layer"], "absent")
+        self.assertEqual(only_star["pipe"], ["Obvert", "diameter", True, True, False])
+        self.assertEqual(self.resolved(rules[1:], "PQ1")["answered by"], "nothing")
+
+    def test_the_codes_looked_up_are_every_key_s_own_alone_and_with_a_number_a_padded_number_and_a_letter(self):
+        doc = document(feature("AB*"), feature("PQ", draw="point"), feature("*"))
+        self.assertEqual(parity.probe_codes(doc), ["07", "1", "A", "AB", "AB07", "AB1", "ABA", "PQ", "PQ07", "PQ1",
+                                                   "PQA"])
+
+    def test_two_files_whose_keys_agree_one_by_one_can_resolve_differently_and_that_fails(self):
+        reference = [feature("A*"), symbol("A*", hide=True), feature("AB*", draw="point"), symbol("AB*", hide=False)]
+        candidate = [feature("A*"), symbol("A*", hide=True), feature("AB*", draw="point"), symbol("AB*")]
+        report = run(reference, candidate)
+        # Key by key the two are the same: an absent hide reads as false.
+        self.assertEqual(report["structure"], [])
+        self.assertEqual(report["required"], {})
+        # Looked up, the candidate's AB codes take the hide of A*, and the reference's do not.
+        self.assertEqual(report["codes_resolved"], 8)   # A, A1, A07, AA, AB, AB1, AB07, ABA
+        self.assertEqual([r["code"] for r in report["resolution"]], ["AB", "AB07", "AB1", "ABA"])
+        self.assertEqual(report["resolution"][0]["problems"], ["hide: expected false, found true"])
+        self.assertFalse(report["ok"])
+        self.assertTrue(run(reference, reference)["ok"])
+
+    def test_a_symbol_said_through_the_linestyle_resolves_as_a_symbol_drawn(self):
+        reference = [feature("AB*", draw="point", linestyle="Probe Mark")]
+        candidate = [feature("AB*", draw="point"), symbol("AB*")]
+        self.assertEqual(run(reference, candidate, [("AB*", parity.LINESTYLE_SYMBOL, 1)])["resolution"], [])
+        # Without the symbol rule the candidate draws none, and both parts say so.
+        lost = run(reference, [feature("AB*", draw="point")], [("AB*", parity.LINESTYLE_SYMBOL, 1)])
+        self.assertEqual(lost["resolution"][0]["problems"], ['symbol: expected "drawn", found "none"'])
+
+    def test_a_text_size_that_differs_resolves_differently(self):
+        def text(size):
+            return {"key": "7", "sets": "text", "text": {"style": "A", "units": "paper", "size": size,
+                                                       "justifyX": "left", "justifyY": "bottom"}}
+        self.assertEqual(self.resolved([text(10)], "7")["text"], ["paper", 10, "left", "bottom"])
+        report = run([text(10)], [text(7)])
+        self.assertEqual([r["code"] for r in report["resolution"]], ["7"])   # 71, 707 and 7A meet no key
+        self.assertEqual(report["codes_resolved"], 4)
+
+
 class Exceptions(unittest.TestCase):
     def write(self, text):
         directory = tempfile.TemporaryDirectory()

@@ -313,12 +313,13 @@ if(Python3_Interpreter_FOUND)
             COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/katana_standard/${_ks_module}.py" --check)
     endforeach()
     # Katana Standard shares the survey code KEYS of the NSW customisation, tracked beside it, and nothing else of
-    # it. `katana_standard_parity` holds that the two have the same keys and, for each key, the same kinds of rule
-    # (parity.py, with its documented exceptions in parity_exceptions.json); `katana_standard_parity_script` is
-    # parity.py's own test, on small invented customisations; `katana_standard_originality` scans the two files for
-    # anything but the keys that they share (originality.py), and `katana_standard_originality_script` is that
-    # scan's own test, on two invented libraries. The scripts read the files with Python's json module alone
-    # (docs/katana_standard.md, "What is shared and what is not").
+    # it. `katana_standard_parity` holds that the two have the same keys and, for each key, the same kinds of rule,
+    # and that every key's code resolves to the same kind of entity in both (parity.py, with its documented
+    # exceptions in parity_exceptions.json); `katana_standard_parity_script` is parity.py's own test, on small
+    # invented customisations; `katana_standard_originality` scans the two files for anything but the keys that
+    # they share (originality.py), and `katana_standard_originality_script` is that scan's own test, on two
+    # invented libraries. The scripts read the files with Python's json module alone (docs/katana_standard.md,
+    # "What is shared and what is not").
     set(_ks_tools "${PROJECT_SOURCE_DIR}/tools/katana_standard")
     set(_ks_nsw "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json")
     set(_ks_own "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")

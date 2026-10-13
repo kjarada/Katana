@@ -55,6 +55,17 @@ WHAT IT REPORTS, in the order it is printed
                missing layer; and a second rule of one kind under one key (only the first applies to the field
                it sets). The candidate is to have none. --allow-candidate-defects skips this part, which is how a
                file is compared with itself.
+  5. RESOLUTION parts 2 and 3 compare a key with the same key. A code is answered by several keys at once (the
+               exact key, each prefix key from the longest to the bare `*`), and each field comes from the most
+               specific rule that says it, so two files whose keys agree one by one can still make different
+               entities: a symbol rule that leaves `hide` unsaid takes it from a broader key, and one that says
+               `false` does not. So every key's own code, alone and followed by `1`, `07` and `A` (a string
+               number, a padded one, and a letter that sends it on to the broader keys), is looked up in both
+               files as `SurveyMap::lookup` does it, and what comes out is compared: which kind of key
+               answered, the draw mode, the surface flag, hide, whether a symbol is drawn (by a symbol rule or
+               through a linestyle that is a symbol), whether a layer and a colour are named, the text's units,
+               size and justification, and the three pipe rules. No exception explains a difference here: the
+               documented ones of part 3 change none of these.
 
 EXIT STATUS   0 parity holds; 1 it does not (every difference is unexplained until the exceptions file says
               otherwise); 2 a file cannot be read.
@@ -406,6 +417,86 @@ def differences(expected, got):
     return problems, colour_only
 
 
+# ---- resolution ------------------------------------------------------------------------------------------------
+
+# What follows a key's own code when it is looked up: nothing, a string number, a padded one, a letter.
+PROBE_SUFFIXES = ("", "1", "07", "A")
+PIPE_KINDS = ("pipe", "vertexPipe", "segmentPipe")
+
+
+def matching_rules(index, code):
+    """The indices of the rules that answer `code`, most specific first, as `SurveyMap::matchIndices` orders
+    them: the exact key, then each prefix key from the longest to the bare `*`, a key's rules in file order.
+    `index` is `by_key` of the rules."""
+    found = list(index.get(code, []))
+    for length in range(len(code), -1, -1):
+        found.extend(index.get(code[:length] + "*", []))
+    return found
+
+
+def resolve(document, index, code):
+    """What `SurveyMap::lookup` makes of one code, in the words of the entity it makes. Each field is the first
+    one said among the rules that answer the code: a member that is present says something (`hide: false`
+    does), and a layer, colour or linestyle says something when it is not empty."""
+    rules = document["codes"]
+    said = {}
+    first_key = None
+    for i in matching_rules(index, code):
+        rule = rules[i]
+        if first_key is None:
+            first_key = rule["key"]
+        for member in ("draw", "surface", "hide", "symbol", "text") + PIPE_KINDS:
+            if member in rule and member not in said:
+                said[member] = rule[member]
+        for member in ("layer", "colour", "linestyle"):
+            if rule.get(member) and member not in said:
+                said[member] = rule[member]
+    out = collections.OrderedDict()
+    out["answered by"] = ("nothing" if first_key is None else "the bare *" if first_key == "*"
+                          else "an exact key" if first_key == code else "a prefix key")
+    out["draw"] = said.get("draw", "none")
+    out["surface"] = said.get("surface", "unsaid")
+    out["hide"] = bool(said.get("hide", False))
+    named = bool((said.get("symbol") or {}).get("name"))
+    out["symbol"] = "drawn" if named or names_a_symbol({"linestyle": said.get("linestyle", "")}, document) \
+        else "none"
+    out["layer"] = "given" if "layer" in said else "absent"
+    out["colour"] = "given" if "colour" in said else "absent"
+    text = said.get("text")
+    out["text"] = None if text is None else [text.get(name, "") for name in ("units", "size", "justifyX", "justifyY")]
+    for kind in PIPE_KINDS:
+        pipe = said.get(kind)
+        out[kind] = None if pipe is None else [pipe.get("justify", ""), pipe.get("shape", ""),
+                                               bool(pipe.get("active", False)), bool(pipe.get("size1")),
+                                               bool(pipe.get("size2"))]
+    return out
+
+
+def probe_codes(*documents):
+    """The codes part 5 looks up: for every key of the documents, its own code (the key without its star) alone
+    and with each of PROBE_SUFFIXES. The bare `*` has no code of its own, so it gives the suffixes alone."""
+    codes = set()
+    for document in documents:
+        for rule in document.get("codes", []):
+            base = rule["key"][:-1] if rule["key"].endswith("*") else rule["key"]
+            codes.update(base + suffix for suffix in PROBE_SUFFIXES if base + suffix)
+    return sorted(codes)
+
+
+def resolution_differences(reference, candidate):
+    """(the codes looked up, [{code, problems}] for those the two files resolve differently)."""
+    ref_index, cand_index = by_key(reference.get("codes", [])), by_key(candidate.get("codes", []))
+    codes = probe_codes(reference, candidate)
+    differing = []
+    for code in codes:
+        expected, got = resolve(reference, ref_index, code), resolve(candidate, cand_index, code)
+        problems = ["%s: expected %s, found %s" % (member, json.dumps(expected[member]), json.dumps(got[member]))
+                    for member in expected if expected[member] != got[member]]
+        if problems:
+            differing.append({"code": code, "problems": problems})
+    return codes, differing
+
+
 # ---- exceptions ------------------------------------------------------------------------------------------------
 
 def load_exceptions(path):
@@ -535,8 +626,10 @@ def compare(reference, candidate, exceptions=(), allow_extras=True, allow_candid
     report["defects"] = [{"rule": i, "key": key, "kind": kind, "message": message}
                          for i, key, kind, message in document_defects(candidate)]
     report["defect_counts"] = dict(collections.Counter(d["kind"] for d in report["defects"]))
+    codes, report["resolution"] = resolution_differences(reference, candidate)
+    report["codes_resolved"] = len(codes)
     failing = (report["missing_keys"] or report["extra_keys"] or report["structure"] or report["undocumented"]
-               or report["count_mismatch"] or report["unused_exceptions"]
+               or report["count_mismatch"] or report["unused_exceptions"] or report["resolution"]
                or (report["defects"] and not allow_candidate_defects))
     report["ok"] = not failing
     return report
@@ -570,6 +663,7 @@ def render(report, reference_path, candidate_path, limit, allow_candidate_defect
     lines.append("candidate_defects total=%d%s %s" % (
         len(report["defects"]), " (allowed)" if allow_candidate_defects else "",
         " ".join("%s=%d" % kv for kv in sorted(report["defect_counts"].items()))))
+    lines.append("resolution codes=%d differing=%d" % (report["codes_resolved"], len(report["resolution"])))
 
     def section(title, items, text):
         if not items:
@@ -590,6 +684,8 @@ def render(report, reference_path, candidate_path, limit, allow_candidate_defect
     section("unused exception", report["unused_exceptions"], lambda e: "%s %s" % (e["key"], e["reason"]))
     section("candidate defect", report["defects"],
             lambda d: "rule #%d %s: %s: %s" % (d["rule"], d["key"], d["kind"], d["message"]))
+    section("resolves differently", report["resolution"],
+            lambda r: "%s: %s" % (r["code"], "; ".join(r["problems"])))
     lines.append("parity=%s" % ("PASS" if report["ok"] else "FAIL"))
     return "\n".join(lines)
 
