@@ -513,9 +513,9 @@ def _():
     return k
 
 
-@symbol("Junction Pit", G_PITS, "Square with both diagonals. A stormwater junction pit.")
+@symbol("Junction Pit", G_PITS, "Square crossed from top to bottom by a line, with a branch from its middle to the +x side: pipes meeting in a box. A stormwater junction pit.")
 def _():
-    return Sketch().box(3.2, 3.2).cross(1.6)
+    return Sketch().box(3.2, 3.2).line(0, -1.6, 0, 1.6).line(0, 0, 1.6, 0)   # a pipe run and the branch that joins it
 
 
 @symbol("Stormwater Manhole", G_PITS, "Double ring holding the letter D. A stormwater maintenance hole (D for drainage).")

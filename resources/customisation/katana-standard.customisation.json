@@ -2272,10 +2272,10 @@
       ["draw", 1.6, 1.6],
       ["draw", -1.6, 1.6],
       ["draw", -1.6, -1.6],
-      ["move", -1.6, -1.6],
-      ["draw", 1.6, 1.6],
-      ["move", -1.6, 1.6],
-      ["draw", 1.6, -1.6]
+      ["move", 0, -1.6],
+      ["draw", 0, 1.6],
+      ["move", 0, 0],
+      ["draw", 1.6, 0]
     ]},
     {"name": "Kerbside Meter", "group": "Street Furniture and Signs/Amenities", "units": "paper", "atVertices": true, "strokes": [
       ["move", 0, 0],

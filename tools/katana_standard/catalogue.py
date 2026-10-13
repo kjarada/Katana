@@ -220,9 +220,12 @@ def catalogue(data, root):
     shared = {"diameters": applied("Diameter (mm)"), "heights": applied("Height (mm)"),
               "zones": applied("Check Zone"), "texts": kinds.get("text", 0),
               "near_labels": "(at 0.85 alike or more)", "near_any": ""}
+    # How many definitions five strokes or fewer draw: the comparison of shapes leaves those out. It is a figure
+    # of this library alone, so it needs no reference file.
+    originality = _sibling("originality")
+    n_left_out = n_ls + n_sy - len(originality.compared(_candidate(data)))
     if figures:
-        scan = _sibling("originality").scan(parity.load_document(os.path.join(root, REFERENCE)),
-                                            _candidate(data))
+        scan = originality.scan(parity.load_document(os.path.join(root, REFERENCE)), _candidate(data))
         shared["near_labels"] = "(%d at 0.85 alike or more)" % len(scan["same_key_labels"])
         n_names, n_labels = len(scan["near_names"]), len(scan["near_labels"])
         shared["near_any"] = ("%s as near as 0.9 to anything the other library calls a thing, whatever the key. "
@@ -441,9 +444,13 @@ def catalogue(data, root):
       "tests, and `KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the names and "
       "the colours once more in C++. No definition name, group path, layer path, legend label, colour name, "
       "attribute name or text style is the same in both. Nor does a definition here draw the shape of one "
-      "there, beyond the dash, the plus and the square that any library draws: each is compared with every "
-      "one of the other library's by the marks it makes (its lines, circles, arcs, dots and texts), whatever "
-      "order and direction the strokes were written in, turned by quarter turns and mirrored (the eight "
+      "there, beyond what five strokes or fewer draw (a dash, a dash and a letter, a plus, a square, a ring), "
+      "which any library draws: %d of the %d definitions are that plain and are left out. Every other is "
+      "compared with every one of the other library's as the drawing it makes: its lines, circles, arcs, dots "
+      "and texts where the renderer puts them, a line written in pieces as the one line it is, and a dot that "
+      "lies on a line, a ring or an arc of its own definition as no mark, since the pen has been there. The "
+      "drawings are compared whatever order and direction the strokes were written in, turned by quarter turns "
+      "and mirrored (the eight "
       "symmetries of the square), and three ways: as drawn, moved, and scaled to one size. Two numbers are "
       "the same there to the third decimal, and to the second once scaled. A name is the same when its letters "
       "and digits are, whatever its case, blanks and punctuation; and a definition name is compared with "
@@ -452,7 +459,8 @@ def catalogue(data, root):
       "since a symbol named after the other library's label would be its name for the thing all the same. "
       "None is. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for "
       "communications and which every drawing system has. The script and the tests excuse that one white, the "
-      "communications colour of `utilityTypeColour`, and no other value: a second white would fail them.")
+      "communications colour of `utilityTypeColour`, and no other value: a second white would fail them."
+      % (n_left_out, n_ls + n_sy))
     w("")
     w("**What two libraries cannot help sharing** is the trade's own names for real things, and the sizes "
       "above. A give way line, a sewage pumping station and a culvert by its height are called that by anyone, "
@@ -833,11 +841,14 @@ def catalogue(data, root):
       "marks and lane lines). Their meanings are worded as generally as the label allows, and the unclassified "
       "design strings share one layer family each; a surveyor who knows what one is for should say so.")
     w("- **What the comparison of shapes does not see.** `originality.py` holds two definitions to be one shape "
-      "when they make the same marks at any place and size, turned by quarter turns or mirrored. A drawing "
-      "turned by another angle, stretched one way, a circle drawn as a ring of short lines, or a line cut in two "
-      "where another meets it makes other marks and is another shape to it, and a definition of five strokes or "
-      "fewer is not compared at all. No C++ test repeats the comparison, so it is held where Python is "
-      "(`katana_standard_originality`).")
+      "when their drawings have the same marks at any place and size, turned by quarter turns or mirrored. A "
+      "drawing turned by another angle or stretched one way, a circle drawn as arcs or as a ring of short "
+      "lines, an arc cut in two, and a text set from another corner of its box make other marks and are another "
+      "shape to it. A drawing that five strokes or fewer make is not compared at all, and that is %d of the %d "
+      "linestyles, most of them one or two lines, or a line and a letter: of a linestyle the comparison holds "
+      "the motif and not its period, and a plain motif is anybody's. No C++ test repeats the comparison, so it "
+      "is held where Python is (`katana_standard_originality`)."
+      % (n_ls - len(originality.compared({"linestyles": data.linestyles})), n_ls))
     w("- **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's "
       "rotation, offset and raise. The library carries them for the day it does.")
     w("- **A curve cannot come from a field file.** The readers Katana has strung points by the file's own "
