@@ -136,7 +136,7 @@ ROLES = {
     "katana breakline": "breaklines",
     "katana ground": "ground shots and levels",
     "katana tree": "trees",
-    "katana planting": "shrubs, hedges and ground cover",
+    "katana planting": "the edges of timber, scrub, grass and crops",
     "katana building": "buildings and structures",
     "katana fence": "fences and gates",
     "katana wall": "walls",
@@ -154,7 +154,7 @@ WARM_FLOOR = 0.06
 THIN = ("katana tree", "katana planting", "katana ground", "katana building", "katana wall", "katana telecom")
 THIN_FLOOR = 3.25
 
-# The colour every text code is drawn in (the MT codes), so notes never compete with the features they label.
+# The colour every text code is drawn in (the keys 1 to 8), so notes never compete with the features they label.
 TEXT_COLOUR = "katana note"
 
 # The palette as the preview and the catalogue lay it out: (heading, [colour names]).

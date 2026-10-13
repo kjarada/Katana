@@ -17,8 +17,8 @@
 //   "Beta Two"   1 definition (BETA Line), 1 rule over 1 key (BB*)
 //
 // Katana Standard's figures are those of its census (tools/katana_standard/
-// census.py, held in test_katana_standard.cpp): 186 definitions (73
-// linestyles, 113 symbols), 770 rules over 245 keys, 28 colours. NSW's are
+// census.py, held in test_katana_standard.cpp): 221 definitions (98
+// linestyles, 123 symbols), 1103 rules over 632 keys, 28 colours. NSW's are
 // test_builtin_census.cpp's: 792, 1,624 rules over 632 keys.
 
 #include <gtest/gtest.h>
@@ -547,9 +547,9 @@ TEST(BuiltInLibrary, TheDefaultBuildCompilesKatanaStandardInAsTheDefaultAndItHol
     EXPECT_EQ(compiledIn.customisation->name, "Katana Standard");
     // The census figures, as test_katana_standard.cpp holds the file to them:
     // here it is the COMPILED-IN copy, which is what a program starts with.
-    EXPECT_EQ(compiledIn.customisation->library.size(), 186u);
-    EXPECT_EQ(compiledIn.customisation->map.size(), 770u);
-    EXPECT_EQ(compiledIn.customisation->map.keys().size(), 245u);
+    EXPECT_EQ(compiledIn.customisation->library.size(), 221u);
+    EXPECT_EQ(compiledIn.customisation->map.size(), 1103u);
+    EXPECT_EQ(compiledIn.customisation->map.keys().size(), 632u);
     EXPECT_EQ(compiledIn.customisation->colours.size(), 28u);
     EXPECT_EQ(compiledIn.digest.size(), 16u);
     // And its choice figures say the same.
@@ -557,9 +557,9 @@ TEST(BuiltInLibrary, TheDefaultBuildCompilesKatanaStandardInAsTheDefaultAndItHol
     const std::vector<BuiltInChoice> choices = katana::cad::builtInChoices(document, entries);
     const BuiltInChoice* standard = choiceNamed(choices, "Katana Standard");
     ASSERT_NE(standard, nullptr);
-    EXPECT_EQ(standard->definitions, 186u);
-    EXPECT_EQ(standard->rules, 770u);
-    EXPECT_EQ(standard->codes, 245u);
+    EXPECT_EQ(standard->definitions, 221u);
+    EXPECT_EQ(standard->rules, 1103u);
+    EXPECT_EQ(standard->codes, 632u);
     EXPECT_EQ(standard->source, "katana-standard.customisation.json");
 }
 

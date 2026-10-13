@@ -258,10 +258,12 @@ Katana's own resources (`resources/`: the icons, the plot frame, the online
 source catalogue) are part of Katana. The one exception is the built-in
 customisation, `resources/customisation/nsw.customisation.json`, which is
 compiled into every program as an alternate built-in beside Katana Standard (the
-default, which is original) and is **not** covered by the project licence. It
-is shipped on the owner's decision and statement that the information in it is
-public; a build without it is possible: see `LICENSING.md`, "What the licence
-does not cover".
+default, whose linestyles, symbols, layers and colours are Katana's own) and is
+**not** covered by the project licence. Katana Standard uses this file's survey
+code keys (the identifiers), reused for field-data compatibility on the owner's
+decision; the rest of it is Katana's own. The file is shipped on the owner's
+decision and statement that the information in it is public; a build without
+it is possible: see `LICENSING.md`, "What the licence does not cover".
 
 ## 5. Used to build or test, never shipped
 

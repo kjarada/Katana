@@ -1,27 +1,32 @@
-// Katana Standard: the original customisation tracked as
+// Katana Standard: the customisation tracked as
 // resources/customisation/katana-standard.customisation.json
-// (docs/katana_standard.md).
+// (docs/katana_standard.md). Its survey code KEYS are the NSW customisation's,
+// byte for byte, on the owner's decision; everything else in it is its own.
 //
 // The tests read the COMMITTED file with the strict reader and hold what the
 // library promises, so a regenerated file that drifted from its design fails
 // here and not in somebody's drawing. Every figure is from a source that is
 // not this program:
 //
-//   * the counts of the twelve classes and the 245 codes are the taxonomy of
-//     the design (3 + 3 + 5 + 4 + 3 + 10 + 3 + 3 + 3 + 5 + 4 + 3 = 49
-//     subgroups; 18 + 19 + 17 + 21 + 10 + 60 + 16 + 15 + 17 + 23 + 20 + 9 =
-//     245 codes), written down before the file was made;
-//   * the stroke totals, the number of rules of each kind and the prompts are
-//     counted by tools/katana_standard/census.py and
+//   * the counts of keys, rules, definitions and strokes, and the figures
+//     below, are counted by tools/katana_standard/census.py and
 //     tools/customisation_census.py, which read the file with the standard
-//     `json` module and share no code with Katana;
+//     `json` module and share no code with Katana, and by
+//     tools/katana_standard/parity.py, which reads both files the same way:
+//     632 keys; 1103 rules, of which 917 are the reference's own structure
+//     (its 916 effective rules and the one symbol rule that AD* needs) and
+//     186 are the service attribute rules this library adds; 221 definitions
+//     (98 linestyles, 123 symbols); 28 colours;
 //   * contrast is the WCAG 2.x formula, a published standard;
-//   * a hand-worked check says why a figure is what it is where it can: 245
-//     codes make 245 feature rules and 245 surface rules; 125 of them draw a
-//     symbol (every code but the 114 plain lines and the 6 text codes); 77
-//     attributes are applied (60 utility codes say their service, the 11
-//     stormwater pits and pipes say theirs, 6 disused ones say so) and every
-//     other is a prompt; 140 codes carry attributes (the 245 less 105 with none).
+//   * a hand-worked check says why a figure is what it is where it can: 572
+//     keys have a feature rule and 60 have none (52 that only set a surface
+//     flag, the 7 text codes and the bare `*`); 360 of the 572 draw a line,
+//     205 a point and 7 only name a layer; 203 symbol rules are the 202 points
+//     with a symbol and the one line (BI*) with one; the 119 surface rules are
+//     the reference's 52 surface-only keys and 67 feature-and-surface keys,
+//     and every one says false; 244 attributes are applied (186 service
+//     words, 12 model zones, 28 stated diameters and 18 stated heights) and
+//     641 are prompts;
 //   * the palette's two floors are the WCAG contrast formula and the OKLab
 //     distance of Bjorn Ottosson's published matrices, written out below;
 //   * the service colours are AS 5488's: the standard names them and gives no
@@ -29,8 +34,9 @@
 //     utilityTypeColour (utility_drawing.hpp), which UTILITY DRAW draws in and
 //     which the file's colours are held equal to.
 //
-// Nothing here names a definition, a code or a colour of the reference
-// customisation: where the two are compared it is by count, at run time.
+// Nothing here names a definition, a layer, a group or a legend label of the
+// NSW customisation: where the two are compared it is by key and by kind of
+// entity, from the two tracked files, at run time.
 
 #include <gtest/gtest.h>
 
@@ -42,6 +48,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -70,41 +77,52 @@ std::string slurp(const std::string& path)
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
-// The committed file, read once. `problem` is set when it cannot be read, so
-// that every test says why instead of crashing on an empty value.
-struct Standard {
+// A tracked customisation file, read once. `problem` is set when it cannot be
+// read, so that every test says why instead of crashing on an empty value.
+struct Loaded {
     std::string text;
     Customisation value;
     std::string problem;
 };
 
-const Standard& standard()
+Loaded load(const char* path)
 {
-    static const Standard loaded = [] {
-        Standard s;
-        s.text = slurp(KATANA_STANDARD_JSON);
-        if (s.text.empty()) {
-            s.problem = std::string("no file at ") + KATANA_STANDARD_JSON;
-            return s;
-        }
-        auto read = katana::entity::customisationFromJson(s.text);
-        if (!read.ok()) {
-            s.problem = read.error().describe();
-            return s;
-        }
-        s.value = std::move(*read);
+    Loaded s;
+    s.text = slurp(path);
+    if (s.text.empty()) {
+        s.problem = std::string("no file at ") + path;
         return s;
-    }();
+    }
+    auto read = katana::entity::customisationFromJson(s.text);
+    if (!read.ok()) {
+        s.problem = read.error().describe();
+        return s;
+    }
+    s.value = std::move(*read);
+    return s;
+}
+
+const Loaded& standard()
+{
+    static const Loaded loaded = load(KATANA_STANDARD_JSON);
     return loaded;
 }
 
-// The rules of one section, by key without its `*`.
+// The NSW customisation, tracked beside it: the one thing it shares with this
+// library is its keys, and these tests read it to hold that.
+const Loaded& nsw()
+{
+    static const Loaded loaded = load(KATANA_NSW_JSON);
+    return loaded;
+}
+
+// The rules of one section, by key as written (`AC*`, `PBMK`, `*`).
 std::map<std::string, const SurveyRule*> rulesOf(const Customisation& c, SurveySection section)
 {
     std::map<std::string, const SurveyRule*> found;
     for (const SurveyRule& rule : c.map.rules()) {
         if (rule.section == section) {
-            found.emplace(rule.key.substr(0, rule.key.size() - 1), &rule);
+            found.emplace(rule.key, &rule);
         }
     }
     return found;
@@ -119,6 +137,18 @@ bool hasAttribute(const SurveyRule& rule, std::string_view name, std::string_vie
 bool asksFor(const SurveyRule& rule, std::string_view name)
 {
     return hasAttribute(rule, name, "");
+}
+
+bool hasAttributeNamed(const SurveyRule& rule, std::string_view name)
+{
+    return std::any_of(rule.attributes.begin(), rule.attributes.end(),
+                       [&](const auto& a) { return a.name == name; });
+}
+
+// The first path level of a rule's group: the class it belongs to.
+std::string classOf(const SurveyRule& rule)
+{
+    return rule.group.substr(0, rule.group.find('/'));
 }
 
 // WCAG 2.x relative luminance and contrast ratio.
@@ -186,7 +216,7 @@ std::string lower(std::string text)
 } // namespace
 
 #define KS_LOAD()                                                                                  \
-    const Standard& ks = standard();                                                               \
+    const Loaded& ks = standard();                                                                 \
     ASSERT_TRUE(ks.problem.empty()) << ks.problem;                                                 \
     [[maybe_unused]] const Customisation& file = ks.value
 
@@ -212,56 +242,88 @@ TEST(KatanaStandard, ItHoldsTheCountsOfItsIndependentCensus)
             ++strokes[stroke.op];
         }
     });
-    EXPECT_EQ(file.library.size(), 186u);
-    EXPECT_EQ(linestyles, 73u);
-    EXPECT_EQ(symbols, 113u);
-    EXPECT_EQ(atVertices, 113u) << "every symbol is at vertices and no linestyle is";
-    // census.py: arc 84, circle 83, dot 38, draw 1113, move 586, text 43.
-    EXPECT_EQ(strokes[StrokeOp::Arc], 84u);
-    EXPECT_EQ(strokes[StrokeOp::Circle], 83u);
-    EXPECT_EQ(strokes[StrokeOp::Dot], 38u);
-    EXPECT_EQ(strokes[StrokeOp::Draw], 1113u);
-    EXPECT_EQ(strokes[StrokeOp::Move], 586u);
-    EXPECT_EQ(strokes[StrokeOp::Text], 43u);
+    EXPECT_EQ(file.library.size(), 221u);
+    EXPECT_EQ(linestyles, 98u);
+    EXPECT_EQ(symbols, 123u);
+    EXPECT_EQ(atVertices, 123u) << "every symbol is at vertices and no linestyle is";
+    // census.py: arc 32, circle 118, dot 40, draw 1709, move 701, text 54.
+    EXPECT_EQ(strokes[StrokeOp::Arc], 32u);
+    EXPECT_EQ(strokes[StrokeOp::Circle], 118u);
+    EXPECT_EQ(strokes[StrokeOp::Dot], 40u);
+    EXPECT_EQ(strokes[StrokeOp::Draw], 1709u);
+    EXPECT_EQ(strokes[StrokeOp::Move], 701u);
+    EXPECT_EQ(strokes[StrokeOp::Text], 54u);
     EXPECT_EQ(strokes[StrokeOp::Pen], 0u) << "no stroke names a pen: the rule gives the colour";
-    EXPECT_EQ(katana::entity::styleGroups(file.library).size(), 49u);
-    EXPECT_EQ(file.map.size(), 770u);
-    EXPECT_EQ(file.map.keys().size(), 245u);
+    EXPECT_EQ(katana::entity::styleGroups(file.library).size(), 48u);
+    EXPECT_EQ(file.map.size(), 1103u);
+    EXPECT_EQ(file.map.keys().size(), 632u);
     EXPECT_EQ(file.colours.size(), 28u);
 }
 
-TEST(KatanaStandard, EveryClassHoldsTheNumberOfCodesItsTaxonomySays)
+TEST(KatanaStandard, EveryClassHoldsTheNumberOfKeysItsGroupsSayAndSixtyKeysHaveNoFeatureRule)
 {
     KS_LOAD();
-    std::map<char, std::size_t> perClass;
-    for (const std::string& key : file.map.keys()) {
-        ++perClass[key.front()];
+    // A key's class is the first level of the group on its feature rule; the
+    // keys that have none (the text codes, the surface-only keys and the bare
+    // `*`) have no group in the file.
+    std::map<std::string, std::size_t> perClass;
+    for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
+        ++perClass[classOf(*rule)];
     }
-    const std::map<char, std::size_t> taxonomy{{'C', 18}, {'R', 19}, {'S', 17}, {'K', 21},
-                                               {'T', 10}, {'U', 60}, {'V', 16}, {'B', 15},
-                                               {'F', 17}, {'G', 23}, {'M', 20}, {'X', 9}};
-    EXPECT_EQ(perClass, taxonomy);
-    std::size_t total = 0;
-    for (const auto& [letter, count] : taxonomy) {
-        total += count;
+    // census.py "classes".
+    const std::map<std::string, std::size_t> census{{"Boundaries and Cadastre", 23},
+                                                    {"Roads and Pavements", 35},
+                                                    {"Street Furniture and Signs", 36},
+                                                    {"Kerbs and Drainage", 79},
+                                                    {"Rail and Transit", 12},
+                                                    {"Utilities", 118},
+                                                    {"Vegetation and Landscape", 33},
+                                                    {"Buildings and Structures", 33},
+                                                    {"Fences and Walls", 8},
+                                                    {"Terrain and Breaklines", 25},
+                                                    {"Survey Control and Annotation", 39},
+                                                    {"Miscellaneous", 16},
+                                                    {"Design and Setting Out", 115}};
+    EXPECT_EQ(perClass, census);
+    std::size_t withFeature = 0;
+    for (const auto& [name, count] : census) {
+        withFeature += count;
     }
-    EXPECT_EQ(total, 245u);
+    EXPECT_EQ(withFeature, 572u);
+    // 52 keys that only set a surface flag, the 7 text codes, and the bare `*`.
+    EXPECT_EQ(file.map.keys().size() - withFeature, 60u);
+    EXPECT_EQ(52u + 7u + 1u, 60u);
 }
 
-TEST(KatanaStandard, EveryKeyIsThreeCapitalLettersAndEveryCodeHasItsOwnPrefixRule)
+TEST(KatanaStandard, EveryKeyIsCapitalsAndDigitsWithOptionalStarAndNoRuleIsWrittenTwiceInASection)
 {
     KS_LOAD();
-    const std::regex shape("[A-Z]{3}\\*");
+    const std::regex shape("\\*|[A-Z0-9]+\\*?");
     std::set<std::pair<std::string, SurveySection>> seen;
     for (const SurveyRule& rule : file.map.rules()) {
         EXPECT_TRUE(std::regex_match(rule.key, shape)) << "key " << rule.key;
         EXPECT_TRUE(seen.emplace(rule.key, rule.section).second)
             << rule.key << " is written twice in one section";
     }
-    // Every key owns exactly one feature rule and one surface rule, so a typo
-    // answers with nothing and no rule is shadowed.
-    EXPECT_EQ(rulesOf(file, SurveySection::Map).size(), 245u);
-    EXPECT_EQ(rulesOf(file, SurveySection::Tinable).size(), 245u);
+    // The three forms of key: 422 prefix keys, 209 exact keys, the bare `*`.
+    std::size_t prefix = 0;
+    std::size_t exact = 0;
+    std::size_t bare = 0;
+    for (const std::string& key : file.map.keys()) {
+        if (key == "*") {
+            ++bare;
+        } else if (key.back() == '*') {
+            ++prefix;
+        } else {
+            ++exact;
+        }
+    }
+    EXPECT_EQ(prefix, 422u);
+    EXPECT_EQ(exact, 209u);
+    EXPECT_EQ(bare, 1u);
+    // A key is the code of a feature or of a flag, never the empty one.
+    EXPECT_EQ(rulesOf(file, SurveySection::Map).size(), 572u);
+    EXPECT_EQ(rulesOf(file, SurveySection::Tinable).size(), 119u);
 }
 
 TEST(KatanaStandard, ARuleOfEachKindIsWrittenForTheCodesThatNeedIt)
@@ -270,27 +332,36 @@ TEST(KatanaStandard, ARuleOfEachKindIsWrittenForTheCodesThatNeedIt)
     std::map<SurveySection, std::size_t> bySection;
     std::size_t lines = 0;
     std::size_t points = 0;
+    std::size_t layerOnly = 0;
     for (const SurveyRule& rule : file.map.rules()) {
         ++bySection[rule.section];
         if (rule.section == SurveySection::Map) {
-            (rule.breakline == katana::entity::SurveyBreakline::Line ? lines : points) += 1;
+            if (!rule.breakline) {
+                ++layerOnly;
+            } else {
+                (*rule.breakline == katana::entity::SurveyBreakline::Line ? lines : points) += 1;
+            }
         }
     }
-    EXPECT_EQ(bySection[SurveySection::Map], 245u);
-    EXPECT_EQ(bySection[SurveySection::Tinable], 245u);
-    EXPECT_EQ(bySection[SurveySection::Pipe], 9u);
-    EXPECT_EQ(bySection[SurveySection::VertexTextStyle], 6u);
-    EXPECT_EQ(bySection[SurveySection::StringAttribute], 140u);
-    EXPECT_EQ(bySection[SurveySection::VertexPipe], 0u);
-    EXPECT_EQ(bySection[SurveySection::SegmentPipe], 0u);
-    EXPECT_EQ(bySection[SurveySection::VertexAttribute], 0u);
-    // 123 codes draw a line: 114 plain lines and 9 that carry a symbol at
-    // every vertex. The other 122 are points: 116 symbols and 6 texts.
-    EXPECT_EQ(lines, 123u);
-    EXPECT_EQ(points, 122u);
-    // A symbol rule for every code but the 114 plain lines and the 6 texts:
-    // 245 - 114 - 6.
-    EXPECT_EQ(bySection[SurveySection::VertexSymbol], 125u);
+    EXPECT_EQ(bySection[SurveySection::Map], 572u);
+    EXPECT_EQ(bySection[SurveySection::Tinable], 119u);
+    EXPECT_EQ(bySection[SurveySection::Pipe], 1u);
+    EXPECT_EQ(bySection[SurveySection::VertexPipe], 1u);
+    EXPECT_EQ(bySection[SurveySection::SegmentPipe], 1u);
+    EXPECT_EQ(bySection[SurveySection::VertexTextStyle], 7u);
+    // 12 attribute rules the reference has, and 186 service rules this library adds.
+    EXPECT_EQ(bySection[SurveySection::StringAttribute], 198u);
+    EXPECT_EQ(bySection[SurveySection::VertexAttribute], 1u);
+    // 572 keys with a feature rule: 360 lines, 205 points, 7 that only name the
+    // layer of a text code (1* to 8*).
+    EXPECT_EQ(lines, 360u);
+    EXPECT_EQ(points, 205u);
+    EXPECT_EQ(layerOnly, 7u);
+    EXPECT_EQ(lines + points + layerOnly, 572u);
+    // A symbol rule for every point but three that name none (POCP, PRTR and
+    // the design key PLIG*), and for the one line that carries a symbol at
+    // every vertex (BI*): 205 - 3 + 1.
+    EXPECT_EQ(bySection[SurveySection::VertexSymbol], 203u);
 }
 
 TEST(KatanaStandard, EveryNameARuleUsesIsDefinedExceptThePlainLineAndEveryDefinitionIsUsed)
@@ -437,17 +508,17 @@ TEST(KatanaStandard, TheClassesDrawnWithTheThinnestPensKeepAFloorOfThreeAndAQuar
     }
 }
 
-TEST(KatanaStandard, ThreeKerbLinesAreThreePatternsAndTheReturnIsTheTopEdgeCurved)
+TEST(KatanaStandard, TheKerbTopIsAPlainLineAndItsBackAndItsGutterLipHavePatternsOfTheirOwn)
 {
     KS_LOAD();
     const auto map = rulesOf(file, SurveySection::Map);
-    // The face's top edge and the return round a corner are one feature, so
-    // they share the plain line; the gutter lip and the back edge are other
-    // things and each has a pattern of its own, since no pen is applied yet.
-    EXPECT_EQ(map.at("KKT")->linestyle, "continuous");
-    EXPECT_EQ(map.at("KKR")->linestyle, "continuous");
-    EXPECT_EQ(map.at("KKL")->linestyle, "Gutter Lip Line");
-    EXPECT_EQ(map.at("KKB")->linestyle, "Kerb Back Line");
+    // The top edge of a kerb and the top edge of a median are hard edges drawn
+    // plain; the back of the kerb and the lip of the gutter are other things
+    // and each has a pattern of its own, since no pen is applied yet.
+    EXPECT_EQ(map.at("KB*")->linestyle, "continuous");
+    EXPECT_EQ(map.at("TM*")->linestyle, "continuous");
+    EXPECT_EQ(map.at("LP*")->linestyle, "Gutter Lip Line");
+    EXPECT_EQ(map.at("BK*")->linestyle, "Kerb Back Line");
     for (const char* name : {"Gutter Lip Line", "Kerb Back Line"}) {
         const LineStyle* style = file.library.find(name);
         ASSERT_NE(style, nullptr) << name;
@@ -455,7 +526,7 @@ TEST(KatanaStandard, ThreeKerbLinesAreThreePatternsAndTheReturnIsTheTopEdgeCurve
     }
 }
 
-TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundredAndThirty)
+TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundredAndSixtyOne)
 {
     KS_LOAD();
     const std::regex word("[a-z]+(-[a-z]+)*");
@@ -472,10 +543,10 @@ TEST(KatanaStandard, EveryLayerIsThreeLevelsOfLowerCaseWordsAndThereAreOneHundre
             EXPECT_TRUE(std::regex_match(level, word)) << key << " level '" << level << "'";
         }
     }
-    EXPECT_EQ(layers.size(), 130u);
+    EXPECT_EQ(layers.size(), 161u);
 }
 
-TEST(KatanaStandard, EveryGroupIsTwoLevelsDeepAndThereAreFiftyInAll)
+TEST(KatanaStandard, EveryGroupIsTwoLevelsDeepAndThereAreFiftyEightInAll)
 {
     KS_LOAD();
     std::set<std::string> ofDefinitions;
@@ -489,14 +560,15 @@ TEST(KatanaStandard, EveryGroupIsTwoLevelsDeepAndThereAreFiftyInAll)
     for (const std::string& group : everyGroup) {
         EXPECT_EQ(std::count(group.begin(), group.end(), '/'), 1) << group;
     }
-    // 49 subgroups of the taxonomy, each a rule group. The definitions' 49
-    // are the same but for two: the text codes (Survey Control and
-    // Annotation/Text and Notes) have no definition, and the shapes every
-    // service shares have a group no code has (Utilities/All Services).
-    // 49 + 1 = 50 groups in all.
-    EXPECT_EQ(ofRules.size(), 49u);
-    EXPECT_EQ(ofDefinitions.size(), 49u);
-    EXPECT_EQ(everyGroup.size(), 50u);
+    // 57 groups of the codes: 13 classes and their groups, every one of them
+    // holding a code. The definitions' 48 are the groups that have a
+    // definition; of the codes' 57, 10 have none (seven design groups drawn
+    // with other groups' definitions, the paths, the land use areas and the
+    // text codes), and the shapes every service shares have a group no code
+    // has (Utilities/All Services): 57 + 1 = 58 groups in all.
+    EXPECT_EQ(ofRules.size(), 57u);
+    EXPECT_EQ(ofDefinitions.size(), 48u);
+    EXPECT_EQ(everyGroup.size(), 58u);
     EXPECT_EQ(ofRules.count("Utilities/All Services"), 0u);
     EXPECT_EQ(ofDefinitions.count("Utilities/All Services"), 1u);
     EXPECT_EQ(ofDefinitions.count("Survey Control and Annotation/Text and Notes"), 0u);
@@ -510,14 +582,12 @@ TEST(KatanaStandard, TheWeightsAreTheFiveOfTheScaleAndTheBoldOneIsUnused)
     for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
         ++weights[rule->weight];
     }
-    // census.py: 0.13 18, 0.18 46, 0.25 137, 0.35 40, 0.50 4 - and 0.70, the
-    // sixth of the scale, reserved. Nine codes moved from the hairline to the
-    // fine pen when the planting and ground colours were made faintest on
-    // paper (the lawn, bed and crop edges and the six ground readings), so
-    // 27 - 9 = 18 and 37 + 9 = 46.
+    // census.py: 0.13 21, 0.18 180, 0.25 289, 0.35 79, 0.50 3 - and 0.70, the
+    // sixth of the scale, reserved. They add to the 572 feature rules.
     const std::map<std::string, std::size_t> expected{
-        {"0.13", 18}, {"0.18", 46}, {"0.25", 137}, {"0.35", 40}, {"0.50", 4}};
+        {"0.13", 21}, {"0.18", 180}, {"0.25", 289}, {"0.35", 79}, {"0.50", 3}};
     EXPECT_EQ(weights, expected);
+    EXPECT_EQ(21u + 180u + 289u + 79u + 3u, 572u);
     EXPECT_EQ(weights.count("0.70"), 0u);
     // Nothing in the planting or the ground colours is lighter than the fine pen.
     for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
@@ -527,7 +597,7 @@ TEST(KatanaStandard, TheWeightsAreTheFiveOfTheScaleAndTheBoldOneIsUnused)
     }
 }
 
-TEST(KatanaStandard, OnlyTheGroundShotAndTheGroundReadingAreHidden)
+TEST(KatanaStandard, OnlyFourSymbolsAreHiddenAndTheyAreThoseTheOtherLibraryHides)
 {
     KS_LOAD();
     std::set<std::string> hidden;
@@ -536,101 +606,109 @@ TEST(KatanaStandard, OnlyTheGroundShotAndTheGroundReadingAreHidden)
             hidden.insert(key);
         }
     }
-    // GPG and GPR: points shown by their level, not by a mark.
-    EXPECT_EQ(hidden, (std::set<std::string>{"GPG", "GPR"}));
+    // census.py "hideKeys": the four keys whose second symbol rule in the
+    // other library says hide where the first leaves it unsaid, so that a
+    // lookup there hides the symbol (parity.py, "nsw-fields-merged").
+    EXPECT_EQ(hidden, (std::set<std::string>{"PBDY", "PBMZ", "PCRM", "PPSM"}));
 }
 
-TEST(KatanaStandard, TheGroundAndTheHardEdgesGoIntoASurfaceAndEverythingElseDoesNot)
+TEST(KatanaStandard, EverySurfaceRuleKeepsItsCodeOutOfASurfaceAndThereAreOneHundredAndNineteen)
 {
     KS_LOAD();
-    std::set<std::string> yes;
-    for (const auto& [key, rule] : rulesOf(file, SurveySection::Tinable)) {
+    const auto surfaces = rulesOf(file, SurveySection::Tinable);
+    // The other library has 119 keys that set a surface flag (52 that set
+    // nothing else, and 67 beside a feature rule) and every one says false.
+    EXPECT_EQ(surfaces.size(), 119u);
+    for (const auto& [key, rule] : surfaces) {
         ASSERT_TRUE(rule->tinable.has_value()) << key << " says nothing of surfaces";
-        if (*rule->tinable) {
-            yes.insert(key);
-        }
+        EXPECT_FALSE(*rule->tinable) << key;
     }
-    EXPECT_EQ(yes.size(), 33u);
-    // By hand, one of each family the design lists: a ground shot, a spot
-    // level, a kerb top, a gutter, a carriageway edge, a path edge, a bank
-    // top, a water edge, a platform edge, a ballast edge.
-    for (const char* key : {"GPG", "GPS", "KKT", "KKL", "RCE", "RPD", "GBB", "GWE", "TPE", "TTB"}) {
-        EXPECT_EQ(yes.count(key), 1u) << key;
+    EXPECT_EQ(52u + 67u, 119u);
+    // By hand, a few of each family: a speed zone, a culvert, a pipe, a
+    // trunk's own flag key, a control mark's family key, a hazard's flag key.
+    for (const char* key : {"S9*", "D1*", "U3*", "PT04*", "PSS*", "PHAZ*", "CA*", "SO*"}) {
+        EXPECT_EQ(surfaces.count(key), 1u) << key;
     }
-    // And one of each that is not: the exclusion boundary (a surface's own
-    // limit, not its shape), a title boundary, a fence, a tree, a control
-    // mark, a water main.
-    for (const char* key : {"GBX", "CBT", "FFP", "VTB", "MCC", "UWM"}) {
-        EXPECT_EQ(yes.count(key), 0u) << key;
+    // And a few that are not: a kerb top, a title boundary, a water main.
+    for (const char* key : {"KB*", "BT*", "WM*"}) {
+        EXPECT_EQ(surfaces.count(key), 0u) << key;
     }
 }
 
-TEST(KatanaStandard, NineCodesAreMeantAsPipesAndTheGravityOnesJustifyOnTheInvert)
+TEST(KatanaStandard, OnlyTheBareStarIsAPipeAndSizesItFromTheDiameterAttribute)
 {
     KS_LOAD();
-    const auto pipes = rulesOf(file, SurveySection::Pipe);
-    std::set<std::string> keys;
-    for (const auto& [key, rule] : pipes) {
-        keys.insert(key);
-        ASSERT_TRUE(rule->pipe.has_value());
-        EXPECT_TRUE(rule->pipe->active) << key;
-        EXPECT_EQ(rule->pipe->size1.rfind('$', 0), 0u) << key << " sizes from an attribute";
+    const std::map<SurveySection, const char*> kinds{{SurveySection::Pipe, "pipe"},
+                                                     {SurveySection::VertexPipe, "vertexPipe"},
+                                                     {SurveySection::SegmentPipe, "segmentPipe"}};
+    for (const auto& [section, word] : kinds) {
+        const auto pipes = rulesOf(file, section);
+        ASSERT_EQ(pipes.size(), 1u) << word;
+        ASSERT_EQ(pipes.count("*"), 1u) << word;
+        const SurveyRule& rule = *pipes.at("*");
+        ASSERT_TRUE((section == SurveySection::Pipe     ? rule.pipe
+                     : section == SurveySection::VertexPipe ? rule.vertexPipe
+                                                            : rule.segmentPipe)
+                        .has_value())
+            << word;
+        const auto& pipe = section == SurveySection::Pipe         ? *rule.pipe
+                           : section == SurveySection::VertexPipe ? *rule.vertexPipe
+                                                                  : *rule.segmentPipe;
+        EXPECT_TRUE(pipe.active) << word;
+        EXPECT_EQ(pipe.justify, "Obvert") << word << ": a string with a diameter is measured from its top";
+        EXPECT_EQ(pipe.shape, "diameter") << word;
+        EXPECT_EQ(pipe.size1, "$Diameter (mm)") << word << " sizes from an attribute";
+        EXPECT_TRUE(pipe.size2.empty()) << word;
     }
-    // The stormwater pipe, the box culvert, the water, sewer (gravity),
-    // pressure sewer, gas, recycled water, fire and fuel mains.
-    EXPECT_EQ(keys, (std::set<std::string>{"KCP", "KCB", "UWM", "USM", "USR", "UGM", "URM", "UFM",
-                                           "UPM"}));
-    for (const char* key : {"KCP", "KCB", "USM"}) {
-        EXPECT_EQ(pipes.at(key)->pipe->justify, "Invert") << key << " is gravity: its level is the invert";
-    }
-    for (const char* key : {"UWM", "USR", "UGM", "URM", "UFM", "UPM"}) {
-        EXPECT_EQ(pipes.at(key)->pipe->justify, "Centre") << key << " is a pressure main";
-    }
-    EXPECT_EQ(pipes.at("KCB")->pipe->shape, "culvert");
-    EXPECT_EQ(pipes.at("KCB")->pipe->size2, "$Height (mm)");
 }
 
-TEST(KatanaStandard, TheSixTextCodesAreStandardTextInMillimetresOfPaper)
+TEST(KatanaStandard, TheSevenTextCodesAreStandardTextInMillimetresOfPaper)
 {
     KS_LOAD();
     const auto texts = rulesOf(file, SurveySection::VertexTextStyle);
-    std::set<std::string> keys;
+    std::map<std::string, double> sizes;
     for (const auto& [key, rule] : texts) {
-        keys.insert(key);
         ASSERT_TRUE(rule->textStyle.has_value());
         EXPECT_EQ(rule->textStyle->textstyle, "Standard") << key;
         EXPECT_EQ(rule->textStyle->type, "paper") << key;
-        EXPECT_GT(rule->textStyle->size, 0.0) << key;
-        EXPECT_LE(rule->textStyle->size, 5.0) << key << " is at most the heading's size";
+        EXPECT_EQ(rule->textStyle->colour, "katana note") << key;
+        EXPECT_EQ(rule->textStyle->justifyX, "left") << key;
+        EXPECT_EQ(rule->textStyle->justifyY, "bottom") << key;
+        sizes[key] = rule->textStyle->size;
     }
-    EXPECT_EQ(keys, (std::set<std::string>{"MTL", "MTN", "MTH", "MTS", "MTR", "MTC"}));
+    // The keys 1 to 5 and 7 are the sizes 1.5, 2.5, 3.5, 5, 7 and 10 mm; 8 is
+    // the parcel label's 2.5 (census.py "textSizes").
+    EXPECT_EQ(sizes, (std::map<std::string, double>{
+                         {"1", 1.5}, {"2", 2.5}, {"3", 3.5}, {"4", 5.0}, {"5", 7.0}, {"7", 10.0}, {"8", 2.5}}));
+    // And each has a feature rule under its star that names the layer all text goes on.
+    const auto features = rulesOf(file, SurveySection::Map);
+    for (const char* key : {"1*", "2*", "3*", "4*", "5*", "7*", "8*"}) {
+        ASSERT_EQ(features.count(key), 1u) << key;
+        EXPECT_EQ(features.at(key)->model, "control/annotation/text") << key;
+        EXPECT_FALSE(features.at(key)->breakline.has_value()) << key << " draws nothing of its own";
+    }
 }
 
-TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndADisusedCodeSaysSo)
+TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndNoOtherCodeClaimsOneButTheStormwaterOnes)
 {
     KS_LOAD();
-    // The service letter and the word Katana's utility tools use for it.
-    const std::map<char, std::string> service{
-        {'W', "water"},        {'S', "sewer"},          {'G', "gas"},  {'E', "electricity"},
-        {'C', "telecommunications"}, {'R', "recycled-water"}, {'F', "fire-service"},
-        {'P', "fuel"},         {'I', "its"},            {'X', "unknown"}};
-    std::set<std::string> disusedByLayer;
     std::set<std::string> disusedByStatus;
     std::size_t utilities = 0;
+    std::size_t typedUtilities = 0;
     std::size_t stormwaterTyped = 0;
+    std::map<std::string, std::size_t> perService;
     const auto attributes = rulesOf(file, SurveySection::StringAttribute);
     for (const auto& [key, feature] : rulesOf(file, SurveySection::Map)) {
         const auto found = attributes.find(key);
-        const bool says = found != attributes.end() &&
-                          std::any_of(found->second->attributes.begin(), found->second->attributes.end(),
-                                      [](const auto& a) { return a.name == "utility.type"; });
-        if (key.front() != 'U') {
-            // Class K's stormwater pits and structures (KP) and pipes and
-            // culverts (KC) are services too; its kerbs, channels and creeks
-            // are not.
-            const bool stormwater = key.front() == 'K' && (key[1] == 'P' || key[1] == 'C');
+        const bool says = found != attributes.end() && hasAttributeNamed(*found->second, "utility.type");
+        const bool inUtilities = feature->model.rfind("utilities/", 0) == 0;
+        // The stormwater pits, structures, pipes and culverts are services too,
+        // though they are catalogued with drainage.
+        const bool stormwater = feature->model.rfind("drainage/pipes/", 0) == 0 ||
+                                feature->model.rfind("drainage/structures/", 0) == 0;
+        if (!inUtilities) {
             EXPECT_EQ(says, stormwater) << key << (stormwater ? " is stormwater and must say so"
-                                                              : " is not a utility and must not claim a service");
+                                                              : " is not a service and must not claim one");
             if (stormwater && says) {
                 EXPECT_TRUE(hasAttribute(*found->second, "utility.type", "stormwater")) << key;
                 ++stormwaterTyped;
@@ -638,26 +716,43 @@ TEST(KatanaStandard, EveryUtilityCodeNamesItsServiceAndADisusedCodeSaysSo)
             continue;
         }
         ++utilities;
-        ASSERT_NE(found, attributes.end()) << key;
-        const std::string& word = service.at(key[1]);
-        EXPECT_TRUE(hasAttribute(*found->second, "utility.type", word)) << key;
-        // utilities/<service word>/<family>: a coded service and UTILITY DRAW
-        // share one tree.
-        EXPECT_EQ(feature->model.rfind("utilities/" + word + "/", 0), 0u) << key << " " << feature->model;
-        if (feature->model.ends_with("/disused")) {
-            disusedByLayer.insert(key);
+        // utilities/<service word>/<family>: a coded service and UTILITY DRAW share one tree.
+        std::stringstream split(feature->model);
+        std::string root;
+        std::string service;
+        std::getline(split, root, '/');
+        std::getline(split, service, '/');
+        if (key == "TS*") {
+            // The reference gives it an attribute rule (its model zone), whose
+            // entries are fixed, so it cannot also say its service.
+            EXPECT_FALSE(says) << key;
+            continue;
         }
-        if (hasAttribute(*found->second, "utility.status", "disused")) {
+        ASSERT_NE(found, attributes.end()) << key;
+        EXPECT_TRUE(hasAttribute(*found->second, "utility.type", service)) << key << " " << feature->model;
+        ++typedUtilities;
+        ++perService[service];
+        if (hasAttributeNamed(*found->second, "utility.status")) {
             disusedByStatus.insert(key);
         }
     }
-    EXPECT_EQ(utilities, 60u);
-    // KP: gully, kerb inlet, junction, manhole, trap, headwall, culvert end,
-    // subsoil inspection point (8); KC: pipe, box culvert, subsoil drain (3).
-    EXPECT_EQ(stormwaterTyped, 11u);
-    EXPECT_EQ(disusedByLayer, disusedByStatus);
-    EXPECT_EQ(disusedByStatus,
-              (std::set<std::string>{"UWD", "USD", "UGD", "UED", "UCD", "URD"}));
+    EXPECT_EQ(utilities, 118u);
+    EXPECT_EQ(typedUtilities, 117u);
+    // The pits and structures of drainage and its pipes and culverts, all typed.
+    EXPECT_EQ(stormwaterTyped, 69u);
+    // The other library has no disused service, and neither has this one.
+    EXPECT_TRUE(disusedByStatus.empty());
+    // census.py "utilityTypes".
+    EXPECT_EQ(perService, (std::map<std::string, std::size_t>{{"electricity", 23},
+                                                              {"fire-service", 1},
+                                                              {"fuel", 7},
+                                                              {"gas", 15},
+                                                              {"its", 4},
+                                                              {"recycled-water", 8},
+                                                              {"sewer", 13},
+                                                              {"telecommunications", 22},
+                                                              {"unknown", 8},
+                                                              {"water", 16}}));
 }
 
 TEST(KatanaStandard, EveryServiceColourIsTheColourUtilityDrawUses)
@@ -691,7 +786,7 @@ TEST(KatanaStandard, EveryServiceColourIsTheColourUtilityDrawUses)
             if (attribute.name != "utility.type") {
                 continue;
             }
-            // The 60 utility codes and the 11 stormwater pits and pipes of class K.
+            // The 117 utility codes and the 69 stormwater pits, structures and pipes.
             ASSERT_EQ(byWord.count(attribute.value), 1u) << key << " says " << attribute.value;
             const sub::UtilityType kind = byWord.at(attribute.value);
             const Color expected = katana::cad::utilities::utilityTypeColour(kind);
@@ -702,7 +797,7 @@ TEST(KatanaStandard, EveryServiceColourIsTheColourUtilityDrawUses)
             reached.insert(kind);
         }
     }
-    EXPECT_EQ(checked, 71u);
+    EXPECT_EQ(checked, 186u);
     // It reached every kind but "other", for which the library has no code,
     // so the loop is not passing for want of anything to compare.
     std::set<sub::UtilityType> expectedKinds(kinds.begin(), kinds.end());
@@ -710,35 +805,54 @@ TEST(KatanaStandard, EveryServiceColourIsTheColourUtilityDrawUses)
     EXPECT_EQ(reached, expectedKinds);
 }
 
-TEST(KatanaStandard, EveryBuriedUtilityLineAsksForItsOwnerItsConditionAndItsDepth)
+TEST(KatanaStandard, EveryBuriedUtilityLineAsksForItsOwnerItsConditionAndItsDepthOrHeight)
 {
     KS_LOAD();
     const auto attributes = rulesOf(file, SurveySection::StringAttribute);
     std::size_t lines = 0;
+    std::size_t depth = 0;
+    std::size_t height = 0;
+    std::set<std::string> neither;
     for (const auto& [key, feature] : rulesOf(file, SurveySection::Map)) {
-        if (key.front() != 'U' || feature->breakline != katana::entity::SurveyBreakline::Line) {
+        if (feature->model.rfind("utilities/", 0) != 0 ||
+            feature->breakline != katana::entity::SurveyBreakline::Line) {
             continue;
         }
         ++lines;
         const SurveyRule& rule = *attributes.at(key);
-        // The line of a service nobody has named has no owner to ask for or
-        // condition to read; an overhead line has no depth.
-        if (key != "UXL") {
-            EXPECT_TRUE(asksFor(rule, "Owner")) << key;
-            EXPECT_TRUE(asksFor(rule, "Condition")) << key;
+        if (key == "TS*") {
+            // The telephone sump's only attribute rule is the model zone.
+            EXPECT_FALSE(asksFor(rule, "Owner")) << key;
+            continue;
         }
-        if (key != "UXL" && key != "UEO" && key != "UCO") {
-            EXPECT_TRUE(asksFor(rule, "Depth (m)")) << key;
+        EXPECT_TRUE(asksFor(rule, "Owner")) << key;
+        EXPECT_TRUE(asksFor(rule, "Condition")) << key;
+        if (asksFor(rule, "Depth (m)")) {
+            ++depth;
+        } else if (asksFor(rule, "Height (m)")) {
+            ++height;
+        } else {
+            neither.insert(key);
         }
     }
-    EXPECT_EQ(lines, 25u);
+    // 52 lines on a utilities layer. 38 are buried and ask for a depth; 4 are
+    // strung above ground and ask for a height (UE*, UL*, UO*, OA*); the
+    // outlines of structures and the stay wire ask for neither (a reservoir, a
+    // pond, a pump-out station, a septic tank, a transformer cabinet, a pylon
+    // footing, a telephone box, a junction box and a stay wire); and TS*.
+    EXPECT_EQ(lines, 52u);
+    EXPECT_EQ(depth, 38u);
+    EXPECT_EQ(height, 4u);
+    EXPECT_EQ(neither, (std::set<std::string>{"EC*", "EL*", "RE*", "SC*", "SP*", "SQ*", "ST*", "TX*", "US*"}));
+    EXPECT_EQ(depth + height + neither.size() + 1u, lines);
 }
 
-TEST(KatanaStandard, AnAttributeWithNoValueIsAPromptAndOnlyTheUtilityWordsAreApplied)
+TEST(KatanaStandard, AnAttributeWithNoValueIsAPromptAndOnlyAFewKindsAreApplied)
 {
     KS_LOAD();
     std::size_t prompts = 0;
     std::size_t applied = 0;
+    std::map<std::string, std::size_t> appliedNames;
     for (const auto& [key, rule] : rulesOf(file, SurveySection::StringAttribute)) {
         std::set<std::string> names;
         for (const auto& attribute : rule->attributes) {
@@ -748,15 +862,28 @@ TEST(KatanaStandard, AnAttributeWithNoValueIsAPromptAndOnlyTheUtilityWordsAreApp
                 ++prompts;
             } else {
                 ++applied;
-                EXPECT_EQ(attribute.name.rfind("utility.", 0), 0u)
-                    << key << " applies " << attribute.name << " and only utility.* words are applied";
+                ++appliedNames[attribute.name];
+                // Applied: the service word, a model zone, or a size the key itself states (a whole number).
+                const bool service = attribute.name == "utility.type";
+                const bool zone = attribute.name == "Check Zone";
+                const bool stated = attribute.name == "Diameter (mm)" || attribute.name == "Height (mm)";
+                EXPECT_TRUE(service || zone || stated) << key << " applies " << attribute.name;
+                if (zone || stated) {
+                    EXPECT_EQ(attribute.type, "integer") << key;
+                    EXPECT_EQ(attribute.value.find_first_not_of("0123456789"), std::string::npos) << key;
+                }
             }
         }
     }
-    // 60 utility codes say their service, 11 stormwater pits and pipes say
-    // theirs and 6 disused ones say so.
-    EXPECT_EQ(applied, 77u);
-    EXPECT_EQ(prompts, 395u);
+    // census.py: attributesApplied 244, attributesPrompted 641. The applied
+    // are 186 service words, 12 model zones, 28 stated diameters (the 14
+    // inverts PI01 to PI18 and the 14 pipes U1 to V8) and 18 stated heights
+    // (the culverts D0 to D9 and the box culverts B0 to B9 that exist).
+    EXPECT_EQ(applied, 244u);
+    EXPECT_EQ(prompts, 641u);
+    EXPECT_EQ(appliedNames, (std::map<std::string, std::size_t>{
+                                {"Check Zone", 12}, {"Diameter (mm)", 28}, {"Height (mm)", 18}, {"utility.type", 186}}));
+    EXPECT_EQ(186u + 12u + 28u + 18u, 244u);
 }
 
 TEST(KatanaStandard, EveryDefinitionIsInPaperMillimetresAndStaysInsideTheBoundsOfTheDesign)
@@ -870,34 +997,49 @@ TEST(KatanaStandard, TheFileSaysNothingOfLineworkOrAutomationAndNamesNoSource)
     EXPECT_EQ(ks.text.find("\"automation\""), std::string::npos);
 }
 
-TEST(KatanaStandard, ANumberedStringAnswersItsCodesRuleAndATypoAnswersNone)
+TEST(KatanaStandard, ANumberedStringAnswersItsKeysRuleAndATypoAnswersNone)
 {
     KS_LOAD();
     const auto& map = file.map;
-    // UWM, UWM1 and UWM01 are one code: the digits are the string number.
-    for (const char* name : {"UWM", "UWM1", "UWM01", "UWM12"}) {
+    // WM, WM1 and WM01 are one code: the digits are the string number.
+    for (const char* name : {"WM", "WM1", "WM01", "WM12"}) {
         const auto match = map.lookup(name);
         EXPECT_TRUE(match.matched()) << name;
         EXPECT_EQ(match.resolved.model, "utilities/water/main") << name;
         EXPECT_EQ(match.resolved.linestyle, "Water Supply Pipe") << name;
         EXPECT_EQ(match.resolved.breakline, katana::entity::SurveyBreakline::Line) << name;
     }
-    // A paling fence is a line with a post at every vertex.
-    const auto fence = map.lookup("FFP2");
-    EXPECT_EQ(fence.resolved.linestyle, "Paling Fence");
-    ASSERT_TRUE(fence.resolved.symbol.has_value());
-    EXPECT_EQ(fence.resolved.symbol->style, "Fence Post");
-    // A gully pit is a point with a symbol.
-    const auto pit = map.lookup("KPG");
+    // A bulk bin is a line with a bin at every vertex: the one such key.
+    const auto bin = map.lookup("BI2");
+    EXPECT_EQ(bin.resolved.breakline, katana::entity::SurveyBreakline::Line);
+    ASSERT_TRUE(bin.resolved.symbol.has_value());
+    EXPECT_EQ(bin.resolved.symbol->style, "Litter Bin");
+    // A wire fence is a line with no symbol.
+    const auto fence = map.lookup("FE3");
+    EXPECT_EQ(fence.resolved.linestyle, "Post and Wire Fence");
+    EXPECT_FALSE(fence.resolved.symbol.has_value());
+    // A gully pit is a point with a symbol, and an exact key: PGUL1 is none.
+    const auto pit = map.lookup("PGUL");
+    EXPECT_EQ(pit.kind, katana::entity::SurveyMatchKind::Exact);
     EXPECT_EQ(pit.resolved.breakline, katana::entity::SurveyBreakline::Point);
     ASSERT_TRUE(pit.resolved.symbol.has_value());
     EXPECT_EQ(pit.resolved.symbol->style, "Gully Pit");
+    EXPECT_FALSE(map.lookup("PGUL1").matched());
     // The valve and the water main share a colour and not a layer.
-    EXPECT_EQ(map.lookup("UWV").resolved.colour, map.lookup("UWM").resolved.colour);
-    EXPECT_NE(map.lookup("UWV").resolved.model, map.lookup("UWM").resolved.model);
-    // A code nobody wrote is answered by nothing: no family rule swallows it.
-    for (const char* typo : {"UWQ", "ZZZ", "UW", "U", "KK", "XQ"}) {
-        EXPECT_FALSE(map.lookup(typo).matched()) << typo;
+    EXPECT_EQ(map.lookup("PWSV").resolved.colour, map.lookup("WM").resolved.colour);
+    EXPECT_NE(map.lookup("PWSV").resolved.model, map.lookup("WM").resolved.model);
+    // A longer prefix wins field by field over a shorter one: Z0* over Z*.
+    const auto index = map.lookup("Z07");
+    EXPECT_EQ(index.resolved.comment, "Index contour, regular");
+    EXPECT_EQ(map.lookup("Z1").resolved.comment, "Heavy contour");
+    // A code that no key's prefix fits is answered by the bare `*` alone, which
+    // names no layer, linestyle or symbol, so it is no match. None of these
+    // starts a key: PWSW (the keys of P are exact), QZ (only QQ* starts with Q),
+    // WQ, W, U, and the digits 6 and 9 (the digit keys are 1 2 3 4 5 7 8).
+    for (const char* typo : {"PWSW", "QZ", "WQ", "W", "U", "6", "9"}) {
+        const auto match = map.lookup(typo);
+        EXPECT_FALSE(match.matched()) << typo;
+        EXPECT_EQ(match.kind, katana::entity::SurveyMatchKind::FallbackOnly) << typo;
     }
 }
 
@@ -926,23 +1068,246 @@ TEST(KatanaStandard, EveryDefinitionAndEveryCodeIsCataloguedInTheDocument)
         }
     });
     for (const std::string& key : file.map.keys()) {
-        const std::string bare = key.substr(0, key.size() - 1);
         // Once in its table and once in the alphabetical index.
-        const std::string row = "\n| `" + bare + "` |";
+        const std::string row = "\n| `" + key + "` |";
         const auto first = doc.find(row);
-        ASSERT_NE(first, std::string::npos) << bare << " is not catalogued";
-        EXPECT_NE(doc.find(row, first + 1), std::string::npos) << bare << " is not in the index";
+        ASSERT_NE(first, std::string::npos) << key << " is not catalogued";
+        EXPECT_NE(doc.find(row, first + 1), std::string::npos) << key << " is not in the index";
     }
     EXPECT_EQ(missing, 0u);
+}
+
+// ---- the keys of the NSW built-in -------------------------------------------------------------------------
+
+TEST(KatanaStandard, EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey)
+{
+    KS_LOAD();
+    const Loaded& other = nsw();
+    ASSERT_TRUE(other.problem.empty()) << other.problem;
+    // Byte for byte: `AB`, `AB*`, `AB1*` and `*` are four keys. Both lists are
+    // in name order.
+    const std::vector<std::string> ours = file.map.keys();
+    const std::vector<std::string> theirs = other.value.map.keys();
+    // parity.py and tools/customisation_census.py: the other library has 632 keys.
+    EXPECT_EQ(theirs.size(), 632u);
+    std::vector<std::string> missing;
+    std::set_difference(theirs.begin(), theirs.end(), ours.begin(), ours.end(), std::back_inserter(missing));
+    std::vector<std::string> extra;
+    std::set_difference(ours.begin(), ours.end(), theirs.begin(), theirs.end(), std::back_inserter(extra));
+    EXPECT_TRUE(missing.empty()) << missing.size() << " keys are missing, the first "
+                                 << (missing.empty() ? std::string() : missing.front());
+    EXPECT_TRUE(extra.empty()) << extra.size() << " keys are extra, the first "
+                               << (extra.empty() ? std::string() : extra.front());
+    EXPECT_EQ(ours, theirs);
+}
+
+namespace {
+
+// What a code makes of the rules that answer it, as a kind of entity: the
+// things a field file's result depends on and a person does not see.
+struct Kind {
+    katana::entity::SurveyMatchKind matched = katana::entity::SurveyMatchKind::None;
+    int breakline = -1; // -1 says nothing of it, 0 a point, 1 a line
+    int tinable = -1;   // -1 says nothing of it, 0 stays out of a surface, 1 joins one
+    bool hide = false;
+    bool symbol = false;
+    bool layerNamed = false;
+    bool colourNamed = false;
+    bool text = false;
+    std::string textUnits;
+    double textSize = 0.0;
+    std::string textJustifyX;
+    std::string textJustifyY;
+    bool pipe = false;
+    bool vertexPipe = false;
+    bool segmentPipe = false;
+    std::string pipeJustify;
+    std::string pipeShape;
+    bool pipeActive = false;
+    bool pipeSize1 = false;
+    bool pipeSize2 = false;
+};
+
+Kind kindOf(const Customisation& library, const std::string& code)
+{
+    const auto match = library.map.lookup(code);
+    const SurveyRule& r = match.resolved;
+    Kind k;
+    k.matched = match.kind;
+    if (r.breakline) {
+        k.breakline = *r.breakline == katana::entity::SurveyBreakline::Line ? 1 : 0;
+    }
+    if (r.tinable) {
+        k.tinable = *r.tinable ? 1 : 0;
+    }
+    k.hide = r.hide.value_or(false);
+    k.symbol = r.symbol.has_value() && !r.symbol->style.empty();
+    k.layerNamed = !r.model.empty();
+    k.colourNamed = !r.colour.empty();
+    if (r.textStyle) {
+        k.text = true;
+        k.textUnits = r.textStyle->type;
+        k.textSize = r.textStyle->size;
+        k.textJustifyX = r.textStyle->justifyX;
+        k.textJustifyY = r.textStyle->justifyY;
+    }
+    k.pipe = r.pipe.has_value();
+    k.vertexPipe = r.vertexPipe.has_value();
+    k.segmentPipe = r.segmentPipe.has_value();
+    if (r.pipe) {
+        k.pipeJustify = r.pipe->justify;
+        k.pipeShape = r.pipe->shape;
+        k.pipeActive = r.pipe->active;
+        k.pipeSize1 = !r.pipe->size1.empty();
+        k.pipeSize2 = !r.pipe->size2.empty();
+    }
+    return k;
+}
+
+// The kinds of rule a key makes, in order of first appearance, without a
+// second rule of a kind (the other library repeats rules and only the first
+// of a kind sets a field). `extra` attribute rules this library adds to a
+// service key the other gives none are left out when `dropExtraAttributes`.
+std::vector<SurveySection> sectionsOf(const Customisation& library, const std::string& key,
+                                      bool dropExtraAttributes, bool otherHasAttributes)
+{
+    std::vector<SurveySection> sections;
+    for (const SurveyRule& rule : library.map.rules()) {
+        if (rule.key != key) {
+            continue;
+        }
+        if (std::find(sections.begin(), sections.end(), rule.section) == sections.end()) {
+            sections.push_back(rule.section);
+        }
+    }
+    if (dropExtraAttributes && !otherHasAttributes) {
+        sections.erase(std::remove(sections.begin(), sections.end(), SurveySection::StringAttribute), sections.end());
+    }
+    return sections;
+}
+
+bool hasSection(const Customisation& library, const std::string& key, SurveySection section)
+{
+    return std::any_of(library.map.rules().begin(), library.map.rules().end(),
+                       [&](const SurveyRule& r) { return r.key == key && r.section == section; });
+}
+
+} // namespace
+
+TEST(KatanaStandard, FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBuiltInMakes)
+{
+    KS_LOAD();
+    const Loaded& other = nsw();
+    ASSERT_TRUE(other.problem.empty()) << other.problem;
+    // Forty keys, chosen by hand to take every class (a class of Katana
+    // Standard's own arrangement), every kind of rule and every oddity once or
+    // more: a line, a point, a line that is also a point's symbol (BI*), a
+    // key that only sets a surface flag, a hidden symbol (PBDY), a vertex
+    // attribute (PNAL), a model zone (KB*, FE*, TS*), the text keys, the
+    // layer-only key, the bare `*`, and prefix families that overlap (Z* and
+    // Z0*, PT04 and PT04*). AD* is left out: it is the one key whose clean
+    // form differs, and parity_exceptions.json says so.
+    const std::vector<std::string> keys{
+        "BT*",  "BE*",  "PBDY", "PNAL",                          // boundaries and cadastre
+        "CZ*",  "AS*",  "PTMX",                                  // roads and pavements
+        "S9*",  "AC*",  "BI*",  "PSGL",                          // street furniture and signs
+        "KB*",  "U3*",  "PGUL", "POBV",                          // kerbs and drainage
+        "RA*",  "PRBX",                                          // rail and transit
+        "WM*",  "PWSV", "TS*",                                   // utilities
+        "PT04", "PT04*", "JD*",                                  // vegetation
+        "BU*",  "UT*",  "PFLG",                                  // buildings and structures
+        "FE*",  "AG*",  "POST",                                  // fences and walls
+        "Z0*",  "Z*",   "PSHT",                                  // terrain
+        "PBMK", "4",    "8*",                                    // survey control and annotation
+        "PHAZ", "HP*",                                           // miscellaneous
+        "L8*",  "BF*",                                           // design and setting out
+        "*",                                                     // the bare star
+    };
+    ASSERT_EQ(keys.size(), 40u);
+    std::set<std::string> distinct(keys.begin(), keys.end());
+    ASSERT_EQ(distinct.size(), 40u) << "the sample names a key twice";
+    for (const std::string& key : keys) {
+        SCOPED_TRACE("key " + key);
+        ASSERT_TRUE(hasSection(file, key, SurveySection::Map) || hasSection(file, key, SurveySection::Tinable) ||
+                    hasSection(file, key, SurveySection::VertexTextStyle) || hasSection(file, key, SurveySection::Pipe))
+            << "the sample names a key this library lacks";
+        ASSERT_FALSE(other.value.map.rules().empty());
+
+        // 1. The same ordered kinds of rule. This library adds one attributes
+        //    rule to a service key where the other has none; that is left out.
+        const bool otherHasAttributes = hasSection(other.value, key, SurveySection::StringAttribute);
+        EXPECT_EQ(sectionsOf(file, key, true, otherHasAttributes), sectionsOf(other.value, key, false, true));
+
+        // 2. The first attributes rule of the other library: the same entries
+        //    (a type and whether a value is given), then maybe more.
+        if (otherHasAttributes) {
+            const SurveyRule* theirs = nullptr;
+            for (const SurveyRule& r : other.value.map.rules()) {
+                if (r.key == key && r.section == SurveySection::StringAttribute) {
+                    theirs = &r;
+                    break;
+                }
+            }
+            const SurveyRule* ours = nullptr;
+            for (const SurveyRule& r : file.map.rules()) {
+                if (r.key == key && r.section == SurveySection::StringAttribute) {
+                    ours = &r;
+                    break;
+                }
+            }
+            ASSERT_NE(theirs, nullptr);
+            ASSERT_NE(ours, nullptr);
+            ASSERT_EQ(ours->attributes.size(), theirs->attributes.size());
+            for (std::size_t i = 0; i < theirs->attributes.size(); ++i) {
+                EXPECT_EQ(ours->attributes[i].type, theirs->attributes[i].type) << "entry " << i;
+                EXPECT_EQ(ours->attributes[i].value.empty(), theirs->attributes[i].value.empty()) << "entry " << i;
+            }
+        }
+
+        // 3. The same code makes the same kind of entity. A code that the key
+        //    answers: the key without its star, or the key itself.
+        const std::string code = key == "*" ? std::string("QZ") : (key.back() == '*' ? key.substr(0, key.size() - 1) : key);
+        const Kind a = kindOf(other.value, code);
+        const Kind b = kindOf(file, code);
+        EXPECT_EQ(b.matched, a.matched) << code;
+        EXPECT_EQ(b.breakline, a.breakline) << code << ": a line in one and a point in the other";
+        EXPECT_EQ(b.tinable, a.tinable) << code << ": the surface flag";
+        EXPECT_EQ(b.hide, a.hide) << code;
+        EXPECT_EQ(b.symbol, a.symbol) << code << ": a symbol in one and none in the other";
+        EXPECT_EQ(b.layerNamed, a.layerNamed) << code;
+        EXPECT_EQ(b.colourNamed, a.colourNamed) << code;
+        EXPECT_EQ(b.text, a.text) << code;
+        EXPECT_EQ(b.textUnits, a.textUnits) << code;
+        EXPECT_EQ(b.textSize, a.textSize) << code;
+        EXPECT_EQ(b.textJustifyX, a.textJustifyX) << code;
+        EXPECT_EQ(b.textJustifyY, a.textJustifyY) << code;
+        EXPECT_EQ(b.pipe, a.pipe) << code;
+        EXPECT_EQ(b.vertexPipe, a.vertexPipe) << code;
+        EXPECT_EQ(b.segmentPipe, a.segmentPipe) << code;
+        EXPECT_EQ(b.pipeJustify, a.pipeJustify) << code;
+        EXPECT_EQ(b.pipeShape, a.pipeShape) << code;
+        EXPECT_EQ(b.pipeActive, a.pipeActive) << code;
+        EXPECT_EQ(b.pipeSize1, a.pipeSize1) << code;
+        EXPECT_EQ(b.pipeSize2, a.pipeSize2) << code;
+    }
+    // The sample reaches what it claims to: it holds a hidden symbol, a text
+    // key, a pipe, a key with only a surface flag and a line with a symbol.
+    EXPECT_TRUE(kindOf(file, "PBDY").hide);
+    EXPECT_TRUE(kindOf(other.value, "PBDY").hide);
+    EXPECT_TRUE(kindOf(file, "4").text);
+    EXPECT_TRUE(kindOf(file, "QZ").pipe);
+    EXPECT_EQ(kindOf(file, "PT04").tinable, 0);
+    EXPECT_TRUE(kindOf(file, "BI1").symbol);
+    EXPECT_EQ(kindOf(file, "BI1").breakline, 1);
 }
 
 namespace {
 
 // Counts only, found at run time: nothing here names what the other holds.
-// Katana Standard was made from a design of its own, so no definition name,
-// group path, survey code key or colour name of it is one of the other's,
-// whole.
-void expectNothingInCommonWith(const Customisation& file, const Customisation& other)
+// Katana Standard was made so that nothing but the survey code keys is the
+// other's: no definition name, group path, layer path or colour name of it is
+// one of the other's, whole, and its keys are the other's exactly.
+void expectNothingButTheKeysInCommonWith(const Customisation& file, const Customisation& other)
 {
     std::size_t sharedNames = 0;
     file.library.forEach([&](const LineStyle& style) { sharedNames += other.library.contains(style.name) ? 1 : 0; });
@@ -958,6 +1323,7 @@ void expectNothingInCommonWith(const Customisation& file, const Customisation& o
     }
     EXPECT_EQ(sharedGroups, 0u) << "group paths in common";
 
+    // The keys are the one thing shared, and shared whole.
     std::set<std::string> otherKeys;
     for (const std::string& key : other.map.keys()) {
         otherKeys.insert(key);
@@ -966,7 +1332,8 @@ void expectNothingInCommonWith(const Customisation& file, const Customisation& o
     for (const std::string& key : file.map.keys()) {
         sharedKeys += otherKeys.count(key);
     }
-    EXPECT_EQ(sharedKeys, 0u) << "survey code keys in common";
+    EXPECT_EQ(sharedKeys, otherKeys.size()) << "survey code keys in common";
+    EXPECT_EQ(sharedKeys, file.map.keys().size()) << "survey code keys in common";
 
     std::size_t sharedColours = 0;
     for (const auto& entry : file.colours.entries()) {
@@ -1019,11 +1386,33 @@ void expectNothingInCommonWith(const Customisation& file, const Customisation& o
         sharedLayers += otherLayers.count(rule->model);
     }
     EXPECT_EQ(sharedLayers, 0u) << "layer paths in common";
+
+    // And no legend label is one of the other's: the labels are the comments
+    // of the feature rules, with the other's own "[KEY]" lead-in taken off.
+    std::set<std::string> otherLabels;
+    for (const auto& rule : other.map.rules()) {
+        std::string comment = rule.comment;
+        if (!comment.empty() && comment.front() == '[') {
+            const auto close = comment.find(']');
+            if (close != std::string::npos) {
+                comment = comment.substr(close + 1);
+                comment.erase(0, comment.find_first_not_of(' '));
+            }
+        }
+        if (!comment.empty()) {
+            otherLabels.insert(lower(comment));
+        }
+    }
+    std::size_t sharedLabels = 0;
+    for (const auto& [key, rule] : rulesOf(file, SurveySection::Map)) {
+        sharedLabels += otherLabels.count(lower(rule->comment));
+    }
+    EXPECT_EQ(sharedLabels, 0u) << "legend labels in common";
 }
 
 } // namespace
 
-TEST(KatanaStandard, NoNameOfItIsAnyNameInAnyOtherCompiledInBuiltIn)
+TEST(KatanaStandard, NothingButTheKeysIsSharedWithAnyOtherCompiledInBuiltIn)
 {
     KS_LOAD();
     // EVERY built-in this build compiled in but this one: Katana Standard is
@@ -1036,9 +1425,19 @@ TEST(KatanaStandard, NoNameOfItIsAnyNameInAnyOtherCompiledInBuiltIn)
         }
         ++compared;
         SCOPED_TRACE("compared with the built-in number " + std::to_string(compared));
-        expectNothingInCommonWith(file, *entry.builtIn.customisation);
+        expectNothingButTheKeysInCommonWith(file, *entry.builtIn.customisation);
     }
     if (compared == 0) {
         GTEST_SKIP() << "this build has no other customisation compiled in to compare with";
     }
+}
+
+TEST(KatanaStandard, NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt)
+{
+    KS_LOAD();
+    // The same comparison against the tracked file, so that it runs in every
+    // build and not only in one that compiled the other built-in in.
+    const Loaded& other = nsw();
+    ASSERT_TRUE(other.problem.empty()) << other.problem;
+    expectNothingButTheKeysInCommonWith(file, other.value);
 }

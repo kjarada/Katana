@@ -502,7 +502,8 @@ Not everything in the repository is covered by the project licence:
 
 - `resources/customisation/nsw.customisation.json`, the NSW customisation,
   compiled into a default build as an alternate built-in beside Katana Standard
-  (the default, original to Katana), was converted from style and survey-code libraries that
+  (the default; its look is Katana's own, and its survey code keys are this
+  file's, reused for field-data compatibility), was converted from style and survey-code libraries that
   came under someone else's licence. The owner states that the information in
   it is public and decided on 2026-10-08 to commit it and ship it in releases.
   The owner does not claim to have written it, nothing in the repository
