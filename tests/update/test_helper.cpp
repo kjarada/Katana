@@ -2819,6 +2819,42 @@ TEST(HelperSwap, AnUpdateWhoseHelperDiedAfterTheNewVersionSaidItStartsIsConfirme
     world->expectV2();
 }
 
+TEST(HelperSwap, ARecoverThatDiesWhileItSettlesHadPutTheLogonEntryBackFirstAndTheNextOneFinishes)
+{
+    REQUIRE_CAN_SIGN();
+    const std::unique_ptr<World> world = killedBeforeHealthy("unsettled-dies");
+    ASSERT_TRUE(world != nullptr);
+    ASSERT_NO_FATAL_FAILURE(expectUnsettled(*world));
+    const std::string tx(kTransaction);
+    const std::string root = toUtf8(world->root.native());
+    const Path journal = world->root / ".update" / tx / "journal";
+    const std::string journalBefore = readText(journal);
+
+    // The logon: Windows has taken the entry away, and the run it started loses power before its
+    // FIRST change to the disk (--die-at 1: the HEALTHY record). Were the entry put back only at
+    // the end, no later logon would come for this update.
+    world->consumeRunOnce();
+    std::vector<std::string> killed = world->withTestOptions({"--recover", root});
+    killed.push_back("--die-at");
+    killed.push_back("1");
+    const SpawnResult died = world->runHelper(killed);
+    ASSERT_EQ(died.exitCode, 99) << describe(died);
+    EXPECT_EQ(world->runOnce(), runOnceCommand(world->helperPath(tx), world->root))
+        << "the entry was put back before anything else was done";
+    world->expectV2();
+    EXPECT_EQ(readText(journal), journalBefore) << "the record was not written: it decides again";
+    EXPECT_FALSE(isPresent(world->root / ".update" / "recovery.log")) << "a process that was killed wrote no line";
+
+    // That logon: decided again from the same marker, and finished.
+    world->consumeRunOnce();
+    const SpawnResult finished = world->runHelper(world->withTestOptions({"--recover", root}));
+    ASSERT_EQ(finished.exitCode, 0) << describe(finished);
+    EXPECT_EQ(valueOf(finished.output, "detail").rfind("confirmed:", 0), 0u) << finished.output;
+    world->expectV2();
+    EXPECT_FALSE(isPresent(world->root / ".update" / tx));
+    EXPECT_FALSE(world->runOnceIsSet());
+}
+
 TEST(HelperSwap, AnUpdateWhoseNewVersionNeverSaidItStartsIsPutBackByRecoverWhenNothingOfTheInstallIsRunning)
 {
     REQUIRE_CAN_SIGN();
