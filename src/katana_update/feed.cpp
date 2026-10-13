@@ -698,19 +698,15 @@ std::string fetchFailureReason(const core::Error& error)
     // nothing after them: what follows may be an address or a server's words, and must not be
     // able to name a reason.
     std::string_view rest = error.context;
-    std::optional<int> status;
+    int status = 0; // 0 as well when the context names none: either way no answer arrived
     constexpr std::string_view kStatus = "status=";
     if (rest.starts_with(kStatus)) {
         rest.remove_prefix(kStatus.size());
         std::size_t digits = 0;
-        int number = 0;
         while (digits < rest.size() && rest[digits] >= '0' && rest[digits] <= '9' &&
-               number < 10000) {
-            number = number * 10 + (rest[digits] - '0');
+               status < 10000) {
+            status = status * 10 + (rest[digits] - '0');
             ++digits;
-        }
-        if (digits > 0) {
-            status = number;
         }
         rest.remove_prefix(digits);
         constexpr std::string_view kNext = "; ";
@@ -737,7 +733,7 @@ std::string fetchFailureReason(const core::Error& error)
         return error.message == kPartialDownloadsRefused ? "partial_downloads" : "too_large";
     case core::ErrorCode::FileImportFailure:
         // No status at all is a failure to get an answer, like status 0.
-        return status.value_or(0) == 0 ? "offline" : "http_" + std::to_string(*status);
+        return status == 0 ? "offline" : "http_" + std::to_string(status);
     default:
         return "error";
     }

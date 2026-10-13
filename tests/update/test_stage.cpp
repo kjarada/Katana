@@ -655,7 +655,7 @@ TEST(Stage, ATruncatedOrMisplacedRangeIsRefusedAndStagesNothing)
         FixtureRig rig("stage_shifted");
         PayloadServer server(rig.v2Zip);
         server.custom = [&](std::size_t, const HttpHop& hop) -> std::optional<core::Result<HttpHopReply>> {
-            const Range range = *rangeOf(hop);
+            const Range range = rangeOf(hop).value_or(Range{0, 0});
             HttpHopReply reply;
             reply.status = 206;
             reply.body = rig.v2Zip.substr(range.start + 1, range.length);
