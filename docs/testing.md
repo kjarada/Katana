@@ -631,7 +631,15 @@ runs on:
   record of 0.9.0 through this program say so and stop being true when the
   project's version passes it
   (`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords` asserts the
-  premise first).
+  premise first). The swap's in-process tests are the other place the
+  build's version reaches, and they assert no such premise: their small
+  releases are 0.1.0 installed and 0.2.0 staged (`buildSmallScenario` in
+  `tests/update/test_apply.cpp`, `buildTinyLoop` in
+  `tests/update/test_recover.cpp`), and 0.2.0 is the project's own version
+  today. So the installed version reads there as the program's, and it is
+  the SEQUENCES that make the staged release the newer one. A project
+  version above 0.2.0 turns each of those updates into a `downgrade`, and
+  the versions of those releases have to move before it does.
 - **What the person kept.** `UPDATE BLOCKED CLEAR` is run by `katana_cli`
   against a state file a CMake script wrote by hand - two releases blocked,
   a version skipped, the switch off, a time of the last check - and the
