@@ -145,26 +145,9 @@ bool stageIsThere(const std::filesystem::path& stateDirectory, std::uint64_t seq
         failed);
 }
 
-// The helper's copy that UPDATE APPLY CONFIRM made for a request nobody will
-// start (U/run-<tx>, update/stage.hpp, preflight): listed for the sweep the
-// next start makes (update/state.hpp, cleanup.list). It is a program's size,
-// and one would otherwise stay behind for every press that was taken back.
-// Empty when it is listed; else why it could not be.
-QString discardPrepared(const katana::update::ApplyRequest& request)
-{
-    if (request.stateDirectory.empty() ||
-        !katana::update::isValidTransactionId(request.transaction)) {
-        return {};
-    }
-    const std::unique_ptr<katana::update::FsOps> files = katana::update::makeSystemFsOps();
-    const katana::core::Status listed = katana::update::appendCleanup(
-        request.stateDirectory,
-        katana::update::runPath(request.stateDirectory, request.transaction), *files);
-    return listed ? QString() : qs(listed.error().message);
-}
-
-// Lists for the same sweep the helper's copy of each update of THIS install
-// that needed a recovery and is over. `katana_updater --recover` writes
+// Lists for the window's sweep (update/state.hpp, cleanup.list) the helper's
+// copy of each update of THIS install that needed a recovery and is over.
+// `katana_updater --recover` writes
 // nothing per user, whoever started it (update/recover.hpp), so nothing in the
 // update folder names that copy: unlisted, one helper's size would stay there
 // for every update a crash interrupted. Which transactions those are is
@@ -284,10 +267,10 @@ UpdateWorkbench::~UpdateWorkbench()
     // A request that was prepared and is still here was never started: the
     // person closed the window themselves while the close for it waited, and
     // main() was handed nothing. The helper's copy goes to the next start's
-    // sweep, as after Later - without a word, since the log is the window's
-    // and the window is going.
+    // sweep, as after Later (dropPrepared) - without a word, since the log is
+    // the window's and the window is going.
     if (pendingApply_.has_value()) {
-        (void)discardPrepared(*pendingApply_);
+        (void)katana::app::abandonApply(*pendingApply_);
     }
     // The dialog is the window's child only so that it floats over it; it
     // calls back into this object, so it goes with it.
@@ -910,11 +893,16 @@ void UpdateWorkbench::later()
 
 void UpdateWorkbench::dropPrepared(const katana::update::ApplyRequest& request)
 {
-    if (const QString failed = discardPrepared(request); !failed.isEmpty()) {
+    // The one way a prepared apply is given up, which the session and
+    // katana_cli take too (app::abandonApply, update_verbs.hpp): the helper's
+    // copy U/run-<tx> goes on the list the next start sweeps. It is a
+    // program's size, and one would otherwise stay behind for every press
+    // that was taken back.
+    if (const katana::core::Status listed = katana::app::abandonApply(request); !listed) {
         // A leftover only: said, not an error of the session.
         log(QStringLiteral("Update: the helper's copy made for the update that was not started "
                            "could not be listed for removal (%1).")
-                .arg(failed));
+                .arg(qs(listed.error().message)));
     }
 }
 
