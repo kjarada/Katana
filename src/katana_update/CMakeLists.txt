@@ -45,7 +45,6 @@ set(_katana_update_sources
     # that the skeleton settles itself - see the top of each file.
     contract.cpp
     arguments.cpp
-    not_implemented.hpp
 )
 # One implementation of each seam per platform. The process scan and the registry
 # live under src/katana_updater, where the helper's own task owns them, but THIS
@@ -116,8 +115,6 @@ find_package(nlohmann_json CONFIG REQUIRED)
 target_link_libraries(katana_update
     PUBLIC katana_core
     PRIVATE katana_update_third_party nlohmann_json::nlohmann_json)
-# For not_implemented.hpp, which the files under src/katana_updater share.
-target_include_directories(katana_update PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # ---- what is compiled in ----------------------------------------------------------------
 
