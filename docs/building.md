@@ -385,7 +385,7 @@ may not see GDAL, PDAL or the archive readers:
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST`, `CODE CHECK` (the interpreter's since 2026-09-26; the last two were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06; `docs/customisation.md`, "The verbs") | yes | yes |
 | `IMPORT <file.ifc>`, `EXPORT <file.ifc>`, `INFO <file.ifc>`, `IFC RULES` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC, which run these lines |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
-| `UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`, `SET AUTO`, `TOKEN STATUS \| CLEAR`: the program's own update (`src/katana_app/update_verbs.hpp`, `docs/update.md`). In a build tree `STATUS` says `kind=development` and `CHECK` says `update=unsupported` without asking any server | yes; `APPLY CONFIRM` must be the last line of a run | yes, `CHECK`, `DOWNLOAD` and `APPLY` as background jobs; a headless window answers `CHECK` and `STATUS` only |
+| `UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`, `BLOCKED CLEAR`, `SET AUTO`, `TOKEN STATUS \| CLEAR`: the program's own update (`src/katana_app/update_verbs.hpp`, `docs/update.md`). In a build tree `STATUS` says `kind=development` and `CHECK` says `update=unsupported` without asking any server | yes; `APPLY CONFIRM` must be the last line of a run | yes, `CHECK`, `DOWNLOAD` and `APPLY` as background jobs; a headless window answers `CHECK` and `STATUS` only |
 | `ZOOM`, `GRID`, `SNAP`, `QUIT` | `QUIT` only | yes |
 | a catalogue tool's alias alone (`L`, `TRIM`, `STRETCH`) | no: "unknown command" where the interpreter has no verb of that name | starts the tool (`docs/tools.md`) |
 
@@ -581,13 +581,28 @@ build:
 - **The fourth program.** `katana_updater` (`src/katana_updater`) links
   `katana_update` and `katana_core` and nothing else, with `-static` under
   MinGW, which takes libstdc++, libgcc and libwinpthread in. The test
-  `katana_updater_imports_only_os_dlls` reads its import table. It is
+  `katana_updater_imports_only_os_dlls` reads its import table. That
+  listing speaks for what the helper CARRIES, and of the two libraries that
+  is libcrypto alone: the helper checks every signature itself and never
+  inflates - a release is inflated when it is staged, by the program that
+  downloads it - so the linker takes nothing of zlib into it, and its check
+  would pass on a link line that named zlib's DLL. For zlib the evidence is
+  `katana_update_link_probe` (`tests/update/link_probe.cpp`), which uses
+  Ed25519, raw inflate and crc32 through the same third-party target and
+  the same link options, and whose own import table is read
+  (`katana_update_link_probe_imports_only_os_dlls`). The helper is
   installed on Windows and Linux and not on macOS, where nothing is updated
   in place.
 - **Where a copy asks.** `KATANA_UPDATE_REPO` and `KATANA_UPDATE_FEED`
   ("Options") are compiled into the library, with the version from
   `project(Katana VERSION ...)`: `katana_cli` has no version of its own, so
-  the library carries one for every program.
+  the library carries one for every program. The default repository,
+  `kjarada/Katana`, is public, so the default feed is read with no token; a
+  build that names a PRIVATE repository can still be updated by a person
+  who holds a read-only token for it (`docs/update.md`, "The access
+  token"). That version is also the floor against going back: an installed
+  copy's version is the higher of its install record's and the program's
+  own (`docs/update.md`, "The installed version").
 - **The keys.** `cmake/KatanaUpdateKeys.cmake`, included by the root
   `CMakeLists.txt`, holds the two public keys every program verifies a
   release with; they reach one source file, `src/katana_update/trust.cpp`.
@@ -599,8 +614,16 @@ build:
   `python tools/update_keytool.py pub`, never by hand.
 - **What makes a copy a release.** `share/katana/install.json`, which names
   the package's target (`win64`, `win-arm64`, `linux-x86_64` ...), is written
-  by a script CPack runs on the tree it stages
-  (`cmake/KatanaPackaging.cmake`, "install.json") and by nothing else. So a
+  by a script CPack runs on the tree it stages and by nothing else. That
+  script is `<build>/KatanaInstallRecord.cmake`, which is no file of the
+  repository: `cmake/KatanaPackaging.cmake` ("install.json") writes it into
+  the build directory at configure time and lists it first among CPack's
+  pre-build scripts, before the signing script, so that what is signed
+  already holds the record. A macOS bundle was sealed ad hoc by the install
+  before either ran, and a file added afterwards is one that seal does not
+  list; so `cmake/KatanaSign.cmake` seals the bundle again, ad hoc, when no
+  Developer ID is named - the one thing it does with no certificate (since
+  2026-10-14, reasoned from the files and not yet run on a Mac). So a
   build tree, `cmake --install` and the `bundle` target are DEVELOPMENT
   copies, which never check for an update and are never updated; only what
   `package` makes is a release. `tools/check_install_rules.cmake` holds

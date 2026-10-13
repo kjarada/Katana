@@ -186,6 +186,10 @@ Three consequences follow from the same rule:
   interfaces of the layer (`FsOps`, `Launcher`, `ProcessOps`, `RegistryOps`,
   `CredentialStore`), with one real implementation per platform under
   `src/`, so that the swap and its recovery are driven in process by tests.
+  One question about the machine has no interface: whether the process
+  was started as administrator (`update::processIsElevated`). It is asked
+  once, when a program's update context is made, and handed on as a member
+  of that context (`UpdateContext::elevated`), which is what a test sets.
 - **Its two libraries stay behind `src/`** like every other (Rule 4):
   OpenSSL's libcrypto for the signature and zlib for inflating, both linked
   statically on Windows so that the helper imports only the operating
@@ -393,7 +397,10 @@ the program, and not static linking" moved there from this document.
 | Project from a newer Katana | refused with `Unsupported` rather than guessed at |
 | Third-party library throws | converted to a `Result` at the module boundary |
 | An update of the program interrupted by a crash or a power cut | `update::recover`, the first thing `main()` does in every program, has the old version's files put back before anything else is read (`docs/update.md`, "Recovery") |
-| An updated program that does not start | the update helper puts every file back, starts the old version again, and that release is not offered a second time (`docs/update.md`, "The swap") |
+| An updated program that does not start | the update helper puts every file back, starts the old version again, and that release is neither offered nor applied again until the person asks for it (`UPDATE BLOCKED CLEAR`; `docs/update.md`, "The swap") |
+| The update helper itself dies while the new version is proving that it starts | the tree is a whole new version that nothing has confirmed, and no program's recovery touches it. It is settled from what is on the disk, under the update lock, by `katana_updater --recover` at the next logon, by a window of that version at its first idle turn, or by the next update: confirmed on the new version's marker; put back only by `--recover`, and only when the files are still that release's and no program of the install is running; otherwise left for a start that can decide (`docs/update.md`, "An update whose helper died during the health check") |
+| A program of the install is started while an update is being prepared | the helper lists the running programs a second time, after its plan and before the first file moves, and gives way: nothing is touched and the download is kept (`docs/update.md`, "The swap", step 4) |
+| Katana was started as administrator and asked to install an update | refused before the helper is copied (`reason=elevated`): the helper would run with those rights from a folder ordinary programs can write. Started the ordinary way it installs the release, which stays downloaded (`docs/update.md`, "The three kinds") |
 
 ## Section and phase numbers in older comments
 

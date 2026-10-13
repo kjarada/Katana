@@ -407,6 +407,92 @@ it claims: a crash at every k, at the operation numbered k, and crashes
 that left the journal in each state a swap passes through. The loops are
 deterministic: the fault is the k-th operation, not a moment in time.
 
+**An update whose helper died during the health check**
+(`tests/update/test_recover.cpp`, the suites `SettleUnproved`, `SettleLoops`,
+`ConfirmStarted` and `RecoverSuperseded`; `docs/update.md` has the rule under
+that name). The state is never written by hand: the fixture update is applied
+on a `FaultFs` that dies before the operation a clean run's log names as the
+`HEALTHY` append, which leaves what a helper that lost power leaves. The
+expectations are the specification's, worked out by hand:
+
+- WHICH TREE an install must end as: the new version's, built from the
+  release in a folder of its own, or the old one's, the snapshot taken before
+  the update - never what the code left behind;
+- "nothing written" is zero changes counted by a `FaultFs` under the code,
+  and the install (its `.update` included) and the per-user folder compared
+  entry by entry, byte by byte;
+- the ORDER of the registry against the disk is read off a registry double
+  that notes, at each call, how many changes to the disk had been made by
+  then (`TheLogonNetIsPutBackFirstAndTheVersionIsRewrittenBeforeTheRecordIsWritten`);
+- the `RunOnce` command is written out as the swap's step 4 gives it.
+
+What they hold: with its marker there the update is settled healthy, the
+per-user folder only read, and a second run changes nothing
+(`AnUpdateWhoseMarkerIsThereIsSettledHealthyAndThePerUserFolderIsOnlyRead`);
+with the marker gone and nobody running it is put back, and nothing per user
+says so (`AnUpdateWithNoMarkerAndNobodyRunningIsPutBackAndNothingPerUserSaysSo`);
+a program found by the first scan, or only by the second, a scan that fails,
+or one file of the new version overwritten each leave the journal, the tree
+and the folder as they were, with the logon entry registered
+(`NothingIsPutBackUnderARunningProgramOrOverFilesThatAreNoLongerThatRelease`);
+a held lock is a live helper, and then not even the registry is written
+(`AHeldLockIsALiveHelperAndNothingIsWrittenNotEvenTheRunOnceEntry`); a marker
+missing from another per-user folder, old files that are not all kept, a
+lock that cannot be opened and a folder that cannot be read through decide
+nothing. The window's half is `detail::confirmStartedWith`
+(`TheWindowOfTheNewVersionSettlesTheUpdateHealthyAndClearsWhatTheDeadHelperLeft`,
+`AHeldLockIsALiveHelperTheWindowAsksOnceAndChangesNothing`), and the next
+swap's is step 1 of the swap itself
+(`AnEarlierUpdateWhoseMarkerIsThereIsSettledFirstWhateverBecomesOfTheNextOne`,
+`AnEarlierUpdateThatWasNeverSaidToStartStopsTheNextOneBeforeItTouchesAnything`).
+That a program's own recovery leaves such an update exactly as it is, with
+no lock and nothing started, is `AnUpdateThatWasNeverSaidToStartIsLeftExactlyAsItIsWithNoLockAndNoHelper`.
+
+Three more loops, of the same kind as the fault loops, die before EVERY
+change to the disk of one settlement and then do what the machine does next
+- a recovery and a settlement on a file system that works - and require the
+whole tree to be one version's: of a healthy settlement always the new one
+(`DyingBeforeEveryChangeOfAHealthySettlementAlwaysEndsAtTheNewTree`), of a
+putting back always the old one
+(`DyingBeforeEveryChangeOfAPuttingBackAlwaysEndsAtTheOldTree`), and of a
+window's confirming the old one while its marker is not yet written and the
+new one from then on
+(`DyingBeforeEveryChangeOfAWindowsConfirmingEndsAtTheOldTreeBeforeItsMarkerAndTheNewOneAfter`).
+Each requires a death at every k, at operation k.
+
+The same through the REAL helper (`tests/update/test_helper.cpp`):
+`katana_updater_test` is killed with `--die-at` before its `HEALTHY` append,
+after a real program stood in for the new version and wrote the marker; then
+`--recover` is run as a logon runs it, the `RunOnce` entry consumed first.
+It exits 0 with `detail=confirmed:`, the tree the new version's, the
+per-user folder unchanged and the entry gone
+(`AnUpdateWhoseHelperDiedAfterTheNewVersionSaidItStartsIsConfirmedByRecoverWhichOnlyReadsThePerUserFolder`);
+with the marker deleted it puts the old version back and writes no
+`last.json` and no `state.json`
+(`AnUpdateWhoseNewVersionNeverSaidItStartsIsPutBackByRecoverWhenNothingOfTheInstallIsRunning`);
+with a stub running from the install it changes nothing and the entry is the
+command again
+(`RecoverPutsNothingBackUnderARunningProgramAndPutsTheLogonEntryBackForTheNextTry`);
+and killed before its own first change it had put the entry back already
+(`ARecoverThatDiesWhileItSettlesHadPutTheLogonEntryBackFirstAndTheNextOneFinishes`).
+What was there before holds unchanged, which is the point of leaving
+recovery itself alone: `EveryInterruptedStateIsPutBackAndEveryFinishedOneIsLeftAlone`,
+the three fault loops, and
+`RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`.
+
+**The second scan** has a process seam whose answers are a list, one for
+each time it is asked, so that the second can differ from the first
+(`tests/update/test_apply.cpp`, suite `ApplyWait`): nobody and then
+`katana_cli` is `blocked` with the install untouched, the download kept and
+no `RunOnce` entry ever registered, and the Retry then installs from that
+same stage
+(`AProgramStartedWhileThePlanWasMadeBlocksTheUpdateAndTheInstallAndTheDownloadAreAsBefore`);
+the PLAN group is the last change to the disk before the second question
+and `COMMITTING` the first after it
+(`TheSecondLookIsTheLastThingBeforeTheJournalSaysCommitting`); and a scan
+that gives no answer the second time is a refusal, not "nobody"
+(`AScanThatFailsAtTheSecondLookIsARefusalTooAndNothingIsTouched`).
+
 **The fake feed** (`tools/update_fake_feed.py`). A release host for the
 tests, of the standard library alone: it serves one folder - a manifest, its
 signature, the update zip - on `127.0.0.1`, port 0, and on a second port
@@ -484,7 +570,12 @@ that cannot see a violation passes as quietly as one that finds none:
 - the helper's imports: `katana_updater_imports_only_os_dlls` reads the
   import table of the helper (Windows), and
   `updater_import_check_names_the_gcc_runtime` runs the same check on the
-  listing of a program that is not static, which it must name;
+  listing of a program that is not static, which it must name. The helper's
+  listing speaks for libcrypto, which it carries, and not for zlib, of
+  which the linker takes nothing into a program that never inflates; the
+  whole link line is held by the same check on `katana_update_link_probe`,
+  which uses both (`katana_update_link_probe_imports_only_os_dlls`,
+  `docs/building.md`, "The update layer");
 - no test key in what ships: `update_test_keys_are_in_no_shipped_program`
   looks for the test keys in the bytes of the four programs, and the two
   test executables that DO link them are its controls;
@@ -501,13 +592,61 @@ that cannot see a violation passes as quietly as one that finds none:
 install and the signed fixtures (`tests/app/test_update_verbs.cpp`, suite
 `UpdateVerbs`); `katana_cli` and the window are started from a build tree,
 which is a development copy and asks no server
-(`src/katana_app/update_cli.cmake`, the `cli.update_*` cases;
-`tests/update/headless/update_window.cmake`); the dialog, its sentences and
-the window's decisions are widget tests
-(`tests/qt_widgets/test_update_dialog.cpp`). Each run of a program is given
-an update state folder of the tests' own (`KATANA_UPDATE_STATE_DIR`), and a
-token of the tests' own or none, so that nothing of whoever runs the suite
-is read or written.
+(`src/katana_app/update_cli.cmake` and `src/katana_app/update_blocked.cmake`,
+the `cli.update_*` cases; `tests/update/headless/update_window.cmake`); the
+dialog, its sentences and the window's decisions are widget tests
+(`tests/qt_widgets/test_update_dialog.cpp`), and the Command Reference's
+Updates section is held to the verbs' own help
+(`tests/qt_widgets/test_command_reference.cpp`). Each run of a program is
+given an update state folder of the tests' own (`KATANA_UPDATE_STATE_DIR`),
+and a token of the tests' own or none, so that nothing of whoever runs the
+suite is read or written.
+
+Three things about a machine that a test must not take from the machine it
+runs on:
+
+- **How the suite was started.** `UPDATE APPLY CONFIRM` is refused in a
+  Katana that was started as administrator, and whether the suite's own
+  process is one is not for a test to assume. The verbs' tests SET the
+  context's member (`UpdateContext::elevated`:
+  `ApplyIsRefusedInAKatanaStartedAsAdministratorBeforeAnyHelperIsCopied`),
+  and the one decision of `update::processIsElevated` - which kind of token
+  is a yes - is a function of its own to which every kind is put
+  (`OnlyTheElevatedHalfOfASplitTokenIsAYes`). What holds of every run is
+  held of this one: the answer is steady, and never "yes" for a token
+  Windows itself calls not elevated
+  (`TheAnswerIsSteadyAndIsNeverYesForATokenWindowsCallsNotElevated`). A
+  "yes" from the system is seen only by a suite that holds the elevated
+  half of a split token.
+- **Which version the suite was built as.** The installed version is the
+  higher of the install record's and the program's own, so what
+  `update::readInstall` answers depends on the build. The rule is therefore
+  shown through `detail::readInstallAs`, the same reading with the
+  program's version handed in, for a program below, at and above a record
+  (`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`,
+  `AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`); the
+  cases that read with this build's own version place their record by
+  `KATANA_EXPECTED_VERSION`, which the build hands the suite from
+  `project(Katana VERSION ...)`. The verbs' tests that read the fixtures'
+  record of 0.9.0 through this program say so and stop being true when the
+  project's version passes it
+  (`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords` asserts the
+  premise first).
+- **What the person kept.** `UPDATE BLOCKED CLEAR` is run by `katana_cli`
+  against a state file a CMake script wrote by hand - two releases blocked,
+  a version skipped, the switch off, a time of the last check - and the
+  file is read back with CMake's own JSON reader, not by Katana
+  (`cli.update_blocked_state_is_written_with_two_releases_blocked`,
+  `cli.update_blocked_clear_says_none_and_keeps_the_other_settings`,
+  `cli.update_blocked_clear_left_the_state_file_with_an_empty_list`). That
+  a blocked release is then offered and applied again is the verbs' own
+  test, on a scratch install and the fake transport
+  (`BlockedClearEmptiesTheListAndTheNextCheckOffersTheReleaseAgain`,
+  `AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseThatWasPutBack`);
+  and the button in Settings > Updates is pressed in the real window, where
+  the command log shows that one line and the status the verbs' refusal
+  for a headless run
+  (`qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`).
 
 **Where nothing is installed.** On Linux and macOS the swap is not written,
 and what is held there is the refusal: `tests/update/test_platform.cpp`, and
@@ -534,6 +673,18 @@ What no test covers:
   cannot be given a test key, which is the point of them; so the few lines
   that only they have - the window's close-and-apply, `katana_cli` starting
   the helper - are exercised by a release and by no test.
+- **The window's call that confirms an update whose helper died.** Whether a
+  window may confirm is a function with a test
+  (`AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled`), and
+  what confirming does is the engine's, tested with its seams
+  (`ConfirmStarted`). The call between them - `UpdateWorkbench::start`'s
+  first idle turn, its fresh read of the install record and its twelve
+  askings while a helper holds the lock - is reached by neither a build
+  tree nor a headless run, and so by an installed copy alone. The same is
+  true of `main()` saying that the helper could not be started: which runs
+  are shown a message box is tested
+  (`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`), that
+  `main()` asks it and says the rest on stderr is not.
 - **GitHub itself** (`docs/update.md`, "To verify on first release").
 
 ## Benchmarks
