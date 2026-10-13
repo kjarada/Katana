@@ -93,7 +93,7 @@ class Colours(unittest.TestCase):
         colours = parity.Colours(document(colours={"Probe-Ink": "#112233"}))
         self.assertEqual(colours.state("probe ink"), "known")
         self.assertEqual(colours.state("Light Pink"), "known")
-        self.assertEqual(colours.state("pen 018"), "unknown")
+        self.assertEqual(colours.state("elder umber"), "unknown")
         self.assertEqual(colours.state(""), "absent")
 
 
@@ -233,7 +233,7 @@ class FieldsMerged(unittest.TestCase):
 
 
 class UnknownColour(unittest.TestCase):
-    reference = [feature("AB*", colour="pen 018")]
+    reference = [feature("AB*", colour="elder umber")]
 
     def test_replacing_a_colour_that_resolves_to_nothing_needs_its_exception(self):
         report = run(self.reference, [feature("AB*")])

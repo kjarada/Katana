@@ -10,8 +10,8 @@ and WORDS is meant to be Katana's own, and this script is the scan that holds th
 files with the standard `json` module, shares no code with Katana, and compares what a person could copy:
 
   definition names    a linestyle or symbol name EQUAL to one of the reference's: the same letters and digits in
-                      the same order, whatever the case, the blanks and the punctuation (`Flag Pole`, `flag-pole`
-                      and `Flagpole` are one name). A name is compared three ways, each counted apart: with the
+                      the same order, whatever the case, the blanks and the punctuation (`Stone Line`, `stone-line`
+                      and `Stoneline` are one name). A name is compared three ways, each counted apart: with the
                       reference's definition names whole; with those names less their LEAD-IN, the word of
                       capitals a reference may put before a name, with or without a single capital before that
                       (`E WALL Stone Line` and `WALL Stone Line` are both also `Stone Line`); and with the
