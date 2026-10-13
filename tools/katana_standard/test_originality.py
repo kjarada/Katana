@@ -191,6 +191,96 @@ class OneThingCopied(unittest.TestCase):
         self.assertEqual(result["definitions"], (2, 2, 1))   # one of the candidate's two is left out
 
 
+class WhatTheReferenceCallsAThing(unittest.TestCase):
+    """A definition name of the candidate against everything the reference calls a thing (its definition names
+    less a lead-in, and its legend labels), a legend label of the candidate against the reference's definition
+    names, and what "equal" means for all of them."""
+
+    def scan(self, change_reference, change_candidate):
+        reference, candidate = elder(), probe()
+        change_reference(reference)
+        change_candidate(candidate)
+        result = originality.scan(reference, candidate)
+        return failing(result), result
+
+    def test_a_name_is_found_under_the_reference_s_lead_in_with_or_without_its_single_capital(self):
+        for theirs in ("E WALL Stone Line", "WALL Stone Line", "E 12 Stone Line"):
+            found, _ = self.scan(lambda r: r["linestyles"][0].update(name=theirs),
+                                 lambda c: c["linestyles"][0].update(name="Stone Line"))
+            self.assertEqual(found, {"definition names and reference names less their lead-in": ["Stone Line"]},
+                             theirs)
+
+    def test_two_lead_ins_are_taken_off_one_after_the_other(self):
+        # "AB CD Peg" is also "CD Peg" and "Peg".
+        for ours in ("Peg", "Cd Peg"):
+            found, _ = self.scan(lambda r: r["symbols"][0].update(name="AB CD Peg"),
+                                 lambda c: c["symbols"][0].update(name=ours))
+            self.assertEqual(found, {"definition names and reference names less their lead-in": [ours]}, ours)
+
+    def test_a_word_in_mixed_case_is_no_lead_in_and_a_name_of_one_word_has_none(self):
+        # "Elder Line" loses nothing, so "Line" alone is no name of the reference; nor is "MARK" less than itself.
+        found, _ = self.scan(lambda r: r["symbols"][0].update(name="MARK"),
+                             lambda c: c["linestyles"][0].update(name="Line"))
+        self.assertEqual(found, {})
+        self.assertEqual(originality.without_lead_ins("Elder Line"), [])
+        self.assertEqual(originality.without_lead_ins("MARK"), [])
+        self.assertEqual(originality.without_lead_ins("A B Line"), [])   # one capital is not a word of capitals
+        self.assertEqual(originality.without_lead_ins("E WALL Stone Line"), ["Stone Line"])
+        self.assertEqual(originality.without_lead_ins("AB CD Peg"), ["CD Peg", "Peg"])
+
+    def test_a_definition_named_after_the_reference_s_legend_label_is_found(self):
+        # "[AB] Stone wall face" and "Pit lid" are the reference's labels: a symbol called either is called what
+        # the reference calls the thing.
+        for ours in ("Stone Wall Face", "Pit Lid"):
+            found, _ = self.scan(lambda r: None, lambda c: c["symbols"][0].update(name=ours))
+            self.assertEqual(found, {"definition names and reference legend labels": [ours]}, ours)
+
+    def test_a_legend_label_that_is_a_definition_name_of_the_reference_is_found(self):
+        found, _ = self.scan(lambda r: None, lambda c: c["codes"][2].update(comment="Elder mark"))
+        self.assertEqual(found, {"legend labels and reference definition names": ["Elder mark"]})
+        # And one that is a name of the reference less its lead-in.
+        found, _ = self.scan(lambda r: r["linestyles"][0].update(name="E WALL Stone Line"),
+                             lambda c: c["codes"][2].update(comment="Stone line"))
+        self.assertEqual(found, {"legend labels and reference definition names": ["Stone line"]})
+
+    def test_names_are_equal_whatever_their_blanks_and_punctuation(self):
+        # A hyphen, a comma, a stop or a missing blank does not make a name another name.
+        for ours in ("Elder-Line", "Elder, Line", "Elderline", "ELDER_LINE."):
+            found, _ = self.scan(lambda r: None, lambda c: c["linestyles"][0].update(name=ours))
+            self.assertEqual(found, {"definition names": [ours]}, ours)
+        found, _ = self.scan(lambda r: None, lambda c: c["codes"][0].update(comment="Stone-wall face."))
+        self.assertEqual(found, {"legend labels": ["Stone-wall face."]})
+        found, _ = self.scan(lambda r: None, lambda c: c["codes"][2].update(layer="Elder-Mark"))
+        self.assertEqual(found, {"layer paths": ["Elder-Mark"]})
+
+    def test_a_label_s_lead_in_of_up_to_eight_capitals_and_digits_is_taken_off(self):
+        for theirs in ("E WALLFACE Stone coping", "[PQ] E W2 Stone coping", "[PQ]Stone coping"):
+            found, _ = self.scan(lambda r: r["codes"][2].update(comment=theirs),
+                                 lambda c: c["codes"][2].update(comment="Stone coping"))
+            self.assertEqual(found, {"legend labels": ["Stone coping"]}, theirs)
+        # Nine capitals are a word of the label and not a lead-in, so the two labels differ.
+        found, _ = self.scan(lambda r: r["codes"][2].update(comment="E WALLFACES Stone coping"),
+                             lambda c: c["codes"][2].update(comment="Stone coping"))
+        self.assertEqual(found, {})
+
+    def test_a_name_near_one_the_reference_gives_is_listed_and_does_not_fail(self):
+        # "stone lines" against "stone line": 10 characters in common of 11 and 10, a ratio of 20 / 21 = 0.95.
+        found, result = self.scan(lambda r: r["linestyles"][0].update(name="E WALL Stone Line"),
+                                  lambda c: c["linestyles"][0].update(name="Stone Lines"))
+        self.assertEqual(found, {})
+        self.assertEqual(result["near_names"], ["Stone Lines"])
+        # Near a legend label of the reference: "pit lids" against "pit lid", 14 / 15 = 0.93.
+        found, result = self.scan(lambda r: None, lambda c: c["symbols"][0].update(name="Pit Lids"))
+        self.assertEqual(found, {})
+        self.assertEqual(result["near_names"], ["Pit Lids"])
+        # An equal name is counted as equal and is not listed again as near; nor is the untouched pair's.
+        _, result = self.scan(lambda r: None, lambda c: c["symbols"][0].update(name="Pit Lid"))
+        self.assertEqual(result["near_names"], [])
+        _, result = self.scan(lambda r: None, lambda c: None)
+        self.assertEqual(result["near_names"], [])
+        self.assertEqual(result["near_labels"], [])
+
+
 class CommandLine(unittest.TestCase):
     def run_main(self, reference, candidate, *options):
         with tempfile.TemporaryDirectory() as folder:

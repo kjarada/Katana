@@ -8,11 +8,20 @@ coded for either draws in both (docs/katana_standard.md, "What is shared and wha
 is meant to be Katana's own, and this script is the scan that holds that to account. It reads both files with the
 standard `json` module, shares no code with Katana, and compares what a person could copy:
 
-  definition names    a linestyle or symbol name equal after folding case, blanks and punctuation
-  group paths         a definition's group, and a rule's group, equal after folding
-  layer paths         a rule's layer
-  legend labels       a rule's comment, with the reference's own "[KEY]" and "E XXXX" lead-ins taken off
-  colour names        a name in the colour table
+  definition names    a linestyle or symbol name EQUAL to one of the reference's: the same letters and digits in
+                      the same order, whatever the case, the blanks and the punctuation (`Flag Pole`, `flag-pole`
+                      and `Flagpole` are one name). A name is compared three ways, each counted apart: with the
+                      reference's definition names whole; with those names less their LEAD-IN, the word of
+                      capitals a reference may put before a name, with or without a single capital before that
+                      (`E WALL Stone Line` and `WALL Stone Line` are both also `Stone Line`); and with the
+                      reference's legend labels, since a symbol named after the other library's label for the
+                      thing is that library's name for it as much as one named after its symbol
+  group paths         a definition's group, and a rule's group, equal in the same sense
+  layer paths         a rule's layer, likewise
+  legend labels       a rule's comment, equal in the same sense, with the reference's own "[KEY]" and "E XXXX"
+                      lead-ins taken off; and, counted apart, a comment that is one of the reference's definition
+                      names, whole or less its lead-in
+  colour names        a name in the colour table, likewise
   colour values       a colour VALUE equal to one the reference draws in: a value of its table, or the value of a
                       standard colour name one of its rules uses (`white`, `red`: the 27 names a Katana file may
                       use without a table). One value is excused and counted apart: pure white, when it is the
@@ -25,7 +34,9 @@ standard `json` module, shares no code with Katana, and compares what a person c
   stroke lists        a definition whose strokes equal one of the reference's: exactly; after moving the first
                       point to the origin (translated); or after also scaling to a unit box (scaled). A list of
                       five strokes or fewer (a dash, a plus, a square) is left out: any library draws those
-  near names          a definition name or a legend label at least 0.9 alike (difflib), listed to --limit
+  near names          a definition name at least 0.9 alike (difflib) to a reference definition name, to one less
+                      its lead-in or to a reference legend label, and a legend label as near to any of those,
+                      without being equal to it; listed to --limit
   same-key labels     how many of the candidate's legend labels are at least 0.85 like the reference's label for
                       the SAME key. Two libraries that name one real thing (a give way line, a sewage pumping
                       station) use the trade's words for it, so this is a figure to read and not a failure
@@ -61,7 +72,15 @@ def load(path):
 
 
 def fold(text):
-    return re.sub(r"[\s_\-/]+", " ", text.strip().lower())
+    """The words of a name: lower case, and every run of anything but a letter or a digit one blank. What the
+    likeness of two names (difflib) is measured on."""
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def squeeze(text):
+    """The letters and digits of a name and nothing else: two names are EQUAL when these are, so a blank, a
+    hyphen or a comma more or less does not make a name another name."""
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
 def fold_colour(name):
@@ -71,9 +90,26 @@ def fold_colour(name):
 
 
 def clean_label(text):
+    """A reference legend label less its lead-ins: a "[KEY]" in brackets, then a single capital and a word of two
+    to eight capitals and digits ("[AB] E WALLS Stone wall face" is "Stone wall face")."""
     text = re.sub(r"^\[[^\]]*\]\s*", "", text.strip())
-    text = re.sub(r"^[A-Z]\s+[A-Z]{2,5}\s+", "", text)
-    return fold(text)
+    return re.sub(r"^[A-Z]\s+[A-Z0-9]{2,8}\s+", "", text)
+
+
+LEAD_IN = re.compile(r"^(?:[A-Z]\s+)?[A-Z0-9]{2,}\s+(?=\S)")
+
+
+def without_lead_ins(name):
+    """Every shorter form of a reference definition name that taking a lead-in off its front gives: a word of
+    two or more capitals and digits, with or without a single capital before it, when more follows. "E WALL Stone
+    Line" gives ["Stone Line"], "AB CD Peg" gives ["CD Peg", "Peg"], and "Stone Line" gives nothing."""
+    out, rest = [], name.strip()
+    while True:
+        shorter = LEAD_IN.sub("", rest, count=1)
+        if shorter == rest:
+            return out
+        out.append(shorter)
+        rest = shorter
 
 
 def definitions(document):
@@ -169,24 +205,33 @@ def scan(reference, candidate):
     names that are also the reference's (every list is to be empty); `excused` is the candidate's one white;
     `near_names`, `near_labels` and `same_key_labels` are figures to read; `failing` is the sum of `exact`."""
     exact = {}
-    ref_names = {fold(d["name"]) for d in definitions(reference)}
-    exact["definition names"] = [d["name"] for d in definitions(candidate) if fold(d["name"]) in ref_names]
+    # What the reference calls things: its definition names whole, those names less a lead-in, and its legend
+    # labels. A name of the candidate is compared with all three, and so is a label of it.
+    ref_names = {squeeze(d["name"]) for d in definitions(reference)} - {""}
+    ref_tails = {squeeze(t) for d in definitions(reference) for t in without_lead_ins(d["name"])} - ref_names - {""}
+    ref_labels = {squeeze(clean_label(r["comment"])) for r in rules(reference) if r.get("comment")} - {""}
+    cand_names = [d["name"] for d in definitions(candidate)]
+    cand_labels = sorted({r["comment"] for r in rules(candidate) if r.get("comment")})
+    exact["definition names"] = [n for n in cand_names if squeeze(n) in ref_names]
+    exact["definition names and reference names less their lead-in"] = [n for n in cand_names
+                                                                        if squeeze(n) in ref_tails]
+    exact["definition names and reference legend labels"] = [n for n in cand_names if squeeze(n) in ref_labels]
 
-    ref_groups = ({fold(d.get("group", "")) for d in definitions(reference)}
-                  | {fold(r.get("group", "")) for r in rules(reference)})
+    ref_groups = ({squeeze(d.get("group", "")) for d in definitions(reference)}
+                  | {squeeze(r.get("group", "")) for r in rules(reference)})
     cand_groups = {d.get("group", "") for d in definitions(candidate)} | {r.get("group", "") for r in rules(candidate)}
-    exact["group paths"] = sorted(g for g in cand_groups if g and fold(g) in ref_groups)
+    exact["group paths"] = sorted(g for g in cand_groups if g and squeeze(g) in ref_groups)
 
-    ref_layers = {fold(r["layer"]) for r in rules(reference) if r.get("layer")}
+    ref_layers = {squeeze(r["layer"]) for r in rules(reference) if r.get("layer")}
     cand_layers = {r["layer"] for r in rules(candidate) if r.get("layer")}
-    exact["layer paths"] = sorted(layer for layer in cand_layers if fold(layer) in ref_layers)
+    exact["layer paths"] = sorted(layer for layer in cand_layers if squeeze(layer) in ref_layers)
 
-    ref_labels = {clean_label(r["comment"]) for r in rules(reference) if r.get("comment")}
-    cand_labels = {r["comment"] for r in rules(candidate) if r.get("comment")}
-    exact["legend labels"] = sorted(c for c in cand_labels if fold(c) in ref_labels)
+    exact["legend labels"] = [c for c in cand_labels if squeeze(c) in ref_labels]
+    exact["legend labels and reference definition names"] = [c for c in cand_labels
+                                                             if squeeze(c) in ref_names or squeeze(c) in ref_tails]
 
-    ref_colour_names = {fold(n) for n in reference.get("colours", {})}
-    exact["colour names"] = sorted(n for n in candidate.get("colours", {}) if fold(n) in ref_colour_names)
+    ref_colour_names = {squeeze(n) for n in reference.get("colours", {})}
+    exact["colour names"] = sorted(n for n in candidate.get("colours", {}) if squeeze(n) in ref_colour_names)
 
     # Pure white is excused for ONE colour of the candidate, its communications colour, and for no other.
     ref_values = colour_values(reference)
@@ -208,18 +253,24 @@ def scan(reference, candidate):
     exact["stroke lists, translated"] = [d["name"] for d in real(candidate) if translated(strokes_of(d)) in ref_trans]
     exact["stroke lists, scaled"] = [d["name"] for d in real(candidate) if scaled(strokes_of(d)) in ref_scaled]
 
-    ref_name_list = sorted(ref_names)
-    near_names = [d["name"] for d in definitions(candidate)
-                  if difflib.get_close_matches(fold(d["name"]), ref_name_list, n=1, cutoff=0.9)]
-    ref_label_list = sorted(ref_labels)
-    near_labels = [c for c in sorted(cand_labels)
-                   if fold(c) not in ref_labels and difflib.get_close_matches(fold(c), ref_label_list, n=1, cutoff=0.9)]
+    # Near and not equal: against everything the reference calls a thing, as words.
+    said = ({fold(d["name"]) for d in definitions(reference)}
+            | {fold(t) for d in definitions(reference) for t in without_lead_ins(d["name"])}
+            | {fold(clean_label(r["comment"])) for r in rules(reference) if r.get("comment")}) - {""}
+    said_list, said_squeezed = sorted(said), {squeeze(text) for text in said}
+
+    def near(text):
+        return (squeeze(text) not in said_squeezed
+                and bool(difflib.get_close_matches(fold(text), said_list, n=1, cutoff=0.9)))
+
+    near_names = [n for n in cand_names if near(n)]
+    near_labels = [c for c in cand_labels if near(c)]
 
     # The candidate's labels that are near the reference's label for the same key: read, not failed (see above).
     ref_label_of = {}
     for r in rules(reference):
         if r.get("comment"):
-            ref_label_of.setdefault(r["key"], set()).add(clean_label(r["comment"]))
+            ref_label_of.setdefault(r["key"], set()).add(fold(clean_label(r["comment"])))
     same_key = sorted({r["comment"] for r in rules(candidate) if r.get("comment")
                        for label in ref_label_of.get(r["key"], ())
                        if difflib.SequenceMatcher(None, label, fold(r["comment"])).ratio() >= 0.85})
