@@ -54,10 +54,18 @@
 //                     update=unsupported), install_record (install.json does
 //                     not read: update=unsupported), notify_only (available,
 //                     and installed by hand).
+//                     last_check is recorded when the feed ANSWERED - a
+//                     manifest verified: available, current or blocked - and
+//                     not for a check that could not read it, so that an
+//                     automatic check that failed is due again; nor for a
+//                     copy that asks nobody (unsupported).
 //   UPDATE STATUS     target=none for a development copy; last=none when no
 //                     apply's outcome is recorded. A development copy is
 //                     staged=none last=none whatever the update folder holds:
-//                     those are an install's, and it is none.
+//                     those are an install's, and it is none. staged= is the
+//                     newest release in the update folder whose two records
+//                     (stage.hpp) verify and which is above what is installed;
+//                     APPLY applies that one.
 //   UPDATE DOWNLOAD CONFIRM
 //                     each progress line is
 //                         progress bytes=<done>/<total> files=<done>/<total>

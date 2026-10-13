@@ -1049,7 +1049,7 @@ std::optional<Result<UpdateReply>> refusedBySurface(UpdateSurface surface, Actio
             std::string(lineOf(action)) +
                 " is not katana_mcp's to run: an agent checks for an update and reads this "
                 "copy's status (katana_check_update) and no more, so that it never replaces "
-                "the program its client holds open. " +
+                "the program its client holds open; " +
                 kWhoRunsEveryLine + " runs it",
             "reason=mcp"));
     }
