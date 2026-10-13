@@ -134,11 +134,6 @@ struct FetchRequest {
     // the range).
     std::uint64_t rangeStart = 0;
     std::uint64_t rangeLength = 0;
-    // The signed size of the file a range is taken from (Manifest::payload->size): what a
-    // `Content-Range` total and a 200 that holds the whole file are held to
-    // (checkRangeResponse, ranges.hpp). Required (InvalidArgument without it) when
-    // rangeLength is not 0; ignored otherwise.
-    std::uint64_t payloadSize = 0;
     // The most bytes to accept; the transfer is abandoned the moment it is
     // exceeded. For a range this equals rangeLength, so a server that ignores
     // `Range` and starts the whole payload cannot flood the disk or memory.
@@ -155,6 +150,12 @@ struct FetchRequest {
     // The engine fills it in only for a request to that host. Never logged.
     std::string bearerToken;
     std::string userAgent;
+    // The signed size of the file a range is taken from (Manifest::payload->size): what a
+    // `Content-Range` total and a 200 that holds the whole file are held to
+    // (checkRangeResponse, ranges.hpp). Required (InvalidArgument without it) when
+    // rangeLength is not 0; ignored otherwise. Last in the struct: it was added after the
+    // members above were published, and a member added anywhere else would move them.
+    std::uint64_t payloadSize = 0;
 };
 
 using ProgressFn = std::function<void(std::uint64_t done, std::uint64_t total)>;
@@ -181,22 +182,33 @@ using Fetch = std::function<core::Result<std::string>(const FetchRequest&, std::
 //
 //   - Redirects are followed HERE, at most kMaxRedirects, and only to https addresses (an http
 //     address on the loopback only when the request itself began there: a feed of the owner's
-//     own, a test). The headers are REBUILT for every hop (hopHeaders): `Authorization: Bearer`
-//     only when the hop's address is exactly https://api.github.com, so the signed address of
-//     the storage host never receives the token, and `Range` and `Accept` on every hop.
+//     own, a test). The headers are REBUILT for every hop (hopHeaders): `Range` and `Accept` on
+//     every hop, and `Authorization: Bearer` on the FIRST hop alone, and there only when the
+//     address the engine asked for is exactly https://api.github.com. No address a server
+//     answered with is sent the token - not the signed address of the storage host, and not
+//     api.github.com itself when a redirect names it: a host that is trusted with a download is
+//     not thereby trusted to aim an authenticated request at a path of its choosing. (What that
+//     costs: a repository that was renamed answers on api.github.com with a 301 to its new
+//     address, and the hop that follows it carries no token, so a private repository then
+//     answers 404. The person corrects the repository's name; whether that redirect should carry
+//     the token is the owner's to rule, docs/update.md, "To verify on first release".)
 //   - A 404 is NotFound; any other status that is not 200/206 is FileImportFailure with the
 //     context `status=<n>`; a transport failure is `status=0` (the Fetch conventions above).
 //   - An answer whose content type is HTML is a web page standing in for the file (a captive
-//     portal, a proxy's sign-in): FileImportFailure, context `status=<n>; reason=html_page`.
+//     portal, a proxy's sign-in): FileImportFailure, context `status=<n>; reason=html_page`,
+//     however long the page is - also when it is longer than the request's maxBytes.
 //   - A ranged answer is held to checkRangeResponse (ranges.hpp): 206 with the Content-Range
 //     asked for, or a 200 that is the whole file when the whole file was asked for. A server that
 //     ignores `Range` and starts the whole payload is cut off at maxBytes (the hop function does
 //     that) and reported as Unsupported "this network does not allow partial downloads"; a 206
 //     that is another part of the file, or of a file of another length, or a body of another
-//     length, is FileImportFailure, context `status=206; reason=bad_range`.
-//   - No address with a query string, and no header, is ever put in an Error: displayUrl. And
-//     whatever the hop function put in an Error of its own, the request's token is not in the
-//     Error the Fetch returns: its message and context pass through redactToken (credential.hpp).
+//     length - one that ran past the range included - is FileImportFailure, context
+//     `status=206; reason=bad_range`.
+//   - No address with a query string, and no header, is ever put in an Error. The Fetch writes
+//     the context of every Error it returns itself, with the address through displayUrl; what
+//     the hop function said about a failure is passed on only after withoutQueries, so an
+//     address the hop quoted has lost its query too; and the request's token is in no word of
+//     it: message and context pass through redactToken (credential.hpp).
 //
 // THE CONTEXT OF AN ERROR of a Fetch is written in one order, so that the token of a failure is
 // read from the part this program wrote and never from an address or a server's words:
@@ -209,10 +221,21 @@ using Fetch = std::function<core::Result<std::string>(const FetchRequest&, std::
 
 inline constexpr std::string_view kApiHost = "api.github.com";
 inline constexpr int kMaxRedirects = 5;
-// What the hop function is given as the time for one request: a whole-body request is a few
-// kilobytes; a range is at most kRangeMaxLength (32 MiB), which a slow line takes minutes over.
+// What the hop function is given as the time for one request. A whole-body request is a few
+// kilobytes: kHopTimeoutSeconds. A range is given the time its length takes on a slow line -
+// mobile data at the edge of coverage, where a survey crew updates - and never less than
+// kRangeHopTimeoutSeconds: rangeHopTimeoutSeconds. A transfer that has stopped moving is ended
+// long before either by the hop's own low-speed limit; these bound one that only crawls.
 inline constexpr int kHopTimeoutSeconds = 60;
 inline constexpr int kRangeHopTimeoutSeconds = 600;
+inline constexpr std::uint64_t kSlowLineBytesPerSecond = 16 * 1024;
+inline constexpr int kMaxHopTimeoutSeconds = 4 * 60 * 60;
+
+// Seconds for one ranged request of `rangeLength` bytes: kHopTimeoutSeconds to get an answer
+// started plus the length at kSlowLineBytesPerSecond, rounded up - 60 + 2048 = 2108 s for the
+// largest merged range (32 MiB, ranges.hpp) - and at least kRangeHopTimeoutSeconds, at most
+// kMaxHopTimeoutSeconds (a member larger than a merged range is a range of its own, unsplit).
+[[nodiscard]] int rangeHopTimeoutSeconds(std::uint64_t rangeLength);
 
 // True for exactly `https://api.github.com` and a path or query after it, in any case: the
 // authority is the whole text up to the first '/', '?' or '#', so a user-info prefix
@@ -233,19 +256,33 @@ inline constexpr int kRangeHopTimeoutSeconds = 600;
 [[nodiscard]] core::Result<std::string> resolveRedirect(std::string_view from,
                                                         std::string_view location);
 
-// The request headers for one hop to `hopUrl`, "Name: value" each:
+// The request headers for one hop to `hopUrl`, "Name: value" each. `redirected` says how the
+// hop came about: false for the address the engine asked for (the first hop), true for one a
+// server answered with.
 //   Accept: <request.accept>                         when it is not empty
 //   Range: bytes=a-b                                  for a ranged request
-//   Authorization: Bearer <request.bearerToken>       only when the token is not empty AND
+//   Authorization: Bearer <request.bearerToken>       only when the token is not empty AND the
+//                                                     hop is not `redirected` AND
 //                                                     isApiGithubUrl(hopUrl)
 //   X-GitHub-Api-Version: 2022-11-28                  for a hop to api.github.com
 // The token is a value in the result and nowhere else; log nothing built from it.
 [[nodiscard]] std::vector<std::string> hopHeaders(const FetchRequest& request,
-                                                  std::string_view hopUrl);
+                                                  std::string_view hopUrl, bool redirected);
 
 // `url` without user-info, query and fragment: scheme://host/path, for an error context or a
 // log line. A signed storage address carries its signature in the query.
 [[nodiscard]] std::string displayUrl(std::string_view url);
+
+// `text` with the query and the fragment cut from every address written in it. Wherever "://"
+// stands, what follows up to the next blank, control character or byte outside ASCII is taken
+// for an address (none of those can be in one that went over the wire), and everything from its
+// first '?' or '#' to its end is dropped:
+//   "no answer from https://h/p?sig=S&se=1: timed out"  ->  "no answer from https://h/p timed out"
+// It is what the words of a hop function, or of the library under it, pass through before they
+// are put in an Error: they may quote the address they were given, whole or with some of its
+// query hidden, and the address a release redirects to is a signed one - all of its query is
+// the secret, under names no list of secret parameter names knows.
+[[nodiscard]] std::string withoutQueries(std::string_view text);
 
 // One request on the wire, redirects NOT followed.
 struct HttpHop {
@@ -263,11 +300,24 @@ struct HttpHopReply {
     std::string location;      // the Location header, empty when none
     std::string contentRange;  // the Content-Range header, empty when none
     std::string body;
+    // True when the body of a 200 or 206 passed HttpHop::maxBytes and the transfer was abandoned
+    // there. `body` is then not the answer (the hop of katana_app leaves it empty) and is never
+    // handed on; the status and the content type are still the answer's, and they are what tell
+    // a portal's long page (html_page) from a server that ignored `Range` (a 200:
+    // partial_downloads) from a 206 that ran past its range (bad_range).
+    bool overran = false;
 };
 
-// Errors of a hop: InvalidState when cancelled; Unsupported when the body passed maxBytes;
-// FileImportFailure with the context `status=0` for any failure to get an HTTP answer (no
-// connection, a certificate refused, a timeout); InvalidArgument for an address it cannot fetch.
+// Errors of a hop: InvalidState when cancelled; FileImportFailure for any failure to get an
+// HTTP answer (no connection, a certificate refused, a timeout); InvalidArgument for an address
+// it cannot fetch; Unsupported when the body passed maxBytes and the hop cannot say what the
+// answer was (one that can returns the reply with `overran` set, which is the better report).
+//
+// The context of a hop's Error is the hop's own words about the failure - `status=<n>` first
+// when it knows one, libcurl's sentence after it - and NOT the address: the Fetch writes the
+// address itself. No context of a hop is trusted to be free of one, all the same: the Fetch
+// keeps the leading status, and puts what follows it after its own address, through
+// withoutQueries (and the message likewise).
 using HopFn = std::function<core::Result<HttpHopReply>(const HttpHop&, std::stop_token,
                                                        ProgressFn)>;
 

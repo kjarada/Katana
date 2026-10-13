@@ -1,7 +1,8 @@
 // The feed (include/katana/update/feed.hpp): the configure-time defaults, the reader of a
 // release's asset list, and the transport's rules - the one place the access token is held to
 // "exactly https://api.github.com, on no redirect hop", the redirect limits, the portal and
-// range answers, and the guarantee that no error carries the token or a signed address.
+// range answers, the time a request is given, and the guarantee that no error carries the token
+// or the query of an address, whoever wrote its words.
 //
 // The addresses themselves are tested in test_contract.cpp (UpdateFeedAddresses), which no later
 // task replaces; this file does not repeat them.
@@ -351,7 +352,8 @@ TEST(HopHeaders, TheTokenIsOnTheApiHostAndOnNoOtherAddress)
     const FetchRequest request = rangedRequest();
     const std::string bearer = "Authorization: Bearer " + std::string(kSecretToken);
 
-    const auto api = hopHeaders(request, "https://api.github.com/repos/o/r/releases/assets/9");
+    const auto api = hopHeaders(request, "https://api.github.com/repos/o/r/releases/assets/9",
+                                /*redirected=*/false);
     EXPECT_TRUE(hasHeader(api, bearer));
     EXPECT_TRUE(hasHeader(api, "Accept: application/octet-stream"));
     EXPECT_TRUE(hasHeader(api, "Range: bytes=100-149")) << "inclusive last byte, RFC 9110 14.1.2";
@@ -366,15 +368,42 @@ TEST(HopHeaders, TheTokenIsOnTheApiHostAndOnNoOtherAddress)
              "https://api.github.com:8443/x",
              "http://127.0.0.1:8080/x",
          }) {
-        const auto other = hopHeaders(request, url);
-        EXPECT_FALSE(hasHeaderNamed(other, "Authorization")) << url;
-        EXPECT_FALSE(hasHeaderNamed(other, "X-GitHub-Api-Version")) << url;
-        // What the next hop still needs to get the same bytes.
-        EXPECT_TRUE(hasHeader(other, "Accept: application/octet-stream")) << url;
-        EXPECT_TRUE(hasHeader(other, "Range: bytes=100-149")) << url;
-        for (const std::string& header : other) {
+        // Whether the engine asked for the address itself or a server answered with it.
+        for (const bool redirected : {false, true}) {
+            const auto other = hopHeaders(request, url, redirected);
+            EXPECT_FALSE(hasHeaderNamed(other, "Authorization")) << url;
+            EXPECT_FALSE(hasHeaderNamed(other, "X-GitHub-Api-Version")) << url;
+            // What the next hop still needs to get the same bytes.
+            EXPECT_TRUE(hasHeader(other, "Accept: application/octet-stream")) << url;
+            EXPECT_TRUE(hasHeader(other, "Range: bytes=100-149")) << url;
+            for (const std::string& header : other) {
+                EXPECT_FALSE(contains(header, kSecretToken)) << url << ": " << header;
+            }
+        }
+    }
+}
+
+TEST(HopHeaders, AnAddressAServerAnsweredWithGetsNoTokenEvenWhenItIsTheApiHost)
+{
+    // The owner's ruling (S2) and the contract of FetchRequest::bearerToken: the token goes to
+    // exactly https://api.github.com and NEVER on a redirect hop. So the very address that
+    // carries it on the first hop carries none when a redirect is what named it.
+    const FetchRequest request = rangedRequest();
+    for (const std::string url : {
+             "https://api.github.com/repos/o/r/releases/assets/9",
+             "https://api.github.com/repositories/42/releases/assets/9",
+             "https://api.github.com/user",
+             "https://api.github.com",
+         }) {
+        const auto redirected = hopHeaders(request, url, /*redirected=*/true);
+        EXPECT_FALSE(hasHeaderNamed(redirected, "Authorization")) << url;
+        for (const std::string& header : redirected) {
             EXPECT_FALSE(contains(header, kSecretToken)) << url << ": " << header;
         }
+        // The rest of what a hop to the API is sent says nothing secret, and stays.
+        EXPECT_TRUE(hasHeader(redirected, "X-GitHub-Api-Version: 2022-11-28")) << url;
+        EXPECT_TRUE(hasHeader(redirected, "Accept: application/octet-stream")) << url;
+        EXPECT_TRUE(hasHeader(redirected, "Range: bytes=100-149")) << url;
     }
 }
 
@@ -382,7 +411,7 @@ TEST(HopHeaders, NoTokenMeansNoAuthorizationEvenOnTheApiHost)
 {
     FetchRequest request = rangedRequest();
     request.bearerToken.clear();
-    const auto api = hopHeaders(request, "https://api.github.com/x");
+    const auto api = hopHeaders(request, "https://api.github.com/x", /*redirected=*/false);
     EXPECT_FALSE(hasHeaderNamed(api, "Authorization"));
 }
 
@@ -391,7 +420,7 @@ TEST(HopHeaders, AWholeBodyRequestHasNoRangeAndAnEmptyAcceptIsOmitted)
     FetchRequest request;
     request.url = "https://github.com/x";
     request.maxBytes = 10;
-    const auto headers = hopHeaders(request, request.url);
+    const auto headers = hopHeaders(request, request.url, /*redirected=*/false);
     EXPECT_TRUE(headers.empty());
 }
 
@@ -404,6 +433,72 @@ TEST(DisplayUrl, DropsTheQueryTheFragmentAndTheUserInfo)
     EXPECT_EQ(displayUrl("not an address"), "(not an address)");
     const std::string longPath = "https://example.org/" + std::string(500, 'a');
     EXPECT_LT(displayUrl(longPath).size(), 220u) << "bounded: it is for a person to read";
+}
+
+TEST(WithoutQueries, EveryAddressInATextLosesItsQueryAndItsFragment)
+{
+    // Written out by hand from the rule in feed.hpp: from "://" an address runs to the next
+    // blank, control character or byte outside ASCII, and is cut at its first '?' or '#'.
+    EXPECT_EQ(withoutQueries("https://h/p?sp=r&sig=S"), "https://h/p");
+    EXPECT_EQ(withoutQueries("no answer from https://h/p?sig=S&se=1: timed out"),
+              "no answer from https://h/p timed out");
+    EXPECT_EQ(withoutQueries("https://h/p#frag end"), "https://h/p end");
+    EXPECT_EQ(withoutQueries("a https://x/y b http://z/w?k=v c"), "a https://x/y b http://z/w c");
+    EXPECT_EQ(withoutQueries("https://h/p?a=1\nhttps://g/q?b=2"), "https://h/p\nhttps://g/q");
+    // What a list of secret parameter names does not know is cut all the same, and so is a
+    // query some of whose values were already hidden.
+    EXPECT_EQ(withoutQueries("https://s3.example/b/k?X-Amz-Signature=abcdef&X-Amz-Expires=300"),
+              "https://s3.example/b/k");
+    EXPECT_EQ(withoutQueries("https://h/p?sp=r&sig=***&se=2026 (HTTP 0): Could not resolve host"),
+              "https://h/p (HTTP 0): Could not resolve host");
+    // An address inside a query goes with the query; a quote or a semicolon inside a query does
+    // not end the address (either may stand in one), so nothing after it survives.
+    EXPECT_EQ(withoutQueries("https://a/p?next=https://b/q?sig=S tail"), "https://a/p tail");
+    EXPECT_EQ(withoutQueries("'https://h/p?name='x';sig=S' refused"), "'https://h/p refused");
+}
+
+TEST(WithoutQueries, ATextWithoutAnAddressOrWithoutAQueryIsLeftAsItIs)
+{
+    for (const std::string text : {
+             "",
+             "the server did not answer within 60 s",
+             "a web page instead of the file (a sign-in page?)", // a '?' that is in no address
+             "status=403; https://github.com/o/r/releases/latest/download/x; detail",
+             "status=206; reason=bad_range; https://github.com/x.zip; Content-Range 'bytes 1-2/3'",
+             "://",
+             "a://",
+         }) {
+        EXPECT_EQ(withoutQueries(text), text);
+    }
+}
+
+// ---- the time a request is given ---------------------------------------------------------------------
+
+TEST(Timeouts, ARangeIsGivenTheTimeItsLengthTakesOnASlowLine)
+{
+    // feed.hpp: 60 s to get an answer started, plus the length at 16 KiB a second rounded up;
+    // never less than 600 s and never more than four hours. Each figure is worked by hand.
+    EXPECT_EQ(kHopTimeoutSeconds, 60);
+    EXPECT_EQ(kRangeHopTimeoutSeconds, 600);
+    EXPECT_EQ(kSlowLineBytesPerSecond, 16384u);
+    EXPECT_EQ(kMaxHopTimeoutSeconds, 14400);
+
+    EXPECT_EQ(rangeHopTimeoutSeconds(0), 600);
+    EXPECT_EQ(rangeHopTimeoutSeconds(50), 600);
+    // The floor ends where the transfer alone takes 540 s: 540 * 16384 = 8847360 bytes.
+    EXPECT_EQ(rangeHopTimeoutSeconds(8847360), 600);
+    EXPECT_EQ(rangeHopTimeoutSeconds(8847361), 601) << "a second that was begun counts";
+    // The largest merged range, 32 MiB = 33554432 bytes: 2048 s at 16384 a second, and 60.
+    EXPECT_EQ(kRangeMaxLength, 33554432u);
+    EXPECT_EQ(rangeHopTimeoutSeconds(kRangeMaxLength), 2108);
+    EXPECT_EQ(rangeHopTimeoutSeconds(kRangeMaxLength + 1), 2109);
+    // The cap is reached at 14340 s of transfer: 14340 * 16384 = 234946560 bytes; one second
+    // less of it (14339 * 16384 = 234930176 bytes) is 14399 s.
+    EXPECT_EQ(rangeHopTimeoutSeconds(234930176), 14399);
+    EXPECT_EQ(rangeHopTimeoutSeconds(234946560), 14400);
+    EXPECT_EQ(rangeHopTimeoutSeconds(2ull * 1024 * 1024 * 1024), 14400)
+        << "the largest file a manifest may list";
+    EXPECT_EQ(rangeHopTimeoutSeconds(~0ull), 14400) << "and no length makes the sum wrap";
 }
 
 // ---- the transport, over a fake that records every hop ------------------------------------------------
@@ -513,21 +608,86 @@ TEST(Transport, TheRangeIsSentAgainOnEveryHop)
     }
 }
 
-TEST(Transport, ARedirectBackToTheApiHostCarriesTheTokenAgainAndOnlyThere)
+TEST(Transport, EachHopIsGivenTheTimeOfItsRequest)
 {
-    // api.github.com answers a renamed repository with a 301 to itself; the rule is the host of
-    // each hop, so the token goes with it - and a hop to anywhere else in the chain has none.
-    Wire wire;
-    wire.script.push_back(answer(301, "", "", "/repositories/42/releases/assets/9"));
-    wire.script.push_back(answer(302, "", "", std::string(kStorage)));
-    wire.script.push_back(answer(200, "ok"));
-    const Fetch fetch = makeFetch(wire.hop());
-    ASSERT_TRUE(fetch(apiAsset(), {}, {}).ok());
-    ASSERT_EQ(wire.hops.size(), 3u);
-    EXPECT_EQ(wire.hops[1].url, "https://api.github.com/repositories/42/releases/assets/9");
-    EXPECT_TRUE(hasHeaderNamed(wire.hops[0].headers, "Authorization"));
-    EXPECT_TRUE(hasHeaderNamed(wire.hops[1].headers, "Authorization"));
-    EXPECT_FALSE(hasHeaderNamed(wire.hops[2].headers, "Authorization"));
+    // A whole body: 60 s. The largest merged range (32 MiB): 60 + 2048 = 2108 s, on every hop.
+    {
+        Wire wire;
+        wire.script.push_back(answer(302, "", "", std::string(kStorage)));
+        wire.script.push_back(answer(200, "ok"));
+        ASSERT_TRUE(makeFetch(wire.hop())(apiAsset(), {}, {}).ok());
+        ASSERT_EQ(wire.hops.size(), 2u);
+        EXPECT_EQ(wire.hops[0].timeoutSeconds, 60);
+        EXPECT_EQ(wire.hops[1].timeoutSeconds, 60);
+    }
+    {
+        FetchRequest request = rangedRequest();
+        request.rangeStart = 0;
+        request.rangeLength = kRangeMaxLength;
+        request.maxBytes = kRangeMaxLength;
+        request.payloadSize = 2 * kRangeMaxLength;
+        Wire wire;
+        wire.script.push_back(answer(302, "", "", std::string(kStorage)));
+        wire.script.push_back(answer(503, "busy"));
+        ASSERT_FALSE(makeFetch(wire.hop())(request, {}, {}).ok());
+        ASSERT_EQ(wire.hops.size(), 2u);
+        EXPECT_EQ(wire.hops[0].timeoutSeconds, 2108);
+        EXPECT_EQ(wire.hops[1].timeoutSeconds, 2108);
+    }
+}
+
+TEST(Transport, ARedirectNeverCarriesTheTokenNotEvenBackToTheApiHost)
+{
+    // "Never to a redirect target" (the owner's ruling, S2; FetchRequest::bearerToken). The first
+    // hop is the one address the engine wrote; every later one was named by a server.
+    {
+        // api.github.com answers a renamed repository with a 301 to itself: the hop that follows
+        // it is a redirect hop, and has no token.
+        Wire wire;
+        wire.script.push_back(answer(301, "", "", "/repositories/42/releases/assets/9"));
+        wire.script.push_back(answer(302, "", "", std::string(kStorage)));
+        wire.script.push_back(answer(200, "ok"));
+        const Fetch fetch = makeFetch(wire.hop());
+        ASSERT_TRUE(fetch(apiAsset(), {}, {}).ok());
+        ASSERT_EQ(wire.hops.size(), 3u);
+        EXPECT_EQ(wire.hops[1].url, "https://api.github.com/repositories/42/releases/assets/9");
+        EXPECT_TRUE(hasHeaderNamed(wire.hops[0].headers, "Authorization"));
+        EXPECT_FALSE(hasHeaderNamed(wire.hops[1].headers, "Authorization"));
+        EXPECT_FALSE(hasHeaderNamed(wire.hops[2].headers, "Authorization"));
+    }
+    {
+        // The storage host (or whoever answers in its place) sends the request back to the API,
+        // at a path of its own choosing: that request is not an authenticated one.
+        Wire wire;
+        wire.script.push_back(answer(302, "", "", std::string(kStorage)));
+        wire.script.push_back(answer(302, "", "", "https://api.github.com/user"));
+        wire.script.push_back(answer(200, "ok"));
+        const Fetch fetch = makeFetch(wire.hop());
+        ASSERT_TRUE(fetch(apiAsset(), {}, {}).ok());
+        ASSERT_EQ(wire.hops.size(), 3u);
+        EXPECT_EQ(wire.hops[2].url, "https://api.github.com/user");
+        EXPECT_TRUE(hasHeaderNamed(wire.hops[0].headers, "Authorization"));
+        EXPECT_FALSE(hasHeaderNamed(wire.hops[1].headers, "Authorization"));
+        EXPECT_FALSE(hasHeaderNamed(wire.hops[2].headers, "Authorization"));
+        for (std::size_t i = 1; i < wire.hops.size(); ++i) {
+            for (const std::string& header : wire.hops[i].headers) {
+                EXPECT_FALSE(contains(header, kSecretToken)) << wire.hops[i].url;
+            }
+        }
+    }
+    {
+        // A redirect to the very address that was asked for is a redirect all the same.
+        Wire wire;
+        wire.script.push_back(
+            answer(307, "", "", "https://api.github.com/repos/o/r/releases/assets/9"));
+        wire.script.push_back(answer(200, "ok"));
+        const Fetch fetch = makeFetch(wire.hop());
+        ASSERT_TRUE(fetch(apiAsset(), {}, {}).ok());
+        ASSERT_EQ(wire.hops.size(), 2u);
+        EXPECT_EQ(wire.hops[1].url, wire.hops[0].url);
+        EXPECT_TRUE(hasHeaderNamed(wire.hops[0].headers, "Authorization"));
+        EXPECT_FALSE(hasHeaderNamed(wire.hops[1].headers, "Authorization"));
+    }
 }
 
 TEST(Transport, ADownloadRouteRequestNeverCarriesATokenAnywhere)
@@ -841,6 +1001,66 @@ TEST(Transport, AWholeBodyRequestWantsA200AndTheEngineSBound)
     EXPECT_EQ(fetchFailureReason(over.error()), "too_large");
 }
 
+// What a hop that abandons a transfer at maxBytes hands back when it can say what the answer was
+// (katana_app's can): the status and the headers, no body, and `overran`.
+Reply overrun(int status, std::string contentType = {}, std::string contentRange = {})
+{
+    Reply reply = answer(status, "", std::move(contentType), "", std::move(contentRange));
+    reply.reply.overran = true;
+    return reply;
+}
+
+TEST(Transport, AnAnswerThatRanPastItsBoundIsNamedByWhatTheAnswerSaidItWas)
+{
+    FetchRequest ranged = rangedRequest(); // bytes 100-149 of 1000, at most 50
+    ranged.url = "https://github.com/o/r/releases/download/v1/x.zip";
+
+    // A portal's page is a page however long it is. The signature is asked for with a bound of
+    // 1024 bytes, and a sign-in page is longer than that: it is still "html_page", and not a
+    // file that is too large or a network without partial downloads.
+    for (const std::string type : {"text/html", "text/html; charset=utf-8"}) {
+        const auto page = oneRequest(overrun(200, type));
+        ASSERT_FALSE(page.ok()) << type;
+        EXPECT_EQ(page.error().code, core::ErrorCode::FileImportFailure) << type;
+        EXPECT_EQ(fetchFailureReason(page.error()), "html_page") << type;
+        const auto inPlaceOfARange = oneRequest(overrun(200, type), ranged);
+        ASSERT_FALSE(inPlaceOfARange.ok()) << type;
+        EXPECT_EQ(fetchFailureReason(inPlaceOfARange.error()), "html_page") << type;
+    }
+
+    // A whole file longer than the engine reads before it has verified it.
+    const auto large = oneRequest(overrun(200, "application/octet-stream"));
+    ASSERT_FALSE(large.ok());
+    EXPECT_EQ(large.error().code, core::ErrorCode::Unsupported);
+    EXPECT_EQ(fetchFailureReason(large.error()), "too_large");
+    EXPECT_TRUE(large.error().context.starts_with("status=200; ")) << large.error().context;
+
+    // A range answered with a 200 that began the whole file: this network does not do ranges.
+    const auto ignored = oneRequest(overrun(200, "application/zip"), ranged);
+    ASSERT_FALSE(ignored.ok());
+    EXPECT_EQ(ignored.error().code, core::ErrorCode::Unsupported);
+    EXPECT_EQ(ignored.error().message, std::string(kPartialDownloadsRefused));
+    EXPECT_EQ(fetchFailureReason(ignored.error()), "partial_downloads");
+    EXPECT_TRUE(ignored.error().context.starts_with("status=200; ")) << ignored.error().context;
+
+    // A range answered with a 206 that ran past the range: a part of the file, and not the
+    // part asked for. Partial downloads ARE allowed here; this one is wrong (feed.hpp: a 206
+    // whose body is of another length is `status=206; reason=bad_range`).
+    const auto past = oneRequest(overrun(206, "application/zip", "bytes 100-149/1000"), ranged);
+    ASSERT_FALSE(past.ok());
+    EXPECT_EQ(past.error().code, core::ErrorCode::FileImportFailure);
+    EXPECT_EQ(fetchFailureReason(past.error()), "bad_range");
+    EXPECT_TRUE(past.error().context.starts_with("status=206; reason=bad_range; "))
+        << past.error().context;
+    // The same from a hop that does not enforce the bound and hands the long body over: 51
+    // bytes where 50 were asked for.
+    const auto handedOver =
+        oneRequest(answer(206, std::string(51, 'x'), "", "", "bytes 100-149/1000"), ranged);
+    ASSERT_FALSE(handedOver.ok());
+    EXPECT_EQ(handedOver.error().code, core::ErrorCode::FileImportFailure);
+    EXPECT_EQ(fetchFailureReason(handedOver.error()), "bad_range");
+}
+
 TEST(Transport, ARequestThatIsNotBoundedOrNotAnAddressIsRefusedBeforeAnyHop)
 {
     Wire wire;
@@ -963,6 +1183,91 @@ TEST(Transport, AHopThatPutsTheTokenInItsOwnErrorDoesNotGetItPastTheFetch)
     const auto later = makeFetch(wire.hop())(apiAsset(), {}, {});
     ASSERT_FALSE(later.ok());
     EXPECT_FALSE(contains(later.error().describe(), kSecretToken));
+}
+
+TEST(Transport, AHopThatQuotesTheSignedAddressDoesNotGetItsQueryPastTheFetch)
+{
+    // The hop function is the caller's, over a library that puts the address it was given into
+    // what it says about a failure - whole, or with the parameters it takes for secrets hidden
+    // and the others left (a redaction by parameter name knows `sig`, and has never heard of
+    // `sp` or `se`). The address a release redirects to is a signed one: all of its query is
+    // the secret. So whatever a hop says, the Error of the Fetch names the address once, where
+    // the Fetch writes it, without its query - and nothing else in it has a query either.
+    const std::string partlyHidden =
+        "https://release-assets.githubusercontent.com/github-production-release-asset/1/uuid"
+        "?sp=r&sig=***&se=2026-10-20T08%3A00%3A00Z";
+    struct Said {
+        std::string message;
+        std::string context;
+    };
+    const std::vector<Said> said = {
+        {"the request failed",
+         std::string(kStorage) + ": Could not resolve host: release-assets.githubusercontent.com"},
+        {"the request failed", partlyHidden + ": SSL certificate problem"},
+        {"no answer from " + std::string(kStorage), "status=0; " + std::string(kStorage)},
+        {"no answer from '" + partlyHidden + "'", "status=0; reason=cancelled; " + partlyHidden},
+    };
+    for (const core::ErrorCode code :
+         {core::ErrorCode::FileImportFailure, core::ErrorCode::InvalidState,
+          core::ErrorCode::Unsupported, core::ErrorCode::InvalidArgument,
+          core::ErrorCode::Internal}) {
+        for (const Said& one : said) {
+            Wire wire;
+            wire.script.push_back(answer(302, "", "", std::string(kStorage)));
+            wire.script.push_back(fail(core::makeError(code, one.message, one.context)));
+            const auto body = makeFetch(wire.hop())(apiAsset(), {}, {});
+            ASSERT_FALSE(body.ok());
+            EXPECT_EQ(body.error().code, code) << "the failure is the hop's";
+            const std::string text = body.error().describe();
+            EXPECT_FALSE(contains(text, "SIGNATURE-IN-QUERY")) << text;
+            EXPECT_FALSE(contains(text, "sig=")) << text;
+            EXPECT_FALSE(contains(text, "sp=r")) << text;
+            EXPECT_FALSE(contains(text, "se=2026")) << text;
+            EXPECT_FALSE(contains(text, "?")) << text;
+            EXPECT_FALSE(contains(text, kSecretToken)) << text;
+            // No answer arrived, and then the address as a person may read it.
+            EXPECT_TRUE(body.error().context.starts_with(
+                "status=0; https://release-assets.githubusercontent.com/"
+                "github-production-release-asset/1/uuid"))
+                << body.error().context;
+        }
+    }
+}
+
+TEST(Transport, AHopsErrorKeepsItsStatusAndItsWordsAndCannotNameAReason)
+{
+    // feed.hpp, HopFn: the code and the sentence are the hop's; the context is the Fetch's -
+    // the status the hop led with (0 when it named none), the address, then what else the hop
+    // said, as text. The address here is oneRequest's.
+    const std::string address = "https://github.com/o/r/releases/latest/download/x";
+
+    const auto refused = oneRequest(fail(core::makeError(
+        core::ErrorCode::FileImportFailure, "the service's certificate could not be verified",
+        "status=0; SSL certificate problem: unable to get local issuer certificate")));
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, core::ErrorCode::FileImportFailure);
+    EXPECT_EQ(refused.error().message, "the service's certificate could not be verified");
+    EXPECT_EQ(refused.error().context,
+              "status=0; " + address +
+                  "; SSL certificate problem: unable to get local issuer certificate");
+    EXPECT_EQ(fetchFailureReason(refused.error()), "offline");
+
+    const auto bare = oneRequest(fail(core::makeError(core::ErrorCode::FileImportFailure, "no route")));
+    ASSERT_FALSE(bare.ok());
+    EXPECT_EQ(bare.error().context, "status=0; " + address);
+
+    // A reason is this program's to give. One a hop wrote - first in its context, or after its
+    // status - comes after the address, where it is words.
+    const auto named = oneRequest(fail(core::makeError(core::ErrorCode::FileImportFailure, "m",
+                                                       "reason=html_page; x")));
+    ASSERT_FALSE(named.ok());
+    EXPECT_EQ(named.error().context, "status=0; " + address + "; reason=html_page; x");
+    EXPECT_EQ(fetchFailureReason(named.error()), "offline");
+    const auto afterStatus = oneRequest(fail(core::makeError(
+        core::ErrorCode::FileImportFailure, "m", "status=0; reason=cancelled; x")));
+    ASSERT_FALSE(afterStatus.ok());
+    EXPECT_EQ(afterStatus.error().context, "status=0; " + address + "; reason=cancelled; x");
+    EXPECT_EQ(fetchFailureReason(afterStatus.error()), "offline");
 }
 
 TEST(Transport, AnAddressCannotNameTheReasonOfAFailure)

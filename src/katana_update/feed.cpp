@@ -396,10 +396,13 @@ core::Error rangeRefused(const core::Error& why, const FetchRequest& request,
                           shownServerText(contentRange) + "'");
 }
 
-// The request's token is in no word of an Error the Fetch returns, whoever wrote the words: the
-// hop function is the caller's, and what it says about a failure is passed on.
-core::Error withoutToken(core::Error error, std::string_view token)
+// Neither the request's token nor the query of an address is in any word of an Error the Fetch
+// returns, whoever wrote the words: the hop function is the caller's, what it says about a
+// failure is passed on, and a server's own words are quoted in some of them.
+core::Error withoutSecrets(core::Error error, std::string_view token)
 {
+    error.message = withoutQueries(error.message);
+    error.context = withoutQueries(error.context);
     if (!token.empty()) {
         error.message = redactToken(error.message, token);
         error.context = redactToken(error.context, token);
@@ -410,6 +413,49 @@ core::Error withoutToken(core::Error error, std::string_view token)
 core::Error cancelled(std::string_view url)
 {
     return core::makeError(core::ErrorCode::InvalidState, "cancelled", displayUrl(url));
+}
+
+// The leading `status=<n>` of a context written in the order feed.hpp gives.
+struct LeadingStatus {
+    int status = 0; // 0 as well when the context names none: either way no answer arrived
+    // What follows the field and its separator. All of the context when it does not begin with
+    // the field; nothing when the field is not `status=<digits>; ` to the letter (`status=200x`,
+    // a `status=` with no number), so that nothing after a malformed field is taken for one.
+    std::string_view rest;
+};
+
+LeadingStatus leadingStatus(std::string_view context)
+{
+    LeadingStatus led;
+    led.rest = context;
+    constexpr std::string_view kStatus = "status=";
+    if (!context.starts_with(kStatus)) {
+        return led;
+    }
+    std::string_view rest = context.substr(kStatus.size());
+    std::size_t digits = 0;
+    while (digits < rest.size() && rest[digits] >= '0' && rest[digits] <= '9' &&
+           led.status < 10000) {
+        led.status = led.status * 10 + (rest[digits] - '0');
+        ++digits;
+    }
+    rest.remove_prefix(digits);
+    constexpr std::string_view kNext = "; ";
+    led.rest = digits > 0 && rest.starts_with(kNext) ? rest.substr(kNext.size())
+                                                     : std::string_view{};
+    return led;
+}
+
+// The Error of a hop that failed, as the Fetch hands it on (feed.hpp, HopFn). The code and the
+// sentence are the hop's. The context is written again here, in the one order: the hop's own
+// `status=<n>` (0 when it named none: no answer arrived), the address of the hop without its
+// query, and then whatever else the hop said, which is text and no longer a field. So a hop
+// that passes on a library's context, address and all, still cannot put a signed address into
+// an Error (makeFetch cuts the query from what it quoted) or name a reason.
+core::Error hopFailure(const core::Error& error, std::string_view url)
+{
+    const LeadingStatus led = leadingStatus(error.context);
+    return fetchError(error.code, error.message, led.status, url, {}, led.rest);
 }
 
 bool isRedirectStatus(int status)
@@ -524,7 +570,21 @@ core::Result<std::string> resolveRedirect(std::string_view from, std::string_vie
     return parts->scheme + "://" + std::string(parts->authority) + std::string(parts->remainder);
 }
 
-std::vector<std::string> hopHeaders(const FetchRequest& request, std::string_view hopUrl)
+int rangeHopTimeoutSeconds(std::uint64_t rangeLength)
+{
+    // In 64 bits, and rounded up: the length is a manifest's and may be anything. The quotient
+    // is at most 2^50, so the sum cannot wrap.
+    const std::uint64_t transfer = rangeLength / kSlowLineBytesPerSecond +
+                                   (rangeLength % kSlowLineBytesPerSecond != 0 ? 1 : 0);
+    const std::uint64_t seconds = static_cast<std::uint64_t>(kHopTimeoutSeconds) + transfer;
+    if (seconds >= static_cast<std::uint64_t>(kMaxHopTimeoutSeconds)) {
+        return kMaxHopTimeoutSeconds;
+    }
+    return std::max(kRangeHopTimeoutSeconds, static_cast<int>(seconds));
+}
+
+std::vector<std::string> hopHeaders(const FetchRequest& request, std::string_view hopUrl,
+                                    bool redirected)
 {
     std::vector<std::string> headers;
     if (!request.accept.empty()) {
@@ -538,7 +598,11 @@ std::vector<std::string> hopHeaders(const FetchRequest& request, std::string_vie
     }
     if (isApiGithubUrl(hopUrl)) {
         headers.emplace_back("X-GitHub-Api-Version: 2022-11-28");
-        if (!request.bearerToken.empty()) {
+        // The token goes with the request the engine wrote, to the address the engine wrote, and
+        // with no other. An address a server answered with gets none, api.github.com's own
+        // included: whoever can redirect a download must not thereby be able to aim an
+        // authenticated request (feed.hpp, "the transport's rules").
+        if (!redirected && !request.bearerToken.empty()) {
             headers.push_back("Authorization: Bearer " + request.bearerToken);
         }
     }
@@ -565,6 +629,39 @@ std::string displayUrl(std::string_view url)
         shown += "...";
     }
     return shown;
+}
+
+std::string withoutQueries(std::string_view text)
+{
+    constexpr std::string_view kMark = "://";
+    // Where an address in running text ends: at a byte no address that went over the wire can
+    // hold. Nothing else ends it - a quote, a bracket and a semicolon may all stand in a query,
+    // and stopping at one of them would keep what follows it.
+    const auto endsAddress = [](char c) {
+        const auto byte = static_cast<unsigned char>(c);
+        return byte <= 0x20 || byte >= 0x7F;
+    };
+    std::string out;
+    out.reserve(text.size());
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const std::size_t mark = text.find(kMark, at);
+        if (mark == std::string_view::npos) {
+            out.append(text.substr(at));
+            break;
+        }
+        std::size_t end = mark + kMark.size();
+        while (end < text.size() && !endsAddress(text[end])) {
+            ++end;
+        }
+        // [mark, end) is the address from its "://" on. It is kept up to its first '?' or '#',
+        // with whatever stood before it; the rest of it is dropped.
+        const std::size_t cut = text.substr(mark, end - mark).find_first_of("?#");
+        const std::size_t kept = cut == std::string_view::npos ? end : mark + cut;
+        out.append(text.substr(at, kept - at));
+        at = end;
+    }
+    return out;
 }
 
 namespace {
@@ -604,21 +701,25 @@ core::Result<std::string> followRequest(const HopFn& hop, const FetchRequest& re
         HttpHop one;
         one.url = url;
         one.userAgent = request.userAgent;
-        one.headers = hopHeaders(request, url);
+        one.headers = hopHeaders(request, url, /*redirected=*/redirects > 0);
         one.maxBytes = request.maxBytes;
-        one.timeoutSeconds = ranged ? kRangeHopTimeoutSeconds : kHopTimeoutSeconds;
+        one.timeoutSeconds =
+            ranged ? rangeHopTimeoutSeconds(request.rangeLength) : kHopTimeoutSeconds;
 
         core::Result<HttpHopReply> answer = hop(one, stop, progress);
         if (!answer) {
             const core::Error& error = answer.error();
             if (error.code == core::ErrorCode::Unsupported && ranged) {
-                // The body outgrew the range: a server that ignored `Range` and began the whole
-                // payload.
-                return fetchError(core::ErrorCode::Unsupported,
-                                  std::string(kPartialDownloadsRefused), 200, url, {},
-                                  "exceeded=" + std::to_string(request.maxBytes) + " bytes");
+                // The body outgrew the range, and the hop could not say what the answer was (one
+                // that can sets HttpHopReply::overran, below). A server that ignored `Range`
+                // and began the whole payload is what does that; no status is claimed for it.
+                return core::makeError(core::ErrorCode::Unsupported,
+                                       std::string(kPartialDownloadsRefused),
+                                       "reason=partial_downloads; " + displayUrl(url) +
+                                           "; exceeded=" + std::to_string(request.maxBytes) +
+                                           " bytes");
             }
-            return error;
+            return hopFailure(error, url);
         }
         HttpHopReply& reply = answer.value();
 
@@ -656,11 +757,32 @@ core::Result<std::string> followRequest(const HopFn& hop, const FetchRequest& re
                               "(a sign-in page?)",
                               reply.status, url, "html_page");
         }
-        if (reply.body.size() > request.maxBytes) {
+        // Longer than was asked for: the hop cut it off (overran), or did not and handed it all
+        // over. What it is depends on what the answer said it was.
+        if (reply.overran || reply.body.size() > request.maxBytes) {
+            const std::string exceeded =
+                "exceeded=" + std::to_string(request.maxBytes) + " bytes";
+            if (!ranged) {
+                return fetchError(core::ErrorCode::Unsupported,
+                                  "the answer is longer than this request allows", reply.status,
+                                  url, {}, exceeded);
+            }
+            if (reply.status == 206) {
+                // A part of the file, and more of it than the part asked for: not a server that
+                // ignores `Range`, but one whose answer is not the range.
+                return fetchError(core::ErrorCode::FileImportFailure,
+                                  "the server sent more than the part of the file that was "
+                                  "asked for",
+                                  206, url, "bad_range",
+                                  "asked for " + std::to_string(request.rangeLength) +
+                                      " bytes from " + std::to_string(request.rangeStart) +
+                                      " of " + std::to_string(request.payloadSize) + "; " +
+                                      exceeded);
+            }
+            // A 200 that began the whole file.
             return fetchError(core::ErrorCode::Unsupported,
-                              ranged ? std::string(kPartialDownloadsRefused)
-                                     : "the answer is longer than this request allows",
-                              reply.status, url);
+                              std::string(kPartialDownloadsRefused), reply.status, url, {},
+                              exceeded);
         }
         if (ranged) {
             const core::Status held =
@@ -685,8 +807,8 @@ Fetch makeFetch(HopFn hop)
     return [hop = std::move(hop)](const FetchRequest& request, std::stop_token stop,
                                   ProgressFn progress) -> core::Result<std::string> {
         core::Result<std::string> answer = followRequest(hop, request, stop, progress);
-        if (!answer.ok() && !request.bearerToken.empty()) {
-            return withoutToken(answer.error(), request.bearerToken);
+        if (!answer.ok()) {
+            return withoutSecrets(answer.error(), request.bearerToken);
         }
         return answer;
     };
@@ -696,25 +818,11 @@ std::string fetchFailureReason(const core::Error& error)
 {
     // The two leading fields this program writes, `status=<n>; ` and then `reason=<token>`, and
     // nothing after them: what follows may be an address or a server's words, and must not be
-    // able to name a reason.
-    std::string_view rest = error.context;
-    int status = 0; // 0 as well when the context names none: either way no answer arrived
-    constexpr std::string_view kStatus = "status=";
-    if (rest.starts_with(kStatus)) {
-        rest.remove_prefix(kStatus.size());
-        std::size_t digits = 0;
-        while (digits < rest.size() && rest[digits] >= '0' && rest[digits] <= '9' &&
-               status < 10000) {
-            status = status * 10 + (rest[digits] - '0');
-            ++digits;
-        }
-        rest.remove_prefix(digits);
-        constexpr std::string_view kNext = "; ";
-        // Only a number and then the separator lead to a second field: `status=200x` and a
-        // `status=` with no number have none.
-        rest = digits > 0 && rest.starts_with(kNext) ? rest.substr(kNext.size())
-                                                     : std::string_view{};
-    }
+    // able to name a reason. Only a number and then the separator lead to a second field:
+    // `status=200x` and a `status=` with no number have none (leadingStatus).
+    const LeadingStatus led = leadingStatus(error.context);
+    const int status = led.status;
+    std::string_view rest = led.rest;
     constexpr std::string_view kReason = "reason=";
     if (rest.starts_with(kReason)) {
         rest.remove_prefix(kReason.size());
