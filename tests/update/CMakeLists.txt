@@ -108,6 +108,36 @@ if(WIN32 AND TARGET katana_updater_test)
     add_dependencies(katana_update_tests katana_updater katana_updater_test katana_updater_stub)
 endif()
 
+# ---- where a copy of Katana does not replace its own files (PX) -------------------------------------
+#
+# Linux, until its apply back end is written (task T18: src/katana_update/fsops_posix.cpp and
+# spawn_posix.cpp), and macOS for good, where a file changed inside Katana.app breaks the seal of
+# the bundle. UPDATE CHECK and UPDATE STATUS work there; a download, a preflight and the helper
+# refuse FOR THE PLATFORM and write nothing. Two things hold that, on those systems only (Windows
+# compiles neither: its seams are the real ones, with test_journal.cpp and test_helper.cpp):
+#
+#   test_platform.cpp              the engine and its seams, as cases of katana_update_tests
+#   check_platform_refusal.cmake   the helper that ships and the helper with the test key, each
+#                                  RUN with its swap line and with --recover: exit 13,
+#                                  reason=platform, and the test's folder listed afterwards
+#
+# When T18 writes the Linux back end the two script tests stay for macOS (if(APPLE)), and
+# test_platform.cpp says which of its cases do.
+if(NOT WIN32)
+    target_sources(katana_update_tests PRIVATE test_platform.cpp)
+    foreach(_program IN ITEMS katana_updater katana_updater_test)
+        if(TARGET ${_program})
+            add_test(NAME ${_program}_refuses_for_the_platform_and_writes_nothing
+                COMMAND ${CMAKE_COMMAND} "-DHELPER=$<TARGET_FILE:${_program}>"
+                        "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/platform_refusal/${_program}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_platform_refusal.cmake")
+            set_tests_properties(${_program}_refuses_for_the_platform_and_writes_nothing PROPERTIES
+                PASS_REGULAR_EXPRESSION "refused a swap and a recovery for the platform, and wrote nothing"
+                FAIL_REGULAR_EXPRESSION "CMake Error")
+        endif()
+    endforeach()
+endif()
+
 # ---- the pinned keys (cmake/KatanaUpdateKeys.cmake) ----------------------------------
 #
 # The module is the configure's own check run as a script, so the refusals are proved on

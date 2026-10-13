@@ -431,6 +431,44 @@ core::Result<PayloadSource> resolvePayloadSource(const Fetch& fetch, const FeedC
     return source;
 }
 
+#ifndef _WIN32
+// WHERE A COPY OF KATANA DOES NOT REPLACE ITS OWN FILES. The forms of stage() and preflight() that
+// use the system's file system refuse there under the token `platform`, before a folder is asked
+// for or a request is sent. Two cases, and they do not hang on each other:
+//
+//   macOS, for good   A file changed inside Katana.app breaks the seal of the bundle
+//                     (docs/update.md), so nothing is downloaded and no helper is prepared there
+//                     WHATEVER the file system answers. fsops_posix.cpp is compiled for macOS
+//                     too: the day it is written for Linux it works on a Mac as well, and this
+//                     refusal must still stand. So it asks the file system nothing.
+//   Linux, for now    The system's file system is not written (fsops_posix.cpp): every operation
+//                     of it is one refusal, with the code Unsupported. Worked through, that comes
+//                     back as `write_failed` from stage() - a folder that could not be written -
+//                     and as `helper_missing` from preflight(), neither of which is what is
+//                     wrong. So one question is put to it first and its refusal is handed on as
+//                     it is. Where the file system is written stat() does not answer
+//                     Unsupported, and nothing here stands in the way.
+#ifdef __APPLE__
+std::optional<core::Error> refusedByThePlatform(const FsOps&, const fs::path&)
+{
+    return stageError(core::ErrorCode::Unsupported,
+                      "Katana does not install updates itself on macOS, where a changed file "
+                      "would break the seal of the application: it checks for a newer version, "
+                      "which is then downloaded from the releases page and installed by hand",
+                      "platform");
+}
+#else
+std::optional<core::Error> refusedByThePlatform(const FsOps& system, const fs::path& folder)
+{
+    const core::Result<EntryInfo> asked = system.stat(folder);
+    if (asked.ok() || asked.error().code != core::ErrorCode::Unsupported) {
+        return std::nullopt;
+    }
+    return stageError(core::ErrorCode::Unsupported, asked.error().message, "platform");
+}
+#endif
+#endif
+
 } // namespace
 
 core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& manifest,
@@ -438,6 +476,11 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
                    ProgressFn progress)
 {
     const std::unique_ptr<FsOps> system = makeSystemFsOps();
+#ifndef _WIN32
+    if (const std::optional<core::Error> refused = refusedByThePlatform(*system, stageDir)) {
+        return *refused;
+    }
+#endif
     return stage(fetch, feed, manifest, plan, stageDir, std::move(stop), std::move(progress),
                  *system);
 }
@@ -687,6 +730,11 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
                                       Launcher& launcher)
 {
     const std::unique_ptr<FsOps> system = makeSystemFsOps();
+#ifndef _WIN32
+    if (const std::optional<core::Error> refused = refusedByThePlatform(*system, stateDir)) {
+        return *refused;
+    }
+#endif
     return preflight(manifest, install, stageDir, stateDir, launcher, *system);
 }
 

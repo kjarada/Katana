@@ -1091,6 +1091,52 @@ int runRecover(const Path& root, Rig& rig)
     return kExitOk;
 }
 
+#ifndef _WIN32
+// ---- a platform this program does not swap on ---------------------------------------------------
+//
+// Where this program swaps nothing, a swap and a recovery are refused before either is begun:
+//
+//   outcome=refused (the swap) or recover=refused (--recover), reason=platform, exit=13, detail=
+//
+// (for --recover that is a value, `refused`, and a line, `reason=`, which it prints nowhere
+// else), and NOTHING is written anywhere: no last.json, no log, no folder. Two cases, and they do
+// not hang on each other:
+//
+//   macOS, for good   A file changed inside Katana.app breaks the seal of the bundle
+//                     (docs/update.md), so this program replaces nothing there WHATEVER the file
+//                     system answers. src/katana_update/fsops_posix.cpp is compiled for macOS
+//                     too: the day it is written for Linux it works on a Mac as well, and this
+//                     refusal must still stand. So it asks the file system nothing.
+//   Linux, for now    The update has no file system of its own there yet (fsops_posix.cpp: every
+//                     operation is one refusal, with the code Unsupported). Given that file
+//                     system, apply() refuses too - but as `root_not_writable`, after writing a
+//                     last.json that tells the window so, and without starting Katana again; and
+//                     recoverInProcess answers "failed", exit 12, of an install nothing here can
+//                     have half swapped. So the file system is asked one question before either
+//                     is called. Where it is written stat() does not answer Unsupported, this
+//                     returns nothing, and the swap and the recovery run as they do on Windows.
+std::optional<int> refusedByThePlatform(const Command& command, [[maybe_unused]] Rig& rig)
+{
+    const bool recovering = command.mode == Mode::Recover;
+#ifdef __APPLE__
+    const std::string why = "this program does not replace the files of Katana on macOS, where a "
+                            "changed file would break the seal of the application";
+#else
+    const core::Result<upd::EntryInfo> asked =
+        rig.fs().stat(recovering ? command.recoverRoot : command.request.root);
+    if (asked.ok() || asked.error().code != core::ErrorCode::Unsupported) {
+        return std::nullopt;
+    }
+    const std::string why = asked.error().message;
+#endif
+    std::cout << (recovering ? "recover=refused" : "outcome=refused") << '\n'
+              << "reason=platform\n"
+              << "exit=" << kExitRefused << '\n'
+              << "detail=" << oneLine(why) << std::endl;
+    return kExitRefused;
+}
+#endif
+
 // ---- main ---------------------------------------------------------------------------------------
 
 int run(int argc, char** argv)
@@ -1139,6 +1185,11 @@ int run(int argc, char** argv)
     }
 
     Rig rig(command.test, std::move(userVariables));
+#ifndef _WIN32
+    if (const std::optional<int> refused = refusedByThePlatform(command, rig)) {
+        return *refused;
+    }
+#endif
     return command.mode == Mode::Recover ? runRecover(command.recoverRoot, rig)
                                          : runApply(command.request, argv0, rig);
 }
