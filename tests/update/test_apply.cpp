@@ -19,7 +19,7 @@
 #include "apply_harness.hpp"
 #include "command_line.hpp"
 #include "recover_internal.hpp"
-#include "scripted_processes.hpp"
+#include "seam_doubles.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1146,32 +1146,7 @@ TEST(ApplyLock, ARootThatCannotBeWrittenIsReportedAsSuch)
     EXPECT_EQ(treeHash(s.root), s.v1Hash);
 }
 
-namespace {
-
-// Answers "held" to the first `heldFor` attempts to take the lock (always, when it is -1): what a
-// virus scanner or an indexer that has the lock file open for a moment looks like to a program
-// that asks for it with share mode 0.
-class BusyLockFs final : public ForwardingFs {
-  public:
-    BusyLockFs(FsOps& inner, int heldFor) : ForwardingFs(inner), heldFor_(heldFor) {}
-
-    core::Result<std::unique_ptr<FileLock>> tryLock(const Path& p) override
-    {
-        ++attempts;
-        if (heldFor_ < 0 || attempts <= heldFor_) {
-            return core::makeError(core::ErrorCode::InvalidState, "held",
-                                   "os_error=32 " + core::pathToUtf8(p));
-        }
-        return inner_.tryLock(p);
-    }
-
-    int attempts = 0;
-
-  private:
-    int heldFor_;
-};
-
-} // namespace
+// BusyLockFs (seam_doubles.hpp) answers "held" to the first attempts to take the lock, or always.
 
 TEST(ApplyLock, ALockThatIsHeldOnlyForAMomentIsWaitedForNotMistakenForAnotherHelper)
 {
@@ -1368,7 +1343,7 @@ TEST(ApplyWait, ACancelWhileWaitingEndsTheWaitWithoutTouchingAnything)
 namespace {
 
 // One run of the swap with a process seam of the test's own in the place of the rig's: the
-// harness's FakeProcesses cannot say "nobody, and then somebody" (scripted_processes.hpp).
+// harness's FakeProcesses cannot say "nobody, and then somebody" (seam_doubles.hpp).
 ApplyResult runWith(Rig& rig, ProcessOps& processes)
 {
     const ApplyServices services{*rig.fs, processes, rig.launcher, rig.registry, testTrust(), rig.timings};

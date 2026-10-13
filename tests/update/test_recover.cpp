@@ -10,11 +10,13 @@
 
 #include <gtest/gtest.h>
 
+#include <ostream>
 #include <stdexcept>
 #include <thread>
 
 #include "apply_harness.hpp"
 #include "recover_internal.hpp"
+#include "seam_doubles.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -27,6 +29,53 @@
 using namespace katana;
 using namespace katana::update;
 using namespace katana::update::harness;
+
+namespace katana::update {
+
+// So that a failed comparison says "Left" and not a number (GoogleTest finds these by the
+// namespace of the type).
+inline void PrintTo(Settled settled, std::ostream* out)
+{
+    switch (settled) {
+    case Settled::Nothing:
+        *out << "Nothing";
+        return;
+    case Settled::Healthy:
+        *out << "Healthy";
+        return;
+    case Settled::RolledBack:
+        *out << "RolledBack";
+        return;
+    case Settled::Left:
+        *out << "Left";
+        return;
+    case Settled::Busy:
+        *out << "Busy";
+        return;
+    case Settled::RollbackIncomplete:
+        *out << "RollbackIncomplete";
+        return;
+    }
+    *out << "?";
+}
+
+inline void PrintTo(Confirmed confirmed, std::ostream* out)
+{
+    switch (confirmed) {
+    case Confirmed::Nothing:
+        *out << "Nothing";
+        return;
+    case Confirmed::Done:
+        *out << "Done";
+        return;
+    case Confirmed::Busy:
+        *out << "Busy";
+        return;
+    }
+    *out << "?";
+}
+
+} // namespace katana::update
 
 namespace {
 
@@ -886,7 +935,12 @@ TEST(RecoverBeforeApply, AnInterruptedUpdateThatCannotBePutBackStopsTheNewOneBef
     EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
 }
 
-// ---- a pending folder whose helper died ---------------------------------------------------------------------------------------
+// ---- a pending folder whose helper died, met by the next update ------------------------------------------------------------
+//
+// A swap settles, in its first step, an earlier update that is in place and was never said to
+// start (apply.hpp, step 1; the rule is recover_internal.hpp's settlePending): healthy when the
+// marker of that update is there, and otherwise nothing new is started over it. So such a
+// folder never outlives the next update, and there is one at most.
 
 namespace {
 
@@ -901,6 +955,21 @@ void buildTinyLoop(Scenario& s)
     s.v1Hash = treeHash(s.root);
     s.v1Snapshot = snapshot(s.root);
     s.v2Hash = treeHash(s.expected);
+}
+
+// Every entry of the install folder, its working folder .update INCLUDED (snapshot() leaves that
+// one out): what "the install is exactly as it was" compares, journal and old files too. Only
+// the lock file is left out: asking for the lock makes it, and an empty lock file is no state.
+std::map<std::string, std::string> wholeInstall(const Scenario& s)
+{
+    std::map<std::string, std::string> entries = snapshot(s.root.parent_path());
+    const std::string prefix = s.root.filename().generic_string() + "/";
+    for (auto it = entries.begin(); it != entries.end();) {
+        const bool inside = it->first.rfind(prefix, 0) == 0;
+        const bool lock = it->first == prefix + ".update/lock";
+        it = (!inside || lock) ? entries.erase(it) : std::next(it);
+    }
+    return entries;
 }
 
 } // namespace
@@ -939,8 +1008,13 @@ TEST(RecoverSuperseded, AnUpdateThatProvesHealthyDeletesThePendingFolderAnEarlie
     EXPECT_FALSE(isPresent(healthMarkerPath(s.state, first))) << "and its marker";
 }
 
-TEST(RecoverSuperseded, AnUpdateThatDoesNotProveHealthyLeavesThePendingFolderWhereItWas)
+TEST(RecoverSuperseded, AnEarlierUpdateWhoseMarkerIsThereIsSettledFirstWhateverBecomesOfTheNextOne)
 {
+    // Until 2026-10-14 this case was named AnUpdateThatDoesNotProveHealthyLeavesThePendingFolder
+    // WhereItWas and expected the earlier folder to stay: a later update swept it only when the
+    // later one proved healthy. The rule changed, not the code's output: an earlier update with
+    // its marker is settled healthy in the next swap's first step, on that marker alone, and
+    // what the later release then does - here it does not start - is another matter.
     REQUIRE_CAN_SIGN();
     Loop loop("superseded-not", buildTinyLoop);
     Scenario& s = loop.scenario();
@@ -949,6 +1023,7 @@ TEST(RecoverSuperseded, AnUpdateThatDoesNotProveHealthyLeavesThePendingFolderWhe
     ASSERT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
     const std::string first = onlyTransaction(s);
     writeText(s.state / ("run-" + first) / "katana_updater.exe", "the dead helper's copy");
+    ASSERT_TRUE(isPresent(healthMarkerPath(s.state, first))) << "the premise: its marker is there";
 
     fs::remove_all(s.stage);
     writeStage(s.stage, tiny("0.3.0", 300));
@@ -962,9 +1037,867 @@ TEST(RecoverSuperseded, AnUpdateThatDoesNotProveHealthyLeavesThePendingFolderWhe
     const ApplyResult result = second.run();
     ASSERT_EQ(result.outcome, ApplyOutcome::RolledBack) << result.reason << ": " << result.detail;
     EXPECT_EQ(treeHash(s.root), s.v2Hash) << "back to the second release";
-    EXPECT_EQ(leftoversInUpdate(s.root), std::vector<std::string>{first})
-        << "the second release is not proved yet: its folder is what a health rollback needs";
-    EXPECT_TRUE(isPresent(s.state / ("run-" + first)));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty())
+        << "the second release had said that it starts: its folder went before the third was planned";
+    EXPECT_FALSE(isPresent(s.state / ("run-" + first))) << "and with it its dead helper's copy";
+    EXPECT_FALSE(isPresent(healthMarkerPath(s.state, first))) << "and its marker";
+}
+
+TEST(RecoverSuperseded, AnEarlierUpdateThatWasNeverSaidToStartStopsTheNextOneBeforeItTouchesAnything)
+{
+    REQUIRE_CAN_SIGN();
+    Loop loop("superseded-unproved", buildTinyLoop);
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.healthy);
+    ASSERT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    ASSERT_EQ(treeHash(s.root), s.v2Hash);
+    const std::string first = onlyTransaction(s);
+    writeText(s.state / ("run-" + first) / "katana_updater.exe", "the dead helper's copy");
+    // Nothing says that the second release ever started: its marker is not there.
+    fs::remove(healthMarkerPath(s.state, first));
+
+    const ReleaseSpec v3 = tiny("0.3.0", 300);
+    fs::remove_all(s.stage);
+    writeStage(s.stage, v3);
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> stageBefore = snapshot(s.stage);
+
+    StdFs disk;
+    Rig second(s, disk, "bbbbbbbb");
+    const ApplyResult result = second.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Refused);
+    EXPECT_EQ(result.reason, "interrupted_update") << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << "the second release is still what is installed";
+    EXPECT_FALSE(isPresent(s.root / ".update" / "bbbbbbbb")) << "the new update made no folder of its own";
+    // Nothing touched: the earlier update's folder, journal and old files are as they were - it
+    // was not put back, which a swap never does to a release somebody may be running ...
+    EXPECT_EQ(difference(installBefore, wholeInstall(s)), "");
+    EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    // ... nothing was started to find out, no RunOnce entry was registered, and what its dead
+    // helper left in U is still there for whoever settles it.
+    EXPECT_TRUE(second.launcher.ran.empty());
+    EXPECT_TRUE(second.registry.runOnceHistory.empty());
+    EXPECT_TRUE(isPresent(s.state / ("run-" + first) / "katana_updater.exe"));
+    EXPECT_EQ(difference(stageBefore, snapshot(s.stage)), "") << "and the download is kept";
+
+    // Once the second release has said that it starts - its window writes the marker - the very
+    // same update goes through.
+    writeText(healthMarkerPath(s.state, first), "ok\n");
+    const Path expected3 = s.scratch.path() / "expected3";
+    writeInstall(expected3, v3);
+    Rig third(s, disk, "cccccccc");
+    const ApplyResult again = third.run();
+    ASSERT_EQ(again.outcome, ApplyOutcome::Committed) << again.reason << ": " << again.detail;
+    EXPECT_EQ(treeHash(s.root), treeHash(expected3));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+// ---- an update that is in place and was never said to start ------------------------------------------------------------------
+//
+// A helper that dies between its COMMITTED_PENDING_HEALTH record and its HEALTHY one leaves a
+// whole new version that nothing has settled (recover.hpp, "AN UPDATE THAT IS INSTALLED AND WAS
+// NEVER SAID TO START"). What follows holds the rule that settles it (recover_internal.hpp,
+// settlePending) and two of its callers - settleUnproved, which is `katana_updater --recover`,
+// and confirmStartedWith, the window - to the specification, worked out by hand:
+//   - WHICH TREE: the new version's, built from the release in a folder of its own (s.v2Hash),
+//     or the old one's, the snapshot taken before the update (s.v1Hash). Never what the code
+//     left behind.
+//   - "NOTHING WRITTEN" is zero changes counted by a FaultFs under the code, and the install
+//     (its .update included) and the per-user folder compared entry by entry, byte by byte.
+//   - THE ORDER of the registry against the disk is read off a registry that notes, at each
+//     call, how many changes to the disk had been made by then.
+//   - THE RUNONCE COMMAND is written out as apply.hpp's step 4 gives it.
+// The state itself is not written by hand: the fixture update is applied on a FaultFs that dies
+// before the operation a clean run's log names as the HEALTHY append.
+
+namespace {
+
+struct Unproved {
+    explicit Unproved(const std::string& label)
+        : loop(label, [](Scenario& s) { buildFixtureScenario(s); }), points(measureCleanApply(loop))
+    {
+        again();
+    }
+
+    // That state once more, from the pristine install (a Loop puts back the install and the
+    // stage, and empties the per-user folder).
+    void again()
+    {
+        crashAt(loop, points.healthy);
+        transaction = onlyTransaction(loop.scenario());
+        marker = healthMarkerPath(loop.scenario().state, transaction);
+        helper = loop.scenario().state / ("run-" + transaction) / "katana_updater.exe";
+        // What the dead helper ran from. It is only ever looked for and deleted here, never
+        // started: a test starts no file that is not a program.
+        writeText(helper, "the dead helper's copy");
+    }
+
+    // What every case starts from; one that did not would prove nothing.
+    void expectPremise()
+    {
+        ASSERT_EQ(journalStateOf(s().root), JournalState::CommittedPendingHealth);
+        ASSERT_EQ(treeHash(s().root), s().v2Hash) << "every file is the new version's";
+        ASSERT_TRUE(isPresent(marker)) << "the health run wrote its marker before the helper died";
+        ASSERT_EQ(leftoversInUpdate(s().root), std::vector<std::string>{transaction});
+    }
+
+    Scenario& s() { return loop.scenario(); }
+    [[nodiscard]] Path work() { return s().root / ".update" / transaction; }
+    // `"<helper>" --recover <R>`: the helper in quotes, and the install folder quoted when it
+    // needs it (apply.hpp, step 4; TheRunOnceEntryIsRegisteredBeforeTheSwap... in test_apply.cpp
+    // holds the swap to the same text).
+    [[nodiscard]] std::string command()
+    {
+        return "\"" + core::pathToUtf8(helper) + "\" --recover " +
+               detail::quoteArgument(core::pathToUtf8(s().root));
+    }
+
+    Loop loop;
+    Points points;
+    std::string transaction;
+    Path marker;
+    Path helper;
+};
+
+// settleUnproved as `katana_updater --recover` calls it: the helper is the copy the swap ran
+// from, and the marker is looked for in the per-user folder the swap used.
+Settled settle(Unproved& u, const ApplyServices& services)
+{
+    return settleUnproved(u.s().root, u.helper, u.s().state, services);
+}
+
+// The same, on `fs`, until it ends or "dies".
+std::optional<SimulatedCrash> settleUntilCrash(Unproved& u, FsOps& fs, Settled* settled = nullptr)
+{
+    Rig rig(u.s(), fs, "eeeeeeee");
+    try {
+        const Settled ended = settle(u, rig.services());
+        if (settled != nullptr) {
+            *settled = ended;
+        }
+    } catch (const SimulatedCrash& crash) {
+        return crash;
+    }
+    return std::nullopt;
+}
+
+// What a machine does after a program died while it was settling: the next
+// `katana_updater --recover`, which is a recovery and then a settlement (src/katana_updater/
+// main.cpp, runRecover), both on a file system that works.
+void recoverThenSettle(Unproved& u)
+{
+    ASSERT_TRUE(recoverClean(u.s()).ok());
+    StdFs clean;
+    ASSERT_FALSE(settleUntilCrash(u, clean).has_value());
+}
+
+// A registry that also writes down, for each call, how many changes to the disk had been made
+// by then (the length of a LogFs's log): the order of the registry against the file system.
+class TimedRegistry final : public RegistryOps {
+  public:
+    explicit TimedRegistry(const LogFs& log) : log_(log) {}
+
+    struct Call {
+        std::string what;
+        std::string name;
+        std::string value;
+        std::size_t changesBefore = 0;
+    };
+    std::optional<Path> location;
+    std::vector<Call> calls;
+
+    core::Result<std::optional<Path>> installerLocation() const override { return location; }
+    core::Status setRunOnce(std::string_view name, std::string_view command) override
+    {
+        calls.push_back({"setRunOnce", std::string(name), std::string(command), log_.log.size()});
+        return {};
+    }
+    core::Status clearRunOnce(std::string_view name) override
+    {
+        calls.push_back({"clearRunOnce", std::string(name), std::string(), log_.log.size()});
+        return {};
+    }
+    core::Status setInstalledVersion(std::string_view version, std::string_view displayName) override
+    {
+        calls.push_back({"setInstalledVersion", std::string(displayName), std::string(version),
+                         log_.log.size()});
+        return {};
+    }
+
+  private:
+    const LogFs& log_;
+};
+
+bool endsWith(const std::string& text, std::string_view tail)
+{
+    return text.size() >= tail.size() && text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
+}
+
+// The path of a LogFs entry that is `<operation> <path>` and nothing more.
+Path pathOf(const std::string& entry, std::string_view operation)
+{
+    return core::pathFromUtf8(entry.substr(operation.size() + 1));
+}
+
+// The RunOnce value as the registry double holds it when the logon net is in place.
+std::map<std::string, std::string> armed(Unproved& u)
+{
+    return {{std::string(kRunOnceName), u.command()}};
+}
+
+} // namespace
+
+TEST(SettleUnproved, AnUpdateWhoseMarkerIsThereIsSettledHealthyAndThePerUserFolderIsOnlyRead)
+{
+    Unproved u("settle-healthy");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+    const Path journal = u.work() / "journal";
+    // The one record a settlement appends: HEALTHY, numbered after the records that are there.
+    const std::string healthyRecord =
+        encodeRecord(parseJournal(readText(journal)).records.size() + 1, {JournalOp::Healthy, {}});
+
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(s, log, "eeeeeeee");
+    EXPECT_EQ(settle(u, rig.services()), Settled::Healthy);
+
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty()) << "its folder is gone";
+    // `--recover` is started by headless programs too: U is read, for the marker, and that is
+    // all. The marker itself and the dead helper's copy are still there.
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    EXPECT_TRUE(isPresent(u.marker));
+    // The logon net: put back before anything else, and taken away once no folder is left.
+    EXPECT_EQ(rig.registry.runOnceHistory, std::vector<std::string>{u.command()});
+    EXPECT_TRUE(rig.registry.runOnce.empty());
+    EXPECT_EQ(rig.registry.runOnceCleared, 1);
+    EXPECT_TRUE(rig.registry.versions.empty()) << "an archive install has no entry in Settings > Apps";
+    EXPECT_TRUE(rig.launcher.ran.empty()) << "no settler starts a program";
+    EXPECT_TRUE(rig.launcher.started.empty());
+
+    // On the disk: one flushed record first, then the folder, its journal the last file to go.
+    ASSERT_FALSE(log.log.empty());
+    const std::string& first = log.log.front();
+    ASSERT_TRUE(first.rfind("appendDurable ", 0) == 0 && endsWith(first, " " + healthyRecord)) << first;
+    EXPECT_EQ(core::pathFromUtf8(first.substr(14, first.size() - 14 - 1 - healthyRecord.size())), journal);
+    const std::vector<std::uint64_t> removals = log.all("removeFile");
+    ASSERT_FALSE(removals.empty());
+    EXPECT_EQ(pathOf(log.log[removals.back() - 1], "removeFile"), journal)
+        << "a crash part way leaves a folder that still says what it is";
+    EXPECT_EQ(pathOf(log.log.back(), "removeEmptyDirectory"), u.work());
+
+    // Again: there is nothing to settle, so nothing is asked for and nothing written.
+    WatchedFs watched(disk);
+    FaultFs counting(watched);
+    Rig again(s, counting, "eeeeeeee");
+    EXPECT_EQ(settle(u, again.services()), Settled::Nothing);
+    EXPECT_EQ(counting.mutatingOperations(), 0u);
+    EXPECT_EQ(watched.locks, 0) << "not even the lock";
+    EXPECT_TRUE(again.registry.runOnceHistory.empty());
+    EXPECT_EQ(again.registry.runOnceCleared, 0);
+    EXPECT_EQ(treeHash(s.root), s.v2Hash);
+}
+
+TEST(SettleUnproved, TheLogonNetIsPutBackFirstAndTheVersionIsRewrittenBeforeTheRecordIsWritten)
+{
+    Unproved u("settle-order");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(s, log, "eeeeeeee");
+    TimedRegistry registry(log);
+    registry.location = s.root; // HKCU Software\Jarada\Katana equals R: an installer's install
+    const ApplyServices services{log, rig.processes, rig.launcher, registry, testTrust(), rig.timings};
+    ASSERT_EQ(settle(u, services), Settled::Healthy);
+    ASSERT_FALSE(log.log.empty());
+    ASSERT_NE(log.log.front().find(" HEALTHY "), std::string::npos) << log.log.front();
+
+    ASSERT_EQ(registry.calls.size(), 3u);
+    // FIRST the RunOnce entry, with nothing on the disk changed yet: when Windows started this
+    // run from the entry it had already taken the entry away.
+    EXPECT_EQ(registry.calls[0].what, "setRunOnce");
+    EXPECT_EQ(registry.calls[0].name, std::string(kRunOnceName));
+    EXPECT_EQ(registry.calls[0].value, u.command());
+    EXPECT_EQ(registry.calls[0].changesBefore, 0u);
+    // Then the version Settings > Apps shows - the fixtures' v2 is 0.10.0 - before HEALTHY is
+    // written (the first change to the disk, above): the swap itself rewrites it only once the
+    // proof is there, and it may have died before it did.
+    EXPECT_EQ(registry.calls[1].what, "setInstalledVersion");
+    EXPECT_EQ(registry.calls[1].value, "0.10.0");
+    EXPECT_EQ(registry.calls[1].name, "Katana 0.10.0");
+    EXPECT_EQ(registry.calls[1].changesBefore, 0u);
+    // And the entry is taken away last, when the folder is gone.
+    EXPECT_EQ(registry.calls[2].what, "clearRunOnce");
+    EXPECT_EQ(registry.calls[2].name, std::string(kRunOnceName));
+    EXPECT_EQ(registry.calls[2].changesBefore, log.log.size());
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(SettleUnproved, AnUpdateWithNoMarkerAndNobodyRunningIsPutBackAndNothingPerUserSaysSo)
+{
+    Unproved u("settle-rollback");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker); // the new version never said that it starts
+    // The tree's seed is the person's (v1's), not the one the release lists: a seed is written
+    // only when absent. The tree is that release all the same - or nothing here would be put back.
+    const std::string seed = readText(s.root / "etc/katana/settings.ini");
+    ASSERT_EQ(seed, readText(fixtureFolder() / "install/v1/etc/katana/settings.ini"));
+    ASSERT_NE(seed, readText(fixtureFolder() / "install/v2/etc/katana/settings.ini"));
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(s, log, "eeeeeeee");
+    EXPECT_EQ(settle(u, rig.services()), Settled::RolledBack);
+
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty()) << "its folder is gone";
+    EXPECT_EQ(rig.processes.scans.load(), 2) << "asked before the files were hashed, and again as the last thing";
+    // The rollback is the one every interrupted update gets: its two records, the first of them
+    // before anything moves.
+    EXPECT_EQ(log.find("appendDurable", "ROLLING_BACK"), 1u);
+    EXPECT_GT(log.find("appendDurable", "ROLLED_BACK"), 1u);
+    EXPECT_EQ(rig.registry.runOnceHistory, std::vector<std::string>{u.command()});
+    EXPECT_TRUE(rig.registry.runOnce.empty());
+    EXPECT_EQ(rig.registry.runOnceCleared, 1);
+    EXPECT_TRUE(rig.registry.versions.empty());
+    EXPECT_TRUE(rig.launcher.ran.empty()) << "the old version is not started either: no settler starts a program";
+    EXPECT_TRUE(rig.launcher.started.empty());
+    // What such a run cannot record is not recorded: no last.json, and the release is not added
+    // to `blocked` (no state.json is made). U is as it was.
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    EXPECT_FALSE(isPresent(s.state / "last.json"));
+    EXPECT_FALSE(isPresent(s.state / "state.json"));
+
+    FaultFs counting(disk);
+    Rig again(s, counting, "eeeeeeee");
+    EXPECT_EQ(settle(u, again.services()), Settled::Nothing);
+    EXPECT_EQ(counting.mutatingOperations(), 0u);
+    EXPECT_EQ(treeHash(s.root), s.v1Hash);
+}
+
+TEST(SettleUnproved, NothingIsPutBackUnderARunningProgramOrOverFilesThatAreNoLongerThatRelease)
+{
+    Unproved u("settle-left");
+    Scenario& s = u.s();
+    static const Trust noKeys{};
+
+    struct Row {
+        const char* name;
+        std::function<void()> arrange; // on top of the marker being gone
+        std::vector<ScriptedProcesses::Answer> answers;
+        const Trust* trust = nullptr; // nullptr: the keys the release is signed with
+        bool evidence = true;         // false: no per-user folder is named at all
+    };
+    const ScriptedProcesses::Answer cli = somebody(4412, "C:/k/bin/katana_cli.exe");
+    const std::vector<Row> rows = {
+        {"a program of the install is running at the first scan", {}, {cli}},
+        {"one was started while the files were hashed: at the second scan only", {}, {nobody(), cli}},
+        {"the first scan fails, which is not 'nobody'", {}, {noAnswer()}},
+        {"the second scan fails", {}, {nobody(), noAnswer()}},
+        {"one file of the release was overwritten",
+         [&] { writeText(s.root / "share/katana/readme.txt", "changed by hand\n"); },
+         {}},
+        {"one file of the release is gone", [&] { fs::remove(s.root / "bin/libnew-2.dll"); }, {}},
+        {"the journal's PLAN names another release than the manifest in the tree",
+         [&] {
+             // The same journal with another `toSequence` (the fixtures' v2 is 1792312800), written
+             // record by record so that every number and check is right.
+             const Path journal = u.work() / "journal";
+             ParsedJournal parsed = parseJournal(readText(journal));
+             ASSERT_FALSE(parsed.records.empty());
+             ASSERT_EQ(parsed.records.front().args.size(), 3u);
+             ASSERT_EQ(parsed.records.front().args[2], "1792312800");
+             parsed.records.front().args[2] = "999";
+             std::string text;
+             std::uint64_t n = 1;
+             for (const JournalRecord& record : parsed.records) {
+                 text += encodeRecord(n++, record);
+             }
+             writeText(journal, text);
+         },
+         {}},
+        {"the manifest in the tree is signed by a key this helper does not trust", {}, {}, &noKeys},
+        {"something that is not a file has the marker's name", [&] { fs::create_directories(u.marker); }, {}},
+        {"no per-user folder is named, so there is nowhere to look for a marker", {}, {}, nullptr, false},
+    };
+    for (const Row& row : rows) {
+        SCOPED_TRACE(row.name);
+        u.again();
+        ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+        fs::remove(u.marker);
+        if (row.arrange) {
+            ASSERT_NO_FATAL_FAILURE(row.arrange());
+        }
+        ASSERT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+        const std::map<std::string, std::string> installBefore = wholeInstall(s);
+        const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+        StdFs disk;
+        FaultFs counting(disk);
+        Rig rig(s, counting, "eeeeeeee");
+        ScriptedProcesses processes(row.answers);
+        const ApplyServices services{counting,     processes,
+                                     rig.launcher, rig.registry,
+                                     row.trust != nullptr ? *row.trust : testTrust(),
+                                     rig.timings};
+        EXPECT_EQ(settleUnproved(s.root, u.helper, row.evidence ? s.state : Path(), services), Settled::Left);
+
+        EXPECT_EQ(counting.mutatingOperations(), 0u) << "nothing is written for an update that is left";
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+        EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+        EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+        // The logon net is in place, and stays: the next logon comes back to decide.
+        EXPECT_EQ(rig.registry.runOnce, armed(u));
+        EXPECT_EQ(rig.registry.runOnceCleared, 0);
+        EXPECT_TRUE(rig.launcher.ran.empty());
+        EXPECT_TRUE(rig.launcher.started.empty());
+    }
+}
+
+TEST(SettleUnproved, AHeldLockIsALiveHelperAndNothingIsWrittenNotEvenTheRunOnceEntry)
+{
+    Unproved u("settle-busy");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    // With no marker and nobody running this update would be put back - were the lock free. It
+    // is held: its helper is alive, and in the middle of the very health run that would write it.
+    fs::remove(u.marker);
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    StdFs disk;
+    BusyLockFs busy(disk, -1);
+    FaultFs counting(busy);
+    Rig rig(s, counting, "eeeeeeee");
+    rig.timings.waitForHolders = std::chrono::milliseconds(300);
+    EXPECT_EQ(settle(u, rig.services()), Settled::Busy);
+
+    EXPECT_GT(busy.attempts, 1) << "the lock is polled, as a recovery polls it: one refusal is not believed";
+    EXPECT_EQ(counting.mutatingOperations(), 0u);
+    EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    EXPECT_TRUE(rig.registry.runOnceHistory.empty()) << "the registry too is the live helper's";
+    EXPECT_EQ(rig.registry.runOnceCleared, 0);
+    EXPECT_EQ(rig.processes.scans.load(), 0) << "nobody is even asked who is running";
+}
+
+TEST(SettleUnproved, ALockThatIsHeldOnlyForAMomentIsWaitedForAndTheUpdateIsThenSettled)
+{
+    Unproved u("settle-lock-blip");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    StdFs disk;
+    BusyLockFs busy(disk, 3); // a scanner that has the lock file open for a moment
+    Rig rig(s, busy, "eeeeeeee");
+    rig.timings.waitForHolders = std::chrono::seconds(5);
+    EXPECT_EQ(settle(u, rig.services()), Settled::Healthy);
+    EXPECT_EQ(busy.attempts, 4) << "three refusals, then the lock";
+    EXPECT_EQ(treeHash(s.root), s.v2Hash);
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(SettleUnproved, APuttingBackThatCannotFinishSaysSoAndTheNextRecoveryFinishesIt)
+{
+    Unproved u("settle-incomplete");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker);
+
+    StdFs disk;
+    HookFs hooked(disk);
+    hooked.beforeRename = [](const Path& from, const Path&) -> std::optional<core::Status> {
+        return injected(32, from); // a file that stays locked
+    };
+    Rig rig(s, hooked, "eeeeeeee");
+    EXPECT_EQ(settle(u, rig.services()), Settled::RollbackIncomplete);
+    // The journal says what every later start finishes (journal.hpp, needsRecovery), the folder
+    // with the old files is still there, and the logon net stays.
+    EXPECT_EQ(journalStateOf(s.root), JournalState::RollingBack);
+    EXPECT_EQ(leftoversInUpdate(s.root), std::vector<std::string>{u.transaction});
+    EXPECT_EQ(rig.registry.runOnce, armed(u));
+    EXPECT_EQ(rig.registry.runOnceCleared, 0);
+
+    // The next start of anything, with the file free: an ordinary recovery, which needs no marker
+    // and asks nobody who is running.
+    ASSERT_TRUE(recoverClean(s).ok());
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(SettleUnproved, WithNoSuchUpdateItAsksForNoLockAndWritesNothing)
+{
+    {
+        // An install that never updated.
+        Scenario s("settle-nothing");
+        s.v1 = tiny("0.1.0", 1);
+        writeInstall(s.root, s.v1);
+        StdFs disk;
+        WatchedFs watched(disk);
+        FaultFs counting(watched);
+        Rig rig(s, counting, "eeeeeeee");
+        EXPECT_EQ(settleUnproved(s.root, rig.request.helper, s.state, rig.services()), Settled::Nothing);
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(watched.locks, 0);
+        EXPECT_TRUE(rig.registry.runOnceHistory.empty());
+        EXPECT_EQ(rig.registry.runOnceCleared, 0);
+        EXPECT_FALSE(isPresent(s.root / ".update")) << "it does not make the folder";
+        EXPECT_EQ(settleUnproved(Path(), rig.request.helper, s.state, rig.services()), Settled::Nothing)
+            << "no install folder is not the .update of the current folder";
+        EXPECT_EQ(watched.locks, 0);
+    }
+    {
+        // An update that a crash cut off in the middle of its commit is recovery's to put back,
+        // not this function's to judge: it is as it was.
+        Loop loop("settle-not-mine", [](Scenario& s) { buildFixtureScenario(s); });
+        Scenario& s = loop.scenario();
+        const Points p = measureCleanApply(loop);
+        crashAt(loop, p.renames[p.renames.size() / 2]);
+        ASSERT_EQ(journalStateOf(s.root), JournalState::Committing);
+        const std::map<std::string, std::string> installBefore = wholeInstall(s);
+        StdFs disk;
+        WatchedFs watched(disk);
+        FaultFs counting(watched);
+        Rig rig(s, counting, "eeeeeeee");
+        EXPECT_EQ(settleUnproved(s.root, rig.request.helper, s.state, rig.services()), Settled::Nothing);
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(watched.locks, 0);
+        EXPECT_TRUE(rig.registry.runOnceHistory.empty());
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "");
+    }
+}
+
+// ---- the same, cut off anywhere ------------------------------------------------------------------------------------------------
+//
+// Every step is safe against a crash or a power loss at any point. Each loop dies before EVERY
+// change to the disk of one settlement, then does what the machine does next - a recovery and a
+// settlement, on a file system that works - and requires the whole tree to be one version's:
+//   a healthy settlement   always the new one (before HEALTHY is on disk the marker decides
+//                          again; after it any start sweeps);
+//   a putting back         always the old one (before ROLLING_BACK it is decided again, with
+//                          the same answer; after it every start finishes the rollback);
+//   a window's confirming  the old one while its marker is not yet written - nothing says the
+//                          release starts, and nobody is running - and the new one from then on.
+// A loop that died nowhere would pass, so each requires a death at every k, at operation k.
+
+TEST(SettleLoops, DyingBeforeEveryChangeOfAHealthySettlementAlwaysEndsAtTheNewTree)
+{
+    Unproved u("settle-loop-healthy");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    std::uint64_t total = 0;
+    {
+        StdFs disk;
+        FaultFs counting(disk);
+        Settled settled = Settled::Nothing;
+        ASSERT_FALSE(settleUntilCrash(u, counting, &settled).has_value());
+        ASSERT_EQ(settled, Settled::Healthy);
+        total = counting.mutatingOperations();
+    }
+    ASSERT_GE(total, 3u) << "a record, at least one file of the folder, the folder";
+
+    for (std::uint64_t k = 1; k <= total; ++k) {
+        SCOPED_TRACE("dying before change " + std::to_string(k) + " of " + std::to_string(total));
+        u.again();
+        ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+        const std::map<std::string, std::string> userBefore = snapshot(s.state);
+        StdFs disk;
+        FaultFs faults(disk);
+        faults.crashBefore(k);
+        const std::optional<SimulatedCrash> crash = settleUntilCrash(u, faults);
+        ASSERT_TRUE(crash.has_value()) << "it did not die";
+        ASSERT_EQ(crash->operation, k);
+
+        ASSERT_NO_FATAL_FAILURE(recoverThenSettle(u));
+        ASSERT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+        ASSERT_TRUE(leftoversInUpdate(s.root).empty());
+        ASSERT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    }
+    // Past the last change there is nothing to die before.
+    u.again();
+    StdFs disk;
+    FaultFs faults(disk);
+    faults.crashBefore(total + 1);
+    Settled settled = Settled::Nothing;
+    EXPECT_FALSE(settleUntilCrash(u, faults, &settled).has_value());
+    EXPECT_EQ(settled, Settled::Healthy);
+    EXPECT_EQ(faults.mutatingOperations(), total);
+}
+
+TEST(SettleLoops, DyingBeforeEveryChangeOfAPuttingBackAlwaysEndsAtTheOldTree)
+{
+    Unproved u("settle-loop-rollback");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    std::uint64_t total = 0;
+    {
+        fs::remove(u.marker);
+        StdFs disk;
+        FaultFs counting(disk);
+        Settled settled = Settled::Nothing;
+        ASSERT_FALSE(settleUntilCrash(u, counting, &settled).has_value());
+        ASSERT_EQ(settled, Settled::RolledBack);
+        ASSERT_EQ(treeHash(s.root), s.v1Hash);
+        total = counting.mutatingOperations();
+    }
+    ASSERT_GE(total, 10u) << "two records, two renames for each file that changed, the folder";
+
+    for (std::uint64_t k = 1; k <= total; ++k) {
+        SCOPED_TRACE("dying before change " + std::to_string(k) + " of " + std::to_string(total));
+        u.again();
+        ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+        fs::remove(u.marker);
+        const std::map<std::string, std::string> userBefore = snapshot(s.state);
+        StdFs disk;
+        FaultFs faults(disk);
+        faults.crashBefore(k);
+        const std::optional<SimulatedCrash> crash = settleUntilCrash(u, faults);
+        ASSERT_TRUE(crash.has_value()) << "it did not die";
+        ASSERT_EQ(crash->operation, k);
+
+        ASSERT_NO_FATAL_FAILURE(recoverThenSettle(u));
+        ASSERT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+        ASSERT_TRUE(leftoversInUpdate(s.root).empty());
+        ASSERT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    }
+}
+
+TEST(SettleLoops, DyingBeforeEveryChangeOfAWindowsConfirmingEndsAtTheOldTreeBeforeItsMarkerAndTheNewOneAfter)
+{
+    Unproved u("settle-loop-confirm");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    std::uint64_t total = 0;
+    std::uint64_t markerWritten = 0; // the change that puts the window's marker on disk
+    {
+        fs::remove(u.marker);
+        StdFs disk;
+        FaultFs counting(disk);
+        LogFs log(counting);
+        FakeRegistry registry;
+        ASSERT_EQ(detail::confirmStartedWith(s.root, s.state, log, registry), Confirmed::Done);
+        total = counting.mutatingOperations();
+        ASSERT_EQ(log.log.size(), total);
+        markerWritten = log.find("writeDurable", "healthy-");
+        ASSERT_GT(markerWritten, 0u);
+        ASSERT_LT(markerWritten, total);
+    }
+
+    std::uint64_t old = 0;
+    std::uint64_t fresh = 0;
+    for (std::uint64_t k = 1; k <= total; ++k) {
+        SCOPED_TRACE("dying before change " + std::to_string(k) + " of " + std::to_string(total));
+        u.again();
+        ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+        fs::remove(u.marker);
+        StdFs disk;
+        FaultFs faults(disk);
+        faults.crashBefore(k);
+        FakeRegistry registry;
+        std::optional<SimulatedCrash> crash;
+        try {
+            (void)detail::confirmStartedWith(s.root, s.state, faults, registry);
+        } catch (const SimulatedCrash& died) {
+            crash = died;
+        }
+        ASSERT_TRUE(crash.has_value()) << "it did not die";
+        ASSERT_EQ(crash->operation, k);
+
+        ASSERT_NO_FATAL_FAILURE(recoverThenSettle(u));
+        // The changes before k were made: the marker's write is one of them, or it is not.
+        const bool said = k > markerWritten;
+        ASSERT_EQ(treeHash(s.root), said ? s.v2Hash : s.v1Hash)
+            << "versus the old: " << difference(s.v1Snapshot, snapshot(s.root))
+            << "versus the new: " << difference(snapshot(s.expected), snapshot(s.root));
+        ASSERT_TRUE(leftoversInUpdate(s.root).empty());
+        ++(said ? fresh : old);
+    }
+    // The loop reached both.
+    EXPECT_EQ(old, markerWritten);
+    EXPECT_EQ(fresh, total - markerWritten);
+    EXPECT_GT(old, 0u);
+    EXPECT_GT(fresh, 0u);
+}
+
+// ---- the window of the new version --------------------------------------------------------------------------------------------
+
+TEST(ConfirmStarted, TheWindowOfTheNewVersionSettlesTheUpdateHealthyAndClearsWhatTheDeadHelperLeft)
+{
+    for (const bool markerThere : {true, false}) {
+        SCOPED_TRACE(markerThere ? "the health run had written the marker" : "no marker: the window writes it");
+        Unproved u(std::string("confirm-done-") + (markerThere ? "marker" : "none"));
+        ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+        Scenario& s = u.s();
+        if (!markerThere) {
+            fs::remove(u.marker);
+        }
+        StdFs disk;
+        LogFs log(disk);
+        FakeRegistry registry;
+        registry.runOnce[std::string(kRunOnceName)] = u.command(); // as the swap that died left it
+
+        EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, log, registry), Confirmed::Done);
+        EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+        EXPECT_TRUE(leftoversInUpdate(s.root).empty()) << "its folder is gone";
+        EXPECT_FALSE(isPresent(u.marker)) << "the marker has done its work";
+        EXPECT_FALSE(isPresent(s.state / ("run-" + u.transaction))) << "nothing starts the dead helper's copy again";
+        EXPECT_FALSE(isPresent(s.state / "cleanup.list")) << "nothing stayed, so nothing is listed";
+        EXPECT_TRUE(registry.runOnce.empty()) << "the entry named the copy that is gone";
+        EXPECT_EQ(registry.runOnceCleared, 1);
+        EXPECT_TRUE(registry.runOnceHistory.empty()) << "a window registers nothing";
+
+        // The proof is on disk before anything is settled by it.
+        const std::uint64_t healthy = log.find("appendDurable", " HEALTHY ");
+        const std::uint64_t written = log.find("writeDurable", "healthy-");
+        ASSERT_GT(healthy, 0u);
+        if (markerThere) {
+            EXPECT_EQ(written, 0u) << "a marker that is there is not written again";
+        } else {
+            ASSERT_GT(written, 0u);
+            EXPECT_LT(written, healthy);
+            EXPECT_TRUE(endsWith(log.log[written - 1], " ok\n")) << "what --update-health writes";
+        }
+    }
+}
+
+TEST(ConfirmStarted, AHeldLockIsALiveHelperTheWindowAsksOnceAndChangesNothing)
+{
+    Unproved u("confirm-busy");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker);
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+    const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+    StdFs disk;
+    BusyLockFs busy(disk, -1);
+    FaultFs counting(busy);
+    FakeRegistry registry;
+    registry.runOnce[std::string(kRunOnceName)] = u.command();
+    EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, counting, registry), Confirmed::Busy);
+
+    EXPECT_EQ(busy.attempts, 1) << "a window does not wait for the lock: it asks again later";
+    EXPECT_EQ(counting.mutatingOperations(), 0u) << "not even its marker is written under a live helper";
+    EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+    EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    EXPECT_EQ(registry.runOnce, armed(u));
+    EXPECT_EQ(registry.runOnceCleared, 0);
+}
+
+TEST(ConfirmStarted, WithNoSuchUpdateTheWindowAsksForNoLockAndWritesNothing)
+{
+    {
+        // Every start but the one after a helper died: an install with nothing pending.
+        Scenario s("confirm-nothing");
+        s.v1 = tiny("0.1.0", 1);
+        writeInstall(s.root, s.v1);
+        StdFs disk;
+        WatchedFs watched(disk);
+        FaultFs counting(watched);
+        FakeRegistry registry;
+        registry.runOnce[std::string(kRunOnceName)] = "somebody's";
+        EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, counting, registry), Confirmed::Nothing);
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(watched.locks, 0);
+        EXPECT_EQ(registry.runOnceCleared, 0);
+        EXPECT_EQ(registry.runOnce.size(), 1u);
+        EXPECT_FALSE(isPresent(s.root / ".update"));
+        EXPECT_TRUE(snapshot(s.state).empty()) << "nothing is made in the per-user folder";
+    }
+    {
+        // An update cut off in the middle of its commit is not a version that starts: the window
+        // confirms nothing of it (its own recover() has it put back).
+        Loop loop("confirm-not-mine", [](Scenario& s) { buildFixtureScenario(s); });
+        Scenario& s = loop.scenario();
+        const Points p = measureCleanApply(loop);
+        crashAt(loop, p.renames[p.renames.size() / 2]);
+        ASSERT_EQ(journalStateOf(s.root), JournalState::Committing);
+        const std::map<std::string, std::string> installBefore = wholeInstall(s);
+        StdFs disk;
+        WatchedFs watched(disk);
+        FaultFs counting(watched);
+        FakeRegistry registry;
+        EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, counting, registry), Confirmed::Nothing);
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(watched.locks, 0);
+        EXPECT_EQ(registry.runOnceCleared, 0);
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "");
+    }
+}
+
+TEST(ConfirmStarted, WhatWouldNotGoOfTheDeadHelpersCopyIsListedForTheNextStart)
+{
+    Unproved u("confirm-leftover");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    StdFs disk;
+    // The copy is held - a scanner is reading it - so it cannot be deleted, and neither can the
+    // folder it is in.
+    class Holding final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Status removeFile(const Path& path) override
+        {
+            if (path.filename() == "katana_updater.exe") {
+                return osError(core::ErrorCode::FileExportFailure, "sharing violation", path, 32);
+            }
+            return inner_.removeFile(path);
+        }
+    } holding(disk);
+    FakeRegistry registry;
+    EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, holding, registry), Confirmed::Done)
+        << "the update is settled all the same";
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_FALSE(isPresent(u.marker));
+    EXPECT_TRUE(isPresent(u.helper)) << "the premise: it was held";
+
+    // U/cleanup.list, one path to a line (state.hpp): the file that would not go, and its folder.
+    std::set<Path> listed;
+    std::istringstream lines(readText(s.state / "cleanup.list"));
+    for (std::string line; std::getline(lines, line);) {
+        if (!line.empty()) {
+            listed.insert(core::pathFromUtf8(line));
+        }
+    }
+    EXPECT_EQ(listed, (std::set<Path>{u.helper, u.helper.parent_path()}));
+}
+
+TEST(ConfirmStarted, AWindowThatCannotWriteItsMarkerSettlesNothingAndNeverPutsAnythingBack)
+{
+    Unproved u("confirm-no-marker");
+    ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+    Scenario& s = u.s();
+    fs::remove(u.marker);
+    const std::map<std::string, std::string> installBefore = wholeInstall(s);
+
+    StdFs disk;
+    class NoMarker final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Status writeDurable(const Path& path, std::string_view bytes) override
+        {
+            if (path.filename().string().rfind("healthy-", 0) == 0) {
+                return osError(core::ErrorCode::FileExportFailure, "access denied", path, 5);
+            }
+            return inner_.writeDurable(path, bytes);
+        }
+    } refusing(disk);
+    FakeRegistry registry;
+    registry.runOnce[std::string(kRunOnceName)] = u.command();
+    // With no marker the rule has nothing to call it healthy by, and a window is never the one
+    // to put an update back: it is left, and the window is told to ask again.
+    EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, refusing, registry), Confirmed::Busy);
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << "nothing was put back";
+    EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+    EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    EXPECT_EQ(registry.runOnce, armed(u)) << "the logon net stays for an update that is not settled";
+    EXPECT_EQ(registry.runOnceCleared, 0);
+    EXPECT_TRUE(isPresent(u.helper)) << "and so does the helper the entry names";
 }
 
 // ---- a journal that is not whole ----------------------------------------------------------------------------------------------
@@ -1354,6 +2287,51 @@ TEST(RecoverWith, NothingToDoStartsNothingAndTakesNoLock)
     writeText(s.root / ".update" / "lock", "");
     EXPECT_TRUE(detail::recoverWith(s.root, watched, launcher, s.state, kShortWait).ok());
     EXPECT_EQ(watched.locks, 0);
+}
+
+TEST(RecoverWith, AnUpdateThatWasNeverSaidToStartIsLeftExactlyAsItIsWithNoLockAndNoHelper)
+{
+    // recover() is the first call of every program - the health run of a live helper among them,
+    // and katana_cli and katana_mcp, which write no per-user state. Over an update that is in
+    // place and not yet proved it must therefore do NOTHING: take no lock (the helper that owns
+    // the update may be alive and waiting for this very program to start), run no helper (no
+    // recursion: the helper would be starting what started it), and leave the install and the
+    // per-user folder as they are - with the marker there and without it.
+    for (const bool markerThere : {true, false}) {
+        SCOPED_TRACE(markerThere ? "its marker is there" : "its marker is not there");
+        Unproved u(std::string("recoverwith-unproved-") + (markerThere ? "marker" : "none"));
+        ASSERT_NO_FATAL_FAILURE(u.expectPremise());
+        Scenario& s = u.s();
+        if (!markerThere) {
+            fs::remove(u.marker);
+        }
+        ASSERT_TRUE(isPresent(u.helper)) << "the premise: there is a helper copy it could run";
+        const std::map<std::string, std::string> installBefore = wholeInstall(s);
+        const std::map<std::string, std::string> userBefore = snapshot(s.state);
+
+        StdFs disk;
+        WatchedFs watched(disk);
+        FaultFs counting(watched);
+        FakeLauncher launcher;
+        EXPECT_TRUE(detail::recoverWith(s.root, counting, launcher, s.state, kShortWait).ok());
+        EXPECT_EQ(watched.locks, 0);
+        EXPECT_TRUE(launcher.ran.empty());
+        EXPECT_TRUE(launcher.started.empty());
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+        EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+
+        // And the recovery the helper itself runs first under `--recover` is the same: it is what
+        // comes AFTER it there, settleUnproved, that settles such an update.
+        Rig rig(s, counting, "eeeeeeee");
+        EXPECT_TRUE(recoverInProcess(s.root, rig.services()).ok());
+        EXPECT_EQ(watched.locks, 0);
+        EXPECT_EQ(counting.mutatingOperations(), 0u);
+        EXPECT_TRUE(rig.registry.runOnceHistory.empty());
+        EXPECT_EQ(rig.registry.runOnceCleared, 0);
+        EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
+        EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
+    }
 }
 
 TEST(RecoverEmptyRoot, NoInstallFolderIsNotTheDotUpdateOfTheCurrentFolder)
