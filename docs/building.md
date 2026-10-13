@@ -486,7 +486,8 @@ rule: `cmake --install`, the bundle and the packages hold `katana`,
 test fails the suite if another program is ever installed. The readers of the older formats it is made of are a
 library of their own, `katana_legacy_customisation`
 (`src/katana_archive12d/legacy/`), which no program links - a second test
-walks the link closure of `katana`, `katana_cli` and `katana_mcp` and fails on
+walks the link closure of `katana`, `katana_cli`, `katana_mcp` and
+`katana_updater` and fails on
 it (`tests/CMakeLists.txt`; each check is proved on a fixture, `docs/testing.md`).
 
 The reference folder is that of `KATANA_REFERENCE_CUSTOMISATION_DIR` (the root

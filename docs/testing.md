@@ -248,11 +248,12 @@ a fixture, since a check that cannot see a violation passes as quietly as one
 that finds none (`tests/CMakeLists.txt`):
 
 - the link closure. `the_programs_link_none_of_the_legacy_customisation_readers`
-  walks, at configure time, every library `katana`, `katana_cli` and
-  `katana_mcp` link, however deep and however linked, and fails if
+  walks, at configure time, every library `katana`, `katana_cli`,
+  `katana_mcp` and the update helper `katana_updater` link, however deep and
+  however linked, and fails if
   `katana_legacy_customisation` - the readers of the older customisation
   formats - is among them; it also fails if the walk did not reach
-  `katana_core` or if one of the three is not a target, which would be a walk
+  `katana_core` or if one of the four is not a target, which would be a walk
   that found nothing because it saw nothing. It also fails if any target
   other than the library and the converter compiles a source file of the
   readers (`src/katana_archive12d/legacy/*.cpp`) directly, which a walk of
@@ -374,23 +375,32 @@ signed with the published test key, which no shipped program trusts
 **The fault loops** (`tests/update/test_fault_loops.cpp`). `FaultFs`
 (`include/katana/update/fault_fs.hpp`) wraps a file system, counts its
 changing operations and can make the k-th one not happen, as if the process
-had died just before it. Three loops rest on it, each over a 40-file release
-and again over the fixture releases the producer made:
+had died just before it. Three loops rest on it, each run over a 40-file
+release and over the fixture releases the producer made:
 
 1. the swap is crashed before EVERY one of its file operations, recovery
    runs on what the crash left, and the whole tree must hash to the old
    version's or the new one's, never a mix - the old one unless the crash
    came after the journal said the swap was complete
-   (`CrashingBeforeEveryOperationOfAFortyFileUpdateLeavesTheOldTreeOrTheNewNeverAMix`);
-2. the crash INSIDE the recovery: from six interrupted states - before the
-   commit is recorded, before its first rename, half way through, after its
-   last, before the swap is recorded as complete, and inside the swap's own
-   rollback - the recovery is crashed before every one of its operations,
-   and the recovery after that must still end at the old tree
-   (`CrashingInsideRecoveryAtEveryOperationStillEndsAtTheOldTree`);
+   (`CrashingBeforeEveryOperationOfAFortyFileUpdateLeavesTheOldTreeOrTheNewNeverAMix`,
+   `TheSameLoopOverTheFixtureReleasesMadeByTheProducer`);
+2. the crash INSIDE the recovery: the swap is interrupted, the recovery is
+   crashed before every one of its operations, and the recovery after that
+   must still end at the old tree. The loop names six interrupted states -
+   before the commit is recorded, before its first rename, half way through
+   the renames, after the last, before the swap is recorded as complete, and
+   inside the swap's own rollback - and the two runs do NOT take the same
+   ones. The fixture run takes all six
+   (`TheRecoveryLoopOverTheFixtureReleases`); the 40-file run takes the
+   half-way state alone, the largest recovery there is
+   (`CrashingInsideRecoveryAtEveryOperationStillEndsAtTheOldTree`). So the
+   other five states are crashed into only on the small update; the test's
+   reason is that what a recovery does does not depend on how many files
+   there are;
 3. an error 32, a locked file, at every rename of the commit: the update
    must end rolled back, with the tree exactly the old one
-   (`AnErrorThirtyTwoAtEveryRenameOfAFortyFileUpdateEndsRolledBackToExactlyTheOldTree`).
+   (`AnErrorThirtyTwoAtEveryRenameOfAFortyFileUpdateEndsRolledBackToExactlyTheOldTree`,
+   `TheSameLoopOverTheFixtureReleases`).
 
 A loop that crashed nowhere would pass, so each shows that it reached what
 it claims: a crash at every k, at the operation numbered k, and crashes

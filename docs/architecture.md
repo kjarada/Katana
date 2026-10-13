@@ -208,7 +208,7 @@ else. Two rules are checked there and run as the `layering` test:
    on a tree that does it. Private headers are not spelled `katana/<layer>/`,
    so the older customisation formats' headers, which are private to
    `src/katana_archive12d/legacy/`, are held to their library by a different
-   check - the link closure and the install rules of the three programs
+   check - the link closure and the install rules of the four programs
    (`docs/testing.md`).
 2. **No third-party types in public headers** (Rule 4). Eigen, CGAL, PROJ,
    SQLite, GDAL, PDAL, Qt, Vulkan, nlohmann, OpenSSL, zlib and libcurl may
