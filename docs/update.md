@@ -143,7 +143,7 @@ trust: nothing in U is believed without a signature check.
 | `state.json` | `last_check`, `auto`, `skipped` (a version) and `blocked` (the sequences of releases that were installed here and did not start) |
 | `last.json` | how the last swap ended: `status`, `reason`, `holder`, `version`, `tx`. The window shows it once at its next start and clears it |
 | `stage-<sequence>/` | the downloaded files of one release at their root-relative paths, and last of all `manifest.json` and `manifest.json.sig`, whose presence means "complete"; `stage-<sequence>.lock` beside it |
-| `run-<tx>/` | the copy of the helper that runs the swap |
+| `run-<tx>/` | the copy of the helper that runs the swap. A swap that ends puts the folder on `cleanup.list`; one that was interrupted and recovered leaves it ("Not done") |
 | `healthy-<tx>` | the marker a new version writes to say it starts |
 | `cleanup.list` | what a held lock kept from being deleted; the next start of the window removes it |
 
@@ -630,6 +630,16 @@ NOTHING per user - no `last.json`, no `cleanup.list` - whoever started it.
 Its one record is a line in `R/.update/recovery.log` for each run that found
 something to put right.
 
+`update::recover` keeps the same rule in the program that called it. It
+READS U, to find the helper copy `U/run-<tx>/katana_updater`, and that is
+all it does there: it makes, changes and deletes nothing in U, whichever
+program calls it. No `cleanup.list` is begun for what a lock kept in
+`R/.update` - the next start of any program finds that folder again and
+deletes what is left of it - and the helper copy it ran stays where it was
+("Not done").
+`RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
+compares U before and after, entry by entry and byte by byte.
+
 **The residual.** A program started during the commit - about a second -
 may fail to load, half its libraries being new; it is started again. And a
 program of the install that another Windows account is running cannot be
@@ -1036,6 +1046,21 @@ whatever more the manifest's parser allows (4 GiB).
   A copy unpacked where its user may not write is offered a release like
   any other; the helper refuses at the swap (`last=refused:root_not_writable`),
   after the download.
+- **The helper copy of a recovered update is removed by nothing.** A swap
+  that ends puts `U/run-<tx>` on `cleanup.list` itself. A swap that a crash
+  or a power cut ended did not get there, and one whose rollback failed
+  leaves its copy off the list on purpose, for the `RunOnce` entry to run.
+  Both are put right by `katana_updater --recover R`, which writes nothing
+  per user; and `update::recover`, which starts it from `katana_cli`,
+  `katana_mcp` and a headless window as well as from the window a person
+  uses, leaves U as it found it ("Recovery"). So nothing names the folder
+  afterwards, and the window's start removes what `cleanup.list` names and
+  nothing else: the copy - one folder holding one program - stays in
+  `U/run-<tx>` until a program that may write per-user state removes it.
+  The start of an interactive window of an installed copy is where that
+  sweep belongs, and it has not been given it. Open with it: U is one
+  folder for every copy of Katana a person runs, so a `run-<tx>` that no
+  transaction of THIS install owns may be another install's, in use now.
 - **No resume inside a file.** A download resumes file by file; a large
   file that was half fetched is fetched again.
 - **No beta channel**, no installing an older version, no installing at

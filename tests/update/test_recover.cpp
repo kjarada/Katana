@@ -1137,11 +1137,14 @@ constexpr std::chrono::milliseconds kShortWait{100};
 
 } // namespace
 
-TEST(RecoverWith, TheHelperCopyIsRunWithRecoverAndTheRootFromItsOwnFolderAndNoLongerNeededAfterwards)
+TEST(RecoverWith, TheHelperCopyIsRunWithRecoverAndTheRootFromItsOwnFolderAndTheStateFolderIsLeftAsItWas)
 {
     Interrupted x("recoverwith-args");
     Scenario& s = x.scenario();
     writeText(x.copy(), "a stand-in for the helper copy");
+    // The per-user folder, entry by entry and byte by byte, before the call.
+    const std::map<std::string, std::string> before = snapshot(s.state);
+    ASSERT_TRUE(before.contains("run-" + x.transaction)) << "the premise: the copy's folder is in U";
     StdFs disk;
     FakeLauncher launcher;
     const core::Status status = detail::recoverWith(s.root, disk, launcher, s.state, kShortWait);
@@ -1154,8 +1157,13 @@ TEST(RecoverWith, TheHelperCopyIsRunWithRecoverAndTheRootFromItsOwnFolderAndNoLo
     EXPECT_EQ(launcher.ran[0].workingDirectory, x.copy().parent_path());
     EXPECT_GT(launcher.ran[0].timeout, std::chrono::seconds(30)) << "a bound, and not a short one";
     EXPECT_TRUE(launcher.started.empty());
-    // The helper has exited by now, so the copy of itself it could not delete is deleted.
-    EXPECT_FALSE(isPresent(x.copy().parent_path()));
+    // recover() is the first call of katana_cli and katana_mcp too, and a headless program writes
+    // no per-user state (recover.hpp, "WHAT RECOVERY WRITES, AND WHERE"; docs/headless.md). The
+    // state folder is read, to find the copy, and that is all: the copy that was run is still
+    // there, no cleanup.list is begun, and nothing else in U is made, changed or removed.
+    EXPECT_TRUE(isPresent(x.copy())) << "the helper copy is per-user state: it is not recover()'s to delete";
+    EXPECT_FALSE(isPresent(s.state / "cleanup.list"));
+    EXPECT_EQ(difference(before, snapshot(s.state)), "") << "recover() changed the per-user state folder";
 }
 
 TEST(RecoverWith, TheRootIsPassedWithoutATrailingSeparator)
@@ -1260,6 +1268,56 @@ TEST(RecoverWith, WhatALockKeptFromBeingDeletedAfterARollbackIsSweptAtTheNextSta
     EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
     EXPECT_TRUE(leftoversInUpdate(s.root).empty());
     EXPECT_TRUE(launcher.ran.empty());
+    EXPECT_EQ(treeHash(s.root), s.v1Hash);
+}
+
+TEST(RecoverWith, WhatIsStillHeldAtTheNextStartStaysUnderItsJournalAndIsNotQueuedInTheStateFolder)
+{
+    Loop loop("recoverwith-sweep-held", [](Scenario& s) { buildFixtureScenario(s); });
+    Scenario& s = loop.scenario();
+    const Points p = measureCleanApply(loop);
+    crashAt(loop, p.pending); // every file is in place; the pending record is not written
+
+    // As in the test above: the rollback leaves a folder that cannot be deleted, because
+    // something holds the katana.exe in it.
+    StdFs disk;
+    class StillHolding final : public ForwardingFs {
+      public:
+        using ForwardingFs::ForwardingFs;
+        core::Status removeFile(const Path& path) override
+        {
+            if (path.filename() == "katana.exe" && path.string().find(".update") != std::string::npos) {
+                return osError(core::ErrorCode::FileExportFailure, "sharing violation", path, 32);
+            }
+            return inner_.removeFile(path);
+        }
+    } holding(disk);
+    {
+        Rig rig(s, holding, "eeeeeeee");
+        ASSERT_TRUE(recoverInProcess(s.root, rig.services()).ok());
+    }
+    ASSERT_FALSE(leftoversInUpdate(s.root).empty()) << "the premise: the folder stays";
+    ASSERT_EQ(journalStateOf(s.root), JournalState::RolledBack);
+    const std::map<std::string, std::string> before = snapshot(s.state);
+
+    // The next start, and the file is STILL held. recover() may be katana_cli's or katana_mcp's
+    // first call, and a headless program writes no per-user state (recover.hpp): what the sweep
+    // cannot delete is not queued in U/cleanup.list, and U is as it was. Nothing is lost by that:
+    // the journal is the last thing a sweep deletes (remove_tree.hpp), so the folder still says
+    // that its transaction is over ...
+    FakeLauncher launcher;
+    EXPECT_TRUE(detail::recoverWith(s.root, holding, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(launcher.ran.empty());
+    EXPECT_FALSE(leftoversInUpdate(s.root).empty()) << "a file in it is held";
+    EXPECT_EQ(journalStateOf(s.root), JournalState::RolledBack);
+    EXPECT_FALSE(isPresent(s.state / "cleanup.list"));
+    EXPECT_EQ(difference(before, snapshot(s.state)), "") << "recover() changed the per-user state folder";
+
+    // ... and the start after that, with the file free, finds it and sweeps it.
+    EXPECT_TRUE(detail::recoverWith(s.root, disk, launcher, s.state, kShortWait).ok());
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+    EXPECT_TRUE(launcher.ran.empty());
+    EXPECT_EQ(difference(before, snapshot(s.state)), "");
     EXPECT_EQ(treeHash(s.root), s.v1Hash);
 }
 

@@ -18,6 +18,15 @@
 //                                             a release for ever. recover() sweeps these itself,
 //                                             without starting the helper: there is no tree to
 //                                             put back.
+//
+// recover() is called by katana_cli and katana_mcp too, and a headless program writes no
+// per-user state (recover.hpp, "WHAT RECOVERY WRITES, AND WHERE"). So the state folder U is
+// READ here, to find the helper copy U/run-<tx>/, and nothing in it is made, changed or deleted:
+// the copy that was run stays where it is, and what a sweep cannot delete is not queued in
+// U/cleanup.list. A folder under R/.update that would not go needs no list: it keeps its
+// journal (remove_tree.hpp) and is found and swept again at the next start. The copy is left
+// for a program that may write per-user state, and NOTHING REMOVES IT YET: one helper's size
+// stays in U for each update that a crash interrupted.
 
 #include "katana/update/recover.hpp"
 
@@ -122,7 +131,9 @@ bool anyNeedsWork(const std::vector<Found>& found)
 }
 
 // Deletes a folder through FsOps; what cannot be deleted now (a file something holds open) is
-// queued for the next start when there is a state folder to queue it in.
+// queued for the next start when there is a state folder to queue it in. Only the helper run
+// for the window gives one (apply.cpp, with its `--state U`): recover() and `--recover` give an
+// empty path, and write nothing per-user.
 void sweep(FsOps& fs, const Path& folder, const Path& stateDirectory, std::string_view last)
 {
     std::vector<Path> leftovers;
@@ -201,8 +212,11 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
         if (again.ok()) {
             for (const Found& one : again.value()) {
                 if (isFinished(one.state)) {
-                    sweep(fs, updateWorkDirectory(root) / core::pathFromUtf8(one.name),
-                          stateDirectory, "journal");
+                    // No state folder to queue in: this may be a headless program, which
+                    // begins no cleanup.list. What is still held stays, under its journal, and
+                    // the next start comes here again.
+                    sweep(fs, updateWorkDirectory(root) / core::pathFromUtf8(one.name), Path(),
+                          "journal");
                 }
             }
         }
@@ -235,7 +249,8 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
     }
 
     // The helper copy the interrupted update ran from, if it is still there: it is outside
-    // R, so it works when R's own bin/ is half swapped. Else the install's own.
+    // R, so it works when R's own bin/ is half swapped. Else the install's own. Looking for
+    // the copy is all that is done in the state folder.
     const Path stem = installedProgram(Path(), kHelperStem).filename();
     Path helper;
     for (const Found& one : pending) {
@@ -282,13 +297,9 @@ core::Status recoverWithUnguarded(const Path& rootGiven, FsOps& fs, Launcher& la
                                                    std::to_string(ran->exitCode));
     }
 
-    // The helper has exited and put everything back, so the copies of itself that it could not
-    // delete while it ran can go now (a copy that is still held is queued for the next start).
-    if (!stateDirectory.empty()) {
-        for (const Found& one : pending) {
-            sweep(fs, runPath(stateDirectory, one.name), stateDirectory, {});
-        }
-    }
+    // The helper has exited and put everything back. Its copy U/run-<tx>/ is of no use any
+    // more, and it STAYS: deleting it, or listing it in U/cleanup.list, would be a headless
+    // program changing per-user state (recover.hpp; the top of this file says what that costs).
     return {};
 }
 

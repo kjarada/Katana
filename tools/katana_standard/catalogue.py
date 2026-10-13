@@ -753,7 +753,8 @@ def catalogue(data, root):
       "every colour of the palette is used. "
       "`make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, "
       "`--docs` this document, `--check` exits 1 when either committed output differs from what the data "
-      "makes, `--images` draws the sheets with `render_images.py`. Run twice, it gives the same bytes.")
+      "makes or a picture was drawn from something else than is committed (\"Images\", below), `--images` "
+      "draws the sheets with `render_images.py`. Run twice, `--json` and `--docs` give the same bytes.")
     w("- **The bytes are the writer's.** The generator writes the canonical form `customisationToJson` writes "
       "(`docs/customisation.md`, \"What the writer writes\"): a file loaded by `CUSTOMISE <file>` and written "
       "again by `CUSTOMISE EXPORT <out> CODES LINESTYLES SYMBOLS` comes back byte for byte, except for the one "
@@ -778,7 +779,8 @@ def catalogue(data, root):
       "rectangle and a closed line; `" + CLI_CHECK_TEST + "` holds that `CODE CHECK` finds nothing. A "
       "counts-only test cannot see a swapped colour, weight or linestyle, so "
       "`katana_standard_current` runs `make_katana_standard.py --check` (the committed file and this document "
-      "are what the data makes) and `katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each "
+      "are what the data makes, and each picture was drawn from what is committed) and "
+      "`katana_standard_colours`, `_linestyles`, `_symbols` and `_codes` run each "
       "data module's own check; they exist where Python does.")
     w("- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and "
       "`-showcase.png` are drawn by Katana itself from the committed file, headlessly "
@@ -791,8 +793,14 @@ def catalogue(data, root):
       "script; the showcase is the plan view at the plot scale 1:500, in a few screenshots laid side by side. "
       "`-palette.png` is laid "
       "out from the palette's values by `palette_preview.py`, since a palette is a table and not a drawing. The "
-      "images are not byte-reproducible, since fonts differ between machines, so `--check` does not compare "
-      "them. Each is under 500 KB.")
+      "images are not byte-reproducible, since fonts differ between machines, so `--check` cannot compare "
+      "their bytes. Each carries instead, in the text of its PNG, the SHA-256 of what it was drawn from: the "
+      "committed file for the four Katana draws (the plan also its field file, the showcase also the script of "
+      "its scene) and `colours.py` for the palette. `--check` reports a picture whose record is not that of "
+      "the committed files, or that has none, so a picture of an earlier edition of the library fails "
+      "`katana_standard_current` until it is drawn again; `tools/katana_standard/test_pictures.py` tests that "
+      "check on pictures it writes itself. The script that lays a sheet out is not in the record: whoever "
+      "changes it draws the sheet again. Each is under 500 KB.")
     w("")
 
     w("## Not done")

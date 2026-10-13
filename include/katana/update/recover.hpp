@@ -68,8 +68,10 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     and deletes nothing in U, whichever program calls it: a recovery started
 //     from katana_cli or katana_mcp leaves the per-user folder byte for byte
 //     as it found it, the helper copy it ran included, and no cleanup.list is
-//     begun. The copy stays until a program that may write per-user state
-//     removes it.
+//     begun. What a sweep of R/.update/<tx> could not delete is found there
+//     again at the next start. The copy stays: removing it is for a program
+//     that may write per-user state, and none does yet, so one helper's size
+//     is left in U for each update a crash interrupted.
 [[nodiscard]] core::Status recover(const std::filesystem::path& root);
 
 // Roll back every transaction under R/.update whose journal needs it, in

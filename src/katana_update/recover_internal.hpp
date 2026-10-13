@@ -86,6 +86,8 @@ inline std::filesystem::path normalizedRoot(const std::filesystem::path& root)
 
 // recover() (recover.hpp) with its seams given: the file system, the launcher that runs the
 // helper copy, the state folder U, and how long a live holder of the lock is waited for.
+// `stateDirectory` (U, or empty) is only READ, to find the helper copy U/run-<tx>/: nothing in
+// it is made, changed or deleted, whichever program calls (recover.hpp).
 [[nodiscard]] core::Status recoverWith(const std::filesystem::path& root, FsOps& fs,
                                        Launcher& launcher,
                                        const std::filesystem::path& stateDirectory,

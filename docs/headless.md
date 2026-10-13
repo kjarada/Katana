@@ -553,10 +553,25 @@ and has the install put back before it goes on
 (`include/katana/update/recover.hpp`). With nothing interrupted, which is
 every start but that one, it is a listing of one folder, and of none in a
 copy that has never updated: a build tree. This is not a per-user matter: an
-install half swapped is no state for any run to start from. Where a recovery
-is needed it runs the update helper, which may note what it could not delete
-in the update state folder; one that fails is said on stderr with the
-command that puts the install right by hand, and the run goes on.
+install half swapped is no state for any run to start from. And it writes
+no per-user state, whichever program starts it. Where a recovery is needed
+the program runs the update helper as `katana_updater --recover <R>`, R
+being the install folder; started so, the helper is given no state folder
+and writes nothing per user - no `last.json`, no `state.json`, no
+`cleanup.list`, no health marker. Recovery's only record is in the install
+itself, `R/.update/recovery.log`: a line for each run that found something
+to put right, and one for each record of the interrupted update's journal
+that the rollback would not follow. The calling program READS the update
+state folder, to find the copy of the helper the interrupted update ran from
+(`run-<tx>/` there: it is outside the install, so it still runs when the
+install's own `bin/` is half swapped), and that is all it does there. It
+makes, changes and deletes nothing in that folder - no `cleanup.list` is
+begun, and the copy it ran stays where it was
+(`RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
+compares the folder before and after, entry by entry and byte by byte;
+`docs/update.md`, "Recovery", and "Not done" for the copy that stays). A
+recovery that fails is said on stderr with the command that puts the install
+right by hand, and the run goes on.
 
 **`--update-health TX`.** How the helper asks a version it has just put in
 place whether it starts (`include/katana/update/apply.hpp`, step 7). The run

@@ -23,10 +23,14 @@ What each sheet is, and what is Katana's and what is Pillow's:
             screenshots laid side by side.
 
 The palette sheet, katana-standard-palette.png, is not drawn here: a palette is a table of values, so
-`palette_preview.py` lays it out from colours.py. The images are not byte-reproducible (fonts differ between
-machines), so `make_katana_standard.py --check` leaves them alone. Each is kept under 500 KB.
+`palette_preview.py` lays it out from colours.py. Each image is kept under 500 KB.
+
+The images are not byte-reproducible (fonts differ between machines), so `make_katana_standard.py --check` cannot
+hold them by their bytes. It holds them by what they were drawn from: each sheet is saved with the SHA-256 of the
+customisation file in the text of its PNG (the plan also with that of its field file, the showcase with that of
+its scene; `make_katana_standard.picture_record`), and `--check` reports a sheet whose record is not that of the
+committed files. A sheet of an earlier edition of the library is then found the day the library changes.
 """
-import json
 import os
 import subprocess
 import sys
@@ -35,10 +39,17 @@ import tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-JSON = os.path.join(ROOT, "resources", "customisation", "katana-standard.customisation.json")
-FLD = os.path.join(ROOT, "tests", "data", "katana_standard", "street_corner.fld")
+sys.path.insert(0, HERE)
+import make_katana_standard  # noqa: E402  (what a picture records, and where the file and the field file are)
+
+JSON = make_katana_standard.JSON_PATH
+FLD = make_katana_standard.FIELD_FILE
 LIMIT = 500 * 1024
 GROUND = (0x1E, 0x23, 0x29)
+SHEETS = ("symbols", "linestyles", "plan", "showcase")
+# sheet -> what it is saved with (make_katana_standard.picture_record). Filled before Katana first runs, so that a
+# record is of the files as they were when the drawing began.
+DRAWN_FROM = {}
 
 argv = sys.argv[1:]
 
@@ -48,7 +59,7 @@ def option(name, default):
 
 
 BIN = option("--bin", os.environ.get("KATANA_BIN", os.path.join(ROOT, "build", "release", "bin")))
-OUT = option("--out", os.path.join(ROOT, "docs", "images"))
+OUT = option("--out", make_katana_standard.IMAGES_DIR)
 EXE = os.path.join(BIN, "katana.exe" if os.name == "nt" else "katana")
 
 
@@ -114,21 +125,31 @@ def sample_codes(codes_module, definitions, field, usable=lambda code: True):
     return chosen
 
 
-def save_small(image, name):
-    """Write a PNG under 500 KB: palette first, then fewer colours, then a smaller image."""
-    from PIL import Image
-    path = os.path.join(OUT, name)
+def save_small(image, sheet):
+    """Write the picture of `sheet` as a PNG under 500 KB (a palette, then fewer colours), with the record of what
+    it was drawn from in its text."""
+    from PIL import Image, PngImagePlugin
+    path = make_katana_standard.picture_path(sheet, OUT)
+    name = os.path.basename(path)
     os.makedirs(OUT, exist_ok=True)
     image = image.convert("RGB")
+    record = PngImagePlugin.PngInfo()
+    for keyword, text in DRAWN_FROM[sheet].items():
+        record.add_text(keyword, text)
     # MAXCOVERAGE keeps a thin line's own colour: the median cut splits the palette by how many pixels there are, and
     # on a sheet that is mostly white and grey it merges a blue line with a green one at 128 colours.
     for colours in (256, 192, 128, 96, 64, 48, 32):
         image.quantize(colors=colours, method=Image.Quantize.MAXCOVERAGE, dither=Image.Dither.NONE).save(
-            path, optimize=True)
+            path, optimize=True, pnginfo=record)
         if os.path.getsize(path) <= LIMIT:
             break
     else:
         sys.exit("%s stays over %d bytes at 32 colours" % (name, LIMIT))
+    # What `--check` will read, read the same way: a Pillow that left the text out would otherwise write a picture
+    # that is reported stale the moment it is made, with nothing here to say why.
+    written = make_katana_standard.png_text(path) or {}
+    if any(written.get(keyword) != text for keyword, text in DRAWN_FROM[sheet].items()):
+        sys.exit("%s was written without the record of what it was drawn from" % name)
     print("wrote %s %dx%d %d bytes" % (path, image.width, image.height, os.path.getsize(path)))
 
 
@@ -190,8 +211,14 @@ def shoot_symbols(codes_module, symbols_module):
     tiles = {}
     for index, row in enumerate(rows):
         png = os.path.join(work, "g%02d.png" % index)
-        result = katana(["--dialog", "formatSymbols", "--fill", "symbolGroups=" + row, "--report", "symbolGrid",
-                         "--screenshot", png])
+        # The dialog opens with the library's first symbol selected, and a selected tile is tinted with the
+        # highlight: that one symbol would be on the sheet in another colour than the hundred others, for a reason
+        # that is the dialog's and not the symbol's. A group that does not hold the selected symbol drops the
+        # selection (the rows here share no symbol), so each group is shown after another one: whichever of the
+        # two held it, none is selected in the shot.
+        away = ["--fill", "symbolGroups=" + rows[index - 1]] if len(rows) > 1 else []
+        result = katana(["--dialog", "formatSymbols"] + away + ["--fill", "symbolGroups=" + row,
+                         "--report", "symbolGrid", "--screenshot", png])
         listed = [line for line in result.stderr.splitlines() if line.startswith("symbolGrid:")]
         order = [n.strip() for n in listed[0].split(":", 1)[1].split(";")]
         shot = Image.open(png).convert("RGB")
@@ -202,6 +229,11 @@ def shoot_symbols(codes_module, symbols_module):
     missing = [d["name"] for d in symbols_module.SYMBOLS if d["name"] not in tiles]
     if missing:
         sys.exit("no tile for " + ", ".join(missing))
+    # An icon is drawn inside its tile with a margin, so a tile's corner is the ground. One that is not was cut
+    # from the wrong place, or is the selected one after all, and would be tinted wrongly below.
+    off_ground = [name for name, tile in tiles.items() if tile.getpixel((0, 0)) != GROUND]
+    if off_ground:
+        sys.exit("not on the plan's ground (selected, or the dialog's grid has moved): " + ", ".join(off_ground))
     return tiles
 
 
@@ -280,7 +312,7 @@ def symbol_sheet(tiles, codes_module, colours_module, symbols_module):
 def draw_symbols():
     codes_module, colours_module, _, symbols_module = modules()
     tiles = shoot_symbols(codes_module, symbols_module)
-    save_small(symbol_sheet(tiles, codes_module, colours_module, symbols_module), "katana-standard-symbols.png")
+    save_small(symbol_sheet(tiles, codes_module, colours_module, symbols_module), "symbols")
 
 
 # ---- linestyles: a Katana plot of a sample of each ----------------------------------------------------------
@@ -420,7 +452,7 @@ def draw_linestyles():
            timeout=900)
     sheet = next(f for f in os.listdir(folder) if f.endswith(".png"))
     image = Image.open(os.path.join(folder, sheet)).convert("RGB")
-    save_small(crop_plot(image), "katana-standard-linestyles.png")
+    save_small(crop_plot(image), "linestyles")
 
 
 def crop_plot(image, shrink=0.5):
@@ -503,7 +535,7 @@ def draw_plan():
     pad = 70
     left, right = max(int(min(ink[0], near)) - pad, 0), min(max(ink[2], int(far)) + pad, shot.width)
     top, bottom = max(ink[1] - pad, 0), min(ink[3] + pad, shot.height)
-    save_small(shot.crop((left, top, right, bottom)), "katana-standard-plan.png")
+    save_small(shot.crop((left, top, right, bottom)), "plan")
 
 
 TITLE_BAR = 52       # the pixels of a panel grab above the plan view itself, at twice the pixels
@@ -547,7 +579,7 @@ def plan_tiles(script, frame, scale):
 
 def draw_showcase():
     """The invented street corner of showcase.py, drawn by the library from its codes, in the plan view at the
-    plot scale 1:500, laid out as four screenshots side by side."""
+    plot scale 1:500, in as many screenshots as the frame takes at the window's size, laid side by side."""
     sys.path.insert(0, HERE)
     import showcase
     lines, _ = showcase.commands()
@@ -561,12 +593,13 @@ def draw_showcase():
     pad = 80
     sheet = sheet.crop((max(ink[0] - pad, 0), max(ink[1] - pad, 0), min(ink[2] + pad, sheet.width),
                         min(ink[3] + pad, sheet.height)))
-    save_small(sheet, "katana-standard-showcase.png")
+    save_small(sheet, "showcase")
 
 
 if __name__ == "__main__":
-    sheets = ("symbols", "linestyles", "plan", "showcase")
-    wanted = [a for a in argv if a in sheets] or list(sheets)
+    wanted = [a for a in argv if a in SHEETS] or list(SHEETS)
+    for sheet in wanted:
+        DRAWN_FROM[sheet] = make_katana_standard.picture_record(sheet)
     if "symbols" in wanted:
         draw_symbols()
     if "linestyles" in wanted:

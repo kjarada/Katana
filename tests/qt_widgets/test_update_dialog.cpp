@@ -1501,8 +1501,11 @@ class RecordingStore final : public katana::update::CredentialStore {
     std::optional<std::string> token;
     std::vector<std::string> written;
     int cleared = 0;
-    // What write answers in the place of storing. Unset: it stores.
-    std::optional<katana::core::Error> refusal;
+    // What write answers in the place of storing. Null: it stores. (Pointed
+    // to, not held in an optional: GCC 16's optimiser cannot follow an
+    // optional of an Error that is assigned after the fixture is built, and
+    // warns that the Error's strings may be read before they are written.)
+    std::shared_ptr<const katana::core::Error> refusal;
 
     [[nodiscard]] katana::core::Result<std::string> read() const override
     {
@@ -1754,8 +1757,8 @@ TEST(SettingsUpdates, ATokenTheStoreRefusesIsSaidInTheStoresWordsAndNeverShown)
     UpdatesFixture f;
     // As update/credential.hpp says a store refuses: the message names the
     // rule and the place, never the value.
-    f.store.refusal = katana::core::makeError(katana::core::ErrorCode::InvalidArgument,
-                                              "the access token has a space inside it");
+    f.store.refusal = std::make_shared<const katana::core::Error>(katana::core::makeError(
+        katana::core::ErrorCode::InvalidArgument, "the access token has a space inside it"));
     SettingsDialog dialog(f.context);
     auto* field = child<QLineEdit>(dialog, "settingsUpdateToken");
     field->setText(kToken);

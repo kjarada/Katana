@@ -9,15 +9,20 @@ other. The exception is AS 5488's yellow gas and cream sewer, which print light 
 white panel each colour is drawn as the plot prints it (white prints black). Each row shows the colour as a
 chip, as a line and as a ring, the three forms in which a plan uses it.
 Needs Pillow; nothing else.
+
+The PNG is saved with the SHA-256 of colours.py in its text (`make_katana_standard.picture_record`), so that
+`make_katana_standard.py --check` reports the picture of a palette that has changed since.
 """
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
+sys.dont_write_bytecode = True  # as the generator: nothing is left behind in the tools folder
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import colours  # noqa: E402
+import make_katana_standard  # noqa: E402  (what a picture records of what it was drawn from)
 
 PANELS = (
     # (ground, heading ink, body ink, quiet ink, rule, which contrast to print, its label)
@@ -106,7 +111,10 @@ def palette_sheet(path, scale=2):
     draw.text((margin, foot_y + 58 * s),
               "AS 5488 names the colours and gives no sRGB: these values are Katana's, and the same ones UTILITY DRAW draws in.",
               font=f_note, fill=quiet)
-    image.save(path)
+    record = PngImagePlugin.PngInfo()
+    for keyword, text in make_katana_standard.picture_record("palette").items():
+        record.add_text(keyword, text)
+    image.save(path, pnginfo=record)
     return image.size
 
 

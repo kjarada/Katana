@@ -3,13 +3,18 @@
 
     python tools/katana_standard/make_katana_standard.py --json      write resources/customisation/katana-standard.customisation.json
     python tools/katana_standard/make_katana_standard.py --docs      write docs/katana_standard.md
-    python tools/katana_standard/make_katana_standard.py --check     exit 1 when a committed output differs from what this makes
+    python tools/katana_standard/make_katana_standard.py --check     exit 1 when a committed output differs from what this makes,
+                                                                     or a picture was drawn from something else than is committed
     python tools/katana_standard/make_katana_standard.py --images    draw the catalogue's sheets with Katana itself (render_images.py;
                                                                      needs Pillow and a built katana, and says so)
     python tools/katana_standard/make_katana_standard.py --stats     print the counts
 
 Beside it: `catalogue.py` writes the document, `census.py` counts the committed file with no Katana code (the
 figures the tests pin), `showcase.py` is the street corner of docs/images/katana-standard-showcase.png.
+
+THE PICTURES ARE HELD BY WHAT THEY WERE DRAWN FROM, not by their bytes ("The pictures", below): Katana draws four
+of the five and fonts differ between machines, so a picture drawn twice is not the same file. Each carries the
+SHA-256 of its inputs in the text of its PNG, and `--check` compares those with the committed inputs.
 
 The data is `colours.py`, `linestyles.py`, `symbols.py` and `codes.py` beside this file, each plain Python
 that imports nothing of the outside, and each with its own `--check`. This script is the only thing that
@@ -36,9 +41,11 @@ What the file carries, and what it leaves out, on purpose:
 * No `sources` and no `basedOn`: it was converted from no file. Its survey code keys are the other built-in
   library's, by the owner's decision (codes.py, grammar rule 1), and the notice says so.
 """
+import hashlib
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 
@@ -264,6 +271,117 @@ def write_bytes(path, payload):
         handle.write(payload)
 
 
+# ---- the pictures ---------------------------------------------------------------------------------------------
+# A picture cannot be held as the file and the document are, by its bytes: Katana draws four of the five, Pillow
+# sets their words, and fonts differ between machines. So the script that draws a picture writes into the text of
+# its PNG the SHA-256 of each thing it was drawn from (`picture_record`), and `--check` compares that with the same
+# digests of what is committed now (`picture_problem`). Before this a picture of an earlier edition stayed in the
+# catalogue under names the library no longer had, and nothing said so.
+#
+# The script that draws a picture is NOT one of the things recorded: a comment edited there would report every
+# picture stale. Whoever changes how a sheet is laid out draws it again.
+
+IMAGES_DIR = os.path.join(ROOT, "docs", "images")
+FIELD_FILE = os.path.join(ROOT, "tests", "data", "katana_standard", "street_corner.fld")
+PALETTE_FILE = os.path.join(HERE, "colours.py")
+RECORD_PREFIX = "katana-standard:"   # of a PNG text keyword; the text is "sha256:" and 64 hex digits
+
+# What a picture may be drawn from: the keyword's last part -> the words `--check` says it in.
+SOURCES = {"customisation": "customisation file", "field-file": "field file (street_corner.fld)",
+           "scene": "scene (showcase.py)", "palette": "palette (colours.py)"}
+
+# picture -> (what it is drawn from, how it is drawn again). The order is the catalogue's.
+BY_KATANA = "`make_katana_standard.py --images %s` (a built katana and Pillow)"
+PICTURES = {
+    "showcase": (("customisation", "scene"), BY_KATANA % "showcase"),
+    "plan": (("customisation", "field-file"), BY_KATANA % "plan"),
+    "palette": (("palette",), "`palette_preview.py` (Pillow)"),
+    "linestyles": (("customisation",), BY_KATANA % "linestyles"),
+    "symbols": (("customisation",), BY_KATANA % "symbols"),
+}
+
+
+def picture_path(sheet, folder=IMAGES_DIR):
+    return os.path.join(folder, "katana-standard-%s.png" % sheet)
+
+
+def text_bytes(path):
+    """A committed text file's bytes as the commit has them, or None: a Windows checkout (core.autocrlf) gives
+    the working copy CRLF line ends, and a digest of those would differ from the same commit's elsewhere."""
+    found = read_bytes(path)
+    return None if found is None else found.replace(b"\r\n", b"\n")
+
+
+def source_bytes(source):
+    """The bytes of one thing a picture is drawn from, as it is committed; None when it is not there."""
+    if source == "customisation":
+        return read_bytes(JSON_PATH)             # exact bytes on every checkout (.gitattributes: -text)
+    if source == "field-file":
+        return text_bytes(FIELD_FILE)
+    if source == "palette":
+        return text_bytes(PALETTE_FILE)
+    if source == "scene":
+        # The script Katana runs, as render_images.py writes it: the scene itself, whatever showcase.py's comments say.
+        lines, _ = _module("showcase").commands()
+        return ("\n".join(lines) + "\n").encode("utf-8")
+    raise ValueError("no such source of a picture: %r" % (source,))
+
+
+def picture_record(sheet):
+    """What the script that draws `sheet` writes into its PNG, as {text keyword: text}: one entry for each thing
+    the picture is drawn from, with the SHA-256 of its bytes."""
+    record = {}
+    for source in PICTURES[sheet][0]:
+        payload = source_bytes(source)
+        if payload is None:
+            raise FileNotFoundError("the %s of the %s picture is not there" % (SOURCES[source], sheet))
+        record[RECORD_PREFIX + source] = "sha256:" + hashlib.sha256(payload).hexdigest()
+    return record
+
+
+def png_text(path):
+    """The tEXt chunks of the PNG at `path` as {keyword: text}, read with the standard library alone, so that
+    `--check` needs no Pillow; None when there is no such file or it does not begin as a PNG does. A file cut
+    short gives the chunks that are whole."""
+    data = read_bytes(path)
+    if data is None or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    found, at = {}, 8
+    while at + 8 <= len(data):
+        length, kind = struct.unpack(">I4s", data[at:at + 8])
+        body = data[at + 8:at + 8 + length]
+        if kind == b"tEXt" and len(body) == length and b"\0" in body:
+            keyword, _, value = body.partition(b"\0")
+            found[keyword.decode("latin-1")] = value.decode("latin-1")
+        at += 12 + length   # the length, the type, the body and its CRC
+    return found
+
+
+def picture_problem(sheet, folder=IMAGES_DIR):
+    """Why the picture `sheet` in `folder` is not a picture of what is committed, as words that follow its name,
+    or None when it is. The first thing found is the one said."""
+    found = png_text(picture_path(sheet, folder))
+    if found is None:
+        return "is missing, or is no PNG"
+    try:
+        record = picture_record(sheet)
+    except FileNotFoundError as error:
+        return "cannot be compared with what it was drawn from: %s" % error
+    for keyword, digest in record.items():
+        what = SOURCES[keyword[len(RECORD_PREFIX):]]
+        if keyword not in found:
+            return "does not say which %s it was drawn from" % what
+        if found[keyword] != digest:
+            return "was drawn from another %s than the committed one" % what
+    return None
+
+
+def stale_pictures(folder=IMAGES_DIR):
+    """{picture: why} for the pictures in `folder` that are not pictures of what is committed."""
+    problems = {sheet: picture_problem(sheet, folder) for sheet in PICTURES}
+    return {sheet: problem for sheet, problem in problems.items() if problem}
+
+
 def round_trip(path, cli, scratch):
     """Load `path` in katana_cli and write it back, as a part, with CUSTOMISE EXPORT: the bytes must be the
     file's own. The one thing a session adds that the file has no member for is its record of what it was
@@ -318,7 +436,15 @@ def main(argv):
         write_bytes(DOCS_PATH, payload)
         print("wrote %s (%d bytes)" % (os.path.relpath(DOCS_PATH, ROOT), len(payload)))
     if "--images" in wanted:
-        status |= subprocess.call([sys.executable, os.path.join(HERE, "render_images.py")] + argv[argv.index("--images") + 1:])
+        # A sheet takes its names, sizes and colours from the data and its drawing from the file: of a file the
+        # data no longer makes it would be a picture of two libraries, with the record of one.
+        if read_bytes(JSON_PATH) != customisation_json(data).encode("utf-8"):
+            print("STALE: %s differs from what the data makes, so no picture of it is drawn; run this script "
+                  "with --json first" % os.path.relpath(JSON_PATH, ROOT))
+            status = 1
+        else:
+            status |= subprocess.call([sys.executable, os.path.join(HERE, "render_images.py")]
+                                      + argv[argv.index("--images") + 1:])
     if "--check" in wanted:
         expected = {JSON_PATH: customisation_json(data).encode("utf-8")}
         if os.path.exists(os.path.join(HERE, "catalogue.py")):
@@ -335,6 +461,14 @@ def main(argv):
                 status = 1
             else:
                 print("current: %s" % os.path.relpath(path, ROOT))
+        stale = stale_pictures()
+        for sheet, (_, redraw) in PICTURES.items():
+            name = os.path.relpath(picture_path(sheet), ROOT)
+            if sheet in stale:
+                print("STALE: %s %s; draw it again with %s" % (name, stale[sheet], redraw))
+                status = 1
+            else:
+                print("current: %s" % name)
         if "--round-trip" in argv:
             cli = argv[argv.index("--round-trip") + 1]
             scratch = os.path.join(os.environ.get("TEMP", "/tmp"), "katana_standard_round_trip")
