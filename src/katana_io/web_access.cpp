@@ -15,6 +15,7 @@
 #include <cpl_http.h>
 #include <cpl_minixml.h>
 #include <cpl_string.h>
+#include <curl/curl.h>
 
 #include "gdal_registry.hpp"
 #include "katana/core/sha256.hpp"
@@ -432,6 +433,311 @@ Result<HttpResponse> httpFetch(const HttpRequest& request, const std::stop_token
         failure.body = transfer.body.substr(0, 4096);
         failure.timeoutSeconds = request.timeoutSeconds;
         return explainHttpFailure(failure, std::move(context));
+    }
+}
+
+// ---- one exchange, redirects not followed ---------------------------------------------------
+
+bool carriesCredentials(const std::vector<std::string>& headers)
+{
+    return std::any_of(headers.begin(), headers.end(), [](const std::string& header) {
+        // The field name: up to the colon, case-insensitive (RFC 9110, 5.1). A line with no
+        // colon is no header; all of it is taken for the name, so that one that names
+        // credentials is not let through for being malformed.
+        const std::string_view name =
+            katana::core::trimmed(std::string_view(header).substr(0, header.find(':')));
+        return katana::core::equalsIgnoringCase(name, "authorization") ||
+               katana::core::equalsIgnoringCase(name, "proxy-authorization");
+    });
+}
+
+namespace {
+
+// What a bounded copy of an error page is worth: enough to name the problem, never a download.
+constexpr std::size_t kErrorBodyBytes = 64 * 1024;
+
+struct ExchangeState {
+    const std::stop_token* stop = nullptr;
+    const TransferProgress* progress = nullptr;
+    std::uint64_t maxBytes = 0;
+    int status = 0; // of the LAST status line seen (a 100 Continue or a proxy's 200 comes first)
+    std::string contentType;
+    std::string location;
+    std::string contentRange;
+    std::string body;
+    // The body passed its bound and the transfer was ended here, by onExchangeBody.
+    bool truncated = false;
+};
+
+std::size_t onExchangeHeader(char* buffer, std::size_t size, std::size_t count, void* user)
+{
+    auto& state = *static_cast<ExchangeState*>(user);
+    const std::size_t bytes = size * count;
+    std::string_view line(buffer, bytes);
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+        line.remove_suffix(1);
+    }
+    if (line.starts_with("HTTP/")) {
+        // "HTTP/1.1 206 Partial Content", "HTTP/2 200": a new response begins, and what the
+        // earlier one said about itself no longer applies.
+        int code = 0;
+        const std::size_t space = line.find(' ');
+        for (std::size_t i = space == std::string_view::npos ? line.size() : space + 1;
+             i < line.size() && line[i] >= '0' && line[i] <= '9' && code < 1000; ++i) {
+            code = code * 10 + (line[i] - '0');
+        }
+        state.status = code;
+        state.contentType.clear();
+        state.location.clear();
+        state.contentRange.clear();
+        return bytes;
+    }
+    const std::size_t colon = line.find(':');
+    if (colon == std::string_view::npos) {
+        return bytes;
+    }
+    const std::string_view name = line.substr(0, colon);
+    const std::string value(katana::core::trimmed(line.substr(colon + 1)));
+    if (katana::core::equalsIgnoringCase(name, "content-type")) {
+        state.contentType = value;
+    } else if (katana::core::equalsIgnoringCase(name, "location")) {
+        state.location = value;
+    } else if (katana::core::equalsIgnoringCase(name, "content-range")) {
+        state.contentRange = value;
+    }
+    return bytes;
+}
+
+std::size_t onExchangeBody(char* data, std::size_t size, std::size_t count, void* user)
+{
+    auto& state = *static_cast<ExchangeState*>(user);
+    const std::size_t bytes = size * count;
+    if (state.stop != nullptr && state.stop->stop_requested()) {
+        return 0;
+    }
+    // A 200 or a 206 is the file that was asked for, bounded by the request. Any other status
+    // carries a page about itself, of which the beginning is all anybody reads.
+    const bool file = state.status == 200 || state.status == 206;
+    const std::uint64_t bound = file ? state.maxBytes : std::uint64_t{kErrorBodyBytes};
+    if (state.body.size() + bytes > bound) {
+        // Longer than is read, and the rest is not waited for: a server that never stops
+        // sending would otherwise hold the request until its timeout, once for every retry.
+        // A file that was cut is no file, so none of it is kept; of a page, its beginning is.
+        if (file) {
+            state.body.clear();
+        } else {
+            state.body.append(data, static_cast<std::size_t>(bound - state.body.size()));
+        }
+        state.truncated = true;
+        return 0; // fewer bytes than were offered (there was at least one): the transfer ends
+    }
+    state.body.append(data, bytes);
+    return bytes;
+}
+
+int onExchangeProgress(void* user, curl_off_t total, curl_off_t received, curl_off_t, curl_off_t)
+{
+    auto& state = *static_cast<ExchangeState*>(user);
+    if (state.progress != nullptr && *state.progress && received >= 0) {
+        (*state.progress)(static_cast<std::uint64_t>(received),
+                          total > 0 ? static_cast<std::uint64_t>(total) : 0);
+    }
+    return state.stop != nullptr && state.stop->stop_requested() ? 1 : 0; // non-zero aborts
+}
+
+// An exchange sends what its request says and nothing else. CPLHTTPSetOptions puts on the
+// handle whatever the person has configured for GDAL's own requests, and some of that is
+// credentials: an entry of ~/.netrc (GDAL_HTTP_NETRC is on unless turned off), GDAL_HTTP_USERPWD,
+// GDAL_HTTP_AUTH with GDAL_HTTP_BEARER, GDAL_HTTP_COOKIE and its files, a client certificate
+// (GDAL_HTTP_SSLCERT) - and CPL_CURL_VERBOSE, which prints every request header to stderr, an
+// Authorization among them. Those are a person's settings for a map service. An exchange is
+// used by a caller that decides hop by hop what each host is told, and a hop may be a host that
+// a redirect chose; so they are taken off the handle again, each one. (The headers of
+// GDAL_HTTP_HEADERS and GDAL_HTTP_HEADER_FILE come back from CPLHTTPSetOptions as a list, which
+// performExchange drops.) What stays is how this computer reaches the network, which is not
+// something said to a server: the proxy and the proxy's own credentials, the certificate
+// bundle, the timeouts.
+//
+// The list is GDAL's (port/cpl_http.cpp, CPLHTTPSetOptions; read against libgdal 3.13's option
+// names). An upgrade of GDAL that teaches it another way to send a credential needs a line here.
+void sendNothingAmbient(CURL* curl)
+{
+    const char* const none = nullptr;
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+    curl_easy_setopt(curl, CURLOPT_NETRC, static_cast<long>(CURL_NETRC_IGNORED));
+    curl_easy_setopt(curl, CURLOPT_NETRC_FILE, none);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, none);
+    curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, none);
+    // No authentication scheme of libcurl's own: an Authorization the request names is a header
+    // like any other and is sent all the same.
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, static_cast<long>(CURLAUTH_NONE));
+    curl_easy_setopt(curl, CURLOPT_COOKIE, none);
+    // In this order: naming a jar - even none - starts libcurl's cookie engine, and a null list
+    // of cookie files is what stops it and forgets what it read.
+    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, none);
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, none);
+    curl_easy_setopt(curl, CURLOPT_SSLCERT, none);
+    curl_easy_setopt(curl, CURLOPT_SSLKEY, none);
+    curl_easy_setopt(curl, CURLOPT_KEYPASSWD, none);
+}
+
+// One request on a fresh libcurl handle, configured by GDAL's own option handling
+// (CPLHTTPSetOptions: proxy, certificate bundle, timeouts, user agent), then told to send
+// nothing the request does not name and not to follow a redirect.
+CURLcode performExchange(const HttpRequest& request, ExchangeState& state, std::string& message)
+{
+    CURL* curl = curl_easy_init();
+    if (curl == nullptr) {
+        message = "libcurl could not be started";
+        return CURLE_FAILED_INIT;
+    }
+    CPLStringList options;
+    options.SetNameValue("TIMEOUT", std::to_string(std::max(1, request.timeoutSeconds)).c_str());
+    options.SetNameValue("CONNECTTIMEOUT",
+                         std::to_string(std::max(1, request.connectTimeoutSeconds)).c_str());
+    options.SetNameValue("LOW_SPEED_LIMIT", "16");
+    options.SetNameValue("LOW_SPEED_TIME", "30");
+    // Asked of GDAL here, and set on the handle again in sendNothingAmbient.
+    options.SetNameValue("NETRC", "NO");
+    if (!request.userAgent.empty()) {
+        options.SetNameValue("USERAGENT", request.userAgent.c_str());
+    }
+    CPLErrorReset();
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    // GDAL returns the header list it built - from GDAL_HTTP_HEADERS and GDAL_HTTP_HEADER_FILE,
+    // since no HEADERS option is passed - for the caller to attach and free. It is not attached:
+    // a header a person set for a map service is not this request's to send.
+    curl_slist_free_all(
+        static_cast<curl_slist*>(CPLHTTPSetOptions(curl, request.url.c_str(), options.List())));
+    CPLPopErrorHandler();
+    sendNothingAmbient(curl);
+
+    curl_slist* headers = nullptr;
+    for (const std::string& header : request.headers) {
+        curl_slist* const longer = curl_slist_append(headers, header.c_str());
+        if (longer == nullptr) {
+            // Never a request with some of its headers: one without its Range would be answered
+            // with the whole file.
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
+            message = "out of memory";
+            return CURLE_OUT_OF_MEMORY;
+        }
+        headers = longer;
+    }
+
+    char errorBuffer[CURL_ERROR_SIZE] = {};
+    curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    // The point of this function. CPLHTTPSetOptions turns following on; it is turned off after.
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    // The body is the bytes the server holds, never a compressed form of them unpacked here: a
+    // caller that asks for a range by offset, and counts what arrives, means those bytes. NULL
+    // is libcurl's "send no Accept-Encoding and decode nothing".
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, static_cast<const char*>(nullptr));
+    // Credentials go only to a server whose certificate was checked, whatever
+    // GDAL_HTTP_UNSAFESSL says (CPLHTTPSetOptions obeys it): that setting is a person's answer
+    // to a map server with a bad certificate, not leave to hand a token to whoever answers in
+    // its place. A request without credentials keeps the person's setting.
+    if (carriesCredentials(request.headers)) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    }
+    // Called from worker threads (the update's download job): no signal-based timeouts.
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, onExchangeHeader);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &state);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onExchangeBody);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &state);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, onExchangeProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &state);
+
+    const CURLcode code = curl_easy_perform(curl);
+    message = errorBuffer[0] != '\0' ? errorBuffer : curl_easy_strerror(code);
+    // libcurl's own record of the last response, when it has one: the status lines are read
+    // above because the body callback needs the status while the body arrives, and this is the
+    // same number without this file's reading of a line.
+    long answered = 0;
+    if (code == CURLE_OK &&
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &answered) == CURLE_OK && answered > 0) {
+        state.status = static_cast<int>(answered);
+    }
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    return code;
+}
+
+} // namespace
+
+Result<HttpExchange> httpExchange(const HttpRequest& request, const std::stop_token& stop,
+                                  const TransferProgress& progress)
+{
+    const std::string lower = katana::core::lowered(request.url.substr(0, 8));
+    if (!lower.starts_with("https://") && !lower.starts_with("http://")) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "only http and https URLs can be exchanged", redactUrl(request.url));
+    }
+    if (!request.postBody.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "an exchange is a GET and has no body",
+                         redactUrl(request.url));
+    }
+    detail::ensureGdalRegistered();
+
+    const std::string shown = redactUrl(request.url);
+    double delay = std::max(0.1, request.retryDelaySeconds);
+    for (int attempt = 0;; ++attempt) {
+        if (stop.stop_requested()) {
+            return makeError(ErrorCode::InvalidState, "cancelled", shown);
+        }
+        ExchangeState state;
+        state.stop = &stop;
+        state.progress = &progress;
+        state.maxBytes = request.maxBytes;
+        std::string message;
+        const CURLcode code = performExchange(request, state, message);
+
+        if (stop.stop_requested()) {
+            return makeError(ErrorCode::InvalidState, "cancelled", shown);
+        }
+        // A transfer this function ended itself, at the body's bound, is an answer like one that
+        // ran to its end: the status and the headers arrived. libcurl calls it a write error.
+        if (code == CURLE_OK || state.truncated) {
+            const bool serverTrouble =
+                state.status == 502 || state.status == 503 || state.status == 504;
+            if (!serverTrouble || attempt >= request.retries) {
+                HttpExchange exchange;
+                exchange.status = state.status;
+                exchange.contentType = std::move(state.contentType);
+                exchange.location = std::move(state.location);
+                exchange.contentRange = std::move(state.contentRange);
+                exchange.body = std::move(state.body);
+                exchange.truncated = state.truncated;
+                return exchange;
+            }
+        } else if (attempt >= request.retries || !worthRetrying(0, static_cast<int>(code))) {
+            if (code == CURLE_OPERATION_TIMEDOUT) {
+                // Worded here: explainHttpFailure's sentence for a timeout advises "a smaller
+                // area", which is advice for a map request and not for whoever calls this.
+                return makeError(ErrorCode::FileImportFailure,
+                                 "the server did not answer within " +
+                                     std::to_string(request.timeoutSeconds) + " s",
+                                 shown + ": " + message);
+            }
+            HttpFailure failure;
+            failure.status = 0;
+            failure.curlCode = static_cast<int>(code);
+            failure.error = message;
+            failure.timeoutSeconds = request.timeoutSeconds;
+            return explainHttpFailure(failure, shown + ": " + message);
+        }
+        if (!pause(delay, stop)) {
+            return makeError(ErrorCode::InvalidState, "cancelled", shown);
+        }
+        delay *= 2.0;
     }
 }
 
