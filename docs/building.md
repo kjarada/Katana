@@ -20,6 +20,12 @@ registered, and the build is the same - the built-in customisation is compiled
 in with `#embed`, which needs none ("The built-in customisation and the
 reference folder", below).
 
+The update layer adds two libraries the toolchain already carries, OpenSSL's
+libcrypto and zlib, and on Windows it needs them as STATIC libraries
+(`libcrypto.a`, `libz.a`; MSYS2's `openssl` and `zlib` packages have both):
+the configure stops, naming what it found, without them ("The update layer",
+below). `katana_io` links libcurl by name as well, the one GDAL loads.
+
 GoogleTest and Google Benchmark are fetched once and cached under
 `third_party/_cache` (`cmake/KatanaThirdParty.cmake`), so later build
 directories configure offline.
@@ -263,6 +269,9 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | `OFF` | fail the configure when the default file is absent: a guard for a release job against the tracked file having been deleted or a path being wrong |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | the reference folder under `docs/`, git-ignored | where the reference customisation is kept in the legacy formats; read only by the converter and by the legacy readers' own tests, which skip when the folder is absent or holds no such file; the program reads none of it ("The built-in customisation and the reference folder") |
 | `KATANA_CCACHE` | `ON` | compile through ccache when it is installed and no `CMAKE_CXX_COMPILER_LAUNCHER` is given ("Build and test speed") |
+| `KATANA_UPDATE_REPO` | `kjarada/Katana` | `owner/name` of the GitHub repository whose latest release an installed copy asks for updates; compiled into the update library ("The update layer") |
+| `KATANA_UPDATE_FEED` | empty | the base URL of a release host of the owner's own, in the place of GitHub; it must honour `Range`. With this and `KATANA_UPDATE_REPO` both empty the build has no update feed |
+| `KATANA_REQUIRE_UPDATE_KEYS` | `OFF` | fail the configure while `cmake/KatanaUpdateKeys.cmake` holds the placeholder keys: ON in every job of the release workflow, so that no release ships with keys nobody holds |
 
 `KATANA_MODULE_FILTER` makes a small build quick: the numerics and survey
 modules alone are a few minutes, the whole application most of an hour of
@@ -277,24 +286,28 @@ failed at link time with no explanation.
 | `katana` | yes | the desktop application (`src/katana_qt`) |
 | `katana_cli` | yes | the command-line front end (`src/katana_app`) |
 | `katana_mcp` | yes | the same session served to Claude over the Model Context Protocol (`docs/mcp.md`) |
+| `katana_updater` | yes | the fourth program: the helper that swaps an install's files for an update's while Katana is not running, and puts them back if the new version does not start (`src/katana_updater`, `docs/update.md`). Static on Windows, linked to `katana_update` and `katana_core` alone |
+| `katana_updater_test`, `katana_update_e2e`, `katana_updater_stub`, `katana_update_link_probe` | yes, with the tests | what the update system's tests run and never ship: the helper's own source and the engine, each with a TEST key in the place of the pinned ones, a stand-in for Katana that the helper starts, and a probe of the static link (`tests/update/CMakeLists.txt`, `docs/testing.md`). They land in `<build>/bin/tests`, and the install check refuses the first two by name |
 | `katana_<module>_tests` | yes | one test executable per module (`katana_add_test_suite`, `docs/testing.md`) |
 | `katana_qt_widget_tests` | yes | the widget tests, run offscreen |
 | `katana_benchmarks` | yes | every `benchmarks/bench_*.cpp`, globbed |
 | `katana_runtime` | yes | deploys the runtime beside the programs (Windows, `KATANA_DEPLOY_RUNTIME`) |
 | `katana_12da_probe` | yes | what an archive file holds and what Katana would take from it (`src/katana_archive12d/probe_main.cpp`) |
-| `katana_customisation_convert` | yes | style libraries and survey code files in, one Katana customisation out (`src/katana_archive12d/legacy/convert_main.cpp`); with its library `katana_legacy_customisation` it is a developer's tool, never installed and linked by none of the three programs ("The built-in customisation and the reference folder") |
+| `katana_customisation_convert` | yes | style libraries and survey code files in, one Katana customisation out (`src/katana_archive12d/legacy/convert_main.cpp`); with its library `katana_legacy_customisation` it is a developer's tool, never installed and linked by none of the programs that are ("The built-in customisation and the reference folder") |
 | `run-benchmarks` | no | runs `katana_benchmarks` with `--benchmark_min_time=0.2s` |
 | `format`, `format-check` | no | clang-format over the first-party sources; `format-check` fails if a file would change |
 | `katana_make_icons` | no | writes `resources/katana.ico`, a 256 px PNG and `resources/icon_sheet.png` from the icon painters; the output is committed (`docs/desktop.md`) |
 | `katana_tool_icon_sheet` | no | every catalogue tool's icon with its name and aliases (`docs/tools.md`) |
 | `bundle` | no | a self-contained `<build>/dist/Katana` ("Bundling") |
-| `package` | no | that tree as `Katana-<version>-win64.zip` (`-win-arm64.zip`), and an NSIS installer when `makensis` is found; on Linux `Katana-<version>-linux-x86_64.tar.gz` (`-linux-aarch64`); on macOS `Katana-<version>-macos-arm64.dmg` holding `Katana.app` |
+| `package` | no | that tree as `Katana-<version>-win64.zip` (`-win-arm64.zip`), and an NSIS installer when `makensis` is found; on Linux `Katana-<version>-linux-x86_64.tar.gz` (`-linux-aarch64`); on macOS `Katana-<version>-macos-arm64.dmg` holding `Katana.app`. Only a package holds `share/katana/install.json`, the record that makes a copy a release the updater will touch ("The update layer") |
 
 ### Where things are built
 
 ```
 <build>/bin/katana.exe          the application (target `katana`)
 <build>/bin/katana_cli.exe      the command-line front end
+<build>/bin/katana_mcp.exe      the MCP server
+<build>/bin/katana_updater.exe  the update helper
 <build>/bin/tests/              one test executable per module
 <build>/bin/benchmarks/         katana_benchmarks.exe
 <build>/lib/                    static libraries
@@ -372,6 +385,7 @@ may not see GDAL, PDAL or the archive readers:
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST`, `CODE CHECK` (the interpreter's since 2026-09-26; the last two were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06; `docs/customisation.md`, "The verbs") | yes | yes |
 | `IMPORT <file.ifc>`, `EXPORT <file.ifc>`, `INFO <file.ifc>`, `IFC RULES` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC, which run these lines |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
+| `UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`, `SET AUTO`, `TOKEN STATUS \| CLEAR`: the program's own update (`src/katana_app/update_verbs.hpp`, `docs/update.md`). In a build tree `STATUS` says `kind=development` and `CHECK` says `update=unsupported` without asking any server | yes; `APPLY CONFIRM` must be the last line of a run | yes, `CHECK`, `DOWNLOAD` and `APPLY` as background jobs; a headless window answers `CHECK` and `STATUS` only |
 | `ZOOM`, `GRID`, `SNAP`, `QUIT` | `QUIT` only | yes |
 | a catalogue tool's alias alone (`L`, `TRIM`, `STRETCH`) | no: "unknown command" where the interpreter has no verb of that name | starts the tool (`docs/tools.md`) |
 
@@ -468,8 +482,8 @@ formats", has its command line, what it does to names and colours, and the
 figures of the reference conversion). It is built in `all` beside
 `katana_12da_probe`, into `<build>/bin`, and like the probe it has no install
 rule: `cmake --install`, the bundle and the packages hold `katana`,
-`katana_cli` and `katana_mcp` only, and a test fails the suite if another
-program is ever installed. The readers of the older formats it is made of are a
+`katana_cli`, `katana_mcp` and the update helper `katana_updater` only, and a
+test fails the suite if another program is ever installed. The readers of the older formats it is made of are a
 library of their own, `katana_legacy_customisation`
 (`src/katana_archive12d/legacy/`), which no program links - a second test
 walks the link closure of `katana`, `katana_cli` and `katana_mcp` and fails on
@@ -547,6 +561,54 @@ is one. Both therefore measure the smaller file since the default moved:
 has the same figure, so the figures taken before the default moved are not
 baselines for it.
 
+## The update layer
+
+An installed Katana updates itself (`docs/update.md`). What that asks of a
+build:
+
+- **Two libraries, static on Windows.** `katana_update`
+  (`src/katana_update/CMakeLists.txt`) verifies an Ed25519 signature with
+  OpenSSL's libcrypto and inflates with zlib. With MinGW it looks for
+  `libcrypto.a`, `libz.a` and `openssl/evp.h` BY NAME (the cache variables
+  `KATANA_UPDATE_CRYPTO_STATIC`, `KATANA_UPDATE_ZLIB_STATIC` and
+  `KATANA_UPDATE_OPENSSL_INCLUDE`) and the configure fails without them:
+  the helper runs from a copy in a folder with no `bin/` beside it, so it
+  must import nothing but the operating system's DLLs. They are not asked
+  for through `find_package(OpenSSL)`, whose cached answer GDAL's and
+  libcurl's own configuration files would otherwise decide. Elsewhere the
+  toolchain's OpenSSL and zlib are used as they are.
+- **The fourth program.** `katana_updater` (`src/katana_updater`) links
+  `katana_update` and `katana_core` and nothing else, with `-static` under
+  MinGW, which takes libstdc++, libgcc and libwinpthread in. The test
+  `katana_updater_imports_only_os_dlls` reads its import table. It is
+  installed on Windows and Linux and not on macOS, where nothing is updated
+  in place.
+- **Where a copy asks.** `KATANA_UPDATE_REPO` and `KATANA_UPDATE_FEED`
+  ("Options") are compiled into the library, with the version from
+  `project(Katana VERSION ...)`: `katana_cli` has no version of its own, so
+  the library carries one for every program.
+- **The keys.** `cmake/KatanaUpdateKeys.cmake`, included by the root
+  `CMakeLists.txt`, holds the two public keys every program verifies a
+  release with; they reach one source file, `src/katana_update/trust.cpp`.
+  Until the owner has pinned real keys the configure says `Update keys:
+  PLACEHOLDERS - this build can neither verify nor receive an update`, and
+  such a build refuses every release; with `-DKATANA_REQUIRE_UPDATE_KEYS=ON`
+  the configure fails instead. A build with real keys says `Update keys:
+  pinned, active <key id>, spare <key id>`. The file is rewritten by
+  `python tools/update_keytool.py pub`, never by hand.
+- **What makes a copy a release.** `share/katana/install.json`, which names
+  the package's target (`win64`, `win-arm64`, `linux-x86_64` ...), is written
+  by a script CPack runs on the tree it stages
+  (`cmake/KatanaPackaging.cmake`, "install.json") and by nothing else. So a
+  build tree, `cmake --install` and the `bundle` target are DEVELOPMENT
+  copies, which never check for an update and are never updated; only what
+  `package` makes is a release. `tools/check_install_rules.cmake` holds
+  that, and that the programs installed are the four and no other.
+- **The installer.** `cmake/NSIS.template.in` replaces CPack's own, which
+  asks for administrator rights: the installer is per user, so that an
+  update replaces files as the same user (`docs/release.md`, "The Windows
+  installer").
+
 ## Bundling
 
 `cmake --build <build> --target bundle` installs into `<build>/dist/Katana`;
@@ -554,7 +616,8 @@ baselines for it.
 when `makensis` is on the machine), on Linux a `.tar.gz`, and on macOS a
 `.dmg` holding `Katana.app`. The
 result runs with no MSYS2, Qt, GDAL or toolchain prefix installed. It holds
-`katana`, `katana_cli` and `katana_mcp`.
+`katana`, `katana_cli`, `katana_mcp` and, except on macOS, the update helper
+`katana_updater` ("The update layer").
 
 On Linux and macOS `cmake/KatanaDeployUnix.cmake.in` does the copying, when
 the build uses a toolchain prefix: the prefix's libraries into `lib/`, Qt's
@@ -594,10 +657,21 @@ toolchain's bundle there too. Until it did, every online request from
 tests passed - they load libcurl from the toolchain, beside its own bundle.
 `runtime_has_the_certificates_https_is_checked_against` checks it is there.
 
-The bundle is 388 MB. Almost all of it is the dependency chain of GDAL and PDAL
-as MSYS2 builds them; Katana's own code is a few megabytes. The install rules
-are `cmake/KatanaPackaging.cmake`; the licensed reference files under `docs/`
-must never be installed.
+The bundle is about 504 MB without the update helper. Measured on 2026-10-13
+in a Release build tree, whose `bin/` and `share/` are what the bundle is
+copied from (no bundle was made for the measurement): the three programs
+98.8 MB (`katana.exe` 40.4, `katana_cli.exe` 28.8, `katana_mcp.exe` 29.5:
+every Katana module is a static library linked into each), 189 DLLs 381.3 MB,
+Qt's 11 plugins 2.8 MB, `share/proj` and `share/gdal` 13.3 MB, the
+certificate bundle 0.2 MB and the samples 8.0 MB. A megabyte here is a
+million bytes of the files as they lie on the disk; the compressed packages
+are smaller (`docs/release.md`). The helper is not in the figure: the tree
+measured held it as a placeholder program, before the swap was written into
+it. Three quarters of the bundle is the DLLs: the dependency chain of GDAL
+and PDAL as MSYS2 builds them, and Qt. (This paragraph said 388 MB, with
+Katana's own code "a few megabytes", until that measurement.) The install
+rules are `cmake/KatanaPackaging.cmake`; the licensed reference files under
+`docs/` must never be installed.
 
 The rule that once installed a removed root file unconditionally, and so
 failed every `cmake --install`, is conditional now
@@ -671,7 +745,8 @@ reasons that are facts about the toolchain rather than preferences:
 * **A static build is a build of the whole stack from source**: GDAL, PROJ
   (with `proj.db` embedded - PROJ 9.6 can), PDAL, GEOS, SQLite, libtiff,
   libgeotiff, curl and their dependencies, as static libraries, with a driver
-  set trimmed to what Katana reads (which would also cut most of the 388 MB).
+  set trimmed to what Katana reads (which would also cut most of the DLLs'
+  381 MB, "Bundling").
   PDAL's CMake is built around shared libraries and plugins, so it is the
   hard part.
 * **Licences.** GEOS is LGPL-2.1: linking it statically obliges whoever
