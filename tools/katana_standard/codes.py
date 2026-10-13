@@ -56,8 +56,9 @@ THE GRAMMAR
 8. What a code sets, in this order. `feature`: layer, colour, draw (line or point, none for a layer-only key),
    linestyle (lines only), weight, group and comment. `symbol` for points and for lines that carry a symbol at
    every vertex. `text` for the text keys. `pipe`, `vertexPipe` and `segmentPipe` for the bare `*`. `attributes`
-   and `vertexAttributes`. `surface`, written where the other library writes it: false for what must stay out
-   of a ground surface, true where the code says it belongs in one. Layers are three levels, lower case
+   and `vertexAttributes`. `surface`, written where the other library writes it, and false there every time:
+   it keeps what is not the ground (a mark, a trunk, a design string, a pipe) out of a ground surface, and no
+   key says it belongs in one. Layers are three levels, lower case
    (`class/group/family`), and a family is what one switches on and off together.
 9. Attributes. An attribute with an EMPTY value is a PROMPT: the code asks for it. One with a value is applied.
    Names carry their unit (`Depth (m)`, `Diameter (mm)`). The other library's attribute rules are kept as
