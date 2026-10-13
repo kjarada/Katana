@@ -700,6 +700,10 @@ for all of it:
   `target` the copy was packaged for (`none` for a development copy), `kind`
   (`installer`, `archive` or `development`), and `staged`, `skipped`, `auto`,
   `last_check`, `token` (`present` or `absent`, never the token) and `last`.
+  A copy whose own install record does not read has no word in `kind`: the
+  record says `target=none kind=development` and `warnings` says that the
+  record could not be read, and why; its `check` is
+  `update=unsupported reason=install_record`.
 - The text is the two records as the command line prints them, one a line. A
   value in the object is the record's own text, a number where it is one.
   `isError` is for a line that could not be run at all: a feed that cannot be
@@ -714,6 +718,15 @@ What is decided here, and why:
   nobody: it has no release to compare with, and answers
   `update=unsupported reason=development_tree`
   (`McpServer.TheUpdateToolAnswersWithTheCheckAndStatusRecordsOfThisCopy`).
+- **One thing more is sent in one case, and the tool's description says so.**
+  When the environment variable `KATANA_UPDATE_TOKEN` of the server's run
+  holds an access token and the public address answers that there is no such
+  release - what a private release repository answers - the check asks
+  `api.github.com` instead and sends the token there, and to no other host
+  (`include/katana/update/feed.hpp`, "the private-repository route"). A
+  client is told this in the description before it lets the tool run; without
+  the variable no token exists for this surface and nothing but the user
+  agent is sent.
 - **It keeps nothing per user.** The surface `UpdateSurface::Mcp` is given no
   update state folder and no credential store but the environment variable
   `KATANA_UPDATE_TOKEN` of its own run. So the check is not recorded, a
@@ -724,6 +737,11 @@ What is decided here, and why:
   to mean for a server a client starts unattended
   (`UpdateVerbs.KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse`,
   `UpdateVerbs.TheCheckUpdateToolGivesTheTwoRecordsAsTextAndAsObjects`).
+  What the copy *is* is another matter and is read for every surface: on
+  Windows `kind` is `installer` when the folder the per-user installer
+  recorded - a registry value of that user - is this copy's folder, and
+  `archive` otherwise. That is the install's record of itself, read and never
+  written; nothing a person chose is read with it.
 - **An agent never downloads and never applies.** Applying replaces the
   programs of the install, `katana_mcp` among them, and the client that
   started this server holds it open: the swap would wait for it and give up,
@@ -767,9 +785,26 @@ the session with it, and only then is the helper started, which starts
 nothing again afterwards
 (`cli.update_apply_confirm_that_is_not_the_last_line_is_refused`,
 `cli.update_apply_confirm_followed_only_by_notes_and_a_quit_is_the_last_line`).
+Which line that is, is read with the verbs' own splitter
+(`UpdateVerbs.TheLastLineRuleReadsALineAsTheVerbsDo`). Typed or piped on
+standard input, where the next line cannot be looked at without waiting for
+it, the session ends with the line and `katana_cli` says on stderr that
+nothing after it is run.
+
 The verbs themselves are run for real over a fake feed, a scratch install
 and the signed fixtures of the release tools in
-`tests/app/test_update_verbs.cpp`.
+`tests/app/test_update_verbs.cpp`. A build tree is never updated, so what
+`katana_cli` does with an installed copy is tested there too, through the
+session it runs: `Session::setUpdateContextSource` hands the session the
+scratch install where it would read the running program's
+(`UpdateVerbs.KatanaClisSessionPrintsADownloadsProgressOnceAndKeepsThePreparedApplyToBeTaken`:
+each progress line printed once, the request handed over once, this process
+as the one the helper waits for, nothing to start again). A prepared apply
+that is not launched - a later one took its place, the session ended without
+its front end taking it, or the helper could not be started - has the
+helper's copy listed for the sweep the next start makes, so it does not stay
+behind (`abandonApply`,
+`UpdateVerbs.ASessionGivesUpAPreparedApplyThatALaterOneReplacesOrThatNobodyTook`).
 
 ## What the server adds to the command line
 
