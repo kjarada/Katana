@@ -1960,6 +1960,107 @@ TEST(ApplyHealth, AMarkerFollowedByANonZeroExitIsNotHealthyButAHungExitAfterTheM
     }
 }
 
+// ---- the two records that follow COMMITTED_PENDING_HEALTH, when the journal will not take them ---------------------------
+//
+// A transaction whose journal says COMMITTED_PENDING_HEALTH is not left for ever: whoever meets
+// it later settles it (recover.hpp) - healthy when the new version's marker is there, put back
+// from the old files in its folder when it is not. So while the journal says that, three things
+// must be true of the disk, and a record that cannot be written must not make any of them
+// false: the tree is the whole new version, the old files are all in the folder, and the marker
+// is there exactly when the new version started well. Each case below expects those three, by
+// the rule, and then lets `katana_updater --recover`'s settlement run and expects the tree the
+// rule gives.
+
+TEST(ApplyHealth, AnUpdateWhoseHealthyRecordCannotBeWrittenKeepsItsFolderAndItsMarkerAndIsSettledByThem)
+{
+    // The new version started and said so; then the journal would not take the HEALTHY record
+    // (a full disk). The update stands: it proved itself. But were the clean-up to go on - the
+    // folder deleted as far as it will go, the marker removed - a later `--recover` would find a
+    // pending update with no marker, take it for a release that never started, and put back
+    // whatever was left of the old files.
+    Scenario s("apply-healthy-unrecorded");
+    buildFixtureScenario(s);
+    StdFs disk;
+    HookFs full(disk);
+    Rig rig(s, full);
+    const Path work = s.root / ".update" / rig.tx;
+    std::map<std::string, std::string> folderThen; // the transaction's folder when the record was refused
+    full.beforeAppend = [&](const Path& p, std::string_view bytes) -> std::optional<core::Status> {
+        if (p.filename() == "journal" && bytes.find(" HEALTHY ") != std::string_view::npos) {
+            folderThen = snapshot(work);
+            return injected(112, p); // ERROR_DISK_FULL
+        }
+        return std::nullopt;
+    };
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    ASSERT_FALSE(folderThen.empty()) << "the premise: the HEALTHY record was asked for, and refused";
+    EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    EXPECT_EQ(difference(folderThen, snapshot(work)), "")
+        << "the folder of an update that is not recorded as healthy was cleared: its old files are what it is put back from";
+    EXPECT_TRUE(isPresent(healthMarkerPath(s.state, rig.tx)))
+        << "the marker of an update that is not recorded as healthy was removed: it is the proof that it starts";
+
+    // Whoever settles it next finds it healthy, by that marker.
+    Rig later(s, disk, "eeeeeeee");
+    EXPECT_TRUE(settleUnproved(s.root, rig.request.helper, s.state, later.services()) == Settled::Healthy);
+    EXPECT_EQ(treeHash(s.root), s.v2Hash) << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
+TEST(ApplyHealth, AFailedHealthRunWhosePuttingBackCannotBeginLeavesTheWholeNewTreeAndNoMarkerToCallItHealthyBy)
+{
+    // The new version wrote its marker and then crashed: not healthy (the case further up). The
+    // rollback's first record, ROLLING_BACK, cannot be written (a full disk). Nothing may move
+    // without it - a tree half put back under a journal that says "whole, leave it" is finished
+    // by nobody - so the tree is still the new version, the journal still says so, and the
+    // outcome is the truth: it could not be put back. And the marker of that failed start is
+    // gone ALREADY: beside a journal that still says pending, it would have the next `--recover`
+    // confirm as healthy the very release this helper saw fail.
+    Scenario s("apply-health-no-record");
+    buildFixtureScenario(s);
+    StdFs disk;
+    HookFs full(disk);
+    full.beforeAppend = [](const Path& p, std::string_view bytes) -> std::optional<core::Status> {
+        if (p.filename() == "journal" && bytes.find(" ROLLING_BACK ") != std::string_view::npos) {
+            return injected(112, p); // ERROR_DISK_FULL
+        }
+        return std::nullopt;
+    };
+    Rig rig(s, full);
+    // The copy the swap's helper runs from, where preflight puts it: U/run-<tx>.
+    writeText(rig.request.helper, "the helper's copy");
+    rig.launcher.onRun = [&](const SpawnRequest&) -> core::Result<SpawnResult> {
+        writeText(healthMarkerPath(s.state, rig.tx), "ok");
+        SpawnResult crashed;
+        crashed.exitCode = 139;
+        return crashed;
+    };
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::RollbackIncomplete) << result.reason << ": " << result.detail;
+    EXPECT_EQ(result.reason, "rollback_failed");
+    EXPECT_EQ(treeHash(s.root), s.v2Hash)
+        << "a file was moved under a journal that still says the tree is whole: "
+        << difference(snapshot(s.expected), snapshot(s.root));
+    EXPECT_EQ(journalStateOf(s.root), JournalState::CommittedPendingHealth);
+    EXPECT_FALSE(isPresent(healthMarkerPath(s.state, rig.tx)))
+        << "the marker of a start that then failed is left beside a pending update";
+    EXPECT_EQ(rig.registry.runOnce.count(std::string(kRunOnceName)), 1u) << "the next logon tries again";
+    EXPECT_TRUE(rig.launcher.started.empty()) << "nothing is started after an update that could not be put back";
+    EXPECT_EQ(lastOf(s).status, "rollback_incomplete");
+
+    // That logon's `katana_updater --recover`, with room on the disk: nothing is half swapped,
+    // and the update that never proved itself is put back - no marker, the files are that
+    // release's, nobody is running.
+    Rig later(s, disk, "eeeeeeee");
+    const core::Status recovered = recoverInProcess(s.root, later.services());
+    EXPECT_TRUE(recovered.ok()) << (recovered.ok() ? std::string() : recovered.error().describe());
+    EXPECT_TRUE(settleUnproved(s.root, rig.request.helper, s.state, later.services()) == Settled::RolledBack);
+    EXPECT_EQ(treeHash(s.root), s.v1Hash) << difference(s.v1Snapshot, snapshot(s.root));
+    EXPECT_TRUE(leftoversInUpdate(s.root).empty());
+}
+
 TEST(ApplyHealth, TheHelperCopyThatCannotDeleteItselfIsQueuedForTheNextStart)
 {
     Scenario s("apply-helper-copy");

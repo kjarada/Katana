@@ -1819,13 +1819,15 @@ struct CrashProbe {
     bool inTheCommit = false;  // COMMITTING is in the journal and the tree is neither version's
 };
 
-CrashProbe probeCrash(const std::string& label, std::uint64_t k)
+// `timings` is the test helper's --timings: kTimings, or - for a run that must get THROUGH its
+// health check before it is killed - one whose health wait no run sits out.
+CrashProbe probeCrash(const std::string& label, std::uint64_t k, std::string_view timings = kTimings)
 {
     CrashProbe probe;
     probe.world = std::make_unique<World>(label + "-" + std::to_string(k));
     World& world = *probe.world;
     world.arrangeEnvironment();
-    std::vector<std::string> arguments = world.applyArguments();
+    std::vector<std::string> arguments = world.applyArguments(std::string(kTransaction), 0, timings);
     arguments.push_back("--die-at");
     arguments.push_back(std::to_string(k));
     probe.ran = world.runHelper(arguments);
@@ -2663,11 +2665,20 @@ bool isUnsettled(const CrashProbe& probe)
 // have recorded the update as healthy. The k for --die-at is the twin's, checked against what
 // the program left; should the two ever disagree it is found by bisection, as crashedMidCommit
 // finds its own, and once in a test process either way.
+//
+// THE HEALTH WAIT of these runs is one no run sits out (kLongHealthWait): the helper goes on when
+// the new version's health run ENDS, however long a busy machine takes to start it, and the
+// test's own limit on the run (kPatience) is all that bounds it. With the 20 s of kTimings a
+// start slower than that is a health run that "timed out": the helper turns to putting the old
+// version back, and its first change to the disk on that road has the very number HEALTHY has
+// on the other - so --die-at stops it there too, with a journal that reads exactly like the one
+// wanted over an update that never said it starts.
 std::unique_ptr<World> killedBeforeHealthy(const std::string& label)
 {
     static std::uint64_t at = 0;
+    const std::string timings = timingsWithALongHealthWait();
     const auto unsettledAt = [&](std::uint64_t k) -> std::unique_ptr<World> {
-        CrashProbe probe = probeCrash(label, k);
+        CrashProbe probe = probeCrash(label, k, timings);
         return isUnsettled(probe) ? std::move(probe.world) : nullptr;
     };
     if (at == 0) {
@@ -2687,7 +2698,7 @@ std::unique_ptr<World> killedBeforeHealthy(const std::string& label)
         // journal but the new version's install record (the clean-up of a healthy update deletes
         // the journal while changes are still counted: crashedMidCommit says the same of its own).
         const auto reachedPending = [&](std::uint64_t k) {
-            const CrashProbe probe = probeCrash(label + "-find", k);
+            const CrashProbe probe = probeCrash(label + "-find", k, timings);
             if (!probe.crashed) {
                 return true;
             }
@@ -2965,6 +2976,76 @@ TEST(HelperSwap, RecoverThatCannotPutAnUnprovedUpdateBackExitsWithCode12AndTheNe
     EXPECT_EQ(valueOf(finished.output, "recover"), "ok");
     world->expectV1();
     EXPECT_FALSE(world->runOnceIsSet());
+}
+
+TEST(HelperSwap, RecoverGivesWayToAHelperThatHoldsTheLockAndPutsNothingBackOnAMarkerMissingFromAnotherPerUserFolder)
+{
+    REQUIRE_CAN_SIGN();
+    const std::unique_ptr<World> world = killedBeforeHealthy("unsettled-not-mine");
+    ASSERT_TRUE(world != nullptr);
+    ASSERT_NO_FATAL_FAILURE(expectUnsettled(*world));
+    const std::string tx(kTransaction);
+    const std::string root = toUtf8(world->root.native());
+    const Path journal = world->root / ".update" / tx / "journal";
+    const std::string journalBefore = readText(journal);
+    const std::map<std::string, std::string> userBefore = snapshot(world->state);
+    world->consumeRunOnce(); // a logon: Windows takes the entry away, then runs its command
+
+    // 1. A helper is alive: it holds the update lock, as a swap does from its first step to its
+    //    last, opened with no sharing at all. The update is its own to settle, and so is the
+    //    registry: `busy:`, exit 0, and the entry Windows took away is NOT put back over it.
+    {
+        const std::wstring lockPath = (world->root / ".update" / "lock").native();
+        const HANDLE lock = CreateFileW(lockPath.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        ASSERT_NE(lock, INVALID_HANDLE_VALUE) << GetLastError();
+        // The second number is for how long a lock that is held is asked for again. The lock is
+        // held for the whole run, so no figure changes the answer; this one keeps the run short.
+        const SpawnResult ran =
+            world->runHelper(world->withTestOptions({"--recover", root, "--timings", "500,500,50,500,500"}));
+        CloseHandle(lock);
+        ASSERT_EQ(ran.exitCode, 0) << describe(ran);
+        EXPECT_EQ(valueOf(ran.output, "recover"), "ok");
+        EXPECT_EQ(valueOf(ran.output, "detail").rfind("busy:", 0), 0u) << ran.output;
+        world->expectV2();
+        EXPECT_EQ(readText(journal), journalBefore);
+        EXPECT_EQ(difference(userBefore, snapshot(world->state)), "") << "--recover changed the per-user folder";
+        EXPECT_FALSE(world->runOnceIsSet()) << "the registry is the live helper's while it holds the lock";
+    }
+
+    // 2. The lock is free, and this run's environment names ANOTHER per-user folder than the one
+    //    the update was applied from (KATANA_UPDATE_STATE_DIR set where Katana is started and not
+    //    at the logon; another account): an empty one. No marker is in it - and none was ever
+    //    going to be: the new version wrote its marker in its own folder, where it still is. A
+    //    release that proved itself is not put back for that. It is left, and the logon entry is
+    //    back so that the next logon decides.
+    {
+        const Path elsewhere = world->top_ / "elsewhere";
+        fs::create_directories(elsewhere);
+        world->environment.set(L"KATANA_UPDATE_STATE_DIR", elsewhere);
+        const SpawnResult ran = world->runHelper(world->withTestOptions({"--recover", root}));
+        world->environment.set(L"KATANA_UPDATE_STATE_DIR", world->state);
+        ASSERT_EQ(ran.exitCode, 0) << describe(ran);
+        EXPECT_EQ(valueOf(ran.output, "recover"), "ok");
+        EXPECT_EQ(valueOf(ran.output, "detail").rfind("left:", 0), 0u) << ran.output;
+        world->expectV2();
+        EXPECT_EQ(readText(journal), journalBefore);
+        EXPECT_TRUE(snapshot(elsewhere).empty()) << "nothing is made in the folder it looked in";
+        EXPECT_EQ(difference(userBefore, snapshot(world->state)), "") << "--recover changed the per-user folder";
+        EXPECT_EQ(world->runOnce(), runOnceCommand(world->helperPath(tx), world->root))
+            << "the entry is back, for the next logon";
+    }
+
+    // 3. That logon, in the environment the update was applied in: the marker is found.
+    {
+        world->consumeRunOnce();
+        const SpawnResult ran = world->runHelper(world->withTestOptions({"--recover", root}));
+        ASSERT_EQ(ran.exitCode, 0) << describe(ran);
+        EXPECT_EQ(valueOf(ran.output, "detail").rfind("confirmed:", 0), 0u) << ran.output;
+        world->expectV2();
+        EXPECT_FALSE(isPresent(world->root / ".update" / tx)) << "the transaction folder is gone";
+        EXPECT_FALSE(world->runOnceIsSet());
+    }
 }
 
 #endif // _WIN32
