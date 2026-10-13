@@ -36,6 +36,7 @@
 #include "katana/core/error.hpp"
 #include "katana/entity/linework_codes.hpp"
 #include "katana/entity/style_library.hpp"
+#include "katana/update/credential.hpp"
 #include "linework_labels.hpp"
 #include "theme.hpp"
 
@@ -414,6 +415,48 @@ QPushButton* button(const QString& label, const char* objectName, QWidget* paren
     return made;
 }
 
+// ---- the Updates page's words ------------------------------------------------------------------
+
+// What a check sends, and what the server it asks sees whatever is sent: the
+// one thing about a person's computer an update check gives away, said where
+// the check is switched on and off.
+QString updateSendsWords(const SettingsUpdates& updates)
+{
+    return QStringLiteral("A check asks %1 for the newest version. It sends only \"%2\" as its "
+                          "user agent - nothing about you, your files or your drawings - and, "
+                          "as with every website, %1 sees this computer's network address.")
+        .arg(updates.server.isEmpty() ? QStringLiteral("the release server") : updates.server,
+             updates.userAgent.isEmpty() ? QStringLiteral("Katana/<version> (<target>)")
+                                         : updates.userAgent);
+}
+
+// Whether a token is stored and where - never the token. A store that cannot
+// be read says so in its own words, which name the place and not the value
+// (update/credential.hpp).
+QString updateTokenWords(const katana::update::CredentialStore* store)
+{
+    if (store == nullptr) {
+        return QStringLiteral("This session keeps no access token; the environment variable %1 "
+                              "gives a run one.")
+            .arg(text(katana::update::kTokenEnvironmentVariable));
+    }
+    const katana::core::Result<std::string> stored = store->read();
+    if (stored.ok()) {
+        return QStringLiteral("An access token is stored in the %1.").arg(text(store->where()));
+    }
+    if (stored.error().code == katana::core::ErrorCode::NotFound) {
+        return QStringLiteral("No access token is stored.");
+    }
+    return text(stored.error().message);
+}
+
+QString updateSkippedWords(const QString& version)
+{
+    return version.isEmpty() ? QStringLiteral("No version is skipped.")
+                             : QStringLiteral("Katana %1 is skipped: it is not offered.")
+                                   .arg(version);
+}
+
 } // namespace
 
 SettingsDialog::SettingsDialog(SettingsContext context, QWidget* parent)
@@ -435,9 +478,18 @@ SettingsDialog::SettingsDialog(SettingsContext context, QWidget* parent)
     outer->addLayout(body, 1);
 
     addPage(QStringLiteral("Customisation"), buildCustomisationPage());
+    addPage(QStringLiteral("Updates"), buildUpdatesPage());
     // The list chooses the page; the stack has no signal back to this dialog.
     QObject::connect(pages_, &QListWidget::currentRowChanged, stack_,
                      &QStackedWidget::setCurrentIndex);
+    // The Updates page shows per-user state that a typed line or the update
+    // dialog may have changed since: read again each time it is turned to.
+    QObject::connect(pages_, &QListWidget::currentRowChanged, this, [this](int) {
+        if (stack_->currentWidget() != nullptr &&
+            stack_->currentWidget()->objectName() == QLatin1String("settingsUpdates")) {
+            showUpdates();
+        }
+    });
     pages_->setCurrentRow(0);
 
     // A box, not a label: a load answers with several records and a refusal
@@ -485,6 +537,9 @@ SettingsDialog::SettingsDialog(SettingsContext context, QWidget* parent)
         watcher_ = std::make_unique<DocumentWatcher>(*context_.document, changed);
     }
     refresh();
+    // After refresh, which says in the status when there is no drawing: the
+    // Updates page is of the program and is filled either way.
+    showUpdates();
 }
 
 SettingsDialog::~SettingsDialog()
@@ -724,6 +779,89 @@ QWidget* SettingsDialog::buildCustomisationPage()
             context_.openSymbolLibrary();
         }
     });
+    return page;
+}
+
+QWidget* SettingsDialog::buildUpdatesPage()
+{
+    auto* page = new QWidget(this);
+    page->setObjectName(QStringLiteral("settingsUpdates"));
+    auto* column = new QVBoxLayout(page);
+    column->setContentsMargins(0, 0, 0, 0);
+
+    // Hidden until showUpdates() finds something to say.
+    updateNote_ = valueLabel("settingsUpdateNote", page);
+    updateNote_->hide();
+    column->addWidget(updateNote_);
+
+    // Checking.
+    auto* checkBox = new QGroupBox(QStringLiteral("Checking"), page);
+    auto* checkLayout = new QVBoxLayout(checkBox);
+    updateAuto_ = new QCheckBox(QStringLiteral("Check for updates automatically"), checkBox);
+    updateAuto_->setObjectName(QStringLiteral("settingsUpdateAuto"));
+    updateAuto_->setToolTip(QStringLiteral(
+        "Ask once a day, when the window is open, whether a newer Katana exists, and show it in "
+        "the status bar when one does; nothing is downloaded or installed unasked (UPDATE SET "
+        "AUTO ON or OFF). Help > Check for Updates asks at any time"));
+    updateSends_ = valueLabel("settingsUpdateSends", checkBox);
+    checkLayout->addWidget(updateAuto_);
+    checkLayout->addWidget(updateSends_);
+    column->addWidget(checkBox);
+
+    // The access token.
+    auto* tokenBox = new QGroupBox(QStringLiteral("Access token"), page);
+    auto* tokenLayout = new QGridLayout(tokenBox);
+    auto* tokenWhy = new QLabel(
+        QStringLiteral("Needed only when the releases are private: a read-only token, which is "
+                       "sent to the release server and to nothing else. Leave it empty "
+                       "otherwise."),
+        tokenBox);
+    tokenWhy->setWordWrap(true);
+    updateToken_ = new QLineEdit(tokenBox);
+    updateToken_->setObjectName(QStringLiteral("settingsUpdateToken"));
+    // Dots: a token typed with someone looking on is still a secret.
+    updateToken_->setEchoMode(QLineEdit::Password);
+    updateToken_->setPlaceholderText(QStringLiteral("paste an access token to store it"));
+    updateTokenSave_ = button(QStringLiteral("Save"), "settingsUpdateTokenSave", tokenBox);
+    updateTokenClear_ = button(QStringLiteral("Clear"), "settingsUpdateTokenClear", tokenBox);
+    updateTokenClear_->setToolTip(
+        QStringLiteral("Remove the stored access token (UPDATE TOKEN CLEAR)"));
+    updateTokenState_ = valueLabel("settingsUpdateTokenState", tokenBox);
+    tokenLayout->addWidget(tokenWhy, 0, 0, 1, 3);
+    tokenLayout->addWidget(updateToken_, 1, 0);
+    tokenLayout->addWidget(updateTokenSave_, 1, 1);
+    tokenLayout->addWidget(updateTokenClear_, 1, 2);
+    tokenLayout->addWidget(updateTokenState_, 2, 0, 1, 3);
+    tokenLayout->setColumnStretch(0, 1);
+    column->addWidget(tokenBox);
+
+    // The skipped version.
+    auto* skipBox = new QGroupBox(QStringLiteral("Skipped version"), page);
+    auto* skipLayout = new QHBoxLayout(skipBox);
+    updateSkipped_ = valueLabel("settingsUpdateSkipped", skipBox);
+    updateUnskip_ =
+        button(QStringLiteral("Offer the skipped version again"), "settingsUpdateUnskip", skipBox);
+    skipLayout->addWidget(updateSkipped_, 1);
+    skipLayout->addWidget(updateUnskip_);
+    column->addWidget(skipBox);
+    column->addStretch(1);
+
+    // ---- wiring: lambdas, no moc. toggled, not clicked, for the reason the
+    // automation boxes give.
+    QObject::connect(updateAuto_, &QCheckBox::toggled, this, [this](bool on) {
+        if (!loading_) {
+            runUpdatesLine(on ? QStringLiteral("UPDATE SET AUTO ON")
+                              : QStringLiteral("UPDATE SET AUTO OFF"));
+        }
+    });
+    QObject::connect(updateTokenSave_, &QPushButton::clicked, this, [this] { saveUpdateToken(); });
+    QObject::connect(updateTokenClear_, &QPushButton::clicked, this, [this] {
+        // What was typed and not saved goes too: Clear leaves no token anywhere.
+        updateToken_->clear();
+        runUpdatesLine(QStringLiteral("UPDATE TOKEN CLEAR"));
+    });
+    QObject::connect(updateUnskip_, &QPushButton::clicked, this,
+                     [this] { runUpdatesLine(QStringLiteral("UPDATE SKIP NONE")); });
     return page;
 }
 
@@ -1075,6 +1213,103 @@ void SettingsDialog::automationToggled(const char* key, bool on)
     // nothing ran, left the Document as it was, and no notification comes to
     // say so: the box goes back.
     showAutomation();
+}
+
+// ---- the Updates page --------------------------------------------------------------------------
+
+void SettingsDialog::setUpdates(SettingsUpdates updates)
+{
+    context_.updates = std::move(updates);
+    showUpdates();
+}
+
+void SettingsDialog::showUpdates()
+{
+    const SettingsUpdates& updates = context_.updates;
+    const bool lines = static_cast<bool>(context_.run);
+
+    updateNote_->setText(updates.note);
+    updateNote_->setVisible(!updates.note.isEmpty());
+    updateSends_->setText(updateSendsWords(updates));
+
+    // The box shows what the STATE has, as the automation boxes show the
+    // Document: a line that was refused left it as it was, and the box goes
+    // back. With nobody to ask it is off and disabled, never a guess.
+    const bool wasLoading = loading_;
+    loading_ = true;
+    updateAuto_->setChecked(updates.automatic && updates.automatic());
+    loading_ = wasLoading;
+    updateAuto_->setEnabled(lines && static_cast<bool>(updates.automatic));
+
+    updateTokenState_->setText(updateTokenWords(updates.credentials));
+    updateToken_->setEnabled(updates.credentials != nullptr);
+    updateTokenSave_->setEnabled(updates.credentials != nullptr);
+    updateTokenSave_->setToolTip(
+        updates.credentials != nullptr
+            ? QStringLiteral("Store the token typed here for the update checks. It is written "
+                             "to the credential store and to nothing else: no line is run, so "
+                             "the command log never holds it")
+            : QStringLiteral("This session has no credential store to save a token in; the "
+                             "environment variable %1 gives a run one.")
+                  .arg(text(katana::update::kTokenEnvironmentVariable)));
+    updateTokenClear_->setEnabled(lines);
+
+    // With nobody to say which version is skipped, the button stays on and the
+    // verb answers; with none skipped it has nothing to do.
+    const QString skipped = updates.skippedVersion ? updates.skippedVersion() : QString();
+    updateSkipped_->setText(updates.skippedVersion ? updateSkippedWords(skipped) : QString());
+    updateUnskip_->setEnabled(lines && (!updates.skippedVersion || !skipped.isEmpty()));
+    updateUnskip_->setToolTip(QStringLiteral(
+        "Forget which version was skipped, so that the next check offers it (UPDATE SKIP NONE)"));
+}
+
+void SettingsDialog::runUpdatesLine(const QString& line)
+{
+    if (!context_.run) {
+        refuse(QStringLiteral("Nothing here can run %1: Settings was given no command line.")
+                   .arg(line));
+        showUpdates();
+        return;
+    }
+    // No Document is asked for: these lines are of the program, and run with
+    // no drawing and after one has closed.
+    const VerbOutcome outcome = context_.run(line);
+    say(answered(line, outcome), !outcome.ok);
+    showUpdates();
+}
+
+void SettingsDialog::saveUpdateToken()
+{
+    katana::update::CredentialStore* const store = context_.updates.credentials;
+    if (store == nullptr) {
+        refuse(QStringLiteral("Save: this session has no credential store to save a token in."));
+        return;
+    }
+    // The blanks round a pasted token are no part of it; anything else that
+    // makes it no token is the store's to refuse.
+    const QString typed = updateToken_->text().trimmed();
+    if (typed.isEmpty()) {
+        refuse(QStringLiteral("Save: no access token is typed. Paste one, or press Clear to "
+                              "remove the stored one."));
+        return;
+    }
+    // NO LINE: a line is echoed in the command log, and a token must never be
+    // there. Nor is it in anything said below - the store's refusal names the
+    // place and the rule, never the value (update/credential.hpp), and only
+    // its message is shown, never its context.
+    const katana::core::Status written = store->write(typed.toStdString());
+    if (!written) {
+        refuse(QStringLiteral("Save: ") + text(written.error().message));
+        return;
+    }
+    updateToken_->clear();
+    say(QStringLiteral("The access token was saved to the %1. It is not shown again.")
+            .arg(text(store->where())),
+        false);
+    if (context_.updates.tokenChanged) {
+        context_.updates.tokenChanged();
+    }
+    showUpdates();
 }
 
 } // namespace katana::qt

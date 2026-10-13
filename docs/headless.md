@@ -164,6 +164,7 @@ imported (anything else), in order, before any step runs.
 | `--check-menus` | fail the run when a menu item, in any submenu, has no icon or no status tip, listing each (`desktop.md`, "Every menu item has an icon and says what it does") |
 | `--check-toolbars` | measure every icon-only button with a menu on a toolbar or in a dock's title bar (the tool families, Undo, Redo, each view's kind switcher) from its own rendering - where it draws its icon, and what its menu adds - print a `toolbar button` or `title bar button` line for each, and fail the run, with a `menu sign clash:` line, when a menu's sign is drawn over the icon or not at all (`tools::menuSignClashes`; `desktop.md`, "Tool families on the toolbars"). It measures once the `--action` switches and the steps have run, so a `--trigger viewToolBarIconsLarge` or a `--command` starting a tool is measured; on a scaled screen it judges in device pixels, and each line says so |
 | `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
+| `--update-health TX` | not for a person: the update helper starts the version it has just put in place with it, to learn whether that version starts. The window is built - headless, never shown - the marker `healthy-<TX>` is written in the update state folder on the event loop's first idle turn, and the run exits 0 (1 when the marker could not be written). TX is taken only when it is a transaction id as the helper makes them; anything else ends the run with exit 2 and writes nothing. Every other switch beside it is ignored ("Updates in a headless run", below) |
 | the steps | below |
 
 ## The customisation a run starts with
@@ -311,7 +312,7 @@ every action, field, button and tab gets one. In a test they are one
 
 | Switch | `-DDRIVE` step | What it does |
 |---|---|---|
-| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the Annotate menu's `annotateLeaders`, `annotateLeadersForSelection` and `annotateArrangeLeaders` all carry `leaderManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`; File > Settings carries `settingsDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
+| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the Annotate menu's `annotateLeaders`, `annotateLeadersForSelection` and `annotateArrangeLeaders` all carry `leaderManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`; File > Settings carries `settingsDialog`; Help > Check for Updates carries `updateDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal. NAME may also be the DIALOG's own name when no action is called that - `@updateDialog` - and the first action whose data names that dialog is then the one triggered (`qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless`) |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target; at the end its status line is printed |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers. A popup a step opened - a window of its own, shown - is a panel too: a view bar's Layers popup, whose box is the view's ghost switch (`%View2\|!ViewLayersButton\|%ViewLayersPopup\|!ViewLayersShowSelection`, `qt_the_layers_popups_box_turns_a_views_ghosts_off_headless`); it could not be reached before |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does. A disabled field is refused, as `--press` refuses a disabled button: a person cannot type into it and the line does not read it (`qt_fill_of_a_disabled_field_is_refused_headless`) |
@@ -492,6 +493,89 @@ background compresses to a few kilobytes), and PDF and PNG headers are
 compared as hex: CMake's plain `file(READ ... LIMIT 4)` returned `%PDF` plus a
 newline on this platform and failed a good file.
 
+## Updates in a headless run
+
+Katana updates itself from the window (`docs/desktop.md`, "Help > Check for
+Updates"). A headless run takes no part in that unless it is told to, so
+that it is the same run on every machine and no test reaches a server by
+starting the window:
+
+- **No automatic check.** `UpdateWorkbench::start` is called by `main()` only
+  for a window that is shown, and does nothing in a headless one.
+- **No per-user state.** The UPDATE verbs are given the headless window's
+  surface (`src/katana_app/update_verbs.hpp`, `HeadlessWindow`), whose context
+  has no state folder: nothing is read from or written to the update folder
+  of whoever runs the suite - not when the last check was, not a skipped
+  version, not how the last update ended, which an interactive start shows
+  once and clears. Settings > Updates says so, shows its box off and
+  disabled, and has Save disabled: a headless run writes no credential store
+  (`qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless`,
+  `qt_a_headless_run_saves_no_access_token_headless`). It is held to the
+  disk: the window's update checks are all given ONE state folder, removed
+  before the first of them, and after the last of them it must not be there
+  at all (`update_headless_checks_leave_no_update_state_folder_behind`, the
+  cleanup of a fixture every one of them requires).
+- **No dialog unless asked.** `@updateDialog` - or `@helpCheckForUpdates`,
+  the menu item - opens it, and opening it checks nothing. A development
+  copy, which is every build tree, is told it cannot update, from its own
+  install record; an installed copy says what version it is and waits for
+  `!updateCheckNow`. The dialog's sentences are `?updateStateText` and
+  `?updateDetailText`, and a button its state does not show is hidden, so a
+  press of it fails the run
+  (`qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless`).
+- **`UPDATE CHECK` and `UPDATE STATUS` when typed.** `>UPDATE CHECK` waits
+  for its job, as a geoprocessing line does, so its reply is logged before
+  the next step, and a dialog opened after it shows what the answer made of
+  the view; in a build tree both answer without asking any server
+  (`qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless`,
+  `qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the_dialog_shows_headless`:
+  `update=unsupported`, `reason=development_tree`, then the dialog's
+  sentence).
+- **A word typed after `UPDATE TOKEN` is shown nowhere.** No line takes an
+  access token; one typed all the same is echoed as `***`, and what the verbs
+  say back to it is logged without the word, in any case
+  (`qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless`:
+  the whole command log is reported, and the word must be in nothing the run
+  prints).
+- **`UPDATE DOWNLOAD CONFIRM` and `UPDATE APPLY CONFIRM` reply
+  `reason=headless`.** They are handed to the verbs as they are, which
+  refuse them for this surface: a headless run never downloads and never
+  replaces the program
+  (`qt_a_typed_update_download_and_apply_say_a_headless_run_does_neither_headless`).
+- **Release notes** open no browser: the address is logged, `notes_url=...`.
+
+Two things every run does about updates, headless or not, both before the
+window exists:
+
+**`update::recover`, first in `main()`.** The program looks whether an update
+of the install it was started from was interrupted - a crash, a power cut -
+and has the install put back before it goes on
+(`include/katana/update/recover.hpp`). With nothing interrupted, which is
+every start but that one, it is a listing of one folder, and of none in a
+copy that has never updated: a build tree. This is not a per-user matter: an
+install half swapped is no state for any run to start from. Where a recovery
+is needed it runs the update helper, which may note what it could not delete
+in the update state folder; one that fails is said on stderr with the
+command that puts the install right by hand, and the run goes on.
+
+**`--update-health TX`.** How the helper asks a version it has just put in
+place whether it starts (`include/katana/update/apply.hpp`, step 7). The run
+is headless and its window is never shown; the marker `healthy-<TX>` goes to
+the update state folder (`include/katana/update/state.hpp`) - the one thing a
+headless run writes to a per-user place, and the reason the switch exists.
+Then it EXITS: the helper waits for that exit, and starts Katana again itself
+as a person would (`docs/desktop.md`, "Help > Check for Updates", "the health
+run exits"). `KATANA_UPDATE_STATE_DIR` names the state folder for a test
+(`qt_the_health_run_writes_its_marker_and_exits_headless`, between a test
+that empties the folder and one that reads the marker; a TX that is no id is
+refused, `qt_a_health_run_given_no_transaction_id_is_refused_headless`).
+
+The checks are `tests/update/headless/update_window.cmake`. The window's
+checks are given one update state folder of the tests' own - which none of
+them may make - the health run another, and every run no
+`KATANA_UPDATE_TOKEN`, so that nothing of the person running the suite is
+read.
+
 ## A headless session never opens a modal box
 
 A modal box in a headless run is a hang until the test's timeout. So
@@ -551,6 +635,13 @@ A modal box in a headless run is a hang until the test's timeout. So
 
 ## Not done
 
+- No headless run reaches the update dialog's states past "cannot update":
+  every run here starts from a build tree, which is a development copy and
+  never asks a server, downloads or applies. Those states, and what the
+  window decides from a check's answer, the update folder and the last
+  result, are the widget tests' (`tests/qt_widgets/test_update_dialog.cpp`,
+  `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
+  the update system's own end-to-end tests'.
 - No step presses a key into a view (`&KEY` was proposed for a view's own
   keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
   through `>` alone; the rest is tested in `tests/qt_widgets` with real key

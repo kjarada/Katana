@@ -5,8 +5,8 @@
 // built-in put back, the session kept for the next start (docs/desktop.md,
 // "Settings"; docs/customisation.md, "Settings and the kept customisation").
 //
-// A page list beside a stack. One page today, Customisation; another is one
-// more addPage.
+// A page list beside a stack: Customisation, and Updates (below); another is
+// one more addPage.
 //
 // THE DIALOG DOES NONE OF THE WORK. Every button that changes anything builds
 // the CUSTOMISE line a person would type (cad/customisation_verbs.hpp) and
@@ -62,7 +62,7 @@
 // through the dialog opens a modal box.
 //
 // Object names: settingsDialog; settingsPages (the list), settingsStack,
-// settingsCustomisation (the page);
+// settingsCustomisation and settingsUpdates (the pages); of the first page:
 //   settingsActiveName, settingsActiveOrigin, settingsActiveBuiltIn (the
 //   built-in the session is, or the one it is based on), settingsActiveDefinitions,
 //   settingsActiveSymbols, settingsActiveRules, settingsActiveKept,
@@ -87,6 +87,36 @@
 // has: the first press finds out, and every control that would act is then
 // disabled and the status says why. What the page last showed stays to be
 // read.
+//
+// THE UPDATES PAGE (settingsUpdates; docs/desktop.md, "Settings", and the
+// UPDATE verbs, src/katana_app/update_verbs.hpp) is of the program and not of
+// the drawing, so it works with no Document and after one has gone. Like the
+// first page it runs lines and changes nothing itself - with ONE exception,
+// which is the reason it exists:
+//   settingsUpdateNote         why this session checks nothing by itself or
+//                              keeps no update settings (hidden when it does)
+//   settingsUpdateAuto         "Check for updates automatically"; toggled, it
+//                              runs UPDATE SET AUTO ON or OFF, and then shows
+//                              what the state has, as the two automation boxes
+//                              show the Document
+//   settingsUpdateSends        what a check sends: only the user agent
+//                              "Katana/<version> (<target>)", and that the
+//                              server sees the computer's network address
+//   settingsUpdateToken        an access token for private releases, typed or
+//                              pasted (shown as dots)
+//   settingsUpdateTokenSave    writes the token to the credential store
+//                              DIRECTLY (update::CredentialStore::write). A
+//                              token is never a word of a line: lines are
+//                              echoed in the command log. Nothing of it is
+//                              logged or shown; the field is emptied
+//   settingsUpdateTokenClear   runs UPDATE TOKEN CLEAR
+//   settingsUpdateTokenState   whether a token is stored, and where
+//   settingsUpdateSkipped      the version UPDATE SKIP set aside, or that
+//                              none is
+//   settingsUpdateUnskip       "Offer the skipped version again": runs UPDATE
+//                              SKIP NONE
+// The page is there whatever the dialog was given; with no SettingsUpdates its
+// controls are disabled, as a button with no callback is on the first page.
 
 #include <cstdint>
 #include <functional>
@@ -113,9 +143,40 @@ namespace katana::cad {
 class Document;
 } // namespace katana::cad
 
+namespace katana::update {
+class CredentialStore;
+} // namespace katana::update
+
 namespace katana::qt {
 
 class DocumentWatcher;
+
+// What the Updates page shows, and the one thing it does without a line. Every
+// member has a default a test can leave alone; the window fills it from its
+// update workbench (UpdateWorkbench::settingsUpdates).
+struct SettingsUpdates {
+    // "Check for updates automatically" as the per-user state has it. Asked
+    // whenever the page is filled, and after each of its lines. Empty: the box
+    // is disabled.
+    std::function<bool()> automatic{};
+    // The version UPDATE SKIP set aside, empty when none is. Asked likewise.
+    // Empty function: the page says nothing of it and the button stays on.
+    std::function<QString()> skippedVersion{};
+    // Where the access token is kept: Save writes it here and the page says
+    // whether one is stored - never the token itself. Null: Save is disabled.
+    katana::update::CredentialStore* credentials = nullptr;
+    // Told once Save has changed the store, so the next check reads it again.
+    std::function<void()> tokenChanged{};
+    // What a check sends as its user agent, "Katana/0.2.0 (win64)". Empty: the
+    // sentence gives the shape, "Katana/<version> (<target>)".
+    QString userAgent{};
+    // Who the check asks ("GitHub"). Empty: "the release server".
+    QString server{};
+    // One sentence, shown first: why this session checks nothing by itself or
+    // keeps no update settings (a headless run, a development build,
+    // KATANA_UPDATE_DISABLE). Empty: nothing is shown.
+    QString note{};
+};
 
 // What the dialog is given by whoever opens it. Every member has a default a
 // test can leave alone: with no Document nothing is shown and nothing runs,
@@ -151,6 +212,10 @@ struct SettingsContext {
     // window wants. A test gives it to stand in for the build, so that it is
     // the same test on a machine whose build compiled in other files.
     std::function<std::vector<katana::cad::BuiltInEntry>()> builtIns{};
+    // The Updates page's (above). The Format workbench, which makes the dialog,
+    // knows nothing of updates: the window hands these over with setUpdates
+    // each time the dialog is opened.
+    SettingsUpdates updates{};
 };
 
 class SettingsDialog final : public QDialog {
@@ -165,6 +230,10 @@ class SettingsDialog final : public QDialog {
     // watcher does when the Document says it changed.
     void refresh();
 
+    // What the Updates page shows and writes to, in the place of what the
+    // context gave; the page is filled again from it.
+    void setUpdates(SettingsUpdates updates);
+
   private:
     // What a line that changed the customisation is followed by.
     enum class Then {
@@ -177,6 +246,7 @@ class SettingsDialog final : public QDialog {
     // One more page: an entry of the list and the widget it shows.
     void addPage(const QString& title, QWidget* page);
     QWidget* buildCustomisationPage();
+    QWidget* buildUpdatesPage();
 
     [[nodiscard]] bool alive() const;
     // The status box, and for a refusal the log too.
@@ -204,6 +274,16 @@ class SettingsDialog final : public QDialog {
     void automationToggled(const char* key, bool on);
     // The two boxes as the Document has them, telling no one.
     void showAutomation();
+
+    // ---- the Updates page, which needs no Document.
+    // The box, the two labels and which buttons can be pressed, as
+    // context_.updates says now, telling no one.
+    void showUpdates();
+    // Runs an UPDATE line through the executor, shows what it answered and
+    // fills the page again.
+    void runUpdatesLine(const QString& line);
+    // Save: the typed token into the credential store, with no line.
+    void saveUpdateToken();
 
     SettingsContext context_;
     // The Document's generations the page last showed.
@@ -246,6 +326,16 @@ class SettingsDialog final : public QDialog {
     QPushButton* editLinework_ = nullptr;
     QPushButton* openCodes_ = nullptr;
     QPushButton* openSymbols_ = nullptr;
+    // The Updates page.
+    QLabel* updateNote_ = nullptr;
+    QCheckBox* updateAuto_ = nullptr;
+    QLabel* updateSends_ = nullptr;
+    QLineEdit* updateToken_ = nullptr;
+    QPushButton* updateTokenSave_ = nullptr;
+    QPushButton* updateTokenClear_ = nullptr;
+    QLabel* updateTokenState_ = nullptr;
+    QLabel* updateSkipped_ = nullptr;
+    QPushButton* updateUnskip_ = nullptr;
     QPlainTextEdit* status_ = nullptr;
 
     // Last, so it is destroyed first: no delivery reaches a half-destroyed

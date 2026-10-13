@@ -8,16 +8,19 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTextDocumentFragment>
 #include <QTextEdit>
+#include <QTimer>
 #include <QToolBar>
 #include <QTreeView>
 #include <QWheelEvent>
@@ -25,7 +28,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -41,6 +46,10 @@
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
+#include "katana/update/apply.hpp"
+#include "katana/update/install.hpp"
+#include "katana/update/recover.hpp"
+#include "katana/update/state.hpp"
 #include "theme.hpp"
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
@@ -55,17 +64,86 @@
 
 namespace {
 
+// The switch the update helper starts the new version with is the one this
+// file parses, by its literal text (which the docs check reads here).
+static_assert(katana::update::kHealthSwitch == "--update-health");
+
+// The FIRST thing main() does (update/recover.hpp): an update that a crash or
+// a power cut interrupted is put right before this program does anything else
+// with an install whose files may be half swapped. With nothing interrupted -
+// every start but that one - it is a listing of one folder, and of none in a
+// copy that has never updated. A program that is in no install (no bin/ and
+// share/ beside it) has nothing an update could have touched.
+//
+// A recovery that fails is said, with the command that puts the install right
+// by hand (the Error's own words), and the program goes on: it did load, and
+// the window then shows what the last update ended as.
+void recoverInterruptedUpdate()
+{
+    const auto root = katana::update::installRootOfRunningProgram();
+    if (!root) {
+        return;
+    }
+    if (const auto recovered = katana::update::recover(*root); !recovered) {
+        std::fprintf(stderr, "%s\n", recovered.error().describe().c_str());
+    }
+}
+
+// --update-health TX: the marker that tells the update helper this version
+// starts, U/healthy-<TX> (update/state.hpp). The helper looks for it once this
+// process has exited, so a file written and closed is enough; it is the
+// marker's presence that counts, and "ok" is only something to find in it.
+// Written with Qt's file, not the engine's file operations: those are the
+// apply's seam, and are not written for every platform this program runs on.
+// False, said, when it could not be written - the helper then finds no marker
+// and puts the old version back, which is the right answer to a copy that
+// cannot say it started.
+bool writeHealthMarker(const QString& transaction)
+{
+    const std::filesystem::path state = katana::update::stateDirectory();
+    if (state.empty()) {
+        std::fprintf(stderr, "--update-health: this session has no update state folder\n");
+        return false;
+    }
+    // There already when the helper asks: it runs from a folder inside it.
+    std::error_code failed;
+    std::filesystem::create_directories(state, failed);
+    const std::filesystem::path marker =
+        katana::update::healthMarkerPath(state, transaction.toStdString());
+    QFile file(QString::fromStdWString(marker.wstring()));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write("ok\n") != 3 ||
+        !file.flush()) {
+        std::fprintf(stderr, "--update-health: the marker %s could not be written: %s\n",
+                     qPrintable(file.fileName()), qPrintable(file.errorString()));
+        return false;
+    }
+    file.close();
+    return true;
+}
+
 // --dialog (and --survey-dialog, its first name): the dialog action NAME
 // opens, triggered as a click does. The dialog is found by the object name
 // the action carries as its data - how the Format menu's managers name theirs
 // (CustomisationWorkbench) - or else the action's own plus "Dialog", as the
-// Survey workbench names them. What opened is said on stderr, which is where
-// a test reads it. nullptr, said, for an unknown action or one that opens no
-// dialog.
-QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
+// Survey workbench names them. NAME may also be the DIALOG's own name
+// (updateDialog) when no action is called that: the first action whose data
+// names that dialog is the one triggered, so a dialog is asked for by what it
+// is as well as by the menu item that opens it. What opened is said on
+// stderr, which is where a test reads it. nullptr, said, for an unknown
+// action or one that opens no dialog.
+QDialog* openDialog(katana::qt::MainWindow& window, const QString& asked)
 {
+    QString name = asked;
+    if (window.findChild<QAction*>(asked) == nullptr) {
+        for (const QAction* each : window.findChildren<QAction*>()) {
+            if (!each->objectName().isEmpty() && each->data().toString() == asked) {
+                name = each->objectName();
+                break;
+            }
+        }
+    }
     if (const auto status = window.triggerAction(name); !status) {
-        std::fprintf(stderr, "--dialog %s failed: %s\n", qPrintable(name),
+        std::fprintf(stderr, "--dialog %s failed: %s\n", qPrintable(asked),
                      status.error().describe().c_str());
         return nullptr;
     }
@@ -76,11 +154,12 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
                               : name + "Dialog";
     auto* dialog = window.findChild<QDialog*>(named);
     if (dialog == nullptr) {
-        std::fprintf(stderr, "--dialog: %s opened no dialog named %s\n", qPrintable(name),
+        std::fprintf(stderr, "--dialog: %s opened no dialog named %s\n", qPrintable(asked),
                      qPrintable(named));
         return nullptr;
     }
-    std::fprintf(stderr, "--dialog %s opened %s \"%s\"%s\n", qPrintable(name), qPrintable(named),
+    // By the name that was asked for, as before there were two ways to ask.
+    std::fprintf(stderr, "--dialog %s opened %s \"%s\"%s\n", qPrintable(asked), qPrintable(named),
                  qPrintable(dialog->windowTitle()), dialog->isModal() ? " (modal)" : "");
     return dialog;
 }
@@ -500,6 +579,7 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 //   katana --check-shortcuts --screenshot out.png
 //   katana --check-menus --screenshot out.png
 //   katana --check-toolbars --screenshot out.png
+//   katana --update-health TX
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -656,8 +736,26 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 // reviewed - by a person in a pull request, or by a model that cannot watch a
 // screen - the same way --plot lets its output be reviewed. Under
 // QT_QPA_PLATFORM=offscreen nothing is shown anywhere.
+//
+// --update-health TX is not for a person: it is how the update helper asks a
+// version it has just put in place whether it starts (update/apply.hpp, step
+// 7). The program builds its window - never shown, headless as a batch run is
+// - lets the event loop come idle once, writes the marker healthy-<TX> in the
+// update state folder (update/state.hpp) and exits 0. The helper waits for
+// that exit; a copy that cannot load, or that ends any other way, is rolled
+// back, and the helper then starts Katana again as a person would. TX is
+// taken only when it is a transaction id (update::isValidTransactionId):
+// anything else ends the run with exit 2 and writes nothing. Every other
+// switch beside it is ignored.
+//
+// Before anything else - before Qt is started - every run looks whether an
+// update was interrupted and puts the install right (recoverInterruptedUpdate,
+// above). And when the window was closed BY an update (Help > Check for
+// Updates, Restart and update), the helper that swaps the files is started as
+// the last thing main() does, after the event loop has ended.
 int main(int argc, char* argv[])
 {
+    recoverInterruptedUpdate();
     QApplication application(argc, argv);
 #if defined(KATANA_GPU_D3D11)
     // The HLSL compiled on a worker while the window is built, so the first
@@ -706,6 +804,8 @@ int main(int argc, char* argv[])
     bool checkShortcuts = false;
     bool checkMenus = false;
     bool checkToolBars = false;
+    // --update-health's transaction id, as the update helper gave it.
+    std::optional<QString> updateHealth;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -797,6 +897,8 @@ int main(int argc, char* argv[])
             checkMenus = true;
         } else if (argument == "--check-toolbars") {
             checkToolBars = true;
+        } else if (argument == "--update-health") {
+            updateHealth = value();
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -848,6 +950,15 @@ int main(int argc, char* argv[])
         std::fprintf(stderr, "--sheets-json needs an output path, or - for stdout\n");
         return 2;
     }
+    // The id names a file in the update state folder: only the shape the
+    // helper makes is taken, so nothing on a command line can name a file
+    // anywhere else (update::isValidTransactionId).
+    if (updateHealth.has_value() &&
+        !katana::update::isValidTransactionId(updateHealth->toStdString())) {
+        std::fprintf(stderr, "--update-health needs the transaction id the update helper gives "
+                             "it\n");
+        return 2;
+    }
     const bool writesOnly = plotPath.has_value() || sheetsPath.has_value() ||
                             sheetsJsonPath.has_value();
     // A script with nothing to grab is a batch run, as katana_cli's is.
@@ -857,13 +968,27 @@ int main(int argc, char* argv[])
         });
 
     katana::qt::MainWindow window;
-    window.setHeadless(writesOnly || scriptBatch || screenshotPath.has_value());
+    // The health run is headless too: nobody is there to answer a question,
+    // and it must be the same start on every machine.
+    window.setHeadless(writesOnly || scriptBatch || screenshotPath.has_value() ||
+                       updateHealth.has_value());
     // Before anything is opened, so the first drawing is drawn with it: the
     // customisation the session starts with (the kept one, else the built-in
     // one), then --customise merged into it as the typed CUSTOMISE line
     // would. Both are there when a project is opened, whose record of what
     // it was drawn with is compared with what is loaded.
     window.loadDefaultCustomisation();
+    if (updateHealth) {
+        // The window is built and its start-up has run; the marker is written
+        // on the event loop's first idle turn (a zero timer fires when the
+        // queue is empty), which a program that hangs on start-up never
+        // reaches. Then out, with 0 only when the marker is on the disk: the
+        // helper is waiting for this exit and starts Katana again itself.
+        QTimer::singleShot(0, &application, [&updateHealth] {
+            QCoreApplication::exit(writeHealthMarker(*updateHealth) ? 0 : 1);
+        });
+        return application.exec();
+    }
     if (!customisation.isEmpty() && !customise(window, customisation) &&
         (writesOnly || scriptBatch)) {
         std::fprintf(stderr, "--customise %s was refused\n", qPrintable(customisation.join(' ')));
@@ -874,6 +999,11 @@ int main(int argc, char* argv[])
         // never in a headless run, whose window is the same everywhere.
         window.restoreSession();
         window.show();
+        // And what a window a person uses does about updates: how the last
+        // one ended, and the automatic check when one is due. A headless run
+        // checks nothing by itself and reads no per-user state, so this is
+        // not called there.
+        window.startUpdates();
     }
     for (const QString& input : inputs) {
         if (QFileInfo(input).isDir()) {
@@ -1333,5 +1463,27 @@ int main(int argc, char* argv[])
     if (scriptBatch) {
         return 0;
     }
-    return application.exec();
+    const int code = application.exec();
+    // The window has closed and the event loop has ended. If it was closed BY
+    // an update - UPDATE APPLY CONFIRM prepared the helper, and the close the
+    // update workbench then asked for went through, its unsaved-changes
+    // question answered - the helper is started now, detached, and waits for
+    // this process to go before it swaps a file. At any other exit, and after
+    // a close that was cancelled, there is no request and nothing is started:
+    // the release stays downloaded.
+    if (const std::optional<katana::update::ApplyRequest> request = window.takePendingUpdate()) {
+        if (const auto launched = katana::update::launchApply(*request); !launched) {
+            // The window is gone and nothing will happen: said where a person
+            // sees it (a GUI program's stderr goes nowhere), as well as there.
+            const std::string why = launched.error().describe();
+            std::fprintf(stderr, "the update could not be started: %s\n", why.c_str());
+            QMessageBox::warning(
+                nullptr, "Katana Update",
+                QString("The update could not be started, so nothing was changed.\n\n%1\n\n"
+                        "It is still downloaded: start Katana and choose Help > Check for "
+                        "Updates.")
+                    .arg(QString::fromStdString(why)));
+        }
+    }
+    return code;
 }
