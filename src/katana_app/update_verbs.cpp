@@ -906,14 +906,17 @@ Result<UpdateReply> apply(const UpdateContext& context)
     // Which releases those are is in the state file, so one that does not
     // read stops the line: its defaults say that none was ever put back,
     // and the file that is damaged, or was written by a newer Katana, is the
-    // very one that holds them.
+    // very one that holds them. The way out is said too, since nothing here
+    // takes it for the person: the file is theirs, and is not written over.
     const KeptState kept = readKeptState(context);
     if (!kept.readable) {
         return makeError(ErrorCode::InvalidState,
                          "the update settings could not be read, so whether Katana " +
                              update::toString(staged->manifest.version) +
-                             " was put back here before is not known, and it is not applied: " +
-                             kept.problem,
+                             " was put back here before is not known, and it is not applied (" +
+                             kept.problem +
+                             "); with that file removed the settings are the defaults again and "
+                             "the update can be applied",
                          "reason=state_unreadable");
     }
     if (std::find(kept.state.blockedSequences.begin(), kept.state.blockedSequences.end(),
