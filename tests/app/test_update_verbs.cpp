@@ -742,10 +742,20 @@ TEST(UpdateVerbs, CheckDoesNotOfferAReleaseThatWasRolledBackHere)
 
     const core::Result<UpdateReply> reply = runUpdateLine(rig.context(), "UPDATE CHECK");
     ASSERT_TRUE(reply.ok()) << said(reply);
-    EXPECT_EQ(reply->text, "update=blocked installed=0.9.0 latest=0.10.0 notes_url=" + kNotes +
-                               " reason=blocked_before");
+    // One record: what the feed holds, why it is not offered, and - the
+    // detail, which closes the record - the way back (update_verbs.hpp).
+    EXPECT_TRUE(startsWith(reply->text, "update=blocked installed=0.9.0 latest=0.10.0 notes_url=" +
+                                            kNotes + " reason=blocked_before detail=\""))
+        << reply->text;
+    EXPECT_EQ(linesOf(reply->text).size(), 1u) << reply->text;
     ASSERT_TRUE(reply->offer.has_value());
     EXPECT_EQ(reply->offer->check.status, update::CheckStatus::Blocked);
+    EXPECT_EQ(reply->offer->check.reason, "blocked_before");
+    EXPECT_TRUE(contains(reply->offer->check.detail, "was put back"))
+        << reply->offer->check.detail;
+    EXPECT_TRUE(contains(reply->offer->check.detail,
+                         "UPDATE BLOCKED CLEAR (Settings > Updates in the window) offers it again"))
+        << reply->offer->check.detail;
 
     // Recording the check kept what the state already held.
     const core::Result<update::UpdateState> after = update::readState(rig.state);
@@ -1174,6 +1184,170 @@ TEST(UpdateVerbs, WithNoStateFolderNothingPerUserIsReadOrWritten)
     EXPECT_EQ(treeOf(rig.state), before);
 }
 
+// ---- UPDATE BLOCKED CLEAR -----------------------------------------------------------------------
+//
+// A release whose apply was put back here is in the state's `blocked` list by
+// its sequence (update/state.hpp), which is what the helper writes; the tests
+// write it the same way. The reply and each refusal are the ones the grammar
+// gives (update_verbs.hpp): blocked=none; reason=no_state with no update
+// folder; InvalidState for a state file that does not read; InvalidArgument
+// for any other word after BLOCKED.
+
+TEST(UpdateVerbs, BlockedClearEmptiesTheListAndTheNextCheckOffersTheReleaseAgain)
+{
+    for (const UpdateSurface surface : {UpdateSurface::Cli, UpdateSurface::Window}) {
+        Rig rig;
+        rig.serveV2();
+        // Two releases put back here, v2 among them, beside what the person
+        // keeps: another version skipped, the automatic check off, a check
+        // made long ago.
+        update::UpdateState state;
+        state.blockedSequences = {kV1Sequence, kV2Sequence};
+        state.skippedVersion = "0.11.0";
+        state.automatic = false;
+        state.lastCheckEpoch = 1700000000;
+        ASSERT_TRUE(update::writeState(rig.state, state).ok());
+        const UpdateContext context = rig.context(surface);
+
+        const core::Result<UpdateReply> refused = runUpdateLine(context, "UPDATE CHECK");
+        ASSERT_TRUE(refused.ok()) << said(refused);
+        EXPECT_TRUE(startsWith(refused->text, "update=blocked ")) << refused->text;
+
+        const core::Result<UpdateReply> cleared = runUpdateLine(context, "UPDATE BLOCKED CLEAR");
+        ASSERT_TRUE(cleared.ok()) << said(cleared);
+        EXPECT_EQ(cleared->text, "blocked=none");
+        EXPECT_FALSE(cleared->offer.has_value());
+        EXPECT_FALSE(cleared->status.has_value());
+        EXPECT_FALSE(cleared->apply.has_value());
+
+        // The whole list is gone and nothing else of the state was touched.
+        // (The check above was answered by the feed, so it recorded its time.)
+        const core::Result<update::UpdateState> after = update::readState(rig.state);
+        ASSERT_TRUE(after.ok());
+        EXPECT_TRUE(after->blockedSequences.empty());
+        EXPECT_EQ(after->skippedVersion, "0.11.0");
+        EXPECT_FALSE(after->automatic);
+        EXPECT_EQ(after->lastCheckEpoch, kNow);
+
+        const core::Result<UpdateReply> offered = runUpdateLine(context, "UPDATE CHECK");
+        ASSERT_TRUE(offered.ok()) << said(offered);
+        EXPECT_EQ(offered->text, kAvailable);
+
+        // With nothing blocked, and typed in any case: the same answer.
+        const core::Result<UpdateReply> again = runUpdateLine(context, "  update  blocked\tclear ");
+        ASSERT_TRUE(again.ok()) << said(again);
+        EXPECT_EQ(again->text, "blocked=none");
+
+        // The feed was asked by the two checks, a signature and a manifest
+        // each, and by nothing else: the line itself asks nobody.
+        EXPECT_EQ(rig.feed.requests.size(), 4u);
+        EXPECT_TRUE(rig.launcher.runs.empty());
+    }
+}
+
+TEST(UpdateVerbs, UpdateBlockedTakesClearAndNoOtherWordAndSaysTheOneLineThereIs)
+{
+    Rig rig;
+    rig.serveV2();
+    update::UpdateState state;
+    state.blockedSequences = {kV2Sequence};
+    ASSERT_TRUE(update::writeState(rig.state, state).ok());
+    const std::map<std::string, std::string> before = treeOf(rig.state);
+    const UpdateContext context = rig.context();
+
+    for (const char* line :
+         {"UPDATE BLOCKED", "UPDATE BLOCKED NONE", "UPDATE BLOCKED LIST", "UPDATE BLOCKED CLEAR NOW",
+          "UPDATE BLOCKED 1792312800", "UPDATE BLOCKED CLEAR 1792312800", "update blocked clear all",
+          "UPDATE BLOCKED CONFIRM"}) {
+        const core::Result<UpdateReply> reply = runUpdateLine(context, line);
+        ASSERT_FALSE(reply.ok()) << line << " -> " << said(reply);
+        EXPECT_EQ(reply.error().code, core::ErrorCode::InvalidArgument) << line;
+        EXPECT_TRUE(contains(reply.error().message, "UPDATE BLOCKED CLEAR is the one line"))
+            << line << ": " << reply.error().message;
+    }
+    EXPECT_EQ(treeOf(rig.state), before) << "a line that is refused clears nothing";
+    EXPECT_TRUE(rig.feed.requests.empty());
+
+    // The release is blocked as it was.
+    const core::Result<UpdateReply> checked = runUpdateLine(context, "UPDATE CHECK");
+    ASSERT_TRUE(checked.ok()) << said(checked);
+    EXPECT_TRUE(startsWith(checked->text, "update=blocked ")) << checked->text;
+}
+
+TEST(UpdateVerbs, BlockedClearWithNoUpdateFolderSaysSoAndWritesNoFile)
+{
+    {
+        // A caller that keeps nothing. A state file lies where the program's
+        // own would be, with a release blocked in it: neither read nor touched.
+        Rig rig;
+        update::UpdateState state;
+        state.blockedSequences = {kV2Sequence};
+        ASSERT_TRUE(update::writeState(rig.state, state).ok());
+        const std::map<std::string, std::string> before = treeOf(rig.state);
+        UpdateContext context = rig.context();
+        context.stateDirectory.clear();
+
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE BLOCKED CLEAR");
+        ASSERT_TRUE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply->text, "blocked=none reason=no_state");
+        EXPECT_EQ(treeOf(rig.state), before);
+    }
+    {
+        // And with no folder on the disk at all, none is made.
+        Rig rig;
+        UpdateContext context = rig.context();
+        context.stateDirectory.clear();
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "update blocked clear");
+        ASSERT_TRUE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply->text, "blocked=none reason=no_state");
+        EXPECT_FALSE(fs::exists(rig.state));
+    }
+}
+
+TEST(UpdateVerbs, BlockedClearIsRefusedWhenTheStateFileDoesNotReadAndLeavesTheFileAsItIs)
+{
+    // As SKIP and SET AUTO: a file that is damaged, or was written by a newer
+    // Katana, holds what this line cannot keep, and is not written over.
+    Rig rig;
+    rig.serveV2();
+    const std::string damaged = "this is not a state file";
+    writeBytes(rig.state / "state.json", damaged);
+
+    const core::Result<UpdateReply> reply = runUpdateLine(rig.context(), "UPDATE BLOCKED CLEAR");
+    ASSERT_FALSE(reply.ok()) << said(reply);
+    EXPECT_EQ(reply.error().code, core::ErrorCode::InvalidState);
+    EXPECT_TRUE(contains(reply.error().message, "could not be read")) << reply.error().message;
+    EXPECT_EQ(bytesOf(rig.state / "state.json"), damaged);
+    EXPECT_TRUE(rig.feed.requests.empty());
+}
+
+TEST(UpdateVerbs, KatanaClisSessionRunsBlockedClearAndPrintsItsRecord)
+{
+    Rig rig;
+    update::UpdateState state;
+    state.blockedSequences = {kV2Sequence};
+    ASSERT_TRUE(update::writeState(rig.state, state).ok());
+    CliSession cli(rig);
+    {
+        Captured captured;
+        EXPECT_TRUE(cli.session.run("UPDATE BLOCKED CLEAR"));
+        EXPECT_EQ(captured.out(), "blocked=none\n");
+        EXPECT_TRUE(captured.err().empty()) << captured.err();
+    }
+    const core::Result<update::UpdateState> after = update::readState(rig.state);
+    ASSERT_TRUE(after.ok());
+    EXPECT_TRUE(after->blockedSequences.empty());
+    {
+        // A word that is not the line's: the refusal on std::cerr, the run failed.
+        Captured captured;
+        EXPECT_FALSE(cli.session.run("UPDATE BLOCKED"));
+        EXPECT_TRUE(captured.out().empty()) << captured.out();
+        EXPECT_EQ(captured.err().rfind("error: InvalidArgument: UPDATE BLOCKED takes CLEAR", 0), 0u)
+            << captured.err();
+    }
+    EXPECT_FALSE(cli.session.takePendingApply().has_value());
+}
+
 // ---- UPDATE TOKEN -------------------------------------------------------------------------------
 
 TEST(UpdateVerbs, TokenStatusSaysPresentOrAbsentAndNeverTheToken)
@@ -1372,8 +1546,9 @@ TEST(UpdateVerbs, AHeadlessWindowIsRefusedEveryLineThatKeepsOrReadsAPerUserThing
     rig.serveV2();
     rig.store.token = std::string(kSecret);
     const UpdateContext context = rig.context(UpdateSurface::HeadlessWindow);
-    for (const char* line : {"UPDATE SKIP 0.10.0", "UPDATE SKIP NONE", "UPDATE SET AUTO OFF",
-                             "UPDATE SET AUTO ON", "UPDATE TOKEN STATUS", "UPDATE TOKEN CLEAR"}) {
+    for (const char* line : {"UPDATE SKIP 0.10.0", "UPDATE SKIP NONE", "UPDATE BLOCKED CLEAR",
+                             "UPDATE SET AUTO OFF", "UPDATE SET AUTO ON", "UPDATE TOKEN STATUS",
+                             "UPDATE TOKEN CLEAR"}) {
         const core::Result<UpdateReply> reply = runUpdateLine(context, line);
         ASSERT_FALSE(reply.ok()) << line << " -> " << said(reply);
         EXPECT_EQ(reply.error().code, core::ErrorCode::Unsupported) << line;
@@ -1407,7 +1582,8 @@ TEST(UpdateVerbs, KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse)
     const std::size_t asked = rig.feed.requests.size();
     for (const char* line :
          {"UPDATE DOWNLOAD CONFIRM", "UPDATE APPLY CONFIRM", "UPDATE SKIP 0.10.0",
-          "UPDATE SKIP NONE", "UPDATE SET AUTO OFF", "UPDATE TOKEN STATUS", "UPDATE TOKEN CLEAR"}) {
+          "UPDATE SKIP NONE", "UPDATE BLOCKED CLEAR", "UPDATE SET AUTO OFF", "UPDATE TOKEN STATUS",
+          "UPDATE TOKEN CLEAR"}) {
         const core::Result<UpdateReply> reply = runUpdateLine(context, line);
         ASSERT_FALSE(reply.ok()) << line << " -> " << said(reply);
         EXPECT_EQ(reply.error().code, core::ErrorCode::Unsupported) << line;
@@ -1624,6 +1800,8 @@ TEST(UpdateVerbs, TheHelpNamesEveryLineOfTheGrammarAndIsInTheSessionsHelp)
     for (const char* words :
          {"Update    UPDATE CHECK", "UPDATE STATUS", "UPDATE DOWNLOAD CONFIRM",
           "UPDATE APPLY CONFIRM", "UPDATE SKIP <version> | UPDATE SKIP NONE",
+          "UPDATE BLOCKED CLEAR  offer again a release", "blocked=none",
+          "started as administrator installs no update (reason=elevated)",
           "UPDATE SET AUTO ON|OFF", "UPDATE TOKEN STATUS | UPDATE TOKEN CLEAR",
           "update=available|current|unreachable|unsupported|blocked",
           "kind=installer|archive|development", "KATANA_UPDATE_TOKEN", "katana_check_update",
@@ -1666,7 +1844,7 @@ TEST(UpdateVerbs, ASessionToldItIsKatanaMcpsRefusesEveryUpdateLineNamingTheTool)
     katana::app::Session session(nullptr);
     session.setUpdateSurface(UpdateSurface::Mcp);
     for (const char* line : {"UPDATE CHECK", "UPDATE STATUS", "update download confirm",
-                             "UPDATE APPLY CONFIRM", "UPDATE"}) {
+                             "UPDATE APPLY CONFIRM", "UPDATE BLOCKED CLEAR", "UPDATE"}) {
         Captured captured;
         EXPECT_FALSE(session.run(line)) << line;
         EXPECT_TRUE(contains(captured.err(), "error: Unsupported: UPDATE lines are not run by "
@@ -2517,6 +2695,61 @@ TEST(UpdateVerbs, ApplyRefusesAReleaseThatWasRolledBackHere)
     EXPECT_EQ(reply.error().context, "reason=blocked_before");
     EXPECT_TRUE(contains(reply.error().message, "Katana 0.10.0"));
     EXPECT_TRUE(rig.launcher.runs.empty());
+}
+
+TEST(UpdateVerbs, AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseThatWasPutBack)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    const UpdateContext context = rig.context();
+    ASSERT_TRUE(runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM").ok());
+    // What the helper records when the new version did not start and the old
+    // one was put back (update/state.hpp, `blocked`).
+    core::Result<update::UpdateState> state = update::readState(rig.state);
+    ASSERT_TRUE(state.ok());
+    state->blockedSequences.push_back(kV2Sequence);
+    ASSERT_TRUE(update::writeState(rig.state, *state).ok());
+
+    // Refused, and the refusal names the way back - the line, and where the
+    // window has it.
+    const core::Result<UpdateReply> refused = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_FALSE(refused.ok()) << said(refused);
+    EXPECT_EQ(refused.error().code, core::ErrorCode::InvalidState);
+    EXPECT_EQ(refused.error().context, "reason=blocked_before");
+    EXPECT_TRUE(contains(refused.error().message,
+                         "UPDATE BLOCKED CLEAR (Settings > Updates in the window) offers this "
+                         "one again"))
+        << refused.error().message;
+    EXPECT_TRUE(rig.launcher.runs.empty());
+
+    // A download of it is what CHECK says and nothing staged anew: the
+    // release is not offered, so it is not fetched.
+    rig.feed.requests.clear();
+    const core::Result<UpdateReply> notFetched = runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM");
+    ASSERT_TRUE(notFetched.ok()) << said(notFetched);
+    const std::vector<std::string> record = linesOf(notFetched->text);
+    ASSERT_EQ(record.size(), 2u) << notFetched->text;
+    EXPECT_TRUE(startsWith(record[0], "update=blocked ")) << record[0];
+    EXPECT_EQ(record[1], "staged=none");
+    EXPECT_TRUE(rig.feed.requestsFor(kPayloadUrl).empty());
+
+    const core::Result<UpdateReply> cleared = runUpdateLine(context, "UPDATE BLOCKED CLEAR");
+    ASSERT_TRUE(cleared.ok()) << said(cleared);
+    EXPECT_EQ(cleared->text, "blocked=none");
+
+    // The release that was downloaded before is still there, and is applied:
+    // the line hands back the request, and asks the feed for nothing.
+    rig.feed.requests.clear();
+    const core::Result<UpdateReply> applied = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_TRUE(applied.ok()) << said(applied);
+    ASSERT_TRUE(applied->apply.has_value());
+    EXPECT_EQ(applied->text, "ready=0.10.0 transaction=" + applied->apply->transaction);
+    EXPECT_EQ(applied->apply->root, rig.root);
+    EXPECT_EQ(applied->apply->stageDirectory, rig.stageDirectory());
+    EXPECT_EQ(applied->apply->stateDirectory, rig.state);
+    EXPECT_EQ(rig.launcher.runs.size(), 1u);
+    EXPECT_TRUE(rig.feed.requests.empty());
 }
 
 // ---- a Katana that was started as administrator -------------------------------------------------
