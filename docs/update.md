@@ -120,8 +120,10 @@ carry them.
   writes `install.json`, or if a build tree holds one.
 
 A copy whose `install.json` is there and does not read is none of the three:
-`UPDATE CHECK` answers `update=unsupported reason=install_record`, and nothing
-is downloaded or applied to it.
+`UPDATE CHECK` answers `update=unsupported reason=install_record`, nothing is
+downloaded or applied to it, and `UPDATE STATUS`, which has no word for it,
+says `target=none kind=development` with a `warning` record that the install
+record could not be read, and why.
 
 ### The per-user folder
 
@@ -308,7 +310,7 @@ code was written: OpenSSL 3.6.5 answered "valid" for an all-zero public key
 and an all-zero signature on a one-byte message, because that key is a point
 of small order. So a signature whose S is not below the group order, and a
 public key that is not a canonical point of the prime-order subgroup, are
-refused before OpenSSL is asked.
+refused before OpenSSL is asked for its verdict.
 
 **Placeholders.** Until the owner's key steps the pinned keys are 32 bytes
 that spell `PLACEHOLDER-...` in ASCII and are the encoding of no curve
@@ -528,39 +530,44 @@ and the fault loops break it before each of its file operations
    rolls back at its next logon even if no program of the install can start.
 5. **Commit, by renames only.** In the order data and seeds, libraries,
    programs, the helper's own file, the removals, and last the three records
-   - so the claim "this version is installed" is the last thing written.
-   Each file: `R/p` to `old/p`, then `new/p` to `R/p`. A rename that Windows
-   refuses with error 5, 32 or 33 - which a virus scanner holding a file for
-   a moment causes as much as a program does - is tried again every 250 ms
-   for 30 s. Never `MOVEFILE_DELAY_UNTIL_REBOOT`: a swap that completes at a
-   reboot is a swap nobody can roll back.
-6. **The health check.** Journal `COMMITTED_PENDING_HEALTH`, then start the
-   new version as `R/bin/katana --update-health <tx>` and wait up to 60 s. That
-   run builds its window without showing it, writes `U/healthy-<tx>` on the
-   event loop's first idle turn - which a program that hangs while starting
-   never reaches - and exits. A new version that cannot be started, exits
-   with an error, or ends without its marker is not a working release: it is
-   rolled back (`health_exit`, `health_timeout`) and its sequence is added to
-   `blocked` in `state.json`, so that it is not offered again.
-7. **Healthy.** For an installer-kind install rewrite the version shown in
-   Settings > Apps; journal `HEALTHY`; delete the transaction folder, the
-   staged files and the marker; remove the `RunOnce` value; write
-   `last.json`; start Katana again as a person would. What a lock keeps from
-   being deleted - the helper's own running copy among it - goes on
-   `U/cleanup.list` for the next start.
-
-**Rollback** runs after any failure once the journal exists. It does NOT
-replay the journal backwards: it decides FROM THE DISK. Where `old/p` exists
-it goes back over `R/p`; a file the transaction moved in is moved out; a
-folder it created goes when empty; then `ROLLED_BACK`. So it is the same
-code after a crash at any point, the middle of an earlier rollback
-included. The old version is then started again and `last.json` says
-`rolled_back` with the reason.
+   that say which version is installed. Each file: `R/p` to `old/p`, then
+   `new/p` to `R/p`. A rename that Windows refuses with error 5, 32 or 33 -
+   which a virus scanner holding a file for a moment causes as much as a
+   program does - is tried again every 250 ms for 30 s. Never
+   `MOVEFILE_DELAY_UNTIL_REBOOT`: a swap that completes at a reboot is a
+   swap nobody can roll back.
+6. **Rollback**, after any failure once the journal exists. It does NOT
+   replay the journal backwards: it decides FROM THE DISK. Where `old/p`
+   exists it goes back over `R/p`; a file the transaction moved in is moved
+   out; a folder it created goes when empty; then `ROLLED_BACK`. So it is
+   the same code after a crash at any point, the middle of an earlier
+   rollback included. The old version is then started again and `last.json`
+   says `rolled_back` with the reason.
+7. **Success, once the new version has shown that it starts.** Journal
+   `COMMITTED_PENDING_HEALTH`, then start the new version as `R/bin/katana
+   --update-health <tx>` and wait up to 60 s. That run builds its window
+   without showing it, writes `U/healthy-<tx>` on the event loop's first
+   idle turn - which a program that hangs while starting never reaches - and
+   exits. Healthy is: the marker is there, and the run ended with 0 (or was
+   still running when the wait ended, and was stopped). Anything else - it
+   could not be started, it ended with an error, it never wrote its marker -
+   is not a working release: rollback as in 6 (`health_exit`,
+   `health_timeout`), and its sequence is added to `blocked` in
+   `state.json`, so that it is not offered again. When healthy: for an
+   installer-kind install rewrite the version shown in Settings > Apps;
+   journal `HEALTHY`; delete the transaction folder, the staged files and
+   the marker; remove the `RunOnce` value; write `last.json`; and start
+   Katana again as a person would. What a lock keeps from being deleted -
+   the helper's own running copy among it - goes on `U/cleanup.list` for
+   the next start.
 
 If the ROLLBACK ITSELF fails - a file that stays locked, a failing disk -
 the outcome is `rollback_incomplete`, never "rolled back": nothing is
 started, the `RunOnce` entry stays for the next logon, and `last.json` and
 the dialog name the command to run, `katana_updater --recover <R>`.
+
+The steps are numbered as `include/katana/update/apply.hpp` numbers them,
+which is how the code and the other documents cite them.
 
 ### The journal
 
@@ -661,7 +668,7 @@ ready=0.10.0 transaction=<32 hexadecimal digits>
 another tenth has arrived. Its bytes are what is FETCHED, 2949 here, and
 `download_bytes=339` is what the five changed files weigh in the zip: they
 lie within a megabyte of one another, so one request fetches them with the
-unchanged file between them.)
+unchanged files between them.)
 
 - **`CONFIRM` is a word of the line, not a question asked back.**
   `UPDATE DOWNLOAD` or `UPDATE APPLY` without it is refused, saying what the
@@ -983,7 +990,12 @@ whatever more the manifest's parser allows (4 GiB).
   sees" are estimates.
 - **The live rehearsal has not been run** (T17), nor the spike that would
   have asked the real GitHub about redirects and `Range` (S2): "To verify on
-  first release". The static helper was built on x86-64 only (S1).
+  first release". The static helper was built on x86-64 only (S1), and
+  nothing of the update system has been built for Windows on ARM64.
+- **The per-user installer has not been installed, updated and uninstalled
+  on a clean Windows machine** (S3): its script is held to its rules as
+  text, and its file removal is run on small trees (`docs/release.md`, "The
+  Windows installer"); the run by hand is the owner's acceptance step.
 - **`UPDATE CHECK` does not say that the install folder cannot be written.**
   A copy unpacked where its user may not write is offered a release like
   any other; the helper refuses at the swap (`last=refused:root_not_writable`),
@@ -1005,8 +1017,9 @@ whatever more the manifest's parser allows (4 GiB).
   setting at the same instant can lose one change (`docs/mcp.md`, "Not done
   yet").
 - **The helper is not code-signed** until the repository holds a
-  certificate: `cmake/KatanaSign.cmake` signs it with the other programs
-  when it does. Until then Windows names no publisher for it.
+  certificate: `cmake/KatanaSign.cmake` signs every `katana*.exe` of a
+  package when it does, the helper among them. Until then it is unsigned,
+  like the other programs.
 - **What only a window, or only an installed copy, can show has no test
   that runs it**: the workbench's wiring (`docs/desktop.md`), and the few
   lines of `katana_cli`'s `main()` that start the helper (`docs/mcp.md`).
