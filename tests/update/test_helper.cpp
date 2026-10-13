@@ -770,6 +770,12 @@ class World {
         return value ? toUtf8(*value) : std::string();
     }
     [[nodiscard]] bool runOnceIsSet() const { return readString(hive.runOnceKey(), kRunOnceValue.c_str()).has_value(); }
+    // What Windows does at a logon BEFORE it runs a RunOnce command: the value is taken away. In
+    // this world's own key, like every registry write of a test.
+    void consumeRunOnce() const
+    {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, hive.runOnceKey().c_str(), kRunOnceValue.c_str());
+    }
 
     // Makes the install an installer's: the key the installer writes names this folder, and the
     // Uninstall entry (which only an installer makes) shows version 0.9.0.
@@ -2600,6 +2606,329 @@ TEST(HelperSwap, RecoverThatCannotPutTheTreeBackExitsWithCode12AndSaysWhy)
     const SpawnResult finished = world->runHelper(world->withTestOptions({"--recover", toUtf8(world->root.native())}));
     EXPECT_EQ(finished.exitCode, 0) << describe(finished);
     world->expectV1();
+}
+
+// =====================================================================================================
+// A helper that died before it could say that the new version starts
+// =====================================================================================================
+//
+// The update is in place, the journal says COMMITTED_PENDING_HEALTH, and the helper that would
+// have written HEALTHY - or put the old version back - is dead: power, a shutdown, the process
+// ended. No program's recover() touches such an update; `katana_updater --recover` settles it
+// (include/katana/update/recover.hpp, settleUnproved; the table at the top of
+// src/katana_updater/main.cpp says what it prints, and the cases read the first word of its
+// `detail=` line from that table). What each case expects is the specification's: the tree built
+// from the release (v2) when the new version's marker is there; the tree as it was before the
+// update (v1) when it is not and nothing of the install is running; and nothing at all changed,
+// with the logon entry back in place, while a program of the install runs.
+
+namespace {
+
+// The number of the change to the disk with which a swap of a World's releases writes HEALTHY,
+// counted the way --die-at counts. Found without starting anything: a twin of the world's
+// install and stage is run through update::apply in this process, on a file system that writes
+// every change down. Which changes a swap makes is decided by its own logic and by what the
+// tree holds, not by which file system carries them out, so the number is the real program's
+// too - which killedBeforeHealthy checks, and does not take on trust.
+std::uint64_t healthyAppendOfATwin(const World& like)
+{
+    Scenario twin("helper-twin");
+    twin.v1 = like.v1;
+    twin.v2 = like.v2;
+    writeInstall(twin.root, twin.v1);
+    writeStage(twin.stage, twin.v2);
+    StdFs disk;
+    LogFs log(disk);
+    Rig rig(twin, log, std::string(kTransaction));
+    const ApplyResult result = rig.run();
+    EXPECT_EQ(result.outcome, ApplyOutcome::Committed) << result.reason << ": " << result.detail;
+    return log.find("appendDurable", " HEALTHY ");
+}
+
+// Whether the run a probe made was killed between its COMMITTED_PENDING_HEALTH record and its
+// HEALTHY one. Only one k does that: the record after COMMITTED_PENDING_HEALTH is HEALTHY (the
+// health run in between changes nothing through the helper), so a run killed one change later
+// has HEALTHY in its journal.
+bool isUnsettled(const CrashProbe& probe)
+{
+    if (!probe.crashed) {
+        return false;
+    }
+    const std::string journal = readText(probe.world->root / ".update" / std::string(kTransaction) / "journal");
+    return contains(journal, "COMMITTED_PENDING_HEALTH") && !contains(journal, " HEALTHY ");
+}
+
+// A world in which the real program applied the update, ran the new version for its health
+// check - which wrote its marker and ended well - and was killed before the change that would
+// have recorded the update as healthy. The k for --die-at is the twin's, checked against what
+// the program left; should the two ever disagree it is found by bisection, as crashedMidCommit
+// finds its own, and once in a test process either way.
+std::unique_ptr<World> killedBeforeHealthy(const std::string& label)
+{
+    static std::uint64_t at = 0;
+    const auto unsettledAt = [&](std::uint64_t k) -> std::unique_ptr<World> {
+        CrashProbe probe = probeCrash(label, k);
+        return isUnsettled(probe) ? std::move(probe.world) : nullptr;
+    };
+    if (at == 0) {
+        std::uint64_t twin = 0;
+        {
+            const World sizing(label + "-sizing");
+            twin = healthyAppendOfATwin(sizing);
+        }
+        if (twin != 0) {
+            if (std::unique_ptr<World> world = unsettledAt(twin)) {
+                at = twin;
+                return world;
+            }
+        }
+        // Whether the run killed before change k had got as far as COMMITTED_PENDING_HEALTH: once
+        // yes, yes for every larger k. Not killed at all is past it; so is a run that left no
+        // journal but the new version's install record (the clean-up of a healthy update deletes
+        // the journal while changes are still counted: crashedMidCommit says the same of its own).
+        const auto reachedPending = [&](std::uint64_t k) {
+            const CrashProbe probe = probeCrash(label + "-find", k);
+            if (!probe.crashed) {
+                return true;
+            }
+            const World& killed = *probe.world;
+            const Path journal = killed.root / ".update" / std::string(kTransaction) / "journal";
+            if (contains(readText(journal), "COMMITTED_PENDING_HEALTH")) {
+                return true;
+            }
+            return !isPresent(journal) &&
+                   readText(killed.root / "share" / "katana" / "installed.json") == installedJson(killed.v2);
+        };
+        std::uint64_t low = 1; // before the first change: nothing on disk
+        std::uint64_t high = 32;
+        while (!reachedPending(high)) {
+            low = high;
+            high *= 2;
+            if (high > 4096) {
+                ADD_FAILURE() << "no run got as far as COMMITTED_PENDING_HEALTH within 4096 changes to the disk";
+                return nullptr;
+            }
+        }
+        while (low + 1 < high) {
+            const std::uint64_t middle = low + (high - low) / 2;
+            (reachedPending(middle) ? high : low) = middle;
+        }
+        at = high; // the first change after the pending record: the HEALTHY append
+    }
+    std::unique_ptr<World> world = unsettledAt(at);
+    if (world == nullptr) {
+        ADD_FAILURE() << "the run killed before change " << at
+                      << " did not stop between COMMITTED_PENDING_HEALTH and HEALTHY";
+    }
+    return world;
+}
+
+// Every entry under a world's install folder, its .update included (the tree hash leaves that
+// out), and the per-user folder: what "nothing was changed" compares.
+std::map<std::string, std::string> installAndState(const World& world)
+{
+    const std::string install = toUtf8(world.root.filename().native()) + "/";
+    const std::string state = toUtf8(world.state.filename().native()) + "/";
+    std::map<std::string, std::string> entries;
+    for (const auto& [name, what] : snapshot(world.root.parent_path())) {
+        if (name.rfind(install, 0) == 0 || name.rfind(state, 0) == 0) {
+            entries[name] = what;
+        }
+    }
+    return entries;
+}
+
+// The one line `--recover` keeps of a run, in the install's own log.
+std::vector<std::string> recoveryLog(const World& world)
+{
+    return linesOf(logOf(world.root / ".update" / "recovery.log"));
+}
+
+// What every case here starts from, checked: the new version is in place and said that it
+// starts, the journal is pending, and the dead helper left its RunOnce entry and no last.json.
+void expectUnsettled(World& world)
+{
+    const std::string tx(kTransaction);
+    world.expectV2();
+    ASSERT_TRUE(isPresent(healthMarkerPath(world.state, tx))) << "the health run wrote its marker";
+    const std::vector<std::string> lines = linesOf(world.stubLog());
+    ASSERT_EQ(lines.size(), 1u) << world.stubLog();
+    ASSERT_EQ(lines[0].rfind("health tag=v2 ", 0), 0u) << lines[0];
+    ASSERT_EQ(world.runOnce(), runOnceCommand(world.helperPath(tx), world.root));
+    ASSERT_FALSE(isPresent(world.state / "last.json")) << "a process that was killed wrote nothing";
+    // The helper waited for the health run to end before it went on, so nothing of the install
+    // is running.
+    const core::Result<std::vector<RunningProgram>> running = makeSystemProcessOps()->holdersUnder(world.root);
+    ASSERT_TRUE(running.ok()) << running.error().describe();
+    ASSERT_TRUE(running->empty()) << "a program of the install is still running";
+}
+
+} // namespace
+
+TEST(HelperSwap, AnUpdateWhoseHelperDiedAfterTheNewVersionSaidItStartsIsConfirmedByRecoverWhichOnlyReadsThePerUserFolder)
+{
+    REQUIRE_CAN_SIGN();
+    const std::unique_ptr<World> world = killedBeforeHealthy("unsettled-healthy");
+    ASSERT_TRUE(world != nullptr);
+    ASSERT_NO_FATAL_FAILURE(expectUnsettled(*world));
+    const std::string tx(kTransaction);
+    const std::string root = toUtf8(world->root.native());
+
+    // Every program's recover() leaves such an update exactly as it is: it may be a live helper's,
+    // waiting for that very program. This process plays katana_cli's part.
+    {
+        const std::map<std::string, std::string> before = installAndState(*world);
+        const core::Status recovered = recover(world->root);
+        EXPECT_TRUE(recovered.ok()) << (recovered.ok() ? std::string() : recovered.error().describe());
+        EXPECT_EQ(difference(before, installAndState(*world)), "") << "recover() changed the install or the per-user folder";
+        EXPECT_TRUE(world->runOnceIsSet());
+    }
+
+    // The next logon. Windows takes the entry away and runs its command; the install is an
+    // installer's here, whose entry in Settings > Apps still names the version before.
+    world->registerAsInstaller();
+    world->consumeRunOnce();
+    ASSERT_FALSE(world->runOnceIsSet());
+    const std::map<std::string, std::string> userBefore = snapshot(world->state);
+
+    const SpawnResult ran = world->runHelper(world->withTestOptions({"--recover", root}));
+    ASSERT_EQ(ran.exitCode, 0) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "recover"), "ok");
+    EXPECT_EQ(valueOf(ran.output, "detail").rfind("confirmed:", 0), 0u) << ran.output;
+    world->expectV2();
+    EXPECT_FALSE(isPresent(world->root / ".update" / tx)) << "the transaction folder is gone";
+    EXPECT_EQ(world->displayVersion(), std::wstring(L"0.10.0")) << "Settings > Apps names the version that is installed";
+    EXPECT_EQ(world->displayName(), std::wstring(L"Katana 0.10.0"));
+    EXPECT_FALSE(world->runOnceIsSet()) << "nothing is left for a logon to do";
+    // U was read, for the marker, and that is all: `--recover` is what headless programs start.
+    EXPECT_EQ(difference(userBefore, snapshot(world->state)), "") << "--recover changed the per-user folder";
+    EXPECT_FALSE(isPresent(world->state / "last.json"));
+    EXPECT_EQ(linesOf(world->stubLog()).size(), 1u) << "no program was started to find out\n" << world->stubLog();
+
+    const std::vector<std::string> lines = recoveryLog(*world);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(contains(lines[0], " recover found=" + tx + " result=ok left=")) << lines[0];
+    EXPECT_TRUE(lines[0].size() >= 5 && lines[0].compare(lines[0].size() - 5, 5, "left=") == 0)
+        << "nothing is left, so the line ends there: " << lines[0];
+
+    // And a second run has nothing to do.
+    const SpawnResult again = world->runHelper(world->withTestOptions({"--recover", root}));
+    EXPECT_EQ(again.exitCode, 0) << describe(again);
+    EXPECT_EQ(valueOf(again.output, "recover"), "nothing_to_do");
+    EXPECT_EQ(recoveryLog(*world), lines);
+    world->expectV2();
+}
+
+TEST(HelperSwap, AnUpdateWhoseNewVersionNeverSaidItStartsIsPutBackByRecoverWhenNothingOfTheInstallIsRunning)
+{
+    REQUIRE_CAN_SIGN();
+    const std::unique_ptr<World> world = killedBeforeHealthy("unsettled-rollback");
+    ASSERT_TRUE(world != nullptr);
+    ASSERT_NO_FATAL_FAILURE(expectUnsettled(*world));
+    const std::string tx(kTransaction);
+    // As a helper that died while the new version was still starting leaves it: no marker.
+    fs::remove(healthMarkerPath(world->state, tx));
+    world->registerAsInstaller();
+    world->consumeRunOnce(); // the logon
+    const std::map<std::string, std::string> userBefore = snapshot(world->state);
+
+    const SpawnResult ran = world->runHelper(world->withTestOptions({"--recover", toUtf8(world->root.native())}));
+    ASSERT_EQ(ran.exitCode, 0) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "recover"), "ok");
+    EXPECT_EQ(valueOf(ran.output, "detail").rfind("put back:", 0), 0u) << ran.output;
+    world->expectV1();
+    EXPECT_FALSE(isPresent(world->root / ".update" / tx)) << "the transaction folder is gone";
+    EXPECT_EQ(world->displayVersion(), std::wstring(L"0.9.0")) << "a release that never proved itself is never shown";
+    EXPECT_FALSE(world->runOnceIsSet());
+    // What this run cannot record is not recorded: no last.json, and no state.json - the release
+    // is not blocked, and the next check offers it again.
+    EXPECT_EQ(difference(userBefore, snapshot(world->state)), "") << "--recover changed the per-user folder";
+    EXPECT_FALSE(isPresent(world->state / "last.json"));
+    EXPECT_FALSE(isPresent(world->state / "state.json"));
+    EXPECT_EQ(linesOf(world->stubLog()).size(), 1u) << "the old version is not started either\n" << world->stubLog();
+    const std::vector<std::string> lines = recoveryLog(*world);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(contains(lines[0], " recover found=" + tx + " result=ok left=")) << lines[0];
+}
+
+TEST(HelperSwap, RecoverPutsNothingBackUnderARunningProgramAndPutsTheLogonEntryBackForTheNextTry)
+{
+    REQUIRE_CAN_SIGN();
+    const std::unique_ptr<World> world = killedBeforeHealthy("unsettled-holder");
+    ASSERT_TRUE(world != nullptr);
+    ASSERT_NO_FATAL_FAILURE(expectUnsettled(*world));
+    const std::string tx(kTransaction);
+    const std::string root = toUtf8(world->root.native());
+    const Path journal = world->root / ".update" / tx / "journal";
+    fs::remove(healthMarkerPath(world->state, tx));
+    // The install's own katana_cli.exe - the new version's - is running: somebody is using it.
+    auto holder = std::make_unique<Sleeper>(world->root / "bin" / "katana_cli.exe", 120'000);
+    ASSERT_NE(holder->pid(), 0u);
+    world->consumeRunOnce(); // the logon
+    const std::string journalBefore = readText(journal);
+    const std::map<std::string, std::string> userBefore = snapshot(world->state);
+
+    const SpawnResult ran = world->runHelper(world->withTestOptions({"--recover", root}));
+    ASSERT_EQ(ran.exitCode, 0) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "recover"), "ok");
+    EXPECT_EQ(valueOf(ran.output, "detail").rfind("left:", 0), 0u) << ran.output;
+    // Nothing of the update was changed: the tree, its folder and its journal are as they were.
+    world->expectV2();
+    EXPECT_EQ(readText(journal), journalBefore);
+    EXPECT_EQ(difference(userBefore, snapshot(world->state)), "") << "--recover changed the per-user folder";
+    // And the entry Windows took away is there again, so that the next logon comes back.
+    EXPECT_EQ(world->runOnce(), runOnceCommand(world->helperPath(tx), world->root));
+    const std::vector<std::string> lines = recoveryLog(*world);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(contains(lines[0], " recover found=" + tx + " result=ok left=" + tx)) << lines[0];
+
+    // That logon, with the program closed: now it is put back.
+    holder->terminate();
+    holder.reset();
+    world->consumeRunOnce();
+    const SpawnResult later = world->runHelper(world->withTestOptions({"--recover", root}));
+    ASSERT_EQ(later.exitCode, 0) << describe(later);
+    EXPECT_EQ(valueOf(later.output, "detail").rfind("put back:", 0), 0u) << later.output;
+    world->expectV1();
+    EXPECT_FALSE(world->runOnceIsSet());
+}
+
+TEST(HelperSwap, RecoverThatCannotPutAnUnprovedUpdateBackExitsWithCode12AndTheNextRunFinishesIt)
+{
+    REQUIRE_CAN_SIGN();
+    const std::unique_ptr<World> world = killedBeforeHealthy("unsettled-incomplete");
+    ASSERT_TRUE(world != nullptr);
+    ASSERT_NO_FATAL_FAILURE(expectUnsettled(*world));
+    const std::string tx(kTransaction);
+    const std::string root = toUtf8(world->root.native());
+    fs::remove(healthMarkerPath(world->state, tx));
+    world->consumeRunOnce(); // the logon
+    // A file of the new version held open with no sharing for deletion: it can be read - the tree
+    // is still that release - and it cannot be moved out, so the putting back cannot finish.
+    const std::wstring library = (world->root / "bin" / "libcore-1.dll").native();
+    const HANDLE held = CreateFileW(library.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE) << GetLastError();
+    // The fifth number is how long a rename that Windows refuses is tried again.
+    const SpawnResult ran =
+        world->runHelper(world->withTestOptions({"--recover", root, "--timings", "500,500,50,500,500"}));
+    CloseHandle(held);
+    EXPECT_EQ(ran.exitCode, 12) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "recover"), "failed");
+    EXPECT_TRUE(contains(valueOf(ran.output, "detail"), "katana_updater --recover")) << ran.output;
+    EXPECT_EQ(world->runOnce(), runOnceCommand(world->helperPath(tx), world->root))
+        << "the entry is back, and stays, for the next logon";
+    EXPECT_FALSE(isPresent(world->state / "last.json"));
+    const std::vector<std::string> lines = recoveryLog(*world);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(contains(lines[0], " recover found=" + tx + " result=failed left=" + tx)) << lines[0];
+
+    // Released: the journal says ROLLING_BACK, which every run of recovery finishes.
+    const SpawnResult finished = world->runHelper(world->withTestOptions({"--recover", root}));
+    EXPECT_EQ(finished.exitCode, 0) << describe(finished);
+    EXPECT_EQ(valueOf(finished.output, "recover"), "ok");
+    world->expectV1();
+    EXPECT_FALSE(world->runOnceIsSet());
 }
 
 #endif // _WIN32
