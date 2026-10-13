@@ -13,6 +13,7 @@
 #include <iterator>
 #include <numbers>
 #include <string>
+#include <vector>
 
 #include "katana/gis/reproject.hpp"
 #include "katana/gis/web_access.hpp"
@@ -122,6 +123,66 @@ TEST(OnlineWeb, AStoppedFetchEndsAsCancelledBeforeAnyRequest)
     ASSERT_FALSE(stopped.ok());
     EXPECT_EQ(stopped.error().code, ErrorCode::InvalidState);
     EXPECT_EQ(stopped.error().message, "cancelled");
+}
+
+TEST(OnlineWeb, AnExchangeRefusesWhatItCannotSendBeforeAnyConnectionIsMade)
+{
+    // gis::httpExchange is one GET that follows no redirect (web_access.hpp). What it does on
+    // the wire needs a server and is the update system's end-to-end tests'; what it refuses, it
+    // refuses before libcurl is asked for anything, so these reach no network. The host is
+    // RFC 2606's .invalid, which no resolver answers, should one ever get that far.
+    //
+    // Unlike httpFetch it reads no file: a caller that decides hop by hop where its headers go
+    // has no use for one, and a file:// address in a Location must not be an answer.
+    for (const char* url : {"file:///no/such/file.json", "gopher://example.invalid/x",
+                            "example.invalid/x", ""}) {
+        const auto refused = gis::httpExchange(requestFor(url));
+        ASSERT_FALSE(refused.ok()) << url;
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument) << url;
+    }
+    // A GET only.
+    gis::HttpRequest post = requestFor("https://example.invalid/search");
+    post.postBody = "{}";
+    const auto withBody = gis::httpExchange(post);
+    ASSERT_FALSE(withBody.ok());
+    EXPECT_EQ(withBody.error().code, ErrorCode::InvalidArgument);
+
+    // A stop asked for before the start is "cancelled", with no request made; and neither the
+    // request's headers nor a secret in its address is in the error.
+    std::stop_source source;
+    source.request_stop();
+    gis::HttpRequest request = requestFor("https://example.invalid/asset?token=SECRET-IN-QUERY");
+    request.headers = {"Authorization: Bearer SECRET-IN-HEADER"};
+    const auto stopped = gis::httpExchange(request, source.get_token());
+    ASSERT_FALSE(stopped.ok());
+    EXPECT_EQ(stopped.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(stopped.error().message, "cancelled");
+    const std::string said = stopped.error().describe();
+    EXPECT_EQ(said.find("SECRET-IN-QUERY"), std::string::npos) << said;
+    EXPECT_EQ(said.find("SECRET-IN-HEADER"), std::string::npos) << said;
+}
+
+TEST(OnlineWeb, ARequestCarriesCredentialsWhenAHeaderIsAnAuthorization)
+{
+    // The rule by which an exchange keeps the certificate check on whatever GDAL_HTTP_UNSAFESSL
+    // says (web_access.hpp). RFC 9110: field names are case-insensitive (5.1); Authorization
+    // (11.6.2) and Proxy-Authorization (11.7.2) are the two that carry credentials.
+    using Headers = std::vector<std::string>;
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Authorization: Bearer abc"}));
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Accept: */*", "authorization:Basic abc"}));
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"AUTHORIZATION : x"})) << "blanks about the name";
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Proxy-Authorization: Basic abc"}));
+    EXPECT_TRUE(gis::carriesCredentials(Headers{"Authorization"}))
+        << "malformed, and not let through for it";
+
+    EXPECT_FALSE(gis::carriesCredentials(Headers{}));
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"Accept: application/octet-stream",
+                                                 "Range: bytes=0-99",
+                                                 "X-GitHub-Api-Version: 2022-11-28"}));
+    // The name must BE the field, not hold it or be named in a value.
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"X-Authorization-Hint: none"}));
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"Accept: Authorization"}));
+    EXPECT_FALSE(gis::carriesCredentials(Headers{"WWW-Authenticate: Bearer"}));
 }
 
 TEST(OnlineWeb, AFailureIsExplainedByWhatActuallyStoppedIt)
