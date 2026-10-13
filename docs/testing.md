@@ -33,6 +33,8 @@ about the configuration that ships.
 | the layering rules | `tests/CMakeLists.txt` | `layering` | `tools/check_layering.cmake` |
 | what the programs link and install | `tests/CMakeLists.txt` | `the_programs_link_none_of_the_legacy_customisation_readers`, `packaging_installs_only_present_first_party_files` | the link closure walked at configure time; `tools/check_install_rules.cmake` ("What the programs hold", below) |
 | the documents' references | `tests/CMakeLists.txt` | `docs` | `tools/check_docs.py` ("The docs test", below) |
+| the update system end to end, on a feed of the tests' own | `tests/update/e2e.cmake` | `update_e2e_<what it shows>` | `tests/update/update_e2e.py` driving `tools/update_fake_feed.py`, `katana_update_e2e` and `katana_updater_test` ("The update system's tests", below) |
+| the release tools, and the build's promises about updating | `tests/update/CMakeLists.txt` | `update_tools_<tool>`, `update_keys_<what it shows>`, `katana_updater_imports_only_os_dlls`, `update_test_keys_are_in_no_shipped_program`, `packaging_nsis_<what it shows>` | Python `unittest` files in `tests/update/tool_tests/`; CMake scripts in `tests/update/` |
 
 `ctest -N` gives the current count of each; this document does not, because a
 number here would be stale by the next commit.
@@ -284,6 +286,16 @@ from fixtures (`tests/interop/data/online/`) through
 few that reach real services are named `OnlineLive.*` and skip unless
 `KATANA_ONLINE_TESTS=1` is set (`docs/gis_online.md`, "Tests").
 
+**The loopback rule.** A test that reaches any host other than the loopback
+address runs only with `KATANA_ONLINE_TESTS=1`. A test MAY start its own
+server on `127.0.0.1`, on port 0 - the system picks a free one - with proxies
+disabled, and such a test counts as local: it runs in every suite run (the
+owner's ruling of 2026-10-08, decision D4 of `docs/update.md`). The update
+system's end-to-end tests are the ones that do ("The update system's tests",
+below). What keeps them on the machine is not good behaviour but
+construction: the server binds `127.0.0.1` and has no option to bind anything
+else, and the client the tests fetch with can connect to no other address.
+
 ## What makes a test evidence
 
 **Derived expectations** (`docs/architecture.md`, "Working rules"). The
@@ -331,6 +343,186 @@ The other standing rules:
   belongs in a unit test that fails deterministically without the fix
   (`qt_import_12da_then_toggle_headless` and the listener tests in
   `tests/cad/test_cad.cpp`).
+
+## The update system's tests
+
+An update replaces the programs of an install, so a mistake in it is the one
+kind that a later release cannot repair. Its tests are built so that the
+real code runs against things it cannot tell from the real ones - a feed, a
+signed release, a file system that fails - and none of them touches a real
+server, a real key, an installed copy or the machine's registry
+(`docs/update.md` is the system; `tests/update/CMakeLists.txt` registers
+what follows).
+
+**Where the expectations come from.** Never from the program: the Ed25519
+answers are RFC 8032's published vectors and an independent derivation of
+them (`tests/update/tool_tests/rfc8032_oracle.py`); what a release's zip
+holds is asked of Python's `zipfile` and `hashlib`; a signature is made by
+the `openssl` command line; the tree an update must leave is built from the
+specification of the two releases, in a folder of its own, and compared as a
+whole.
+
+**The engine, in process** (`katana_update_tests`, `tests/update/test_*.cpp`).
+Everything the engine does to the machine goes through an interface -
+`FsOps`, `ProcessOps`, `Launcher`, `RegistryOps`, `CredentialStore`, `Fetch` -
+and the tests hand it fakes: a transport that records what each hop was
+sent, a launcher that counts what it was asked to start, a registry that is
+a map. The trust root is a parameter too, so these tests verify releases
+signed with the published test key, which no shipped program trusts
+(`tests/update/test_key.hpp`).
+
+**The fault loops** (`tests/update/test_fault_loops.cpp`). `FaultFs`
+(`include/katana/update/fault_fs.hpp`) wraps a file system, counts its
+changing operations and can make the k-th one not happen, as if the process
+had died just before it. Three loops rest on it, each over a 40-file release
+and again over the fixture releases the producer made:
+
+1. the swap is crashed before EVERY one of its file operations, recovery
+   runs on what the crash left, and the whole tree must hash to the old
+   version's or the new one's, never a mix - the old one unless the crash
+   came after the journal said the swap was complete
+   (`CrashingBeforeEveryOperationOfAFortyFileUpdateLeavesTheOldTreeOrTheNewNeverAMix`);
+2. the crash INSIDE the recovery: from six interrupted states - before the
+   commit, at its first rename, half way, after its last, and inside the
+   swap's own rollback - the recovery is crashed before every one of its
+   operations, and the recovery after that must still end at the old tree
+   (`CrashingInsideRecoveryAtEveryOperationStillEndsAtTheOldTree`);
+3. an error 32, a locked file, at every rename of the commit: the update
+   must end rolled back, with the tree exactly the old one
+   (`AnErrorThirtyTwoAtEveryRenameOfAFortyFileUpdateEndsRolledBackToExactlyTheOldTree`).
+
+A loop that crashed nowhere would pass, so each shows that it reached what
+it claims: a crash at every k, at the operation numbered k, and crashes
+that left the journal in each state a swap passes through. The loops are
+deterministic: the fault is the k-th operation, not a moment in time.
+
+**The fake feed** (`tools/update_fake_feed.py`). A release host for the
+tests, of the standard library alone: it serves one folder - a manifest, its
+signature, the update zip - on `127.0.0.1`, port 0, and on a second port
+that stands for the storage host a release redirects to. It answers `Range`
+as a release host does (206 with `Content-Range`, 501 for several ranges in
+one request) and misbehaves on request: a status (`--status 429:GLOB`), a
+sign-in page in the place of a file (`--html`), a redirect to the second
+port with a signed-looking query (`--redirect`), `Range` ignored
+(`--ignore-range`), a connection that drops (`--truncate`), and GitHub's
+answers for a private repository, token and all (`--github`, `--token`).
+Every request on either port is a record in its log - the method, the path,
+the headers as they arrived, what was served - which is how a test proves
+what went over the wire: which bytes of the zip were asked for, and that
+the second hop carried no `Authorization`. `update_tools_fake_feed`
+(`tests/update/tool_tests/test_fake_feed.py`) asks it with Python's own
+client.
+
+**The loopback, and nothing else.** The fake feed binds the loopback
+address and has no option to bind another; `katana_update_e2e`, the client
+the end-to-end tests fetch with, connects to `127.0.0.1` and a port and to
+nothing else, looks no name up, and refuses a feed address that is not one
+(`update_e2e_program_refuses_an_https_feed` and its neighbours). The tests'
+environment unsets every proxy variable and sets `NO_PROXY=127.0.0.1`. So
+these tests run without `KATANA_ONLINE_TESTS` ("The loopback rule", above).
+
+**Three programs the tests build and nothing ships**
+(`tools/check_install_rules.cmake` refuses the first two by name):
+
+- `katana_update_e2e` (`tests/update/e2e_main.cpp`): the engine from a
+  command line - check, plan, stage, preflight, launch, recover - with the
+  test key as its trust;
+- `katana_updater_test`: the helper's OWN `main.cpp`, compiled with the test
+  key in the place of the pinned ones and four options that exist only
+  there - `--die-at N` (a `FaultFs`: the N-th change is not made and the
+  process ends), `--registry-base K` (its registry values re-rooted under a
+  key of the test's), `--timings` (so that a test does not wait a minute)
+  and `--stand-in P`. Without a registry base it uses a registry that has
+  nothing, so a test that forgets the option leaves no `RunOnce` entry on
+  the machine;
+- `katana_updater_stub` (`tests/update/updater_stub.cpp`): a real program
+  that stands in for Katana when the helper starts the new version. A test
+  never starts a file that is not a program: Windows answers that with a
+  message box somebody has to click.
+
+**The end-to-end tests** (`tests/update/update_e2e.py`, one case a ctest).
+Nothing in them is a fake of the code under test: the real producer makes
+and signs two releases, the fake feed serves them, `katana_update_e2e` is
+the engine and `katana_updater_test` the helper of every install. Fifteen
+cases: the update from the first release to the second (the tree is exactly
+the second's, and the feed served only the bytes that changed); a member
+that is not the signed file; a file held open, which rolls back; the helper
+killed before every change it makes, then recovery (in four shards, to
+spread it over the cores); a downgrade, a replayed release, a manifest with
+one bit changed, a signature of another manifest, another key, another
+target; a program of the install still running; a new version that exits
+with 1, which is rolled back and not offered again; the token, which goes to
+the API and to no address a redirect names; a feed that cannot be read; a
+download that fails and then succeeds. Every folder a case writes is
+temporary and removed at its end, and the install's has a blank and a letter
+outside ASCII in its name, as a folder under a person's profile has. Five of
+the cases start no program of the install and
+so run on Linux and macOS too; the others are Windows only, where the swap
+is written. `update_e2e_every_case_of_the_driver_is_registered` fails when
+the driver has a case that nothing registered. They need Python 3.10 and
+`openssl` 3; without them they are not registered - not registered as
+skipped, since a skipped test passes as quietly as one that ran.
+
+**The build's promises**, each proved on a fixture as well, since a check
+that cannot see a violation passes as quietly as one that finds none:
+
+- the pinned keys: `update_keys_*` run `cmake/KatanaUpdateKeys.cmake` as a
+  script over keys that are not the tree's - placeholders are let through
+  loudly, refused when `KATANA_REQUIRE_UPDATE_KEYS` is ON, and a published
+  test key is refused in either slot;
+- the helper's imports: `katana_updater_imports_only_os_dlls` reads the
+  import table of the helper (Windows), and
+  `updater_import_check_names_the_gcc_runtime` runs the same check on the
+  listing of a program that is not static, which it must name;
+- no test key in what ships: `update_test_keys_are_in_no_shipped_program`
+  looks for the test keys in the bytes of the four programs, and the two
+  test executables that DO link them are its controls;
+- the release tools: `update_tools_make_manifest`, `update_tools_keytool`,
+  `update_tools_verify_release`, `update_tools_release_sign` and
+  `update_tools_fixtures`, Python `unittest` files judged by `zipfile`,
+  `hashlib`, the RFC's vectors and `openssl`;
+- the installer: `packaging_nsis_template_is_per_user` holds the installer
+  script's text to its rules, and each `packaging_nsis_check_catches_*`
+  breaks one rule in that text (`docs/release.md`, "The Windows
+  installer").
+
+**The surfaces.** The verbs run for real over a fake transport, a scratch
+install and the signed fixtures (`tests/app/test_update_verbs.cpp`, suite
+`UpdateVerbs`); `katana_cli` and the window are started from a build tree,
+which is a development copy and asks no server
+(`src/katana_app/update_cli.cmake`, the `cli.update_*` cases;
+`tests/update/headless/update_window.cmake`); the dialog, its sentences and
+the window's decisions are widget tests
+(`tests/qt_widgets/test_update_dialog.cpp`). Each run of a program is given
+an update state folder of the tests' own (`KATANA_UPDATE_STATE_DIR`), and a
+token of the tests' own or none, so that nothing of whoever runs the suite
+is read or written.
+
+**Where nothing is installed.** On Linux and macOS the swap is not written,
+and what is held there is the refusal: `tests/update/test_platform.cpp`, and
+`katana_updater_refuses_for_the_platform_and_writes_nothing`, which runs the
+helper with its swap line and with `--recover` and lists its folder
+afterwards.
+
+What no test covers:
+
+- **The transport the programs ship with, against a server.** Its rules -
+  where the token goes, which redirects are followed, what an answer to a
+  range must be - are tested to the letter, over a recorded wire
+  (`tests/update/test_feed.cpp`), and end to end through
+  `katana_update_e2e`. But that program moves its requests over plain
+  sockets of its own, because it must not be able to leave the machine. The
+  half the shipped programs use instead - `app::makeUpdateFetch`
+  (`src/katana_app/update_transport.cpp`) over libcurl, `gis::httpExchange`
+  - is run against a server only by the two `OnlineLive` cases of
+  `tests/interop/test_online_fetch.cpp`, which need `KATANA_ONLINE_TESTS=1`
+  and a real host; no test in the ordinary run puts it in front of the fake
+  feed. A release is the first place it meets a `Range` answer.
+- **A shipped program updating an installed copy.** The shipped programs
+  cannot be given a test key, which is the point of them; so the few lines
+  that only they have - the window's close-and-apply, `katana_cli` starting
+  the helper - are exercised by a release and by no test.
+- **GitHub itself** (`docs/update.md`, "To verify on first release").
 
 ## Benchmarks
 
