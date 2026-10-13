@@ -28,13 +28,14 @@
 //   katana_updater --version
 //       one line: the version and the protocol (apply.hpp, kApplierProtocol).
 //   katana_updater --help
-//       the usage text on standard output, exit 0.
+//       the usage text and the exit codes below on standard output, exit 0.
 //
 // Anything else - an unknown or repeated option, a missing value or option, modes mixed together -
-// is a usage error: the text on standard error and exit 20.
+// is a usage error: the usage text on standard error and exit 20.
 //
 // EXIT CODES. They are the program's whole interface to a script and to a person at a prompt
-// (the window reads last.json, not these):
+// (the window reads last.json, not these). --help prints the same table (kHelp below: a code
+// added here is added there, and tests/update/test_helper.cpp reads it from the program):
 //
 //    0  ok: the update is installed and healthy; or --recover put everything right, or had
 //       nothing to do; or --selftest and --version succeeded
@@ -61,23 +62,29 @@
 // without a window, so nobody sees it unless it is run from a prompt or by a test):
 //   the swap:    outcome= reason= exit= detail= and a holder= line for each blocking process
 //   --recover:   recover=ok|nothing_to_do|failed, exit=, detail=
-//   --selftest:  selftest=ok|failed, version=, applier=, ed25519=, openssl_environment=, keys=
+//   --selftest:  selftest=ok|failed, version=, applier=, ed25519=, openssl_environment=,
+//                openssl_removed= (the names of the variables below that were set when the
+//                program started, or none), keys=, and a problem= line for each thing wrong
 //
-// THE ENVIRONMENT. main() reads OPENSSL_CONF, OPENSSL_MODULES and OPENSSL_ENGINES, then calls
-// hardenOpenSslEnvironment(), which removes them and starts libcrypto without a configuration
-// file: nothing in the environment can change what "verified" means (signature.hpp). The
-// values are kept, because the program the helper starts afterwards - the new version for its
-// health check, the old or new one at the end - is the person's program and must see the
-// person's environment, so each launch lends the values back for its duration
+// THE ENVIRONMENT. main() calls hardenOpenSslEnvironment() FIRST - before an argument is read,
+// before anything can use libcrypto. It removes OPENSSL_CONF, OPENSSL_MODULES and
+// OPENSSL_ENGINES from this process and starts libcrypto without a configuration file: nothing
+// in the environment can change what "verified" means (signature.hpp). The one statement that
+// stands before the call reads those three values and touches nothing else, as signature.hpp
+// says a helper must that means to hand them on: the program the helper starts afterwards - the
+// new version for its health check, the old or new one at the end - is the person's program and
+// must see the person's environment, so each launch lends the values back for its duration
 // (HandOnLauncher). --selftest runs after the hardening and says whether the variables are
 // really gone, so it fails on a binary whose hardening is missing.
-// The helper also sets the process error mode (SEM_FAILCRITICALERRORS and its companions), which
-// the programs it starts inherit: no "entry point not found", "not a valid Win32 application" or
-// crash box can open and wait for a click on a desktop nobody is watching - measured: starting a
-// file that is not a program with the default mode blocked the helper behind such a box until it
-// was killed. A new version that cannot load then exits at once with a loader error and is rolled
-// back, instead of waiting out the 60 s limit. The person's Katana, started at the end, gets back
-// only SEM_FAILCRITICALERRORS (HandOnLauncher), the rest reset, so a crash of it reports as usual.
+// The helper also turns the system's error boxes off for ITSELF (SetErrorMode: no "there is no
+// disk in the drive", no crash box): it runs with no window, on a desktop nobody may be
+// watching, and a box would hold the swap until somebody clicked it. The programs it starts do
+// not inherit that. The launcher (src/katana_update/spawn_win.cpp) starts each with the default
+// error mode, so the person's Katana reports a crash the way it always does, and it is the
+// launcher too that makes a file Windows cannot run an error instead of a message box. A new
+// version that starts and cannot LOAD (a missing entry point) therefore shows the loader's own
+// box, and is rolled back when somebody closes it or when the health wait ends, whichever comes
+// first (apply.hpp, step 7).
 //
 // WHICH PER-USER STATE IT WRITES.
 //   the swap:    --state U is given, so last.json, state.json (`blocked`), the health marker's
@@ -93,16 +100,26 @@
 //   - katana_updater (installed) passes productionTrust(), the keys pinned at build time.
 //   - katana_updater_test (tests/update/CMakeLists.txt, never installed) is these same sources
 //     compiled with KATANA_UPDATER_TEST_BUILD: a test key passed in place of the pinned ones,
-//     and three more options that exist only there, so that the end-to-end tests can drive the
+//     and four more options that exist only there, so that the end-to-end tests can drive the
 //     real program:
 //       --die-at N            a FaultFs: the N-th change to the disk is not made and the
 //                             process ends there (exit 99), as if it had been killed
-//       --registry-base K     every registry key the helper uses is re-rooted under HKCU\K, so a
-//                             test never touches the machine's RunOnce or Uninstall entries
+//       --registry-base K     every registry key the helper uses is re-rooted under HKCU\K
 //       --timings a,b,c,d,e   milliseconds: wait for the window, wait for the programs under R,
 //                             poll interval, wait for the health check, and how long a rename
 //                             that Windows refuses is retried - so a test need not wait a minute
-//     A shipped helper rejects all three as unknown options (a test checks that).
+//       --stand-in P          every program this run would start (the new version for its health
+//                             check, the program started at the end) is P instead, with the same
+//                             arguments and working folder: a release whose katana is not a
+//                             program - the fixtures' is a text file - can then be applied to its
+//                             end, with a real program playing its part
+//     A shipped helper rejects all four as unknown options (a test checks that).
+//     THE TEST BUILD NEVER TOUCHES THE MACHINE'S OWN REGISTRY KEYS. Its registry is the one
+//     --registry-base names; without the option, the one the environment variable
+//     KATANA_UPDATER_TEST_REGISTRY_BASE names (for a run whose command line the engine writes:
+//     launchApply and recover() pass no test option); and without either, a registry that has
+//     nothing - no installer folder, and every write succeeds doing nothing. So a test that
+//     forgets the option leaves no RunOnce entry on the machine it ran on.
 //   So no test key exists in a shipped helper, and nothing in the environment moves the trust
 //   root. tests/update/check_no_test_keys.cmake looks at the bytes.
 //   The self-test's known-answer signature is RFC 8032's TEST 3, a published signature of a
@@ -210,6 +227,34 @@ constexpr std::string_view kUsage =
     "       katana_updater --recover R\n"
     "       katana_updater --selftest | --version | --help\n";
 
+// What --help adds to the usage: what each form is for, and the exit codes (the table at the top
+// of this file, in a person's words).
+constexpr std::string_view kHelp =
+    "\n"
+    "The first form is how Katana starts this program to install a downloaded update: it\n"
+    "replaces the files of the install folder R with those staged in S once the process P has\n"
+    "exited, and starts <path> again. It is not meant to be typed.\n"
+    "  --recover R   put back an update of the install folder R that was interrupted\n"
+    "  --selftest    check that this program starts and can verify a signature; print its version\n"
+    "  --version     print the version and the update protocol\n"
+    "  --help        print this text\n"
+    "\n"
+    "exit codes:\n"
+    "   0  done: the update is installed, or --recover had nothing to put back or put it back\n"
+    "  10  blocked: a program of the install is still running; nothing was changed\n"
+    "  11  rolled back: the update failed and the previous version is back\n"
+    "  12  rollback incomplete: the install may be half updated; run katana_updater --recover R\n"
+    "  13  refused: nothing was changed (the reason= line says why)\n"
+    "  20  the command line is wrong\n"
+    "  21  the staged release is not trusted by this program, or --selftest failed\n"
+    "  30  internal error\n"
+#ifdef KATANA_UPDATER_TEST_BUILD
+    "\n"
+    "This is the test build: it trusts the test key, never the release keys, and also takes\n"
+    "--die-at N, --registry-base K, --timings a,b,c,d,e and --stand-in P (exit 99: --die-at).\n"
+#endif
+    ;
+
 // `text` on one line: a control character becomes %XX, so that a value read from a file or a
 // process cannot make one record look like two.
 std::string oneLine(std::string_view text)
@@ -255,13 +300,14 @@ using NativeText = std::wstring;
 using NativeText = std::string;
 #endif
 
-struct UserVariable {
-    NativeText name;
-    NativeText value;
-};
-
 constexpr std::array<std::string_view, 3> kOpenSslVariables = {"OPENSSL_CONF", "OPENSSL_MODULES",
                                                                "OPENSSL_ENGINES"};
+
+// One of the three, as the person had it set when the helper started.
+struct UserVariable {
+    std::string_view name; // an element of kOpenSslVariables
+    NativeText value;
+};
 
 NativeText nativeFromAscii(std::string_view text)
 {
@@ -312,9 +358,8 @@ std::vector<UserVariable> captureOpenSslVariables()
 {
     std::vector<UserVariable> kept;
     for (const std::string_view name : kOpenSslVariables) {
-        const NativeText native = nativeFromAscii(name);
-        if (const std::optional<NativeText> value = readVariable(native)) {
-            kept.push_back({native, *value});
+        if (const std::optional<NativeText> value = readVariable(nativeFromAscii(name))) {
+            kept.push_back({name, *value});
         }
     }
     return kept;
@@ -325,26 +370,12 @@ bool openSslVariableIsSet(std::string_view name)
     return readVariable(nativeFromAscii(name)).has_value();
 }
 
-
-#ifdef _WIN32
-// SetErrorMode for the length of a scope.
-class ErrorModeScope {
-  public:
-    explicit ErrorModeScope(UINT mode) : previous_(SetErrorMode(mode)) {}
-    ErrorModeScope(const ErrorModeScope&) = delete;
-    ErrorModeScope& operator=(const ErrorModeScope&) = delete;
-    ~ErrorModeScope() { SetErrorMode(previous_); }
-
-  private:
-    UINT previous_;
-};
-#endif
-
 // The Launcher the swap uses to start the person's Katana (the health check, the relaunch):
 // the system one, with the person's OPENSSL_* values lent back to the process for the length of
-// the call - the child inherits them - and, for the detached relaunch, the error mode with only
-// SEM_FAILCRITICALERRORS (see the top). The helper does one thing at a time, so there is no other
-// thread to see the variables while they are back.
+// the call, because the child inherits the environment of the moment it is started. The helper
+// does one thing at a time and makes no call into libcrypto while a child is being started or
+// waited for (every signature was checked before the first file moved: apply.hpp, step 1), so
+// nothing of this process reads the variables while they are back.
 class HandOnLauncher final : public upd::Launcher {
   public:
     HandOnLauncher(std::unique_ptr<upd::Launcher> inner, std::vector<UserVariable> variables)
@@ -361,9 +392,6 @@ class HandOnLauncher final : public upd::Launcher {
     core::Status startDetached(const upd::SpawnRequest& request) override
     {
         const Lent lent(variables_);
-#ifdef _WIN32
-        const ErrorModeScope mode(SEM_FAILCRITICALERRORS);
-#endif
         return inner_->startDetached(request);
     }
 
@@ -373,7 +401,7 @@ class HandOnLauncher final : public upd::Launcher {
         explicit Lent(const std::vector<UserVariable>& variables) : variables_(variables)
         {
             for (const UserVariable& variable : variables_) {
-                writeVariable(variable.name, variable.value);
+                writeVariable(nativeFromAscii(variable.name), variable.value);
             }
         }
         Lent(const Lent&) = delete;
@@ -381,7 +409,7 @@ class HandOnLauncher final : public upd::Launcher {
         ~Lent()
         {
             for (const UserVariable& variable : variables_) {
-                writeVariable(variable.name, std::nullopt);
+                writeVariable(nativeFromAscii(variable.name), std::nullopt);
             }
         }
 
@@ -392,6 +420,58 @@ class HandOnLauncher final : public upd::Launcher {
     std::unique_ptr<upd::Launcher> inner_;
     std::vector<UserVariable> variables_;
 };
+
+#ifdef KATANA_UPDATER_TEST_BUILD
+// --stand-in (see the top): a Launcher that starts one given program whatever it is asked to
+// start, with the arguments and the working folder it was asked for.
+class StandInLauncher final : public upd::Launcher {
+  public:
+    StandInLauncher(std::unique_ptr<upd::Launcher> inner, Path program)
+        : inner_(std::move(inner)), program_(std::move(program))
+    {
+    }
+
+    core::Result<upd::SpawnResult> run(const upd::SpawnRequest& request) override
+    {
+        return inner_->run(inItsPlace(request));
+    }
+
+    core::Status startDetached(const upd::SpawnRequest& request) override
+    {
+        return inner_->startDetached(inItsPlace(request));
+    }
+
+  private:
+    [[nodiscard]] upd::SpawnRequest inItsPlace(const upd::SpawnRequest& request) const
+    {
+        upd::SpawnRequest other = request;
+        other.executable = program_;
+        return other;
+    }
+
+    std::unique_ptr<upd::Launcher> inner_;
+    Path program_;
+};
+
+// The registry of a test run that named none (see the top): it has no installer folder, and a
+// write succeeds doing nothing, so nothing of the machine's is read or changed.
+class NoRegistry final : public upd::RegistryOps {
+  public:
+    [[nodiscard]] core::Result<std::optional<Path>> installerLocation() const override
+    {
+        return std::optional<Path>{};
+    }
+    [[nodiscard]] core::Status setRunOnce(std::string_view, std::string_view) override
+    {
+        return {};
+    }
+    [[nodiscard]] core::Status clearRunOnce(std::string_view) override { return {}; }
+    [[nodiscard]] core::Status setInstalledVersion(std::string_view, std::string_view) override
+    {
+        return {};
+    }
+};
+#endif
 
 // ---- where this program is ----------------------------------------------------------------------
 
@@ -435,9 +515,10 @@ enum class Mode { Version, SelfTest, Help, Recover, Apply };
 // Only the test build fills these in (see the top); a shipped helper never sees them.
 struct TestOptions {
     std::uint64_t dieAt = 0;     // 0: never
-    std::string registryBase;    // empty: the machine's keys
+    std::string registryBase;    // empty: a registry that has nothing (never the machine's keys)
     std::optional<upd::ApplyTimings> timings;
     std::optional<upd::RetryPolicy> retry;
+    Path standIn;                // empty: every program is started as asked
 };
 
 struct Command {
@@ -469,17 +550,38 @@ bool parseCount(std::string_view text, std::uint64_t& value)
     return true;
 }
 
-// Takes --die-at, --registry-base and --timings out of `arguments`, wherever they stand.
+// The environment's stand-in for --registry-base (see the top). Read in the test build only.
+constexpr const char* kRegistryBaseVariable = "KATANA_UPDATER_TEST_REGISTRY_BASE";
+
+// A registry base must name a folder of keys of its own under HKCU: text, not empty, with no
+// leading or trailing backslash - what makeRegistryOpsUnder accepts (registry_win.cpp).
+core::Status checkRegistryBase(const std::string& base, std::string_view from)
+{
+#ifdef _WIN32
+    if (upd::makeRegistryOpsUnder(base) == nullptr) {
+        return usageError(std::string(from) + " is an HKCU subkey with no leading or trailing "
+                                              "backslash",
+                          base);
+    }
+    return {};
+#else
+    return usageError(std::string(from) + " exists on Windows only", base);
+#endif
+}
+
+// Takes --die-at, --registry-base, --timings and --stand-in out of `arguments`, wherever they
+// stand.
 core::Status extractTestOptions(std::vector<std::string>& arguments, TestOptions& options)
 {
     std::vector<std::string> rest;
     bool sawDieAt = false;
     bool sawBase = false;
     bool sawTimings = false;
+    bool sawStandIn = false;
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         const std::string& argument = arguments[i];
-        const bool isTestOption =
-            argument == "--die-at" || argument == "--registry-base" || argument == "--timings";
+        const bool isTestOption = argument == "--die-at" || argument == "--registry-base" ||
+                                  argument == "--timings" || argument == "--stand-in";
         if (!isTestOption) {
             rest.push_back(argument);
             continue;
@@ -502,16 +604,19 @@ core::Status extractTestOptions(std::vector<std::string>& arguments, TestOptions
                 return usageError("option given twice", argument);
             }
             sawBase = true;
-#ifdef _WIN32
-            if (value.empty() || value.front() == '\\' || value.back() == '\\') {
-                return usageError("--registry-base is an HKCU subkey with no leading or trailing "
-                                  "backslash",
-                                  value);
+            if (const core::Status usable = checkRegistryBase(value, argument); !usable.ok()) {
+                return usable;
             }
             options.registryBase = value;
-#else
-            return usageError("--registry-base exists on Windows only", value);
-#endif
+        } else if (argument == "--stand-in") {
+            if (sawStandIn) {
+                return usageError("option given twice", argument);
+            }
+            sawStandIn = true;
+            options.standIn = core::pathFromUtf8(value);
+            if (!options.standIn.is_absolute()) {
+                return usageError("--stand-in is the absolute path of a program", value);
+            }
         } else {
             if (sawTimings) {
                 return usageError("option given twice", argument);
@@ -546,6 +651,20 @@ core::Status extractTestOptions(std::vector<std::string>& arguments, TestOptions
             retry.total = ms(static_cast<std::int64_t>(milliseconds[4]));
             retry.interval = std::min(retry.interval, std::max(retry.total, ms(1)));
             options.retry = retry;
+        }
+    }
+    if (!sawBase) {
+        // A run whose command line the engine wrote (launchApply, recover()) carries no test
+        // option; the test that started the engine names the registry in the environment.
+        const std::string named = core::environmentVariable(kRegistryBaseVariable);
+        if (!named.empty()) {
+#ifdef _WIN32
+            if (const core::Status usable = checkRegistryBase(named, kRegistryBaseVariable);
+                !usable.ok()) {
+                return usable;
+            }
+            options.registryBase = named;
+#endif
         }
     }
     arguments = std::move(rest);
@@ -681,7 +800,11 @@ std::optional<std::vector<std::uint8_t>> bytesFromHex(std::string_view hex)
     return bytes;
 }
 
-int runSelfTest()
+// `removed` is what main() read before the hardening: the variables that were set when the
+// program started. Their names are printed (never their values), so that whoever runs the
+// self-test under a hostile environment can see that the variables reached this process and
+// were taken away, and not merely that none is set now.
+int runSelfTest(const std::vector<UserVariable>& removed)
 {
     std::vector<std::string> problems;
     const auto problem = [&problems](std::string text) { problems.push_back(std::move(text)); };
@@ -693,6 +816,11 @@ int runSelfTest()
             environmentCleared = false;
             problem(std::string(name) + " is still set: the environment was not hardened");
         }
+    }
+    std::string removedNames;
+    for (const UserVariable& variable : removed) {
+        removedNames += removedNames.empty() ? std::string(variable.name)
+                                             : "," + std::string(variable.name);
     }
 
     // The signature code, on a published vector: a good signature verifies, and the same
@@ -751,6 +879,7 @@ int runSelfTest()
               << "applier=" << upd::kApplierProtocol << '\n'
               << "ed25519=" << (signatureOk ? "ok" : "failed") << '\n'
               << "openssl_environment=" << (environmentCleared ? "cleared" : "set") << '\n'
+              << "openssl_removed=" << (removedNames.empty() ? "none" : removedNames) << '\n'
               << "keys=" << keys << '\n';
     for (const std::string& text : problems) {
         std::cout << "problem=" << oneLine(text) << '\n';
@@ -769,6 +898,7 @@ class Rig {
     {
         system_ = upd::makeSystemFsOps(test.retry.value_or(upd::RetryPolicy{}));
         fs_ = system_.get();
+        std::unique_ptr<upd::Launcher> launcher = upd::makeSystemLauncher();
 #ifdef KATANA_UPDATER_TEST_BUILD
         if (test.dieAt != 0) {
             faulty_.emplace(*system_);
@@ -778,17 +908,24 @@ class Rig {
         if (test.timings) {
             timings_ = *test.timings;
         }
+        if (!test.standIn.empty()) {
+            launcher = std::make_unique<StandInLauncher>(std::move(launcher), test.standIn);
+        }
 #ifdef _WIN32
         if (!test.registryBase.empty()) {
             registry_ = upd::makeRegistryOpsUnder(test.registryBase);
         }
 #endif
-#endif
+        // Never the machine's own keys in a test run: no base, or one that names nothing (the
+        // command line refused that already), is a registry that has nothing.
         if (!registry_) {
-            registry_ = upd::makeSystemRegistryOps();
+            registry_ = std::make_unique<NoRegistry>();
         }
+#else
+        registry_ = upd::makeSystemRegistryOps();
+#endif
         processes_ = upd::makeSystemProcessOps();
-        launcher_ = std::make_unique<HandOnLauncher>(upd::makeSystemLauncher(),
+        launcher_ = std::make_unique<HandOnLauncher>(std::move(launcher),
                                                      std::move(userVariables));
     }
 
@@ -904,22 +1041,22 @@ int runRecover(const Path& root, Rig& rig)
 
 int run(int argc, char** argv)
 {
-    // 1. The person's OPENSSL_* values, read before they are taken away.
+    // FIRST: nothing in the environment moves the trust root (see the top). The values are
+    // read on the way, because the call removes them for good and the person's own Katana,
+    // started later, is owed them (signature.hpp says to read them before the call).
     std::vector<UserVariable> userVariables = captureOpenSslVariables();
-
-    // 2. FIRST, before anything uses libcrypto: nothing in the environment moves the trust root.
     if (const core::Status hardened = upd::hardenOpenSslEnvironment(); !hardened.ok()) {
         std::cerr << "katana_updater: " << hardened.error().describe() << '\n';
         return kExitInternal;
     }
 
 #ifdef _WIN32
-    // No "entry point not found" or crash box, here or in the health-check start that inherits
-    // this: a new version that cannot load must fail at once, not wait behind a dialog.
+    // No box of the system's for THIS process to wait behind (see the top). The programs it
+    // starts get the default mode from the launcher.
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 #endif
 
-    // 3. The command line, as UTF-8 and never from argv.
+    // The command line, as UTF-8 and never from argv.
     std::vector<std::string> arguments = upd::utf8Arguments(argc, argv);
     const std::string argv0 = arguments.empty() ? std::string() : arguments.front();
     if (!arguments.empty()) {
@@ -938,10 +1075,10 @@ int run(int argc, char** argv)
                   << " applier=" << upd::kApplierProtocol << std::endl;
         return kExitOk;
     case Mode::Help:
-        std::cout << kUsage << std::flush;
+        std::cout << kUsage << kHelp << std::flush;
         return kExitOk;
     case Mode::SelfTest:
-        return runSelfTest();
+        return runSelfTest(userVariables);
     case Mode::Recover:
     case Mode::Apply:
         break;
@@ -961,8 +1098,11 @@ int main(int argc, char** argv)
     }
 #ifdef KATANA_UPDATER_TEST_BUILD
     catch (const katana::update::SimulatedCrash& crash) {
-        // A process that was killed leaves what it had written and nothing else: no destructor
-        // runs, no buffer is flushed (a held lock is released by the process ending).
+        // A process that was killed leaves what it had written and nothing else. The stack has
+        // been unwound to here, which is harmless because nothing in the swap does disk or
+        // registry work in a destructor (apply.cpp, rule 2; the lock it let go is the one the
+        // process ending would have let go); from here nothing more runs: no static's destructor,
+        // no flush of standard output.
         std::cerr << "katana_updater: simulated crash before change " << crash.operation << ": "
                   << crash.description << '\n';
         std::cerr.flush();
