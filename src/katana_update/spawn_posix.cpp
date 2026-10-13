@@ -53,4 +53,11 @@ std::unique_ptr<Launcher> makeSystemLauncher()
     return std::make_unique<NoLauncher>();
 }
 
+// The elevated half of a split token is a thing of Windows (process.hpp): there is none here,
+// and no update is applied here either (`reason=platform`, above).
+bool processIsElevated()
+{
+    return false;
+}
+
 } // namespace katana::update

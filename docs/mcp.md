@@ -675,10 +675,10 @@ Katana updates itself from signed releases: a person asks in the window (Help
 > Check for Updates) or with `katana_cli`, the files that changed are
 downloaded, and a helper program swaps them in after the program has closed
 and puts every one back if the new version does not start. The verbs are
-`UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`, `SET
-AUTO` and `TOKEN STATUS | CLEAR`; their grammar, their replies and what each
-front end may run are written once, in `src/katana_app/update_verbs.hpp`, and
-`HELP UPDATE` prints them.
+`UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`,
+`BLOCKED CLEAR`, `SET AUTO` and `TOKEN STATUS | CLEAR`; their grammar, their
+replies and what each front end may run are written once, in
+`src/katana_app/update_verbs.hpp`, and `HELP UPDATE` prints them.
 
 **An agent checks and reports, and nothing more.** `katana_mcp` has one tool
 for all of it:
@@ -789,7 +789,18 @@ Which line that is, is read with the verbs' own splitter
 (`UpdateVerbs.TheLastLineRuleReadsALineAsTheVerbsDo`). Typed or piped on
 standard input, where the next line cannot be looked at without waiting for
 it, the session ends with the line and `katana_cli` says on stderr that
-nothing after it is run.
+nothing after it is run. `UPDATE BLOCKED CLEAR` is tested in the real program
+too (`src/katana_app/update_blocked.cmake`): against a state file written by
+hand with two releases blocked, it prints `blocked=none`, the file is read
+back with an empty list, and the version skipped, the switch and the time of
+the last check are as they were
+(`cli.update_blocked_clear_says_none_and_keeps_the_other_settings`,
+`cli.update_blocked_clear_left_the_state_file_with_an_empty_list`); with
+another word after `BLOCKED`, or none, the line is refused saying the one
+line there is
+(`cli.update_blocked_without_clear_is_refused_saying_the_one_line_there_is`).
+Those runs keep their state in a folder of the build tree
+(`KATANA_UPDATE_STATE_DIR`), never in the per-user one.
 
 The verbs themselves are run for real over a fake feed, a scratch install
 and the signed fixtures of the release tools in
@@ -805,6 +816,39 @@ its front end taking it, or the helper could not be started - has the
 helper's copy listed for the sweep the next start makes, so it does not stay
 behind (`abandonApply`,
 `UpdateVerbs.ASessionGivesUpAPreparedApplyThatALaterOneReplacesOrThatNobodyTook`).
+
+Two refusals of `UPDATE APPLY CONFIRM` have a way out that the refusal names,
+and both are tested there:
+
+- **A release that was put back here is not applied again until a person says
+  so.** One start that was too slow for the health check is enough to block a
+  release that is sound, so the block is not for good: `UPDATE BLOCKED CLEAR`
+  (in the window, Settings > Updates) empties the list, the next `UPDATE
+  CHECK` offers the release again, and `UPDATE APPLY CONFIRM` hands back the
+  request for the release that was already downloaded
+  (`UpdateVerbs.BlockedClearEmptiesTheListAndTheNextCheckOffersTheReleaseAgain`,
+  `UpdateVerbs.AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseThatWasPutBack`).
+  It clears the whole list and takes no sequence: the feed offers one
+  release, the newest, so there is no second one to choose. Nothing clears
+  the list by itself: a release that does not start on this machine is not
+  tried again with nobody having asked. The line is refused for a headless
+  window and for `katana_mcp` as `UPDATE SKIP` is: it changes what one user
+  keeps.
+- **A Katana that was started as administrator installs no update.** The
+  helper runs from a copy in the per-user update folder, which the same
+  person's ordinary programs can write; started from a process that holds the
+  elevated half of a split token it would run with administrator rights from
+  there. So the line is refused, `reason=elevated`, before that copy is made,
+  and the release stays downloaded for Katana started the ordinary way
+  (`UpdateVerbs.ApplyIsRefusedInAKatanaStartedAsAdministratorBeforeAnyHelperIsCopied`).
+  A machine with that protection turned off, and the built-in administrator
+  account, have one token and no unelevated half to interfere, and are not
+  refused (`include/katana/update/process.hpp`, `processIsElevated`). It is
+  the last of the line's own refusals, so a build tree says
+  `reason=development_tree` from an administrator's prompt as from any other
+  (`UpdateVerbs.TheOtherRefusalsOfApplyAreSaidBeforeTheOneForAnAdministratorsSession`),
+  and `UPDATE DOWNLOAD CONFIRM` is not refused
+  (`UpdateVerbs.AKatanaStartedAsAdministratorStillChecksAndDownloads`).
 
 ## What the server adds to the command line
 

@@ -41,7 +41,8 @@ namespace fs = std::filesystem;
 
 constexpr const char* kUsage =
     "UPDATE CHECK | UPDATE STATUS | UPDATE DOWNLOAD CONFIRM | UPDATE APPLY CONFIRM | "
-    "UPDATE SKIP <version>|NONE | UPDATE SET AUTO ON|OFF | UPDATE TOKEN STATUS|CLEAR";
+    "UPDATE SKIP <version>|NONE | UPDATE BLOCKED CLEAR | UPDATE SET AUTO ON|OFF | "
+    "UPDATE TOKEN STATUS|CLEAR";
 
 // What a line without its CONFIRM is told: that nothing was done, and what
 // the line with the word does - so that the word is typed knowing it.
@@ -61,6 +62,21 @@ constexpr const char* kTokenUsage =
     "UPDATE TOKEN takes STATUS or CLEAR and no other word. A token is never typed on a line, "
     "because lines are logged: the window's Settings > Updates stores one, and the environment "
     "variable KATANA_UPDATE_TOKEN gives a run one";
+
+// UPDATE BLOCKED has one line, and a refusal says which: a list of releases
+// is not a thing to guess the other words of.
+constexpr const char* kBlockedUsage =
+    "UPDATE BLOCKED takes CLEAR and no other word: UPDATE BLOCKED CLEAR is the one line there "
+    "is, and it forgets which releases were put back here, so that the next UPDATE CHECK "
+    "offers them again";
+
+// What UPDATE CHECK says of a release it does not offer because an apply of
+// it was put back here (update=blocked reason=blocked_before), and the way
+// back, which is a person's to take: one start that was too slow for the
+// health check is enough to block a release that is sound.
+constexpr const char* kBlockedDetail =
+    "this release was installed here before, did not start and was put back, so it is not "
+    "offered; UPDATE BLOCKED CLEAR (Settings > Updates in the window) offers it again";
 
 // What the transport of a build without an HTTP stack answers every request
 // with (update_transport.cpp). No server can cure it, so it is this copy that
@@ -112,7 +128,17 @@ std::vector<std::string_view> wordsOf(std::string_view line)
     return words;
 }
 
-enum class Action { Check, Status, Download, Apply, Skip, SetAuto, TokenStatus, TokenClear };
+enum class Action {
+    Check,
+    Status,
+    Download,
+    Apply,
+    Skip,
+    BlockedClear,
+    SetAuto,
+    TokenStatus,
+    TokenClear,
+};
 
 // The line an action is, for the words of a refusal.
 const char* lineOf(Action action)
@@ -128,6 +154,8 @@ const char* lineOf(Action action)
         return "UPDATE APPLY";
     case Action::Skip:
         return "UPDATE SKIP";
+    case Action::BlockedClear:
+        return "UPDATE BLOCKED CLEAR";
     case Action::SetAuto:
         return "UPDATE SET AUTO";
     case Action::TokenStatus:
@@ -192,6 +220,13 @@ Result<UpdateLine> parse(std::string_view line)
         }
         parsed.version = update::toString(*version);
         return parsed;
+    }
+    if (sameWord(action, "BLOCKED")) {
+        if (words.size() == 3 && sameWord(words[2], "CLEAR")) {
+            parsed.action = Action::BlockedClear;
+            return parsed;
+        }
+        return makeError(ErrorCode::InvalidArgument, kBlockedUsage);
     }
     if (sameWord(action, "SET")) {
         parsed.action = Action::SetAuto;
@@ -538,6 +573,9 @@ Result<Checked> runCheck(const UpdateContext& context)
     }
     if (kept.kept && kept.readable) {
         update::applyUpdateState(result, kept.state);
+        if (result.status == update::CheckStatus::Blocked) {
+            result.detail = kBlockedDetail;
+        }
     }
 
     if (result.status == update::CheckStatus::Available && result.manifest.has_value()) {
@@ -903,6 +941,8 @@ Result<UpdateReply> apply(const UpdateContext& context)
     }
     // A release whose apply was rolled back here is not tried again: the
     // helper found that it does not start on this machine (apply.hpp, step 7).
+    // Not by this line, that is: UPDATE BLOCKED CLEAR is the person's way of
+    // saying that it is to be tried again, and the refusal names it.
     // Which releases those are is in the state file, so one that does not
     // read stops the line: its defaults say that none was ever put back,
     // and the file that is damaged, or was written by a newer Katana, is the
@@ -923,9 +963,25 @@ Result<UpdateReply> apply(const UpdateContext& context)
                   staged->manifest.sequence) != kept.state.blockedSequences.end()) {
         return makeError(ErrorCode::InvalidState,
                          "Katana " + update::toString(staged->manifest.version) +
-                             " could not be installed here before and was put back; it is not "
-                             "applied again, and a later release will be offered",
+                             " could not be installed here before and was put back, so it is "
+                             "not applied again. A later release will be offered; UPDATE BLOCKED "
+                             "CLEAR (Settings > Updates in the window) offers this one again",
                          "reason=blocked_before");
+    }
+    // Started "as administrator": the helper would run with those rights from
+    // its copy in the update folder, which the same person's ordinary programs
+    // can write (update/process.hpp, processIsElevated). The last refusal, and
+    // before the preflight: no copy is made for a helper that will not be
+    // started, and the release stays where it was downloaded to.
+    if (context.elevated) {
+        return makeError(ErrorCode::Unsupported,
+                         "this Katana was started as administrator, and an update is not "
+                         "installed from there: the update helper would run with administrator "
+                         "rights from a folder that ordinary programs can write. Start Katana "
+                         "the ordinary way and update again; Katana " +
+                             update::toString(staged->manifest.version) +
+                             " stays downloaded and is not fetched a second time",
+                         "reason=elevated");
     }
 
     // The helper is copied out of the install and proves it starts now, while
@@ -991,6 +1047,30 @@ Result<UpdateReply> setAutomatic(const UpdateContext& context, const UpdateLine&
         return changed.error();
     }
     reply.text = line.on ? "auto=on" : "auto=off";
+    return reply;
+}
+
+// ---- UPDATE BLOCKED CLEAR -------------------------------------------------------------------
+
+// Forgets which releases were put back here, so that the next check offers
+// the newest one again and APPLY applies it. Every one of them: the list is
+// kept so that a release that does not start is not tried at each start, and
+// a person who asks for another try asks for the release that is offered now
+// - there is no older one to be had from the feed. Taken out of the state as
+// it is at the moment of writing (changeState), as a skip is.
+Result<UpdateReply> blockedClear(const UpdateContext& context)
+{
+    UpdateReply reply;
+    if (context.stateDirectory.empty()) {
+        reply.text = "blocked=none reason=no_state";
+        return reply;
+    }
+    if (const core::Status changed = changeState(
+            context, [](update::UpdateState& state) { state.blockedSequences.clear(); });
+        !changed) {
+        return changed.error();
+    }
+    reply.text = "blocked=none";
     return reply;
 }
 
@@ -1133,6 +1213,8 @@ Result<UpdateReply> run(const UpdateContext& context, std::string_view line,
         return apply(context);
     case Action::Skip:
         return skip(context, *parsed);
+    case Action::BlockedClear:
+        return blockedClear(context);
     case Action::SetAuto:
         return setAutomatic(context, *parsed);
     case Action::TokenStatus:
@@ -1258,6 +1340,9 @@ UpdateContext contextOf(UpdateSurface surface, const Result<fs::path>& root)
     if (perUser) {
         context.stateDirectory = update::stateDirectory();
     }
+    // How the process was started is nothing a person keeps: asked for every
+    // surface, of the system, and never of a file.
+    context.elevated = update::processIsElevated();
     return context;
 }
 
@@ -1340,9 +1425,13 @@ const char* updateHelpText()
            "          transaction=<id>, the session ends, and the update helper replaces\n"
            "          the files, putting every one back if the new version does not\n"
            "          start. It must be the last line of a katana_cli run, which starts\n"
-           "          nothing again; the window closes and reopens\n"
+           "          nothing again; the window closes and reopens. A Katana that was\n"
+           "          started as administrator installs no update (reason=elevated):\n"
+           "          started the ordinary way it does, and the download is kept\n"
            "          UPDATE SKIP <version> | UPDATE SKIP NONE  do not offer that version;\n"
            "          offer it again\n"
+           "          UPDATE BLOCKED CLEAR  offer again a release that was installed here,\n"
+           "          did not start and was put back (update=blocked): blocked=none\n"
            "          UPDATE SET AUTO ON|OFF  whether the window checks by itself, once a day\n"
            "          UPDATE TOKEN STATUS | UPDATE TOKEN CLEAR  whether an access token for a\n"
            "          private release repository is stored (present or absent, never the\n"

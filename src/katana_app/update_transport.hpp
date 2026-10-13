@@ -23,11 +23,17 @@
 // the address of every Error itself, through update::displayUrl, and cuts the query from any
 // address a hop quoted all the same.
 //
-// This file is the one part of the update system that needs a socket, so no unit test is of it.
+// This file is the one part of the update system that needs a socket, and NO TEST DRIVES IT.
 // The rules it must keep - where the token goes, which redirects are followed, what an answer
 // must be - are update::makeFetch's and are tested there over a recorded wire
-// (tests/update/test_feed.cpp); the end-to-end tests are what drive this file, against a feed
-// on the loopback address (tests/update/CMakeLists.txt, "the end-to-end tests").
+// (tests/update/test_feed.cpp); the one request it makes is gis::httpExchange's, which has
+// tests of its own (tests/interop/test_online_fetch.cpp, and test_online_requests.cpp beside
+// it). The end-to-end tests do NOT come through here: their program links the engine and no
+// libcurl, and carries update::makeFetch over a hop of its own on plain sockets
+// (tests/update/e2e_main.cpp), because a program that ships cannot be given the test key or
+// a feed on the loopback address. What is left to this file - handing a request to the
+// exchange and its answer back - first meets a server in a check against a real release
+// (docs/update.md, "To verify on first release").
 
 #include "katana/update/feed.hpp"
 

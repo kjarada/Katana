@@ -1,6 +1,8 @@
 // The records beside the programs (install.hpp: install.json, installed.json, the signed manifest
 // kept for removals) and in the per-user state folder (state.hpp: state.json, last.json, the
-// cleanup list), and the one function that finds the install root of the running program.
+// cleanup list), and the one function that finds the install root of the running program. At
+// the end, the other thing that is asked of the running program: how it was started
+// (process.hpp, processIsElevated).
 //
 // Each expectation comes from the contract in the header, worked out by hand: the file shapes
 // are the ones the headers print, the paths are joined by the rules there, and the numbers in
@@ -36,8 +38,12 @@
 
 #include "katana/core/path_text.hpp"
 #include "katana/update/install.hpp"
+#include "katana/update/manifest.hpp"
+#include "katana/update/process.hpp"
 #include "katana/update/registry.hpp"
 #include "katana/update/state.hpp"
+#include "katana/update/trust.hpp"
+#include "katana/update/version.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -53,6 +59,19 @@
 
 using namespace katana;
 namespace fs = std::filesystem;
+
+// Not in any public header. state.cpp's readInstall for a program of any version: readInstall
+// answers the higher of the record's version and the program's own, and with the program's
+// version handed in both sides of that are written in the test, so no answer moves when the
+// project's version does. spawn_win.cpp's one decision about a token, apart from asking
+// Windows for it: every kind of token can be put to it whatever token this run holds.
+namespace katana::update::detail {
+core::Result<Install> readInstallAs(const std::filesystem::path& root,
+                                    const RegistryOps& registry, const Version& program);
+#ifdef _WIN32
+bool isElevatedHalf(unsigned long type);
+#endif
+} // namespace katana::update::detail
 
 namespace {
 
@@ -628,7 +647,10 @@ TEST(InstallRecords, InstalledJsonSaysWhichBuildTheHelperPutThere)
     world.installedJson(R"({"schema":1,"product":"katana","version":"0.9.0","sequence":1790000000,)"
                         R"("tag":"v0.9.0","target":"win64"})");
     FakeRegistry registry;
-    const auto install = update::readInstall(world.root, registry);
+    // Read as a program below the record (0.1.0: 1 < 9), so that the version comes from the
+    // record and from nowhere else, whatever version this project has reached.
+    const auto install =
+        update::detail::readInstallAs(world.root, registry, versionOf(0, 1, 0, 0, 3));
     ASSERT_TRUE(install.ok()) << install.error().describe();
     EXPECT_EQ(install->version, versionOf(0, 9, 0, 0, 3));
     EXPECT_EQ(update::toString(install->version), "0.9.0") << "== ignores how many were written";
@@ -642,11 +664,242 @@ TEST(InstallRecords, VersionsOfFourComponentsAndSequencesBeyondTwoToTheFiftyThir
     world.installJson(R"({"schema":1,"target":"win64"})");
     world.installedJson(R"({"schema":1,"version":"1.2.3.4","sequence":18446744073709551615})");
     FakeRegistry registry;
-    const auto install = update::readInstall(world.root, registry);
+    // As above: a program below the record (0.1.0 against 1.2.3.4: 0 < 1 in the first number).
+    const auto install =
+        update::detail::readInstallAs(world.root, registry, versionOf(0, 1, 0, 0, 3));
     ASSERT_TRUE(install.ok()) << install.error().describe();
     EXPECT_EQ(install->version, versionOf(1, 2, 3, 4, 4));
     EXPECT_EQ(update::toString(install->version), "1.2.3.4") << "== ignores how many were written";
     EXPECT_EQ(install->sequence, UINT64_MAX);
+}
+
+// ---- the installed version is the higher of the record's and the program's own ------------
+//
+// The program's own version is KATANA_EXPECTED_VERSION: the version this build was configured
+// as, handed to the suite by tests/update/CMakeLists.txt from project(Katana VERSION) and not
+// by the library under test (test_version.cpp holds programVersion() to it). A record is placed
+// below it as 0.1.0, which the project's version left behind for good, and above it by raising
+// its first number, so these stay the same cases when the project's version moves on.
+
+namespace {
+
+update::Version theProgramsOwnVersion()
+{
+    return update::parseVersion(KATANA_EXPECTED_VERSION).value();
+}
+
+// The program's own version with its first number raised by one, written with three numbers.
+update::Version aVersionAboveTheProgram()
+{
+    update::Version above = theProgramsOwnVersion();
+    above.components = {above.components[0] + 1, 0, 0, 0};
+    above.written = 3;
+    return above;
+}
+
+std::string installedRecordOf(const std::string& version, std::uint64_t sequence)
+{
+    return R"({"schema":1,"product":"katana","version":")" + version + R"(","sequence":)" +
+           std::to_string(sequence) + R"(,"tag":"v)" + version + R"(","target":"win64"})";
+}
+
+update::Manifest aReleaseOf(const update::Version& version, std::uint64_t sequence)
+{
+    update::Manifest manifest;
+    manifest.version = version;
+    manifest.sequence = sequence;
+    return manifest;
+}
+
+} // namespace
+
+TEST(InstallRecords, ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion)
+{
+    // What a zip unpacked by hand over a copy that had updated itself leaves: the programs of
+    // the newer version, and the helper's record of the older one.
+    ASSERT_LT(versionOf(0, 1, 0, 0, 3), theProgramsOwnVersion());
+    Root world;
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    world.installedJson(installedRecordOf("0.1.0", 1790000000));
+    FakeRegistry registry;
+    const auto install = update::readInstall(world.root, registry);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(install->version, theProgramsOwnVersion());
+    EXPECT_EQ(update::toString(install->version), KATANA_EXPECTED_VERSION);
+    // The record is still a record: its sequence is the one it names.
+    EXPECT_EQ(install->sequence, 1790000000u);
+    EXPECT_TRUE(install->hasInstalledRecord);
+}
+
+TEST(InstallRecords, ARecordAtOrAboveTheProgramsOwnVersionIsTheInstalledVersion)
+{
+    FakeRegistry registry;
+    {
+        // The other order: the record names a version above this program's.
+        const update::Version above = aVersionAboveTheProgram();
+        ASSERT_GT(above, theProgramsOwnVersion());
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        world.installedJson(installedRecordOf(update::toString(above), 1790000000));
+        const auto install = update::readInstall(world.root, registry);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->version, above);
+        EXPECT_EQ(update::toString(install->version), update::toString(above));
+        EXPECT_EQ(install->sequence, 1790000000u);
+        EXPECT_TRUE(install->hasInstalledRecord);
+    }
+    {
+        // And the two the same, which is every copy the helper updated and nobody overwrote.
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        world.installedJson(installedRecordOf(KATANA_EXPECTED_VERSION, 7));
+        const auto install = update::readInstall(world.root, registry);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->version, theProgramsOwnVersion());
+        EXPECT_EQ(update::toString(install->version), KATANA_EXPECTED_VERSION);
+        EXPECT_EQ(install->sequence, 7u);
+        EXPECT_TRUE(install->hasInstalledRecord);
+    }
+}
+
+TEST(InstallRecords, TheFloorAgainstGoingBackIsTheHigherVersionAndNotAStaleRecords)
+{
+    // isNewerThan (trust.hpp) is the one place the order is written: a higher version, or the
+    // same version with a higher sequence than the record's. Each answer below is that rule
+    // applied by hand to an install whose version is this program's and whose record is build
+    // 100 of 0.1.0.
+    const update::Version program = theProgramsOwnVersion();
+    ASSERT_LT(versionOf(0, 1, 0, 0, 3), program);
+    Root world;
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    world.installedJson(installedRecordOf("0.1.0", 100));
+    FakeRegistry registry;
+    const auto install = update::readInstall(world.root, registry);
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+
+    // A later build of the version the record names. Against the record alone it is newer -
+    // the same version, a higher sequence - and it is an EARLIER release than the programs
+    // that are installed: the way back that the record must not open.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 1, 0, 0, 3), 200), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 1, 0, 0, 3), 100), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 0, 9, 0, 3), 300), *install));
+
+    // What is above the programs is above the install, whatever its sequence.
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(aVersionAboveTheProgram(), 1), *install));
+
+    // The programs' own version: the sequences decide, and the record's is the one there is.
+    // (The helper of a release that brings its own helper is that release's version, and must
+    // still find the release above the build the record names: state.cpp, readInstall.)
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(program, 200), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(program, 100), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(program, 99), *install));
+}
+
+// ---- the same rule, for a program of any version --------------------------------------------
+//
+// The three cases above read with this build's own version, which is the one thing they cannot
+// choose. detail::readInstallAs is the same reading with the program's version handed in
+// (state.cpp: readInstall is that, given programVersion()), so here both versions are written
+// down and every answer is the rule worked by hand: the installed version is the higher of
+// the two, compared number by number; the sequence, and that there is a record, are the
+// record's alone.
+
+TEST(InstallRecords, OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders)
+{
+    Root world;
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    world.installedJson(installedRecordOf("0.4.0", 400));
+    FakeRegistry registry;
+    const struct {
+        update::Version program;
+        const char* installed;
+    } cases[] = {
+        {versionOf(0, 3, 9, 0, 3), "0.4.0"},   // the record is the higher: 4 > 3
+        {versionOf(0, 4, 0, 0, 3), "0.4.0"},   // the two the same
+        {versionOf(0, 4, 1, 0, 3), "0.4.1"},   // the program is the higher, by its last number
+        {versionOf(0, 10, 0, 0, 3), "0.10.0"}, // by number and not by text: 10 > 4
+        {versionOf(1, 0, 0, 0, 2), "1.0"},     // by its first number, and written with two
+    };
+    for (const auto& c : cases) {
+        const auto install = update::detail::readInstallAs(world.root, registry, c.program);
+        ASSERT_TRUE(install.ok()) << c.installed << ": " << install.error().describe();
+        EXPECT_EQ(update::toString(install->version), c.installed)
+            << "for a program of " << update::toString(c.program);
+        // Whichever version it is, the record is still the record.
+        EXPECT_EQ(install->sequence, 400u) << c.installed;
+        EXPECT_TRUE(install->hasInstalledRecord) << c.installed;
+        EXPECT_EQ(install->target, "win64") << c.installed;
+        EXPECT_EQ(install->kind, update::InstallKind::Archive) << c.installed;
+    }
+}
+
+TEST(InstallRecords, WithNoRecordOfTheHelpersTheInstalledVersionIsTheProgramsWhateverThatIs)
+{
+    FakeRegistry registry;
+    const update::Version program = versionOf(7, 8, 9, 0, 3);
+    {
+        // A fresh install: install.json and nothing the helper wrote.
+        Root world;
+        world.installJson(R"({"schema":1,"target":"win64"})");
+        const auto install = update::detail::readInstallAs(world.root, registry, program);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->kind, update::InstallKind::Archive);
+        EXPECT_EQ(update::toString(install->version), "7.8.9");
+        EXPECT_EQ(install->sequence, 0u);
+        EXPECT_FALSE(install->hasInstalledRecord);
+    }
+    {
+        // A development tree, with a record somebody copied into it: the record is not read at
+        // all there, so it does not raise the version either (9.9.9 is above 7.8.9).
+        Root world;
+        world.installedJson(installedRecordOf("9.9.9", 5));
+        const auto install = update::detail::readInstallAs(world.root, registry, program);
+        ASSERT_TRUE(install.ok()) << install.error().describe();
+        EXPECT_EQ(install->kind, update::InstallKind::Development);
+        EXPECT_EQ(update::toString(install->version), "7.8.9");
+        EXPECT_EQ(install->sequence, 0u);
+        EXPECT_FALSE(install->hasInstalledRecord);
+    }
+}
+
+TEST(InstallRecords, AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn)
+{
+    // The case the rule is for, with its versions written down. A copy updated itself to 0.3.0
+    // (build 300), and 0.5.0 was then unpacked over it by hand: the programs are 0.5.0 and the
+    // helper's record still says 0.3.0. isNewerThan (trust.hpp) is the one place the order is
+    // written - a higher version, or the same version with a higher sequence than the record's
+    // - and each answer below is that rule applied by hand to an install of version 0.5.0 whose
+    // record is build 300.
+    Root world;
+    world.installJson(R"({"schema":1,"target":"win64"})");
+    world.installedJson(installedRecordOf("0.3.0", 300));
+    FakeRegistry registry;
+    const auto install =
+        update::detail::readInstallAs(world.root, registry, versionOf(0, 5, 0, 0, 3));
+    ASSERT_TRUE(install.ok()) << install.error().describe();
+    EXPECT_EQ(update::toString(install->version), "0.5.0");
+
+    // 0.4.0 is a release between the two: above the record (4 > 3), below the programs
+    // (4 < 5). It is signed and it is the way back.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 4, 0, 0, 3), 400), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 4, 9, 0, 3), 490), *install));
+    // The release the record names, and a later build of it.
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 3, 0, 0, 3), 300), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 3, 0, 0, 3), 310), *install));
+    // What is above the programs is an update, whatever its sequence.
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 1, 0, 3), 510), *install));
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 6, 0, 0, 3), 1), *install));
+    // The programs' own version: the sequences decide, and the record's is 300.
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 0, 0, 3), 500), *install));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 5, 0, 0, 3), 300), *install));
+
+    // And the same record under the programs it names: 0.4.0 is then the update it is.
+    const auto before =
+        update::detail::readInstallAs(world.root, registry, versionOf(0, 3, 0, 0, 3));
+    ASSERT_TRUE(before.ok()) << before.error().describe();
+    EXPECT_EQ(update::toString(before->version), "0.3.0");
+    EXPECT_TRUE(update::isNewerThan(aReleaseOf(versionOf(0, 4, 0, 0, 3), 400), *before));
+    EXPECT_FALSE(update::isNewerThan(aReleaseOf(versionOf(0, 3, 0, 0, 3), 300), *before));
 }
 
 TEST(InstallRecords, TheInstalledManifestCountsOnlyWithItsSignatureBesideIt)
@@ -2136,4 +2389,57 @@ TEST(CleanupList, AFolderNestedDeeperThanTheUpdaterEverMakesIsLeftAlone)
     EXPECT_TRUE(fs::exists(deep))
         << "the walk gives up past 64 levels instead of recursing without end";
     EXPECT_EQ(readFile(world.list), lineOf(world.stateDir / "run-deep")) << "and it stays listed";
+}
+
+// ---- how this process was started (process.hpp) -------------------------------------------
+//
+// The verbs refuse an apply in a process that holds the elevated half of a split token, and
+// take the answer from processIsElevated. Whether this run of the suite is such a process is
+// not for a test to assume, so what is held here is true of every run: the answer does not
+// change while the process lives, and it is never "yes" for a token Windows itself calls not
+// elevated. That second question is put to Windows another way than the function puts its
+// own (TokenElevation, where the function reads TokenElevationType): the elevated half of a
+// split token is an elevated token, so a yes from the one with a no from the other cannot be.
+//
+// WHAT THAT CANNOT SHOW: a "yes". A suite started the ordinary way holds no elevated half, and
+// no test can give itself one. So the function's one decision - which kind of token is a yes -
+// is a function of its own (spawn_win.cpp, detail::isElevatedHalf) and every kind is put to
+// it below. What stays unshown in an ordinary run is only that processIsElevated hands it
+// the kind Windows gave: that is seen by a suite that itself holds the elevated half.
+
+#ifdef _WIN32
+TEST(ProcessIsElevated, OnlyTheElevatedHalfOfASplitTokenIsAYes)
+{
+    // The three kinds Windows names (winnt.h, TOKEN_ELEVATION_TYPE), and what the ruling
+    // makes of each: the elevated half of a split token is refused an apply; the other half
+    // is an ordinary program; and a token that was never split - User Account Control off, or
+    // the built-in administrator - has no unelevated half that could interfere, so it is not.
+    const auto kind = [](TOKEN_ELEVATION_TYPE type) { return static_cast<unsigned long>(type); };
+    EXPECT_TRUE(update::detail::isElevatedHalf(kind(TokenElevationTypeFull)));
+    EXPECT_FALSE(update::detail::isElevatedHalf(kind(TokenElevationTypeLimited)));
+    EXPECT_FALSE(update::detail::isElevatedHalf(kind(TokenElevationTypeDefault)));
+    // And a number that is none of the three, which is what an answer nobody could read is.
+    EXPECT_FALSE(update::detail::isElevatedHalf(0));
+    EXPECT_FALSE(update::detail::isElevatedHalf(4));
+}
+#endif
+
+TEST(ProcessIsElevated, TheAnswerIsSteadyAndIsNeverYesForATokenWindowsCallsNotElevated)
+{
+    const bool elevated = update::processIsElevated();
+    EXPECT_EQ(update::processIsElevated(), elevated);
+#ifdef _WIN32
+    HANDLE token = nullptr;
+    ASSERT_NE(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token), 0);
+    TOKEN_ELEVATION held{};
+    DWORD written = 0;
+    const BOOL asked = GetTokenInformation(token, TokenElevation, &held, sizeof(held), &written);
+    CloseHandle(token);
+    ASSERT_NE(asked, 0);
+    if (held.TokenIsElevated == 0) {
+        EXPECT_FALSE(elevated);
+    }
+#else
+    EXPECT_FALSE(elevated) << "there is no split token here";
+#endif
 }

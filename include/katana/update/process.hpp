@@ -143,4 +143,22 @@ class Launcher {
 [[nodiscard]] core::Result<std::vector<RunningProgram>>
 runningPrograms(const std::filesystem::path& root);
 
+// Whether this process holds the ELEVATED HALF OF A SPLIT TOKEN: a program started "as
+// administrator" on a Windows machine where an administrator's programs ordinarily run with
+// the other, filtered half. The helper runs from a copy in the per-user update folder
+// (stage.hpp, preflight), which those ordinary programs can write: started from such a
+// process it would run with administrator rights from a folder that programs without them
+// control. So `UPDATE APPLY CONFIRM` is refused there, before the copy is made
+// (src/katana_app/update_verbs.hpp, reason=elevated).
+//
+// Windows: GetTokenInformation(TokenElevationType) answers TokenElevationTypeFull. A machine
+// with that protection turned off, and the built-in administrator account, have ONE token and
+// no unelevated half that could interfere (TokenElevationTypeDefault): false, and an update
+// is applied there as anywhere. A process that could not ask - its token cannot be opened or
+// read - is answered false as well, and that is no error: the question guards one case, and
+// what cannot be shown to be that case is not refused an update for it. Elsewhere than
+// Windows: false. Asked once by makeUpdateContext; defined in spawn_win.cpp and
+// spawn_posix.cpp.
+[[nodiscard]] bool processIsElevated();
+
 } // namespace katana::update

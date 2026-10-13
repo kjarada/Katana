@@ -93,7 +93,8 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 // manifest and signature (see above).
 // InvalidState "cancelled"; the transport's errors; InvalidArgument for a
 // member that fails its hash or its size; FileExportFailure when the disk
-// refuses; AlreadyExists when another stage() is filling the same folder.
+// refuses; AlreadyExists when another stage() is filling the same folder;
+// Unsupported where this system installs no update (`platform`, below).
 // Progress is bytes of the compressed payload fetched over the total
 // to fetch, counting what a previous run already staged as fetched.
 //
@@ -111,7 +112,12 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 //                    of makeFetch refuses that itself, as bad_range: feed.hpp)
 //   unverified_manifest / notify_only / no_token   the call is not one stage() can serve
 //   asset_missing / payload_mismatch / malformed   the private route's release listing
-// preflight's: helper_missing, helper_not_started, helper_timeout, helper_failed, write_failed.
+//   platform         this system is one where a copy of Katana does not replace its own files
+//                    (macOS for good, Linux until its file system is written: stage.cpp says
+//                    why). Only the forms that use the system's file system refuse so, and
+//                    before a folder is asked for or a request is sent
+// preflight's: helper_missing, helper_not_started, helper_timeout, helper_failed, write_failed,
+// and platform as above.
 //
 // Progress never goes backwards and never passes its total, whatever the transport reports
 // (it starts a request again after a dropped connection).
@@ -135,9 +141,10 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 
 // The same, through the file system given instead of the system's (makeSystemFsOps, which the
 // form above uses). It is how the tests run the staging on every platform - the system's own
-// file system is written for Windows only so far (fsops.hpp), so the form above answers
-// write_failed "not implemented" elsewhere - and how they make a write fail. `fs` must be one
-// over the real disk: a member is hashed while a stream writes it, which no FsOps call does.
+// file system is written for Windows only so far (fsops.hpp), and elsewhere the form above
+// refuses at once under the token `platform`, touching nothing - and how they make a write
+// fail. `fs` must be one over the real disk: a member is hashed while a stream writes it, which
+// no FsOps call does.
 [[nodiscard]] core::Status stage(const Fetch& fetch, const FeedConfig& feed,
                                  const Manifest& manifest, const Plan& plan,
                                  const std::filesystem::path& stageDir, std::stop_token stop,
