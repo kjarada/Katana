@@ -39,6 +39,16 @@
 //
 // Paths are root-relative with '/', as in the manifest.
 //
+// WHO WRITES WHAT FOLLOWS COMMITTED_PENDING_HEALTH. The helper that made the swap, while
+// it lives: HEALTHY once its health run has passed, or ROLLING_BACK and ROLLED_BACK when
+// it has not. A helper that dies in between leaves the journal at
+// COMMITTED_PENDING_HEALTH, and no further kind of record exists for that: the SAME
+// records are appended later, under the update lock, by whoever settles the transaction
+// (recover.hpp) - HEALTHY by `katana_updater --recover`, by the window of the new version
+// or by the next swap, each on the marker the health run writes; ROLLING_BACK and
+// ROLLED_BACK by `katana_updater --recover` alone. So a journal still reads the same way
+// whoever finished it.
+//
 // THE JOURNAL IS NOT AUTHENTICATED. It sits in R/.update, which a process running as the
 // same user can write, and its crc detects a torn write, not a forged line. So what rollback
 // and recovery READ from it is never trusted as a place to act on: every path of an ADD,
@@ -102,7 +112,9 @@ enum class JournalState {
 };
 
 // A journal in Planned, Committing or RollingBack is one a crash left behind:
-// recover() must roll it back.
+// recover() must roll it back. CommittedPendingHealth is NOT one of them: its
+// tree is a whole version and its helper may be alive and waiting, so recover()
+// leaves it (recover.hpp says who settles one whose helper died, and how).
 [[nodiscard]] bool needsRecovery(JournalState state);
 
 struct ParsedJournal {
