@@ -656,6 +656,136 @@ TEST_F(McpServer, TheWindowsOwnVerbsAreRefusedSayingWhereTheyRun)
               std::string::npos);
 }
 
+// The update system's one tool (docs/mcp.md, "Updates"): it asks and reports,
+// and says to its client that it reaches the network. The tools that run
+// lines do not, and go on saying so, because an UPDATE line is refused in
+// them.
+TEST_F(McpServer, TheUpdateToolIsListedReadOnlyAndOpenWorldAndTheToolsThatRunLinesAreNot)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    const auto named = [&tools](const char* name) {
+        const auto found = std::find_if(tools.begin(), tools.end(),
+                                        [name](const Json& each) { return each["name"] == name; });
+        return found == tools.end() ? Json() : *found;
+    };
+    const Json update = named("katana_check_update");
+    ASSERT_TRUE(update.is_object()) << "katana_check_update is not listed";
+    // Read-only and open-world, and nothing else: the WHOLE object. A tool
+    // that is not read-only is listed with two hints more - whether it
+    // destroys, and whether asking twice is asking once (hints(),
+    // mcp_server.cpp) - which mean something only for a tool that changes
+    // things; so their absence is the tool being listed as one that changes
+    // nothing, and a tool listed any other way fails here.
+    EXPECT_EQ(update["annotations"], (Json{{"readOnlyHint", true}, {"openWorldHint", true}}))
+        << update["annotations"].dump();
+    EXPECT_TRUE(update["inputSchema"]["properties"].empty()) << "it takes no argument";
+    const std::string description = update["description"].get<std::string>();
+    // Among them what is sent, the one case in which a token is included:
+    // a client is told the whole of it before it lets the tool run.
+    for (const char* words : {"Read-only", "downloads nothing", "It reaches the network",
+                              "the program's version and platform", "KATANA_UPDATE_TOKEN",
+                              "api.github.com, and to no other host",
+                              "update=unsupported reason=development_tree", "never the token"}) {
+        EXPECT_NE(description.find(words), std::string::npos) << words;
+    }
+
+    for (const char* runsLines : {"katana_run_commands", "katana_run_script"}) {
+        const Json tool = named(runsLines);
+        ASSERT_TRUE(tool.is_object()) << runsLines;
+        EXPECT_FALSE(tool["annotations"]["openWorldHint"].get<bool>()) << runsLines;
+    }
+    const std::string commands = named("katana_run_commands")["description"].get<std::string>();
+    EXPECT_NE(commands.find("UPDATE lines are refused here too"), std::string::npos);
+    EXPECT_NE(commands.find("katana_check_update"), std::string::npos);
+}
+
+TEST_F(McpServer, AnUpdateLineIsRefusedInEveryToolThatRunsLinesNamingTheUpdateTool)
+{
+    initialize();
+    for (const char* line :
+         {"UPDATE CHECK", "UPDATE STATUS", "update download confirm", "UPDATE APPLY CONFIRM",
+          "UPDATE SKIP 1.0", "UPDATE SET AUTO OFF", "UPDATE TOKEN STATUS", "  UPDATE"}) {
+        const Json ran = runLine(line);
+        EXPECT_TRUE(ran["isError"].get<bool>()) << line;
+        const std::string text = textOf(ran);
+        EXPECT_NE(text.find("Unsupported: UPDATE lines are not run by katana_mcp"),
+                  std::string::npos)
+            << text;
+        EXPECT_NE(text.find("katana_check_update"), std::string::npos) << text;
+        EXPECT_EQ(text.find("unknown command"), std::string::npos) << text;
+        EXPECT_FALSE(ran["structuredContent"]["commands"][0]["ok"].get<bool>()) << line;
+    }
+
+    // In a batch it stops the batch, as any refused line does: the point
+    // before it is drawn, the one after it is not.
+    const Json batch = call("katana_run_commands",
+                            Json{{"commands", {"POINT 1,1", "UPDATE CHECK", "POINT 2,2"}}});
+    EXPECT_TRUE(batch["isError"].get<bool>());
+    EXPECT_EQ(session.document().model().entities.size(), 1U) << textOf(batch);
+
+    // And in a script, which the other tool that runs lines runs.
+    TempDir folder("update-script");
+    const std::string script = folder.file("update.kcs");
+    {
+        std::ofstream out(script);
+        out << "POINT 3,3\nUPDATE DOWNLOAD CONFIRM\nPOINT 4,4\n";
+    }
+    const Json scripted = call("katana_run_script", Json{{"path", script}});
+    EXPECT_TRUE(scripted["isError"].get<bool>());
+    EXPECT_NE(textOf(scripted).find("katana_check_update"), std::string::npos) << textOf(scripted);
+    EXPECT_EQ(session.document().model().entities.size(), 2U) << textOf(scripted);
+
+    // HELP UPDATE is a HELP line: the grammar is read here as anywhere.
+    const Json help = runLine("HELP UPDATE");
+    EXPECT_FALSE(help["isError"].get<bool>()) << textOf(help);
+    EXPECT_NE(textOf(help).find("UPDATE DOWNLOAD CONFIRM"), std::string::npos);
+    EXPECT_NE(textOf(call("katana_help")).find("Update    UPDATE CHECK"), std::string::npos);
+}
+
+TEST_F(McpServer, TheUpdateToolAnswersWithTheCheckAndStatusRecordsOfThisCopy)
+{
+    // This suite's executable is in no install - nothing packaging wrote lies
+    // beside it - so the copy is a development one: the check says so without
+    // asking any server, and the status says what kind of copy it is
+    // (src/katana_app/update_verbs.hpp). No token of whoever runs the suite
+    // is read.
+    katana::app::tests::ScopedVariable token("KATANA_UPDATE_TOKEN", nullptr);
+    initialize();
+    const Json answered = call("katana_check_update");
+    ASSERT_FALSE(answered["isError"].get<bool>()) << textOf(answered);
+    const std::string text = textOf(answered);
+    EXPECT_NE(text.find("update=unsupported"), std::string::npos) << text;
+    EXPECT_NE(text.find("reason=development_tree"), std::string::npos) << text;
+    EXPECT_NE(text.find("kind=development"), std::string::npos) << text;
+
+    const Json& check = answered["structuredContent"]["check"];
+    EXPECT_EQ(check["update"], "unsupported");
+    EXPECT_EQ(check["reason"], "development_tree");
+    EXPECT_TRUE(check["installed"].is_string());
+    EXPECT_FALSE(check.contains("latest")) << "nobody was asked";
+    const Json& status = answered["structuredContent"]["status"];
+    EXPECT_EQ(status["kind"], "development");
+    EXPECT_EQ(status["target"], "none");
+    EXPECT_EQ(status["staged"], "none");
+    EXPECT_EQ(status["skipped"], "none");
+    EXPECT_EQ(status["last_check"], "never");
+    EXPECT_EQ(status["token"], "absent");
+    EXPECT_EQ(status["last"], "none");
+    EXPECT_EQ(status["installed"], check["installed"]);
+
+    // It changed nothing in the drawing, and asked twice it answers the same.
+    EXPECT_FALSE(session.document().isModified());
+    EXPECT_EQ(textOf(call("katana_check_update")), text);
+
+    // An argument it does not take is refused, as for every tool.
+    const Json refused = call("katana_check_update", Json{{"download", true}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("katana_check_update takes no argument \"download\""),
+              std::string::npos)
+        << textOf(refused);
+}
+
 TEST_F(McpServer, TheImportToolSaysWhatLocalDoes)
 {
     // It once said LOCAL imported "in the drawing's own coordinates rather

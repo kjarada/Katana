@@ -13,6 +13,11 @@
 
 #include "session.hpp"
 
+namespace katana::app {
+// update_verbs.hpp: everything an UPDATE line needs from the program that runs it.
+struct UpdateContext;
+} // namespace katana::app
+
 namespace katana::app::mcp {
 
 using Json = nlohmann::json;
@@ -76,6 +81,16 @@ struct LineOutcome {
 // katana_import and katana_export all say a scope through it.
 [[nodiscard]] std::string scopeWordsOf(const std::string& kind, const Json& area,
                                        const Json& layers, bool only, const Json& where);
+
+// katana_check_update's reply for `context` (mcp_server.cpp): UPDATE CHECK and
+// UPDATE STATUS as the verbs answer them (update_verbs.hpp), one line each in
+// the text, and in the structured content as the objects `check` and `status`
+// - a member for each key=value of the record, a number where the value is
+// one - with `warnings` in either when the reply had any. The tool passes the
+// running program's context for the Mcp surface, which keeps no per-user
+// state; a test passes one over a fake feed. isError when a line could not be
+// run at all: a feed that cannot be read is a reply (update=unreachable).
+[[nodiscard]] ToolReply checkUpdateReply(const katana::app::UpdateContext& context);
 
 // katana_customisation (mcp_customisation.cpp): the session's customisation
 // as structured data - what is loaded, its survey code rules, its definitions

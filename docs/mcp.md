@@ -19,9 +19,11 @@ It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a
 client instead of typed. Every tool that changes anything is a shape over the
 command line's verbs, so there is one implementation of each, pinned by the
 `cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
-not. Every change is one undoable command, as it is when typed. (Two tools run
-no line and change nothing: `katana_status` and `katana_customisation` read
-the Document for what no reply holds as structure.)
+not. Every change is one undoable command, as it is when typed. (Three tools
+run no line and change nothing: `katana_status` and `katana_customisation`
+read the Document for what no reply holds as structure, and
+`katana_check_update` asks whether a newer Katana has been released -
+"Updates", below.)
 
 The session starts with the customisation `katana_cli` starts with - the
 kept file the environment variable `KATANA_CUSTOMISATION` names, else the
@@ -80,6 +82,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
+| `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`src/katana_app/update_verbs.hpp`), for the surface `UpdateSurface::Mcp` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
 and are pinned now by `McpServer.DescribeEntityDescribesTheEntityItNames` and
@@ -666,6 +669,143 @@ filter); `structuredContent.records[0]` is still the `exported` record, the
 `McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes` pins
 them.
 
+## Updates
+
+Katana updates itself from signed releases: a person asks in the window (Help
+> Check for Updates) or with `katana_cli`, the files that changed are
+downloaded, and a helper program swaps them in after the program has closed
+and puts every one back if the new version does not start. The verbs are
+`UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`, `SET
+AUTO` and `TOKEN STATUS | CLEAR`; their grammar, their replies and what each
+front end may run are written once, in `src/katana_app/update_verbs.hpp`, and
+`HELP UPDATE` prints them.
+
+**An agent checks and reports, and nothing more.** `katana_mcp` has one tool
+for all of it:
+
+| Tool | Arguments | Structured content |
+|---|---|---|
+| `katana_check_update` | `{}` | `{check: {update, installed, latest?, files?, download_bytes?, notes_url?, information?, reason?, detail?, warnings?}, status: {installed, target, kind, staged, skipped, auto, last_check, token, last, warnings?}}` |
+
+- **`check`** is `UPDATE CHECK`'s record: `update` is `available`, `current`,
+  `unreachable` (the feed could not be read or did not verify: `reason` is the
+  token - `offline`, `http_404`, `bad_signature` ... - and `detail` the
+  failure's own sentence), `unsupported` (this copy cannot update:
+  `development_tree`, `disabled_build`, `no_network`, `install_record`) or
+  `blocked` (this very release was rolled back here before). `files` is
+  `"<changed>/<total>"` and `download_bytes` a number, both only for
+  `available`, where the installed files were hashed to say what would be
+  fetched; `information` is `old` when the release's own expiry has passed.
+- **`status`** is `UPDATE STATUS`'s record: the installed version, the
+  `target` the copy was packaged for (`none` for a development copy), `kind`
+  (`installer`, `archive` or `development`), and `staged`, `skipped`, `auto`,
+  `last_check`, `token` (`present` or `absent`, never the token) and `last`.
+  A copy whose own install record does not read has no word in `kind`: the
+  record says `target=none kind=development` and `warnings` says that the
+  record could not be read, and why; its `check` is
+  `update=unsupported reason=install_record`.
+- The text is the two records as the command line prints them, one a line. A
+  value in the object is the record's own text, a number where it is one.
+  `isError` is for a line that could not be run at all: a feed that cannot be
+  read is an answer.
+
+What is decided here, and why:
+
+- **Read-only, and it says it reaches the network.** Its hints are read-only
+  and open-world. It asks the release feed for two small files (a signature
+  and a manifest) and sends nothing of the drawing: the program's version and
+  platform are its user agent. A development copy - every build tree - asks
+  nobody: it has no release to compare with, and answers
+  `update=unsupported reason=development_tree`
+  (`McpServer.TheUpdateToolAnswersWithTheCheckAndStatusRecordsOfThisCopy`).
+- **One thing more is sent in one case, and the tool's description says so.**
+  When the environment variable `KATANA_UPDATE_TOKEN` of the server's run
+  holds an access token and the public address answers that there is no such
+  release - what a private release repository answers - the check asks
+  `api.github.com` instead and sends the token there, and to no other host
+  (`include/katana/update/feed.hpp`, "the private-repository route"). A
+  client is told this in the description before it lets the tool run; without
+  the variable no token exists for this surface and nothing but the user
+  agent is sent.
+- **It keeps nothing per user.** The surface `UpdateSurface::Mcp` is given no
+  update state folder and no credential store but the environment variable
+  `KATANA_UPDATE_TOKEN` of its own run. So the check is not recorded, a
+  version the person skipped in the window is still reported `available`
+  here, and `staged`, `skipped`, `auto`, `last_check` and `last` are what a
+  copy with nothing kept says (`none`, `none`, `on`, `never`, `none`). The
+  same call answers the same on every machine, which is what "read-only" has
+  to mean for a server a client starts unattended
+  (`UpdateVerbs.KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse`,
+  `UpdateVerbs.TheCheckUpdateToolGivesTheTwoRecordsAsTextAndAsObjects`).
+  What the copy *is* is another matter and is read for every surface: on
+  Windows `kind` is `installer` when the folder the per-user installer
+  recorded - a registry value of that user - is this copy's folder, and
+  `archive` otherwise. That is the install's record of itself, read and never
+  written; nothing a person chose is read with it.
+- **An agent never downloads and never applies.** Applying replaces the
+  programs of the install, `katana_mcp` among them, and the client that
+  started this server holds it open: the swap would wait for it and give up,
+  or the agent would be replacing the program it is speaking through. So
+  those are a person's lines, in the window or in `katana_cli`, and the
+  verbs refuse every line but `CHECK` and `STATUS` for this surface, naming
+  the tool and who does run the line.
+- **`UPDATE` lines are refused in the tools that run lines** -
+  `katana_run_commands` and `katana_run_script` - whatever the line, `UPDATE
+  CHECK` and `UPDATE STATUS` included, with `Unsupported: UPDATE lines are
+  not run by katana_mcp` and the tool's name, as the window's own verbs are
+  refused by name. The server marks its session as an agent's when it is
+  made (`Session::setUpdateSurface`), so no line reaches the verbs from here
+  (`McpServer.AnUpdateLineIsRefusedInEveryToolThatRunsLinesNamingTheUpdateTool`).
+  Rejected: letting the two read-only lines through. `katana_run_commands`
+  tells its client that it reaches no network (its open-world hint is false),
+  and a client that trusts the hint lets it run unattended; one line that
+  asked a server would make the hint false for every call. A tool of its own
+  carries its own hint
+  (`McpServer.TheUpdateToolIsListedReadOnlyAndOpenWorldAndTheToolsThatRunLinesAreNot`).
+  `HELP UPDATE` is a `HELP` line and is answered like any other.
+- **An interrupted update is put back before the server reads anything.**
+  The first thing `katana_mcp`'s `main()` does, as `katana_cli`'s does, is
+  `recoverInterruptedUpdate` (`src/katana_app/session.hpp`): when an update of
+  the install was cut short - a crash, a power cut - the install is put back
+  before a file of it is read (`include/katana/update/recover.hpp`). With
+  nothing interrupted, which is every start but that one, it is the listing
+  of one folder, and nothing at all in a build tree. What it has to say goes
+  to stderr, the server's log, never to the protocol's stream.
+
+`katana_cli` runs every line, and its tests are of a build tree
+(`src/katana_app/update_cli.cmake`): `UPDATE STATUS` says `kind=development`
+(`cli.update_status_in_a_build_tree_says_the_copy_is_a_development_one`),
+`UPDATE CHECK` says `update=unsupported` without asking any server
+(`cli.update_check_in_a_build_tree_is_unsupported_and_asks_no_server`), a
+`DOWNLOAD` or an `APPLY` without its `CONFIRM` is refused saying what the
+line with it does
+(`cli.update_download_without_confirm_is_refused_saying_what_confirm_does`),
+and `UPDATE APPLY CONFIRM` must be the last line of a run - the run ends,
+the session with it, and only then is the helper started, which starts
+nothing again afterwards
+(`cli.update_apply_confirm_that_is_not_the_last_line_is_refused`,
+`cli.update_apply_confirm_followed_only_by_notes_and_a_quit_is_the_last_line`).
+Which line that is, is read with the verbs' own splitter
+(`UpdateVerbs.TheLastLineRuleReadsALineAsTheVerbsDo`). Typed or piped on
+standard input, where the next line cannot be looked at without waiting for
+it, the session ends with the line and `katana_cli` says on stderr that
+nothing after it is run.
+
+The verbs themselves are run for real over a fake feed, a scratch install
+and the signed fixtures of the release tools in
+`tests/app/test_update_verbs.cpp`. A build tree is never updated, so what
+`katana_cli` does with an installed copy is tested there too, through the
+session it runs: `Session::setUpdateContextSource` hands the session the
+scratch install where it would read the running program's
+(`UpdateVerbs.KatanaClisSessionPrintsADownloadsProgressOnceAndKeepsThePreparedApplyToBeTaken`:
+each progress line printed once, the request handed over once, this process
+as the one the helper waits for, nothing to start again). A prepared apply
+that is not launched - a later one took its place, the session ended without
+its front end taking it, or the helper could not be started - has the
+helper's copy listed for the sweep the next start makes, so it does not stay
+behind (`abandonApply`,
+`UpdateVerbs.ASessionGivesUpAPreparedApplyThatALaterOneReplacesOrThatNobodyTook`).
+
 ## What the server adds to the command line
 
 Three rules that a typed command does not have, because a model is not a person
@@ -697,6 +837,10 @@ watching the window:
   `cli.a_window_verb_in_a_batch_fails_it`). An agent that needs linked views
   drives the window with `katana --command "VIEWS LINK 1,2"`
   (`docs/headless.md`).
+
+* **`UPDATE` lines are refused by name too**, naming `katana_check_update`:
+  an agent asks whether a newer Katana exists through that tool, and
+  downloads and installs nothing ("Updates", above).
 
 IFC 4.3 is reached as the window's IFC dialogs reach it, by lines: `EXPORT
 <file.ifc> ... PREVIEW` for the class each object would become, `EXPORT`,
@@ -731,8 +875,15 @@ project that matters.
 * `src/katana_app/mcp_customisation.cpp` - `katana_customisation`, built from
   the helpers of `src/katana_app/mcp_tools.hpp` as the geoprocessing tools
   are.
+* `src/katana_app/update_verbs.cpp` - the `UPDATE` verbs, over the update
+  engine (`include/katana/update/`): one function runs a line for the context
+  it is handed, so `katana_cli`, the window and `katana_check_update` run the
+  same code, and the tests run it on a fake feed. `mcp_server.cpp` builds the
+  tool's reply from the two records (`checkUpdateReply`, declared in
+  `src/katana_app/mcp_tools.hpp`).
 * `src/katana_app/mcp_main.cpp` - the process: the stdio transport
-  (newline-delimited JSON-RPC 2.0) and `--project`.
+  (newline-delimited JSON-RPC 2.0) and `--project`; before either, an
+  interrupted update of the install is put back ("Updates", above).
 
 **stdout belongs to the protocol.** A single stray line on it - a warning a
 verb prints, a library's `printf` - and the client reads a message that is not
@@ -754,6 +905,34 @@ anything else with the JSON-RPC error the specification names.
 
 ## Not done yet
 
+* **The update tool does not say what the person keeps.** It reads no
+  per-user setting, so it cannot tell an agent that a version was skipped,
+  that a release is already downloaded, or how the last update ended; the
+  window and `katana_cli` say those (`UPDATE STATUS`). Reading them would
+  make the tool's answer depend on whose machine the server runs on, and
+  nothing an agent may do follows from them while it neither downloads nor
+  applies.
+* **`UPDATE CHECK` does not say that the install folder cannot be written.**
+  A copy unpacked where its user may not write is offered a release like any
+  other; the helper refuses at the swap (`last=refused:root_not_writable` in
+  `UPDATE STATUS` afterwards), after the download. Asking the file system
+  beforehand, without writing into the install, is not written.
+* **`katana_cli`'s start of the helper has no test.** Everything up to the
+  prepared request is tested through the session
+  (`tests/app/test_update_verbs.cpp`); the few lines of `main()` after the
+  session has ended - `update::launchApply`, and the note on stderr when the
+  line was typed or piped - run only in an installed copy, and the shipped
+  programs cannot be given the test keys an installed copy in a test would
+  need (`include/katana/update/trust.hpp`).
+* **Two programs that change the update settings at the same instant can
+  lose one change.** A setting is changed by reading the state file and
+  writing it back, and `UPDATE CHECK` records its time the same way, into
+  the state as it is at the moment of writing - so nothing kept during the
+  seconds it spends hashing the installed files is undone. Between that
+  reading and the writing there are still some microseconds in which another
+  program's change is lost. Closing them needs a lock on the state file,
+  which the engine does not have; and no test holds the two programs at that
+  point, so the rule is kept by the code's shape and not by a test.
 * **The window is not driven.** The server runs its own session on project
   files; it does not reach into a running `katana` window. To see the result,
   save and open the project in the window. A bridge into the window (the same

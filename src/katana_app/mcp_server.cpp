@@ -3,9 +3,11 @@
 // Every tool is a thin shape over Session::run: a tool builds command lines,
 // runs them, and hands back what the session printed. So there is one
 // implementation of every verb, the one katana_cli and its tests exercise, and
-// a tool can never do something the command line cannot. (Two tools run no
-// line: katana_status and katana_customisation read the Document through cad,
-// for what no reply holds as structure, and change nothing.)
+// a tool can never do something the command line cannot. (Three tools run no
+// line and change nothing: katana_status and katana_customisation read the
+// Document through cad, for what no reply holds as structure, and
+// katana_check_update runs the UPDATE verbs' own CHECK and STATUS for an
+// agent's surface - the session refuses every UPDATE line here.)
 
 #include "mcp_server.hpp"
 #include "mcp_tools.hpp"
@@ -34,6 +36,7 @@
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
+#include "update_verbs.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
 #include "geo/gis_records.hpp"
@@ -613,7 +616,8 @@ const std::vector<Tool>& tools()
             "SCRIPT, GRID, EXAGGERATION, VIEWS and ZOOM are the desktop window's verbs and are "
             "refused here, saying so: plotting, view pictures, online data and the views need "
             "the window (or katana run headless with --command); a script file is "
-            "katana_run_script's.",
+            "katana_run_script's. UPDATE lines are refused here too, so that this tool reaches "
+            "no network: katana_check_update is the tool that checks for a newer Katana.",
             objectSchema(
                 Json{{"commands",
                       {{"type", "array"},
@@ -1038,6 +1042,40 @@ const std::vector<Tool>& tools()
                                std::string(redo ? "REDO " : "UNDO ") + std::to_string(steps));
             }});
 
+        // The one thing of the update system an agent has (update_verbs.hpp,
+        // UpdateSurface::Mcp): asking, and reading this copy's status. It runs
+        // no session line - an UPDATE line is refused in every tool that runs
+        // lines - so that katana_run_commands can go on telling its client it
+        // reaches no network, while this tool says that it does. It writes
+        // nothing: the Mcp surface keeps no per-user state.
+        list.push_back(Tool{
+            "katana_check_update", "Check for a Katana update",
+            "Ask the release server whether a newer Katana than this copy has been released, "
+            "and report this copy's update status. Read-only: it downloads nothing, installs "
+            "nothing and writes no file. An update is downloaded and installed by a person, in "
+            "the Katana window (Help > Check for Updates) or with katana_cli (UPDATE DOWNLOAD "
+            "CONFIRM, then UPDATE APPLY CONFIRM as the last line of a run) - never by an agent, "
+            "so the program this client holds open is never replaced under it, and UPDATE lines "
+            "sent to katana_run_commands are refused. It reaches the network: the release feed "
+            "is asked, and what it is sent of this copy is the program's version and platform "
+            "as the user agent. One thing more is sent in one case: when the environment "
+            "variable KATANA_UPDATE_TOKEN of this server's run holds an access token and the "
+            "public address answers that there is no such release (a private release "
+            "repository), that token is sent to api.github.com, and to no other host. A "
+            "development copy (a build tree) asks nobody and answers "
+            "update=unsupported reason=development_tree. The reply is two records, in "
+            "structuredContent as the objects check and status. check: update=available, "
+            "current, unreachable, unsupported or blocked, with installed, latest, files "
+            "(changed/total), download_bytes, notes_url, and reason and detail when there is "
+            "something to say. status: installed, target, kind=installer, archive or "
+            "development, staged, skipped, auto, last_check, token=present or absent (never "
+            "the token) and last. No per-user setting is read here, so staged, skipped, auto, "
+            "last_check and last are what a copy with none says.",
+            objectSchema(Json::object()), hints(true, false, true, true),
+            [](Session&, const Json&) {
+                return checkUpdateReply(katana::app::makeUpdateContext(UpdateSurface::Mcp));
+            }});
+
         // The customisation as structured data, from its own file
         // (mcp_customisation.cpp).
         list.push_back(customisationTool());
@@ -1237,6 +1275,102 @@ void refuseUndeclared(const Tool& tool, const Json& arguments)
 
 } // namespace
 
+namespace {
+
+// One reply record as an object: each key=value word a member, a value in
+// quotes read back as cad::recordValue wrote it (always text), and a plain
+// value of digits alone a number. A word that is no key=value - the name a
+// record begins with - is not a member.
+Json recordObject(std::string_view record)
+{
+    Json object = Json::object();
+    for (std::size_t at = 0; at < record.size();) {
+        if (record[at] == ' ') {
+            ++at;
+            continue;
+        }
+        const std::size_t equals = record.find('=', at);
+        const std::size_t blank = record.find(' ', at);
+        if (equals == std::string_view::npos || blank < equals) {
+            at = blank == std::string_view::npos ? record.size() : blank;
+            continue;
+        }
+        const std::string key(record.substr(at, equals - at));
+        at = equals + 1;
+        if (at < record.size() && record[at] == '"') {
+            std::string value;
+            for (++at; at < record.size() && record[at] != '"'; ++at) {
+                if (record[at] == '\\' && at + 1 < record.size()) {
+                    ++at;
+                }
+                value += record[at];
+            }
+            at = at < record.size() ? at + 1 : at; // past the closing quote
+            object[key] = std::move(value);
+            continue;
+        }
+        const std::size_t end = std::min(record.find(' ', at), record.size());
+        const std::string value(record.substr(at, end - at));
+        at = end;
+        // Eighteen digits fit a 64-bit number whatever they are.
+        const bool number = !value.empty() && value.size() <= 18 &&
+                            std::ranges::all_of(value, [](char c) { return c >= '0' && c <= '9'; });
+        if (number) {
+            object[key] = std::stoull(value);
+        } else {
+            object[key] = value;
+        }
+    }
+    return object;
+}
+
+// An UPDATE reply as an object: its first line is the record, and the text of
+// each `warning text="..."` after it an entry of `warnings`.
+Json updateReplyObject(const std::string& text)
+{
+    Json object = Json::object();
+    Json warnings = Json::array();
+    bool first = true;
+    for (std::string_view rest = text; !rest.empty();) {
+        const std::size_t end = rest.find('\n');
+        const std::string_view line = rest.substr(0, end);
+        if (first) {
+            object = recordObject(line);
+            first = false;
+        } else if (const Json extra = recordObject(line); extra.contains("text")) {
+            warnings.push_back(extra["text"]);
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(end + 1);
+    }
+    if (!warnings.empty()) {
+        object["warnings"] = std::move(warnings);
+    }
+    return object;
+}
+
+} // namespace
+
+ToolReply checkUpdateReply(const katana::app::UpdateContext& context)
+{
+    // The verbs' own two lines, run for the context given: what the tool says
+    // is what UPDATE CHECK and UPDATE STATUS say, word for word.
+    const auto check = katana::app::runUpdateLine(context, "UPDATE CHECK");
+    if (!check) {
+        return {"error: " + check.error().describe(), nullptr, true};
+    }
+    const auto status = katana::app::runUpdateLine(context, "UPDATE STATUS");
+    if (!status) {
+        return {"error: " + status.error().describe(), nullptr, true};
+    }
+    return {check->text + "\n" + status->text,
+            Json{{"check", updateReplyObject(check->text)},
+                 {"status", updateReplyObject(status->text)}},
+            false};
+}
+
 Json hints(bool readOnly, bool destructive, bool idempotent, bool openWorld)
 {
     Json annotations{{"readOnlyHint", readOnly}, {"openWorldHint", openWorld}};
@@ -1262,6 +1396,9 @@ LineOutcome runCaptured(Session& session, const std::string& line)
 Server::Server(Session& session, std::string version)
     : session_(session), version_(std::move(version))
 {
+    // An agent's session: every UPDATE line is refused in it, naming
+    // katana_check_update (session.hpp).
+    session_.setUpdateSurface(UpdateSurface::Mcp);
 }
 
 std::optional<std::string> Server::handle(std::string_view message)
