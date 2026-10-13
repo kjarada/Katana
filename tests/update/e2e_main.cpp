@@ -60,7 +60,8 @@
 //   preflight    stage= version= transaction= run= helper=
 //   launch       preflight's, then wait_pid= relaunch= launched=<transaction>
 //   recover      recover=ok
-//   a failure    error=<ErrorCode> reason=<token of update::fetchFailureReason> message= context=
+//   a failure    error=<ErrorCode> error_reason=<token of update::fetchFailureReason>
+//                error_message= error_context=
 //
 // EXIT CODES: 0 the call was made (a feed that cannot be read is an ANSWER, update=unreachable,
 // not a failure); 1 the engine answered with an error (the error= lines say which); 2 the
@@ -171,13 +172,14 @@ void sayNumber(std::string_view key, std::uint64_t value)
     std::cout << key << '=' << value << '\n';
 }
 
-// The error= lines of a failure, and the exit code that goes with them.
+// The error= lines of a failure, and the exit code that goes with them. Keys of their own: a
+// check that was made before the failure has already printed its `reason=`.
 int sayError(const core::Error& error)
 {
     say("error", core::toString(error.code));
-    say("reason", upd::fetchFailureReason(error));
-    say("message", error.message);
-    say("context", error.context);
+    say("error_reason", upd::fetchFailureReason(error));
+    say("error_message", error.message);
+    say("error_context", error.context);
     std::cout << std::flush;
     return kExitFailed;
 }

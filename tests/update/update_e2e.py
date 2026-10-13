@@ -824,9 +824,10 @@ def bad_member_hash(bench: Bench, args: argparse.Namespace) -> None:
     feed = bench.feed(bad.folder)
     refused = world.ask("stage", feed)
     expect_equal(refused.code, 1, "the exit code of stage")
-    expect_equal((refused.value("error"), refused.value("reason")), ("InvalidArgument", "staged_hash"),
+    expect_equal((refused.value("error"), refused.value("error_reason")), ("InvalidArgument", "staged_hash"),
                  "how stage fails (stage.hpp)")
-    expect(f"path={victim}" in refused.value("context"), f"the failure does not name the file: {refused.value('context')}")
+    expect(f"path={victim}" in refused.value("error_context"),
+           f"the failure does not name the file: {refused.value('error_context')}")
     expect(not refused.has("staged"), "stage said staged= after failing")
     stage = Path(refused.value("stage"))
     before = expect_only_verified(stage, v2, "after the failed download")
@@ -837,7 +838,7 @@ def bad_member_hash(bench: Bench, args: argparse.Namespace) -> None:
     world.expect_untouched("after the failed download")
     # A stage that is not complete is never applied.
     unready = world.engine("preflight", "--stage", stage)
-    expect_equal((unready.code, unready.value("reason")), (1, "staged_manifest"), "preflight on an incomplete stage")
+    expect_equal((unready.code, unready.value("error_reason")), (1, "staged_manifest"), "preflight on an incomplete stage")
     expect_equal(sorted(entry.name for entry in world.state.iterdir() if entry.name.startswith("run-")), [],
                  "helper copies left by a preflight that refused")
 
@@ -1243,7 +1244,7 @@ def token_first_hop_only(bench: Bench, args: argparse.Namespace) -> None:
     # ---- the storage host refuses: neither the token nor the signed address is in what is said ----
     feed.set_rules([fake.Rule("status", "*.zip", 403, "second")])
     refused = World(bench, "token-storage-refuses").engine("stage", *private, "--token", TOKEN)
-    expect_equal((refused.code, refused.value("reason")), (1, "http_403"), "stage when the storage host answers 403")
+    expect_equal((refused.code, refused.value("error_reason")), (1, "http_403"), "stage when the storage host answers 403")
     said = refused.out + refused.err
     expect(TOKEN not in said, "the token is in the failure's text")
     expect("FAKE-SIGNED-ADDRESS-SECRET" not in said, "the signed address's query is in the failure's text")
@@ -1282,9 +1283,9 @@ def download_fails(bench: Bench, args: argparse.Namespace) -> None:
     world = World(bench, "download_fails")
     feed = bench.feed(v2.folder, fake.Rule("ignore-range", "*.zip"))
     whole = world.ask("stage", feed)
-    expect_equal((whole.code, whole.value("error"), whole.value("reason")), (1, "Unsupported", "partial_downloads"),
+    expect_equal((whole.code, whole.value("error"), whole.value("error_reason")), (1, "Unsupported", "partial_downloads"),
                  "stage against a feed that ignores Range")
-    expect_equal(whole.value("message"), "this network does not allow partial downloads",
+    expect_equal(whole.value("error_message"), "this network does not allow partial downloads",
                  "the sentence for a network that ignores Range (ranges.hpp)")
     stage = Path(whole.value("stage"))
     expect_equal(staged_files(stage), {}, "what the stage holds after a refused download")
@@ -1292,7 +1293,7 @@ def download_fails(bench: Bench, args: argparse.Namespace) -> None:
 
     feed.set_rules([fake.Rule("truncate", "*.zip")])
     cut = world.ask("stage", feed)
-    expect_equal((cut.code, cut.value("error"), cut.value("reason")), (1, "FileImportFailure", "offline"),
+    expect_equal((cut.code, cut.value("error"), cut.value("error_reason")), (1, "FileImportFailure", "offline"),
                  "stage when the connection drops inside a range")
     expect_equal(staged_files(stage), {}, "what the stage holds after a dropped connection")
     expect(not (stage / "manifest.json").exists(), "a stage that failed says it is complete")
