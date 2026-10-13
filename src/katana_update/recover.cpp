@@ -298,8 +298,9 @@ void settleOne(const Path& root, const ApplyServices& services, const std::strin
         return;
     }
     if (const core::Status undone = rollback(root, name, services); !undone.ok()) {
-        // The journal says ROLLING_BACK now (or the folder would not go): every start finishes
-        // it, as it finishes any rollback that was cut off.
+        // However far it got, somebody finishes it: its first step writes ROLLING_BACK, and
+        // from then on every start does, as for any rollback that was cut off (journal.hpp,
+        // needsRecovery); had it failed before that step, the next `--recover` decides again.
         outcome.incomplete.push_back(name);
         return;
     }

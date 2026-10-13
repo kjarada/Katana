@@ -1145,12 +1145,15 @@ struct Unproved {
     Scenario& s() { return loop.scenario(); }
     [[nodiscard]] Path work() { return s().root / ".update" / transaction; }
     // `"<helper>" --recover <R>`: the helper in quotes, and the install folder quoted when it
-    // needs it (apply.hpp, step 4; TheRunOnceEntryIsRegisteredBeforeTheSwap... in test_apply.cpp
-    // holds the swap to the same text).
+    // needs it, both with the separators of the system - it is the shell that reads the command
+    // at the next logon (apply.hpp, step 4; TheRunOnceEntryIsRegisteredBeforeTheSwap... in
+    // test_apply.cpp holds the swap to the same text).
     [[nodiscard]] std::string command()
     {
-        return "\"" + core::pathToUtf8(helper) + "\" --recover " +
-               detail::quoteArgument(core::pathToUtf8(s().root));
+        Path program = helper;
+        Path folder = s().root;
+        return "\"" + core::pathToUtf8(program.make_preferred()) + "\" --recover " +
+               detail::quoteArgument(core::pathToUtf8(folder.make_preferred()));
     }
 
     Loop loop;

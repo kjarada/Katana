@@ -843,9 +843,9 @@ std::optional<Failure> Applier::begin()
     if (!earlier.left.empty()) {
         return refuse("interrupted_update",
                       "an earlier update is in place and has not been confirmed to start, so no "
-                      "new one is started over it. Open Katana's window, which confirms it - or "
-                      "run: katana_updater --recover \"" + core::pathToUtf8(root_) +
-                          "\", which confirms it or puts it back - and update again");
+                      "new one is started over it. Katana's window confirms it when it starts - "
+                      "or run: katana_updater --recover \"" + core::pathToUtf8(root_) +
+                          "\", which confirms it or puts it back - then update again");
     }
     // What is installed may be another version now (the rollback put it back).
     return readInstallRecord();
