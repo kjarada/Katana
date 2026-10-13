@@ -42,6 +42,7 @@
 #include "katana/core/error.hpp"
 #include "katana/update/apply.hpp"
 #include "katana/update/feed.hpp"
+#include "katana/update/fsops.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/manifest.hpp"
 #include "katana/update/plan.hpp"
@@ -86,6 +87,11 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 //
 // Progress never goes backwards and never passes its total, whatever the transport reports
 // (it starts a request again after a dropped connection).
+//
+// What is asked for is not Plan::ranges as it stands: the changed files that are not staged
+// yet are merged again (mergeRanges), so a resumed stage asks for less than the plan lists.
+// Folders `stage-<n>` beside `stageDir` with n below the manifest's sequence are removed (the
+// stage of a release this one outranks); nothing else beside it is touched.
 [[nodiscard]] core::Status stage(const Fetch& fetch, const FeedConfig& feed,
                                  const Manifest& manifest, const Plan& plan,
                                  const std::filesystem::path& stageDir, std::stop_token stop,
