@@ -1356,23 +1356,30 @@ void expectNothingButTheKeysInCommonWith(const Customisation& file, const Custom
             }
         }
     }
-    // Pure white is the one value not held to this. AS 5488 names the colour of
-    // communications white, so the library's communications colour is white,
-    // and white is the standard colour every drawing system starts from: a
-    // built-in that draws in it shares the value without sharing a design. The
-    // other 27 values are what shows the two are independent, and they stay at
-    // none in common.
-    const std::string white = Color{255, 255, 255, 255}.toHex();
+    // One value is not held to this: communications' own, which AS 5488 names
+    // white and the one table (utilityTypeColour) therefore makes pure white.
+    // White is the colour every drawing system starts from, so a built-in that
+    // draws in it shares the value without sharing a design. The exemption is
+    // that colour and no other white-ish one, it is one library colour, and the
+    // other 27 values are what shows the two are independent: they stay at none
+    // in common. (This is the one expectation of the colour work that was
+    // loosened after a run showed the collision, and it is the owner's to
+    // accept; docs/katana_standard.md says what the comparison excuses. A
+    // near-white would also print black, but it would not be AS 5488's white.)
+    const Color communications = katana::cad::utilities::utilityTypeColour(
+        katana::survey::subsurface::UtilityType::Telecommunications);
+    ASSERT_EQ(communications.toHex(), (Color{255, 255, 255, 255}.toHex()))
+        << "AS 5488 communications is white";
     std::size_t sharedValues = 0;
-    std::size_t whites = 0;
+    std::size_t exempt = 0;
     for (const auto& entry : file.colours.entries()) {
-        if (entry.colour.toHex() == white) {
-            ++whites;
+        if (entry.colour.toHex() == communications.toHex()) {
+            ++exempt;
             continue;
         }
         sharedValues += otherValues.count(entry.colour.toHex());
     }
-    EXPECT_EQ(whites, 1u) << "the one white is communications";
+    EXPECT_EQ(exempt, 1u) << "the one white is communications";
     EXPECT_EQ(sharedValues, 0u) << "colour values in common";
 
     std::set<std::string> otherLayers;

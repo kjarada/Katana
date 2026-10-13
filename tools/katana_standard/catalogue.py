@@ -385,9 +385,11 @@ def catalogue(data, root):
       "pen weights, text styles, legend labels, and every sentence of every meaning and of this document. "
       "`tools/katana_standard/originality.py` scans the two files for what a person could copy and the test "
       "`KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the result: no definition "
-      "name, group path, layer path, legend label, colour name or colour value (but white) is the same in both, "
-      "and no stroke list is, exactly, moved or scaled, beyond the dash, the plus and the square that any "
-      "library draws.")
+      "name, group path, layer path, legend label or colour name is the same in both, and no stroke list is, "
+      "exactly, moved or scaled, beyond the dash, the plus and the square that any library draws. Of colour "
+      "values one is in both: pure white, `#FFFFFF`, which AS 5488 names for communications and which every "
+      "drawing system has. The script and the tests excuse that one white, the communications colour of "
+      "`utilityTypeColour`, and no other value.")
     w("")
     if figures:
         w("**Where the other library is not clean, this one is.** The NSW customisation holds %d rules over %d "
