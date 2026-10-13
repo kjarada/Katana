@@ -16,7 +16,6 @@
 
 #include "apply_harness.hpp"
 #include "recover_internal.hpp"
-#include "seam_doubles.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -142,13 +141,20 @@ ReleaseSpec tiny(const std::string& version, std::uint64_t sequence)
     return release;
 }
 
-// A counting FsOps for "nothing to do costs next to nothing".
+// A counting FsOps for "nothing to do costs next to nothing" - and, for the cases that need the
+// update lock to be somebody else's, one whose lock is "held" for the first `heldFor` attempts
+// (always, when it is -1): a helper that is alive, or a scanner that has the lock file open for
+// a moment. `locks` counts every attempt, so one attempt can be told from a lock that was polled.
 class WatchedFs final : public ForwardingFs {
   public:
     using ForwardingFs::ForwardingFs;
     core::Result<std::unique_ptr<FileLock>> tryLock(const Path& p) override
     {
         ++locks;
+        if (heldFor < 0 || locks <= heldFor) {
+            return core::makeError(core::ErrorCode::InvalidState, "held",
+                                   "os_error=32 " + core::pathToUtf8(p));
+        }
         return inner_.tryLock(p);
     }
     core::Result<std::vector<Path>> listDirectory(const Path& p) const override
@@ -156,9 +162,61 @@ class WatchedFs final : public ForwardingFs {
         ++listings;
         return inner_.listDirectory(p);
     }
+    int heldFor = 0; // 0: the lock is free, as far as this wrapper goes
     mutable int locks = 0;
     mutable int listings = 0;
 };
+
+// A process seam that answers each question about the programs under the root from a list: the
+// k-th question (from 1) gets the k-th answer, and past the list nobody is running. The harness's
+// FakeProcesses can say "these programs, and then nobody"; a program started while a recovery is
+// deciding is the opposite. (The same double is in test_apply.cpp, for the swap's two questions:
+// both belong beside FakeProcesses in apply_harness.hpp.)
+class ScriptedProcesses final : public ProcessOps {
+  public:
+    struct Answer {
+        std::vector<RunningProgram> holders; // empty: nobody is running
+        bool fails = false;                  // the scan itself fails (no answer at all)
+    };
+
+    explicit ScriptedProcesses(std::vector<Answer> answers = {}) : answers_(std::move(answers)) {}
+
+    std::uint64_t pid = 1;
+    mutable int scans = 0;
+
+    std::uint64_t currentPid() const override { return pid; }
+    bool isAlive(std::uint64_t) const override { return false; }
+    core::Result<std::vector<RunningProgram>> holdersUnder(const Path&) const override
+    {
+        const int asked = ++scans;
+        if (asked > static_cast<int>(answers_.size())) {
+            return std::vector<RunningProgram>{};
+        }
+        const Answer& answer = answers_[static_cast<std::size_t>(asked - 1)];
+        if (answer.fails) {
+            return core::makeError(core::ErrorCode::Internal, "the snapshot failed");
+        }
+        return answer.holders;
+    }
+
+  private:
+    std::vector<Answer> answers_;
+};
+
+ScriptedProcesses::Answer nobody()
+{
+    return ScriptedProcesses::Answer{};
+}
+
+ScriptedProcesses::Answer somebody(std::uint64_t pid, const char* image)
+{
+    return ScriptedProcesses::Answer{{RunningProgram{pid, core::pathFromUtf8(image)}}, false};
+}
+
+ScriptedProcesses::Answer noAnswer()
+{
+    return ScriptedProcesses::Answer{{}, true};
+}
 
 } // namespace
 
@@ -1480,13 +1538,14 @@ TEST(SettleUnproved, AHeldLockIsALiveHelperAndNothingIsWrittenNotEvenTheRunOnceE
     const std::map<std::string, std::string> userBefore = snapshot(s.state);
 
     StdFs disk;
-    BusyLockFs busy(disk, -1);
+    WatchedFs busy(disk);
+    busy.heldFor = -1;
     FaultFs counting(busy);
     Rig rig(s, counting, "eeeeeeee");
     rig.timings.waitForHolders = std::chrono::milliseconds(300);
     EXPECT_EQ(settle(u, rig.services()), Settled::Busy);
 
-    EXPECT_GT(busy.attempts, 1) << "the lock is polled, as a recovery polls it: one refusal is not believed";
+    EXPECT_GT(busy.locks, 1) << "the lock is polled, as a recovery polls it: one refusal is not believed";
     EXPECT_EQ(counting.mutatingOperations(), 0u);
     EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
     EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";
@@ -1501,11 +1560,12 @@ TEST(SettleUnproved, ALockThatIsHeldOnlyForAMomentIsWaitedForAndTheUpdateIsThenS
     ASSERT_NO_FATAL_FAILURE(u.expectPremise());
     Scenario& s = u.s();
     StdFs disk;
-    BusyLockFs busy(disk, 3); // a scanner that has the lock file open for a moment
+    WatchedFs busy(disk);
+    busy.heldFor = 3; // a scanner that has the lock file open for a moment
     Rig rig(s, busy, "eeeeeeee");
     rig.timings.waitForHolders = std::chrono::seconds(5);
     EXPECT_EQ(settle(u, rig.services()), Settled::Healthy);
-    EXPECT_EQ(busy.attempts, 4) << "three refusals, then the lock";
+    EXPECT_EQ(busy.locks, 4) << "three refusals, then the lock";
     EXPECT_EQ(treeHash(s.root), s.v2Hash);
     EXPECT_TRUE(leftoversInUpdate(s.root).empty());
 }
@@ -1843,13 +1903,14 @@ TEST(ConfirmStarted, AHeldLockIsALiveHelperTheWindowAsksOnceAndChangesNothing)
     const std::map<std::string, std::string> userBefore = snapshot(s.state);
 
     StdFs disk;
-    BusyLockFs busy(disk, -1);
+    WatchedFs busy(disk);
+    busy.heldFor = -1;
     FaultFs counting(busy);
     FakeRegistry registry;
     registry.runOnce[std::string(kRunOnceName)] = u.command();
     EXPECT_EQ(detail::confirmStartedWith(s.root, s.state, counting, registry), Confirmed::Busy);
 
-    EXPECT_EQ(busy.attempts, 1) << "a window does not wait for the lock: it asks again later";
+    EXPECT_EQ(busy.locks, 1) << "a window does not wait for the lock: it asks again later";
     EXPECT_EQ(counting.mutatingOperations(), 0u) << "not even its marker is written under a live helper";
     EXPECT_EQ(difference(installBefore, wholeInstall(s)), "") << "the install was changed";
     EXPECT_EQ(difference(userBefore, snapshot(s.state)), "") << "the per-user folder was changed";

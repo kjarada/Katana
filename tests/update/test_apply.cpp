@@ -19,7 +19,6 @@
 #include "apply_harness.hpp"
 #include "command_line.hpp"
 #include "recover_internal.hpp"
-#include "seam_doubles.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1146,7 +1145,32 @@ TEST(ApplyLock, ARootThatCannotBeWrittenIsReportedAsSuch)
     EXPECT_EQ(treeHash(s.root), s.v1Hash);
 }
 
-// BusyLockFs (seam_doubles.hpp) answers "held" to the first attempts to take the lock, or always.
+namespace {
+
+// Answers "held" to the first `heldFor` attempts to take the lock (always, when it is -1): what a
+// virus scanner or an indexer that has the lock file open for a moment looks like to a program
+// that asks for it with share mode 0.
+class BusyLockFs final : public ForwardingFs {
+  public:
+    BusyLockFs(FsOps& inner, int heldFor) : ForwardingFs(inner), heldFor_(heldFor) {}
+
+    core::Result<std::unique_ptr<FileLock>> tryLock(const Path& p) override
+    {
+        ++attempts;
+        if (heldFor_ < 0 || attempts <= heldFor_) {
+            return core::makeError(core::ErrorCode::InvalidState, "held",
+                                   "os_error=32 " + core::pathToUtf8(p));
+        }
+        return inner_.tryLock(p);
+    }
+
+    int attempts = 0;
+
+  private:
+    int heldFor_;
+};
+
+} // namespace
 
 TEST(ApplyLock, ALockThatIsHeldOnlyForAMomentIsWaitedForNotMistakenForAnotherHelper)
 {
@@ -1342,8 +1366,68 @@ TEST(ApplyWait, ACancelWhileWaitingEndsTheWaitWithoutTouchingAnything)
 
 namespace {
 
-// One run of the swap with a process seam of the test's own in the place of the rig's: the
-// harness's FakeProcesses cannot say "nobody, and then somebody" (seam_doubles.hpp).
+// A process seam that answers each question about the programs under the root from a list. The
+// harness's FakeProcesses can say "these programs, for the first n questions, and then nobody";
+// the opposite - nobody at first, and somebody at a LATER question - is what a program started
+// while the helper works looks like, and this gives each question its own answer. (The same
+// double is in test_recover.cpp, for the recovery's two questions: both belong beside
+// FakeProcesses in apply_harness.hpp.)
+class ScriptedProcesses final : public ProcessOps {
+  public:
+    // What one question is answered with.
+    struct Answer {
+        std::vector<RunningProgram> holders; // empty: nobody is running
+        bool fails = false;                  // the scan itself fails (no answer at all)
+    };
+
+    // The k-th question (from 1) gets the k-th answer; past the list nobody is running.
+    explicit ScriptedProcesses(std::vector<Answer> answers = {}) : answers_(std::move(answers)) {}
+
+    std::uint64_t pid = 1;
+    // Called at each question with its number, before it is answered: where a test looks at the
+    // disk as it stands at that moment.
+    std::function<void(int)> onScan;
+    mutable int scans = 0;
+
+    std::uint64_t currentPid() const override { return pid; }
+    // No window is waited for in the cases that use this seam (waitPid is 0).
+    bool isAlive(std::uint64_t) const override { return false; }
+    core::Result<std::vector<RunningProgram>> holdersUnder(const Path&) const override
+    {
+        const int asked = ++scans;
+        if (onScan) {
+            onScan(asked);
+        }
+        if (asked > static_cast<int>(answers_.size())) {
+            return std::vector<RunningProgram>{};
+        }
+        const Answer& answer = answers_[static_cast<std::size_t>(asked - 1)];
+        if (answer.fails) {
+            return core::makeError(core::ErrorCode::Internal, "the snapshot failed");
+        }
+        return answer.holders;
+    }
+
+  private:
+    std::vector<Answer> answers_;
+};
+
+ScriptedProcesses::Answer nobody()
+{
+    return ScriptedProcesses::Answer{};
+}
+
+ScriptedProcesses::Answer somebody(std::uint64_t pid, const char* image)
+{
+    return ScriptedProcesses::Answer{{RunningProgram{pid, core::pathFromUtf8(image)}}, false};
+}
+
+ScriptedProcesses::Answer noAnswer()
+{
+    return ScriptedProcesses::Answer{{}, true};
+}
+
+// One run of the swap with that seam in the place of the rig's.
 ApplyResult runWith(Rig& rig, ProcessOps& processes)
 {
     const ApplyServices services{*rig.fs, processes, rig.launcher, rig.registry, testTrust(), rig.timings};
