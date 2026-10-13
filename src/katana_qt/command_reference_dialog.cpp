@@ -183,8 +183,8 @@ Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW|REGRADE|SCHEDULE   subsurfa
           utilities, on a schedule or what is drawn (HELP UTILITY)
 Update    UPDATE CHECK | STATUS | DOWNLOAD CONFIRM | APPLY CONFIRM | SKIP | BLOCKED CLEAR |
           SET AUTO | TOKEN   a newer Katana: asked about, downloaded and installed (Help >
-          Check for Updates, and File > Settings > Updates); the usage of each is under
-          Updates (HELP UPDATE)
+          Check for Updates, and File > Settings > Updates); the usage of each is
+          under Updates (HELP UPDATE)
 Quit      QUIT | EXIT   close the window; in a script, end the script
 Tools     a bare tool word typed here starts the tool: LINE, L, C, TR, or an id such as
           draw.circle.ttr; with arguments it is the interpreter's (LINE 0,0 10,0), and so
