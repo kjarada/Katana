@@ -15,6 +15,14 @@
 //
 // The server is a hop function behind update::makeFetch, so what is exercised is stage(), the
 // planner's ranges, the transport's rules and the inflater together, with no network.
+//
+// The stage folder is worked through the harness's portable file system (apply_harness.hpp,
+// StdFs under a HookFs), handed to the forms of stage() and preflight() that take one: the
+// system's own (makeSystemFsOps) is written for Windows only so far, and these tests are of the
+// staging, which is the same code on every platform. The forms without the argument - what the
+// programs call - are run once through the file system that ships, at the end, on Windows.
+// Nothing is ever started: the launcher is a fake, so the "helper" a test puts in an install is
+// any bytes at the helper's name.
 
 #include <gtest/gtest.h>
 
@@ -331,7 +339,8 @@ struct Rig {
         return stage(fetch, feed, manifest, thePlan, stageDir, stop,
                      [this](std::uint64_t done, std::uint64_t total) {
                          progress.emplace_back(done, total);
-                     });
+                     },
+                     hooked);
     }
 
     h::Scratch scratch;
@@ -343,6 +352,9 @@ struct Rig {
     Manifest manifest;
     Plan thePlan;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> progress;
+    // The disk, and over it the hooks a test breaks a write or names the free space with.
+    h::StdFs disk;
+    h::HookFs hooked{disk};
 };
 
 // Every regular file under `folder`, as '/'-separated paths relative to it.
@@ -625,6 +637,8 @@ TEST(Stage, ATruncatedOrMisplacedRangeIsRefusedAndStagesNothing)
         server.mutate = [](std::string& body) { body.pop_back(); }; // Content-Range still says all of it
         const core::Status status = rig.run(makeFetch(server.hop()));
         ASSERT_FALSE(status.ok());
+        EXPECT_EQ(status.error().code, core::ErrorCode::FileImportFailure);
+        EXPECT_EQ(reasonOf(status), "bad_range") << "a 206 that is not the range, not a status";
         EXPECT_TRUE(filesUnder(rig.stageDir).empty());
     }
     {
@@ -633,6 +647,7 @@ TEST(Stage, ATruncatedOrMisplacedRangeIsRefusedAndStagesNothing)
         PayloadServer server(rig.v2Zip + "extra");
         const core::Status status = rig.run(makeFetch(server.hop()));
         ASSERT_FALSE(status.ok());
+        EXPECT_EQ(reasonOf(status), "bad_range");
         EXPECT_TRUE(filesUnder(rig.stageDir).empty());
     }
     {
@@ -649,8 +664,29 @@ TEST(Stage, ATruncatedOrMisplacedRangeIsRefusedAndStagesNothing)
                                  std::to_string(rig.v2Zip.size());
             return core::Result<HttpHopReply>(reply);
         };
-        EXPECT_FALSE(rig.run(makeFetch(server.hop())).ok());
+        EXPECT_EQ(reasonOf(rig.run(makeFetch(server.hop()))), "bad_range");
         EXPECT_TRUE(filesUnder(rig.stageDir).empty());
+    }
+}
+
+TEST(Stage, ATransportThatHandsOverABodyOfTheWrongLengthIsRefusedByTheStageItself)
+{
+    // makeFetch holds a range to its length; a Fetch of another making (a test's, a later
+    // transport's) may not, and the slices cut from the body are only right if it is that long.
+    FixtureRig rig("stage_short_range");
+    for (const std::size_t length : {std::size_t{0}, std::size_t{2948}, std::size_t{2950}}) {
+        std::size_t asked = 0;
+        const Fetch careless = [&](const FetchRequest&, std::stop_token,
+                                   ProgressFn) -> core::Result<std::string> {
+            ++asked;
+            return std::string(length, 'x'); // the range is 2949 bytes
+        };
+        const core::Status status = rig.run(careless);
+        ASSERT_FALSE(status.ok()) << length;
+        EXPECT_EQ(status.error().code, core::ErrorCode::FileImportFailure) << length;
+        EXPECT_EQ(reasonOf(status), "short_range") << length;
+        EXPECT_EQ(asked, 1u) << length;
+        EXPECT_TRUE(filesUnder(rig.stageDir).empty()) << length;
     }
 }
 
@@ -785,11 +821,13 @@ TEST(Stage, AStopRequestedBetweenTwoRequestsMakesNoFurtherRequest)
     int calls = 0;
     const core::Status status =
         stage(makeFetch(server.hop()), rig.feed, rig.manifest, rig.thePlan, rig.stageDir,
-              source.get_token(), [&](std::uint64_t, std::uint64_t) {
+              source.get_token(),
+              [&](std::uint64_t, std::uint64_t) {
                   if (++calls == 4) {
                       source.request_stop();
                   }
-              });
+              },
+              rig.hooked);
     ASSERT_FALSE(status.ok());
     EXPECT_EQ(reasonOf(status), "cancelled");
     EXPECT_EQ(server.hops.size(), 1u) << "no request is made once the stop is seen";
@@ -844,6 +882,72 @@ TEST(Stage, ARecordOfAnEarlierCompleteStageDoesNotSurviveAFailedRun)
     EXPECT_FALSE(h::isPresent(rig.stageDir / "manifest.json.sig"));
 }
 
+TEST(Stage, AFileThatCannotBePutInItsPlaceFailsTheStageAndLeavesNoHalfFile)
+{
+    // The disk refuses the rename of bin/b.dll to its final name (error 5, as a file somebody
+    // holds open gives). a.dll, before it in the same range, is staged; b.dll is under no name
+    // at all; and the run that follows a repaired disk asks only for what is missing.
+    Rig rig("stage_rename_fails");
+    const Built built = build(threeRanges());
+    rig.use(built);
+    rig.hooked.beforeRename = [](const h::Path&, const h::Path& to) -> std::optional<core::Status> {
+        if (to.filename() == "b.dll") {
+            return h::injected(5, to);
+        }
+        return std::nullopt;
+    };
+    PayloadServer server(built.payload);
+    const core::Status status = rig.run(makeFetch(server.hop()));
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, core::ErrorCode::FileExportFailure);
+    EXPECT_EQ(reasonOf(status), "write_failed");
+    // The token, then the manifest's path, then the file system's own number (fsops.hpp).
+    EXPECT_TRUE(status.error().context.starts_with("reason=write_failed; path=bin/b.dll; os_error=5 "))
+        << status.error().context;
+    EXPECT_EQ(server.hops.size(), 1u) << "nothing more is fetched into a folder that refuses";
+    EXPECT_EQ(filesUnder(rig.stageDir), names({"bin/a.dll"}));
+    EXPECT_FALSE(h::isPresent(rig.stageDir / ".partial"));
+
+    rig.hooked.beforeRename = nullptr;
+    PayloadServer second(built.payload);
+    ASSERT_TRUE(rig.run(makeFetch(second.hop())).ok());
+    // b.dll alone (a.dll, 500 bytes before it, is staged), then the two far ranges.
+    ASSERT_EQ(second.ranges.size(), 3u);
+    EXPECT_EQ(second.ranges[0], (Range{3549, 45}));
+    EXPECT_EQ(second.ranges[1], (Range{2100746, 3145990}));
+    EXPECT_EQ(second.ranges[2], (Range{6819600, 15}));
+    for (const Placed& placed : built.placed) {
+        EXPECT_EQ(h::readText(rig.stageDir / placed.path), placed.content) << placed.path;
+    }
+}
+
+TEST(Stage, ProgressNeverGoesBackwardsOrPastTheTotalWhateverTheTransportReports)
+{
+    // One member of 100 bytes: a stored block of 105, so one request of 105 bytes. The transport
+    // counts 80 bytes, starts the request again (a dropped connection: 10), and then reports more
+    // than there is.
+    Rig rig("stage_progress_restart");
+    const Built built = build({{"bin/a.dll", pattern(100, 1), FileClass::Lib, 0}});
+    rig.use(built);
+    PayloadServer server(built.payload);
+    const HopFn hop = [&](const HttpHop& one, std::stop_token stop,
+                          ProgressFn progress) -> core::Result<HttpHopReply> {
+        progress(80, 105);
+        progress(10, 105);
+        progress(100000, 0);
+        return server.hop()(one, stop, ProgressFn{});
+    };
+    ASSERT_TRUE(rig.run(makeFetch(hop)).ok());
+    ASSERT_GE(rig.progress.size(), 5u);
+    EXPECT_EQ(rig.progress[0], (std::pair<std::uint64_t, std::uint64_t>{0, 105}));
+    EXPECT_EQ(rig.progress[1], (std::pair<std::uint64_t, std::uint64_t>{80, 105}));
+    EXPECT_EQ(rig.progress[2], (std::pair<std::uint64_t, std::uint64_t>{80, 105}))
+        << "the restart is not shown as a step back";
+    EXPECT_EQ(rig.progress[3], (std::pair<std::uint64_t, std::uint64_t>{105, 105}))
+        << "and no more than the request holds";
+    EXPECT_EQ(rig.progress.back(), (std::pair<std::uint64_t, std::uint64_t>{105, 105}));
+}
+
 TEST(Stage, TheStagedRecordIsTheSignedBytesAndTheSignatureLineExactly)
 {
     Rig rig("stage_record");
@@ -876,6 +980,60 @@ TEST(Stage, NotEnoughFreeSpaceIsRefusedBeforeAnythingIsFetched)
     EXPECT_TRUE(filesUnder(rig.stageDir).empty());
 }
 
+TEST(Stage, TheFreeSpaceNeededIsThePlansFigureLessWhatIsAlreadyStagedToTheByte)
+{
+    // The four files of threeRanges() are 3000 + 40 + 3145745 + 10 = 3148795 bytes, and 2.6 times
+    // that is 8186867 exactly (3148795 * 26 = 81868670). A volume with one byte less is refused
+    // before anything is asked for; a volume with exactly that much is not.
+    const Built built = build(threeRanges());
+    {
+        Rig rig("stage_space_exact");
+        rig.use(built);
+        ASSERT_EQ(rig.thePlan.requiredFreeBytes, 8186867u);
+        rig.hooked.freeBytes = 8186866;
+        PayloadServer refused(built.payload);
+        const core::Status status = rig.run(makeFetch(refused.hop()));
+        ASSERT_FALSE(status.ok());
+        EXPECT_EQ(reasonOf(status), "low_disk_space");
+        EXPECT_EQ(status.error().context,
+                  "reason=low_disk_space; need=8186867 bytes; free=8186866 bytes");
+        EXPECT_TRUE(refused.hops.empty());
+
+        rig.hooked.freeBytes = 8186867;
+        PayloadServer enough(built.payload);
+        EXPECT_TRUE(rig.run(makeFetch(enough.hop())).ok());
+    }
+    {
+        // a.dll and b.dll (3040 bytes) are staged by a run that is then cancelled. They are on
+        // the disk already, so what the next run needs free is 8186867 - 3040 = 8183827.
+        Rig rig("stage_space_resumed");
+        rig.use(built);
+        std::stop_source source;
+        PayloadServer first(built.payload);
+        first.before = [&](std::size_t index) {
+            if (index == 1) {
+                source.request_stop();
+            }
+        };
+        ASSERT_FALSE(rig.run(makeFetch(first.hop()), source.get_token()).ok());
+        ASSERT_EQ(filesUnder(rig.stageDir), names({"bin/a.dll", "bin/b.dll"}));
+
+        rig.hooked.freeBytes = 8183826;
+        PayloadServer refused(built.payload);
+        const core::Status status = rig.run(makeFetch(refused.hop()));
+        ASSERT_FALSE(status.ok());
+        EXPECT_EQ(status.error().context,
+                  "reason=low_disk_space; need=8183827 bytes; free=8183826 bytes");
+        EXPECT_TRUE(refused.hops.empty());
+        EXPECT_EQ(filesUnder(rig.stageDir), names({"bin/a.dll", "bin/b.dll"}))
+            << "what was staged is kept for the day there is room";
+
+        rig.hooked.freeBytes = 8183827;
+        PayloadServer enough(built.payload);
+        EXPECT_TRUE(rig.run(makeFetch(enough.hop())).ok());
+    }
+}
+
 TEST(Stage, APlanOfTwoAndAHalfTimesTheChangedBytesIsThePlansFigureAndItIsHonoured)
 {
     // plan() computes ceil(2.6 * changedBytes) (plan.hpp); stage() takes that figure as given and
@@ -898,31 +1056,31 @@ TEST(Stage, AnUnverifiedManifestOrAPlanThatIsNotItsIsRefused)
 
     Manifest unverified = built.manifest;
     unverified.signedJson.clear();
-    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, unverified, rig.thePlan, rig.stageDir, {}, {})),
+    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, unverified, rig.thePlan, rig.stageDir, {}, {}, rig.hooked)),
               "unverified_manifest");
     unverified = built.manifest;
     unverified.signatureLine.clear();
-    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, unverified, rig.thePlan, rig.stageDir, {}, {})),
+    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, unverified, rig.thePlan, rig.stageDir, {}, {}, rig.hooked)),
               "unverified_manifest");
 
     Manifest notify = built.manifest;
     notify.notifyOnly = true;
-    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, notify, rig.thePlan, rig.stageDir, {}, {})), "notify_only");
+    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, notify, rig.thePlan, rig.stageDir, {}, {}, rig.hooked)), "notify_only");
     Manifest noPayload = built.manifest;
     noPayload.payload.reset();
-    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, noPayload, rig.thePlan, rig.stageDir, {}, {})), "notify_only");
+    EXPECT_EQ(reasonOf(stage(fetch, rig.feed, noPayload, rig.thePlan, rig.stageDir, {}, {}, rig.hooked)), "notify_only");
 
     Plan other = rig.thePlan;
     other.files.pop_back();
-    EXPECT_EQ(stage(fetch, rig.feed, built.manifest, other, rig.stageDir, {}, {}).error().code,
+    EXPECT_EQ(stage(fetch, rig.feed, built.manifest, other, rig.stageDir, {}, {}, rig.hooked).error().code,
               core::ErrorCode::InvalidArgument);
     Plan wild = rig.thePlan;
     wild.files[0].index = 99;
-    EXPECT_EQ(stage(fetch, rig.feed, built.manifest, wild, rig.stageDir, {}, {}).error().code,
+    EXPECT_EQ(stage(fetch, rig.feed, built.manifest, wild, rig.stageDir, {}, {}, rig.hooked).error().code,
               core::ErrorCode::InvalidArgument);
-    EXPECT_EQ(stage(fetch, rig.feed, built.manifest, rig.thePlan, fs::path{}, {}, {}).error().code,
+    EXPECT_EQ(stage(fetch, rig.feed, built.manifest, rig.thePlan, fs::path{}, {}, {}, rig.hooked).error().code,
               core::ErrorCode::InvalidArgument);
-    EXPECT_EQ(stage(Fetch{}, rig.feed, built.manifest, rig.thePlan, rig.stageDir, {}, {}).error().code,
+    EXPECT_EQ(stage(Fetch{}, rig.feed, built.manifest, rig.thePlan, rig.stageDir, {}, {}, rig.hooked).error().code,
               core::ErrorCode::InvalidArgument);
     EXPECT_TRUE(server.hops.empty());
 }
@@ -1153,7 +1311,7 @@ TEST(Preflight, TheInstalledHelperIsCopiedToTheRunFolderAndRunWithSelftest)
     h::FakeLauncher launcher;
     const Manifest manifest = manifestWithHelper(1, "STAGED HELPER", rig.root);
     const core::Result<PreparedApply> prepared =
-        preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+        preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
 
     EXPECT_TRUE(isValidTransactionId(prepared->transaction));
@@ -1180,7 +1338,7 @@ TEST(Preflight, ANewerProtocolRunsTheStagedHelperAfterItsHashIsChecked)
     const std::string name = core::pathToUtf8(rig.helperPath.filename());
 
     // Not staged yet: refused, with no run folder left behind.
-    auto missing = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    auto missing = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_FALSE(missing.ok());
     EXPECT_EQ(fetchFailureReason(missing.error()), "helper_missing");
     EXPECT_TRUE(rig.runFolders().empty());
@@ -1188,14 +1346,14 @@ TEST(Preflight, ANewerProtocolRunsTheStagedHelperAfterItsHashIsChecked)
 
     // Staged but not the signed bytes: refused.
     h::writeText(rig.stageDir / "bin" / name, "SOMETHING ELSE");
-    auto wrong = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    auto wrong = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_FALSE(wrong.ok());
     EXPECT_EQ(fetchFailureReason(wrong.error()), "helper_missing");
     EXPECT_TRUE(rig.runFolders().empty());
 
     // Staged and right: that one runs, not the installed one.
     h::writeText(rig.stageDir / "bin" / name, "STAGED HELPER protocol 2");
-    const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
     EXPECT_EQ(h::readText(prepared->helper), "STAGED HELPER protocol 2");
     ASSERT_EQ(launcher.ran.size(), 1u);
@@ -1208,7 +1366,7 @@ TEST(Preflight, ANewerProtocolWithNoHelperInTheManifestIsRefused)
     PreflightRig rig("preflight_no_helper");
     h::FakeLauncher launcher;
     const Built built = build({{"share/other.txt", "o", FileClass::Data, 0}}, kApplierProtocol + 1);
-    const auto prepared = preflight(built.manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    const auto prepared = preflight(built.manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_FALSE(prepared.ok());
     EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_missing");
     EXPECT_TRUE(rig.runFolders().empty());
@@ -1227,7 +1385,7 @@ TEST(Preflight, AHelperThatFailsItsSelftestIsReportedAndLeavesNoRunFolder)
             result.output = "selftest: OpenSSL could not be initialised\n";
             return result;
         };
-        const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+        const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
         ASSERT_FALSE(prepared.ok());
         EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_failed");
         EXPECT_NE(prepared.error().context.find("exit=3"), std::string::npos);
@@ -1241,7 +1399,7 @@ TEST(Preflight, AHelperThatFailsItsSelftestIsReportedAndLeavesNoRunFolder)
             result.timedOut = true;
             return result;
         };
-        const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+        const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
         ASSERT_FALSE(prepared.ok());
         EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_timeout");
         EXPECT_TRUE(rig.runFolders().empty());
@@ -1251,7 +1409,7 @@ TEST(Preflight, AHelperThatFailsItsSelftestIsReportedAndLeavesNoRunFolder)
         launcher.onRun = [](const SpawnRequest&) -> core::Result<SpawnResult> {
             return core::makeError(core::ErrorCode::FileImportFailure, "CreateProcess failed: 193");
         };
-        const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+        const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
         ASSERT_FALSE(prepared.ok());
         EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_not_started");
         EXPECT_NE(prepared.error().message.find("193"), std::string::npos);
@@ -1265,13 +1423,13 @@ TEST(Preflight, AnInstallWithoutAHelperIsRefusedBeforeAnythingIsCreated)
     fs::remove(rig.helperPath);
     h::FakeLauncher launcher;
     const Manifest manifest = manifestWithHelper(1, "x", rig.root);
-    const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    const auto prepared = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_FALSE(prepared.ok());
     EXPECT_EQ(fetchFailureReason(prepared.error()), "helper_missing");
     EXPECT_TRUE(rig.runFolders().empty());
     EXPECT_TRUE(launcher.ran.empty());
 
-    EXPECT_EQ(preflight(manifest, rig.install, rig.stageDir, fs::path{}, launcher).error().code,
+    EXPECT_EQ(preflight(manifest, rig.install, rig.stageDir, fs::path{}, launcher, rig.hooked).error().code,
               core::ErrorCode::InvalidArgument);
 }
 
@@ -1280,13 +1438,94 @@ TEST(Preflight, EachRunGetsItsOwnTransactionAndFolder)
     PreflightRig rig("preflight_twice");
     h::FakeLauncher launcher;
     const Manifest manifest = manifestWithHelper(1, "x", rig.root);
-    const auto first = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
-    const auto second = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    const auto first = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
+    const auto second = preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
     ASSERT_TRUE(first.ok());
     ASSERT_TRUE(second.ok());
     EXPECT_NE(first->transaction, second->transaction);
     EXPECT_NE(first->runDirectory, second->runDirectory);
     EXPECT_EQ(rig.runFolders().size(), 2u);
 }
+
+TEST(Preflight, AHelperThatCannotBeCopiedIsAWriteFailureThatLeavesNoRunFolderAndStartsNothing)
+{
+    PreflightRig rig("preflight_copy_fails");
+    h::FakeLauncher launcher;
+    const Manifest manifest = manifestWithHelper(1, "x", rig.root);
+    rig.hooked.beforeCopy = [](const h::Path&, const h::Path& to) -> std::optional<core::Status> {
+        return h::injected(112, to); // ERROR_DISK_FULL
+    };
+    const auto prepared =
+        preflight(manifest, rig.install, rig.stageDir, rig.stateDir, launcher, rig.hooked);
+    ASSERT_FALSE(prepared.ok());
+    EXPECT_EQ(prepared.error().code, core::ErrorCode::FileExportFailure);
+    EXPECT_EQ(fetchFailureReason(prepared.error()), "write_failed");
+    EXPECT_NE(prepared.error().context.find("os_error=112"), std::string::npos)
+        << prepared.error().context;
+    EXPECT_TRUE(rig.runFolders().empty());
+    EXPECT_TRUE(launcher.ran.empty()) << "a helper that was not copied is not started";
+}
+
+// ---- once through the file system that ships --------------------------------------------------
+
+#ifdef _WIN32
+
+// Everything above hands stage() and preflight() the harness's portable file system. The
+// programs call the forms without one, which use makeSystemFsOps: long paths, and a rename that
+// waits out a virus scanner. The fixture release once through those, from an empty stage to a
+// preflighted helper, and once more to see the resume find its own files.
+TEST(StageOnTheSystemFileSystem, TheFixtureReleaseIsStagedResumedAndItsHelperPreflighted)
+{
+    FixtureRig rig("stage_system_fs");
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> progress;
+    const ProgressFn record = [&](std::uint64_t done, std::uint64_t total) {
+        progress.emplace_back(done, total);
+    };
+
+    PayloadServer server(rig.v2Zip);
+    const core::Status status = stage(makeFetch(server.hop()), rig.feed, rig.manifest,
+                                      rig.thePlan, rig.stageDir, std::stop_token{}, record);
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    EXPECT_EQ(filesUnder(rig.stageDir),
+              names({"bin/katana.exe", "bin/libnew-2.dll", "share/katana/help/index.txt",
+                     "share/katana/news.txt", "share/katana/readme.txt", "manifest.json",
+                     "manifest.json.sig"}));
+    for (const char* path : {"bin/katana.exe", "bin/libnew-2.dll", "share/katana/help/index.txt",
+                             "share/katana/news.txt", "share/katana/readme.txt"}) {
+        EXPECT_EQ(h::readText(rig.stageDir / path), rig.v2File(path)) << path;
+    }
+    EXPECT_EQ(h::readText(rig.stageDir / "manifest.json"),
+              h::readText(h::fixtureFolder() / "release/v2/Katana-update-win64.json"));
+    ASSERT_EQ(server.ranges.size(), 1u);
+    EXPECT_EQ(server.ranges[0], (Range{44, 2949}));
+    ASSERT_FALSE(progress.empty());
+    EXPECT_EQ(progress.back(), (std::pair<std::uint64_t, std::uint64_t>{2949, 2949}));
+
+    // One staged file is damaged: the second run asks for that file and no other.
+    h::writeText(rig.stageDir / "share/katana/news.txt", "not the news");
+    PayloadServer second(rig.v2Zip);
+    ASSERT_TRUE(stage(makeFetch(second.hop()), rig.feed, rig.manifest, rig.thePlan, rig.stageDir,
+                      std::stop_token{}, ProgressFn{})
+                    .ok());
+    ASSERT_EQ(second.ranges.size(), 1u);
+    EXPECT_EQ(second.ranges[0], (Range{725, 54})) << "news.txt: offset 725, csize 54";
+    EXPECT_EQ(h::readText(rig.stageDir / "share/katana/news.txt"),
+              rig.v2File("share/katana/news.txt"));
+
+    // The helper: any bytes at its name (the launcher is a fake; nothing is started).
+    const h::Path installedHelper = installedProgram(rig.root, "katana_updater");
+    h::writeText(installedHelper, "THE INSTALLED HELPER");
+    h::FakeLauncher launcher;
+    const core::Result<PreparedApply> prepared =
+        preflight(rig.manifest, rig.install, rig.stageDir, rig.stateDir, launcher);
+    ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
+    EXPECT_EQ(prepared->runDirectory, runPath(rig.stateDir, prepared->transaction));
+    EXPECT_EQ(h::readText(prepared->helper), "THE INSTALLED HELPER");
+    ASSERT_EQ(launcher.ran.size(), 1u);
+    EXPECT_EQ(launcher.ran[0].executable, prepared->helper);
+    EXPECT_EQ(launcher.ran[0].arguments, (std::vector<std::string>{"--selftest"}));
+}
+
+#endif // _WIN32
 
 } // namespace

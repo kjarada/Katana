@@ -75,16 +75,31 @@ stagedSignaturePath(const std::filesystem::path& stageDir)
 // have theirs: http_<status>, offline, html_page, partial_downloads, cancelled):
 //   staged_hash      a member inflated to bytes that are not the signed file
 //   staged_corrupt   a member could not be unpacked, or is not the signed length
-//   write_failed     the stage folder could not be written
+//   write_failed     the stage folder could not be written; the file system's own
+//                    `os_error=<n>` and path follow the token (fsops.hpp)
 //   low_disk_space   the volume has less than the plan's requiredFreeBytes (less what is staged)
-//   short_range      the server sent a body that is not the range's length
+//   short_range      the transport handed over a body that is not the range's length (a Fetch
+//                    of makeFetch refuses that itself, as bad_range: feed.hpp)
 //   unverified_manifest / notify_only / no_token   the call is not one stage() can serve
 //   asset_missing / payload_mismatch / malformed   the private route's release listing
-// preflight's: helper_missing, helper_not_started, helper_timeout, helper_failed.
+// preflight's: helper_missing, helper_not_started, helper_timeout, helper_failed, write_failed.
+//
+// Progress never goes backwards and never passes its total, whatever the transport reports
+// (it starts a request again after a dropped connection).
 [[nodiscard]] core::Status stage(const Fetch& fetch, const FeedConfig& feed,
                                  const Manifest& manifest, const Plan& plan,
                                  const std::filesystem::path& stageDir, std::stop_token stop,
                                  ProgressFn progress);
+
+// The same, through the file system given instead of the system's (makeSystemFsOps, which the
+// form above uses). It is how the tests run the staging on every platform - the system's own
+// file system is written for Windows only so far (fsops.hpp), so the form above answers
+// write_failed "not implemented" elsewhere - and how they make a write fail. `fs` must be one
+// over the real disk: a member is hashed while a stream writes it, which no FsOps call does.
+[[nodiscard]] core::Status stage(const Fetch& fetch, const FeedConfig& feed,
+                                 const Manifest& manifest, const Plan& plan,
+                                 const std::filesystem::path& stageDir, std::stop_token stop,
+                                 ProgressFn progress, FsOps& fs);
 
 // What launchApply needs, once the helper has been copied and has proved it
 // starts.
@@ -101,5 +116,10 @@ struct PreparedApply {
 [[nodiscard]] core::Result<PreparedApply>
 preflight(const Manifest& manifest, const Install& install, const std::filesystem::path& stageDir,
           const std::filesystem::path& stateDir, Launcher& launcher);
+
+// The same, through the file system given (see stage above).
+[[nodiscard]] core::Result<PreparedApply>
+preflight(const Manifest& manifest, const Install& install, const std::filesystem::path& stageDir,
+          const std::filesystem::path& stateDir, Launcher& launcher, FsOps& fs);
 
 } // namespace katana::update

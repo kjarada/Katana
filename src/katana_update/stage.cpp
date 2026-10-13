@@ -11,16 +11,27 @@
 //
 // Nothing here trusts what it fetched: a member is believed only by its hash, which is in the
 // signed manifest, and the helper checks the staged files by hash again before it copies them
-// (apply.hpp, step 3).
+// (apply.hpp, step 3). That second check is also why a member is written by a plain stream and
+// not flushed to the disk: a staged file a power cut left short fails its hash at the swap,
+// nothing is touched, and the next download replaces it.
+//
+// The folder is worked through an FsOps (fsops.hpp), the system's unless one is given. A member
+// is hashed while it is written, by a stream, so the FsOps must be one over the real disk; what
+// it adds is the real file system's long paths and its patience with a virus scanner on Windows,
+// and the tests' ability to run the same code on every platform and to break a write.
 
 #include "katana/update/stage.hpp"
 
 #include <algorithm>
 #include <charconv>
+#include <cstdint>
 #include <fstream>
+#include <memory>
 #include <optional>
+#include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "katana/core/path_text.hpp"
 #include "katana/core/sha256.hpp"
@@ -57,6 +68,26 @@ core::Error stageError(core::ErrorCode code, std::string message, std::string_vi
 core::Error cancelledError()
 {
     return stageError(core::ErrorCode::InvalidState, "cancelled", "cancelled");
+}
+
+// The stage folder refused something. `why` is the file system's own Error: its message is
+// joined to the sentence, and its context (`os_error=<n>` and the path, fsops.hpp) follows the
+// token, where a person looking for the cause finds the number.
+core::Error writeFailed(std::string what, const core::Error& why,
+                        std::string_view manifestPath = {})
+{
+    std::string extra;
+    if (!manifestPath.empty()) {
+        extra = "path=" + std::string(manifestPath);
+    }
+    if (!why.context.empty()) {
+        if (!extra.empty()) {
+            extra += "; ";
+        }
+        extra += why.context;
+    }
+    return stageError(core::ErrorCode::FileExportFailure, std::move(what) + ": " + why.message,
+                      "write_failed", extra);
 }
 
 fs::path finalPathOf(const fs::path& stageDir, const ManifestFile& file)
@@ -146,7 +177,7 @@ core::Status stageMember(FsOps& fsOps, const fs::path& scratch, const fs::path& 
     const fs::path temporary = scratch / std::to_string(index);
     const fs::path target = finalPathOf(stageDir, file);
     if (core::Status removed = fsOps.removeFile(temporary); !removed.ok()) {
-        return removed.error();
+        return writeFailed("the stage folder could not be prepared", removed.error(), file.path);
     }
 
     std::ofstream out(detail::openable(temporary), std::ios::binary | std::ios::trunc);
@@ -174,8 +205,12 @@ core::Status stageMember(FsOps& fsOps, const fs::path& scratch, const fs::path& 
     if (!inflated.ok()) {
         (void)fsOps.removeFile(temporary);
         const core::Error& why = inflated.error();
+        // The sink's own failures (cancelled, the disk), and zlib failing to run at all, which
+        // says nothing about the member: passed on as they are. Everything else is what the
+        // inflater found wrong with the bytes.
         if (why.code == core::ErrorCode::InvalidState ||
-            why.code == core::ErrorCode::FileExportFailure) {
+            why.code == core::ErrorCode::FileExportFailure ||
+            why.code == core::ErrorCode::Internal) {
             return why;
         }
         return stageError(core::ErrorCode::InvalidArgument,
@@ -199,24 +234,26 @@ core::Status stageMember(FsOps& fsOps, const fs::path& scratch, const fs::path& 
 
     if (core::Status made = fsOps.makeDirectories(target.parent_path()); !made.ok()) {
         (void)fsOps.removeFile(temporary);
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the stage folder could not be prepared: " + made.error().message,
-                          "write_failed", "path=" + file.path);
+        return writeFailed("the stage folder could not be prepared", made.error(), file.path);
     }
     // A rename never replaces (fsops.hpp); what is there is a file that failed its hash.
     if (core::Status removed = fsOps.removeFile(target); !removed.ok()) {
         (void)fsOps.removeFile(temporary);
-        return removed.error();
+        return writeFailed("what is in a staged file's place could not be removed",
+                           removed.error(), file.path);
     }
     if (core::Status moved = fsOps.renameFile(temporary, target); !moved.ok()) {
         (void)fsOps.removeFile(temporary);
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "a verified file could not be put in its place: " + moved.error().message,
-                          "write_failed", "path=" + file.path);
+        return writeFailed("a verified file could not be put in its place", moved.error(),
+                           file.path);
     }
     if (file.executable) {
         if (core::Status marked = fsOps.setExecutable(target); !marked.ok()) {
-            return marked.error();
+            // The file stays: it is the signed bytes, and the swap and the preflight each mark
+            // their own copy (apply.cpp, preflight below). But a folder that refuses this is
+            // not one to go on writing into.
+            return writeFailed("a staged program could not be made runnable", marked.error(),
+                               file.path);
         }
     }
     return {};
@@ -226,20 +263,15 @@ core::Status stageMember(FsOps& fsOps, const fs::path& scratch, const fs::path& 
 core::Status writeStagedRecord(FsOps& fsOps, const fs::path& scratch, const fs::path& target,
                                std::string_view bytes)
 {
-    const fs::path temporary = scratch / core::pathToUtf8(target.filename());
+    const fs::path temporary = scratch / target.filename();
     if (core::Status written = fsOps.writeDurable(temporary, bytes); !written.ok()) {
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the staged manifest could not be written: " + written.error().message,
-                          "write_failed");
+        return writeFailed("the staged manifest could not be written", written.error());
     }
     if (core::Status removed = fsOps.removeFile(target); !removed.ok()) {
-        return removed.error();
+        return writeFailed("an earlier staged manifest could not be removed", removed.error());
     }
     if (core::Status moved = fsOps.renameFile(temporary, target); !moved.ok()) {
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the staged manifest could not be put in its place: " +
-                              moved.error().message,
-                          "write_failed");
+        return writeFailed("the staged manifest could not be put in its place", moved.error());
     }
     return {};
 }
@@ -308,6 +340,15 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
                    const Plan& plan, const fs::path& stageDir, std::stop_token stop,
                    ProgressFn progress)
 {
+    const std::unique_ptr<FsOps> system = makeSystemFsOps();
+    return stage(fetch, feed, manifest, plan, stageDir, std::move(stop), std::move(progress),
+                 *system);
+}
+
+core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& manifest,
+                   const Plan& plan, const fs::path& stageDir, std::stop_token stop,
+                   ProgressFn progress, FsOps& fsOps)
+{
     if (!fetch) {
         return core::makeError(core::ErrorCode::InvalidArgument, "stage was given no transport");
     }
@@ -335,18 +376,15 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
         return cancelledError();
     }
 
-    const std::unique_ptr<FsOps> owner = makeSystemFsOps();
-    FsOps& fsOps = *owner;
     if (core::Status made = fsOps.makeDirectories(stageDir); !made.ok()) {
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the stage folder could not be created: " + made.error().message,
-                          "write_failed");
+        return writeFailed("the stage folder could not be created", made.error());
     }
     // A staged manifest says "complete" (stage.hpp); this run has not completed yet, so a
     // record of an earlier one must not keep saying so if this one fails.
     for (const fs::path& stale : {stagedManifestPath(stageDir), stagedSignaturePath(stageDir)}) {
         if (core::Status removed = fsOps.removeFile(stale); !removed.ok()) {
-            return removed.error();
+            return writeFailed("an earlier staged manifest could not be removed",
+                               removed.error());
         }
     }
     sweepOlderStages(fsOps, stageDir, manifest.sequence);
@@ -357,9 +395,7 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
         detail::removeTree(fsOps, scratch.path(), leftovers); // a crashed run's member
     }
     if (core::Status made = fsOps.makeDirectories(scratch.path()); !made.ok()) {
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the stage folder could not be prepared: " + made.error().message,
-                          "write_failed");
+        return writeFailed("the stage folder could not be prepared", made.error());
     }
 
     // What is already staged and right is skipped: the resume.
@@ -400,7 +436,8 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
                               "need=" + std::to_string(needed) +
                                   " bytes; free=" + std::to_string(free.value()) + " bytes");
         }
-        // An unreadable figure does not stop the download: the writes will say if the disk is full.
+        // An unreadable figure does not stop the download: the writes will say if the disk is
+        // full.
     }
 
     const std::vector<MergedRange> ranges = mergeRanges(missing);
@@ -408,9 +445,13 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
     for (const MergedRange& range : ranges) {
         total += range.length;
     }
+    // Never backwards, never past the total: the transport starts a request again after a
+    // dropped connection, and its count with it.
+    std::uint64_t shown = 0;
     const auto report = [&](std::uint64_t done) {
+        shown = std::max(shown, std::min(done, total));
         if (progress) {
-            progress(std::min(done, total), total);
+            progress(shown, total);
         }
     };
     report(stagedCompressed);
@@ -496,7 +537,7 @@ core::Status stage(const Fetch& fetch, const FeedConfig& feed, const Manifest& m
         return written;
     }
     if (core::Status synced = fsOps.syncDirectory(stageDir); !synced.ok()) {
-        return synced.error();
+        return writeFailed("the stage folder could not be flushed to the disk", synced.error());
     }
     report(total);
     return {};
@@ -535,12 +576,18 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
                                       const fs::path& stageDir, const fs::path& stateDir,
                                       Launcher& launcher)
 {
+    const std::unique_ptr<FsOps> system = makeSystemFsOps();
+    return preflight(manifest, install, stageDir, stateDir, launcher, *system);
+}
+
+core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& install,
+                                      const fs::path& stageDir, const fs::path& stateDir,
+                                      Launcher& launcher, FsOps& fsOps)
+{
     if (stateDir.empty()) {
         return core::makeError(core::ErrorCode::InvalidArgument,
                                "preflight was given no state folder");
     }
-    const std::unique_ptr<FsOps> owner = makeSystemFsOps();
-    FsOps& fsOps = *owner;
 
     // Which helper runs the swap. The installed one speaks the protocol this build speaks; a
     // manifest that needs a newer one carries it, and it is the staged copy that runs, after its
@@ -576,23 +623,16 @@ core::Result<PreparedApply> preflight(const Manifest& manifest, const Install& i
     const std::string transaction = newTransactionId();
     const fs::path runDir = runPath(stateDir, transaction);
     if (core::Status made = fsOps.makeDirectories(runDir); !made.ok()) {
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the update helper's folder could not be created: " +
-                              made.error().message,
-                          "write_failed");
+        return writeFailed("the update helper's folder could not be created", made.error());
     }
     const fs::path helper = runDir / source.filename();
     if (core::Status copied = fsOps.copyFile(source, helper); !copied.ok()) {
         removeRunFolder(fsOps, stateDir, runDir);
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the update helper could not be copied: " + copied.error().message,
-                          "write_failed");
+        return writeFailed("the update helper could not be copied", copied.error());
     }
     if (core::Status marked = fsOps.setExecutable(helper); !marked.ok()) {
         removeRunFolder(fsOps, stateDir, runDir);
-        return stageError(core::ErrorCode::FileExportFailure,
-                          "the update helper could not be made runnable: " + marked.error().message,
-                          "write_failed");
+        return writeFailed("the update helper could not be made runnable", marked.error());
     }
 
     // It starts: the copy is scanned now, while the window is still open, and a helper that
