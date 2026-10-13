@@ -4,7 +4,9 @@
 // WHERE THE EXPECTATIONS COME FROM (CLAUDE.md, section 4). Nothing here is copied from what the
 // program printed:
 //   - the process scan is held to processes this test starts itself, whose image path it knows,
-//     and to the operating system's own answers (GetCurrentProcessId, the path it started);
+//     and to the operating system's own answers (GetCurrentProcessId, the path it started, and
+//     the file system's identity for a file where two spellings of its path must be told to be
+//     one file);
 //   - the registry is read back with RegGetValueW and written for the reader with RegSetKeyValueW,
 //     not through the code under test, and always under a key of the test's own;
 //   - the import table is read from the PE file by the code below, not by the helper;
@@ -20,6 +22,9 @@
 //     box that somebody has to click. Every program started is a real one: the helper, and
 //     updater_stub.cpp standing in for Katana (in the T3 fixtures, whose katana.exe is text, by
 //     the test helper's --stand-in);
+//   - start a program other than through update::Launcher, which turns that box off for the
+//     start: the stubs left running are started by it too, and say themselves which process
+//     they are (Sleeper, below);
 //   - write the machine's own RunOnce, Uninstall or installer keys. Every registry write goes
 //     under HKCU\Software\KatanaUpdateTest-<unique>, which is deleted with the test; the helper
 //     built for the tests has no way to the machine's keys at all (main.cpp).
@@ -33,6 +38,7 @@
 #ifdef _WIN32
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -216,54 +222,88 @@ SpawnResult runProgram(const Path& executable, std::vector<std::string> argument
     return ran.value();
 }
 
-// A program left running: the stub, asked to sleep. Ended with the object. It is started here and
-// not by the Launcher because the test needs its process id and a handle to end it with - so the
-// Launcher's one precaution is taken here too: no message box of the system's, should the copy
-// of the stub not be a program after all (a copy cut short), only an error.
+// A program left running: the stub, asked to sleep. Ended with the object. It is started by the
+// Launcher like every other program here, so that the Launcher's precaution covers this start
+// too: should the copy of the stub not be a program after all (a copy cut short), that is an
+// error and never a message box of the system's. The Launcher hands back no process id, so the
+// stub writes its own into a file this names for it (KATANA_STUB_PID_FILE, updater_stub.cpp),
+// and the process is then opened by that id - to end it with, and so that the id stays this
+// process's for as long as a case asks about it. pid() is 0 when any of that failed.
 class Sleeper {
   public:
-    Sleeper(const Path& executable, unsigned milliseconds)
+    Sleeper(const Path& executable, unsigned milliseconds) : executable_(executable)
     {
-        std::wstring command = L"\"" + executable.native() + L"\" --sleep " + std::to_wstring(milliseconds);
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        const Path directory = executable.parent_path();
-        const UINT previousMode =
-            SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-        started_ = CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
-                                  CREATE_NO_WINDOW | CREATE_DEFAULT_ERROR_MODE, nullptr, directory.c_str(), &startup,
-                                  &process_) != 0;
-        const DWORD error = GetLastError();
-        SetErrorMode(previousMode);
-        EXPECT_TRUE(started_) << "could not start " << toUtf8(executable.native()) << ": " << error;
-        executable_ = executable;
+        static Scratch notes("sleepers");
+        static std::atomic<unsigned> counter{0};
+        const Path note = notes.path() / (std::to_string(counter++) + ".pid");
+        {
+            // Only the program started now is told where to write: the variable is gone again
+            // before anything else is started.
+            ScopedEnvironment environment;
+            environment.set(L"KATANA_STUB_PID_FILE", note);
+            SpawnRequest request;
+            request.executable = executable;
+            request.arguments = {"--sleep", std::to_string(milliseconds)};
+            request.workingDirectory = executable.parent_path();
+            const core::Status started = makeSystemLauncher()->startDetached(request);
+            EXPECT_TRUE(started.ok()) << "could not start " << toUtf8(executable.native()) << ": "
+                                      << (started.ok() ? std::string() : started.error().describe());
+            if (!started.ok()) {
+                return;
+            }
+        }
+        // The stub writes the digits and a line feed in one write, first thing.
+        std::string text;
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (std::chrono::steady_clock::now() < end) {
+            text = readText(note);
+            if (!text.empty() && text.back() == '\n') {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        DWORD pid = 0;
+        for (const char c : text) {
+            if (c >= '0' && c <= '9') {
+                pid = pid * 10 + static_cast<DWORD>(c - '0');
+            }
+        }
+        EXPECT_NE(pid, 0u) << toUtf8(executable.native()) << " was started and did not say which process it is";
+        if (pid == 0) {
+            return;
+        }
+        process_ = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        EXPECT_TRUE(process_ != nullptr) << "process " << pid << " could not be opened: " << GetLastError();
+        if (process_ != nullptr) {
+            pid_ = pid;
+        }
     }
     Sleeper(const Sleeper&) = delete;
     Sleeper& operator=(const Sleeper&) = delete;
     ~Sleeper()
     {
         terminate();
-        if (started_) {
-            CloseHandle(process_.hProcess);
-            CloseHandle(process_.hThread);
+        if (process_ != nullptr) {
+            CloseHandle(process_);
         }
     }
 
-    [[nodiscard]] DWORD pid() const { return process_.dwProcessId; }
+    [[nodiscard]] DWORD pid() const { return pid_; }
     [[nodiscard]] const Path& executable() const { return executable_; }
     void terminate()
     {
-        if (started_ && WaitForSingleObject(process_.hProcess, 0) == WAIT_TIMEOUT) {
-            TerminateProcess(process_.hProcess, 1);
+        if (process_ == nullptr) {
+            return;
         }
-        if (started_) {
-            WaitForSingleObject(process_.hProcess, 10'000);
+        if (WaitForSingleObject(process_, 0) == WAIT_TIMEOUT) {
+            TerminateProcess(process_, 1);
         }
+        WaitForSingleObject(process_, 10'000);
     }
 
   private:
-    bool started_ = false;
-    PROCESS_INFORMATION process_{};
+    HANDLE process_ = nullptr;
+    DWORD pid_ = 0;
     Path executable_;
 };
 
@@ -320,13 +360,52 @@ const Path kStub = preferred(KATANA_UPDATER_STUB_EXE);
 const Path kHelper = preferred(KATANA_UPDATER_EXE);
 const Path kTestHelper = preferred(KATANA_UPDATER_TEST_EXE);
 
-// The long, final spelling of a folder: Windows may hand out 8.3 names for the temp folder, and
-// the paths the programs report back are compared with the test's as text.
+// The long spelling of an existing folder: Windows may hand out 8.3 names for the temp folder
+// (C:\Users\RUNNER~1\... on a build service), and the paths the programs report back are
+// compared with the test's as text. GetLongPathNameW and not std::filesystem::canonical, which
+// with this library on Windows leaves a short name as it is.
 Path longSpelling(const Path& folder)
 {
-    std::error_code ec;
-    const Path canonical = fs::canonical(folder, ec);
-    return ec ? folder : canonical;
+    std::wstring buffer(folder.native().size() + 64, L'\0');
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const DWORD length = GetLongPathNameW(folder.c_str(), buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return folder;
+        }
+        if (length < buffer.size()) {
+            buffer.resize(length);
+            return Path(buffer);
+        }
+        buffer.assign(length + 1, L'\0');
+    }
+    return folder;
+}
+
+// Whether two paths name ONE file, by the file system's own identity for it - the volume and the
+// file's number on it - and not by how the paths are spelled. A short name against a long one, a
+// junction against the folder it points to, either case: the spelling a program reports of its
+// own image is the kernel's choice, and the test does not guess it.
+bool sameFile(const Path& first, const Path& second)
+{
+    const auto identity = [](const Path& path) -> std::optional<std::array<DWORD, 3>> {
+        // No access asked for, only the attributes: a program that is running can be opened so.
+        const HANDLE file = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return std::nullopt;
+        }
+        BY_HANDLE_FILE_INFORMATION information{};
+        const bool known = GetFileInformationByHandle(file, &information) != 0;
+        CloseHandle(file);
+        if (!known) {
+            return std::nullopt;
+        }
+        return std::array<DWORD, 3>{information.dwVolumeSerialNumber, information.nFileIndexHigh,
+                                    information.nFileIndexLow};
+    };
+    const std::optional<std::array<DWORD, 3>> one = identity(first);
+    const std::optional<std::array<DWORD, 3>> other = identity(second);
+    return one.has_value() && other.has_value() && *one == *other;
 }
 
 Path systemFolder()
@@ -335,6 +414,16 @@ Path systemFolder()
     const UINT length = GetSystemDirectoryW(folder.data(), static_cast<UINT>(folder.size()));
     folder.resize(length < folder.size() ? length : 0);
     return Path(folder);
+}
+
+// Makes `link` a junction to the folder `target` (cmd's mklink /J, which needs no privilege).
+// False, with what cmd said, where the machine's policy refuses it.
+bool makeJunction(const Path& link, const Path& target, std::string& said)
+{
+    const SpawnResult made = runProgram(systemFolder() / "cmd.exe",
+                                        {"/c", "mklink", "/J", toUtf8(link.native()), toUtf8(target.native())});
+    said = made.output;
+    return made.exitCode == 0;
 }
 
 // ---- a registry of the test's own -----------------------------------------------------------------------
@@ -417,7 +506,9 @@ void writeValue(const std::wstring& subkey, const wchar_t* name, DWORD type, con
 }
 
 // The value name the helper registers (registry.hpp), and the machine's own key for it. The
-// machine's key is only ever READ here.
+// machine's key is only ever READ here - but for one line, which takes a value of this file's
+// own out of it again should a redirection of HKEY_CURRENT_USER ever fail to hold
+// (TheShippedRegistry..., below), and is not reached otherwise.
 const std::wstring kRunOnceValue = L"KatanaUpdateRecover";
 const std::wstring kMachineRunOnceKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
 
@@ -790,14 +881,9 @@ bool listsPid(const core::Result<std::vector<RunningProgram>>& scanned, DWORD pi
     }
     for (const RunningProgram& program : scanned.value()) {
         if (program.pid == pid) {
-            if (expectedImage == nullptr) {
-                return true;
-            }
-            std::error_code actualError;
-            std::error_code wantedError;
-            const Path actual = fs::canonical(program.image, actualError);
-            const Path wanted = fs::canonical(*expectedImage, wantedError);
-            return !actualError && !wantedError && equalIgnoringCase(actual.native(), wanted.native());
+            // The image the scan names must BE the file that was started, however it is spelled
+            // (the temp folder's 8.3 name, a junction): one file by the file system's identity.
+            return expectedImage == nullptr || sameFile(program.image, *expectedImage);
         }
     }
     return false;
@@ -863,11 +949,11 @@ TEST(HelperProcessScan, ARootReachedThroughAJunctionFindsTheProgramStartedFromTh
     const Path root = scratch.path() / kUnicodeFolder / "Install Katana";
     const auto sleeper = startSleeperAt(root / "bin" / "katana.exe");
     const Path junction = scratch.path() / "link";
-    // mklink /J needs no privilege; where the machine's policy refuses it, the case cannot be made.
-    const SpawnResult made = runProgram(systemFolder() / "cmd.exe",
-                                        {"/c", "mklink", "/J", toUtf8(junction.native()), toUtf8(root.native())});
-    if (made.exitCode != 0) {
-        GTEST_SKIP() << "a junction could not be made here: " << made.output;
+    // Where the machine's policy refuses a junction the case cannot be made - on a developer's
+    // machine. A build service makes them, and a skip there would pass for a test that ran.
+    std::string said;
+    if (!makeJunction(junction, root, said)) {
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("a junction could not be made here: " + said);
     }
     const core::Result<std::vector<RunningProgram>> scanned = makeSystemProcessOps()->holdersUnder(junction);
     ASSERT_TRUE(scanned.ok()) << scanned.error().describe();
@@ -993,6 +1079,28 @@ TEST(HelperRegistry, TheInstallersFolderIsReadFromTheKeyTheInstallerWrites)
     ASSERT_TRUE(location.ok()) << location.error().describe();
     ASSERT_TRUE(location->has_value());
     EXPECT_EQ((*location)->native(), systemRoot + L"\\Katana");
+
+    // An expansion LONGER than the text stored, which is the usual case and the installer's own
+    // (%LOCALAPPDATA%\Programs\Katana): the folder is read to its end. For an expandable string
+    // Windows was measured to report the size of the STORED text (registry_win.cpp), and a reader
+    // that believes that size cuts this folder short after 22 of its 43 characters. The variable
+    // is this test's own, set for this process, which is where the expansion is done.
+    ScopedEnvironment environment;
+    const std::wstring profile = L"C:\\Users\\K\u00e4se\\AppData\\Local";
+    environment.set(L"KT9", profile);
+    writeValue(hive.locationKey(), nullptr, REG_EXPAND_SZ, L"%KT9%\\Programs\\Katana");
+    location = registry->installerLocation();
+    ASSERT_TRUE(location.ok()) << location.error().describe();
+    ASSERT_TRUE(location->has_value());
+    EXPECT_EQ((*location)->native(), profile + L"\\Programs\\Katana");
+
+    // And an expansion longer than the reader's first buffer (260 characters) as well.
+    const std::wstring deep = L"C:\\" + std::wstring(300, L'd');
+    environment.set(L"KT9", deep);
+    location = registry->installerLocation();
+    ASSERT_TRUE(location.ok()) << location.error().describe();
+    ASSERT_TRUE(location->has_value());
+    EXPECT_EQ((*location)->native(), deep + L"\\Programs\\Katana");
 
     // A folder longer than the reader's first buffer (260 characters) is read whole.
     const std::wstring longFolder = L"C:\\" + std::wstring(300, L'k') + L"\\Katana";
@@ -1141,8 +1249,12 @@ TEST(HelperRegistry, TheShippedRegistryUsesTheKeysWindowsAndTheInstallerUseShown
             EXPECT_TRUE(makeSystemRegistryOps()->clearRunOnce(name).ok());
         }
     }
-    // Whatever happened above, nothing of this test stays in the machine's key.
-    RegDeleteKeyValueW(HKEY_CURRENT_USER, kMachineRunOnceKey.c_str(), wideName.c_str());
+    // Should the redirection not have held, nothing of this test stays in the machine's key. It
+    // is the one write this file ever makes there, and only to take its own value out again: the
+    // key is not even opened for writing when the value did not reach it.
+    if (reachedTheMachine) {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, kMachineRunOnceKey.c_str(), wideName.c_str());
+    }
 
     ASSERT_TRUE(redirected) << "HKEY_CURRENT_USER could not be redirected, so the shipped registry was not run";
     EXPECT_FALSE(reachedTheMachine) << "the redirection did not hold: the machine's RunOnce key was written";
@@ -1327,13 +1439,16 @@ TEST(HelperProgram, TheHostileConfigurationBreaksAProgramThatReadsIt)
     // this configuration, so the helper's pass is the helper's doing and not a configuration that
     // does nothing. The program is the openssl command, where one of version 3 or later is
     // installed and works; the release tools' tests need one too (tests/update/CMakeLists.txt).
+    // Without one the case is skipped on a developer's machine and FAILS on a build service: a
+    // control that skips there would leave the case above with nothing to show it means anything.
     Scratch scratch("selftest-control");
     const Path configuration = writeHostileConfiguration(scratch.path());
     wchar_t found[MAX_PATH * 4];
     const DWORD foundLength =
         SearchPathW(nullptr, L"openssl.exe", nullptr, static_cast<DWORD>(std::size(found)), found, nullptr);
     if (foundLength == 0 || foundLength >= std::size(found)) {
-        GTEST_SKIP() << "no openssl.exe on PATH: the hostile configuration is not shown to be hostile here";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI(
+            "no openssl.exe on PATH: the hostile configuration is not shown to be hostile here");
     }
     const Path openssl(std::wstring(found, foundLength));
     const std::vector<std::string> digest = {"dgst", "-sha256", toUtf8(configuration.native())};
@@ -1347,8 +1462,9 @@ TEST(HelperProgram, TheHostileConfigurationBreaksAProgramThatReadsIt)
         const bool threeOrLater = version.exitCode == 0 && text.rfind("OpenSSL ", 0) == 0 && text.size() > 8 &&
                                   std::isdigit(static_cast<unsigned char>(text[8])) != 0 && text[8] >= '3';
         if (!threeOrLater || runProgram(openssl, digest).exitCode != 0) {
-            GTEST_SKIP() << toUtf8(openssl.native()) << " is not a working OpenSSL 3 or later (" << text
-                         << "): the hostile configuration is not shown to be hostile here";
+            SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI(toUtf8(openssl.native()) + " is not a working OpenSSL 3 or later (" +
+                                                text +
+                                                "): the hostile configuration is not shown to be hostile here");
         }
     }
     ScopedEnvironment environment;
@@ -1356,23 +1472,6 @@ TEST(HelperProgram, TheHostileConfigurationBreaksAProgramThatReadsIt)
     const SpawnResult control = runProgram(openssl, digest);
     EXPECT_NE(control.exitCode, 0) << "the hostile configuration should break an OpenSSL that reads it: "
                                    << describe(control);
-}
-
-TEST(HelperProgram, TheCopyRunsFromAFolderOfItsOwnWithNothingOfTheToolchainOnPath)
-{
-    // S1 of the design: the helper never runs from bin/, so it must need nothing beside it.
-    Scratch scratch("selftest-alone");
-    const Path copy = scratch.path() / kUnicodeFolder / "run-1" / "katana_updater.exe";
-    copyProgram(kHelper, copy);
-    wchar_t windows[MAX_PATH];
-    const UINT length = GetWindowsDirectoryW(windows, MAX_PATH);
-    const std::wstring systemFolders =
-        std::wstring(windows, length) + L"\\System32;" + std::wstring(windows, length);
-    ScopedEnvironment environment;
-    environment.set(L"PATH", systemFolders);
-    const SpawnResult ran = runProgram(copy, {"--selftest"}, copy.parent_path());
-    EXPECT_EQ(ran.exitCode, 0) << describe(ran);
-    EXPECT_EQ(valueOf(ran.output, "selftest"), "ok");
 }
 
 TEST(HelperProgram, EveryKindOfBadCommandLineIsAUsageErrorWithExitCode20)
@@ -1631,6 +1730,36 @@ TEST(HelperImports, TheCheckSeesADynamicallyLinkedProgramForWhatItIs)
     EXPECT_TRUE(isOperatingSystemLibrary("api-ms-win-crt-stdio-l1-1-0.dll"));
 }
 
+TEST(HelperProgram, TheCopyRunsFromAFolderOfItsOwnWithNothingOfTheToolchainOnPath)
+{
+    // S1 of the design: the helper never runs from bin/, so it must need nothing beside it.
+    Scratch scratch("selftest-alone");
+    const Path copy = scratch.path() / kUnicodeFolder / "run-1" / "katana_updater.exe";
+    copyProgram(kHelper, copy);
+    // Read before it is run. A helper that needed a DLL of the toolchain would not fail quietly
+    // here: started with nothing of the toolchain on PATH it would put up the loader's own
+    // message box ("... was not found") and sit behind it until somebody clicked - the Launcher
+    // gives a program it starts the default error mode. So the regression this case is for is
+    // caught from the file, and the program is only started once it can load.
+    const std::vector<std::string> imported = importedLibraries(copy);
+    ASSERT_FALSE(imported.empty()) << "no import table was read from the copy: it is not started";
+    for (const std::string& name : imported) {
+        ASSERT_TRUE(isOperatingSystemLibrary(name))
+            << "katana_updater imports " << name << ", which is not the operating system's: it is not started";
+    }
+    wchar_t windows[MAX_PATH];
+    const UINT length = GetWindowsDirectoryW(windows, MAX_PATH);
+    const std::wstring systemFolders =
+        std::wstring(windows, length) + L"\\System32;" + std::wstring(windows, length);
+    ScopedEnvironment environment;
+    environment.set(L"PATH", systemFolders);
+    // A self-test takes a moment; half a minute is a virus scanner's first look at a new file.
+    const SpawnResult ran = runProgram(copy, {"--selftest"}, copy.parent_path(), std::chrono::seconds(30));
+    EXPECT_FALSE(ran.timedOut) << describe(ran);
+    EXPECT_EQ(ran.exitCode, 0) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "selftest"), "ok");
+}
+
 // =====================================================================================================
 // The swap, through the real program
 // =====================================================================================================
@@ -1667,23 +1796,48 @@ CrashProbe probeCrash(const std::string& label, std::uint64_t k)
 
 // Finds a crash in the MIDDLE of the commit, with `wanted` agreeing, and returns the world it
 // happened in with the crash left on disk. The number of the first change after the journal says
-// COMMITTING is found by bisection (the journal reaches COMMITTING at some change and stays
-// there), and the changes after it are tried in turn: each is a rename or a journal line.
+// COMMITTING is found by bisection, and the changes after it are tried in turn: each is a rename
+// or a journal line.
 std::unique_ptr<World> crashedMidCommit(const std::string& label, const std::function<bool(World&)>& wanted,
                                         SpawnResult* crashed = nullptr, std::uint64_t* at = nullptr)
 {
-    const auto journalHasCommitting = [&](std::uint64_t k) {
+    // Whether the run killed before change k had got as far as COMMITTING. A bisection needs an
+    // answer that, once yes, stays yes as k grows - so "COMMITTING is in the journal" is not
+    // enough by itself:
+    //   - not killed at all: k is past the last change, and so past the commit;
+    //   - COMMITTING is in the journal;
+    //   - there is no journal to read. Before the plan there is none yet. After a healthy update
+    //     there is none ANY MORE: the clean-up deletes it with the transaction's folder while
+    //     changes are still being counted (the staged files, the records in U), and a run killed
+    //     there would read as "before the commit". The install's own record tells the two apart:
+    //     installed.json is put in place by the commit, among its last files (apply.hpp, step 5),
+    //     and by nothing before it, so the new version's record means the commit has begun.
+    const auto reachedTheCommit = [&](std::uint64_t k) {
         const CrashProbe probe = probeCrash(label, k);
         if (!probe.crashed) {
-            return true; // it ran to its end: past the commit
+            return true;
         }
-        return contains(readText(probe.world->root / ".update" / std::string(kTransaction) / "journal"), "COMMITTING");
+        const World& killed = *probe.world;
+        if (contains(readText(killed.root / ".update" / std::string(kTransaction) / "journal"), "COMMITTING")) {
+            return true;
+        }
+        return readText(killed.root / "share" / "katana" / "installed.json") == installedJson(killed.v2);
     };
-    std::uint64_t low = 1;    // before the first change: nothing on disk
-    std::uint64_t high = 200; // beyond the commit of this small release
+    // The upper end is found, not assumed: doubled until a run gets as far as the commit, so that
+    // a release of more files than today's does not put the answer out of reach.
+    std::uint64_t low = 1; // before the first change: nothing on disk
+    std::uint64_t high = 32;
+    while (!reachedTheCommit(high)) {
+        low = high;
+        high *= 2;
+        if (high > 4096) {
+            ADD_FAILURE() << "no run got as far as the commit within 4096 changes to the disk";
+            return nullptr;
+        }
+    }
     while (low + 1 < high) {
         const std::uint64_t middle = low + (high - low) / 2;
-        (journalHasCommitting(middle) ? high : low) = middle;
+        (reachedTheCommit(middle) ? high : low) = middle;
     }
     for (std::uint64_t k = high; k < high + 40; ++k) {
         CrashProbe probe = probeCrash(label, k);
@@ -1712,6 +1866,15 @@ bool isHalfSwapped(World& world)
 {
     return readText(world.root / "share" / "katana" / "readme.txt") == world.v2.find("share/katana/readme.txt")->content &&
            readText(world.root / "bin" / "katana.exe") == world.v1.find("bin/katana.exe")->content;
+}
+
+// The sequences state.json holds as blocked: the releases whose health check failed on this
+// machine, which are not offered again as they were (state.hpp). None when there is no file.
+std::vector<std::uint64_t> blockedSequences(const Path& stateDirectory)
+{
+    const core::Result<UpdateState> recorded = readState(stateDirectory);
+    EXPECT_TRUE(recorded.ok()) << (recorded.ok() ? std::string() : recorded.error().describe());
+    return recorded.ok() ? recorded->blockedSequences : std::vector<std::uint64_t>{};
 }
 
 } // namespace
@@ -1776,9 +1939,13 @@ TEST(HelperSwap, ATestHelperToldOfNoRegistryWritesNoRunOnceEntryOnTheMachine)
     REQUIRE_CAN_SIGN();
     // The machine's own key is only READ, by the stub, at the moment a shipped helper would have
     // its entry there: during the health check. The engine's own command line is used as it is,
-    // with no test option, and the environment names no registry either.
+    // with no test option, and the environment names no registry either. A machine on which a
+    // real Katana was interrupted has such an entry already, and the case cannot judge it; a
+    // build service has no Katana installed, so there the entry would be a test's own leak, and
+    // that is a failure.
     if (readString(kMachineRunOnceKey, kRunOnceValue.c_str()).has_value()) {
-        GTEST_SKIP() << "this machine has a real Katana recovery entry in RunOnce; it is not ours to judge";
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI(
+            "this machine has a Katana recovery entry in its RunOnce key already; it is not this test's to judge");
     }
     World world("swap-no-registry");
     world.arrangeEnvironment();
@@ -1979,7 +2146,45 @@ TEST(HelperSwap, ANewVersionThatSaysItStartedAndThenExitsWithAnErrorIsRolledBack
     EXPECT_TRUE(world.logHas("health tag=v2 ")) << "the new version was started";
     EXPECT_FALSE(isPresent(healthMarkerPath(world.state, std::string(kTransaction))))
         << "the marker of a start that then failed is no evidence for the next one";
+    EXPECT_EQ(world.last().status, "rolled_back");
+    EXPECT_EQ(world.last().reason, "health_exit");
+    EXPECT_EQ(blockedSequences(world.state), std::vector<std::uint64_t>{2000})
+        << "v2's sequence: a release that starts and then fails is not offered again";
     ASSERT_TRUE(world.waitForLog("start tag=v1 ")) << world.stubLog();
+}
+
+TEST(HelperSwap, ANewVersionThatEndsWellWithoutSayingItStartedIsRolledBackAndNotOfferedAgain)
+{
+    REQUIRE_CAN_SIGN();
+    // Exit code 0 and no marker: a program that was started and ended without a complaint, and
+    // never got to its first idle turn - a release whose katana does not know the switch and
+    // leaves at once, say. "A start that ... never writes it means rollback" (apply.hpp, step 7):
+    // a clean exit alone proves nothing. It ended, so the helper has no wait to sit out: the
+    // reason is the exit, not the time, and the 60 s of this run's health wait are not spent.
+    World world("swap-health-exit0");
+    world.arrangeEnvironment("exit0");
+    world.registerAsInstaller();
+    const auto begin = std::chrono::steady_clock::now();
+    const SpawnResult ran =
+        world.runHelper(world.applyArguments(std::string(kTransaction), 0, "500,1500,50,60000,30000"));
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    ASSERT_EQ(ran.exitCode, 11) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "outcome"), "rolled_back");
+    EXPECT_EQ(valueOf(ran.output, "reason"), "health_exit");
+    EXPECT_LT(elapsed, 30s) << "the health wait must not have been sat out for a program that had ended";
+    world.expectV1();
+    EXPECT_EQ(world.displayVersion(), std::wstring(L"0.9.0")) << "a release that did not prove itself is never shown";
+    EXPECT_TRUE(leftoversInUpdate(world.root).empty());
+    EXPECT_FALSE(world.runOnceIsSet());
+    EXPECT_FALSE(isPresent(healthMarkerPath(world.state, std::string(kTransaction)))) << "the premise: no marker";
+    EXPECT_EQ(world.last().status, "rolled_back");
+    EXPECT_EQ(world.last().reason, "health_exit");
+    EXPECT_EQ(blockedSequences(world.state), std::vector<std::uint64_t>{2000}) << "v2's sequence";
+    ASSERT_TRUE(world.waitForLog("start tag=v1 ")) << world.stubLog();
+    const std::vector<std::string> lines = linesOf(world.stubLog());
+    ASSERT_GE(lines.size(), 1u);
+    EXPECT_EQ(lines.front().rfind("health tag=v2 ", 0), 0u) << lines.front();
+    EXPECT_TRUE(contains(lines.front(), " mode=exit0")) << "the premise: the stub was in the mode asked for";
 }
 
 TEST(HelperSwap, ANewVersionThatNeverSaysItStartedIsRolledBackWhenTheHealthWaitEnds)
@@ -1993,6 +2198,10 @@ TEST(HelperSwap, ANewVersionThatNeverSaysItStartedIsRolledBackWhenTheHealthWaitE
     EXPECT_EQ(valueOf(ran.output, "reason"), "health_timeout");
     world.expectV1();
     EXPECT_TRUE(world.logHas("health tag=v2 ")) << "the new version was started";
+    EXPECT_EQ(world.last().status, "rolled_back");
+    EXPECT_EQ(world.last().reason, "health_timeout");
+    EXPECT_EQ(blockedSequences(world.state), std::vector<std::uint64_t>{2000})
+        << "v2's sequence: a release that never says it started is not offered again";
     ASSERT_TRUE(world.waitForLog("start tag=v1 ")) << world.stubLog();
 }
 
@@ -2182,8 +2391,10 @@ TEST(HelperSwap, RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryL
     const std::unique_ptr<World> world = crashedMidCommit("swap-headless-recover", isHalfSwapped);
     ASSERT_TRUE(world != nullptr);
     const std::string tx(kTransaction);
-    const std::set<std::string> before = namesIn(world->state);
-    ASSERT_TRUE(before.contains("run-" + tx + "/")) << "the premise: the helper copy the swap ran from is in U";
+    ASSERT_TRUE(namesIn(world->state).contains("run-" + tx + "/"))
+        << "the premise: the helper copy the swap ran from is in U";
+    // The per-user folder, entry by entry and byte by byte, as the crash left it.
+    const std::map<std::string, std::string> before = snapshot(world->state);
 
     // katana_cli and katana_mcp call recover(R) first thing (recover.hpp); this process plays
     // their part. U is the folder the swap used (KATANA_UPDATE_STATE_DIR), so the helper copy is
@@ -2201,18 +2412,58 @@ TEST(HelperSwap, RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryL
     EXPECT_TRUE(contains(lines[0], " recover found=" + tx + " result=ok left=")) << lines[0];
 
     // What it did not write: any per-user state. No last.json - only the helper run for the
-    // window writes one - no state.json, no health marker; and nothing new in U at all, bar the
-    // list of what could not be deleted yet (recover.hpp says which program writes that).
+    // window writes one - no state.json, no health marker, no cleanup.list; and the rule is held
+    // to the letter (recover.hpp: "writes only R/.update/recovery.log"): the per-user folder is
+    // as it was, nothing in it made, changed or removed - the helper copy it ran included.
     EXPECT_FALSE(isPresent(world->state / "last.json"));
     EXPECT_FALSE(isPresent(world->state / "state.json"));
     EXPECT_FALSE(isPresent(healthMarkerPath(world->state, tx)));
-    for (const std::string& name : namesIn(world->state)) {
-        EXPECT_TRUE(before.contains(name) || name == "cleanup.list") << name << " appeared in the state folder";
-    }
+    EXPECT_FALSE(isPresent(world->state / "cleanup.list"));
+    EXPECT_EQ(difference(before, snapshot(world->state)), "")
+        << "recover() changed the per-user state folder. A headless program writes no per-user state: "
+           "recover() may read U to find the helper copy and must leave it as it is (recover.hpp)";
 
-    // And a start after that finds nothing to do.
+    // And a start after that finds nothing to do, and still writes nothing there.
     EXPECT_TRUE(recover(world->root).ok());
     EXPECT_EQ(linesOf(readText(world->root / ".update" / "recovery.log")), lines);
+    EXPECT_EQ(difference(before, snapshot(world->state)), "");
+}
+
+TEST(HelperSwap, RecoverNeitherReadsNorWritesThroughAnUpdateFolderThatIsALink)
+{
+    REQUIRE_CAN_SIGN();
+    // R/.update is a junction to a folder outside the install, and that folder holds what looks
+    // like an interrupted transaction. Recovery reads nothing through a link (recover.cpp), and
+    // the swap makes nothing through one, so no transaction of this install can be in there:
+    // the program has nothing to do, says so, and neither lists the folder as this install's
+    // nor leaves its recovery.log in it - which would be a write outside R.
+    World world("swap-recover-link");
+    world.arrangeEnvironment();
+    const Path outside = world.top_ / "outside";
+    writeText(outside / "c0ffee" / "journal", "1 PLAN c0ffee 1000 2000 00000000\n");
+    writeText(outside / "note.txt", "somebody else's folder\n");
+    const std::map<std::string, std::string> before = snapshot(outside);
+    const Path link = world.root / ".update";
+    std::string said;
+    if (!makeJunction(link, outside, said)) {
+        SKIP_UNLESS_AVAILABLE_OR_FAIL_IN_CI("a junction could not be made here: " + said);
+    }
+    ASSERT_TRUE(isPresent(link / "c0ffee" / "journal")) << "the premise: the link leads to the folder";
+
+    const SpawnResult ran = world.runHelper(world.withTestOptions({"--recover", toUtf8(world.root.native())}));
+    // The link itself goes before anything is judged (only the link: the folder it points to
+    // stays), so that the tree and the folder are compared as they are and the world can be
+    // cleared away.
+    ASSERT_NE(RemoveDirectoryW(link.c_str()), 0) << "the junction could not be removed: " << GetLastError();
+
+    EXPECT_EQ(ran.exitCode, 0) << describe(ran);
+    EXPECT_EQ(valueOf(ran.output, "recover"), "nothing_to_do") << ran.output;
+    EXPECT_FALSE(contains(ran.output, "c0ffee")) << "the folder behind the link was listed as this install's\n"
+                                                 << ran.output;
+    EXPECT_EQ(difference(before, snapshot(outside)), "") << "the folder behind the link was written to";
+    EXPECT_FALSE(isPresent(outside / "recovery.log"));
+    world.expectV1();
+    EXPECT_FALSE(isPresent(world.state / "last.json"));
 }
 
 TEST(HelperSwap, ACrashInsideRecoveryLeavesAStateThatTheNextRecoverFinishes)

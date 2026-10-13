@@ -52,8 +52,10 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     appended for each run that found something to put right
 //     (`<UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>`, and
 //     `detail=` after a failure), and one for each journal record the rollback
-//     would not follow. A run that found nothing writes nothing. When everything
-//     is back it removes the RunOnce entry the interrupted swap left.
+//     would not follow. A run that found nothing writes nothing, and where
+//     R/.update is not a folder of the install itself (a link) nothing is read
+//     or written through it. When everything is back it removes the RunOnce
+//     entry the interrupted swap left.
 //   - last.json is written by ONE program in ONE mode: the helper run for the
 //     window, the swap itself (`--state U`, apply.hpp). A recovery started from
 //     katana_cli or katana_mcp therefore never leaves a "the last update ..."
@@ -62,11 +64,12 @@ inline constexpr std::chrono::seconds kRecoverWait{20};
 //     swap's own helper got to write one.
 //   - In the calling program this function READS the state folder, to find the
 //     helper copy U/run-<tx>/ (it is outside R, so it still runs when R's own
-//     bin/ is half swapped), and when that helper has put everything back it
-//     deletes the copies, which nothing will run again. What it could not
-//     delete then - a copy still held open, a file of a finished transaction's
-//     folder - it names in U/cleanup.list for the window's next start. It
-//     creates and changes nothing else there.
+//     bin/ is half swapped) - and that is all it does there. It makes, changes
+//     and deletes nothing in U, whichever program calls it: a recovery started
+//     from katana_cli or katana_mcp leaves the per-user folder byte for byte
+//     as it found it, the helper copy it ran included, and no cleanup.list is
+//     begun. The copy stays until a program that may write per-user state
+//     removes it.
 [[nodiscard]] core::Status recover(const std::filesystem::path& root);
 
 // Roll back every transaction under R/.update whose journal needs it, in
