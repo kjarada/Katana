@@ -2958,7 +2958,11 @@ down out of it; its data names `updateDialog`, which is how `--dialog` finds
 the dialog), above About. And a button in the status bar,
 `statusUpdateAvailable`, reading "Update 0.3.0": hidden until a newer release
 is known, shown while there is one to act on - offered, on its way,
-downloaded, or waiting for other programs to close. Both open the dialog.
+downloaded, or waiting for other programs to close
+(`updateStatusButtonText`; in a build tree, where no update is ever known,
+the button is there by its name and has no words:
+`qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless`).
+Both open the dialog.
 
 **Two classes.** `UpdateDialog` (`src/katana_qt/update_dialog.hpp`) shows and
 asks; `UpdateWorkbench` (`src/katana_qt/update_workbench.hpp`) owns it and

@@ -71,13 +71,15 @@ add_test(NAME qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_i
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
 # UPDATE STATUS typed on the window's command line: the verbs' reply, which in
-# a build tree says the copy is a development one.
+# a build tree says the copy is a development one. And the status bar has its
+# update button, by its name (a report of a widget that is not there fails the
+# run), with no words on it: no update is known, and none is offered.
 add_test(NAME qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless
     COMMAND ${CMAKE_COMMAND}
         "-DAPP=$<TARGET_FILE:katana>"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-        "-DDRIVE=>UPDATE STATUS"
-        "-DEXPECT=kind=development"
+        "-DDRIVE=>UPDATE STATUS|?statusUpdateAvailable"
+        "-DEXPECT=kind=development.*statusUpdateAvailable: [\r\n]"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_status_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
