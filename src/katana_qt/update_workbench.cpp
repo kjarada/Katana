@@ -576,7 +576,14 @@ void UpdateWorkbench::checkFinished(const Result<katana::app::UpdateReply>& repl
         logReply(reply);
         UpdateView view = viewOf(UpdateDialogState::CheckFailed);
         if (reply) {
-            view.reason = updateReplyValue(qs(reply->text), "reason");
+            // A reply with no record of the offer is read by its words: the
+            // reason, and whether it is the copy that cannot update rather
+            // than the check that failed.
+            const QString said = qs(reply->text);
+            view.reason = updateReplyValue(said, "reason");
+            if (updateReplyValue(said, "update") == QLatin1String("unsupported")) {
+                view.state = UpdateDialogState::Unsupported;
+            }
         } else {
             view.problem = qs(reply.error().message);
         }

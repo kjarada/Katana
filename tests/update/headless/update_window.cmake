@@ -24,10 +24,13 @@
 # The environment: offscreen; no built-in and no kept customisation, which the
 # program-test scan gives every *_headless test anyway (tests/CMakeLists.txt)
 # and is said here so that it holds wherever this file is included from; an
-# update state folder of the test's own; and no access token from whoever runs
-# the suite.
+# update state folder of the tests' own - ONE for all the window's checks
+# here, which a test at the end of this file requires that none of them makes
+# ("No per-user state", there); and no access token from whoever runs the
+# suite.
+set(_update_headless_state "${CMAKE_CURRENT_BINARY_DIR}/update_headless_state")
 set(_update_headless_environment
-    "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:;KATANA_UPDATE_STATE_DIR=set:${CMAKE_CURRENT_BINARY_DIR}/update_headless_state;KATANA_UPDATE_TOKEN=unset:")
+    "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:;KATANA_UPDATE_STATE_DIR=set:${_update_headless_state};KATANA_UPDATE_TOKEN=unset:")
 
 # --dialog takes the dialog's own name, updateDialog: it opens, non-modal, and
 # says why a build tree cannot update. Nothing was typed and nothing is asked
@@ -88,6 +91,41 @@ add_test(NAME qt_a_typed_update_download_and_apply_say_a_headless_run_does_neith
         "-DDRIVE=>UPDATE DOWNLOAD CONFIRM|>UPDATE APPLY CONFIRM"
         "-DEXPECT=reason=headless.*reason=headless"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_download_headless.png"
+        -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+# UPDATE CHECK typed on the window's command line is a JOB: the line is run by
+# the verbs on a worker thread and its reply logged when the job ends, which a
+# headless run waits for - so the reply is in the log before the next step
+# opens the dialog. In a build tree the verbs answer that the copy cannot
+# update (update=unsupported, reason=development_tree: update_verbs.hpp, "A
+# copy that packaging did not write ... CHECK replies unsupported", and the
+# reason's token in include/katana/update/check.hpp), and the dialog opened
+# afterwards shows what the job's answer made of the view - the design's
+# "Updates are not available for this copy of Katana: <reason>." - not what it
+# would say unasked. No host is reached: a development copy asks nobody.
+add_test(NAME qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the_dialog_shows_headless
+    COMMAND ${CMAKE_COMMAND}
+        "-DAPP=$<TARGET_FILE:katana>"
+        "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+        "-DDRIVE=>UPDATE CHECK|@updateDialog|?updateStateText|@helpKeyboardShortcuts"
+        "-DEXPECT=update=unsupported.*reason=development_tree.*--dialog updateDialog opened updateDialog \"Check for Updates\".*updateStateText: Updates are not available for this copy of Katana: it is a development build, not an installed release\\."
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_check_job_headless.png"
+        -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+# No UPDATE line takes an access token (update_verbs.hpp: "A token is never a
+# word of a line - lines are logged"), and a person may type one that does all
+# the same. The echo of the line shows "***" in the word's place, and nothing
+# the run prints - the log, the verbs' refusal of the line, the report of the
+# whole command log - holds the word, in any case. The word is no token: it
+# only has the shape of one.
+add_test(NAME qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless
+    COMMAND ${CMAKE_COMMAND}
+        "-DAPP=$<TARGET_FILE:katana>"
+        "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+        "-DDRIVE=>UPDATE TOKEN ghp_k9w2ZqNotAToken|?commandLog"
+        "-DEXPECT=commandLog: .*> UPDATE TOKEN \\*\\*\\*"
+        "-DFORBID=[Gg][Hh][Pp]_[Kk]9[Ww]2[Zz][Qq]"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_token_typed_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
 # Settings has its second page: turned to by its name in the page list, it
@@ -158,13 +196,43 @@ set_tests_properties(qt_a_health_run_given_no_transaction_id_is_refused_headless
         "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:;KATANA_UPDATE_STATE_DIR=set:${_update_health_state}_refused"
                TIMEOUT 180)
 
+# "No per-user state" (docs/headless.md, "Updates in a headless run"), held to
+# the disk: every check above is given the SAME update state folder, which is
+# removed before the first of them runs, and after the last of them it must
+# not be there - not made empty, not made at all. A headless run that opened
+# the dialog, typed STATUS, CHECK, DOWNLOAD, APPLY and TOKEN lines, and turned
+# to Settings > Updates has then written nothing a later run could read. Three
+# parts held together as a fixture: the removal, the checks, and the look,
+# which is a script written here because `cmake -E` has no "must not exist".
+set(_update_headless_state_check
+    "${CMAKE_CURRENT_BINARY_DIR}/update_headless_state_is_absent.cmake")
+file(WRITE "${_update_headless_state_check}"
+"# Written by tests/update/headless/update_window.cmake when the tree is configured.
+if(EXISTS \"${_update_headless_state}\")
+    file(GLOB_RECURSE _left LIST_DIRECTORIES true \"${_update_headless_state}/*\")
+    message(FATAL_ERROR \"a headless run made the update state folder ${_update_headless_state}: \${_left}\")
+endif()
+message(STATUS \"no update state folder was made by the headless runs\")
+")
+add_test(NAME update_headless_state_folder_is_removed_before_the_headless_checks
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_update_headless_state}")
+add_test(NAME update_headless_checks_leave_no_update_state_folder_behind
+    COMMAND ${CMAKE_COMMAND} -P "${_update_headless_state_check}")
+set_tests_properties(update_headless_state_folder_is_removed_before_the_headless_checks
+    PROPERTIES FIXTURES_SETUP update_headless_state_absent)
+set_tests_properties(update_headless_checks_leave_no_update_state_folder_behind
+    PROPERTIES FIXTURES_CLEANUP update_headless_state_absent)
+
 set_tests_properties(
     qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless
     qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless
     qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_its_own_headless
     qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless
     qt_a_typed_update_download_and_apply_say_a_headless_run_does_neither_headless
+    qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the_dialog_shows_headless
+    qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless
     qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless
     qt_a_headless_run_saves_no_access_token_headless
     PROPERTIES ENVIRONMENT_MODIFICATION "${_update_headless_environment}"
+    FIXTURES_REQUIRED update_headless_state_absent
     TIMEOUT 180)
