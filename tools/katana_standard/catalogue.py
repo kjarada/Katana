@@ -259,10 +259,11 @@ def catalogue(data, root):
     w("")
     w("*An invented street corner, drawn in Katana's plan view with nothing but the library: %d of its %d codes "
       "are in it, kerbs and lots, houses, fences, trees, the services under and over the road, a stretch of rail "
-      "on a bridge, contours and a creek, control marks and the labels. Every mark is the size it is on paper "
-      "and sits where its code put it (`tools/katana_standard/showcase.py`). Katana does not yet apply a code's "
-      "pen weight, so every line is drawn at one width here and the weight ladder of \"Pen weights\" is not "
-      "shown.*" % (len(_showcase_keys()), n_codes))
+      "on a bridge, contours and a creek, control marks and the labels. Every line and symbol is the size it is "
+      "on paper and is drawn by its code (`tools/katana_standard/showcase.py`); the words take their layer and "
+      "colour from a text code and their height from the script, since Katana does not yet apply a text rule. "
+      "Nor does it yet apply a code's pen weight, so every line is drawn at one width here and the weight ladder "
+      "of \"Pen weights\" is not shown.*" % (len(_showcase_keys()), n_codes))
     w("")
 
     w("**Contents.** [At a glance](#at-a-glance) · [Using it](#using-it) · [Reading a code](#reading-a-code) · "
@@ -595,6 +596,10 @@ def catalogue(data, root):
     w("")
     w("![All %d symbols of Katana Standard, drawn by Katana](" % n_sy + IMAGES + "symbols.png)")
     w("")
+    w("*As the Symbol Library draws them, each in the colour of a code that uses it. The dialog scales every "
+      "icon to fill its tile, so the figures under a name are the symbol's width and height on paper: the "
+      "canopies and the trunks differ by size alone.*")
+    w("")
     w("**The house style**, which makes each symbol learnt once:")
     w("")
     for term, text in house_style(sym_module.__doc__, "THE HOUSE STYLE"):
@@ -774,8 +779,10 @@ def catalogue(data, root):
     w("- **Images.** `docs/images/katana-standard-symbols.png`, `-linestyles.png`, `-plan.png` and "
       "`-showcase.png` are drawn by Katana itself from the committed file, headlessly "
       "(`tools/katana_standard/render_images.py`; `docs/headless.md`): the symbols are the Symbol Library's own "
-      "icons, tinted with the colour of a code that uses each (a code of the definition's own group where one "
-      "does) and laid out on one sheet; the linestyles are a 300 dpi plot, each sample drawn by such a code; "
+      "icons, tinted with the colour of a code that uses each (a code of the definition's own group; what "
+      "several services share takes the first that uses it) and laid out on one sheet with each symbol's size "
+      "on paper under its name, since the dialog scales every icon to fill its tile; the linestyles are a "
+      "300 dpi plot, each sample drawn by such a code, the rows as far apart as their linestyles need; "
       "the plan is the plan view at twice the pixels, each feature named beside it by the "
       "script; the showcase is the plan view at the plot scale 1:500, in a few screenshots laid side by side. "
       "`-palette.png` is laid "

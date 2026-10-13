@@ -10,11 +10,13 @@ the only customisation in the session). Without a sheet named, all four are draw
 
 What each sheet is, and what is Katana's and what is Pillow's:
 
-* symbols   Katana's own Symbol Library (Format > Symbol Library), one screenshot a group, its icons and
-            captions cut out and laid on one sheet by class, each icon tinted with the colour its code takes.
-            The icons are the dialog's: a symbol scaled to fill a 64 px tile, which is how a person reads it.
+* symbols   Katana's own Symbol Library (Format > Symbol Library), one screenshot a group, its icons cut out
+            and laid on one sheet by class, each icon tinted with the colour its code takes, with its name and
+            its size on paper under it. The icons are the dialog's: a symbol scaled to fill a 64 px tile, which
+            is how a person reads it, and why the size is printed (symbols that differ by size alone look alike).
 * linestyles  a Katana plot (File > Plot, 300 dpi) of one sample of every linestyle, each drawn by a real
-            code of the library in the colour that code gives it, on a sheet of white paper at true size.
+            code of the library in the colour that code gives it, on a sheet of white paper at true size, a row
+            as far under the one before as the two linestyles need to stay clear of each other.
 * plan      the plan view of the window after `SURVEY IMPORT tests/data/katana_standard/street_corner.fld`:
             the invented street corner, coded and strung by the library, on the plan's own ground.
 * showcase  the plan view of the scene `showcase.py` writes, at the plot scale 1:500, a window at a time, the
@@ -93,20 +95,22 @@ def hex_rgb(text):
 
 def sample_codes(codes_module, definitions, field, usable=lambda code: True):
     """definition name -> the code that shows it on a sheet. Several codes may draw with one definition, each in
-    its own colour: the sample is a code of the definition's OWN group when one uses it (a hidden outline is then
-    a building's and a fire hydrant the fire service's), else the first code that does. `field` is `linestyle`
-    or `symbol`; `usable` leaves out a code the sheet cannot use."""
+    its own colour: the sample is the first code of the definition's OWN group that uses it (a hidden outline is
+    then a building's and a fire hydrant the fire service's). `codes.py --check` holds that there is one, but for
+    the definitions several services share, whose group no code has: those take the first code of their own
+    CLASS (a buried duct is then a service's and not the railway's), and failing that the first code of all.
+    `field` is `linestyle` or `symbol`; `usable` leaves out a code the sheet cannot use."""
     group_of = {d["name"]: d["group"] for d in definitions}
-    chosen, in_group = {}, set()
+    chosen, rank = {}, {}
     for c in codes_module.CODES:
         name = codes_module.styling(c)[field]
         if not name or name not in group_of or not usable(c):
             continue
-        own = c["group"] == group_of[name]
-        if name not in chosen or (own and name not in in_group):
-            chosen[name] = c
-            if own:
-                in_group.add(name)
+        # 0: a code of the definition's group; 1: of its class; 2: any code
+        nearness = (0 if c["group"] == group_of[name]
+                    else 1 if c["group"].split("/")[0] == group_of[name].split("/")[0] else 2)
+        if name not in chosen or nearness < rank[name]:
+            chosen[name], rank[name] = c, nearness
     return chosen
 
 
@@ -161,11 +165,9 @@ def wrapped(draw, text, face, width):
     return lines + [line]
 
 
-def draw_symbols():
-    from PIL import Image, ImageDraw
-    codes_module, colours_module, _, symbols_module = modules()
-    colour_of = {name: hex_rgb(colours_module.COLOURS[codes_module.styling(c)["colour"]])
-                 for name, c in sample_codes(codes_module, symbols_module.SYMBOLS, "symbol").items()}
+def shoot_symbols(codes_module, symbols_module):
+    """name -> the icon the Symbol Library draws for it: one screenshot of the dialog a group, its tiles cut out."""
+    from PIL import Image
     by_group = {}
     for d in symbols_module.SYMBOLS:
         by_group.setdefault(d["group"], []).append(d["name"])
@@ -200,6 +202,21 @@ def draw_symbols():
     missing = [d["name"] for d in symbols_module.SYMBOLS if d["name"] not in tiles]
     if missing:
         sys.exit("no tile for " + ", ".join(missing))
+    return tiles
+
+
+def symbol_sheet(tiles, codes_module, colours_module, symbols_module):
+    """The sheet of every symbol, from `tiles` (name -> a TILE-square icon, a white line on the plan's ground): the
+    icons by class and, in a class, by group, each tinted with the colour of a code that uses it, with its name
+    and its size on paper under it. The dialog scales every icon to fill its tile, so the six canopies and the six
+    trunks, which differ by size alone, look alike there: the figures tell them apart."""
+    from PIL import Image, ImageDraw
+    colour_of = {name: hex_rgb(colours_module.COLOURS[codes_module.styling(c)["colour"]])
+                 for name, c in sample_codes(codes_module, symbols_module.SYMBOLS, "symbol").items()}
+    size_of = {}
+    for d in symbols_module.SYMBOLS:
+        x0, y0, x1, y1 = symbols_module._bounds(d["strokes"])
+        size_of[d["name"]] = "%.1f x %.1f mm" % (x1 - x0, y1 - y0)
 
     # The dialog draws a white line on the ground; take the brightness as the strength of the symbol's own
     # colour. The ground is the plan view's, so the icon sits on the sheet as it sits on the plan.
@@ -213,14 +230,22 @@ def draw_symbols():
                 px[xx, yy] = tuple(round(GROUND[i] * (1 - a) + colour[i] * a) for i in range(3))
         return out
 
-    per_row, cell_w, cell_h, margin = 8, 118, 112, 36
+    per_row, cell_w, margin, line_h = 8, 118, 36, 14
+    small = font(12)
+    probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    name_lines = {d["name"]: wrapped(probe, d["name"], small, cell_w - 12) for d in symbols_module.SYMBOLS}
+    # A cell holds the icon, the longest name there is and the size under it.
+    cell_h = TILE + 5 + (max(len(lines) for lines in name_lines.values()) + 1) * line_h + 8
     classes = []
     for top in codes_module.TAXONOMY:
-        names = [d["name"] for d in symbols_module.SYMBOLS if d["group"].split("/")[0] == top[1]]
+        groups = [top[1] + "/" + sub[0] for sub in top[4]]
+        if top[0] == "U":
+            groups.append("Utilities/All Services")
+        names = [d["name"] for g in groups for d in symbols_module.SYMBOLS if d["group"] == g]
         if names:
             classes.append((top, names))
     heading = 58
-    height = margin * 2 + 92 + sum(((len(n) + per_row - 1) // per_row) * cell_h + heading for _, n in classes)
+    height = margin * 2 + 110 + sum(((len(n) + per_row - 1) // per_row) * cell_h + heading for _, n in classes)
     width = margin * 2 + per_row * cell_w
     sheet = Image.new("RGB", (width, height), GROUND)
     draw = ImageDraw.Draw(sheet)
@@ -228,8 +253,9 @@ def draw_symbols():
               fill=(236, 240, 244), font=font(30, True))
     draw.text((margin, margin + 30), "As the Symbol Library draws them, each in the colour of a code that uses it.",
               fill=(154, 164, 176), font=font(14))
-    y = margin + 76
-    small = font(12)
+    draw.text((margin, margin + 50), "Every icon is scaled to fill its tile: the figures are a symbol's width and "
+              "height on paper.", fill=(154, 164, 176), font=font(14))
+    y = margin + 94
     for top, names in classes:
         label = top[1].upper()
         draw.text((margin, y), label, fill=(196, 206, 218), font=font(14, True))
@@ -243,11 +269,18 @@ def draw_symbols():
             sheet.paste(tinted(tiles[name], colour_of.get(name, hex_rgb(colours_module.COLOURS["katana note"]))),
                         (x, top_y))
             draw.rectangle((x - 1, top_y - 1, x + TILE, top_y + TILE), outline=(46, 53, 62))
-            for line_no, line in enumerate(wrapped(draw, name, small, cell_w - 12)):
-                draw.text((x + TILE / 2 - draw.textlength(line, font=small) / 2, top_y + TILE + 5 + line_no * 14),
-                          line, fill=(166, 176, 188), font=small)
+            words = [(line, (166, 176, 188)) for line in name_lines[name]] + [(size_of[name], (112, 122, 134))]
+            for line_no, (line, fill) in enumerate(words):
+                draw.text((x + TILE / 2 - draw.textlength(line, font=small) / 2, top_y + TILE + 5 + line_no * line_h),
+                          line, fill=fill, font=small)
         y += ((len(names) + per_row - 1) // per_row) * cell_h + 18
-    save_small(sheet.crop((0, 0, width, y + margin - 18)), "katana-standard-symbols.png")
+    return sheet.crop((0, 0, width, y + margin - 18))
+
+
+def draw_symbols():
+    codes_module, colours_module, _, symbols_module = modules()
+    tiles = shoot_symbols(codes_module, symbols_module)
+    save_small(symbol_sheet(tiles, codes_module, colours_module, symbols_module), "katana-standard-symbols.png")
 
 
 # ---- linestyles: a Katana plot of a sample of each ----------------------------------------------------------
@@ -260,14 +293,62 @@ def mm(paper):
     return paper * SCALE / 1000.0
 
 
-def draw_linestyles():
-    from PIL import Image
-    codes_module, colours_module, linestyles_module, _ = modules()
-    keys = {c["key"] for c in codes_module.CODES}
-    # a code that the key itself answers, so the library styles the sample by that key
-    user = {name: field_code(c["key"])
-            for name, c in sample_codes(codes_module, linestyles_module.LINESTYLES, "linestyle",
-                                        lambda c: matched_key(field_code(c["key"]), keys) == c["key"]).items()}
+# The sheet's layout, in millimetres of paper: a column, the room for a name, the length of a sample, and the jog a
+# sample takes two thirds of the way along (so that a pattern is seen to follow a bend).
+COLUMN_W, NAME_W, SAMPLE_W, JOG = 122.0, 46.0, 66.0, 1.2
+ROW_MIN = 5.2        # the least from one row's line to the next: a name is 2.1 mm high
+ROW_CLEAR = 0.9      # white paper between the lowest mark of one row and the highest of the next
+SHEET_ROWS = 256.5   # the height the columns may take: what an A3 sheet at 1:SCALE holds with room to spare
+
+
+def cross_extent(definition):
+    """(above, below): how far a linestyle's strokes reach to the LEFT of its line and to the right, in
+    millimetres, both at least 0. An arc or a circle is taken as its whole circle and a letter as its height."""
+    highest = lowest = y = 0.0
+    for stroke in definition["strokes"]:
+        kind = stroke[0]
+        if kind in ("move", "draw"):
+            y = stroke[2]
+            reach = 0.0
+        elif kind in ("circle", "dot", "arc"):
+            reach = abs(stroke[1])
+        elif kind == "text":
+            reach = stroke[1].get("height", 0) / 2.0
+        else:
+            continue
+        highest, lowest = max(highest, y + reach), min(lowest, y - reach)
+    return highest, -lowest
+
+
+def row_room(kind, definition=None):
+    """(above, below): the room a row of the sheet takes above and below its own line. A heading is 2.6 mm text
+    whose foot is 1 mm under the line; a sample is a name (2.1 mm text, 0.7 mm under) and the linestyle itself,
+    which rises by the jog."""
+    if kind == "heading":
+        return 1.6, 1.0
+    above, below = cross_extent(definition)
+    return max(1.4, JOG + above), max(0.7, below)
+
+
+def column_rows(column, definitions):
+    """The rows of one column with the y of each row's line, in millimetres down from the title (negative), and
+    the column's height. Each row is as far under the one before as the two need to stay clear of each other,
+    and never nearer than ROW_MIN: a linestyle may reach 3.4 mm to either side of its line, so rows at one fixed
+    pitch small enough to fit the sheet would let a turn arrow of one row run into the next."""
+    rows, y, below_before = [], 0.0, None
+    for kind, text in column:
+        above, below = row_room(kind, definitions.get(text))
+        y -= ROW_MIN if below_before is None else max(ROW_MIN, below_before + above + ROW_CLEAR)
+        rows.append((kind, text, y))
+        below_before = below
+    return rows, -y
+
+
+def linestyle_columns(codes_module, linestyles_module):
+    """Three columns of whole groups, in the catalogue's order, cut where the tallest column is shortest; a
+    heading for every group, so it is never left at the foot of a column away from its lines. Each column is a
+    list of (kind, text, y)."""
+    definitions = {d["name"]: d for d in linestyles_module.LINESTYLES}
     groups = []
     for top in codes_module.TAXONOMY:
         for sub in top[4]:
@@ -277,26 +358,35 @@ def draw_linestyles():
                 names += [d["name"] for d in linestyles_module.LINESTYLES if d["group"] == "Utilities/All Services"]
             if names:
                 groups.append((g, names))
-    # Three columns of whole groups, in order, cut where the longest column is shortest; a heading for every
-    # group, so it is never left at the foot of a column away from its lines.
-    sizes = [1 + len(names) for _, names in groups]
+
+    def column(block):
+        rows = []
+        for g, names in block:
+            rows.append(("heading", g))
+            rows += [("style", n) for n in sorted(names)]
+        return column_rows(rows, definitions)
+
     best = None
     for first in range(1, len(groups) - 1):
         for second in range(first + 1, len(groups)):
-            longest = max(sum(sizes[:first]), sum(sizes[first:second]), sum(sizes[second:]))
-            if best is None or longest < best[0]:
-                best = (longest, first, second)
-    _, first, second = best
-    columns = []
-    for block in (groups[:first], groups[first:second], groups[second:]):
-        column = []
-        for g, names in block:
-            column.append(("heading", g))
-            column += [("style", n) for n in sorted(names)]
-        columns.append(column)
-    # A3 holds the longest column with room to spare: the stamps Katana puts in the sheet's corners (the plan title
-    # bottom left, the scale bar bottom right) sit below the last row, so none of it is cut or hidden.
-    col_w, row_h, name_w, line_w = 122.0, 5.7, 46.0, 66.0
+            made = [column(block) for block in (groups[:first], groups[first:second], groups[second:])]
+            tallest = max(height for _, height in made)
+            if best is None or tallest < best[0]:
+                best = (tallest, [rows for rows, _ in made])
+    if best[0] > SHEET_ROWS:
+        sys.exit("the linestyle sheet's tallest column is %.1f mm and the sheet holds %.1f" % (best[0], SHEET_ROWS))
+    return best[1]
+
+
+def draw_linestyles():
+    from PIL import Image
+    codes_module, colours_module, linestyles_module, _ = modules()
+    keys = {c["key"] for c in codes_module.CODES}
+    # a code that the key itself answers, so the library styles the sample by that key
+    user = {name: field_code(c["key"])
+            for name, c in sample_codes(codes_module, linestyles_module.LINESTYLES, "linestyle",
+                                        lambda c: matched_key(field_code(c["key"]), keys) == c["key"]).items()}
+    columns = linestyle_columns(codes_module, linestyles_module)
     lines = []
     ident = 0
 
@@ -309,15 +399,14 @@ def draw_linestyles():
     made('TEXT %.4f,%.4f %.4f "One sample of each, drawn by a code that uses it, in the colour that code gives it. '
          'Plotted at 1:%d: every mark is the size it is on paper."' % (0, mm(2.5), mm(2.1), SCALE))
     for c, column in enumerate(columns):
-        x0 = c * col_w
-        for r, (kind, text) in enumerate(column):
-            y = -(r + 1) * row_h
+        x0 = c * COLUMN_W
+        for kind, text, y in column:
             if kind == "heading":
                 made('TEXT %.4f,%.4f %.4f "%s"' % (mm(x0), mm(y - 1.0), mm(2.6), text.upper().replace("/", "  /  ")))
                 continue
             made('TEXT %.4f,%.4f %.4f "%s"' % (mm(x0), mm(y - 0.7), mm(2.1), text))
-            xs = [x0 + name_w, x0 + name_w + 36, x0 + name_w + 44, x0 + name_w + line_w]
-            ys = [y, y, y + 1.2, y + 1.2]
+            xs = [x0 + NAME_W, x0 + NAME_W + 36, x0 + NAME_W + 44, x0 + NAME_W + SAMPLE_W]
+            ys = [y, y, y + JOG, y + JOG]
             pid = made("PLINE " + " ".join("%.4f,%.4f" % (mm(a), mm(b)) for a, b in zip(xs, ys)))
             lines += ["SELECT %d" % pid, "PROP SET code %s text" % user[text], "SELECT NONE"]
     lines.append("CODE")
