@@ -24,7 +24,9 @@ What it does by itself, with no switch:
                                 several ranges in one request are 501, which is what the release host
                                 answered when it was measured (ranges.hpp); a Range that is not one is
                                 ignored, as the RFC allows
-  anything else                 404; a method other than GET is 501
+  anything else                 404; a method other than GET is 501, and a request that cannot be read
+                                as one is 400 (414, 431 and 505 as http.server finds them), each with
+                                an empty body
 
 The switches, each of which may be repeated. GLOB is matched against the request's path (decoded,
 starting with '/', without its query) by fnmatch, so `*.zip` is every zip and `*` is everything. A
@@ -56,7 +58,10 @@ status answered, what answered (`behaviour`), the range served (first and last b
 the length announced and `served`: the bytes of body written to the connection. --log FILE appends
 each as one line of JSON; FakeFeed.requests() gives the same records to a test in this process. It is
 how a test proves what went over the wire: which bytes of the zip were asked for, and that the second
-hop carried no `Authorization`.
+hop carried no `Authorization`. So EVERY request is a record, the ones the feed refuses too: a method
+other than GET, and a request it could not read (`behaviour` is `refused`; the method, the path and
+the headers are what was read of them, which may be nothing). A request made in a way no test
+expected is then in the log, and not merely absent from it.
 
     --lifetime SECONDS          stop after this long (default 3600; 0: never), so that a server whose
                                 test died does not live for ever
@@ -173,19 +178,43 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002  (the base class's name)
         pass  # the log is FakeFeed's, not standard error's
 
-    def do_GET(self) -> None:  # noqa: N802  (the base class's name)
-        feed: FakeFeed = self.server.feed    # type: ignore[attr-defined]
-        which: str = self.server.which       # type: ignore[attr-defined]
-        path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+    def _record(self) -> dict:
+        """The log's record of the request being answered, before its answer: what was read of it. A
+        request the base class refused may have no path or no headers yet (see send_error)."""
         headers: dict[str, str] = {}
-        for name, value in self.headers.items():
+        received = getattr(self, "headers", None)
+        for name, value in (received.items() if received is not None else ()):
             key = name.lower()
             headers[key] = f"{headers[key]}, {value}" if key in headers else value
-        record = {"port": which, "method": "GET", "path": self.path, "headers": headers, "status": 0,
-                  "behaviour": "", "range": None, "length": 0, "served": 0}
+        which: str = self.server.which       # type: ignore[attr-defined]
+        return {"port": which, "method": getattr(self, "command", None) or "", "path": getattr(self, "path", ""),
+                "headers": headers, "status": 0, "behaviour": "", "range": None, "length": 0, "served": 0}
+
+    def do_GET(self) -> None:  # noqa: N802  (the base class's name)
+        feed: FakeFeed = self.server.feed    # type: ignore[attr-defined]
+        path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+        record = self._record()
         feed.begin()
         try:
-            self._answer(feed, which, path, record)
+            self._answer(feed, record["port"], path, record)
+        finally:
+            feed.log(record)
+
+    def send_error(self, code: int, message: Optional[str] = None, explain: Optional[str] = None) -> None:
+        """What http.server refuses by itself, without asking do_GET: a method other than GET (501), and a
+        request it could not read (400; 414, 431, 505). Each is answered with that status and an empty
+        body, and LOGGED like every other request - the log is what proves which requests were made.
+        `message` and `explain` are the base class's words for its own page, which is not sent."""
+        feed: FakeFeed = self.server.feed    # type: ignore[attr-defined]
+        if not getattr(self, "command", None):
+            # No request line was read. Some versions of http.server then answer as to HTTP/0.9, with
+            # no status line at all (others, 3.14 among them, see to it themselves for some of the
+            # cases). The refusal is said in HTTP/1.1 always, so that the status logged is one that was sent.
+            self.request_version = self.protocol_version
+        record = self._record()
+        feed.begin()
+        try:
+            self._send(record, "refused", int(code), {"Content-Type": "text/plain"}, b"")
         finally:
             feed.log(record)
 
@@ -467,8 +496,12 @@ class FakeFeed:
             self._settled.wait_for(lambda: self._answering == 0, timeout=settle_seconds)
             return [json.loads(json.dumps(r)) for r in self._records if port is None or r["port"] == port]
 
-    def clear_log(self) -> None:
-        with self._lock:
+    def clear_log(self, settle_seconds: float = 10.0) -> None:
+        """Forget the records so far. Like requests(), it first waits (up to `settle_seconds`) for every
+        request that has begun to be in the log: the record of an answer that is still being sent is one
+        of those being forgotten, and must not turn up afterwards among the records of what follows."""
+        with self._settled:
+            self._settled.wait_for(lambda: self._answering == 0, timeout=settle_seconds)
             self._records = []
 
 

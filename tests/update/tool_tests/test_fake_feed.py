@@ -13,8 +13,10 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import socket
 import subprocess
 import sys
+import threading
 import unittest
 import urllib.error
 import urllib.request
@@ -172,11 +174,40 @@ class WhatItServesByItself(FeedTest):
                 self.assertEqual(reply.status, 404)
                 self.assertNotIn(b"beside the served folder", reply.body)
 
-    def test_a_method_other_than_get_is_501(self) -> None:
+    def test_a_method_other_than_get_is_501_with_no_body_and_is_in_the_log(self) -> None:
         feed = self.serve()
         for method in ("HEAD", "DELETE"):
             with self.subTest(method):
-                self.assertEqual(get(feed.url + "/alpha.bin", method=method).status, 501)
+                reply = get(feed.url + "/alpha.bin?x=1", {"X-Marker": "seen"}, method=method)
+                self.assertEqual((reply.status, reply.body, reply.headers["Content-Length"]), (501, b"", "0"))
+        # The log is what proves which requests were made: one made in a way no test expected is IN it.
+        records = feed.requests()
+        self.assertEqual([(r["n"], r["port"], r["method"], r["path"], r["status"], r["behaviour"], r["length"],
+                           r["served"]) for r in records],
+                         [(1, "first", "HEAD", "/alpha.bin?x=1", 501, "refused", 0, 0),
+                          (2, "first", "DELETE", "/alpha.bin?x=1", 501, "refused", 0, 0)])
+        self.assertEqual([r["headers"].get("x-marker") for r in records], ["seen", "seen"])
+
+    def test_a_request_that_cannot_be_read_as_one_is_400_and_is_in_the_log_with_what_was_read(self) -> None:
+        feed = self.serve()
+        # One word where a method, an address and a version belong (RFC 9112, 3: the request line), sent
+        # to the second port. urllib cannot be made to say this, so it goes over a socket of the test's own.
+        with socket.create_connection(("127.0.0.1", feed.second_port), timeout=30) as raw:
+            raw.sendall(b"HELLO\r\n")
+            answer = b""
+            while True:
+                piece = raw.recv(4096)
+                if not piece:
+                    break
+                answer += piece
+        head, blank, body = answer.partition(b"\r\n\r\n")
+        lines = head.split(b"\r\n")
+        self.assertEqual(lines[0], b"HTTP/1.1 400 Bad Request")
+        self.assertIn(b"Content-Length: 0", lines[1:])
+        self.assertEqual((blank, body), (b"\r\n\r\n", b""))
+        self.assertEqual(feed.requests(), [{"n": 1, "port": "second", "method": "", "path": "", "headers": {},
+                                            "status": 400, "behaviour": "refused", "range": None, "length": 0,
+                                            "served": 0}])
 
 
 class TheRangeReader(unittest.TestCase):
@@ -363,6 +394,43 @@ class TheLog(FeedTest):
         self.assertEqual(lines, records)
         feed.clear_log()
         self.assertEqual(feed.requests(), [])
+
+    def test_clearing_the_log_waits_for_an_answer_that_is_still_being_sent(self) -> None:
+        # A record is written when its answer has been sent. So a log cleared while an answer is on its
+        # way must wait for that record and forget it with the rest: left to arrive afterwards, it would be
+        # counted among the requests of whatever the test does next.
+        #
+        # The answer is held up from this side: 32 MiB that the client does not read. The loopback takes a
+        # few megabytes of that into its buffers at the most, so the feed is still writing the body.
+        size = 32 * 1024 * 1024
+        (self.root / "big.bin").write_bytes(bytes(size))
+        feed = self.serve()
+        connection = http.client.HTTPConnection("127.0.0.1", feed.port, timeout=60)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/big.bin")
+        response = connection.getresponse()  # the headers are here: the answer has begun, its body is unread
+        self.assertEqual((response.status, response.getheader("Content-Length")), (200, str(size)))
+        clearing = threading.Thread(target=feed.clear_log, name="clearing-the-log", daemon=True)
+        clearing.start()
+        clearing.join(timeout=0.5)
+        self.assertTrue(clearing.is_alive(), "clear_log returned while an answer was still being sent")
+        self.assertEqual(len(response.read()), size)
+        clearing.join(timeout=60)
+        self.assertFalse(clearing.is_alive(), "clear_log did not return once the answer had been sent")
+        self.assertEqual(feed.requests(), [])
+        # What follows is the first record of a log that starts again.
+        get(feed.url + "/alpha.bin")
+        self.assertEqual([(r["n"], r["path"]) for r in feed.requests()], [(1, "/alpha.bin")])
+
+    def test_clearing_the_log_does_not_wait_for_ever_for_an_answer_nobody_reads(self) -> None:
+        (self.root / "big.bin").write_bytes(bytes(32 * 1024 * 1024))
+        feed = self.serve()
+        connection = http.client.HTTPConnection("127.0.0.1", feed.port, timeout=60)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/big.bin")
+        connection.getresponse()
+        feed.clear_log(settle_seconds=0.2)  # returns: a test that hangs proves nothing
+        self.assertEqual(feed.requests(settle_seconds=0.0), [])
 
 
 class APrivateRepositoryOnGitHub(FeedTest):
