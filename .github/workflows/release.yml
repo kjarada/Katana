@@ -21,14 +21,14 @@ on:
         required: false
         default: ""
       sign:
-        description: "Who signs the update manifests. ci: this run, with the secret UPDATE_SIGNING_KEY. offline: the release stays a draft without signatures until tools/update_release_sign.py has signed it."
+        description: "Who signs the update manifests. ci: this run (secret UPDATE_SIGNING_KEY). offline: nobody yet; the release stays a draft until tools/update_release_sign.py has signed it."
         type: choice
         options:
           - ci
           - offline
         default: ci
       publish_repo:
-        description: "owner/name of another repository to publish the release in (needs the secret RELEASES_REPO_TOKEN). Empty: this repository."
+        description: "Another repository to publish the release in, owner/name (secret RELEASES_REPO_TOKEN). Empty: this repository."
         required: false
         default: ""
 
@@ -223,10 +223,10 @@ jobs:
       # that built it, in a run without a tag too, and not the publish job
       # hours later.
       #
-      # Then the updater itself: the helper must start with no DLL beside it
-      # that it needs, verify a known signature and hold real keys, and the
-      # command line must know which release it is - its version, the target
-      # the package was named for, and that it is an unpacked archive.
+      # Then the updater itself: the helper must start, verify a known
+      # signature and hold real keys, not the placeholders, and the command
+      # line must know which release it is - its version, the target the
+      # package was named for, and that it is an unpacked archive.
       - name: Smoke test the package
         timeout-minutes: 20
         run: |
@@ -620,11 +620,12 @@ jobs:
             case "$token" in
               win*)
                 unzip -q "dist/Katana-$VERSION-$token.zip" -d "trees/$token"
-                # unzip invents execute bits from a zip made on Windows, and
-                # the producer, here on Linux, would read them: as "exec" in
-                # the manifest and as a reason to call a file in bin/ a
-                # program. Cleared, a Windows file is classed by its name
-                # alone (.exe, .dll), as the producer classes it on Windows.
+                # A zip made on Windows carries the execute bits its archiver
+                # guessed from the file names, and the producer, here on
+                # Linux, would read them: as "exec" in the manifest and as a
+                # reason to call a file in bin/ a program. Cleared, a Windows
+                # file is classed by its name alone (.exe, .dll), as the
+                # producer classes it on Windows, where there is no such bit.
                 chmod -R u+rwX "trees/$token"
                 find "trees/$token" -type f -exec chmod a-x {} +
                 extra=()

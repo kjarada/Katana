@@ -134,11 +134,14 @@ The seed and the excluded names are written once, at the top of the workflow
 and the rehearsal below alike. `share/katana/install.json` needs no option:
 the producer leaves the install record out by itself.
 
-**The Windows packages are unpacked on Linux,** where `unzip` invents execute
-bits from a zip made on Windows and the producer would read them, as `exec`
-in the manifest and as a reason to class a file in `bin/` as a program. The
-step clears them, so a Windows file is classed by its name alone (`.exe`,
-`.dll`), as the producer classes it when it runs on Windows.
+**The Windows packages are unpacked on Linux,** where the execute bits a zip
+made on Windows carries (its archiver's guess from the file names) become
+real, and the producer would read them: as `exec` in the manifest, and as a
+reason to class a file in `bin/` as a program. The step clears them, so a
+Windows file is classed by its name alone (`.exe`, `.dll`), as the producer
+classes it when it runs on Windows, where there is no such bit. This is the
+one part of the step that could not be tried on the machine it was written
+on, which has no such bits either ("Not done").
 
 **No package holds a symbolic link,** which the producer refuses (a manifest
 has no way to say one, and the updater does not follow links,
@@ -189,10 +192,13 @@ left without it.
 Nothing in the workflow has run since the update assets were added ("Not
 done"), and several things can only be seen on GitHub. In the run:
 
+* The Linux, macOS and Windows ARM64 jobs configure and build at all: they
+  are the first places the update library, and the helper with it (not on
+  macOS), meets those systems - on Linux and macOS OpenSSL and zlib as the
+  toolchain prefix has them, on Windows ARM64 their static libraries.
 * Each Windows and Linux job's smoke test prints `selftest=ok` and
   `keys=pinned`, and all five print `target=<token>` and `kind=archive`
-  ("The smoke test"). The Linux and the Windows ARM64 jobs are the first
-  places the helper is built on those systems at all.
+  ("The smoke test").
 * The rehearsal in each of the four jobs ends `verified 1 manifest(s)`, and
   the number of files it reports is the package's. A refusal names every
   file it is about.
@@ -225,6 +231,12 @@ from. With the next release published, the same line says
 `update=available`, and Help > Check for Updates installs it: the first live
 update. What the updater itself still has to be seen doing against the real
 GitHub is listed in `docs/update.md`.
+
+Only when they are first used: with `sign` set to `offline`, that
+`gh release view vX.Y.Z` and `gh release download vX.Y.Z` find the DRAFT by
+its tag (the workflow's re-run and the offline tool's printed command both
+rely on it); with `publish_repo`, that the release appears in the other
+repository, on its default branch.
 
 ## What each job does
 
@@ -667,14 +679,29 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   (2026-10-13), and no run of it has yet published a release. What was done
   instead: the file was parsed by an independent YAML parser, every script
   in it passed `bash -n` or PowerShell's parser, every option it gives `gh`
-  and the update tools was held to their own lists, and the Publish job's
-  three scripts were run as they stand on made-up packages, with a throwaway
-  key and a stand-in for `gh`. None of that is a run. A rehearsal - two
-  versions published in a throwaway repository, the second installed as an
-  update of the first - is the owner's acceptance step and the gate for the
-  first real release ("To verify on the first release").
+  and the update tools was held to their own lists, and the scripts of the
+  first job and of the Publish job (all but the OpenPGP step) were run as
+  they stand on made-up packages, with a throwaway key and a stand-in for
+  `gh`. None of that is a run: nothing was tried on a runner, against the
+  real `gh` and GitHub, or on a file system that has execute bits (the
+  Windows packages' part of "Update assets"); and the smoke tests' new lines
+  need the programs. A rehearsal - two versions published in a throwaway
+  repository, the second installed as an update of the first - is the
+  owner's acceptance step and the gate for the first real release ("To
+  verify on the first release").
 * **The update keys are placeholders** until the owner's key steps ("Update
   signing"); until then the workflow stops in its first job.
+* **On macOS without a Developer ID the install record is added after the
+  bundle is sealed.** Found by reading, 2026-10-13, and not yet seen on a
+  Mac: `cmake --install` seals `Katana.app` ad hoc
+  (`cmake/KatanaDeployUnix.cmake.in`, its last step), and CPack then writes
+  `Contents/Resources/share/katana/install.json` into the staged bundle
+  (`cmake/KatanaPackaging.cmake`, "install.json"). With a Developer ID
+  `cmake/KatanaSign.cmake` signs everything again afterwards; without one
+  nothing does, so `codesign --verify --deep --strict` in the macOS smoke
+  test should refuse the bundle for a file added to it. The bundle has to be
+  sealed again after the record is written, in the packaging and not in the
+  workflow.
 * **macOS is told about a release, not updated,** and the Linux packages are
   not yet updated in place either (`docs/update.md`); their manifests and
   update zips are published all the same.
@@ -684,7 +711,6 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   place: then either `ssl` joins the folders
   (`include/katana/update/paths.hpp` and both tools) or the bundle moves
   under one of them.
-
 * **No CI on every change.** The whole suite runs in the release workflow,
   which is started by hand; a change is still gated by running the suite
   locally (`docs/testing.md`, audit BLD-01).
