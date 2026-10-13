@@ -688,8 +688,12 @@ core::Error cannotInstallHere(Action action)
                      "reason=platform");
 }
 
-// DOWNLOAD's progress, said as lines: one each time another tenth of the
-// bytes has arrived, the first and the last among them.
+// DOWNLOAD's progress, said as lines: the first report, one each time another
+// tenth of the bytes has arrived, and - the bytes all there - one more when
+// the files have followed them into the stage folder, so that the last line
+// says every changed file is staged. (The bytes of a request arrive before
+// its files are unpacked and verified: "all the bytes, none of the files" is
+// a state a line can truthfully show.)
 class ProgressLines {
   public:
     ProgressLines(const UpdateContext& context, const update::Manifest& manifest,
@@ -708,14 +712,23 @@ class ProgressLines {
         // Nothing to fetch is all of it fetched.
         const std::uint64_t step =
             total == 0 ? kProgressSteps : std::min(done, total) * kProgressSteps / total;
-        if (said_ && step <= step_) {
+        const bool complete = done >= total;
+        // The transport reports many times a second, and the files are
+        // counted on the disk: they are counted only for a line that is about
+        // to be said, or once the bytes are all there.
+        if (said_ && step <= step_ && !complete) {
+            return;
+        }
+        const std::uint64_t files = stagedFiles();
+        if (said_ && step <= step_ && files == files_) {
             return;
         }
         said_ = true;
-        step_ = step;
+        step_ = std::max(step_, step);
+        files_ = files;
         std::string line = "progress bytes=" + std::to_string(std::min(done, total)) + "/" +
-                           std::to_string(total) + " files=" + std::to_string(stagedFiles()) +
-                           "/" + std::to_string(plan_.changedFiles);
+                           std::to_string(total) + " files=" + std::to_string(files) + "/" +
+                           std::to_string(plan_.changedFiles);
         line = withoutSecrets(std::move(line), secrets_);
         if (context_.progressLine) {
             context_.progressLine(line);
@@ -753,7 +766,8 @@ class ProgressLines {
     const std::vector<std::string>& secrets_;
     std::vector<std::string> lines_;
     bool said_ = false;
-    std::uint64_t step_ = 0;
+    std::uint64_t step_ = 0;  // the tenth the last line was said at
+    std::uint64_t files_ = 0; // the files it counted
 };
 
 Result<UpdateReply> download(const UpdateContext& context, const std::vector<std::string>& secrets)
