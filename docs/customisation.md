@@ -23,9 +23,10 @@ document is the reasons.
    customisation, and is one choice away: File > Settings > Built-in library,
    then Use (the line is `CUSTOMISE BUILTIN NSW`), which a session that was kept
    keeps for the next start. The two answer the same survey codes: Katana
-   Standard's code keys are the NSW customisation's, kept on the owner's
-   decision so that the same field data works with either, and everything else
-   in it (linestyles, symbols, layers, colours, labels) is Katana's own, so what
+   Standard's code keys are the NSW customisation's, with what each key stands
+   for and the kinds of rule it has, kept on the owner's decision so that the
+   same field data works with either, and everything it names, draws and words
+   (linestyles, symbols, layers, colours, labels) is Katana's own, so what
    the choice changes is how the drawing looks. (Both files are in the repository, "Why the
    built-in is in the repository", below, so a build made from a clean checkout
    has them. Only a build pointed at files that do not exist starts with no
@@ -1965,7 +1966,8 @@ The customisations a program offers are COMPILED INTO it: Katana customisation
 files, embedded in `katana_cad` with `#embed` into one generated table
 (`src/katana_cad/customisation/builtin_table.hpp`, written by
 `src/katana_cad/CMakeLists.txt`), as the plot frame is. ONE of them is THE
-built-in, the DEFAULT - Katana Standard, a library made for Katana with the NSW customisation's survey code keys -
+built-in, the DEFAULT - Katana Standard, a library made for Katana with the NSW customisation's survey code keys
+and with what each key stands for and does -
 which a program starts with and which `CUSTOMISE RESET` gives; it is parsed
 once at first use by `cad::compiledInCustomisation()`, and alone, so a start
 reads its bytes only. The others are ALTERNATES - the NSW customisation - and
@@ -2004,8 +2006,9 @@ embedding this replaced ran Python over a folder of four files on every build.
 Katana Standard, `resources/customisation/katana-standard.customisation.json`,
 is the default (the owner's ruling, 2026-10-08): a library of 98
 linestyles, 123 symbols and 632 survey codes made for Katana. Its survey code
-keys are the NSW customisation's, kept on the owner's decision so that the same
-field data works with either library; everything else in it is Katana's own
+keys are the NSW customisation's, with what each key stands for and the kinds of
+rule it has, kept on the owner's decision so that the same field data works with
+either library; everything it names, draws and words is Katana's own
 (`docs/katana_standard.md`: how to read it, what is shared and what is not done). The NSW file
 is compiled in beside it as an alternate and stays selectable. Either also loads
 like any file, with `CUSTOMISE REPLACE` or Settings > Import with Replace ticked.
@@ -2078,8 +2081,9 @@ granted a permission, and none is claimed here. The libraries' notice still
 exists in the reference files, and anyone who relies on this file in a build
 they pass on should make their own assessment first (a build without it is
 possible, and has Katana Standard alone: `-DKATANA_ALTERNATE_CUSTOMISATIONS=`,
-the list empty; Katana Standard still holds this file's survey code keys, and
-nothing else of it, `LICENSING.md`). Committed, the file stays in the history even if a later commit
+the list empty; Katana Standard still holds this file's survey code keys and
+what each stands for and does, and nothing this file names, draws or words,
+`LICENSING.md`). Committed, the file stays in the history even if a later commit
 removes it. It is compiled into every program as an ALTERNATE built-in now, not
 as the one a program starts with; it is in the binary all the same.
 

@@ -3,10 +3,11 @@
 
     python tools/katana_standard/originality.py REFERENCE.json CANDIDATE.json [--limit N]
 
-Katana Standard reuses the survey code KEYS of another library, on the owner's decision, so that a field file
-coded for either draws in both (docs/katana_standard.md, "What is shared and what is not"). Everything else in it
-is meant to be Katana's own, and this script is the scan that holds that to account. It reads both files with the
-standard `json` module, shares no code with Katana, and compares what a person could copy:
+Katana Standard reuses the survey code KEYS of another library, with what each key stands for and the kinds of
+rule it has, on the owner's decision, so that a field file coded for either draws in both
+(docs/katana_standard.md, "What is shared and what is not"; parity.py holds that side). Everything it NAMES, DRAWS
+and WORDS is meant to be Katana's own, and this script is the scan that holds that to account. It reads both
+files with the standard `json` module, shares no code with Katana, and compares what a person could copy:
 
   definition names    a linestyle or symbol name EQUAL to one of the reference's: the same letters and digits in
                       the same order, whatever the case, the blanks and the punctuation (`Flag Pole`, `flag-pole`

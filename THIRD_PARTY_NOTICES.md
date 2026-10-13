@@ -260,8 +260,9 @@ customisation, `resources/customisation/nsw.customisation.json`, which is
 compiled into every program as an alternate built-in beside Katana Standard (the
 default, whose linestyles, symbols, layers and colours are Katana's own) and is
 **not** covered by the project licence. Katana Standard uses this file's survey
-code keys (the identifiers), reused for field-data compatibility on the owner's
-decision; the rest of it is Katana's own. The file is shipped on the owner's
+code keys (the identifiers), with what each key stands for and the kinds of rule
+it has, reused for field-data compatibility on the owner's decision; what it
+names, draws and words is Katana's own. The file is shipped on the owner's
 decision and statement that the information in it is public; a build without
 it is possible: see `LICENSING.md`, "What the licence does not cover".
 

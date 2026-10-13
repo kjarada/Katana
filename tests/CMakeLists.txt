@@ -312,8 +312,9 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME katana_standard_${_ks_module}
             COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/katana_standard/${_ks_module}.py" --check)
     endforeach()
-    # Katana Standard shares the survey code KEYS of the NSW customisation, tracked beside it, and nothing else of
-    # it. `katana_standard_parity` holds that the two have the same keys and, for each key, the same kinds of rule,
+    # Katana Standard shares the survey code KEYS of the NSW customisation, tracked beside it, with what each key
+    # stands for and does, and nothing that file names, draws or words. `katana_standard_parity` holds that the two
+    # have the same keys and, for each key, the same kinds of rule,
     # and that every key's code resolves to the same kind of entity in both (parity.py, with its documented
     # exceptions in parity_exceptions.json); `katana_standard_parity_script` is parity.py's own test, on small
     # invented customisations; `katana_standard_originality` scans the two files for anything but the keys that

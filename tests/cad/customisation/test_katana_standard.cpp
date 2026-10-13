@@ -1,7 +1,9 @@
 // Katana Standard: the customisation tracked as
 // resources/customisation/katana-standard.customisation.json
 // (docs/katana_standard.md). Its survey code KEYS are the NSW customisation's,
-// byte for byte, on the owner's decision; everything else in it is its own.
+// byte for byte, on the owner's decision, and each key stands for the same
+// thing and has the same kinds of rule; everything the library names, draws
+// and words is its own.
 //
 // The tests read the COMMITTED file with the strict reader and hold what the
 // library promises, so a regenerated file that drifted from its design fails

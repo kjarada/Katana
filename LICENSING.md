@@ -118,15 +118,24 @@ to hold that (`tools/katana_standard/originality.py`; that document's "What is
 shared and what is not" says what is compared and what was found). Those parts
 are covered like the rest of the repository.
 
-**The one part that is not original is its survey code keys.** The 632
-identifiers (`AC*`, `PBMK`, `WM*` and the rest), and the kinds of rule each key
-makes, are the NSW customisation's, byte for byte (`tools/katana_standard/parity.py`
-holds it). They are reused, on the owner's decision, so that a field file coded
-for either customisation is read by the other. The keys are the NSW file's, so
-what is said of that file in item 1 below applies to them; whether identifiers
-reused for compatibility need anyone's permission is a question for a lawyer,
-and this page does not settle it. Nor does it settle what copyright means for
-work made by an AI agent.
+**The part that is not original is its survey code keys, and what each key
+stands for and does.** Three things are the NSW customisation's
+(`tools/katana_standard/parity.py` holds the first and the third):
+
+- the 632 identifiers (`AC*`, `PBMK`, `WM*` and the rest), byte for byte;
+- what each key stands for: the thing it codes, read from that file's label
+  for the key and worded anew, with the pipe diameter, the culvert height, the
+  model zone or the text size that file gives it (a key states none of these
+  by itself);
+- the kinds of rule each key makes, in order, with their draw mode, hide and
+  surface flags and the text and pipe rules' settings.
+
+They are reused, on the owner's decision, so that a field file coded for either
+customisation is read by the other and makes the same kinds of entity. They are
+the NSW file's, so what is said of that file in item 1 below applies to them;
+whether identifiers and facts reused for compatibility need anyone's permission
+is a question for a lawyer, and this page does not settle it. Nor does it
+settle what copyright means for work made by an AI agent.
 
 These are in the repository or its packages and are **not** covered by the
 project licence, or are not known to be:
@@ -156,8 +165,9 @@ project licence, or are not known to be:
      (`-DKATANA_ALTERNATE_CUSTOMISATIONS=`; `src/katana_cad/CMakeLists.txt`,
      `docs/building.md`), and a default path that names no file as well makes one
      with no built-in at all. Katana Standard alone still holds this file's
-     survey code keys, and nothing else of it (above): a build with nothing of
-     this file in it is the one with no built-in.
+     survey code keys and what each stands for and does, and nothing this file
+     names, draws or words (above): a build with nothing of this file in it is
+     the one with no built-in.
 2. **`samples/`**, installed in every package (`cmake/KatanaPackaging.cmake`).
    Where each file came from is not recorded in this repository, so no licence
    is granted for them here. What can be verified:
