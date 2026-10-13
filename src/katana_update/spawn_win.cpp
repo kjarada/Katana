@@ -290,4 +290,24 @@ std::unique_ptr<Launcher> makeSystemLauncher()
     return std::make_unique<WindowsLauncher>();
 }
 
+// process.hpp says what is asked and why. TokenElevationTypeFull is the elevated half of a
+// split token; TokenElevationTypeLimited is the other half, and TokenElevationTypeDefault a
+// token that was never split (User Account Control off, or the built-in administrator).
+// Every failure to ask is "not elevated".
+bool processIsElevated()
+{
+    HANDLE opened = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &opened)) {
+        return false;
+    }
+    const Closer token(opened);
+    TOKEN_ELEVATION_TYPE kind = TokenElevationTypeDefault;
+    DWORD written = 0;
+    if (!GetTokenInformation(token.get(), TokenElevationType, &kind, sizeof(kind), &written) ||
+        written != sizeof(kind)) {
+        return false;
+    }
+    return kind == TokenElevationTypeFull;
+}
+
 } // namespace katana::update

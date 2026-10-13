@@ -1491,6 +1491,9 @@ TEST(UpdateVerbs, TheContextOfAProgramInNoInstallIsADevelopmentCopys)
         EXPECT_EQ(context.feed.token, "ghp_from_the_environment");
         EXPECT_EQ(context.pid, 0u) << "left for the caller";
         EXPECT_TRUE(context.relaunch.empty());
+        // How this process was started, as the update library answers it:
+        // whichever that is for this run of the suite, the context says it.
+        EXPECT_EQ(context.elevated, update::processIsElevated());
         const bool keeps = surface == UpdateSurface::Cli || surface == UpdateSurface::Window;
         EXPECT_EQ(context.stateDirectory.empty(), !keeps);
         if (keeps) {
@@ -1551,6 +1554,7 @@ TEST(UpdateVerbs, TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords)
     EXPECT_EQ(context.stateDirectory, rig.state);
     EXPECT_EQ(context.pid, 0u) << "left for the caller";
     EXPECT_TRUE(context.relaunch.empty());
+    EXPECT_EQ(context.elevated, update::processIsElevated()) << "this form asks as well";
 
     // The lines on it, with the rig's feed and the fixtures' keys where the
     // network and the release keys are: an installed copy, so it IS asked
@@ -2513,6 +2517,184 @@ TEST(UpdateVerbs, ApplyRefusesAReleaseThatWasRolledBackHere)
     EXPECT_EQ(reply.error().context, "reason=blocked_before");
     EXPECT_TRUE(contains(reply.error().message, "Katana 0.10.0"));
     EXPECT_TRUE(rig.launcher.runs.empty());
+}
+
+// ---- a Katana that was started as administrator -------------------------------------------------
+//
+// UpdateContext::elevated is what makeUpdateContext sets for the elevated half
+// of a split token (update/process.hpp). These tests set the member, so they
+// are the same tests however the suite itself was started.
+
+// The folders U/run-<tx> in `state`: one for each helper copy a preflight made
+// (update/state.hpp).
+std::vector<fs::path> runFoldersIn(const fs::path& state)
+{
+    std::vector<fs::path> found;
+    std::error_code error;
+    for (fs::directory_iterator at(state, error), end; !error && at != end;
+         at.increment(error)) {
+        if (at->path().filename().generic_string().starts_with("run-")) {
+            found.push_back(at->path());
+        }
+    }
+    return found;
+}
+
+TEST(UpdateVerbs, ApplyIsRefusedInAKatanaStartedAsAdministratorBeforeAnyHelperIsCopied)
+{
+    Rig rig;
+    rig.serveV2();
+    putAHelperIn(rig.root);
+    UpdateContext context = rig.context();
+    ASSERT_TRUE(runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM").ok());
+    const std::map<std::string, std::string> kept = treeOf(rig.state);
+    const std::map<std::string, std::string> installed = treeOf(rig.root);
+    rig.feed.requests.clear();
+
+    context.elevated = true;
+    const core::Result<UpdateReply> refused = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_FALSE(refused.ok()) << said(refused);
+    EXPECT_EQ(refused.error().code, core::ErrorCode::Unsupported);
+    EXPECT_EQ(refused.error().context, "reason=elevated");
+    // What to do about it, and that the download is not lost.
+    EXPECT_TRUE(contains(refused.error().message, "started as administrator"))
+        << refused.error().message;
+    EXPECT_TRUE(contains(refused.error().message, "Start Katana the ordinary way and update again"))
+        << refused.error().message;
+    EXPECT_TRUE(contains(refused.error().message, "Katana 0.10.0 stays downloaded"))
+        << refused.error().message;
+
+    // Refused BEFORE the preflight: the launcher was asked for nothing - no
+    // self-test run, nothing started - and no helper copy was made, so there
+    // is no run folder and nothing to list for a sweep. The update folder is
+    // file for file what the download left.
+    EXPECT_EQ(rig.launcher.runs.size(), 0u);
+    EXPECT_EQ(rig.launcher.detached.size(), 0u);
+    EXPECT_TRUE(runFoldersIn(rig.state).empty());
+    EXPECT_EQ(treeOf(rig.state), kept);
+    EXPECT_EQ(treeOf(rig.root), installed);
+    EXPECT_TRUE(rig.feed.requests.empty());
+
+    // The release is still staged ...
+    const core::Result<UpdateReply> status = runUpdateLine(context, "UPDATE STATUS");
+    ASSERT_TRUE(status.ok()) << said(status);
+    EXPECT_TRUE(contains(status->text, "staged=0.10.0")) << status->text;
+    EXPECT_TRUE(fs::exists(update::stagedManifestPath(rig.stageDirectory())));
+
+    // ... and Katana started the ordinary way applies it, without a download.
+    context.elevated = false;
+    const core::Result<UpdateReply> applied = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+    ASSERT_TRUE(applied.ok()) << said(applied);
+    ASSERT_TRUE(applied->apply.has_value());
+    EXPECT_EQ(rig.launcher.runs.size(), 1u);
+    EXPECT_EQ(runFoldersIn(rig.state),
+              std::vector<fs::path>{rig.state / ("run-" + applied->apply->transaction)});
+    EXPECT_TRUE(rig.feed.requests.empty());
+}
+
+TEST(UpdateVerbs, AKatanaStartedAsAdministratorStillChecksAndDownloads)
+{
+    // Only the apply starts the helper, so only the apply is refused: what is
+    // downloaded here is applied by Katana started the ordinary way.
+    Rig rig;
+    rig.serveV2();
+    UpdateContext context = rig.context();
+    context.elevated = true;
+
+    const core::Result<UpdateReply> checked = runUpdateLine(context, "UPDATE CHECK");
+    ASSERT_TRUE(checked.ok()) << said(checked);
+    EXPECT_EQ(checked->text, kAvailable);
+
+    const core::Result<UpdateReply> downloaded = runUpdateLine(context, "UPDATE DOWNLOAD CONFIRM");
+    ASSERT_TRUE(downloaded.ok()) << said(downloaded);
+    const std::vector<std::string> lines = linesOf(downloaded->text);
+    ASSERT_FALSE(lines.empty());
+    EXPECT_EQ(lines.back(), "staged=0.10.0");
+    EXPECT_TRUE(fs::exists(update::stagedManifestPath(rig.stageDirectory())));
+}
+
+TEST(UpdateVerbs, TheOtherRefusalsOfApplyAreSaidBeforeTheOneForAnAdministratorsSession)
+{
+    // A line that would not be carried out in any session says why not, and
+    // not how this one was started: a build tree's own reason is the same from
+    // an administrator's prompt, and there is nothing to start Katana again
+    // for when no release is downloaded or the one that is was put back.
+    {
+        // A development copy.
+        Rig rig;
+        rig.install = update::Install{};
+        rig.install.version = update::parseVersion("0.9.0").value();
+        UpdateContext context = rig.context();
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=development_tree");
+    }
+    {
+        // A copy whose install record does not read.
+        Rig rig;
+        UpdateContext context = rig.context();
+        context.installProblem = "ParseFailure: install.json is not a record";
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=install_record");
+    }
+    {
+        // No update folder.
+        Rig rig;
+        UpdateContext context = rig.context();
+        context.stateDirectory.clear();
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=no_state");
+    }
+    {
+        // Nothing downloaded.
+        Rig rig;
+        UpdateContext context = rig.context();
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=not_staged");
+    }
+    {
+        // Downloaded, and put back here before.
+        Rig rig;
+        putACompleteStageOfV2In(rig.state);
+        update::UpdateState state;
+        state.blockedSequences = {kV2Sequence};
+        ASSERT_TRUE(update::writeState(rig.state, state).ok());
+        UpdateContext context = rig.context();
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=blocked_before");
+    }
+    {
+        // Downloaded, and the state file does not read.
+        Rig rig;
+        putACompleteStageOfV2In(rig.state);
+        writeBytes(rig.state / "state.json", "this is not a state file");
+        UpdateContext context = rig.context();
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=state_unreadable");
+    }
+    {
+        // And with a release ready and nothing else in the way, it is this one.
+        Rig rig;
+        putACompleteStageOfV2In(rig.state);
+        UpdateContext context = rig.context();
+        context.elevated = true;
+        const core::Result<UpdateReply> reply = runUpdateLine(context, "UPDATE APPLY CONFIRM");
+        ASSERT_FALSE(reply.ok()) << said(reply);
+        EXPECT_EQ(reply.error().context, "reason=elevated");
+        EXPECT_EQ(rig.launcher.runs.size(), 0u);
+        EXPECT_TRUE(runFoldersIn(rig.state).empty());
+    }
 }
 
 TEST(UpdateVerbs, AStageThatIsNotAboveWhatIsInstalledIsNotReadyToApply)

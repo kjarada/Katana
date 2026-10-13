@@ -927,6 +927,21 @@ Result<UpdateReply> apply(const UpdateContext& context)
                              "applied again, and a later release will be offered",
                          "reason=blocked_before");
     }
+    // Started "as administrator": the helper would run with those rights from
+    // its copy in the update folder, which the same person's ordinary programs
+    // can write (update/process.hpp, processIsElevated). The last refusal, and
+    // before the preflight: no copy is made for a helper that will not be
+    // started, and the release stays where it was downloaded to.
+    if (context.elevated) {
+        return makeError(ErrorCode::Unsupported,
+                         "this Katana was started as administrator, and an update is not "
+                         "installed from there: the update helper would run with administrator "
+                         "rights from a folder that ordinary programs can write. Start Katana "
+                         "the ordinary way and update again; Katana " +
+                             update::toString(staged->manifest.version) +
+                             " stays downloaded and is not fetched a second time",
+                         "reason=elevated");
+    }
 
     // The helper is copied out of the install and proves it starts now, while
     // this session is still here to say that it does not.
@@ -1258,6 +1273,9 @@ UpdateContext contextOf(UpdateSurface surface, const Result<fs::path>& root)
     if (perUser) {
         context.stateDirectory = update::stateDirectory();
     }
+    // How the process was started is nothing a person keeps: asked for every
+    // surface, of the system, and never of a file.
+    context.elevated = update::processIsElevated();
     return context;
 }
 
@@ -1340,7 +1358,9 @@ const char* updateHelpText()
            "          transaction=<id>, the session ends, and the update helper replaces\n"
            "          the files, putting every one back if the new version does not\n"
            "          start. It must be the last line of a katana_cli run, which starts\n"
-           "          nothing again; the window closes and reopens\n"
+           "          nothing again; the window closes and reopens. A Katana that was\n"
+           "          started as administrator installs no update (reason=elevated):\n"
+           "          started the ordinary way it does, and the download is kept\n"
            "          UPDATE SKIP <version> | UPDATE SKIP NONE  do not offer that version;\n"
            "          offer it again\n"
            "          UPDATE SET AUTO ON|OFF  whether the window checks by itself, once a day\n"

@@ -1,6 +1,8 @@
 // The records beside the programs (install.hpp: install.json, installed.json, the signed manifest
 // kept for removals) and in the per-user state folder (state.hpp: state.json, last.json, the
-// cleanup list), and the one function that finds the install root of the running program.
+// cleanup list), and the one function that finds the install root of the running program. At
+// the end, the other thing that is asked of the running program: how it was started
+// (process.hpp, processIsElevated).
 //
 // Each expectation comes from the contract in the header, worked out by hand: the file shapes
 // are the ones the headers print, the paths are joined by the rules there, and the numbers in
@@ -37,6 +39,7 @@
 #include "katana/core/path_text.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/manifest.hpp"
+#include "katana/update/process.hpp"
 #include "katana/update/registry.hpp"
 #include "katana/update/state.hpp"
 #include "katana/update/trust.hpp"
@@ -2261,4 +2264,34 @@ TEST(CleanupList, AFolderNestedDeeperThanTheUpdaterEverMakesIsLeftAlone)
     EXPECT_TRUE(fs::exists(deep))
         << "the walk gives up past 64 levels instead of recursing without end";
     EXPECT_EQ(readFile(world.list), lineOf(world.stateDir / "run-deep")) << "and it stays listed";
+}
+
+// ---- how this process was started (process.hpp) -------------------------------------------
+//
+// The verbs refuse an apply in a process that holds the elevated half of a split token, and
+// take the answer from processIsElevated. Whether this run of the suite is such a process is
+// not for a test to assume, so what is held here is true of every run: the answer does not
+// change while the process lives, and it is never "yes" for a token Windows itself calls not
+// elevated. That second question is put to Windows another way than the function puts its
+// own (TokenElevation, where the function reads TokenElevationType): the elevated half of a
+// split token is an elevated token, so a yes from the one with a no from the other cannot be.
+
+TEST(ProcessIsElevated, TheAnswerIsSteadyAndIsNeverYesForATokenWindowsCallsNotElevated)
+{
+    const bool elevated = update::processIsElevated();
+    EXPECT_EQ(update::processIsElevated(), elevated);
+#ifdef _WIN32
+    HANDLE token = nullptr;
+    ASSERT_NE(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token), 0);
+    TOKEN_ELEVATION held{};
+    DWORD written = 0;
+    const BOOL asked = GetTokenInformation(token, TokenElevation, &held, sizeof(held), &written);
+    CloseHandle(token);
+    ASSERT_NE(asked, 0);
+    if (held.TokenIsElevated == 0) {
+        EXPECT_FALSE(elevated);
+    }
+#else
+    EXPECT_FALSE(elevated) << "there is no split token here";
+#endif
 }

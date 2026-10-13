@@ -86,12 +86,22 @@
 //                     check), so UpdateReply::offer is set by it too.
 //   UPDATE APPLY CONFIRM
 //                     refused, with reason= first in the error's context:
-//                     not_staged, blocked_before, development_tree,
+//                     not_staged, blocked_before, elevated, development_tree,
 //                     install_record, no_state, platform, or the preflight's
 //                     token (stage.hpp); and state_unreadable when the state
 //                     file does not read - it is where the releases that were
 //                     put back here are kept, so without it the line cannot
 //                     know that this one was not, and applies nothing.
+//                     elevated is a Katana that was started "as
+//                     administrator" where that is the elevated half of a
+//                     split token (UpdateContext::elevated; update/
+//                     process.hpp, processIsElevated): the helper would run
+//                     with those rights from a copy in the per-user update
+//                     folder, which the same person's ordinary programs can
+//                     write. It is the last of these refusals and comes
+//                     before the preflight, so no helper copy is made and
+//                     the release stays downloaded: Katana started the
+//                     ordinary way applies it. DOWNLOAD is not refused.
 //   UPDATE SKIP, UPDATE SET AUTO
 //                     skipped=<v|none>; auto=on|off. With no update folder:
 //                     the same with reason=no_state, and nothing is kept. With
@@ -189,9 +199,15 @@ struct UpdateContext {
     // there and did not read (makeUpdateContext). Empty: it read, or there was
     // none. Such a copy is not called a development build, which it is not:
     // CHECK replies update=unsupported reason=install_record with this as its
-    // detail, and nothing is downloaded or applied. Last in the struct: it was
-    // added after the members above were published.
+    // detail, and nothing is downloaded or applied. Added after the members
+    // above were published, and so after them.
     std::string installProblem;
+    // This process holds the elevated half of a split token: it was started
+    // "as administrator" (update::processIsElevated, which makeUpdateContext
+    // asks). APPLY CONFIRM is then refused, reason=elevated, before a helper
+    // copy is made. A test sets it; nothing here asks the system. Last in the
+    // struct: it was added after every member above was published.
+    bool elevated = false;
 };
 
 // What UPDATE CHECK found, for a caller that shows it rather than prints it.
@@ -238,10 +254,11 @@ struct UpdateReply {
                                                               std::string_view line);
 
 // The context of the running program: its install record, the default feed,
-// the system credential store's token, the https transport, and - unless the
-// surface is HeadlessWindow or Mcp - the per-user state folder. `pid` and
-// `relaunch` are left for the caller. The stores it makes live as long as the
-// program (function-local statics).
+// the system credential store's token, the https transport, whether the
+// process was started as administrator (`elevated`), and - unless the surface
+// is HeadlessWindow or Mcp - the per-user state folder. `pid` and `relaunch`
+// are left for the caller. The stores it makes live as long as the program
+// (function-local statics).
 [[nodiscard]] UpdateContext makeUpdateContext(UpdateSurface surface);
 
 // The same for the program whose executable is at `executable` (an absolute
