@@ -121,7 +121,8 @@ def _draws(c, colours, codes_module):
     elif kind == "layer":
         parts.append("the layer of the text")
     elif kind == "pipe":
-        parts.append("a round pipe from `Diameter (mm)`")
+        # Katana stores a pipe rule and applies none, so this code draws nothing today.
+        parts.append("nothing yet: its pipe rules (a round pipe sized from `Diameter (mm)`) are stored and not applied")
     elif kind == "surface":
         parts.append("nothing")
     if st["colour"]:
@@ -219,9 +220,12 @@ def catalogue(data, root):
     shared = {"diameters": applied("Diameter (mm)"), "heights": applied("Height (mm)"),
               "zones": applied("Check Zone"), "texts": kinds.get("text", 0),
               "near_labels": "(at 0.85 alike or more)", "near_any": ""}
+    # How many definitions five strokes or fewer draw: the comparison of shapes leaves those out. It is a figure
+    # of this library alone, so it needs no reference file.
+    originality = _sibling("originality")
+    n_left_out = n_ls + n_sy - len(originality.compared(_candidate(data)))
     if figures:
-        scan = _sibling("originality").scan(parity.load_document(os.path.join(root, REFERENCE)),
-                                            _candidate(data))
+        scan = originality.scan(parity.load_document(os.path.join(root, REFERENCE)), _candidate(data))
         shared["near_labels"] = "(%d at 0.85 alike or more)" % len(scan["same_key_labels"])
         n_names, n_labels = len(scan["near_names"]), len(scan["near_labels"])
         shared["near_any"] = ("%s as near as 0.9 to anything the other library calls a thing, whatever the key. "
@@ -386,7 +390,8 @@ def catalogue(data, root):
     kind_words = [("line", "a line, joined from the points"), ("point", point_words),
                   ("both", "a line with a symbol at every vertex"), ("text", "text of a size"),
                   ("layer", "the layer of the text codes"), ("surface", "a surface flag and nothing else"),
-                  ("pipe", "the round pipe section of any string that carries a diameter")]
+                  ("pipe", "nothing yet: the pipe rules, which say that any string carrying a diameter is a round "
+                           "pipe, and which Katana stores and does not apply")]
     w(table(["Kind", "Codes", "Meaning"], [[k, kinds.get(k, 0), words] for k, words in kind_words if kinds.get(k)]))
     w("")
     w("### Pen weights")
@@ -435,17 +440,27 @@ def catalogue(data, root):
       "drawn here, from a written brief and looked at in Katana's own renderer) and their names, group paths, "
       "layer paths, colours and the colour table, pen weights, attribute names, text styles, legend labels, and "
       "every sentence of every meaning and of this document. `tools/katana_standard/originality.py` scans the "
-      "two files for what a person could copy and the test "
-      "`KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the result: no definition "
-      "name, group path, layer path, legend label, colour name, attribute name or text style is the same in "
-      "both, and no stroke list is, exactly, moved or scaled, beyond the dash, the plus and the square that any "
-      "library draws. A name is the same when its letters and digits are, whatever its case, blanks and "
-      "punctuation; and a definition name is compared with everything the other library calls a thing: its "
+      "two files for what a person could copy; `katana_standard_originality` runs it on them with the other "
+      "tests, and `KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the names and "
+      "the colours once more in C++. No definition name, group path, layer path, legend label, colour name, "
+      "attribute name or text style is the same in both. Nor does a definition here draw the shape of one "
+      "there, beyond what five strokes or fewer draw (a dash, a dash and a letter, a plus, a square, a ring), "
+      "which any library draws: %d of the %d definitions are that plain and are left out. Every other is "
+      "compared with every one of the other library's as the drawing it makes: its lines, circles, arcs, dots "
+      "and texts where the renderer puts them, a line written in pieces as the one line it is, and a dot that "
+      "lies on a line, a ring or an arc of its own definition as no mark, since the pen has been there. The "
+      "drawings are compared whatever order and direction the strokes were written in, turned by quarter turns "
+      "and mirrored (the eight symmetries of the square), and three ways: as drawn, moved, and scaled to one "
+      "size. Two numbers are the same there to the third decimal, and to the second once scaled, and an arc's "
+      "angle is the same when it moves no point of the arc that far. A name is the same when its letters "
+      "and digits are, whatever its case, blanks and punctuation; and a definition name is compared with "
+      "everything the other library calls a thing: its "
       "definition names, those names without the capitals it puts in front of them, and its legend labels, "
       "since a symbol named after the other library's label would be its name for the thing all the same. "
       "None is. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for "
       "communications and which every drawing system has. The script and the tests excuse that one white, the "
-      "communications colour of `utilityTypeColour`, and no other value: a second white would fail them.")
+      "communications colour of `utilityTypeColour`, and no other value: a second white would fail them."
+      % (n_left_out, n_ls + n_sy))
     w("")
     w("**What two libraries cannot help sharing** is the trade's own names for real things, and the sizes "
       "above. A give way line, a sewage pumping station and a culvert by its height are called that by anyone, "
@@ -467,13 +482,15 @@ def catalogue(data, root):
         n_hidden = sum(1 for st in styled.values() if st["hide"])
         pipe_attributes = sum(count or 1 for _, reason, count in exceptions if reason == parity.PIPE_ATTRIBUTES)
         w("**Where the other library is not clean, this one is.** The NSW customisation holds %d rules over %d "
-          "keys. %d of the rules repeat an earlier rule of their key exactly and %d add nothing to an earlier "
-          "one, in %d of the keys; %d more say something the first rule of their kind leaves unsaid, which a "
-          "lookup then takes (in %d keys a `hide`, so the symbol is hidden); %d keys name a pen colour that "
-          "resolves to nothing; %d draws its symbol through the linestyle slot, which `CODE CHECK` reports as a "
-          "linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in which a rule "
-          "can be for one case of an attribute, carry those cases as attributes, which a lookup here applies to "
-          "every code (%d of them). Katana Standard keeps one clean rule set per key: one rule of each kind, "
+          "keys. %d of the rules repeat an earlier rule of their key exactly and %d are shadowed, in the sense "
+          "`CODE CHECK` gives the word (every field such a rule sets, an earlier rule of its key has set, so a "
+          "lookup takes nothing from it), in %d of the keys; %d more say something the rules before them leave "
+          "unsaid, which a lookup then takes (in %d keys a `hide`, so the symbol is hidden); %d keys name a pen "
+          "colour that resolves to nothing; %d draws its symbol through the linestyle slot, which `CODE CHECK` "
+          "reports as a linestyle that is a symbol; and the pipe rules of the bare `*`, written for a system in "
+          "which a rule can be for one case of an attribute, carry those cases as attributes, which a lookup "
+          "here applies to every code (%d of them). Katana Standard keeps one clean rule set per key: one rule "
+          "of each kind, "
           "every name resolved, the symbol said in a symbol rule, `hide` said where the lookup makes it true, "
           "and no attribute on a pipe rule. Those %d differences are listed in "
           "`tools/katana_standard/parity_exceptions.json`, one entry for each key and reason, and `parity.py` "
@@ -485,10 +502,11 @@ def catalogue(data, root):
         w(table(["Reason", "Keys", "What the other library does and this one does not"], [
             [parity.DUPLICATE, by_reason.get(parity.DUPLICATE, 0), "repeats a rule of the key field for field"],
             [parity.SHADOWED, by_reason.get(parity.SHADOWED, 0),
-             "has a later rule of a kind that says nothing the earlier one of the key did not"],
+             "has a later rule of a kind that `CODE CHECK` calls shadowed: it sets no field and names no "
+             "attribute that an earlier rule of the key has not"],
             [parity.MERGED, by_reason.get(parity.MERGED, 0),
-             "has a later rule that says a field, or names an attribute, that the first leaves unsaid; here the "
-             "one rule says the field"],
+             "has a later rule of a kind that says a field, or names an attribute, that the rules before it "
+             "leave unsaid; here the one rule says the field"],
             [parity.COLOUR, by_reason.get(parity.COLOUR, 0), "names a pen colour that resolves to nothing"],
             [parity.LINESTYLE_SYMBOL, by_reason.get(parity.LINESTYLE_SYMBOL, 0),
              "names a symbol as a linestyle; here a symbol rule follows the feature rule"],
@@ -822,6 +840,15 @@ def catalogue(data, root):
       "stated purpose (the unclassified road design strings, the hinges and bases of a cross-section, a few "
       "marks and lane lines). Their meanings are worded as generally as the label allows, and the unclassified "
       "design strings share one layer family each; a surveyor who knows what one is for should say so.")
+    w("- **What the comparison of shapes does not see.** `originality.py` holds two definitions to be one shape "
+      "when their drawings have the same marks at any place and size, turned by quarter turns or mirrored. A "
+      "drawing turned by another angle or stretched one way, a circle drawn as arcs or as a ring of short "
+      "lines, an arc cut in two or laid over a ring, and a text set from another corner of its box make other "
+      "marks and are another shape to it. A drawing that five strokes or fewer make is not compared at all, "
+      "and that is %d of the %d linestyles, most of them one or two lines, or a line and a letter: of a "
+      "linestyle the comparison holds the motif and not its period, and a plain motif is anybody's. No C++ "
+      "test repeats the comparison, so it is held where Python is (`katana_standard_originality`)."
+      % (n_ls - len(originality.compared({"linestyles": data.linestyles})), n_ls))
     w("- **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's "
       "rotation, offset and raise. The library carries them for the day it does.")
     w("- **A curve cannot come from a field file.** The readers Katana has strung points by the file's own "

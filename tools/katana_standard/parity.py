@@ -18,10 +18,19 @@ WHAT IT REPORTS, in the order it is printed
                `AB1*` and `*` are four keys.
   2. STRUCTURE for each key held by both, the candidate's rules against the reference's EFFECTIVE rules. The
                effective rule of one kind (`sets`) under a key is what a lookup makes of the key's rules of that
-               kind: each field comes from the first rule that says it (`SurveyMap::lookup`), so a later rule is
-               a duplicate or shadowed in CODE CHECK's words unless it says a field the earlier ones leave
-               unsaid, and then the effective rule carries that field (the reference's second file hides the
-               symbol of four keys that its first file left unsaid). Compared per rule, in order:
+               kind: each field comes from the first rule that says it (`SurveyMap::lookup`). So a later rule
+               of a kind is one of three things, and they are CODE CHECK's (`lintSurveyMap`), decided as it
+               decides them, from ALL the rules of the key before it and from EVERY field, not only from the
+               ones this part compares:
+                 a duplicate   it is the same as an earlier rule of the key, field for field;
+                 shadowed      every field it sets is set, and every attribute it names is named, by an
+                               earlier rule of the key, so a lookup takes nothing from it;
+                 neither       it says a field or names an attribute that the rules before it leave unsaid: a
+                               `hide` (the reference's second file hides the symbol of four keys that its
+                               first file left unsaid), and as much a linestyle or a weight, which this part
+                               does not compare.
+               The effective rule is made of the first rule of the kind and of each later one that is
+               neither. Compared per rule, in order:
                  feature    draw (line, point or none), that a layer is given, the state of the colour name
                  symbol     that a symbol is named, hide (absent reads as false)
                  text       units, size, justifyX, justifyY, the state of the colour name
@@ -37,17 +46,21 @@ WHAT IT REPORTS, in the order it is printed
                resolves. A candidate that keeps ONE clean rule set per key leaves those out, so its raw rule
                list differs from the reference's. Each such key needs an entry in the exceptions file
                (`parity_exceptions.json`, a list of {"key", "reason", optional "count" and "note"}), with one of
-                 nsw-duplicate-collapsed      a rule the same as an earlier one, field for field, was left out
-                 nsw-shadowed-collapsed       a rule that adds nothing to an earlier one of its key was left out
+                 nsw-duplicate-collapsed      a later rule of a kind that CODE CHECK calls a duplicate was left out
+                 nsw-shadowed-collapsed       a later rule of a kind that CODE CHECK calls shadowed was left
+                                              out: a lookup takes nothing from it
                  nsw-unknown-colour-replaced  an effective rule named a colour that resolves to nothing, and the
                                               candidate names one that does
                  nsw-linestyle-symbol-resolved  an effective feature rule named a vertex definition (a symbol)
                                               as its LINESTYLE, which draws the symbol at each point but is a
                                               fault CODE CHECK reports; the candidate says it properly, with a
                                               symbol rule after the feature rule
-                 nsw-fields-merged            a later rule of a kind said a field the first left unsaid and so
-                                              changed the effective structure (a symbol's hide); the candidate's
-                                              one rule of that kind carries the field
+                 nsw-fields-merged            a later rule of a kind is neither: it said a field, or named an
+                                              attribute, that the rules of the key before it left unsaid, and
+                                              the effective rule has it. Where that is structure (a symbol's
+                                              hide) the candidate's one rule of that kind carries the field;
+                                              where it is how the key looks (a linestyle, a weight, a group, a
+                                              comment) the candidate's one rule says its own
                  nsw-pipe-attributes-left-out the reference's pipe rules carry attribute lists (where they were
                                               written, the condition a rule applies under: a rule for each
                                               case). Katana has no conditional rule: a lookup takes the first
@@ -204,8 +217,12 @@ def by_key(rules):
 
 
 def classify(rules):
-    """'ok', 'duplicate' or 'shadowed' for every rule, as lintSurveyMap decides it. Only the earlier rules of the
-    SAME key count: a longer prefix catches only some of the codes a shorter one does, so it shadows nothing."""
+    """'ok', 'duplicate' or 'shadowed' for every rule, as lintSurveyMap decides it: a duplicate is the same as an
+    earlier rule of its key, field for field; a rule is shadowed when earlier rules of its key, of ANY kind,
+    set every field it sets and name every attribute it names; any other rule is 'ok'. Only the earlier rules of
+    the SAME key count: a longer prefix catches only some of the codes a shorter one does, so it shadows nothing.
+    This is the one notion of a shadowed rule in this script: the candidate's defects (part 4) and what is filed
+    of the reference (part 3) are both read from it."""
     status = ["ok"] * len(rules)
     for indices in by_key(rules).values():
         before = []
@@ -222,17 +239,6 @@ def classify(rules):
                     status[index] = "shadowed"
             before.append(index)
     return status
-
-
-def first_of_each_kind(rules, indices):
-    """The rules of one key a lookup can use: the first of each `sets`, in the order they first appear."""
-    seen = set()
-    kept = []
-    for index in indices:
-        if rules[index]["sets"] not in seen:
-            seen.add(rules[index]["sets"])
-            kept.append(index)
-    return kept
 
 
 def merged_rule(rules, indices):
@@ -257,6 +263,13 @@ def kinds_under(rules, indices):
     for index in indices:
         table.setdefault(rules[index]["sets"], []).append(index)
     return list(table.items())
+
+
+def contributing(status, of_kind):
+    """Of the rules of one kind under one key, in order, those a clean rule set is made from: the first, and
+    each later one that `classify` calls neither a duplicate nor shadowed. A lookup takes nothing from the
+    others, so the effective rule takes nothing from them either."""
+    return [index for position, index in enumerate(of_kind) if position == 0 or status[index] == "ok"]
 
 
 def layer_problem(layer):
@@ -395,11 +408,12 @@ def names_a_symbol(rule, document):
     return any(d.get("name") == word and d.get("atVertices") for d in document.get("linestyles", []))
 
 
-def effective_structure(document, indices, colours):
+def effective_structure(document, indices, colours, status):
     """The structure a clean rule set for one key of `document` has, in order, and whether a symbol was said
-    through a linestyle (so the clean set holds a symbol rule the key's rules do not)."""
+    through a linestyle (so the clean set holds a symbol rule the key's rules do not). `status` is `classify`
+    of the document's rules."""
     rules = document["codes"]
-    merged = [merged_rule(rules, of_kind) for _, of_kind in kinds_under(rules, indices)]
+    merged = [merged_rule(rules, contributing(status, of_kind)) for _, of_kind in kinds_under(rules, indices)]
     expected = [structure(rule, colours) for rule in merged]
     if "symbol" not in {e["sets"] for e in expected}:
         for position, rule in enumerate(merged):
@@ -551,22 +565,16 @@ def compare(reference, candidate, exceptions=(), allow_extras=True, allow_candid
     ref_colours, cand_colours = Colours(reference), Colours(candidate)
     ref_keys, cand_keys = by_key(ref_rules), by_key(cand_rules)
     ref_status = classify(ref_rules)
-    # What a lookup can never use in the reference, key by key: every rule that is not the first of its kind.
+    # What a clean rule set leaves out of the reference, key by key: every rule that is not the first of its
+    # kind, filed by what CODE CHECK calls it (`classify`). A rule it calls neither a duplicate nor shadowed
+    # says something the rules before it leave unsaid, whatever that is, and is merged into the effective rule.
+    filed_as = {"duplicate": DUPLICATE, "shadowed": SHADOWED, "ok": MERGED}
     collapsible = {}
     for key, indices in ref_keys.items():
-        kept = set(first_of_each_kind(ref_rules, indices))
         counts = collections.Counter()
         for _, of_kind in kinds_under(ref_rules, indices):
-            for position, index in enumerate(of_kind):
-                if index in kept:
-                    continue
-                if ref_status[index] == "duplicate":
-                    counts[DUPLICATE] += 1
-                    continue
-                # Does this rule change what the key's rules of its kind make, once the ones before it are in?
-                before = structure(merged_rule(ref_rules, of_kind[:position]), ref_colours)
-                after = structure(merged_rule(ref_rules, of_kind[:position + 1]), ref_colours)
-                counts[MERGED if before != after else SHADOWED] += 1
+            for index in of_kind[1:]:
+                counts[filed_as[ref_status[index]]] += 1
         collapsible[key] = counts
 
     report = {
@@ -594,7 +602,7 @@ def compare(reference, candidate, exceptions=(), allow_extras=True, allow_candid
         cand_indices = cand_keys[key]
         raw_ref = [structure(ref_rules[i], ref_colours) for i in ref_indices]
         raw_cand = [structure(cand_rules[i], cand_colours) for i in cand_indices]
-        expected, said_through_linestyle = effective_structure(reference, ref_indices, ref_colours)
+        expected, said_through_linestyle = effective_structure(reference, ref_indices, ref_colours, ref_status)
         # The very same rules, fault for fault, are no difference (a file compared with itself); the candidate's
         # faults are part 4. A symbol said through the linestyle is the one fault whose absence changes the
         # structure, so a candidate without the symbol rule is identical only if it says it the same way.

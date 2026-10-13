@@ -225,11 +225,73 @@ class FieldsMerged(unittest.TestCase):
         report = run(reference, [feature("AB*"), symbol("AB*", hide=False)])
         self.assertEqual(report["required"], {("AB*", parity.SHADOWED): 1})
 
-    def test_a_field_that_is_not_compared_does_not_make_a_merge(self):
-        # The second feature rule adds a comment, which is how a key looks, not what it does.
+
+
+class ALaterRuleIsFiledByWhatCodeCheckCallsIt(unittest.TestCase):
+    """Part 3 files every later rule of a kind under one of CODE CHECK's own three words, and "shadowed" is its
+    word and no weaker one. The expectations are read off `lintSurveyMap` (code_table.cpp): a rule is shadowed
+    only when EVERY field it sets is set by an earlier rule of its key (a layer, colour, linestyle, weight,
+    group or comment that is not empty; a draw, surface, hide, symbol, text or pipe that is there) and every
+    attribute it names is named by one. A field that this script does not compare counts as much as one it
+    does: a later rule that adds only a linestyle is not shadowed, because a lookup draws in that linestyle."""
+
+    # A line code that names no linestyle and no weight.
+    bare = {"key": "AB*", "sets": "feature", "layer": "probe/layer/one", "colour": "probe ink", "draw": "line"}
+
+    def filed(self, reference, reason):
+        """The comparison of `reference` with the one clean rule: nothing of the structure differs, exactly one
+        exception is required and it is `reason`, and with it parity holds."""
+        candidate = [feature("AB*")]
+        self.assertEqual(run(reference, candidate)["structure"], [])
+        self.assertEqual(run(reference, candidate)["required"], {("AB*", reason): 1})
+        self.assertTrue(run(reference, candidate, [("AB*", reason, 1)])["ok"])
+
+    def test_a_later_rule_that_adds_only_a_linestyle_is_not_shadowed(self):
+        reference = [dict(self.bare), {"key": "AB*", "sets": "feature", "linestyle": "Probe Line"}]
+        self.assertEqual(parity.classify(reference), ["ok", "ok"])
+        self.filed(reference, parity.MERGED)
+
+    def test_a_later_rule_that_adds_only_a_weight_is_not_shadowed(self):
+        reference = [feature("AB*"), {"key": "AB*", "sets": "feature", "weight": "0.25"}]
+        self.assertEqual(parity.classify(reference), ["ok", "ok"])
+        self.filed(reference, parity.MERGED)
+
+    def test_a_later_rule_that_adds_only_a_legend_label_is_not_shadowed(self):
+        # The same rule again, but for a comment the first has not: no duplicate, and the comment is new.
         reference = [feature("AB*"), feature("AB*", comment="one more word")]
-        report = run(reference, [feature("AB*")])
+        self.assertEqual(parity.classify(reference), ["ok", "ok"])
+        self.filed(reference, parity.MERGED)
+
+    def test_a_later_rule_that_says_a_linestyle_and_a_weight_over_again_is_shadowed(self):
+        # The first rule has both already; the second gives other values, which a lookup never takes.
+        reference = [feature("AB*", weight="0.25"),
+                     {"key": "AB*", "sets": "feature", "linestyle": "0", "weight": "0.5"}]
+        self.assertEqual(parity.classify(reference), ["ok", "shadowed"])
+        self.filed(reference, parity.SHADOWED)
+
+    def test_the_exception_that_says_such_a_rule_added_nothing_explains_nothing(self):
+        reference = [dict(self.bare), {"key": "AB*", "sets": "feature", "linestyle": "Probe Line"}]
+        report = run(reference, [feature("AB*")], [("AB*", parity.SHADOWED, 1)])
+        self.assertEqual(report["undocumented"], [{"key": "AB*", "reason": parity.MERGED, "count": 1}])
+        self.assertEqual(report["unused_exceptions"], [{"key": "AB*", "reason": parity.SHADOWED}])
+        self.assertFalse(report["ok"])
+
+    def test_a_rule_shadowed_through_a_rule_of_another_kind_adds_nothing_to_the_effective_rule(self):
+        # The feature rule says hide: outside its section, which CODE CHECK warns of and a lookup obeys. The
+        # second symbol rule sets a symbol and a hide, and earlier rules of the key have set both, so it is
+        # shadowed although no SYMBOL rule before it said hide. A lookup takes hide from the feature rule: false.
+        reference = [feature("AB*", hide=False), symbol("AB*"), symbol("AB*", hide=True)]
+        self.assertEqual(parity.classify(reference), ["ok", "ok", "shadowed"])
+        candidate = [feature("AB*"), symbol("AB*", hide=False)]
+        report = run(reference, candidate)
+        self.assertEqual(report["structure"], [])
         self.assertEqual(report["required"], {("AB*", parity.SHADOWED): 1})
+        self.assertEqual(report["resolution"], [])
+        self.assertTrue(run(reference, candidate, [("AB*", parity.SHADOWED, 1)])["ok"])
+        # A candidate that hides the symbol has followed the rule a lookup never hears.
+        hidden = run(reference, [feature("AB*"), symbol("AB*", hide=True)], [("AB*", parity.SHADOWED, 1)])
+        self.assertIn("hide", hidden["structure"][0]["problems"][0])
+        self.assertFalse(hidden["ok"])
 
 
 class UnknownColour(unittest.TestCase):

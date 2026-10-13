@@ -299,8 +299,8 @@ SECTIONS = [
 
     # ---- every code (1) ------------------------------------------------------------------------------------------
     ("-", "", [
-        code("*", "Any string that carries a Diameter attribute is also drawn as a round pipe section, measured "
-             "down from its top (the obvert).",
+        code("*", "A string that carries a Diameter attribute is a round pipe, measured down from its top (the "
+             "obvert). Katana stores this pipe rule and does not yet draw by it.",
              pipe("Obvert", "diameter", "$Diameter (mm)"),
              pipe("Obvert", "diameter", "$Diameter (mm)", kind="vertexPipe"),
              pipe("Obvert", "diameter", "$Diameter (mm)", kind="segmentPipe")),

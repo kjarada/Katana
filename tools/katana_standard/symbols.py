@@ -23,7 +23,8 @@ Weight.    One weight: every symbol is outline.  The renderer applies the entity
 Fill.      There are no fills.  A solid centre mark (a very small ring with a dot in it, because Katana draws a
            `dot` as one pen-width point whatever its radius) means "a physical mark or stem is here and this is
            its exact point": pegs, pins, pipes, stations, poles, trunks.  A shape WITHOUT one is a cover, a sign
-           or an observation.  Hatching (at most four strokes) means "solid": a borehole's quadrants.
+           or an observation.  Hatching (at most four strokes) means "solid": a borehole's quadrants, a bridge
+           column.
            A dashed ring means a temporary or former state: a pothole, or a trunk whose width was not taken.  Rays
            mean a light (street light, bollard light, signal lamp).
 Services.  One grammar for every service, learnt once; the service colour comes from the rule and the letter
@@ -512,9 +513,9 @@ def _():
     return k
 
 
-@symbol("Junction Pit", G_PITS, "Square with both diagonals. A stormwater junction pit.")
+@symbol("Junction Pit", G_PITS, "Square crossed from top to bottom by a line, with a branch from its middle to the +x side: pipes meeting in a box. A stormwater junction pit.")
 def _():
-    return Sketch().box(3.2, 3.2).cross(1.6)
+    return Sketch().box(3.2, 3.2).line(0, -1.6, 0, 1.6).line(0, 0, 1.6, 0)   # a pipe run and the branch that joins it
 
 
 @symbol("Stormwater Manhole", G_PITS, "Double ring holding the letter D. A stormwater maintenance hole (D for drainage).")
@@ -914,9 +915,15 @@ def _():
     return k
 
 
-@symbol("Bridge Column", G_STRUCTURES, "Ring crossed by an X. A bridge pier or column.")
+@symbol("Bridge Column", G_STRUCTURES, "Ring hatched by two diagonal lines. A bridge pier or column; the hatching says it is solid.")
 def _():
-    return Sketch().ring(1.6).cross(1.13)
+    k = Sketch().ring(1.6)
+    along, across = polar(1.0, 45), polar(1.0, 135)
+    for d in (-0.55, 0.55):          # two chords, each 0.55 mm from the centre, that end on the ring
+        half = math.sqrt(1.6 * 1.6 - d * d)
+        k.line(d * across[0] - half * along[0], d * across[1] - half * along[1],
+               d * across[0] + half * along[0], d * across[1] + half * along[1])
+    return k
 
 
 @symbol("Mast", G_COMMS, "A-frame with a crossbar and a small ring on its apex. A communications or lighting mast.", centre=True)
