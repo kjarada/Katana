@@ -12,12 +12,27 @@
 // from. The modules a process has loaded are not asked: a DLL that is loaded can be renamed (it
 // is opened with FILE_SHARE_DELETE), which is all the commit does, and listing the modules of
 // every process fails on exactly the protected ones. A process that has ended is not a holder,
-// whoever still has a handle to it. What this cannot see:
-// a process the helper may not open (another user's, or an elevated Katana started with "Run as
-// administrator" while the helper is not elevated). Such a Katana still holds its files, the
-// rename fails with a sharing violation after the retries of FsOps::renameFile, and the update
-// rolls back - nothing is half done, but the person is told "rename_failed", not who holds it.
-// No elevation is asked for: a per-user install is updated by the user (design, D1).
+// whoever still has a handle to it.
+//
+// WHAT THE SCAN CANNOT SEE, AND WHAT THEN HAPPENS. A process this user may not open - another
+// account's, which is also what a Katana started "as administrator" with another account's
+// password is - gives no image path, and is passed over: it is NOT taken for a holder. Nothing
+// later stops the swap on its account either. By every account the design found (its section
+// 12) Windows lets the file of a running program be renamed and refuses only to delete or
+// overwrite it, and renames are all the commit does; so the update goes through under such a
+// program, which runs on as the old code among the new version's files, its own file now in
+// R/.update/<tx>/old, where the clean-up cannot delete it yet and lists it for the next start.
+// That is the residual, said here rather than hidden:
+//   - the per-user install (design, D1) is a folder of the person's own profile, which no other
+//     account runs a program from; it takes an archive unpacked where several accounts can
+//     reach it, and one of them running Katana from it at that moment;
+//   - the one thing known of such a process is its file's name (PROCESSENTRY32W::szExeFile), and
+//     a name does not say which install it was started from: to hold the update on "somebody
+//     runs a katana.exe" would block it for as long as any other account runs any Katana of its
+//     own, on a machine people share;
+//   - no elevation is asked for to see more: a per-user install is updated by the user.
+// A snapshot that cannot be taken or read at all is another matter: that is an error, never "no
+// holders" (apply() then refuses with "scan_failed" and touches nothing).
 //
 // PATHS ARE COMPARED AS TEXT, so both sides are first put in one form. The root can be spelled in
 // many ways that name one folder - upper or lower case, "/" for "\", a trailing separator, "." and
@@ -308,8 +323,14 @@ class WindowsProcessOps final : public ProcessOps {
         std::wstring image(32768, L'\0'); // the longest path Windows has
         PROCESSENTRY32W entry{};
         entry.dwSize = sizeof(entry);
-        for (BOOL more = Process32FirstW(snapshot.get(), &entry); more;
-             more = Process32NextW(snapshot.get(), &entry)) {
+        if (!Process32FirstW(snapshot.get(), &entry)) {
+            // A snapshot holds this process at the least, so one with no first entry was not
+            // read: an error, and never the answer "nobody is running" (see the top).
+            return core::makeError(core::ErrorCode::Internal,
+                                   "the running programs cannot be listed",
+                                   "os_error=" + std::to_string(GetLastError()));
+        }
+        do {
             if (entry.th32ProcessID == self || entry.th32ProcessID == 0) {
                 continue; // this process is never its own holder; 0 is the idle process
             }
@@ -349,7 +370,7 @@ class WindowsProcessOps final : public ProcessOps {
             if (under) {
                 holders.push_back({entry.th32ProcessID, std::filesystem::path(path)});
             }
-        }
+        } while (Process32NextW(snapshot.get(), &entry));
         std::sort(holders.begin(), holders.end(),
                   [](const RunningProgram& a, const RunningProgram& b) { return a.pid < b.pid; });
         return holders;
