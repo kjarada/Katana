@@ -25,8 +25,8 @@ listed under "To verify on first release".
 
 ## What a person sees
 
-1. **The check.** A window that a person uses asks the release feed once a
-   day whether a newer Katana exists. It sends two small requests and
+1. **The check.** The window of an installed copy asks the release feed once
+   a day whether a newer Katana exists. It sends two small requests and
    nothing about the person or the drawing; when it learns nothing - offline,
    an error from the server, a signature that does not verify - it says
    nothing at all. Help > "Check for Updates..." asks at once and answers in
