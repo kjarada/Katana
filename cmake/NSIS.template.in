@@ -28,7 +28,9 @@
 ; the text this produces to the rules above; keep it in step.
 ;
 ; Comments are whole lines only, and none names a registry hive other than HKCU: that check
-; reads the instructions, but a reader should not have to tell them apart.
+; reads the instructions, but a reader should not have to tell them apart. None ends in a
+; backslash either: NSIS continues a comment onto the next line as it does a command, and the
+; instruction there would be part of the comment (the check refuses such a line).
 
 ;--------------------------------
 ; Values CPack supplies
@@ -141,6 +143,9 @@ FunctionEnd
 
 Function CheckInstallFolder
   Push $0
+  ; No folder at all is refused like one that cannot be written to: every path below starts
+  ; with it, and without it would start at the top of a drive.
+  StrCmp $INSTDIR "" folder_not_writable
   ClearErrors
   CreateDirectory "$INSTDIR"
   FileOpen $0 "$INSTDIR\katana-write-test.tmp" w
@@ -255,6 +260,19 @@ FunctionEnd
 
 Section "-Core installation"
   Call CheckInstallFolder
+
+  ; A copy of Katana that is already in this folder and was not uninstalled first (the answer
+  ; at the start was No, or the registry does not know of it). What goes in below is this
+  ; version, so the updater's record of the version the folder holds goes: left behind, it
+  ; would still name the old one. So does the working folder of an update that was cut short:
+  ; its recovery, at the next start, would put files of the old version back over the new
+  ; ones (docs/update.md). The installed manifest stays: it is how the next update, and the
+  ; uninstaller, find the files an earlier update added. install.json is what says the folder
+  ; holds a packaged Katana, and nothing is touched in a folder without it.
+  IfFileExists "$INSTDIR\share\katana\install.json" 0 previous_copy_done
+    Delete "$INSTDIR\share\katana\installed.json"
+    RMDir /r "$INSTDIR\.update"
+  previous_copy_done:
 
   ; The tree CPack staged: every file of the package, in the folders the programs expect.
   SetOutPath "$INSTDIR"
@@ -427,8 +445,9 @@ Function un.DeleteManifestFiles
     StrCmp $1 60 manifest_bad_byte
     StrCmp $1 62 manifest_bad_byte
     StrCmp $1 124 manifest_bad_byte
+    ; 239 characters or fewer so far leaves room for this one; a 241st is refused.
     StrLen $5 $3
-    IntCmp $5 240 0 0 manifest_bad_byte
+    IntCmp $5 239 0 0 manifest_bad_byte
     StrCmp $1 47 0 manifest_append
     StrCpy $3 "$3\"
     Goto manifest_next_byte
