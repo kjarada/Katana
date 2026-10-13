@@ -1057,6 +1057,15 @@ int runRecover(const Path& root, Rig& rig)
     // Asked again now, because the line goes into the folder as it is at this moment: where
     // it is not an ordinary folder there is no place in R to keep a line, and what happened
     // is on standard output alone.
+    //
+    // THE FORM OF THE LINE IS READ BY THE WINDOW: `updateRecoveredTransactions`
+    // (src/katana_qt/update_dialog.cpp) takes the ids of `found=` from it to know which helper
+    // copies U/run-<tx> are finished with. It reads a line only when the time is its first
+    // word (no space in it), `recover` its second, `found=<ids, commas, no space>` its third
+    // and `result=...` its fourth, and when a line feed ends it. Do not change the order, the
+    // words, the separators or the line feed without changing that function and
+    // tests/qt_widgets/test_update_dialog.cpp with it. What follows `result=` (`left=`,
+    // `detail=`) is not read there.
     if ((!found.empty() || !status.ok()) &&
         workFolderOf(rig.fs(), root) == WorkFolder::Ordinary) {
         std::string line = utcNow() + " recover found=" + joined(found) +

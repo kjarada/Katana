@@ -640,21 +640,25 @@ the window's next start removes it.
 `RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
 compares U before and after, entry by entry and byte by byte.
 
-**The copy a recovery ran from** is removed by the one program that may
-write per-user state: an interactive window of that install, at its next
-start (`UpdateWorkbench::start`, on Windows, where an update can have run).
-Nothing in U names the copy - a swap that a crash ended never listed its
-own, and one whose rollback failed keeps its copy off the list on purpose,
-for the `RunOnce` entry to run - so the INSTALL names it. The window reads
-`R/.update/recovery.log`, in which every `--recover` that found something
-wrote a line
+**The copy a recovery ran from** is removed by the one program that sweeps
+U, where it removes what `cleanup.list` names: an interactive window of that
+install, at its next start (`UpdateWorkbench::start`, on Windows, where an
+update can have run). `katana_cli` keeps per-user state too, and sweeps
+nothing. So until that start the copy - one folder holding one program -
+stays, which is for as long as only `katana_cli`, `katana_mcp` or a headless
+window is started. Nothing in U names the copy - a swap that a crash ended
+never listed its own, and one whose rollback failed keeps its copy off the
+list on purpose, for the `RunOnce` entry to run - so the INSTALL names it.
+The window reads `R/.update/recovery.log`, in which every `--recover` that
+found something wrote a line
 
 ```
 <UTC time> recover found=<tx,...> result=ok|failed left=<tx,...>
 ```
 
-and takes each transaction of a `found=` list whose folder `R/.update/<tx>`
-is gone: that update is over, rolled back or healthy, and nothing starts its
+(a recovery that failed ends its line with `detail=` and the reason), and
+takes each transaction of a `found=` list whose folder `R/.update/<tx>` is
+gone: that update is over, rolled back or healthy, and nothing starts its
 helper again. Its `U/run-<tx>` goes on `cleanup.list`, and the sweep of the
 same start removes it. A transaction whose folder is still there keeps its
 copy - a rollback that failed runs from it at the next try. A copy that is
@@ -662,9 +666,10 @@ gone already, which is every start but the first after a recovery, is not
 listed again.
 
 The log is no more trusted than the journal beside it. A line counts only
-when it is whole, ended by its line feed, and has that form - the same file
-quotes the journal records a rollback refused, whose text is anybody's - and
-an id counts only when it is a transaction id
+when it is whole, ended by its line feed, and has that form as far as
+`result=`, after which nothing is read - the same file quotes the journal
+records a rollback refused, whose text is anybody's - and an id counts only
+when it is a transaction id
 (`update::isValidTransactionId`), so a line names no place but `U/run-<id>`.
 Which transactions a log names is `updateRecoveredTransactions`
 (`src/katana_qt/update_dialog.hpp`), a function of the log's text and of
@@ -1116,8 +1121,10 @@ whatever more the manifest's parser allows (4 GiB).
   package when it does, the helper among them. Until then it is unsigned,
   like the other programs.
 - **What only a window, or only an installed copy, can show has no test
-  that runs it**: the workbench's wiring (`docs/desktop.md`), and the few
-  lines of `katana_cli`'s `main()` that start the helper (`docs/mcp.md`).
+  that runs it**: the workbench's wiring (`docs/desktop.md`) - what a start
+  lists from `recovery.log` and sweeps among it, which a build tree and a
+  headless run never reach - and the few lines of `katana_cli`'s `main()`
+  that start the helper (`docs/mcp.md`).
   The shipped programs cannot be given a test key, which is the point of
   them.
 - **No test in the ordinary run puts the shipped transport in front of a

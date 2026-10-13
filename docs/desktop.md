@@ -3219,7 +3219,12 @@ Not done:
   one click, the close that waits and the close that is cancelled, the
   request handed to `main()`, the automatic check starting and being taken
   over, and the last result being cleared are exercised only by the update
-  system's end-to-end tests and by a release.
+  system's end-to-end tests and by a release. What a start lists from the
+  install's `recovery.log` and then sweeps is reached by neither a
+  development copy nor a headless run, so by no test: which copies it may
+  list is tested (`updateRecoveredTransactions`), and the sweep is the
+  engine's and tested there (`update::processCleanupList`); reading the log
+  and listing the copies are run by a release alone.
 - **A typed check that fails while a release is Ready** leaves the dialog on
   "Could not check for updates" with Retry; the downloaded release is not
   forgotten, and is Ready again after a check that succeeds or at the next
