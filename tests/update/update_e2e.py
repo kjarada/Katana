@@ -316,7 +316,7 @@ def native(path: object) -> str:
     """A path as the system spells it, for a program's command line or environment. On Windows that is
     with backslashes whatever this Python writes: one from MSYS2 joins a path with '/' while MSYSTEM is
     set, so the spelling would follow the shell the tests were started from. In a real run every path the
-    programs meet comes from the system (the program's own file name, a known folder) and has none."""
+    programs meet comes from the system (the program's own file name, a known folder) and has no '/'."""
     spelled = str(path)
     return spelled.replace("/", "\\") if os.name == "nt" else spelled
 
@@ -595,7 +595,7 @@ class World:
         signed manifest beside it (install.hpp), so that a later update knows what that release put here."""
         release = self.bench.release(self.installed, self.big)
         files = dict(release.package)
-        files["share/katana/installed.json"] = installed_record(release.version, release.sequence)
+        files[INSTALLED_RECORD_PATH] = installed_record(release.version, release.sequence)
         files["share/katana/installed.manifest.json"] = release.manifest_path.read_bytes()
         files["share/katana/installed.manifest.json.sig"] = release.signature_path.read_bytes()
         return files
@@ -608,7 +608,7 @@ class World:
         for path, data in self.files.items():
             if is_seed(path):
                 files[path] = data
-        files["share/katana/installed.json"] = installed_record(release.version, release.sequence)
+        files[INSTALLED_RECORD_PATH] = installed_record(release.version, release.sequence)
         files["share/katana/installed.manifest.json"] = release.manifest_path.read_bytes()
         files["share/katana/installed.manifest.json.sig"] = release.signature_path.read_bytes()
         return files
@@ -1439,9 +1439,10 @@ def download_fails(bench: Bench, args: argparse.Namespace) -> None:
     feed.clear_log()
     cut = world.ask("stage", feed)
     # That it FAILS is the engine's; what the failure is called is not held here. A connection that drops
-    # inside a body is named by the hop, and the hop of this program is e2e_main.cpp's own socket client
-    # (it says "no answer", as libcurl's partial transfer is none for the hop the shipped programs use):
-    # a token asserted here would be the test's own word read back.
+    # inside a body is named by the hop, and this program's hop is e2e_main.cpp's own socket client. It
+    # says "no answer", as the hop of the shipped programs does of a transfer libcurl could not finish
+    # (src/katana_app/update_transport.cpp) - but a token asserted here would be the test's own word
+    # read back.
     expect_equal(cut.code, 1, "the exit code of stage when the connection drops inside a range")
     expect(cut.has("error") and not cut.has("staged"), f"a download that was cut short did not fail:\n{cut.out}")
     # The feed's log is the proof that this is what happened: a part of the zip announced and not all sent.
@@ -1463,7 +1464,7 @@ def download_fails(bench: Bench, args: argparse.Namespace) -> None:
 #
 # A case fails when the programs are wrong - and when this driver reads them wrongly, which no case can
 # tell apart. So the readers a verdict rests on are held here to answers worked out by hand, with no
-# program: each was once a way for a correct update to fail its test, or for a wrong one to pass.
+# program: each was once a way for a correct update to fail its test.
 
 SELF_TESTS: list[Callable[[], None]] = []
 
@@ -1481,7 +1482,7 @@ def the_program_a_stubs_line_names_is_read_as_a_path() -> None:
         line = ("health tag=v2 exe=C:\\Users\\A Person\\Katan" + a_acute + " 1\\bin\\katana.exe "
                 "cwd=C:\\Users\\A Person\\AppData\\Local\\Katana\\update\\run-0a1b OPENSSL_CONF=- tx=0a1b mode=healthy")
         # The same file as this driver names it: joined by pathlib, which writes '/' or '\\' as the shell
-        # it runs under has it, from a folder typed in another case.
+        # it runs under has it. Then typed in another case, which Windows takes for the same file.
         expect_equal(stub_program(line), Path("C:/Users/A Person/Katan" + a_acute + " 1") / "bin" / "katana.exe",
                      "the program of a line the stub wrote on Windows")
         expect_equal(stub_program(line), Path("c:/USERS/a person/Katan" + a_acute + " 1/BIN/katana.EXE"),
@@ -1563,6 +1564,8 @@ def a_reserved_port_refuses_a_connection_and_is_nobody_elses() -> None:
             socket.create_connection((fake.LOOPBACK, port), timeout=60).close()
         except ConnectionRefusedError:
             pass
+        except OSError as other_failure:
+            raise Failure(f"a connection to a port nobody listens on was not refused: {other_failure!r}") from other_failure
         else:
             raise Failure("a connection to a port nobody listens on was accepted")
         other = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1577,7 +1580,8 @@ def a_reserved_port_refuses_a_connection_and_is_nobody_elses() -> None:
 
 
 def run_self_tests() -> int:
-    """0 when every reader gives its hand-worked answer; each is named, with what failed."""
+    """0 when every reader gives its hand-worked answer; each is named, with what failed. (An error that
+    is not a Failure ends the run with its traceback, which is not 0 either.)"""
     failures = 0
     for function in SELF_TESTS:
         name = function.__name__.replace("_", " ")
