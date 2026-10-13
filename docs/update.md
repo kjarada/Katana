@@ -368,6 +368,10 @@ No script and no agent makes or sees a private key. These are the steps
    ```sh
    gh secret set UPDATE_SIGNING_KEY --env release < update-signing.pem
    ```
+
+   The key tool's own text gives this command without `--env release` and
+   says to add it once the environment exists: make the environment first,
+   so that the secret is the environment's.
 4. **The first updater-bearing release is installed by hand; the next one is
    the first live update.** An installed copy is updated by the helper it
    already has, which believes only manifests signed by a key it already
@@ -1064,3 +1068,26 @@ whatever more the manifest's parser allows (4 GiB).
   own construction.
 - **The Command Reference has no Updates section** (`docs/desktop.md`);
   `HELP UPDATE` prints the text.
+- **Five things found while this document was read against the code, in
+  files it does not own, and left as they are:**
+  - `discardPrepared` in `src/katana_qt/update_workbench.cpp` is a second
+    copy of `app::abandonApply` (`src/katana_app/update_verbs.hpp`): each
+    puts `U/run-<tx>` on `cleanup.list` for a request nobody will start.
+    The window should call the one the session and `katana_cli` call.
+  - `include/katana/update/check.hpp` lists `root_not_writable` and
+    `headless` among a check's reasons, and says of `Unsupported` that it
+    covers an unwritable root. No check gives either token: the first is the
+    helper's, at the swap, and the second is what a headless window answers
+    `DOWNLOAD`, `APPLY` and the lines it refuses with.
+  - `include/katana/update/state.hpp` says `processCleanupList` is called by
+    the helper after a healthy update as well as by the window. Only the
+    window calls it, at its start; the helper appends to the list and never
+    reads it.
+  - The repository's front page, under "Licence", says the repository "is
+    not public yet", and the comment over `KATANA_UPDATE_REPO` in
+    `src/katana_update/CMakeLists.txt` says the owner "will make" it
+    public. It is public (decision D0; it answered a request without
+    credentials on 2026-10-13).
+  - `tools/update_keytool.py` prints the `gh secret set` command without
+    `--env release`, in its help as a parenthesis to add and after `pub` not
+    at all; this document and `docs/release.md` give it with.
