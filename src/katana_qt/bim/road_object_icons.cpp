@@ -20,6 +20,8 @@
 
 #include <initializer_list>
 
+#include "icons.hpp"
+
 namespace katana::qt {
 
 namespace {

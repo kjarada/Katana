@@ -118,7 +118,7 @@ const P kBarrierParameters[] = {
      "between the posts of a beam or wire rope barrier"},
     {"width", T::Number, "m", "by type", {}, 0.2, 1.5, "base width of a concrete barrier"},
     {"topwidth", T::Number, "m", "by type", {}, 0.05, 1.0, "top width of a single slope barrier"},
-    {"ropes", T::Number, "", "4", {}, 2, 6, "wire ropes", true},
+    {"ropes", T::Number, "", "by type", {}, 2, 6, "a wire rope barrier's ropes", true},
     {"side", T::Choice, "", "auto", kSides, 0, 0,
      "the side of its line the traffic is on, looking along it; auto: towards the centreline"},
 };
