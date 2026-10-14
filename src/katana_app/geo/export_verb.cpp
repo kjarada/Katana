@@ -35,6 +35,7 @@
 
 #include "../dxf_verbs.hpp"
 #include "../import_records.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/dxf/reader.hpp"
@@ -215,6 +216,9 @@ Result<Prepared> exportCloud(Context& context, const Tokens& tokens, std::size_t
 struct Snapshot {
     katana::entity::Model model;
     double annotationScale = 1000.0;
+    // leaders: what a leader's note reads in a DXF - the drawing's surfaces
+    // and alignments, held as copies (cad/annotation/leader_presets.hpp).
+    katana::entity::LeaderContext leaders;
     std::vector<katana::terrain::NamedSurface> surfaces;
     // The project's coordinate system: it goes into the file, and is what a
     // KML or GPX is converted to longitude and latitude from (docs/interop.md,
@@ -232,7 +236,8 @@ Result<std::string> write(Kind kind, const Snapshot& snapshot, const std::filesy
     std::string reply;
     switch (kind) {
     case Kind::Dxf: {
-        auto written = writeDxfExport(snapshot.model, snapshot.annotationScale, to);
+        auto written = writeDxfExport(snapshot.model, snapshot.annotationScale, to,
+                                      snapshot.leaders);
         if (!written) {
             return written.error();
         }
@@ -500,6 +505,7 @@ Result<Prepared> prepareExport(Context& context, const Tokens& tokens, std::stri
     snapshot->model = context.document.model();
     snapshot->model.entities.setObserver({});
     snapshot->annotationScale = context.document.annotationScale();
+    snapshot->leaders = katana::cad::annotation::leaderContext(context.document); // leaders
     snapshot->projectionWkt = project;
 
     // What the scope took; no scope is the whole drawing, as EXPORT was.

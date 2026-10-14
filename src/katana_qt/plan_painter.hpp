@@ -74,6 +74,7 @@
 #include "katana/core/error.hpp"
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/colour_names.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/style_library.hpp"
 #include "katana/geometry/point_splat.hpp"
@@ -109,10 +110,15 @@ struct PlanSource {
     const katana::cad::SelectionSet* selection = nullptr;
     const katana::interop::ReferenceData* reference = nullptr;
     const std::vector<katana::cad::SceneMesh>* meshes = nullptr;
+    // leaders: what a leader's note reads beyond the entity its tip is on -
+    // the drawing's surfaces and alignments (cad/annotation/leader_presets.hpp,
+    // leaderContext). Null reads none: such a line of a note is dropped.
+    std::shared_ptr<const katana::entity::LeaderContext> leaders{};
 };
 
-// The document's drawing, library, index and selection. The reference data and
-// meshes belong to the window and are the caller's to add.
+// The document's drawing, library, index, selection and what its leaders read.
+// The reference data and meshes belong to the window and are the caller's to
+// add.
 [[nodiscard]] PlanSource planSourceOf(const katana::cad::Document& document);
 
 // Where, and through what, the drawing is looked at.

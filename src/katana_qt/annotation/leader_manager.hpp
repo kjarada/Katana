@@ -9,16 +9,21 @@
 //                  chosen (it follows the drawing's selection): what its tip
 //                  is on and how far along; its note as text, a template or
 //                  a label style's, checked as it is typed and shown as it
-//                  would read; the values the entity its tip is on offers,
+//                  would read, or a PRESET's template (the level, the height
+//                  above a surface, the cut or fill, the name, the code, the
+//                  station - leader_presets.hpp) with the surface or the
+//                  alignment it reads; the values the entity its tip is on
+//                  offers, the drawing's surfaces' and alignments' among them,
 //                  a double-click putting {name} into the note; its arrow,
 //                  callout, text style and sizes; an attribute of that
 //                  entity set through it; the tip attached to a selected
 //                  entity; Freeze, Detach and Apply. With several leaders
 //                  selected, Apply, Freeze and Detach change them all.
 //   For Selection  a leader, or a numbered balloon, to each selected entity
-//                  (LEADER FOR, BALLOON FOR), its note checked and shown as
-//                  it would read for the first, with that entity's values
-//                  and the look the leaders are made with.
+//                  (LEADER FOR, BALLOON FOR), its note - typed, or a preset's
+//                  - checked and shown as it would read for the first, with
+//                  that entity's values and the look the leaders are made
+//                  with.
 //   Arrange        the selected leaders' notes in a column (LEADER ALIGN),
 //                  and the balloons numbered again (BALLOON RENUMBER).
 //
@@ -50,6 +55,7 @@
 #include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/entity/leader_values.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -96,6 +102,13 @@ class LeaderManagerDialog final : public QDialog {
     // Puts "{name}" into the note at the cursor (the end of the note, until
     // the user puts the cursor elsewhere), making the note a template.
     void insertValue(const QString& name);
+    // Makes the note preset `word`'s template (LEADER preset=word), reading
+    // `reads` - a surface or an alignment of the drawing; empty for the
+    // first visible surface or the first alignment - as choosing them in
+    // the Preset boxes does. Apply then stores it. False, saying why in the
+    // problem line, for no such preset, no leader shown, or nothing the
+    // preset can read.
+    bool choosePreset(const QString& word, const QString& reads = {});
 
     // The actions, as the buttons run them.
     bool apply();
@@ -117,6 +130,8 @@ class LeaderManagerDialog final : public QDialog {
     // What a leader for the first selected entity would say, or why not.
     [[nodiscard]] QString forPreview() const;
     void insertForValue(const QString& name);
+    // choosePreset for the leaders For Selection makes (LEADER FOR preset=).
+    bool chooseForPreset(const QString& word, const QString& reads = {});
 
     // ---- the Arrange tab
     bool alignSelection();
@@ -159,6 +174,13 @@ class LeaderManagerDialog final : public QDialog {
     };
 
     void refresh(const DocumentChanges& changes);
+    // The drawing's surfaces and alignments as a note reads them, made
+    // afresh for each use (annotation/leader_presets.hpp).
+    [[nodiscard]] katana::entity::LeaderContext readContext() const;
+    // The note made the preset chosen in the Leader tab's boxes, or the For
+    // Selection tab's; true when none is chosen.
+    bool usePreset(bool forTab);
+    bool pickPreset(bool forTab, const QString& word, const QString& reads);
     void fillList();
     void fillStyles();
     void showForm(const katana::entity::LeaderGeometry& leader);
@@ -205,6 +227,8 @@ class LeaderManagerDialog final : public QDialog {
     QLabel* target_ = nullptr;
     QDoubleSpinBox* along_ = nullptr;
     QComboBox* noteKind_ = nullptr;
+    QComboBox* preset_ = nullptr;
+    QComboBox* presetReads_ = nullptr;
     QPlainTextEdit* note_ = nullptr;
     QComboBox* labelStyle_ = nullptr;
     QLabel* check_ = nullptr;
@@ -229,6 +253,8 @@ class LeaderManagerDialog final : public QDialog {
     // For Selection
     QLabel* forSelection_ = nullptr;
     QComboBox* forNoteKind_ = nullptr;
+    QComboBox* forPreset_ = nullptr;
+    QComboBox* forPresetReads_ = nullptr;
     QPlainTextEdit* forNote_ = nullptr;
     QComboBox* forLabelStyle_ = nullptr;
     QLabel* forCheck_ = nullptr;

@@ -259,10 +259,113 @@ void paintLabel(const ToolInk& ink)
     ink.line(11.5, 11, 16.5, 11, true, 1.6);
 }
 
+// ---- the preset leaders (annotate_leader_presets.cpp) ---------------------------------
+//
+// One language for the six: the point the note is read off is a vertex
+// handle (neutral, what is there), the leader rises from it to a short
+// landing (accent, what the tool makes), and what stands at the landing says
+// what the note reads - a level mark, a difference to a ground line, cut and
+// fill arrows, a name tag, a code's bars, a chainage's ticks. No arrowhead:
+// the tip is ON the point, and a head there would hide the point it reads.
+
+// The leader from the point at (x, y) to a bend at (bendX, bendY) and a
+// landing to landingEnd; the point drawn last, over the line's end.
+void presetLeader(const ToolInk& ink, double x, double y, double bendX, double bendY,
+                  double landingEnd)
+{
+    ink.stroke(polyline({{x, y}, {bendX, bendY}, {landingEnd, bendY}}), true);
+    ink.node(x, y);
+}
+
+void paintLevelLeader(const ToolInk& ink)
+{
+    // A spot level's mark at the landing: a triangle standing on its point
+    // on a level line, as a level is marked on a section.
+    presetLeader(ink, 4, 19.5, 10, 9, 13);
+    ink.line(14, 11.5, 22.5, 11.5, false, kExtensionWidth);
+    ink.fill(polyline({{14.8, 4.5}, {21.6, 4.5}, {18.2, 10.5}}, true), true);
+}
+
+void paintSurfaceLeader(const ToolInk& ink)
+{
+    // A point above a ground line, the height between them dashed, and the
+    // note a plus-or-minus: how far above or below the surface.
+    ink.stroke(polyline({{2, 20.5}, {8, 18.5}, {14, 20.5}, {22, 17.5}}), false, kExtensionWidth);
+    ink.dashed(polyline({{6, 13.5}, {6, 18.2}}), true);
+    presetLeader(ink, 6, 11, 11, 5.5, 14);
+    ink.label(19, 6, 10, QStringLiteral("±"), true);
+}
+
+void paintCutFillLeader(const ToolInk& ink)
+{
+    // A point under a ground line - a cut - and the note a cut arrow down
+    // beside a fill arrow up: one of the two is said.
+    ink.stroke(polyline({{2, 14}, {9, 12.5}, {15, 14.5}, {22, 12}}), false, kExtensionWidth);
+    presetLeader(ink, 5, 19.5, 10.5, 5.5, 12.5);
+    ink.line(15.5, 2.5, 15.5, 6.5, true, 1.4);
+    arrowhead(ink, 15.5, 10.5, 0, 1);
+    ink.line(20.5, 10.5, 20.5, 6.5, true, 1.4);
+    arrowhead(ink, 20.5, 2.5, 0, -1);
+}
+
+void paintPointNameLeader(const ToolInk& ink)
+{
+    // A name tag at the landing - its hole the neutral dot - for the
+    // point's name.
+    presetLeader(ink, 4, 19.5, 10, 10, 12.5);
+    ink.stroke(polyline({{13, 6.5}, {19.5, 6.5}, {22.5, 10}, {19.5, 13.5}, {13, 13.5}}, true), true);
+    ink.dot(19.2, 10, 1.1);
+}
+
+void paintCodeLeader(const ToolInk& ink)
+{
+    // A code's bars at the landing, thick and thin, for the survey code.
+    presetLeader(ink, 4, 19.5, 10, 10, 12.5);
+    constexpr double kBars[][2] = {{14.0, 1.6}, {16.2, 0.9}, {18.0, 1.6}, {20.0, 0.9}, {21.8, 1.6}};
+    for (const auto& [x, width] : kBars) {
+        ink.line(x, 6, x, 14, true, width);
+    }
+}
+
+void paintStationLeader(const ToolInk& ink)
+{
+    // An alignment along the bottom with two chainage ticks across it, a
+    // point off it with its offset dashed down to it, and the leader up.
+    ink.stroke(polyline({{2, 21}, {9, 18.5}, {16, 17.8}, {22.5, 19}}), false, kExtensionWidth);
+    ink.line(8.6, 16.3, 9.4, 20.7, false, kExtensionWidth);
+    ink.line(16.2, 15.6, 15.8, 20.0, false, kExtensionWidth);
+    ink.dashed(polyline({{12.5, 12.5}, {12.5, 17.0}}), true);
+    presetLeader(ink, 12.5, 10.5, 17, 4.5, 21.5);
+}
+
 } // namespace
 
 bool paintAnnotateIcon(std::string_view toolId, const ToolInk& ink)
 {
+    if (toolId == "annotate.leader.level") {
+        paintLevelLeader(ink);
+        return true;
+    }
+    if (toolId == "annotate.leader.surface") {
+        paintSurfaceLeader(ink);
+        return true;
+    }
+    if (toolId == "annotate.leader.cutfill") {
+        paintCutFillLeader(ink);
+        return true;
+    }
+    if (toolId == "annotate.leader.name") {
+        paintPointNameLeader(ink);
+        return true;
+    }
+    if (toolId == "annotate.leader.code") {
+        paintCodeLeader(ink);
+        return true;
+    }
+    if (toolId == "annotate.leader.station") {
+        paintStationLeader(ink);
+        return true;
+    }
     if (toolId == "annotate.text") {
         paintText(ink);
     } else if (toolId == "annotate.mtext") {

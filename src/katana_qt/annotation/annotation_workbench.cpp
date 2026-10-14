@@ -245,7 +245,20 @@ QAction* AnnotationWorkbench::addEditTextAction(QMenu& annotateMenu)
     // Menu letter X: the tools' letters are given as the catalogue fills the
     // menu, the first letters of words first, and X begins none of their
     // names (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
-    auto* action = new QAction(QStringLiteral("Edit Te&xt..."), &window_);
+    // But a tool short of letters is moved onto any letter of its name - with
+    // six more leader tools (2026-10-15) Text was one rename from being given
+    // X - so the X is taken only while it is free, and a free letter
+    // otherwise: two items on one letter is a key that cycles between them.
+    std::string taken;
+    for (const QAction* item : annotateMenu.actions()) {
+        if (!item->isSeparator()) {
+            (void)tools::withMnemonic(item->text().toStdString(), taken);
+        }
+    }
+    const std::string text = taken.find('X') == std::string::npos
+                                 ? std::string("Edit Te&xt...")
+                                 : tools::withMnemonic("Edit Text...", taken);
+    auto* action = new QAction(QString::fromStdString(text), &window_);
     action->setObjectName(QStringLiteral("annotateEditText"));
     action->setIcon(katana::qt::icon(Icon::EditText));
     action->setToolTip(QStringLiteral(
