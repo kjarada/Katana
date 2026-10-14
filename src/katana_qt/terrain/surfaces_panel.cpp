@@ -395,6 +395,14 @@ SurfacesPanelUi installSurfacesPanel(QMainWindow& window, cad::Document& documen
     // Until asked for: the window's layout, and every screenshot of it, is
     // as it was for a drawing that has no use for the panel.
     ui.dock->hide();
+    // Shown, it is read at once: a refresh queued while it was hidden may
+    // not have run yet when the next thing - a headless step - looks at it.
+    SurfacesPanel* panel = ui.panel;
+    QObject::connect(ui.dock, &QDockWidget::visibilityChanged, panel, [panel](bool visible) {
+        if (visible) {
+            panel->refresh();
+        }
+    });
 
     ui.toggle = ui.dock->toggleViewAction();
     ui.toggle->setObjectName("viewSurfacesPanel");

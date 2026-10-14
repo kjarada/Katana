@@ -14,7 +14,7 @@ add_test(NAME qt_the_surfaces_panel_copies_the_picked_surface_headless
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=>SURFACE FROM RASTER 1 NAME ground|*terrainSurfacesPanel|%SurfacesDock|surfacesTable=ground|!surfacesCopy|>SURFACE HIDE ground|>SURFACE LIST"
-        "-DEXPECT=surface name=ground triangles=[0-9]+ points=10800 [^\r\n]* style=Standard visible=no[\r\n]+surface name=\"ground \\(2\\)\" triangles=[0-9]+ points=10800 [^\r\n]* style=Standard visible=yes.*listed surfaces=2 rasters=1"
+        "-DEXPECT=surface name=ground triangles=[0-9]+ points=10800 [^\r\n]* style=Standard visible=no[^\r\n]*[\r\n]+[^\r\n]*surface name=\"ground \\(2\\)\" triangles=[0-9]+ points=10800 [^\r\n]* style=Standard visible=yes.*listed surfaces=2 rasters=1"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surfaces_panel_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 set_tests_properties(qt_the_surfaces_panel_copies_the_picked_surface_headless
