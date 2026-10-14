@@ -29,9 +29,9 @@
 # ======================================================================================
 
 # >>> keys: rewritten by tools/update_keytool.py between these two lines, and nowhere else
-set(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS ON)
-set(KATANA_UPDATE_KEY_ACTIVE "504c414345484f4c4445522d4143544956452d4e4f542d412d4b45592d30302d")
-set(KATANA_UPDATE_KEY_SPARE "504c414345484f4c4445522d53504152452d4e4f542d412d4b45592d2d30302d")
+set(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS OFF)
+set(KATANA_UPDATE_KEY_ACTIVE "4b5436f13549eee7555b471eb9e6461e9cdea8e62032f415ff6df38f272d0d73")
+set(KATANA_UPDATE_KEY_SPARE "f5f20acdd524798aab2f07b803d2c0129b4c0decb37ca954e5d651a805037dfc")
 # <<< keys
 
 # Tests only: a script run of this file may take the keys from a fixture, so that the
