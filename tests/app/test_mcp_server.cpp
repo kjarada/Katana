@@ -2584,3 +2584,31 @@ TEST_F(McpServer, AnIfcExportsRecordIsItsWholeKindWithItsFields)
     EXPECT_FALSE(records[0].contains("exported file")) << records.dump();
 }
 #endif
+
+// ---- volumes (docs/volumes.md) ----
+#if defined(KATANA_TEST_WITH_INTEROP)
+// VOLUME is a session line, so the command tool measures between two
+// surfaces as the window's Terrain > Volumes does. The two are closed 3D
+// strings round the square [0, 10]^2 at 10 and at 11, each made a surface of
+// two triangles: a 1 m slab, so 4 x 4 x 1 = 16 m^3 inside the typed square.
+TEST_F(McpServer, AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool)
+{
+    initialize();
+    const Json ran = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LAYER NEW base", "LAYER SET base", "PLINE3D 0,0,10 10,0,10 10,10,10 0,10,10 CLOSE",
+               "LAYER NEW top", "LAYER SET top", "PLINE3D 0,0,11 10,0,11 10,10,11 0,10,11 CLOSE",
+               "SURFACE FROM LAYERS base ONLY NAME base", "SURFACE FROM LAYERS top ONLY NAME top",
+               "VOLUME SURFACES base top INSIDE 2,2 6,2 6,6 2,6"}}});
+    ASSERT_FALSE(ran["isError"].get<bool>()) << textOf(ran);
+    const Json& lines = ran["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 9U);
+    const std::string reply = lines[8]["output"].get<std::string>();
+    EXPECT_NE(reply.find("volume method=exact base=base top=top polygons=1 polygon.area=16.000 "
+                         "cut=0.000 fill=16.000 net=16.000 area=16.000"),
+              std::string::npos)
+        << reply;
+}
+#endif
+// ---- end of volumes ----

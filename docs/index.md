@@ -20,6 +20,7 @@ done. There is no user guide yet.
 | [storage.md](storage.md) | why the project database is SQLite, the measurements, loading without copying | `katana_storage` (a storage engine or encoding decision) |
 | [geodesy.md](geodesy.md) | coordinate reference systems, transformations, units, grid and ground factors, geodesics, site calibration | `katana_geodesy` |
 | [terrain.md](terrain.md) | TIN surfaces, contours, volumes, tiled terrain | `katana_terrain` |
+| [volumes.md](volumes.md) | earthwork volumes between the drawing's surfaces: the overlay of two surfaces, inside polygons, to a level, stockpiles and pits, along an alignment (average end area and prismoidal, the mass haul ordinate), the grid method, factors, the difference (cut/fill map) and envelope surfaces, the `VOLUME` verbs on the three surfaces and Terrain > Volumes | `include/katana/terrain/overlay.hpp`, `include/katana/terrain/volume.hpp`, `include/katana/terrain/section_volume.hpp`, `include/katana/cad/terrain/volume_verbs.hpp`, `src/katana_cad/terrain/volume_*.cpp`, `src/katana_qt/terrain/volumes_dialog.*` |
 | [render.md](render.md) | camera, draw lists, the software rasteriser, the 3D and section views | `katana_render`, `render_view_widget.*`, `section_view_widget.*` |
 | [performance.md](performance.md) | the measurements and what moved | anything measured (`benchmarks/`) |
 | [interop.md](interop.md) | GIS, rasters, point clouds, the `.12da` archive, import and export | `katana_io`, `katana_interop`, `katana_archive12d` (the archive) |

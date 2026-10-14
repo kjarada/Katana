@@ -21,6 +21,8 @@
 #include "katana/cad/interactive_tool.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
+// volumes: HELP VOLUME (docs/volumes.md).
+#include "katana/cad/terrain/volume_verbs.hpp"
 #include "geo/geo_verbs.hpp"
 #include "survey_verbs.hpp"
 #include "katana/interop/online_verbs.hpp"
@@ -201,6 +203,8 @@ std::vector<ReferenceSection> commandReferenceSections()
     sections.push_back({"Sheets", referenceEntries(qs(katana::cad::plotting::sheetVerbHelp()))});
     sections.push_back({"Subsurface utilities",
                         referenceEntries(qs(katana::cad::utilities::utilityVerbHelp()))});
+    // volumes: the VOLUME verbs and SURFACE DIFFERENCE and ENVELOPE (HELP VOLUME).
+    sections.push_back({"Volumes", referenceEntries(qs(katana::cad::volumeVerbHelp()))});
     sections.push_back({"Online data", referenceEntries(qs(katana::interop::onlineUsage()))});
     // GDAL and the geoprocessing verbs, from the executor's own table, so the
     // window and katana_help cannot list them differently.

@@ -35,6 +35,8 @@
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
 #include "tools/flyout_button.hpp"
+// volumes: Terrain > Volumes (docs/volumes.md).
+#include "terrain/volumes_dialog.hpp"
 
 #include <chrono>
 #include <QAction>
@@ -1063,6 +1065,31 @@ void MainWindow::buildActions()
     terrainBar->addActions({selectionSection, alignmentSection});
     terrainBar->addSeparator();
     terrainBar->addActions({quantities, corridor});
+
+    // ---- volumes (docs/volumes.md): Terrain > Volumes and its toolbar button ----
+    QAction* volumes =
+        makeAction(Icon::Volumes, "&Volumes...",
+                   "Cut and fill between surfaces, to a level, of a stockpile, along an "
+                   "alignment or on a grid, inside polygons; and the cut/fill map",
+                   {}, "terrainVolumes");
+    // The dialog it shows, by object name: how --dialog finds it. It builds
+    // VOLUME and SURFACE DIFFERENCE lines and runs them through runVerbLine.
+    volumes->setData(QString("volumesDialog"));
+    connect(volumes, &QAction::triggered, this, [this] {
+        VolumesDialogContext context;
+        context.run = commandRunner();
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
+        }
+        (void)showVolumesDialog(*this, std::move(context));
+    });
+    terrainMenu->addSection("Volumes");
+    terrainMenu->addAction(volumes);
+    terrainBar->addSeparator();
+    terrainBar->addAction(volumes);
+    // ---- end of volumes ----
 
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(*gisMenu, exportAction);

@@ -17,6 +17,8 @@
 #include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
+// volumes: VOLUME, SURFACE DIFFERENCE and ENVELOPE (docs/volumes.md).
+#include "katana/cad/terrain/volume_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -581,6 +583,10 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
+Volumes   VOLUME SURFACES|DATUM|STOCKPILE|SECTIONS|GRID ...   cut and fill between the
+          drawing's surfaces, to a level, of a stockpile, along an alignment or on a grid,
+          inside polygons; SURFACE DIFFERENCE|ENVELOPE ... a cut/fill map or envelope as a
+          new surface (HELP VOLUME)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
           [CHORD length] [PREVIEW]   joins coded survey points into lines by the survey
           codes and their control codes, one undo step; no scope word: the selection, else
@@ -843,6 +849,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && utilities::isUtilityVerb(args.front())) {
             return utilities::utilityVerbHelp();
         }
+        // volumes: HELP VOLUME.
+        if (!args.empty() && katana::core::equalsIgnoringCase(args.front(), "VOLUME")) {
+            return volumeVerbHelp();
+        }
         // Asked by either spelling, as the verb is run by either.
         if (!args.empty() && isCustomisationVerb(canonicalVerb(args.front()))) {
             return customisationVerbHelp();
@@ -863,6 +873,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens, scopeViews_);
+    }
+    // volumes: VOLUME ..., SURFACE DIFFERENCE and SURFACE ENVELOPE.
+    if (isVolumeVerb(verb, args)) {
+        return runVolumeVerb(document_, *tokens, scopeViews_);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they

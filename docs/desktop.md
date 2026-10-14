@@ -4000,6 +4000,18 @@ non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
 decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
 opens with it, in an Alignments section, and the toolbar with its button.
 
+## Terrain > Volumes
+
+Earthwork volumes between the drawing's surfaces in one non-modal dialog the
+window keeps (`volumesDialog`, `src/katana_qt/terrain/volumes_dialog.hpp`,
+`showVolumesDialog`): a page per method, the boundary from the shared scope
+and filter controls or typed corners, factors, the results table, the mass
+haul diagram, Copy, Save CSV and Make Cut/Fill Map. Every one of them is a
+`VOLUME` or `SURFACE DIFFERENCE` line through `runVerbLine`; the methods and
+the decisions are in `docs/volumes.md`. The Terrain menu has it in a Volumes
+section after Corridors (`terrainVolumes`), and the Terrain toolbar its
+button.
+
 ## Settings
 
 What the session's customisation IS, and the few things that are done to it

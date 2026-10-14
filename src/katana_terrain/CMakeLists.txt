@@ -18,6 +18,10 @@ add_library(katana_terrain STATIC
     surface_store.cpp
     # A sight line over the ground, for the LOS verb (docs/terrain.md).
     line_of_sight.cpp
+    # Volumes (docs/volumes.md): the overlay of two surfaces, the difference
+    # and envelope surfaces made of it, and volumes from cross sections.
+    overlay.cpp
+    section_volume.cpp
 )
 katana_target_defaults(katana_terrain)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)
