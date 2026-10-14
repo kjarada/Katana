@@ -483,6 +483,19 @@ std::vector<double> everySpacing(double length, double spacing)
     return out;
 }
 
+// The posts of a barrier or a fence along `path`: postDistances, less the
+// end post of a path that comes back to its start, which would stand where
+// the first one does.
+std::vector<double> postsAlong(const Path& path, double spacing)
+{
+    std::vector<double> out = postDistances(path.length(), spacing);
+    const std::vector<PathPoint>& points = path.points();
+    if (out.size() > 1 && points.front().position.distanceTo(points.back().position) < 1e-6) {
+        out.pop_back();
+    }
+    return out;
+}
+
 // One object stood on its ground: what a placement resolves to before any
 // solid is made.
 struct Spot {
@@ -846,7 +859,7 @@ std::vector<bim::BimObject> makeBarrier(const RoadObject& object, const Placemen
             fail(std::format("height= ({}) is less than the rail ({} m)", real(height),
                              real(rail)));
         }
-        for (const double along : postDistances(path.length(), values.number("postspacing"))) {
+        for (const double along : postsAlong(path, values.number("postspacing"))) {
             const Path::Sample sample = path.at(along);
             addBox(made.mesh, Point3(sample.position.x, sample.position.y, sample.z),
                    sample.direction, kPostFlange, kPostDepth, height);
@@ -865,7 +878,7 @@ std::vector<bim::BimObject> makeBarrier(const RoadObject& object, const Placemen
             fail(std::format("{} ropes {} m apart do not fit under a top rope at {} m", ropes,
                              real(kRopeSpacing), real(height)));
         }
-        for (const double along : postDistances(path.length(), values.number("postspacing"))) {
+        for (const double along : postsAlong(path, values.number("postspacing"))) {
             const Path::Sample sample = path.at(along);
             addBox(made.mesh, Point3(sample.position.x, sample.position.y, sample.z),
                    sample.direction, kRopePost, kRopePost, height + kRopePostAbove);
@@ -961,7 +974,7 @@ std::vector<bim::BimObject> makeFence(const RoadObject& object, const Placement&
     const auto rails = static_cast<std::size_t>(values.number("rails"));
     bim::BimObject made = skeleton(object, values, "", "", {"IfcRailing", "FENCE", "ROADSIDE"});
     std::size_t posts = 0;
-    for (const double along : postDistances(path.length(), values.number("postspacing"))) {
+    for (const double along : postsAlong(path, values.number("postspacing"))) {
         const Path::Sample sample = path.at(along);
         addBox(made.mesh, Point3(sample.position.x, sample.position.y, sample.z),
                sample.direction, post, post, height);

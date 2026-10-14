@@ -193,10 +193,12 @@ Status Document::setRoadObjects(const road::RoadObjectSet& objects, std::string 
             metadata_.unknownKeys.erase(std::string(kRoadObjectsKey));
         }
         roadObjectCache_ = state;
-        // The stack's own notification says History and the tables; what
-        // the road model is made from is said here, on the step, its undo
-        // and its redo alike, so a view rebuilds the model for exactly these.
-        notify(DocumentChange::RoadModel);
+        // Not notified here: the stack's notification of this step, its undo
+        // and its redo carries DocumentChange::RoadModel, found by comparing
+        // the road model's metadata keys - this one among them - with what
+        // the last notification saw (Document::roadModelChanged,
+        // road/road_document.cpp). Said here as well, it went out twice, the
+        // first time from inside the command.
     };
     return execute(std::make_unique<RoadObjectsCommand>(std::move(stepName), std::move(layers),
                                                         std::move(apply)));

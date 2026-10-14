@@ -517,9 +517,10 @@ class Document {
     [[nodiscard]] const road::RoadObjectSet& roadObjects() const;
     [[nodiscard]] katana::core::Status roadObjectsStatus() const;
     // Replaces the set as ONE undoable step named `stepName`, which also
-    // makes any layer an object names that the drawing lacks; notifies
-    // DocumentChange::RoadModel on the step, its undo and its redo. A set
-    // equal to the current one records nothing.
+    // makes any layer an object names that the drawing lacks; the step, its
+    // undo and its redo are reported as DocumentChange::RoadModel, as every
+    // change of a road-model key is. A set equal to the current one records
+    // nothing.
     [[nodiscard]] katana::core::Status setRoadObjects(const road::RoadObjectSet& objects,
                                                       std::string stepName = "SET_ROAD_OBJECTS");
 
