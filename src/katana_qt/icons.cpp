@@ -385,6 +385,10 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        // Surface editing (docs/surface_editing.md).
+        Icon::SurfaceEdit,  Icon::SurfaceLevels,
+        Icon::SurfaceSmooth, Icon::SurfaceThin,
+        Icon::SurfaceDeleteLong, Icon::SurfaceCombine,
         Icon::Download,
     };
     return icons;
@@ -1333,6 +1337,51 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 4.5, 17.5, false);
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
+        break;
+    // ---- surface editing (docs/surface_editing.md) ----
+    case Icon::SurfaceEdit: {
+        // Four triangles round a centre vertex; the vertex in the accent.
+        const QPainterPath rim = polyline({{3, 19}, {6, 5}, {19, 4}, {21, 18}}, true);
+        ink.stroke(rim);
+        for (const QPointF& corner : {QPointF(3, 19), QPointF(6, 5), QPointF(19, 4),
+                                      QPointF(21, 18)}) {
+            ink.line(corner.x(), corner.y(), 12, 12);
+        }
+        ink.dot(12, 12, 2.6, true);
+        break;
+    }
+    case Icon::SurfaceLevels:
+        ink.stroke(polyline({{2.5, 18}, {8, 15}, {14, 17}, {21.5, 13}}));
+        ink.line(12, 3, 12, 12.5, true);
+        ink.stroke(polyline({{9, 6}, {12, 3}, {15, 6}}), true);
+        ink.stroke(polyline({{9, 9.5}, {12, 12.5}, {15, 9.5}}), true);
+        break;
+    case Icon::SurfaceSmooth: {
+        ink.stroke(polyline({{2.5, 14}, {6, 8}, {9, 17}, {13, 7}, {17, 16}, {21.5, 10}}));
+        QPainterPath smooth(QPointF(2.5, 13));
+        smooth.cubicTo(8, 10, 14, 15, 21.5, 11);
+        ink.stroke(smooth, true);
+        break;
+    }
+    case Icon::SurfaceThin:
+        ink.line(3, 15, 21, 11);
+        ink.node(3, 15);
+        ink.node(21, 11);
+        for (const double x : {9.0, 15.0}) {
+            const double y = 15.0 - (x - 3.0) * 4.0 / 18.0;
+            ink.dot(x, y, 1.8, true);
+            ink.line(x - 2.5, y - 2.5, x + 2.5, y + 2.5, true, 1.2);
+        }
+        break;
+    case Icon::SurfaceDeleteLong:
+        ink.stroke(polyline({{2.5, 17}, {21.5, 17}, {12, 13.5}}, true));
+        ink.stroke(polyline({{12, 13.5}, {7, 5}, {17, 5}}, true));
+        ink.line(5, 21, 19, 10, true);
+        break;
+    case Icon::SurfaceCombine:
+        ink.stroke(rectangle(3, 4, 18, 16));
+        ink.fill(rectangle(9, 9, 8, 7), true, 160);
+        ink.stroke(rectangle(9, 9, 8, 7), true);
         break;
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,

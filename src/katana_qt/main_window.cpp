@@ -34,6 +34,8 @@
 #include "property_panel.hpp"
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
+// Terrain > Edit Surface (docs/surface_editing.md).
+#include "terrain/surface_edit_ui.hpp"
 #include "tools/flyout_button.hpp"
 
 #include <chrono>
@@ -971,6 +973,26 @@ void MainWindow::buildActions()
     viewBar->addSeparator();
     viewBar->addActions({gridAction_, snapAction_});
 
+    // ---- Terrain > Edit Surface (docs/surface_editing.md) ----------------------------
+    // Made before the tool catalogue fills the menus, which puts the Terrain
+    // tools in its submenu and toolbar (buildToolActions); placed in the
+    // Terrain menu below.
+    {
+        SurfaceEditServices services;
+        services.window = this;
+        services.document = &document_;
+        services.run = commandRunner();
+        services.views = [views = views_] { return scopeFilterViews(views->viewSet()); };
+        services.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                     const QKeySequence& shortcut, const QString& name) {
+            return makeAction(icon, text, tip, shortcut, name);
+        };
+        services.makeToolBar = [this](const QString& title) {
+            return makeToolBar(title, Qt::TopToolBarArea);
+        };
+        surfaceEdit_ = std::make_unique<SurfaceEditUi>(std::move(services));
+    }
+
     // ---- Draw, Modify, Annotate ----------------------------------------------------
     buildToolActions(*drawMenu, *modifyMenu, *annotateMenu);
 
@@ -1050,6 +1072,8 @@ void MainWindow::buildActions()
     terrainMenu->addAction(alignmentManager);
     terrainMenu->addSection("Surfaces");
     terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
+    // Edit Surface and Combine Surfaces (docs/surface_editing.md).
+    surfaceEdit_->finish(*terrainMenu);
     terrainMenu->addSection("Sections");
     terrainMenu->addActions({selectionSection, alignmentSection});
     terrainMenu->addSection("Corridors");
@@ -1063,6 +1087,9 @@ void MainWindow::buildActions()
     terrainBar->addActions({selectionSection, alignmentSection});
     terrainBar->addSeparator();
     terrainBar->addActions({quantities, corridor});
+    // The Surface Edit toolbar, made before the tools filled it, goes after
+    // Terrain on the second row (docs/surface_editing.md).
+    addToolBar(Qt::TopToolBarArea, surfaceEdit_->toolBar());
 
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(*gisMenu, exportAction);
@@ -1461,6 +1488,10 @@ void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& ann
     tools::ToolMenuTargets targets;
     targets.menus = {{"Draw", &drawMenu}, {"Modify", &modifyMenu}, {"Annotate", &annotateMenu}};
     targets.toolBars = {{"Draw", drawBar}, {"Modify", modifyBar}, {"Annotate", annotateBar}};
+    // The Terrain tools go in Terrain > Edit Surface and the Surface Edit
+    // toolbar (docs/surface_editing.md), not in a menu of their own.
+    targets.menus["Terrain"] = surfaceEdit_->menu();
+    targets.toolBars["Terrain"] = surfaceEdit_->toolBar();
     toolActions_ = tools::fillToolMenus(katana::cad::toolCatalog(), targets, this,
                                         [this](const std::string& id) { startTool(id); });
 }

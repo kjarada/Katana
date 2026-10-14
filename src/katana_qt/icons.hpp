@@ -238,6 +238,22 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // ---- surface editing (docs/surface_editing.md) ----
+    // Terrain > Edit Surface: a small TIN, one vertex in the accent - the
+    // surface as a thing to work on.
+    SurfaceEdit,
+    // Raise, Lower or Set Level: a ground line and, in the accent, the
+    // up-and-down arrow of a change of level.
+    SurfaceLevels,
+    // Smooth: a jagged line, and in the accent the smooth curve through it.
+    SurfaceSmooth,
+    // Thin: a row of vertices, the middle ones in the accent struck out.
+    SurfaceThin,
+    // Delete Long Triangles: a long thin triangle on the rim, struck through
+    // in the accent.
+    SurfaceDeleteLong,
+    // Combine Surfaces: a ground outline, and in the accent a pad laid into it.
+    SurfaceCombine,
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.
