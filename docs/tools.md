@@ -188,6 +188,16 @@ Tangent Tangent and Arc Start End Direction); `docs/drawing.md` has their
 tables. The Survey menu's tools (`docs/survey.md`) are
 dialogs, not catalogue tools.
 
+**Terrain > Edit Surface** (`terrain_edit.cpp`, 2026-10-15) is the first
+family of another category, Terrain: Delete Triangle, Flip Edge, Add Point,
+Delete Point, Delete Triangles Inside, Add Breakline, Boundary and Hole, each
+acting on the active surface. The window hands `tools::fillToolMenus` the
+Edit Surface submenu and the Surface Edit toolbar as the category's targets,
+so the category gets no menu of its own. A tool does not edit the surface: it
+writes the `SURFACE EDIT` line, plans it with the verb's own planner and
+returns the command the verb would commit (`docs/surface_editing.md`, "In the
+window").
+
 **One command per tool session.** A tool that completes returns ONE command,
 so one undo removes the whole operation: a chain of Line segments, every copy
 Copy made before Enter, every cut of a Trim. The edit tools need more than

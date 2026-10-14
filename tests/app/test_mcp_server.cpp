@@ -2497,6 +2497,33 @@ TEST_F(McpServer, ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen)
               std::string::npos)
         << reply;
 }
+
+// The surface edits through the command tool (docs/surface_editing.md): no
+// tool of their own, the lines are the session's. terrain.asc's heights span
+// 24.892 to 38.819 over 120 x 90 cells, every cell centre a vertex (10 800):
+// RAISE 1 moves every one by 1, and katana_terrain_list then reads the
+// drawing's surface at 25.892 to 39.819.
+TEST_F(McpServer, ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json edited = call("katana_run_commands",
+                             Json{{"commands", {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                                                "SURFACE EDIT ground RAISE 1"}}});
+    ASSERT_FALSE(edited["isError"].get<bool>()) << textOf(edited);
+    const std::string reply =
+        edited["structuredContent"]["commands"][1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("surface name=ground operation=raise"), std::string::npos) << reply;
+    EXPECT_NE(reply.find("moved=10800 held=0 crossings=0 largest_change=1 changed=yes"),
+              std::string::npos)
+        << reply;
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& surfaces = listed["structuredContent"]["surfaces"];
+    ASSERT_EQ(surfaces.size(), 1U) << surfaces.dump();
+    EXPECT_NEAR(surfaces[0]["zmin"].get<double>(), 25.892, 1e-6);
+    EXPECT_NEAR(surfaces[0]["zmax"].get<double>(), 39.819, 1e-6);
+}
 #endif
 
 // IFC through the one door an agent has: the lines File > Export IFC and

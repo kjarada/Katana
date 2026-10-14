@@ -89,6 +89,8 @@ class LayerManagerDialog;
 class PropertyTreePanel;
 class DatasetInfoDialog;
 class DrawingSummaryDialog;
+// Terrain > Edit Surface and its toolbar (terrain/surface_edit_ui.hpp).
+class SurfaceEditUi;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -696,6 +698,9 @@ class MainWindow final : public QMainWindow {
     // BIM > Road Objects and their dialogs (bim/road_object_workbench.hpp,
     // docs/road_objects.md). After the Document for the reason online_ is.
     std::unique_ptr<RoadObjectWorkbench> roadObjects_;
+    // Terrain > Edit Surface, its dialogs and the Surface Edit toolbar
+    // (docs/surface_editing.md). After the Document for the reason online_ is.
+    std::unique_ptr<SurfaceEditUi> surfaceEdit_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's

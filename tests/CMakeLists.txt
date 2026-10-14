@@ -3090,6 +3090,19 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Terrain > Edit Surface > Raise, Lower or Set Level through the window
+    # (docs/surface_editing.md): the dialog opened by its action, its line run
+    # through the window's one executor. samples/gis/terrain.asc as a surface
+    # has 10 800 vertices (cli.surface_from_the_sample_terrain_then_list), and
+    # RAISE 2 moves every one by exactly 2.
+    add_test(NAME qt_the_surface_heights_dialog_raises_the_surface_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|@terrainSurfaceHeights|surfaceHeightsValue=2|!surfaceHeightsRun|?surfaceHeightsReply"
+            "-DEXPECT=surface name=ground operation=raise .*moved=10800 .*largest_change=2 changed=yes"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_heights_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every icon-only button with a menu on a toolbar or in a dock's title
     # bar draws the sign of its menu clear of its icon (--check-toolbars,
     # tools::menuSignClashes), each measured from its own rendering against

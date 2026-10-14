@@ -565,6 +565,16 @@ schema and add nothing the records do not carry. The surfaces to name are
 `katana_terrain_list`'s.
 `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool` pins it.
 
+### Surface edits through katana_run_commands
+
+`SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP` and `OFFSET` (`docs/surface_editing.md`)
+are the interpreter's lines, so `katana_run_commands` runs them as the window's
+Edit Surface tools and dialogs do, each one undo step, the reply a `surface
+name= operation= triangles_before= ...` record. No tool of their own: what an
+agent reads to choose and check a surface is `katana_terrain_list`'s, which
+sees the edited surface.
+`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads` pins it.
+
 ### V5: katana_gis_query
 
 | Tool | In | Out |

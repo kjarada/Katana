@@ -22,6 +22,10 @@ add_library(katana_terrain STATIC
     # and envelope surfaces made of it, and volumes from cross sections.
     overlay.cpp
     section_volume.cpp
+    # Editing a surface, and surfaces made of others (docs/surface_editing.md).
+    tin_patch.cpp
+    tin_edit.cpp
+    tin_thin.cpp
 )
 katana_target_defaults(katana_terrain)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)

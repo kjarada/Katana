@@ -16,6 +16,8 @@
 #include "katana/cad/survey_code_verbs.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
+// The surface edits (docs/surface_editing.md).
+#include "katana/cad/terrain/surface_edit_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
 // volumes: VOLUME, SURFACE DIFFERENCE and ENVELOPE (docs/volumes.md).
 #include "katana/cad/terrain/volume_verbs.hpp"
@@ -615,7 +617,7 @@ Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTEN
           ZOOM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
           [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
-)" + annotationHelpText() + drawingHelpText();
+)" + annotationHelpText() + drawingHelpText() + surfaceEditHelpSummary();
 }
 
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
@@ -852,6 +854,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && plotting::isSheetVerb(args.front())) {
             return plotting::sheetVerbHelp();
         }
+        // HELP SURFACE EDIT (MERGE, PASTE, CLIP, OFFSET): the surface edits'.
+        if (isSurfaceEditVerb(args)) {
+            return surfaceEditVerbHelp();
+        }
         if (!args.empty() && utilities::isUtilityVerb(args.front())) {
             return utilities::utilityVerbHelp();
         }
@@ -876,6 +882,11 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (plotting::isSheetVerb(verb)) {
         return plotting::runSheetVerb(document_, *tokens, sheetContext_);
+    }
+    // SURFACE EDIT, MERGE, PASTE, CLIP and OFFSET (docs/surface_editing.md);
+    // the other SURFACE words are other modules'.
+    if (isSurfaceEditVerb(*tokens)) {
+        return runSurfaceEditVerb(document_, *tokens, scopeViews_);
     }
     if (isLineworkVerb(verb)) {
         return runLineworkVerb(document_, *tokens, scopeViews_);
