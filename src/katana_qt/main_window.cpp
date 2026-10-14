@@ -35,6 +35,8 @@
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
 #include "tools/flyout_button.hpp"
+// The drawing's surfaces (docs/terrain.md).
+#include "terrain/surfaces_panel.hpp"
 
 #include <chrono>
 #include <QAction>
@@ -395,6 +397,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         }
         if (change.has(cad::DocumentChange::Drafting)) {
             syncSnapActions();
+        }
+    });
+    // The drawing's surfaces as the views draw them (main_window.hpp,
+    // surfacesListener_): at once, and a replaced drawing's shown without
+    // opening a 3D view for them.
+    surfacesListener_ = document_.addListener([this](const cad::DocumentChange& change) {
+        if (change.has(cad::DocumentChange::Surfaces | cad::DocumentChange::SurfaceStyles)) {
+            syncSceneSurfaces(!change.has(cad::DocumentChange::Replaced));
         }
     });
     refreshAll();
@@ -1273,13 +1283,12 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
     // The geoprocessing verbs: the executor's context is this window's
-    // drawing, interpreter (VIEW is its plan view), reference rasters and
-    // surfaces.
+    // drawing (its surfaces with it), interpreter (VIEW is its plan view)
+    // and reference rasters.
     GeoServices geo;
     geo.document = &document_;
     geo.interpreter = &interpreter_;
     geo.reference = &reference_;
-    geo.surfaces = &surfaceStore_;
     geo.scratch = katana::app::geo::ownScratch();
     geo.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
     geo.headless = [this] { return headless_; };
@@ -1918,6 +1927,28 @@ void MainWindow::buildDocks()
                         commandDock->toggleViewAction(), referenceDock_->toggleViewAction()});
     drawingUi_ = drawing::installDrawingUi(*this, document_, panels,
                                            findChild<QMenu*>("drawMenu"));
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // The Surfaces panel, tabbed with Reference Data when it is shown; its
+    // lines run through the one executor, as a typed line does.
+    {
+        SurfacesPanel::Services services;
+        services.run = commandRunner();
+        services.zoomTo = [this](const katana::geometry::Box2& box) { views_->zoomTo(box); };
+        services.editStyles = [this] {
+            // The style manager's own item, Terrain > Surface Styles.
+            if (QAction* styles = findChild<QAction*>("terrainSurfaceStyles")) {
+                styles->trigger();
+            } else {
+                logMessage("No style manager in this build: SURFACESTYLE makes and changes the "
+                           "styles on the command line (HELP SURFACESTYLE).",
+                           true);
+            }
+        };
+        surfacesDock_ = installSurfacesPanel(*this, document_, std::move(services), panels,
+                                             findChild<QMenu*>("terrainMenu"), referenceDock_)
+                            .dock;
+        chrome_->install(surfacesDock_, Icon::SurfacesPanel, DockRole::Panel);
+    }
 
     // Opening sizes. Left to itself Qt gives each dock its size hint, which
     // for a text log is a third of the window - so the drawing, which is the
@@ -4087,7 +4118,7 @@ void MainWindow::importFile()
 void MainWindow::exportVectorFile()
 {
     if (document_.model().entities.empty() && document_.model().alignments.empty() &&
-        sceneSurfaces_.empty()) {
+        document_.surfaces().empty()) {
         if (headless_) {
             logMessage("Export: the drawing is empty.", true);
         } else {
@@ -4349,12 +4380,12 @@ void MainWindow::clearReferenceData()
 
 void MainWindow::clearSceneData()
 {
-    // The scene lists first: they point into the stores. The views keep their
-    // pointers to the (now empty) lists, which stay where they are.
-    sceneSurfaces_.clear();
+    // The scene list first: it points into the store. The views keep their
+    // pointer to the (now empty) list, which stays where it is. The surfaces
+    // are not the window's to clear: they are the drawing's, which New
+    // emptied and Open read from the project, and syncSceneSurfaces has
+    // already shown them.
     sceneMeshes_.clear();
-    surfaceStore_.clear();
-    sceneSurfacesRevision_ = surfaceStore_.revision();
     meshStore_.clear();
     views_->drawingReplaced();
 }
@@ -5059,40 +5090,51 @@ void MainWindow::addMesh(std::string name, katana::geometry::TriangleMesh mesh,
     views_->setMeshes(&sceneMeshes_);
 }
 
-void MainWindow::syncSceneSurfaces()
+void MainWindow::syncSceneSurfaces(bool showGained)
 {
-    if (sceneSurfacesRevision_ == surfaceStore_.revision()) {
+    if (sceneSurfacesGeneration_ == document_.surfacesGeneration() &&
+        sceneSurfaceStylesGeneration_ == document_.surfaceStylesGeneration()) {
         return;
     }
-    // Whether the store gained a surface the scene has not drawn: SURFACE
-    // FROM, TO SURFACE and an import alike.
-    const bool gained = std::ranges::any_of(surfaceStore_.all(), [&](const auto& named) {
-        return std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
+    const katana::terrain::SurfaceStore& store = document_.surfaces();
+    // Whether the drawing gained a shown surface the scene has not drawn:
+    // SURFACE FROM, TO SURFACE, an import and an undone removal alike.
+    const bool gained = std::ranges::any_of(store.all(), [&](const auto& named) {
+        return named.visible && std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
             return shown.surface == named.surface.get();
         });
     });
     std::vector<cad::SceneSurface> next;
-    next.reserve(surfaceStore_.all().size());
-    for (const katana::terrain::NamedSurface& named : surfaceStore_.all()) {
+    std::vector<std::shared_ptr<const katana::terrain::TinSurface>> held;
+    next.reserve(store.all().size());
+    held.reserve(store.all().size());
+    for (const katana::terrain::NamedSurface& named : store.all()) {
         cad::SceneSurface item;
         const auto kept = std::ranges::find_if(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
             return shown.surface == named.surface.get();
         });
         if (kept != sceneSurfaces_.end()) {
-            item = *kept; // its style, colouring and visibility
+            item = *kept; // its shading and colouring
         }
         item.name = named.name;
         item.surface = named.surface.get();
+        // Shown or hidden is the drawing's to say (SURFACE SHOW and HIDE, the
+        // Surfaces panel's check boxes).
+        item.visible = named.visible;
         next.push_back(std::move(item));
+        held.push_back(named.surface);
     }
     sceneSurfaces_ = std::move(next);
-    sceneSurfacesRevision_ = surfaceStore_.revision();
+    // Only now may the surfaces the old list pointed at go.
+    sceneSurfacesHeld_ = std::move(held);
+    sceneSurfacesGeneration_ = document_.surfacesGeneration();
+    sceneSurfaceStylesGeneration_ = document_.surfaceStylesGeneration();
     // The views hold a pointer to the VECTOR, not to its elements, so this is a
     // refresh rather than a repair; the surfaces themselves are shared and
     // never move.
     views_->setSurfaces(&sceneSurfaces_);
     views_->refreshAll();
-    if (!gained) {
+    if (!gained || !showGained) {
         return;
     }
     // Show it. A surface the user cannot see is not obviously a success.
@@ -5104,26 +5146,30 @@ void MainWindow::syncSceneSurfaces()
     }
 }
 
-void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface)
+void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface,
+                            std::string stepName)
 {
     // A second surface of a name is "name (2)", as the session names a
     // second alignment: the store keeps names unique, so SURFACE <name>
-    // finds one.
-    const std::string unique = surfaceStore_.uniqueName(name);
-    if (auto added = surfaceStore_.add(
-            {unique, std::make_shared<const katana::terrain::TinSurface>(std::move(surface)), {}});
-        !added) {
+    // finds one. Into the drawing's surfaces as one undo step; the listener
+    // shows it (syncSceneSurfaces).
+    katana::terrain::SurfaceStore next = document_.surfaces();
+    const std::string unique = next.uniqueName(name);
+    auto shared = std::make_shared<const katana::terrain::TinSurface>(std::move(surface));
+    if (auto added = next.add({unique, shared, {}}); !added) {
         logMessage(QString::fromStdString(added.error().describe()), true);
         return;
     }
-    syncSceneSurfaces();
-    const cad::SceneSurface& item = sceneSurfaces_.back();
+    if (auto status = document_.setSurfaces(std::move(next), std::move(stepName)); !status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
+    }
     logMessage(QString("Surface '%1': %2 vertices, %3 triangles, elevation %4 to %5.")
-                   .arg(QString::fromStdString(sceneSurfaces_.back().name))
-                   .arg(item.surface->vertexCount())
-                   .arg(item.surface->triangleCount())
-                   .arg(item.surface->minElevation(), 0, 'f', 3)
-                   .arg(item.surface->maxElevation(), 0, 'f', 3));
+                   .arg(QString::fromStdString(unique))
+                   .arg(shared->vertexCount())
+                   .arg(shared->triangleCount())
+                   .arg(shared->minElevation(), 0, 'f', 3)
+                   .arg(shared->maxElevation(), 0, 'f', 3));
 }
 
 void MainWindow::showSurfaceFrom(SurfaceFromKind kind)
@@ -5190,16 +5236,21 @@ void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QS
                                  const katana::geometry::SolvedProfile* profile,
                                  const std::string& profileName)
 {
-    if (sceneSurfaces_.empty()) {
-        logMessage("Build a surface first (Terrain > Surface From ...).", true);
-        return;
-    }
+    // The drawing's shown surfaces: a section is a picture, and hiding a
+    // surface takes it out of every picture.
     std::vector<cad::SectionSurfaceInput> inputs;
-    inputs.reserve(sceneSurfaces_.size());
-    for (const auto& item : sceneSurfaces_) {
-        if (item.visible && item.surface != nullptr) {
-            inputs.push_back(cad::SectionSurfaceInput{item.name, item.surface});
+    for (const katana::terrain::NamedSurface& named : document_.surfaces().all()) {
+        if (named.visible && named.surface) {
+            inputs.push_back(cad::SectionSurfaceInput{named.name, named.surface.get()});
         }
+    }
+    if (inputs.empty()) {
+        logMessage(document_.surfaces().empty()
+                       ? "Build a surface first (Terrain > Surface From ...)."
+                       : "Every surface is hidden: show one first (Terrain > Surfaces Panel, or "
+                         "SURFACE SHOW <name>).",
+                   true);
+        return;
     }
 
     cad::SectionOptions options;
@@ -5307,12 +5358,14 @@ std::optional<MainWindow::CorridorRequest> MainWindow::askCorridor(const QString
         }
         return std::nullopt;
     }
+    // Every surface of the drawing, hidden ones too: the ground a corridor
+    // daylights on is data, and hiding is a matter of the picture.
     QStringList surfaceNames;
     std::vector<const katana::terrain::TinSurface*> surfaces;
-    for (const auto& item : sceneSurfaces_) {
-        if (item.visible && item.surface != nullptr) {
-            surfaceNames << QString::fromStdString(item.name);
-            surfaces.push_back(item.surface);
+    for (const katana::terrain::NamedSurface& named : document_.surfaces().all()) {
+        if (named.surface) {
+            surfaceNames << QString::fromStdString(named.name);
+            surfaces.push_back(named.surface.get());
         }
     }
     if (surfaces.empty()) {
@@ -5478,7 +5531,8 @@ void MainWindow::corridorSurface()
     const std::size_t triangles = corridor->surface.triangleCount();
     const std::size_t sections = corridor->sections;
     const std::size_t incomplete = corridor->incompleteSections;
-    addSurface("corridor " + request->alignmentName.toStdString(), std::move(corridor->surface));
+    addSurface("corridor " + request->alignmentName.toStdString(), std::move(corridor->surface),
+               "CORRIDOR SURFACE");
     logMessage(QString("Corridor surface for %1 added: %2 triangles from %3 sections%4. It is a "
                        "surface like any other - visible in 3D and in sections.")
                    .arg(request->alignmentName)

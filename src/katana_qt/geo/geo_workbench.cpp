@@ -32,7 +32,6 @@ GeoWorkbench::GeoWorkbench(QMainWindow& window, GeoServices services)
       context_{*services_.document,
                *services_.interpreter,
                *services_.reference,
-               *services_.surfaces,
                services_.scratch,
                services_.frame,
                services_.changed}

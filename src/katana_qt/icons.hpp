@@ -238,6 +238,10 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // The Surfaces panel: a patch of triangulated ground, one triangle in the
+    // accent - a surface picked out of the drawing's.
+    SurfacesPanel,
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.

@@ -5,10 +5,10 @@
 // ONE executor katana_cli and katana_mcp run (src/katana_app/geo/geo_verbs.hpp).
 //
 // Built as the online and utility workbenches are: MainWindow constructs it,
-// hands it the window's drawing, interpreter, reference rasters, surfaces and
-// a few callbacks (GeoServices), and asks it to run any line the executor
-// handles - typed, or a dialog's line through the window's one executor
-// (MainWindow::runVerbLine).
+// hands it the window's drawing (whose surfaces the verbs read and change),
+// interpreter, reference rasters and a few callbacks (GeoServices), and asks
+// it to run any line the executor handles - typed, or a dialog's line through
+// the window's one executor (MainWindow::runVerbLine).
 //
 // A line is prepared on the GUI thread. What answers at once - GDAL LIST,
 // HELP, VERSION, a PREVIEW, a refusal - is logged there. Anything that runs is
@@ -45,10 +45,10 @@ namespace katana::qt {
 class ViewWorkspace;
 
 struct GeoServices {
+    // The drawing, and with it its surfaces (Document::surfaces).
     katana::cad::Document* document = nullptr;
     katana::cad::CommandInterpreter* interpreter = nullptr;
     katana::interop::ReferenceData* reference = nullptr;
-    katana::terrain::SurfaceStore* surfaces = nullptr;
     // Derived rasters of a drawing with no project.
     std::filesystem::path scratch;
     // The command log. isError also counts it as a refusal of the line.
@@ -56,7 +56,8 @@ struct GeoServices {
     std::function<bool()> headless;
     // Frame what an apply added in the plan views; may be empty.
     std::function<void(const katana::geometry::Box2&)> frame;
-    // The reference rasters or the surfaces changed: redraw them.
+    // The reference rasters changed: redraw them. (A change of the surfaces
+    // is the Document's to notify.)
     std::function<void()> changed;
     // The window's one executor, for the dialogs the lanes add.
     CommandRunner run;

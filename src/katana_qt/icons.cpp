@@ -385,6 +385,8 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        // The drawing's surfaces (docs/terrain.md).
+        Icon::SurfacesPanel,
         Icon::Download,
     };
     return icons;
@@ -1334,6 +1336,18 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
         break;
+    case Icon::SurfacesPanel: {
+        // Four vertices of a TIN and the triangles between them; the middle
+        // one filled in the accent, the row picked in the panel.
+        const QPainterPath picked = polyline({{9, 7}, {16, 14}, {7, 17}}, true);
+        ink.fill(picked, true, 90);
+        ink.stroke(polyline({{3, 12}, {9, 7}, {19, 4}, {21, 15}, {16, 14}, {13, 21}, {7, 17}},
+                            true));
+        ink.stroke(polyline({{9, 7}, {16, 14}, {19, 4}}));
+        ink.stroke(polyline({{3, 12}, {7, 17}, {9, 7}}));
+        ink.stroke(polyline({{7, 17}, {16, 14}}));
+        break;
+    }
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,
         // so that at 16 px the shaft does not cross a third line at its base.
