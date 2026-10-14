@@ -148,6 +148,21 @@ struct SurfaceStyleSet {
 // range that is not finite or empty, an unknown ramp.
 [[nodiscard]] katana::core::Status checkSurfaceStyle(const SurfaceDisplayStyle& style);
 
+// checkSurfaceStyle for every style, and the set as a whole: at least one
+// style, no two of one name compared without case (a line names a style in
+// any case), and a default that is one of them. InvalidArgument naming the
+// style. What Document::setSurfaceStyles and surfaceStylesFromJson refuse.
+[[nodiscard]] katana::core::Status checkSurfaceStyleSet(const SurfaceStyleSet& styles);
+
+// The words a line (SURFACESTYLE ... faces= shading=) and the JSON form say
+// these in: none, flat, elevation, slope, aspect; and automatic, shaded,
+// edges (ShadedWithEdges), wireframe, hidden. Read without case; nullopt for
+// any other word.
+[[nodiscard]] std::string_view surfaceFacesWord(SurfaceFaces faces);
+[[nodiscard]] std::optional<SurfaceFaces> parseSurfaceFaces(std::string_view word);
+[[nodiscard]] std::string_view surfaceShadingWord(SurfaceStyle shading);
+[[nodiscard]] std::optional<SurfaceStyle> parseSurfaceShading(std::string_view word);
+
 // The versioned JSON form, as Document keeps it: written with the keys in a
 // fixed order, so the same set is the same text.
 [[nodiscard]] std::string surfaceStylesToJson(const SurfaceStyleSet& styles);

@@ -19,7 +19,8 @@ namespace {
 constexpr std::uint32_t kReplaced = DocumentChange::Replaced | DocumentChange::Entities |
                                     DocumentChange::Selection | DocumentChange::kTables |
                                     DocumentChange::CurrentAttributes | DocumentChange::History |
-                                    DocumentChange::Saved | DocumentChange::Metadata;
+                                    DocumentChange::Saved | DocumentChange::Metadata |
+                                    DocumentChange::Surfaces | DocumentChange::SurfaceStyles;
 
 } // namespace
 
@@ -41,7 +42,9 @@ void Document::rebuildStack()
     stack_ = std::make_unique<katana::commands::CommandStack>(model_, logger_);
     stack_->addListener([this](const katana::commands::CommandEvent& event) {
         applyToSpatialIndex(event.changes);
-        std::uint32_t parts = DocumentChange::History | tablesChanged();
+        // The surfaces and their styles are not tables of the model: a step
+        // that changed them says so by their generations.
+        std::uint32_t parts = DocumentChange::History | tablesChanged() | surfacePartsChanged();
         if (!event.changes.empty()) {
             parts |= DocumentChange::Entities;
         }
@@ -275,6 +278,8 @@ void Document::newDocument()
     metadataModified_ = false;
     surveyJobs_.clear();
     ++surveyJobsGeneration_;
+    installSurfaceState({});
+    (void)surfacePartsChanged(); // reported below, as part of the replaced drawing
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
     currentStyle_.clear();
@@ -308,6 +313,13 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     // The jobs likewise: applyToModel does not read them, and they are the
     // largest thing in a project that has any (the raw field files).
     auto surveyJobs = std::move(contents->surveyJobs);
+    // And the surfaces, decoded and checked now: one that cannot be read
+    // refuses the open before anything is installed, rather than open a
+    // drawing whose next save would leave the surface out.
+    auto surfaceState = readSurfaceState(contents->surfaces, metadata);
+    if (!surfaceState) {
+        return surfaceState.error();
+    }
     // applyToModel validates before it touches the model, so a bad project
     // leaves the current drawing as it was. The contents are consumed: they are
     // a local that dies either way, and copying every entity into the model was
@@ -320,6 +332,8 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     metadataModified_ = false;
     surveyJobs_ = std::move(surveyJobs);
     ++surveyJobsGeneration_;
+    installSurfaceState(std::move(*surfaceState));
+    (void)surfacePartsChanged(); // reported below, as part of the replaced drawing
     rebuildStack();
     // Whole rebuild rather than incremental: the model was replaced, and a
     // rebuild is what picks a cell size suited to the data just loaded.
@@ -388,6 +402,8 @@ katana::core::Result<bool> Document::saveContents(katana::storage::ProjectStore&
     contents.metadata.customisation =
         customisationRecordToSave(metadata_.customisation, customisation_.missingAtOpen, library_,
                                   customisation_.sources, customisationRenames());
+    // The surfaces and their styles, likewise into what is saved.
+    writeSurfaceState(contents);
     // LENT to the contents for the save and taken back after, rather than
     // copied: a job holds its field file whole, and copying tens of megabytes
     // on every save to hand it to a function that only reads it is waste.
