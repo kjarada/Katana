@@ -665,7 +665,13 @@ jobs:
           said smoke/status.txt "installed=$version"
           said smoke/status.txt "target=${{ matrix.package }}"
           said smoke/status.txt "kind=archive"
-          QT_QPA_PLATFORM=offscreen "$bin/katana" smoke/project --screenshot smoke/window.png
+          # Where Qt looks for its plugins, in the log: the first macOS package
+          # found no platform plugin (2026-10-15), and that is the line that
+          # says why.
+          if [ "${{ matrix.archive }}" = dmg ]; then
+            cat smoke/Katana.app/Contents/Resources/qt.conf
+          fi
+          QT_DEBUG_PLUGINS=1 QT_QPA_PLATFORM=offscreen "$bin/katana" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       # What the window drew, to look at; not part of the release.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

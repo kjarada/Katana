@@ -91,6 +91,31 @@ void recoverInterruptedUpdate()
     }
 }
 
+// Katana.app's own Qt plugins, Contents/Frameworks/qt6/plugins beside
+// Contents/MacOS (cmake/KatanaDeployUnix.cmake.in), named to Qt before the
+// application object exists, since that object loads the platform plugin. The
+// bundle's Contents/Resources/qt.conf names the same folder, but the first
+// macOS package, run by the release job's smoke test with the toolchain moved
+// away, found no platform plugin through it ("Could not find the Qt platform
+// plugin", 2026-10-15) though the plugins were in that folder; so the window
+// does not hang on how Qt resolves that file. A program outside such a bundle
+// (a build tree) has no such folder and adds nothing. Called on macOS only;
+// compiled everywhere so that every build checks it.
+[[maybe_unused]] void addBundledQtPlugins(const char* program)
+{
+    std::error_code failed;
+    const std::filesystem::path located =
+        std::filesystem::weakly_canonical(std::filesystem::absolute(program, failed), failed);
+    if (failed) {
+        return;
+    }
+    const std::filesystem::path plugins =
+        located.parent_path().parent_path() / "Frameworks" / "qt6" / "plugins";
+    if (std::filesystem::is_directory(plugins / "platforms", failed)) {
+        QCoreApplication::addLibraryPath(QString::fromStdWString(plugins.wstring()));
+    }
+}
+
 // --update-health TX: the marker that tells the update helper this version
 // starts, U/healthy-<TX> (update/state.hpp). The helper looks for it once this
 // process has exited, so a file written and closed is enough; it is the
@@ -762,6 +787,11 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 int main(int argc, char* argv[])
 {
     recoverInterruptedUpdate();
+#if defined(Q_OS_MACOS)
+    if (argc > 0) {
+        addBundledQtPlugins(argv[0]);
+    }
+#endif
     QApplication application(argc, argv);
 #if defined(KATANA_GPU_D3D11)
     // The HLSL compiled on a worker while the window is built, so the first

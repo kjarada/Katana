@@ -794,6 +794,19 @@ plugins to the conventional `Contents/PlugIns` was rejected: each plugin's
 RPATH (`@loader_path/../../..`) would then miss `Frameworks`, and rewriting
 them breaks their signatures.
 
+**The window names the plugin folder itself.** The first macOS package to
+reach its smoke test (2026-10-15) ran `katana_cli` whole - GDAL, PROJ, PDAL,
+the update record - and then the window stopped: "Could not find the Qt
+platform plugin", with `Frameworks/qt6/plugins/platforms/` in the bundle,
+signed and sealed. So Qt had not taken that folder from `qt.conf`; why was
+not settled from Qt's source, where a relative path resolves against
+`Contents` only once the application object exists. `katana` on macOS
+therefore adds `Contents/Frameworks/qt6/plugins` to Qt's library paths
+itself, from its own path, before the application object loads the
+platform plugin (`addBundledQtPlugins`, `src/katana_qt/main.cpp`), and the
+smoke test runs the window with `QT_DEBUG_PLUGINS=1` and prints the bundle's
+`qt.conf`, so that the log says where Qt looked.
+
 After installing, every library, then `katana_cli` and `katana_mcp`, then the
 bundle (which signs `katana` with `Info.plist` bound to it) are signed ad
 hoc, so `codesign --verify --deep --strict` accepts it. CPack's DragNDrop
