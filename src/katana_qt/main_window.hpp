@@ -25,7 +25,7 @@
 #include "theme.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/geometry/alignment.hpp"
-#include "katana/cad/corridor.hpp"
+#include "bim/road_workbench.hpp" // road model
 #include "katana/geometry/profile.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -410,8 +410,11 @@ class MainWindow final : public QMainWindow {
     void showAlignmentManager();
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
-    void corridorQuantities();
-    void corridorSurface();
+    // ---- road model (docs/road_design.md) ----
+    // The road model's meshes put among the 3D views' meshes in the place of
+    // the last ones (RoadServices::setRoadMeshes): those with planFootprint
+    // off are its own.
+    void setRoadMeshes(std::vector<katana::cad::SceneMesh> meshes);
     // File > Plot to PDF: the dialog, made the first time and kept, which
     // runs the PLOT line.
     void plotToPdf();
@@ -429,21 +432,6 @@ class MainWindow final : public QMainWindow {
     // record logged (plotting/view_image_export.hpp).
     void snapshotView(const SnapshotRequest& request);
 
-    // What both corridor commands ask for: an alignment with a design
-    // profile, a ground surface, the assembly and the interval, from one
-    // dialog. nullopt when the user cancels or nothing qualifies, which has
-    // already been logged.
-    struct CorridorRequest {
-        katana::geometry::SolvedAlignment alignment;
-        katana::geometry::SolvedProfile profile;
-        const katana::terrain::TinSurface* ground = nullptr;
-        QString alignmentName;
-        QString surfaceName;
-        katana::cad::Assembly assembly;
-        double crossfallPercent = 0.0;
-        double interval = 10.0;
-    };
-    std::optional<CorridorRequest> askCorridor(const QString& title);
     // The part both section commands share: gather the visible surfaces, cut
     // along `alignment`, show the result. `along` names the source for the
     // log line.
@@ -691,6 +679,11 @@ class MainWindow final : public QMainWindow {
     // DRAW (survey/utility_workbench.hpp). After the Document for the reason
     // online_ is.
     std::unique_ptr<UtilityWorkbench> utilities_;
+    // ---- road model (docs/road_design.md) ----
+    // The BIM menu's road templates, corridors and quantities, and the road
+    // model in the views (bim/road_workbench.hpp). After the Document for the
+    // reason online_ is.
+    std::unique_ptr<RoadWorkbench> road_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's

@@ -385,6 +385,8 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        // road model
+        Icon::RoadTemplate, Icon::Corridor, Icon::RoadModel,
         Icon::Download,
     };
     return icons;
@@ -1334,6 +1336,41 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
         break;
+    // ---- road model (docs/road_design.md) ----
+    case Icon::RoadTemplate: {
+        // The course under the road, then the crowned surface over it in the
+        // accent, rising to a kerb at each edge.
+        const QPainterPath course =
+            polyline({{4.5, 13}, {12, 11}, {19.5, 13}, {19.5, 16.5}, {12, 14.5}, {4.5, 16.5}}, true);
+        ink.fill(course, false, 90);
+        ink.stroke(course);
+        ink.stroke(polyline({{4.5, 13}, {12, 11}, {19.5, 13}}), true);
+        ink.stroke(polyline({{4.5, 13}, {4.5, 9.5}, {2, 9.5}}));
+        ink.stroke(polyline({{19.5, 13}, {19.5, 9.5}, {22, 9.5}}));
+        break;
+    }
+    case Icon::Corridor: {
+        QPainterPath left(QPointF(3, 21));
+        left.quadTo(4, 9, 15, 3);
+        QPainterPath right(QPointF(11, 21));
+        right.quadTo(12, 13, 21, 8);
+        ink.stroke(left);
+        ink.stroke(right);
+        QPainterPath centre(QPointF(7, 21));
+        centre.quadTo(8, 11, 18, 5.5);
+        ink.dashed(centre, true);
+        break;
+    }
+    case Icon::RoadModel: {
+        // A block seen from above one corner: its top in the accent.
+        const QPainterPath top = polyline({{12, 4}, {20, 8}, {12, 12}, {4, 8}}, true);
+        ink.fill(top, true, 110);
+        ink.stroke(top, true);
+        ink.stroke(polyline({{4, 8}, {4, 16}, {12, 20}, {20, 16}, {20, 8}}));
+        ink.line(12, 12, 12, 20);
+        break;
+    }
+    // ---- end road model ----
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,
         // so that at 16 px the shaft does not cross a third line at its base.
