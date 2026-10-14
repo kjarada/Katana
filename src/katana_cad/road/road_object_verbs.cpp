@@ -932,6 +932,7 @@ std::string roadObjectVerbHelp()
 {
     std::string text = R"(Road objects: furniture and structures placed along an alignment or a line
 (docs/road_objects.md). Every edit is one undo step; PREVIEW changes nothing.
+
 ROADOBJECT KINDS [kind]          the kinds, or one kind's keys with units, ranges, defaults
 ROADOBJECT LIST [JSON]           a record per object, or the stored JSON
 ROADOBJECT INFO id               its keys, the 3D objects made of it, its problems

@@ -318,7 +318,9 @@ chosen one's `INFO`; and Apply (`ROADOBJECT SET`), Copy, Delete and Zoom To
 are each the line a person would type, run through the executor.
 
 The 3D and plan views draw the objects through `bim::bimModel`, the road
-model's code (`road_design.md`), each in its colour on its layer.
+model's code (`road_design.md`), each in its colour on its layer. Help >
+Command Reference has a Road objects section: `HELP ROADOBJECT`'s text, read
+as every family's is (`src/katana_qt/command_reference_dialog.cpp`).
 
 ## For an agent
 

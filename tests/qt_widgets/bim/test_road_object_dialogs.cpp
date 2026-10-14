@@ -33,12 +33,14 @@
 #include <QTableWidget>
 #include <QToolBar>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
 #include "bim/road_object_dialog.hpp"
 #include "bim/road_object_manager.hpp"
 #include "bim/road_object_workbench.hpp"
+#include "command_reference_dialog.hpp"
 #include "command_runner.hpp"
 #include "icons.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -462,4 +464,25 @@ TEST(RoadObjectWorkbench, EveryRoadObjectIconPaintsSomething)
         }
         EXPECT_GT(ink, 0) << static_cast<int>(which);
     }
+}
+
+// Help > Command Reference reads HELP ROADOBJECT as a section of its own, so
+// a word added to the verb's help is there at once.
+TEST(RoadObjectWorkbench, TheCommandReferenceHasTheRoadObjectVerbs)
+{
+    const auto sections = katana::qt::commandReferenceSections();
+    const auto found = std::ranges::find(sections, QString("Road objects"),
+                                         &katana::qt::ReferenceSection::name);
+    ASSERT_NE(found, sections.end());
+    QStringList words;
+    for (const auto& entry : found->entries) {
+        words << entry.text;
+    }
+    const QString all = words.join('\n');
+    for (const char* line : {"ROADOBJECT ADD kind", "ROADOBJECT KINDS", "ROADOBJECT PROBLEMS",
+                             "ALONG FROM <scope>"}) {
+        EXPECT_TRUE(all.contains(line)) << line;
+    }
+    EXPECT_FALSE(found->entries.empty());
+    EXPECT_EQ(found->entries.front().title, "About");
 }
