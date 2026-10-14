@@ -47,13 +47,16 @@ static_assert(std::is_standard_layout_v<Vec3> && sizeof(Vec3) == 3 * sizeof(doub
 static_assert(sizeof(katana::terrain::TinTriangle) == 3 * sizeof(std::uint32_t));
 static_assert(sizeof(std::array<std::uint32_t, 3>) == 3 * sizeof(std::uint32_t));
 
-// The elevation ramp's palette (elevationRampColor), shared with the kernels'
-// parameters so there is one copy of it.
-constexpr int kRampStops = 5;
-constexpr std::uint8_t kRampR[kRampStops] = {40, 60, 235, 200, 245};
-constexpr std::uint8_t kRampG[kRampStops] = {70, 160, 220, 130, 245};
-constexpr std::uint8_t kRampB[kRampStops] = {140, 90, 130, 70, 245};
-static_assert(kRampStops - 1 == static_cast<int>(simd::kRampSegments));
+// The ramps are the ramp table's (surface_ramps.cpp, surfaceRampStops): the
+// elevation ramp is its first, "terrain", and the kernels' parameters are
+// filled from whichever ramp a surface is coloured by, so there is one copy
+// of each palette. Every ramp has the kernels' four segments.
+static_assert(kSurfaceRampStops - 1 == simd::kRampSegments);
+
+[[nodiscard]] Rgba toRgba(const katana::entity::Color& colour)
+{
+    return katana::render::rgba(colour.r, colour.g, colour.b, colour.a);
+}
 
 // Room for `extra` more, growing geometrically: a reserve of exactly what
 // one surface or mesh adds would copy the list once per surface or mesh.
@@ -88,15 +91,14 @@ constexpr std::size_t kMeshKernelMinimum = 2;     // faces
 constexpr std::size_t kFadeKernelMinimum = 8;     // edge vertices
 #endif
 
-// Green (flat) through yellow to red (steep). 1:1 (45 degrees) is the red end,
-// which is where a batter stops being trafficable.
+// Green (flat) through yellow to red (steep): the ramp table's "slope". 1:1
+// (45 degrees) is the red end, which is where a batter stops being
+// trafficable. For a surface with no display style; a style's Slope faces
+// take its own range and ramp (paintOf).
 [[nodiscard]] Rgba slopeRamp(double slope)
 {
-    const double t = std::clamp(slope, 0.0, 1.0);
-    const auto channel = [](double v) {
-        return static_cast<std::uint8_t>(std::clamp(v, 0.0, 1.0) * 255.0 + 0.5);
-    };
-    return katana::render::rgba(channel(t * 2.0), channel(2.0 - t * 2.0), channel(0.15));
+    static const SurfaceRampStops& stops = surfaceRampStops("slope");
+    return toRgba(surfaceRampColour(stops, slope));
 }
 
 [[nodiscard]] Rgba mix(Rgba a, Rgba b, double t)
@@ -205,21 +207,37 @@ struct Light {
 struct Ramp {
     double low = 0.0;
     double high = -1.0;
+    // The table's stops; the elevation ramp's unless a style names another.
+    const SurfaceRampStops* stops = &surfaceRampStops("terrain");
     [[nodiscard]] Rgba at(double z) const
     {
         const double span = high - low;
-        return elevationRampColor(span > tol::kGeometric ? (z - low) / span : 0.5);
+        return toRgba(surfaceRampColour(*stops, span > tol::kGeometric ? (z - low) / span : 0.5));
     }
+    [[nodiscard]] bool spans() const { return low <= high; }
 };
 
-// Lowest and highest of every visible surface coloured by elevation.
+// Whether a surface's heights stretch the one elevation ramp: coloured by
+// elevation, by a ramp (stops are absolute), with an end of its range left to
+// the scene.
+[[nodiscard]] bool sharesRamp(const SceneSurface& item)
+{
+    if (!item.display.has_value()) {
+        return item.coloring == SurfaceColoring::Elevation;
+    }
+    const SurfaceDisplayStyle& style = *item.display;
+    return style.faces3d == SurfaceFaces::Elevation && style.stops.empty() &&
+           !(style.rangeMin.has_value() && style.rangeMax.has_value());
+}
+
+// Lowest and highest of every visible surface that shares the elevation ramp.
 [[nodiscard]] Ramp rampOf(const std::vector<SceneSurface>& surfaces)
 {
     Ramp ramp;
     ramp.low = std::numeric_limits<double>::infinity();
     ramp.high = -std::numeric_limits<double>::infinity();
     for (const SceneSurface& item : surfaces) {
-        if (drawable(item) && item.coloring == SurfaceColoring::Elevation) {
+        if (drawable(item) && sharesRamp(item)) {
             ramp.low = std::min(ramp.low, item.surface->minElevation());
             ramp.high = std::max(ramp.high, item.surface->maxElevation());
         }
@@ -228,6 +246,100 @@ struct Ramp {
         ramp = Ramp{};
     }
     return ramp;
+}
+
+// How one surface's colours are worked out: by the rule from before display
+// styles (no style), or by its style (docs/surface_display.md, "In 3D").
+struct SurfacePaint {
+    // The shared vertices' colours: one flat colour, the ramp at each
+    // vertex's height (what the kernels can do), or the colouring's colour
+    // of each height (stops, bands: the scalar loop).
+    enum class Vertex { Flat, Ramp, Value };
+    // The triangles: on the shared vertices; on copies of their own, a
+    // colour a face (slope, aspect); or cut into their bands.
+    enum class Faces { Shared, PerFace, Bands };
+    Vertex vertex = Vertex::Flat;
+    Faces faces = Faces::Shared;
+    Ramp ramp{};
+    Rgba flat = 0;
+    // A display style's rule, resolved; absent for a surface with none.
+    std::optional<SurfaceColouring> colouring{};
+};
+
+[[nodiscard]] SurfacePaint paintOf(const SceneSurface& item, const Ramp& shared)
+{
+    SurfacePaint paint;
+    paint.flat = item.flatColor;
+    if (!item.display.has_value()) {
+        switch (item.coloring) {
+        case SurfaceColoring::Flat:
+            break;
+        case SurfaceColoring::Elevation:
+            paint.vertex = SurfacePaint::Vertex::Ramp;
+            paint.ramp = shared;
+            break;
+        case SurfaceColoring::Slope:
+            paint.faces = SurfacePaint::Faces::PerFace;
+            break;
+        }
+        return paint;
+    }
+    const SurfaceDisplayStyle& style = *item.display;
+    const katana::terrain::TinSurface& surface = *item.surface;
+    paint.flat = toRgba(style.flatColour);
+    switch (style.faces3d) {
+    case SurfaceFaces::None:
+    case SurfaceFaces::Flat:
+        break;
+    case SurfaceFaces::Elevation: {
+        // The scene's one range where the style leaves an end open, so a
+        // height is one colour on every surface in the view; the surface's
+        // own when nothing shares it.
+        const bool sharedRange = shared.spans();
+        paint.colouring = surfaceColouring(style, SurfaceFaces::Elevation,
+                                           sharedRange ? shared.low : surface.minElevation(),
+                                           sharedRange ? shared.high : surface.maxElevation());
+        if (style.banded) {
+            paint.vertex = SurfacePaint::Vertex::Value;
+            paint.faces = SurfacePaint::Faces::Bands;
+        } else if (!style.stops.empty()) {
+            paint.vertex = SurfacePaint::Vertex::Value;
+        } else {
+            paint.vertex = SurfacePaint::Vertex::Ramp;
+            paint.ramp.low = paint.colouring->low;
+            paint.ramp.high = paint.colouring->high;
+            paint.ramp.stops = &surfaceRampStops(style.ramp);
+        }
+        break;
+    }
+    case SurfaceFaces::Slope:
+        paint.colouring = surfaceColouring(style, SurfaceFaces::Slope, surface);
+        paint.faces = SurfacePaint::Faces::PerFace;
+        break;
+    case SurfaceFaces::Aspect:
+        paint.colouring = surfaceColouring(style, SurfaceFaces::Aspect, surface);
+        paint.faces = SurfacePaint::Faces::PerFace;
+        break;
+    }
+    return paint;
+}
+
+// A face's own colour (SurfacePaint::Faces::PerFace), before the light.
+[[nodiscard]] Rgba faceColour(const SurfacePaint& paint, const katana::terrain::TinSurface& surface,
+                              std::size_t triangle)
+{
+    const auto aspect = surface.triangleSlopeAspect(triangle);
+    if (!paint.colouring.has_value()) {
+        return slopeRamp(aspect.has_value() ? aspect->slope : 0.0);
+    }
+    if (!aspect.has_value()) {
+        return toRgba(paint.colouring->flat); // vertical in plan: no slope to colour
+    }
+    if (paint.colouring->faces == SurfaceFaces::Aspect) {
+        return aspect->aspect.has_value() ? toRgba(aspectSectorColour(aspectSector(*aspect->aspect)))
+                                          : toRgba(paint.colouring->flat);
+    }
+    return toRgba(paint.colouring->colourAt(aspect->slope * 100.0));
 }
 
 // Lowest visible surface or mesh, unexaggerated; nullopt when there is none.
@@ -467,24 +579,23 @@ class Heights {
 
 Rgba elevationRampColor(double t)
 {
-    // Linear ramp through a small fixed palette. Chosen over a single hue so
-    // that adjacent contour bands are actually distinguishable, which is the
-    // whole point of colouring by elevation.
-    static constexpr int kStops = kRampStops;
-    static constexpr const std::uint8_t* kR = kRampR;
-    static constexpr const std::uint8_t* kG = kRampG;
-    static constexpr const std::uint8_t* kB = kRampB;
+    // Linear ramp through a small fixed palette - the ramp table's first,
+    // "terrain". Chosen over a single hue so that adjacent contour bands are
+    // actually distinguishable, which is the whole point of colouring by
+    // elevation.
+    static const SurfaceRampStops& stops = surfaceRampStops("terrain");
+    return toRgba(surfaceRampColour(stops, t));
+}
 
-    const double clamped = std::clamp(std::isfinite(t) ? t : 0.0, 0.0, 1.0) * (kStops - 1);
-    const int lower = std::min(static_cast<int>(clamped), kStops - 2);
-    const double f = clamped - static_cast<double>(lower);
-    const auto blend = [f](std::uint8_t a, std::uint8_t b) {
-        return static_cast<std::uint8_t>(static_cast<double>(a) +
-                                         (static_cast<double>(b) - static_cast<double>(a)) * f +
-                                         0.5);
-    };
-    return katana::render::rgba(blend(kR[lower], kR[lower + 1]), blend(kG[lower], kG[lower + 1]),
-                                blend(kB[lower], kB[lower + 1]));
+void applySurfaceDisplay(SceneSurface& item, const SurfaceDisplayStyle& style)
+{
+    item.style = style.shading;
+    item.display = style;
+    // Kept in step for a reader of the old fields; the scene reads `display`.
+    item.flatColor = toRgba(style.flatColour);
+    item.coloring = style.faces3d == SurfaceFaces::Elevation ? SurfaceColoring::Elevation
+                    : style.faces3d == SurfaceFaces::Slope   ? SurfaceColoring::Slope
+                                                             : SurfaceColoring::Flat;
 }
 
 // ---- surfaces -------------------------------------------------------------------
@@ -510,13 +621,17 @@ kernelParams(const Lift& lift, const Light& light, const Ramp& ramp)
     params[simd::kParamGround] = light.ground;
     params[simd::kParamSkyMinusGround] = light.sky - light.ground;
     params[simd::kParamSun] = light.sun;
-    const std::uint8_t* const palette[3] = {kRampR, kRampG, kRampB};
+    const SurfaceRampStops& palette = *ramp.stops;
+    const auto channelOf = [&palette](std::size_t channel, std::size_t i) {
+        const katana::entity::Color& c = palette[i];
+        return static_cast<double>(channel == 0 ? c.r : channel == 1 ? c.g : c.b);
+    };
     for (std::size_t channel = 0; channel < 3; ++channel) {
         for (std::size_t i = 0; i < simd::kRampSegments; ++i) {
-            const double stop = static_cast<double>(palette[channel][i]);
+            const double stop = channelOf(channel, i);
             params[simd::kParamRampTable + 2 * channel * simd::kRampSegments + i] = stop;
             params[simd::kParamRampTable + (2 * channel + 1) * simd::kRampSegments + i] =
-                static_cast<double>(palette[channel][i + 1]) - stop;
+                channelOf(channel, i + 1) - stop;
         }
     }
     return params;
@@ -532,7 +647,7 @@ struct SurfaceScratch {
 // One surface into `out`, and its fading edges into `edges` (or into `out` at
 // full strength when `edges` is null). Shared by appendSurfaces and
 // buildTerrain.
-void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ramp& ramp,
+void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ramp& sharedRamp,
                  SurfaceScratch scratch, DrawList& out, SceneLayers* edges)
 {
     const katana::terrain::TinSurface& surface = *item.surface;
@@ -542,7 +657,11 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     const bool shaded = style == SurfaceStyle::Shaded || style == SurfaceStyle::ShadedWithEdges;
     const bool wire = style == SurfaceStyle::Wireframe;
     const bool fading = style == SurfaceStyle::ShadedWithEdges;
-    const bool slope = item.coloring == SurfaceColoring::Slope;
+    // What colours it: its display style, or the rule from before them.
+    const SurfacePaint paint = paintOf(item, sharedRamp);
+    const Ramp& ramp = paint.ramp;
+    const bool rampVertices = paint.vertex == SurfacePaint::Vertex::Ramp;
+    const bool sharedFaces = paint.faces == SurfacePaint::Faces::Shared;
     const auto& vertices = surface.vertices();
     const auto& triangles = surface.triangles();
     const Rgba wireColor = katana::render::rgba(190, 190, 190);
@@ -552,7 +671,7 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     // faces round the vertex, each turned to face UP. A TIN is a height field,
     // so up is its outside; the old abs() did the same for the light but let a
     // face turned AWAY from the sun look as lit as one facing it.
-    const bool smooth = shaded && light.on && !slope;
+    const bool smooth = shaded && light.on && sharedFaces;
     const VertexIndex base = static_cast<VertexIndex>(out.positions.size());
     const std::size_t count = vertices.size();
     // Sized once and written in place: resize grows the arrays geometrically
@@ -562,7 +681,10 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     Vec3* const positions = out.positions.data() + base;
     Rgba* const colors = out.colors.data() + base;
 #if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
-    if (count >= kSurfaceKernelMinimum && kernelActive()) {
+    // The kernels colour a vertex flat or by a ramp; a colour a value
+    // (stops, bands) is the scalar loop's.
+    if (count >= kSurfaceKernelMinimum && kernelActive() &&
+        paint.vertex != SurfacePaint::Vertex::Value) {
 #if defined(KATANA_HAVE_AVX2_KERNELS)
         const auto sceneLift = katana_avx2_scene_lift;
         const auto surfaceNormals = katana_avx2_scene_surface_normals;
@@ -581,11 +703,8 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
                            scratch.summed.data());
         }
         // The ramp's degenerate case (one elevation) is one colour: flat.
-        const bool ramped = !wire && item.coloring == SurfaceColoring::Elevation &&
-                            ramp.high - ramp.low > tol::kGeometric;
-        const Rgba flat = wire ? wireColor
-                               : (item.coloring == SurfaceColoring::Elevation ? ramp.at(ramp.low)
-                                                                              : item.flatColor);
+        const bool ramped = !wire && rampVertices && ramp.high - ramp.low > tol::kGeometric;
+        const Rgba flat = wire ? wireColor : (rampVertices ? ramp.at(ramp.low) : paint.flat);
         surfaceVertices(scratch.lifted.data(), count, smooth ? scratch.summed.data() : nullptr,
                         params.data(), flat, ramped ? 1 : 0, &positions->x, colors);
     } else
@@ -621,11 +740,13 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
         // be per facet, on private copies, six times the vertices.
         for (std::size_t i = 0; i < count; ++i) {
             const auto& vertex = vertices[i];
-            Rgba color = item.flatColor;
+            Rgba color = paint.flat;
             if (wire) {
                 color = wireColor;
-            } else if (item.coloring == SurfaceColoring::Elevation) {
+            } else if (rampVertices) {
                 color = ramp.at(vertex.z);
+            } else if (paint.vertex == SurfacePaint::Vertex::Value) {
+                color = toRgba(paint.colouring->colourAt(vertex.z));
             }
             if (smooth) {
                 const double length = normals[i].length();
@@ -638,12 +759,52 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
         }
     }
 
-    if (shaded && !slope) {
+    if (shaded && sharedFaces) {
         const std::size_t first = out.triangles.size();
         out.triangles.resize(first + triangles.size());
         katana::render::DrawTriangle* const shared = out.triangles.data() + first;
         for (std::size_t t = 0; t < triangles.size(); ++t) {
             shared[t] = {base + triangles[t][0], base + triangles[t][1], base + triangles[t][2]};
+        }
+    } else if (shaded && paint.faces == SurfacePaint::Faces::Bands) {
+        // Each triangle cut where a band edge - a contour - crosses it
+        // (bandPieces, on the TRUE heights the bands are of), each piece in
+        // its band's colour, lit by the triangle's own normal: a band stops
+        // at its contour rather than smearing across the triangle.
+        grow(out.triangles, 2 * triangles.size());
+        grow(out.positions, 4 * triangles.size());
+        grow(out.colors, 4 * triangles.size());
+        std::vector<BandPiece> pieces;
+        for (std::size_t t = 0; t < triangles.size(); ++t) {
+            const VertexIndex a = base + triangles[t][0];
+            const VertexIndex b = base + triangles[t][1];
+            const VertexIndex c = base + triangles[t][2];
+            Vec3 n = (out.positions[b] - out.positions[a]).cross(out.positions[c] - out.positions[a]);
+            if (n.z < 0.0) {
+                n = n * -1.0;
+            }
+            const double length = n.length();
+            const bool lit = length > 1.0e-12;
+            const double intensity = lit ? light.intensity(n / length) : 1.0;
+            pieces.clear();
+            bandPieces(*paint.colouring, vertices[triangles[t][0]], vertices[triangles[t][1]],
+                       vertices[triangles[t][2]], pieces);
+            for (const BandPiece& piece : pieces) {
+                Rgba color = toRgba(paint.colouring->bandColour(piece.band));
+                if (lit) {
+                    color = katana::render::shade(color, intensity);
+                }
+                const auto first = static_cast<VertexIndex>(out.positions.size());
+                for (std::size_t k = 0; k < piece.count; ++k) {
+                    const auto& corner = piece.corners[k];
+                    out.addVertex(Vec3(corner.x, corner.y, lift(corner.z)), color);
+                }
+                // A fan: each piece is convex and keeps the triangle's turn.
+                for (std::size_t k = 1; k + 1 < piece.count; ++k) {
+                    out.addTriangle(first, first + static_cast<VertexIndex>(k),
+                                    first + static_cast<VertexIndex>(k + 1));
+                }
+            }
         }
     } else if (shaded) {
         grow(out.triangles, triangles.size());
@@ -653,10 +814,10 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
             const VertexIndex a = base + triangles[t][0];
             const VertexIndex b = base + triangles[t][1];
             const VertexIndex c = base + triangles[t][2];
-            // Slope is a property of the FACET: private copies, or sharing
-            // would smear it across the surface. Lit by the facet normal.
-            const auto aspect = surface.triangleSlopeAspect(t);
-            Rgba color = slopeRamp(aspect.has_value() ? aspect->slope : 0.0);
+            // Slope and aspect are properties of the FACET: private copies,
+            // or sharing would smear them across the surface. Lit by the
+            // facet normal.
+            Rgba color = faceColour(paint, surface, t);
             Vec3 n = (out.positions[b] - out.positions[a]).cross(out.positions[c] - out.positions[a]);
             if (n.z < 0.0) {
                 n = n * -1.0;
@@ -1322,6 +1483,25 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
     const Ramp ramp = rampOf(surfaces);
     layers.rampLow = ramp.low;
     layers.rampHigh = ramp.high;
+    // The legend: the first drawable surface whose display style colours its
+    // faces by a value or by aspect, with the one ramp's range where its
+    // style leaves an end open - its colours as they are drawn.
+    layers.legend.reset();
+    layers.legendSurface.clear();
+    layers.legendStyle.clear();
+    for (const SceneSurface& item : surfaces) {
+        if (!drawable(item) || !item.display.has_value() ||
+            styleOf(item) == SurfaceStyle::Wireframe) {
+            continue;
+        }
+        const SurfacePaint paint = paintOf(item, ramp);
+        if (paint.colouring.has_value() && paint.colouring->coloursFaces()) {
+            layers.legend = surfaceLegend(*paint.colouring);
+            layers.legendSurface = item.name;
+            layers.legendStyle = item.display->name;
+            break;
+        }
+    }
     // Where each surface's edges begin in edges.lines.
     std::vector<std::size_t> edgeStarts;
     for (const SceneSurface& item : surfaces) {
