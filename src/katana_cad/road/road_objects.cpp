@@ -784,7 +784,9 @@ bim::BimObject skeleton(const RoadObject& object, const Values& values, std::str
     made.name = displayName(object) + nameSuffix;
     made.kind = std::string(kindWord(object.kind));
     made.facility = object.facility;
-    made.part = std::string(ifc.part);
+    // The part of the road it belongs to; none for an object of the site,
+    // which belongs to no road.
+    made.part = object.facility.empty() ? std::string() : std::string(ifc.part);
     made.ifcClass = std::string(ifc.ifcClass);
     made.predefinedType = std::string(ifc.predefinedType);
     made.material = materialOf(object);
@@ -942,27 +944,38 @@ std::vector<bim::BimObject> makeWall(const RoadObject& object, const Placement& 
     const double thickness = values.number("thickness");
     const double footing = values.number("footing");
     const double depth = values.number("footingdepth");
-    bim::BimObject made =
-        skeleton(object, values, "", "",
-                 {"IfcWall", retaining ? "RETAININGWALL" : "SOLIDWALL", "ROADSIDE"});
-    std::vector<Point2> profile;
-    if (footing > thickness) {
-        // An inverted T: the footing below the ground, the stem above it.
-        profile = {Point2(-footing / 2.0, -depth),   Point2(footing / 2.0, -depth),
-                   Point2(footing / 2.0, 0.0),       Point2(thickness / 2.0, 0.0),
-                   Point2(thickness / 2.0, height),  Point2(-thickness / 2.0, height),
-                   Point2(-thickness / 2.0, 0.0),    Point2(-footing / 2.0, 0.0)};
-    } else {
-        profile = rectangleProfile(-thickness / 2.0, thickness / 2.0, 0.0, height);
+    // The stem: a retaining wall is IFC 4.3's RETAININGWALL; a noise wall has
+    // no type of its own there, so it is USERDEFINED with its ObjectType said.
+    bim::BimObject wall = skeleton(object, values, "", "",
+                                   {"IfcWall", retaining ? "RETAININGWALL" : "USERDEFINED",
+                                    "ROADSIDE"});
+    if (!retaining) {
+        wall.properties.emplace_back("ObjectType", "NOISEBARRIER");
     }
-    addSweep(made.mesh, path.points(), profile);
-    made.plan.push_back(path.plan());
-    made.properties.emplace_back("WallType", retaining ? "retaining" : "noise");
-    addQuantity(made, "Length", path.length(), "m");
-    addQuantity(made, "Height", height, "m");
-    addQuantity(made, "GrossArea", path.length() * height, "m2");
-    addQuantity(made, "GrossVolume", meshVolume(made.mesh), "m3");
-    return {std::move(made)};
+    wall.properties.emplace_back("WallType", retaining ? "retaining" : "noise");
+    addSweep(wall.mesh, path.points(),
+             rectangleProfile(-thickness / 2.0, thickness / 2.0, 0.0, height));
+    wall.plan.push_back(path.plan());
+    addQuantity(wall, "Length", path.length(), "m");
+    addQuantity(wall, "Height", height, "m");
+    addQuantity(wall, "GrossArea", path.length() * height, "m2");
+    addQuantity(wall, "GrossVolume", meshVolume(wall.mesh), "m3");
+    std::vector<bim::BimObject> made{std::move(wall)};
+    if (footing > 0.0) {
+        // The strip footing it stands on, below the ground: an object of its
+        // own, as IFC keeps a foundation apart from what it carries.
+        bim::BimObject base = skeleton(object, values, "/footing", " footing",
+                                       {"IfcFooting", "STRIP_FOOTING", "ROADSIDE"});
+        addSweep(base.mesh, path.points(),
+                 rectangleProfile(-footing / 2.0, footing / 2.0, -depth, 0.0));
+        base.plan.push_back(path.plan());
+        addQuantity(base, "Length", path.length(), "m");
+        addQuantity(base, "Width", footing, "m");
+        addQuantity(base, "Depth", depth, "m");
+        addQuantity(base, "GrossVolume", meshVolume(base.mesh), "m3");
+        made.push_back(std::move(base));
+    }
+    return made;
 }
 
 std::vector<bim::BimObject> makeFence(const RoadObject& object, const Placement& placement)

@@ -45,6 +45,8 @@
 #include "ifc_dialogs.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
+// Road objects (docs/road_objects.md): the BIM menu's Road Objects section.
+#include "bim/road_object_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "plotting/plot_drawing_dialog.hpp"
 #include "plotting/plot_output.hpp"
@@ -691,6 +693,9 @@ class MainWindow final : public QMainWindow {
     // DRAW (survey/utility_workbench.hpp). After the Document for the reason
     // online_ is.
     std::unique_ptr<UtilityWorkbench> utilities_;
+    // BIM > Road Objects and their dialogs (bim/road_object_workbench.hpp,
+    // docs/road_objects.md). After the Document for the reason online_ is.
+    std::unique_ptr<RoadObjectWorkbench> roadObjects_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's

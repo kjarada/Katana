@@ -36,7 +36,7 @@ struct PathPoint {
 // The triangles that fill a simple polygon, as index triples into it, each
 // counter-clockwise: ear clipping, which is quadratic and meant for the few
 // vertices of a cross-section or a sign's plate. The polygon may be concave
-// (an F-shape barrier's knee, an inverted T wall) and either way round;
+// (an F-shape barrier's knee) and either way round;
 // collinear vertices are fine. Empty for fewer than three vertices, or for a
 // polygon no ear can be cut from (one that crosses itself).
 [[nodiscard]] std::vector<std::array<std::uint32_t, 3>>

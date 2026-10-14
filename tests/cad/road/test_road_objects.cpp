@@ -239,34 +239,54 @@ TEST(RoadObjects, AnFShapeBarrierHasThePublishedFaceAngles)
     EXPECT_NEAR(box.max.z, 10.813, 1e-9);
 }
 
-TEST(RoadObjects, ARetainingWallsAreaIsLengthTimesHeightAndItsVolumeHoldsItsFooting)
+TEST(RoadObjects, ARetainingWallStandsOnItsStripFootingAndItsFaceIsLengthTimesHeight)
 {
-    // 30 m of the default: a 2.0 m stem 0.25 thick on a 1.2 x 0.4 footing,
-    // (0.25 x 2.0 + 1.2 x 0.4) x 30 = 0.98 x 30 = 29.4 m3; face 30 x 2 = 60.
+    // 30 m of the default: a 2.0 m stem 0.25 thick, 0.25 x 2.0 x 30 = 15 m3,
+    // its face 30 x 2 = 60 m2; and below the ground its 1.2 x 0.4 footing,
+    // an IfcFooting of its own, 1.2 x 0.4 x 30 = 14.4 m3.
     Site site;
     site.ok("ROADOBJECT ADD wall ALIGNMENT Main station=0 to=30 offset=-5");
     const BimModel model = site.built("wall-1");
-    ASSERT_EQ(model.objects.size(), 1u);
-    const BimObject& wall = model.objects.front();
+    ASSERT_EQ(model.objects.size(), 2u);
+    const BimObject& wall = model.objects[0];
+    EXPECT_EQ(wall.id, "object/wall-1");
     EXPECT_EQ(wall.ifcClass, "IfcWall");
     EXPECT_EQ(wall.predefinedType, "RETAININGWALL");
     EXPECT_TRUE(isClosedMesh(wall.mesh));
     EXPECT_NEAR(quantityValue(wall, "Length"), 30.0, 1e-9);
     EXPECT_NEAR(quantityValue(wall, "GrossArea"), 60.0, 1e-9);
-    EXPECT_NEAR(quantityValue(wall, "GrossVolume"), 29.4, 1e-9);
-    // The footing reaches 0.4 below the ground.
-    EXPECT_NEAR(wall.mesh.bounds().min.z, 9.6, 1e-9);
+    EXPECT_NEAR(quantityValue(wall, "GrossVolume"), 15.0, 1e-9);
+    EXPECT_NEAR(wall.mesh.bounds().min.z, 10.0, 1e-9);
+    const BimObject& footing = model.objects[1];
+    EXPECT_EQ(footing.id, "object/wall-1/footing");
+    EXPECT_EQ(footing.ifcClass, "IfcFooting");
+    EXPECT_EQ(footing.predefinedType, "STRIP_FOOTING");
+    EXPECT_TRUE(isClosedMesh(footing.mesh));
+    EXPECT_NEAR(quantityValue(footing, "GrossVolume"), 14.4, 1e-9);
+    EXPECT_NEAR(footing.mesh.bounds().min.z, 9.6, 1e-9);
+    EXPECT_NEAR(footing.mesh.bounds().max.z, 10.0, 1e-9);
+    // Of the site, as no road was named: no part of one.
+    EXPECT_TRUE(wall.facility.empty());
+    EXPECT_TRUE(wall.part.empty());
 }
 
-TEST(RoadObjects, ANoiseWallHasNoFooting)
+TEST(RoadObjects, ANoiseWallIsAUserDefinedWallSaidToBeANoiseBarrierWithNoFooting)
 {
     Site site;
-    site.ok("ROADOBJECT ADD wall type=noise ALIGNMENT Main station=0 to=10 offset=8");
+    site.ok("ROADOBJECT ADD wall type=noise facility=\"Main Road\" ALIGNMENT Main station=0 "
+            "to=10 offset=8");
     const BimModel model = site.built("wall-1");
     ASSERT_EQ(model.objects.size(), 1u);
+    const BimObject& wall = model.objects.front();
+    EXPECT_EQ(wall.predefinedType, "USERDEFINED");
+    const std::pair<std::string, std::string> noise{"ObjectType", "NOISEBARRIER"};
+    EXPECT_NE(std::ranges::find(wall.properties, noise), wall.properties.end());
+    // A part of the road named.
+    EXPECT_EQ(wall.facility, "Main Road");
+    EXPECT_EQ(wall.part, "ROADSIDE");
     // 4.0 x 0.2 x 10 = 8 m3, standing on the ground.
-    EXPECT_NEAR(quantityValue(model.objects.front(), "GrossVolume"), 8.0, 1e-9);
-    EXPECT_NEAR(model.objects.front().mesh.bounds().min.z, 10.0, 1e-9);
+    EXPECT_NEAR(quantityValue(wall, "GrossVolume"), 8.0, 1e-9);
+    EXPECT_NEAR(wall.mesh.bounds().min.z, 10.0, 1e-9);
 }
 
 TEST(RoadObjects, ACulvertSkewedThirtyDegreesHasItsEndsWhereTheSkewPutsThem)

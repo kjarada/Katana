@@ -238,6 +238,21 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // ---- road objects (docs/road_objects.md) ----
+    // BIM > Road Objects: each object as it stands beside a road, the rail,
+    // the reflector, the plate, the lantern, the pipe, the wall's section,
+    // the wires and the marks in the accent; and the manager's list. Painted
+    // in bim/road_object_icons.cpp.
+    RoadBarrier,
+    RoadGuidePosts,
+    RoadSign,
+    RoadLightPole,
+    RoadCulvert,
+    RoadWall,
+    RoadFence,
+    RoadLineMarking,
+    RoadObjects,
+    // ---- end road objects ----
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.

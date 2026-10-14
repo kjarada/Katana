@@ -248,6 +248,10 @@ endif()
 add_executable(katana_make_icons EXCLUDE_FROM_ALL make_icons.cpp icons.cpp theme.cpp)
 katana_target_defaults(katana_make_icons)
 target_link_libraries(katana_make_icons PRIVATE Qt6::Widgets)
+# The road objects' icons are painted in their own file (docs/road_objects.md),
+# which icons.cpp calls and which includes from this directory.
+target_sources(katana_make_icons PRIVATE bim/road_object_icons.cpp)
+target_include_directories(katana_make_icons PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # A developer tool, like katana_make_icons: every catalogue tool's icon at two
 # sizes with its name and id, so a tool's author can see the icon without
