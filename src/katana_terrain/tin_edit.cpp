@@ -580,9 +580,9 @@ Result<TinEditResult> addBreakline(const TinSurface& surface,
                              "vertex=" + std::to_string(i) + " at " +
                                  describePosition(vertex.position));
         }
-        // The level of a draped vertex: the surface's, which exists on it.
-        const double z = vertex.z ? *vertex.z : surface.elevationAt(vertex.position).value_or(0.0);
-        request.points.push_back({vertex.position, z, true});
+        // A draped vertex goes in without a level: the patch gives it the
+        // surface's, and one at an existing vertex is that vertex, untouched.
+        request.points.push_back({vertex.position, vertex.z, true});
         hasLength = hasLength ||
                     vertex.position.distanceTo(vertices.front().position) > tol::kGeometric;
     }
