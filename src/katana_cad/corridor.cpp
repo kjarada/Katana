@@ -10,6 +10,7 @@
 #include "katana/geometry/primitives3d.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/math/summation.hpp"
+#include "katana/terrain/section_volume.hpp"
 
 namespace katana::cad {
 
@@ -101,22 +102,14 @@ SplitArea areaBetween(const std::vector<SectionVertex>& upper,
         if (!ua || !ub || !la || !lb) {
             continue; // one line does not cover this interval
         }
-        const double d0 = *ua - *la;
-        const double d1 = *ub - *lb;
-        const double width = b - a;
-        if (d0 >= 0.0 && d1 >= 0.0) {
-            above.add(0.5 * (d0 + d1) * width);
-        } else if (d0 <= 0.0 && d1 <= 0.0) {
-            below.add(-0.5 * (d0 + d1) * width);
-        } else {
-            // The lines cross inside the interval: two triangles of opposite
-            // sign, split where the difference is zero.
-            const double t = d0 / (d0 - d1);
-            const double left = std::abs(d0) * t * width * 0.5;
-            const double right = std::abs(d1) * (1.0 - t) * width * 0.5;
-            (d0 > 0.0 ? above : below).add(left);
-            (d1 > 0.0 ? above : below).add(right);
-        }
+        // The one sign split of a linear strip, the volumes' too: where the
+        // lines cross inside the interval, two triangles of opposite sign.
+        // A part of nothing adds nothing to a compensated sum, so this is the
+        // arithmetic it was, to the bit.
+        const katana::terrain::SignedArea area =
+            katana::terrain::signedTrapezoid(*ua - *la, *ub - *lb, b - a);
+        above.add(area.positive);
+        below.add(area.negative);
     }
     result.above = above.value();
     result.below = below.value();

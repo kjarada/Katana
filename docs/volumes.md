@@ -98,7 +98,12 @@ both surfaces' heights at its corners. It is the pair clipping
 pairs"), moved out so the volumes inside a polygon, the stockpiles and the
 difference and envelope surfaces cut the ground the same way.
 `compareSurfaces` is now a visitor of it, with the same arithmetic in the
-same order: its results are the bits they were.
+same order: its results are the bits they were. Nor did it slow down:
+`BM_CompareSurfaces` (`benchmarks/bench_terrain.cpp`) in Release on the
+24-thread development machine, five repetitions each, the two builds run
+alternately twice on 2026-10-15, gave a median of 51.5 and 51.9 ms before
+and 50.0 and 50.6 ms after, and `BM_CompareSurfacesSerial` 491 and 508 ms
+before and 504 and 507 ms after - each within the spread of its own runs.
 
 **The same bits at any thread count.** The base surface's triangles are cut
 into blocks of a fixed `kOverlayBlockTriangles` (256), and a block's pieces
@@ -380,11 +385,6 @@ records do not carry.
   the window's that is the GUI thread, and a difference of two 200 000
   triangle surfaces takes a second or two. SURFACE FROM's job pattern is the
   way to move it.
-- **One sign-split trapezoid.** `cad::areaBetween` (the corridor's) is the
-  same arithmetic as `terrain::signedTrapezoid`; the corridor engine is being
-  rewritten in parallel with this work (the road design document), and
-  calling the terrain one from it is that rewrite's.
-- **Not measured.** The overlay was moved, not changed, and
-  `BM_CompareSurfaces` (`benchmarks/bench_terrain.cpp`) should read as
-  before; that, and the cost of the difference surface's join, are to be
-  measured in the integration build.
+- **Not measured: the difference surface's join.** The overlay it is made of
+  is (`compareSurfaces`, "One overlay" above); the cost of joining its pieces
+  into one surface on a large pair is not.
