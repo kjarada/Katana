@@ -81,7 +81,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
 | `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids` and `target` narrow it (`docs/annotation.md`, "Presets") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJson`) |
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
-| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
+| `katana_export` | DXF always; GIS vector formats and .12da archives (with the drawing's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
 | `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | nothing: read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
@@ -233,9 +233,16 @@ customisation (`katana://customisation`, "The customisation" below) are also
 resources, for a client that attaches context rather than calling tools. The
 status - the tool's text and structured content, and the resource - is the
 interpreter's `STATUS` and `STATUS JSON` (`docs/cad.md`, "STATUS"), so an
-agent driving the window or `katana_cli` reads the same record. With the GIS
-module, `katana://formats` is the fourth: `FORMATS JSON`, every format this
-GDAL reads and writes (`katana_formats`, below).
+agent driving the window or `katana_cli` reads the same record. The
+drawing's surface display styles (`katana://surface-styles`) are the fourth:
+`SURFACESTYLE LIST JSON`, read from the Document as the customisation is, so
+reading them leaves no line in the session's history - every style, what it
+shows in plan and in 3D, its colours, contours, ramp, bands and stops, and
+which is the default (`docs/terrain.md`, "Surfaces in the drawing"); an agent
+changes them with SURFACESTYLE lines through `katana_run_commands`
+(`McpServer.TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem`). With
+the GIS module, `katana://formats` is the fifth: `FORMATS JSON`, every format
+this GDAL reads and writes (`katana_formats`, below).
 
 Annotation needs no tool of its own: its verbs reply in `key=value` records
 (`docs/annotation.md`, "The verbs"), which come back in each command's
@@ -492,17 +499,23 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
 
 | Tool | Arguments | Structured content |
 |---|---|---|
-| `katana_terrain_list` | `{}` | `{surfaces: [{name, triangles, points, bounds: [x0, y0, x1, y1], zmin, zmax, plan_area, source}], rasters: [{id, name, role, width, height, cell, crs, nodata, source, derived_from}]}` |
+| `katana_terrain_list` | `{}` | `{surfaces: [{name, triangles, points, bounds: [x0, y0, x1, y1], zmin, zmax, plan_area, source, style, visible}], rasters: [{id, name, role, width, height, cell, crs, nodata, source, derived_from}]}` |
 
 It runs `SURFACE LIST JSON` through the Session, as the command line would,
 and hands its JSON back: the surfaces a terrain verb reads as `SURFACE
 <name>` and the rasters it reads as `RASTER <id|name>` (`docs/terrain.md`,
 "Surfaces on every front end"). A raster's `cell` is null unless its cells
 are square and unrotated; `nodata` is null until the reference-layer work
-reads it. Read-only and idempotent. Surfaces are made with `SURFACE FROM`
-through `katana_run_commands`, or by `katana_gdal_run` with `output:
-{surface}`. `McpServer.TerrainListGivesTheSessionsSurfacesAndRasters` pins
-it.
+reads it. A surface's `style` is the display style it is drawn in - the
+drawing's default when it has none of its own - and `visible` whether the
+views draw it. The surfaces are the drawing's, saved with the project and
+undone like any edit (`docs/terrain.md`, "Surfaces in the drawing").
+Read-only and idempotent. Surfaces are made with `SURFACE FROM` through
+`katana_run_commands`, or by `katana_gdal_run` with `output: {surface}`, and
+renamed, restyled, shown, hidden and copied with the SURFACE words the
+interpreter runs. `McpServer.TerrainListGivesTheSessionsSurfacesAndRasters`
+pins it, the style and the shown flag with it, and the three undo steps
+that made and changed the surface.
 
 ### T1: CONTOUR through katana_run_commands
 
@@ -617,9 +630,10 @@ structured content is `{gdal_version, formats: [...]}`, or the driver's
 `{format, open_options, creation_options, layer_creation_options}`. An
 unknown driver, or a `kind` or `capability` that is neither word, is
 refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
-`McpServer.TheHelpAndStatusAreResources` counts it among the resources: four
-with the GIS module and three without, each one more than before
-`katana://customisation` was added.
+`McpServer.TheHelpAndStatusAreResources` counts it among the resources: five
+with the GIS module and four without, each one more than before
+`katana://surface-styles` was added and two more than before
+`katana://customisation` was.
 
 ### D1: katana_dataset_info
 

@@ -18,6 +18,8 @@
 #include "katana/cad/survey_tools.hpp"
 // The surface edits (docs/surface_editing.md).
 #include "katana/cad/terrain/surface_edit_verbs.hpp"
+// The drawing's surfaces and their display styles (docs/terrain.md).
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
 // volumes: VOLUME, SURFACE DIFFERENCE and ENVELOPE (docs/volumes.md).
 #include "katana/cad/terrain/volume_verbs.hpp"
@@ -617,7 +619,8 @@ Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTEN
           ZOOM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
           [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
-)" + annotationHelpText() + drawingHelpText() + surfaceEditHelpSummary();
+)" + annotationHelpText() + drawingHelpText() + surfaceEditHelpSummary() +
+           surfaceVerbSummary();
 }
 
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
@@ -858,6 +861,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (isSurfaceEditVerb(args)) {
             return surfaceEditVerbHelp();
         }
+        // The drawing's surfaces and their styles (docs/terrain.md).
+        if (!args.empty() && katana::core::equalsIgnoringCase(args.front(), "SURFACESTYLE")) {
+            return surfaceVerbHelp();
+        }
         if (!args.empty() && utilities::isUtilityVerb(args.front())) {
             return utilities::utilityVerbHelp();
         }
@@ -887,6 +894,12 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     // the other SURFACE words are other modules'.
     if (isSurfaceEditVerb(*tokens)) {
         return runSurfaceEditVerb(document_, *tokens, scopeViews_);
+    }
+    // The drawing's surfaces and their styles (docs/terrain.md): SURFACESTYLE,
+    // and the SURFACE words that are the drawing's - the geoprocessing
+    // executor takes LIST, INFO, REMOVE, FROM and EXPORT before a line gets here.
+    if (isSurfaceVerb(*tokens)) {
+        return runSurfaceVerb(document_, *tokens);
     }
     if (isLineworkVerb(verb)) {
         return runLineworkVerb(document_, *tokens, scopeViews_);

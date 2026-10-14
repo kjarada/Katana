@@ -39,7 +39,9 @@ TerrainDialogContext terrainDialogContext(GeoWorkbench& workbench)
     context.run = services.run;
     context.headless = services.headless;
     context.reference = services.reference;
-    context.surfaces = services.surfaces;
+    // The drawing's surfaces: the Document's store stays where it is for as
+    // long as the Document does.
+    context.surfaces = services.document != nullptr ? &services.document->surfaces() : nullptr;
     context.document = services.document;
     if (services.views != nullptr) {
         ViewWorkspace* views = services.views;

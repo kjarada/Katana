@@ -3,8 +3,10 @@
 
 #include "geo_verbs.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -68,6 +70,43 @@ const VerbEntry* entryTaking(const Tokens& tokens)
     return entry != nullptr && (entry->takes == nullptr || entry->takes(tokens)) ? entry : nullptr;
 }
 
+// ---- the drawing's surfaces, staged (geo_verbs.hpp) ----------------------------------
+
+// The undo step a line's change of the surfaces is named: its verb, and its
+// second word when that is a word ("SURFACE FROM", "GDAL RASTER") and not a
+// path or a name.
+std::string stepNameOf(const Tokens& tokens)
+{
+    std::string name = upper(tokens.words.front());
+    if (tokens.size() > 1 && !tokens.quoted[1] && !tokens[1].empty() &&
+        std::ranges::all_of(tokens[1], [](char c) {
+            return std::isalpha(static_cast<unsigned char>(c)) != 0;
+        })) {
+        name += " " + upper(tokens[1]);
+    }
+    return name;
+}
+
+// A copy of the drawing's surfaces for the phase about to run; its revision,
+// to tell afterwards whether the phase changed it.
+std::uint64_t stage(Context& context)
+{
+    context.surfaces = context.document.surfaces();
+    return context.surfaces.revision();
+}
+
+// What the phase changed, committed as one step. Nothing when it changed
+// nothing, or when the drawing's surfaces already are the staged ones (an
+// apply that committed them in a step of its own): Document::setSurfaces
+// records no step for an equal store.
+katana::core::Status commit(Context& context, std::uint64_t staged, const std::string& step)
+{
+    if (context.surfaces.revision() == staged) {
+        return {};
+    }
+    return context.document.setSurfaces(context.surfaces, step);
+}
+
 } // namespace
 
 bool handles(std::string_view line)
@@ -93,7 +132,43 @@ Result<Prepared> prepare(Context& context, std::string_view line)
         return makeError(ErrorCode::InvalidArgument, "not a geoprocessing verb",
                          std::string(katana::core::trimmed(line)));
     }
-    return entry->prepare(context, *tokens, line);
+    const std::string step = stepNameOf(*tokens);
+    const std::uint64_t staged = stage(context);
+    auto prepared = entry->prepare(context, *tokens, line);
+    if (!prepared) {
+        return prepared;
+    }
+    // A line answered here may have changed the surfaces (SURFACE REMOVE).
+    if (auto status = commit(context, staged, step); !status) {
+        return status.error();
+    }
+    if (prepared->work) {
+        // The apply, wherever it runs - inline here, or on the window's GUI
+        // thread when its job ends - stages the drawing's surfaces as they
+        // are THEN, and commits what it changed. The work itself is left as
+        // it was: it never sees the Context.
+        prepared->work = [work = std::move(prepared->work),
+                          step](const std::stop_token& stop,
+                                const Progress& progress) -> Result<Apply> {
+            auto apply = work(stop, progress);
+            if (!apply) {
+                return apply.error();
+            }
+            return Apply([apply = std::move(apply).value(),
+                          step](Context& ctx) -> Result<std::string> {
+                const std::uint64_t before = stage(ctx);
+                auto reply = apply(ctx);
+                if (!reply) {
+                    return reply;
+                }
+                if (auto status = commit(ctx, before, step); !status) {
+                    return status.error();
+                }
+                return reply;
+            });
+        };
+    }
+    return prepared;
 }
 
 Result<std::string> runNow(Context& context, std::string_view line, const std::stop_token& stop,

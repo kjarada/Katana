@@ -246,7 +246,6 @@ TEST(DemToolsDialog, RunningAClipThroughTheWindowsExecutorKeepsAReferenceRaster)
         katana::cad::Document document;
         katana::cad::CommandInterpreter interpreter{document};
         katana::interop::ReferenceData reference;
-        katana::terrain::SurfaceStore surfaces;
         QStringList logged;
         QMainWindow main;
         std::unique_ptr<katana::qt::GeoWorkbench> workbench;
@@ -254,7 +253,6 @@ TEST(DemToolsDialog, RunningAClipThroughTheWindowsExecutorKeepsAReferenceRaster)
         services.document = &document;
         services.interpreter = &interpreter;
         services.reference = &reference;
-        services.surfaces = &surfaces;
         services.scratch = scratch;
         services.log = [&logged](const QString& text, bool) { logged << text; };
         services.headless = [] { return true; };

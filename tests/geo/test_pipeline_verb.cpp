@@ -42,8 +42,9 @@ class PipelineVerb : public ::testing::Test {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    geo::Context context{document, interpreter, reference, surfaces, scratch, {}, {}};
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
+    geo::Context context{document, interpreter, reference, scratch, {}, {}};
 
     void SetUp() override
     {

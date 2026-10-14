@@ -5,4 +5,6 @@ file(GLOB _storage_survey_job_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DI
 katana_add_test_suite(storage
     LIBS katana_storage
     SOURCES test_storage.cpp test_annotation_storage.cpp ${_storage_survey_job_tests}
+            # The drawing's surfaces, schema 13 (docs/terrain.md).
+            test_surface_storage.cpp
 )

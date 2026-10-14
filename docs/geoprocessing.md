@@ -465,8 +465,10 @@ lines, polylines and areas with their properties.
 
 - **`RASTER <id|name>`** binds the reference raster's own file, read at full
   precision by GDAL, never its 8-bit display copy.
-- **`SURFACE <name> [CELL <m>]`** binds a surface from the session's
-  `terrain::SurfaceStore`, sampled at cell centres by `geo::surfaceGrid`: the
+- **`SURFACE <name> [CELL <m>]`** binds a surface of the drawing's
+  (`Document::surfaces`, staged in `geo::Context::surfaces` for the phase;
+  `docs/terrain.md`, "Surfaces in the drawing"), sampled at cell centres by
+  `geo::surfaceGrid`: the
   one sampler, which `exportSurfaceRaster` now uses too. The cell is CELL, or
   `suggestedCellSize` of the surface's extent; the grid is capped at 25M
   cells. The sampling is work, so it runs on the worker, from the shared
@@ -739,11 +741,16 @@ line through `MainWindow::runVerbLine` reach it alike.
 in the real window. `qt_widgets.GeoWorkbench.AnInteractiveRunSaysItStartedAndACancelAppliesNothing`
 cancels a job before its result is delivered.
 
-**Surfaces.** The window's surfaces are a `terrain::SurfaceStore`
-(`include/katana/terrain/surface_store.hpp`), the one the session has too.
+**Surfaces.** The surfaces are the drawing's (`Document::surfaces`), on
+every front end. The executor gives a phase a staging copy
+(`geo::Context::surfaces`), made as prepare and as apply begin, and commits
+what the phase changed as one undo step named after the verb; a phase that
+fails commits nothing (`docs/terrain.md`, "Surfaces in the drawing").
 `MainWindow::syncSceneSurfaces` rebuilds the scene's list whenever the
-store's revision moves. A second surface of a name is "name (2)": the store
-keeps names unique so that `SURFACE <name>` finds one.
+Document's surface generation moves. A second surface of a name is
+"name (2)": the store keeps names unique so that `SURFACE <name>` finds
+one. The verb table's SURFACE row takes only LIST, INFO, REMOVE, FROM and
+EXPORT (`takesSurface`); the rest are the interpreter's.
 
 **Menus.** The packages add their items through `GeoMenus`
 (`src/katana_qt/geo/menu_table.cpp`, a block each). It makes the GIS
@@ -1729,7 +1736,9 @@ packages build on:
 - **`import_records.hpp`** and **`dxf_verbs.hpp`** in `src/katana_app`: the
   records and the DXF steps every build shares, so a build without GDAL
   replies in the same records.
-- The session's `SurfaceStore` now holds a 12d archive's surfaces.
+- The session's store came to hold a 12d archive's surfaces; since
+  2026-10-15 they are the drawing's (`docs/terrain.md`, "Surfaces in the
+  drawing").
 
 The reply format changed from prose to records; the `cli.*`, `Session.*`,
 `GeoSession.*` and window checks were rewritten for the records only

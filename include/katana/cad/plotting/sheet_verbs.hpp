@@ -43,13 +43,11 @@
 namespace katana::cad::plotting {
 
 // What the verbs need that the Document does not hold, from the front end
-// that has it. The desktop window supplies both; headless they are left
-// empty and the verbs do without.
+// that has it. The desktop window supplies them; headless they are left
+// empty and the verbs do without. (The surfaces GENERATE SECTIONS samples,
+// to centre each section on its ground and choose the exaggeration, are the
+// drawing's own shown ones, Document::surfaces, on every front end.)
 struct SheetVerbContext {
-    // The surfaces GENERATE SECTIONS samples, to centre each section on its
-    // ground and choose the exaggeration. None: each section is centred when
-    // it is drawn, at an exaggeration of 1 (crossSectionSheets).
-    std::vector<SectionSurfaceInput> surfaces;
     // What GENERATE FIT and GRID cover without area=: in the window,
     // everything its plan view draws (imagery and point clouds included), as
     // the sheet editor's Generate Sheets covers. Not given: the drawing's

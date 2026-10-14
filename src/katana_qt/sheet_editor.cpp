@@ -250,13 +250,9 @@ plotting::SheetVerbContext sheetVerbContextFor(const katana::cad::Document& docu
     plotting::SheetVerbContext context;
     const SheetSource drawn = source();
     // GENERATE lays out what Generate Sheets always covered: everything the
-    // plan view draws, and the visible surfaces for the sections.
+    // plan view draws. (The sections' surfaces are the drawing's own shown
+    // ones, which the verb reads from the Document.)
     context.drawingExtent = planDrawnBounds(drawn.plan, {}, {});
-    for (const auto& surface : drawn.surfaces) {
-        if (surface.visible && surface.surface != nullptr) {
-            context.surfaces.push_back({surface.name, surface.surface});
-        }
-    }
     // The rest ask for the source again when they are called: a verb may
     // change the set between being given the context and using it.
     context.check = [&document, source](std::span<const std::size_t> sheets) {

@@ -277,6 +277,10 @@ enum class Icon {
     SurfaceDeleteLong,
     // Combine Surfaces: a ground outline, and in the accent a pad laid into it.
     SurfaceCombine,
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // The Surfaces panel: a patch of triangulated ground, one triangle in the
+    // accent - a surface picked out of the drawing's.
+    SurfacesPanel,
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.

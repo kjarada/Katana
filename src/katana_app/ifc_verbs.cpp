@@ -12,6 +12,7 @@
 
 #include "katana/cad/project_crs.hpp"
 #include "katana/core/text.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/ifc/front_end.hpp"
 #include "katana/ifc/import.hpp"
@@ -75,6 +76,13 @@ bool exportIfc(const katana::cad::Document& document, const katana::ifc::ExportA
     katana::ifc::ExportInput input;
     if (arguments.entities || arguments.alignments) {
         input.model = &document.model();
+    }
+    // ---- the drawing's surfaces (docs/terrain.md), hidden ones too: hiding
+    // is a matter of the picture, and the window's export takes them all ----
+    if (arguments.surfaces) {
+        for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
+            input.surfaces.push_back({named.name, named.surface.get()});
+        }
     }
     input.utilities = std::move(files->utilities);
     if (arguments.surfaces) {
@@ -159,22 +167,35 @@ bool importIfc(katana::cad::Document& document, const katana::ifc::ImportArgumen
     // The count before the command, which takes the entities; the reply
     // after it, which adds its renames to the warnings.
     const std::size_t entities = imported->entities.size();
-    if (auto command = katana::ifc::importCommand(*imported, document.model())) {
-        if (const auto status = document.execute(std::move(command)); !status) {
-            return fail(status.error().describe());
-        }
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // A terrain the file carries is the drawing's, in the import's one step,
+    // as the window keeps it.
+    std::vector<katana::terrain::NamedSurface> surfaces;
+    for (auto& surface : imported->surfaces) {
+        katana::terrain::NamedSurface named;
+        named.name = surface.name;
+        named.surface =
+            std::make_shared<const katana::terrain::TinSurface>(std::move(surface.surface));
+        named.source = "IFC " + path.filename().string();
+        surfaces.push_back(std::move(named));
+    }
+    auto kept = katana::cad::importSurfaces(
+        document, katana::ifc::importCommand(*imported, document.model()), std::move(surfaces),
+        "IMPORT " + path.filename().string());
+    if (!kept) {
+        return fail(kept.error().describe());
     }
     std::string reply =
         katana::ifc::formatImportReply(*imported, path.filename().string(), entities);
+    for (const std::string& record : *kept) {
+        reply += "\n" + record;
+    }
     const auto note = [&](const std::string& text) {
         reply += "\n" + katana::ifc::noteRecord(text);
     };
     if (arguments.local && options.originShift) {
         note(std::format("shifted by {:.3f},{:.3f} to sit at the origin", options.originShift->x,
                          options.originShift->y));
-    }
-    if (!imported->surfaces.empty()) {
-        note("the command line holds no surfaces: the file's are counted, not kept");
     }
     const std::string& project = document.metadata().coordinateSystem;
     const std::string& file = imported->coordinateSystem;

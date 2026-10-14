@@ -44,6 +44,7 @@
 #include "katana/interop/import.hpp"
 #include "katana/cad/import_placement.hpp"
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/interop/geo/drawing_dataset.hpp"
 #include "terrain_verbs.hpp"
 #include "vector_support.hpp"
@@ -357,9 +358,35 @@ Result<std::string> applyArchive(Context& context, interop::Archive12dImportResu
         transaction->add(cmd::createAlignment(alignment));
         ++alignments;
     }
-    // An archive of TINs, meshes or clouds alone has nothing for the drawing,
-    // and the stack refuses an empty transaction: only one with something in
-    // it runs, and the session data below is added either way.
+    // The archive's TINs are the drawing's surfaces, in the SAME step as its
+    // entities: one Ctrl+Z takes back the whole import. A surface whose name
+    // is taken is "name (2)". Put in the phase's staging copy, then committed
+    // inside the transaction; the executor then finds nothing left to commit.
+    std::vector<std::string> surfaceRecords;
+    for (katana::archive12d::ImportedSurface& surface : read.surfaces) {
+        katana::terrain::NamedSurface named{
+            context.surfaces.uniqueName(surface.name),
+            std::make_shared<const katana::terrain::TinSurface>(std::move(surface.surface)),
+            "12d archive " + pathText(file.filename())};
+        if (auto added = context.surfaces.add(named); !added) {
+            return added.error();
+        }
+        surfaceRecords.push_back(
+            katana::cad::surfaceRecord(named, context.document.surfaceStyles()));
+    }
+    if (!read.surfaces.empty()) {
+        auto surfaces = context.document.surfacesCommand(
+            context.surfaces, "IMPORT " + pathText(file.filename()));
+        if (!surfaces) {
+            return surfaces.error();
+        }
+        if (*surfaces != nullptr) {
+            transaction->add(std::move(*surfaces));
+        }
+    }
+    // An archive of meshes or clouds alone has nothing for the drawing, and
+    // the stack refuses an empty transaction: only one with something in it
+    // runs, and the session data below is added either way.
     if (transaction->size() != 0) {
         if (auto status = context.document.execute(std::move(transaction)); !status) {
             return status.error();
@@ -380,19 +407,9 @@ Result<std::string> applyArchive(Context& context, interop::Archive12dImportResu
         records.push_back(tallyRecord(tally.keyword, tally.read, tally.imported));
     }
 
-    // Surfaces and clouds are session data, outside undo
-    // (interop/reference_data.hpp), added after the transaction so a refused
-    // import leaves none behind. A surface whose name is taken is "name (2)".
-    for (katana::archive12d::ImportedSurface& surface : read.surfaces) {
-        katana::terrain::NamedSurface named{
-            context.surfaces.uniqueName(surface.name),
-            std::make_shared<const katana::terrain::TinSurface>(std::move(surface.surface)),
-            "12d archive " + pathText(file.filename())};
-        if (auto added = context.surfaces.add(named); !added) {
-            return added.error();
-        }
-        records.push_back(surfaceRecord(named));
-    }
+    records.insert(records.end(), surfaceRecords.begin(), surfaceRecords.end());
+    // Clouds are session data, outside undo (interop/reference_data.hpp),
+    // added after the transaction so a refused import leaves none behind.
     for (interop::PointCloudLayer& cloud : read.clouds) {
         const interop::ReferenceId id = context.reference.add(std::move(cloud));
         records.push_back(referenceRecord(*context.reference.findPointCloud(id)));
@@ -419,7 +436,7 @@ Result<std::string> applyArchive(Context& context, interop::Archive12dImportResu
     for (const std::string& warning : read.warnings) {
         records.push_back(warningText(warning));
     }
-    if ((!read.surfaces.empty() || !read.clouds.empty()) && context.changed) {
+    if (!read.clouds.empty() && context.changed) {
         context.changed();
     }
     if (context.imported && (shown.surfaces != 0 || !shown.meshes.empty())) {

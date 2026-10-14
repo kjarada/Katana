@@ -1,8 +1,11 @@
 // The SURFACE verbs (terrain_verbs.hpp, docs/terrain.md "Surfaces on every
-// front end"): the session's named surfaces listed, described, removed, made
+// front end"): the drawing's named surfaces listed, described, removed, made
 // from a raster, a point cloud or the drawing, and written out as a DEM - the
 // same on katana_cli, katana_mcp and the window's command line, where the
 // window's Surface From and Export Surface as DEM items build these lines.
+// The other SURFACE words - RENAME, STYLE, SHOW, HIDE, COPY, the edits, the
+// volumes' - are the interpreter's (cad/terrain/surface_verbs.hpp); the verb
+// table's SURFACE row takes only these.
 //
 //   SURFACE LIST [JSON]
 //   SURFACE INFO <name>
@@ -32,6 +35,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/cad/geo/surface_input.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/terrain_io.hpp"
@@ -51,7 +55,7 @@ constexpr const char* kUsage =
     "SURFACE FROM RASTER <id|name> | FILE <path> | CLOUD <id|name> | <scope> [NAME <n>] "
     "[max=<points>] [AREA x0,y0,x1,y1] [classes=2,...] | "
     "SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog] [co=K=V]... "
-    "[OVERWRITE]";
+    "[OVERWRITE] (and the drawing's: SURFACE RENAME|STYLE|SHOW|HIDE|COPY, HELP SURFACESTYLE)";
 
 std::string utf8Of(const std::filesystem::path& path)
 {
@@ -129,7 +133,8 @@ std::string rasterRecord(const katana::interop::RasterOverlay& raster)
            " file=" + value(utf8Of(raster.source));
 }
 
-nlohmann::json surfaceJson(const katana::terrain::NamedSurface& named)
+nlohmann::json surfaceJson(const katana::terrain::NamedSurface& named,
+                           const katana::cad::SurfaceStyleSet& styles)
 {
     const katana::terrain::TinSurface& surface = *named.surface;
     const katana::geometry::Box2& box = surface.bounds();
@@ -140,7 +145,11 @@ nlohmann::json surfaceJson(const katana::terrain::NamedSurface& named)
             {"zmin", surface.minElevation()},
             {"zmax", surface.maxElevation()},
             {"plan_area", surface.planArea()},
-            {"source", named.source}};
+            {"source", named.source},
+            // The style it is drawn in (the default's name when it has none
+            // of its own), and whether the views draw it.
+            {"style", katana::cad::styleOf(styles, named).name},
+            {"visible", named.visible}};
 }
 
 nlohmann::json rasterJson(const katana::interop::RasterOverlay& raster)
@@ -178,7 +187,7 @@ Result<Prepared> list(Context& context, const Tokens& tokens, std::size_t at)
         // rasters a terrain verb can read as RASTER <id|name>.
         nlohmann::json surfaces = nlohmann::json::array();
         for (const katana::terrain::NamedSurface& named : context.surfaces.all()) {
-            surfaces.push_back(surfaceJson(named));
+            surfaces.push_back(surfaceJson(named, context.document.surfaceStyles()));
         }
         nlohmann::json rasters = nlohmann::json::array();
         for (const katana::interop::RasterOverlay& raster : context.reference.rasters()) {
@@ -189,7 +198,7 @@ Result<Prepared> list(Context& context, const Tokens& tokens, std::size_t at)
     }
     std::vector<std::string> records;
     for (const katana::terrain::NamedSurface& named : context.surfaces.all()) {
-        records.push_back(surfaceRecord(named));
+        records.push_back(katana::cad::surfaceRecord(named, context.document.surfaceStyles()));
     }
     for (const katana::interop::RasterOverlay& raster : context.reference.rasters()) {
         records.push_back(rasterRecord(raster));
@@ -211,7 +220,8 @@ Result<Prepared> info(Context& context, const Tokens& tokens, std::size_t at)
     }
     const katana::terrain::TinSurface& surface = *named->surface;
     return answeredWith("SURFACE INFO",
-                        surfaceRecord(*named) + "\narea plan=" + fixed3(surface.planArea()) +
+                        katana::cad::surfaceRecord(*named, context.document.surfaceStyles()) +
+                            "\narea plan=" + fixed3(surface.planArea()) +
                             " surface=" + fixed3(surface.surfaceArea()));
 }
 
@@ -226,12 +236,10 @@ Result<Prepared> remove(Context& context, const Tokens& tokens, std::size_t at)
                          tokens[at]);
     }
     const std::string name = named->name;
-    // Removed as the line runs, as a reference raster is: a surface is
-    // session data, and there is nothing to wait for.
+    // Removed as the line runs - there is nothing to wait for - from the
+    // phase's staging copy, which the executor commits as one undo step
+    // ("SURFACE REMOVE"): UNDO puts the surface back.
     (void)context.surfaces.remove(name);
-    if (context.changed) {
-        context.changed();
-    }
     return answeredWith("SURFACE REMOVE", "removed surface=" + value(name) +
                                               " surfaces=" +
                                               std::to_string(context.surfaces.all().size()));
@@ -688,16 +696,6 @@ Result<Prepared> exportDem(Context& context, const Tokens& tokens, std::size_t a
 
 // ---- shared with the other terrain verbs --------------------------------------------------------
 
-std::string surfaceRecord(const katana::terrain::NamedSurface& named)
-{
-    const katana::terrain::TinSurface& surface = *named.surface;
-    return "surface name=" + value(named.name) +
-           " triangles=" + std::to_string(surface.triangleCount()) +
-           " points=" + std::to_string(surface.vertexCount()) +
-           " bounds=" + boxText(surface.bounds()) + " zmin=" + fixed3(surface.minElevation()) +
-           " zmax=" + fixed3(surface.maxElevation()) + " source=" + value(named.source);
-}
-
 Result<SurfaceBuild> triangulate(katana::terrain::TinInput input,
                                  const katana::terrain::TinBuildOptions& options)
 {
@@ -761,15 +759,14 @@ Result<std::string> keepSurface(Context& context, std::string name, std::string 
     if (unique) {
         name = context.surfaces.uniqueName(name);
     }
+    // Into the phase's staging copy, which the executor commits as one undo
+    // step when the apply ends (geo_verbs.hpp).
     if (auto added = context.surfaces.add({name, build.surface, std::move(source)}); !added) {
         return added.error();
     }
-    if (context.changed) {
-        context.changed();
-    }
     const katana::terrain::NamedSurface* kept = context.surfaces.find(name);
     std::vector<std::string> records = std::move(build.records);
-    records.push_back(surfaceRecord(*kept));
+    records.push_back(katana::cad::surfaceRecord(*kept, context.document.surfaceStyles()));
     return joinedRecords(records);
 }
 
@@ -856,6 +853,19 @@ Result<Prepared> prepareSurface(Context& context, const Tokens& tokens, std::str
 std::string surfaceUsage()
 {
     return kUsage;
+}
+
+bool takesSurface(const Tokens& tokens)
+{
+    if (tokens.size() < 2) {
+        return true; // SURFACE alone: its usage, which names the other words too
+    }
+    for (const std::string_view word : {"LIST", "INFO", "REMOVE", "FROM", "EXPORT"}) {
+        if (tokens.is(1, word)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace katana::app::geo

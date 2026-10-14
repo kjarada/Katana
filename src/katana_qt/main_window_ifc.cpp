@@ -29,6 +29,7 @@
 #include "ifc_verbs.hpp"
 #include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/project_crs.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/ifc/front_end.hpp"
 #include "katana/ifc/import.hpp"
@@ -107,9 +108,9 @@ Result<std::string> MainWindow::importIfc(const katana::ifc::ImportArguments& ar
                 existing.expand(pi.point);
             }
         });
-        for (const cad::SceneSurface& item : sceneSurfaces_) {
-            if (item.surface != nullptr && item.surface->vertexCount() > 0) {
-                existing.expand(item.surface->bounds());
+        for (const katana::terrain::NamedSurface& named : document_.surfaces().all()) {
+            if (named.surface && named.surface->vertexCount() > 0) {
+                existing.expand(named.surface->bounds());
             }
         }
         const auto advice = interop::advisePlacement(existing, imported->bounds);
@@ -157,13 +158,27 @@ Result<std::string> MainWindow::importIfc(const katana::ifc::ImportArguments& ar
     // count first - the command takes the entities - and the reply after it,
     // since it adds its renames to the warnings.
     const std::size_t entities = imported->entities.size();
-    if (auto command = katana::ifc::importCommand(*imported, document_.model())) {
-        if (const auto status = document_.execute(std::move(command)); !status) {
-            return status.error();
-        }
+    // The file's surfaces are the drawing's, in the same step as its
+    // entities (cad::importSurfaces; docs/terrain.md), as katana_cli keeps them.
+    std::vector<katana::terrain::NamedSurface> surfaces;
+    for (auto& surface : imported->surfaces) {
+        katana::terrain::NamedSurface named;
+        named.name = surface.name;
+        named.surface =
+            std::make_shared<const katana::terrain::TinSurface>(std::move(surface.surface));
+        named.source = "IFC " + fileNameOf(arguments.path);
+        surfaces.push_back(std::move(named));
+    }
+    auto kept = cad::importSurfaces(document_, katana::ifc::importCommand(*imported, document_.model()),
+                                    std::move(surfaces), "IMPORT " + fileNameOf(arguments.path));
+    if (!kept) {
+        return kept.error();
     }
     std::string reply =
         katana::ifc::formatImportReply(*imported, fileNameOf(arguments.path), entities);
+    for (const std::string& record : *kept) {
+        reply += "\n" + record;
+    }
 
     // The file's coordinate system. Taken only when the project has none and
     // the data is where the file put it - shifted, it is in no system at all.
@@ -209,11 +224,6 @@ Result<std::string> MainWindow::importIfc(const katana::ifc::ImportArguments& ar
         reply += "\n" + katana::ifc::noteRecord(note);
     }
 
-    // Surfaces are session data, outside undo (interop/reference_data.hpp),
-    // added after the transaction so that a refused import leaves none.
-    for (auto& surface : imported->surfaces) {
-        addSurface(surface.name, std::move(surface.surface));
-    }
     views_->refreshAll();
     views_->zoomExtentsAll();
     return reply;
@@ -244,9 +254,11 @@ Result<std::string> MainWindow::exportIfc(const katana::ifc::ExportArguments& ar
     if (arguments.entities || arguments.alignments) {
         input.model = &document_.model();
     }
+    // The drawing's surfaces, hidden ones too: hiding is a matter of the
+    // picture, not of what the file holds.
     if (arguments.surfaces) {
-        for (const cad::SceneSurface& item : sceneSurfaces_) {
-            input.surfaces.push_back({item.name, item.surface});
+        for (const katana::terrain::NamedSurface& named : document_.surfaces().all()) {
+            input.surfaces.push_back({named.name, named.surface.get()});
         }
     }
     input.utilities = std::move(files->utilities);
@@ -391,7 +403,7 @@ IfcExportContext MainWindow::ifcExportContext()
         state.entities = document_.model().entities.size();
         state.selected = document_.selection().size();
         state.alignments = document_.model().alignments.size();
-        state.surfaces = sceneSurfaces_.size();
+        state.surfaces = document_.surfaces().all().size();
         const std::string& code = document_.metadata().coordinateSystem;
         state.coordinateSystem = projectCrsLabel(document_);
         if (code.empty()) {

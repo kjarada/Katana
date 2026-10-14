@@ -461,9 +461,12 @@ class Document {
                                                    std::string stepName = "SET_SURFACES");
     // The same change as a command, for a step that does more besides - an
     // IMPORT that brings entities and surfaces is ONE undo step. Null when
-    // `surfaces` equals the current store.
+    // `surfaces` equals the current store. Const: it builds the command and
+    // changes nothing until the command is executed through execute(), so a
+    // tool holding a const Document can make one.
     [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
-    surfacesCommand(katana::terrain::SurfaceStore surfaces, std::string stepName = "SET_SURFACES");
+    surfacesCommand(katana::terrain::SurfaceStore surfaces,
+                    std::string stepName = "SET_SURFACES") const;
 
     // The display styles (cad/terrain/surface_style.hpp): the project's, or
     // builtInSurfaceStyles() when it saved none. Replaced as ONE undoable
@@ -472,6 +475,22 @@ class Document {
     [[nodiscard]] const SurfaceStyleSet& surfaceStyles() const;
     [[nodiscard]] katana::core::Status setSurfaceStyles(SurfaceStyleSet styles,
                                                         std::string stepName = "SET_SURFACE_STYLES");
+    // Counts every change to the styles, undo and redo included, and never
+    // goes back: what a view's cache of a style's drawing keys on.
+    [[nodiscard]] std::uint64_t surfaceStylesGeneration() const;
+    // Why the project's styles could not be read when it was opened - a
+    // newer Katana's (Unsupported), or damaged (ParseFailure) - while the
+    // built-ins stand in for them; success otherwise. Styles a newer Katana
+    // wrote are kept as they were and written back by a save, and
+    // setSurfaceStyles refuses (CommandRejected) to overwrite them; damaged
+    // ones are replaced by the first set given.
+    [[nodiscard]] katana::core::Status surfaceStylesStatus() const;
+    // The surfaces and the styles as ONE undoable step, checked together:
+    // what renaming a style a surface uses needs, the style renamed in the
+    // set and in every surface that names it at once.
+    [[nodiscard]] katana::core::Status setSurfacesAndStyles(katana::terrain::SurfaceStore surfaces,
+                                                            SurfaceStyleSet styles,
+                                                            std::string stepName);
 
     // ---- annotation (docs/annotation.md) ---------------------------------------
     //
@@ -562,6 +581,29 @@ class Document {
     void rememberTables();
     // True when it removed anything from the selection.
     bool pruneSelection();
+    // ---- the surfaces' share of new, open and save (surface_document.cpp) ----
+    //
+    // The surfaces and their styles as one value: what open() reads out of a
+    // project and checks before it installs anything, and what newDocument()
+    // installs empty.
+    struct SurfaceState {
+        katana::terrain::SurfaceStore surfaces;
+        SurfaceStyleSet styles = builtInSurfaceStyles();
+        katana::core::Status stylesStatus{};
+    };
+    // Decodes the project's surface records and reads its styles' metadata
+    // key, taking the key out of `metadata` when it was read (it is the
+    // Document's to write) and leaving it when it could not be (written back
+    // as it was). Fails, and the open with it, on a surface it cannot decode.
+    [[nodiscard]] static katana::core::Result<SurfaceState>
+    readSurfaceState(std::vector<katana::storage::SurfaceRecord>& records,
+                     katana::storage::ProjectMetadata& metadata);
+    void installSurfaceState(SurfaceState state);
+    // The surfaces and the styles into what a save writes.
+    void writeSurfaceState(katana::storage::ProjectContents& contents) const;
+    // DocumentChange::Surfaces and SurfaceStyles for what moved since the
+    // last call; the stack's listener adds them to a step's notification.
+    [[nodiscard]] std::uint32_t surfacePartsChanged();
     void notify(const DocumentChange& change);
     void notify(std::uint32_t parts) { notify(DocumentChange{.parts = parts}); }
 
@@ -622,6 +664,11 @@ class Document {
     katana::terrain::SurfaceStore surfaces_;
     std::uint64_t surfacesGeneration_ = 0;
     SurfaceStyleSet surfaceStyles_ = builtInSurfaceStyles();
+    std::uint64_t surfaceStylesGeneration_ = 0;
+    katana::core::Status surfaceStylesStatus_{};
+    // The generations the last notification reported (surfacePartsChanged).
+    std::uint64_t surfacesNotified_ = 0;
+    std::uint64_t surfaceStylesNotified_ = 0;
 };
 
 } // namespace katana::cad

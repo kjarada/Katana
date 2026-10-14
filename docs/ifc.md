@@ -77,8 +77,10 @@ a chorded curve may stand from the true one (`ImportOptions::curveTolerance`,
 1 mm by default). TAKECRS gives a project with no coordinate system the
 file's, as its own undoable step; KEEPCRS does not; with neither, the line
 says how (`CRS SET`), and File > Import asks. TAKECRS with LOCAL is refused:
-data moved to the origin is in no system. `katana_cli`'s IMPORT counts a
-terrain in the file and does not keep it ("Not done"); the window keeps it.
+data moved to the origin is in no system. A terrain in the file joins the
+drawing's surfaces in the import's one undo step, on every front end
+(`cad::importSurfaces`; `docs/terrain.md`, "Surfaces in the drawing"), and
+EXPORT writes the drawing's surfaces unless NOSURFACES.
 INFO describes a file without importing it; IFC RULES writes the default
 classification rules, for a project to edit into its own.
 `src/katana_app/ifc_verbs.cpp` is the whole of `katana_cli`'s side.
@@ -180,8 +182,8 @@ drawing - its entities, alignments and surfaces - is shifted alongside or
 kept, as every import asks; declining is a cancel, which the dialog says as
 one. File > Import and a path given to the window, whose line says neither,
 ask about the coordinate system; a typed IMPORT or a headless session asks no
-one and says how (`CRS SET`). Terrain comes in as surfaces of the session,
-which Export IFC writes out again.
+one and says how (`CRS SET`). Terrain comes in as surfaces of the drawing,
+in the import's one undo step, which Export IFC writes out again.
 
 
 ## Export: what goes where

@@ -92,11 +92,12 @@ struct Front {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
     geo::Context context;
 
     explicit Front(const std::filesystem::path& scratch)
-        : context{document, interpreter, reference, surfaces, scratch, {}, {}}
+        : context{document, interpreter, reference, scratch, {}, {}}
     {
     }
 
@@ -184,7 +185,7 @@ TEST_F(GisVerbs, ExportAfterImportRoundTripsParcels)
     EXPECT_EQ(again.document.model().entities.size(), 9u);
 }
 
-TEST_F(GisVerbs, ImportOfAnArchiveAddsItsSurfacesToTheStore)
+TEST_F(GisVerbs, ImportOfAnArchiveAddsItsSurfacesToTheDrawingInTheImportsOneStep)
 {
     auto reply = run("IMPORT " + quoted(kArchives + "/multiple_tins.12da"));
     ASSERT_TRUE(reply.ok()) << reply.error().describe();
@@ -220,6 +221,12 @@ TEST_F(GisVerbs, ImportOfAnArchiveAddsItsSurfacesToTheStore)
     ASSERT_TRUE(run("IMPORT " + quoted(kArchives + "/multiple_tins.12da")).ok());
     EXPECT_EQ(front.surfaces.all().size(), 8u);
     EXPECT_NE(front.surfaces.find("TIN SOUTH WEST (2)"), nullptr);
+
+    // Each import is one undo step, its surfaces with it: one UNDO takes the
+    // second archive's four back and leaves the first's.
+    ASSERT_TRUE(front.document.undo().ok());
+    EXPECT_EQ(front.surfaces.all().size(), 4u);
+    EXPECT_EQ(front.surfaces.find("TIN SOUTH WEST (2)"), nullptr);
 }
 
 TEST_F(GisVerbs, AnArchivesMeshesGoToTheFrontEndThatShowsThem)

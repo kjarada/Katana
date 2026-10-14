@@ -1229,18 +1229,21 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
     // The help, the status and - one more than there were, since 2026-10-06 -
     // the customisation (McpServer.TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource):
     // that one added resource is the whole reason each count below went up
-    // by one, from 3 and 2.
+    // by one, from 3 and 2. And one more again since 2026-10-15, the surface
+    // display styles (McpServer.TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem),
+    // from 4 and 3.
 #if defined(KATANA_TEST_WITH_INTEROP)
     // And the formats GDAL reads and writes (McpServer.FormatsReturnsStructuredDrivers).
-    ASSERT_EQ(list.size(), 4U);
+    ASSERT_EQ(list.size(), 5U);
 #else
-    ASSERT_EQ(list.size(), 3U);
+    ASSERT_EQ(list.size(), 4U);
 #endif
     std::vector<std::string> uris;
     for (const Json& resource : list) {
         uris.push_back(resource["uri"].get<std::string>());
     }
-    for (const char* uri : {"katana://help", "katana://status", "katana://customisation"}) {
+    for (const char* uri : {"katana://help", "katana://status", "katana://customisation",
+                            "katana://surface-styles"}) {
         EXPECT_NE(std::find(uris.begin(), uris.end(), uri), uris.end()) << uri;
     }
     const Json help = request("resources/read", Json{{"uri", "katana://help"}});
@@ -1251,6 +1254,30 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
               0);
     EXPECT_EQ(request("resources/read", Json{{"uri", "katana://nothing"}})["error"]["code"],
               -32002);
+}
+
+// katana://surface-styles is SURFACESTYLE LIST JSON (docs/mcp.md): the
+// Document's own form, so an agent reads the styles without a line in the
+// history, and a style made through the command tool is there the next read.
+TEST_F(McpServer, TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem)
+{
+    initialize();
+    const auto read = [this] {
+        const Json resource = request("resources/read", Json{{"uri", "katana://surface-styles"}});
+        EXPECT_EQ(resource["result"]["contents"][0]["mimeType"], "application/json");
+        return resource["result"]["contents"][0]["text"].get<std::string>();
+    };
+    const Json styles = Json::parse(read());
+    EXPECT_EQ(styles["format"], "katana-surface-styles");
+    EXPECT_EQ(styles["default"], "Standard");
+    // The seven built-in styles (cad/terrain/surface_style.hpp).
+    EXPECT_EQ(styles["styles"].size(), 7U);
+    const Json made = runLine("SURFACESTYLE NEW Fine FROM Contours interval=0.5");
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json listed = runLine("SURFACESTYLE LIST JSON");
+    const std::string json = listed["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_EQ(read(), json);
+    EXPECT_EQ(Json::parse(json)["styles"].size(), 8U);
 }
 
 // katana_status and katana://status are the STATUS verb's (cad/document_status.hpp),
@@ -2402,6 +2429,22 @@ TEST_F(McpServer, TerrainListGivesTheSessionsSurfacesAndRasters)
     EXPECT_EQ(content["rasters"][0]["width"], 120);
     EXPECT_EQ(content["rasters"][0]["cell"], 1.5);
     EXPECT_NE(textOf(listed).find("surface ground: "), std::string::npos) << textOf(listed);
+    // The style it is drawn in - the drawing's default, Standard, as it has
+    // none of its own - and whether the views draw it.
+    EXPECT_EQ(content["surfaces"][0]["style"], "Standard");
+    EXPECT_EQ(content["surfaces"][0]["visible"], true);
+    const Json styled = call("katana_run_commands",
+                             Json{{"commands", {"SURFACE STYLE ground Contours",
+                                                "SURFACE HIDE ground"}}});
+    ASSERT_FALSE(styled["isError"].get<bool>()) << textOf(styled);
+    const Json again = call("katana_terrain_list")["structuredContent"];
+    EXPECT_EQ(again["surfaces"][0]["style"], "Contours");
+    EXPECT_EQ(again["surfaces"][0]["visible"], false);
+    // Each of those was one undo step on the drawing, and the surface itself
+    // one more: three UNDOs leave none.
+    const Json undone = call("katana_run_commands", Json{{"commands", {"UNDO 3"}}});
+    ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    EXPECT_TRUE(call("katana_terrain_list")["structuredContent"]["surfaces"].empty());
 }
 
 // T1: CONTOUR is a session line, so the command tool draws contours as the

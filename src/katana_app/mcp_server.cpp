@@ -1204,6 +1204,14 @@ constexpr std::array kResources{
              "its rules, what this drawing uses of it, and what went wrong when the session "
              "started.",
              "application/json"},
+    // ---- the drawing's surface display styles (docs/terrain.md, docs/mcp.md) ----
+    // SURFACESTYLE LIST JSON: the styles a surface is drawn in, read from the
+    // Document as the customisation is.
+    Resource{"katana://surface-styles", "Surface display styles",
+             "The drawing's surface display styles - what each shows in plan and in 3D, its "
+             "colours, contours, ramp, bands and stops - and which is the default: what "
+             "SURFACESTYLE LIST JSON gives, in the form SURFACESTYLE NEW and SET change.",
+             "application/json"},
 #if defined(KATANA_WITH_INTEROP)
     // FORMATS JSON (docs/interop.md, "Formats"), as katana_formats lists it.
     Resource{"katana://formats", "GDAL formats",
@@ -1628,6 +1636,10 @@ std::optional<std::string> Server::handle(std::string_view message)
                 // a line would answer the same and leave a CUSTOMISE JSON in
                 // the history of a session nobody had typed into.
                 text = katana::cad::customisationJson(session_.document());
+                mimeType = "application/json";
+            } else if (uri == "katana://surface-styles") {
+                // The Document's own form, as SURFACESTYLE LIST JSON gives it.
+                text = katana::cad::surfaceStylesToJson(session_.document().surfaceStyles());
                 mimeType = "application/json";
 #if defined(KATANA_WITH_INTEROP)
             } else if (uri == "katana://formats") {

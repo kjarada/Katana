@@ -45,8 +45,9 @@ class VectorFixture : public ::testing::Test {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    katana::app::geo::Context context{document, interpreter, reference, surfaces, scratch_, {}, {}};
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
+    katana::app::geo::Context context{document, interpreter, reference, scratch_, {}, {}};
 
     // The line through the one executor, all three phases.
     katana::core::Result<std::string> run(const std::string& line)

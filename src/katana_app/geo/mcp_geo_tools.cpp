@@ -472,7 +472,7 @@ ToolReply run(Session& session, const Json& arguments)
 
 // ---- T0: katana_terrain_list ----
 // SURFACE LIST JSON through the Session, as a person's SURFACE LIST: the
-// session's surfaces and the rasters a terrain verb reads.
+// drawing's surfaces and the rasters a terrain verb reads.
 ToolReply terrainList(Session& session, const Json&)
 {
     const std::string line = "SURFACE LIST JSON";
@@ -489,7 +489,9 @@ ToolReply terrainList(Session& session, const Json&)
         text += "\nsurface " + surface["name"].get<std::string>() + ": " +
                 std::to_string(surface["triangles"].get<std::size_t>()) + " triangles, z " +
                 geo::fixed3(surface["zmin"].get<double>()) + " to " +
-                geo::fixed3(surface["zmax"].get<double>());
+                geo::fixed3(surface["zmax"].get<double>()) + ", style " +
+                surface.value("style", std::string()) +
+                (surface.value("visible", true) ? "" : ", hidden");
     }
     for (const Json& raster : listed["rasters"]) {
         text += "\nraster " + std::to_string(raster["id"].get<std::uint64_t>()) + " " +
@@ -721,11 +723,13 @@ std::vector<Tool> geoTools()
     // ---- T0: katana_terrain_list ----
     tools.push_back(Tool{
         "katana_terrain_list", "Surfaces and rasters",
-        "The session's named surfaces (TIN, made by SURFACE FROM or TO SURFACE) and its reference "
-        "rasters: what CONTOUR, RASTER SHADE, RASTER SLOPE and a GDAL run's FROM SURFACE <name> "
-        "or FROM RASTER <id|name> read. Each surface's triangles, points, bounds [x0,y0,x1,y1], "
-        "zmin, zmax, plan area and source; each raster's id, name, role (imagery, elevation or "
-        "derived), size, square cell, coordinate system, file and the line that derived it.",
+        "The drawing's named surfaces (TIN, made by SURFACE FROM, TO SURFACE or an import; saved "
+        "with the project) and its reference rasters: what CONTOUR, RASTER SHADE, RASTER SLOPE "
+        "and a GDAL run's FROM SURFACE <name> or FROM RASTER <id|name> read. Each surface's "
+        "triangles, points, bounds [x0,y0,x1,y1], zmin, zmax, plan area, source, the display "
+        "style it is drawn in (katana://surface-styles lists them) and whether the views show "
+        "it; each raster's id, name, role (imagery, elevation or derived), size, square cell, "
+        "coordinate system, file and the line that derived it.",
         objectSchema(Json::object()), hints(true, false, true), terrainList});
     // ---- V5: katana_gis_query ----
     tools.push_back(gisQueryTool());

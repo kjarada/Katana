@@ -17,8 +17,8 @@
 // IMPORT brings the file's alignments, elements and annotations into the
 // drawing as ONE undoable step (ifc/import.hpp); LOCAL moves them to sit at
 // the origin, as the other importers' LOCAL does; TAKECRS gives a project
-// with no coordinate system the file's. The command line holds no surfaces,
-// so a terrain the file carries is counted and not kept.
+// with no coordinate system the file's. A terrain the file carries joins the
+// drawing's surfaces in the same step (cad::importSurfaces).
 //
 // EXPORT writes the drawing's entities (or the selected ones), alignments and
 // surfaces, with the project's coordinate system as the georeferencing; UTILITIES adds

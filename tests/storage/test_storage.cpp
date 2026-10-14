@@ -385,6 +385,11 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 [[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
 {
     // Newest first: a migration is undone before the one it was built on.
+    if (version < 13) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS surfaces;"); !status) {
+            return status;
+        }
+    }
     if (version < 11) {
         if (auto status = database.execute("DROP TABLE IF EXISTS label_rules;"
                                            "DROP TABLE IF EXISTS label_styles;"
@@ -513,7 +518,7 @@ TEST_F(ProjectStoreMigration, RefusesProjectsFromANewerKatana)
 // Schema 12 (docs/model.md): the drawing system's geometry kinds - curve
 // polyline 9, ellipse 10, spline 11 - with no table change of their own.
 
-TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTwelve)
+TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTheCurrentSchema)
 {
     Model model;
     Entity line;
@@ -526,15 +531,17 @@ TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTwelv
         ASSERT_TRUE(store->save(captureModel(model, {})).ok());
     }
     {
-        // Schema 11 as the build before this one left it: 12 changed no
-        // table, so the version is the only difference.
+        // Schema 11 as the build before 12 left it: 12 changed no table, so
+        // the version is the only difference - and 13's surfaces table goes
+        // too, which a schema-11 file never had.
         auto raw = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(raw.ok());
-        ASSERT_TRUE(raw->setUserVersion(11).ok());
+        ASSERT_TRUE(rewindSchemaTo(*raw, 11).ok());
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 12);
+    // Raised through 12 and 13, every migration after the file's.
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
     const auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();
     Model loaded;
@@ -569,7 +576,11 @@ TEST_F(ProjectStoreMigration, AProjectHoldingTheDrawingKindsIsWrittenAsSchemaTwe
         ASSERT_TRUE(raw.ok());
         const auto version = raw->userVersion();
         ASSERT_TRUE(version.ok());
-        EXPECT_EQ(*version, 12);
+        // 12 is the first schema with the kinds, which a schema-11 build
+        // refuses; a file is written at the current one, 13 since the
+        // surfaces (docs/model.md).
+        EXPECT_GE(*version, 12);
+        EXPECT_EQ(*version, 13);
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
@@ -588,19 +599,20 @@ TEST_F(ProjectStoreMigration, ABuildThatCannotReadTheProjectSaysItIsNewerAndWhic
 {
     // What a schema-11 build does with a schema-12 project, by the same check
     // one schema up: refused before any row is read, as version skew, naming
-    // both numbers - not "unknown geometry kind in blob" per entity.
+    // both numbers - not "unknown geometry kind in blob" per entity. One up
+    // from 13, the current schema since the surfaces (docs/model.md).
     { ASSERT_TRUE(ProjectStore::create(projectDir(), {}).ok()); }
     {
         auto raw = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(raw.ok());
-        ASSERT_TRUE(raw->setUserVersion(13).ok());
+        ASSERT_TRUE(raw->setUserVersion(14).ok());
     }
     const auto opened = ProjectStore::open(projectDir());
     ASSERT_FALSE(opened.ok());
     EXPECT_EQ(opened.error().code, ErrorCode::Unsupported);
     EXPECT_NE(opened.error().message.find("newer version of Katana"), std::string::npos)
         << opened.error().describe();
-    EXPECT_EQ(opened.error().context, "schema=13 supported=12");
+    EXPECT_EQ(opened.error().context, "schema=14 supported=13");
 }
 
 // ---- backup & recovery --------------------------------------------------------------------

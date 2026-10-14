@@ -139,7 +139,7 @@ TEST_F(AnnotationStorage, EveryTableAndKindSurvivesSavingTwiceAndReopening)
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 12);
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
     const auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();
     Model loaded;
@@ -174,13 +174,15 @@ TEST_F(AnnotationStorage, AProjectFromBeforeSchema11OpensWithNoneAndModelDimensi
         ASSERT_TRUE(database
                         ->execute("DROP TABLE label_rules; DROP TABLE label_styles;"
                                   "DROP TABLE text_styles;"
-                                  "ALTER TABLE dimension_styles DROP COLUMN paper_sized;")
+                                  "ALTER TABLE dimension_styles DROP COLUMN paper_sized;"
+                                  "DROP TABLE surfaces;")
                         .ok());
         ASSERT_TRUE(database->setUserVersion(10).ok());
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 12);
+    // Raised through every migration after 10, the surfaces' 13 the last.
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
     const auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();
     Model loaded;

@@ -2124,8 +2124,13 @@ Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateO
         request.columns = o.columns.value_or(request.columns);
         request.scale = o.scale ? o.scale->value_or(automatic) : automatic;
         request.exaggeration = o.exaggeration.value_or(automatic);
-        if (context) {
-            request.surfaces = context().surfaces;
+        // The drawing's shown surfaces: a section sheet is a picture, and
+        // hiding a surface takes it out of every picture. None: each section
+        // is centred when it is drawn, at an exaggeration of 1.
+        for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
+            if (named.visible && named.surface) {
+                request.surfaces.push_back({named.name, named.surface.get()});
+            }
         }
         return crossSectionSheets(*solved, *name, request);
     }

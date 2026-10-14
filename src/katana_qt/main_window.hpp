@@ -401,11 +401,17 @@ class MainWindow final : public QMainWindow {
     // Data's chosen cloud or raster first. It builds a SURFACE FROM line and
     // runs it through runVerbLine.
     void showSurfaceFrom(SurfaceFromKind kind);
-    void addSurface(std::string name, katana::terrain::TinSurface surface);
-    // sceneSurfaces_ made again from surfaceStore_ when it has changed, each
-    // surface keeping how it was shown. A surface the store gained is shown
-    // in a 3D view, framed: one the user cannot see is not obviously made.
-    void syncSceneSurfaces();
+    // `surface` into the drawing's surfaces as one undo step named
+    // `stepName`, under `name` or "name (2)" when that is taken.
+    void addSurface(std::string name, katana::terrain::TinSurface surface,
+                    std::string stepName = "ADD SURFACE");
+    // sceneSurfaces_ made again from the drawing's surfaces
+    // (Document::surfaces) when they have changed, each keeping how the 3D
+    // view shows it and NamedSurface::visible saying whether it is shown at
+    // all. A surface the drawing gained is shown in a 3D view, framed - one
+    // the user cannot see is not obviously made - unless `showGained` is
+    // false (a New or an Open: the drawing was replaced, not added to).
+    void syncSceneSurfaces(bool showGained = true);
     // Session data like a surface: not an entity, not undoable, and drawn in
     // 3D with its footprint in plan.
     void addMesh(std::string name, katana::geometry::TriangleMesh mesh,
@@ -675,6 +681,10 @@ class MainWindow final : public QMainWindow {
     katana::cad::Document::ListenerHandle documentListener_;
     // suggestPlotFiles, on a new, opened or saved drawing.
     katana::cad::Document::ListenerHandle fileListener_;
+    // syncSceneSurfaces, AT ONCE when the drawing's surfaces or their styles
+    // change: sceneSurfaces_ points at surfaces, and a deferred refresh would
+    // leave it pointing at a store a step had replaced until then.
+    katana::cad::Document::ListenerHandle surfacesListener_;
     katana::cad::CommandInterpreter interpreter_{document_};
 
     ViewWorkspace* views_ = nullptr;
@@ -723,18 +733,18 @@ class MainWindow final : public QMainWindow {
     QPointer<IfcImportDialog> ifcImport_;
     QPointer<IfcExportDialog> ifcExport_;
 
-    // Surfaces shown in the 3D and section views. Built on demand from
-    // imported point clouds, rasters and drawing geometry, and owned here for
-    // the same reason reference data is: katana_cad must stay free of GDAL and
-    // PDAL so it still builds with -DKATANA_BUILD_IO=OFF.
-    // The one store of named surfaces (terrain/surface_store.hpp) that the
-    // geoprocessing verbs' SURFACE <name> reads too; each surface is shared
-    // and immutable, so sceneSurfaces_ may point into it and a background
-    // job may read one while the views draw it. sceneSurfaces_ is rebuilt
-    // from the store whenever its revision moves (syncSceneSurfaces).
-    katana::terrain::SurfaceStore surfaceStore_;
+    // The drawing's surfaces as the 3D, section and sheet views draw them:
+    // made from Document::surfaces - the one store, which the geoprocessing
+    // verbs, the surface verbs and the panels change - whenever its
+    // generation moves (syncSceneSurfaces). A SceneSurface points at a
+    // surface, so the surfaces it points at are held here as well: an undo
+    // that drops the last step holding one cannot free it under a view.
     std::vector<katana::cad::SceneSurface> sceneSurfaces_;
-    std::uint64_t sceneSurfacesRevision_ = 0;
+    std::vector<std::shared_ptr<const katana::terrain::TinSurface>> sceneSurfacesHeld_;
+    std::uint64_t sceneSurfacesGeneration_ = 0;
+    std::uint64_t sceneSurfaceStylesGeneration_ = 0;
+    // The Surfaces panel's dock (terrain/surfaces_panel.hpp).
+    QDockWidget* surfacesDock_ = nullptr;
     // Meshes (12d trimeshes), held the same way and for the same reasons.
     std::vector<std::unique_ptr<katana::geometry::TriangleMesh>> meshStore_;
     std::vector<katana::cad::SceneMesh> sceneMeshes_;
