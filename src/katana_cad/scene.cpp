@@ -644,10 +644,10 @@ struct SurfaceScratch {
     std::vector<double>& summed;
 };
 
-// One surface into `out`, and its fading edges into `edges` (or into `out` at
-// full strength when `edges` is null). Shared by appendSurfaces and
-// buildTerrain.
-void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ramp& sharedRamp,
+// One surface into `out`, coloured as `paint` says (paintOf), and its fading
+// edges into `edges` (or into `out` at full strength when `edges` is null).
+// Shared by appendSurfaces and buildTerrain.
+void emitSurface(const SceneSurface& item, const SceneOptions& options, const SurfacePaint& paint,
                  SurfaceScratch scratch, DrawList& out, SceneLayers* edges)
 {
     const katana::terrain::TinSurface& surface = *item.surface;
@@ -657,8 +657,6 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     const bool shaded = style == SurfaceStyle::Shaded || style == SurfaceStyle::ShadedWithEdges;
     const bool wire = style == SurfaceStyle::Wireframe;
     const bool fading = style == SurfaceStyle::ShadedWithEdges;
-    // What colours it: its display style, or the rule from before them.
-    const SurfacePaint paint = paintOf(item, sharedRamp);
     const Ramp& ramp = paint.ramp;
     const bool rampVertices = paint.vertex == SurfacePaint::Vertex::Ramp;
     const bool sharedFaces = paint.faces == SurfacePaint::Faces::Shared;
@@ -926,7 +924,8 @@ void SceneBuilder::appendSurfaces(const std::vector<SceneSurface>& surfaces,
     const Ramp ramp = rampOf(surfaces);
     for (const SceneSurface& item : surfaces) {
         if (drawable(item)) {
-            emitSurface(item, options, ramp, {normals_, lifted_, summed_}, out, nullptr);
+            emitSurface(item, options, paintOf(item, ramp), {normals_, lifted_, summed_}, out,
+                        nullptr);
         }
     }
 }
@@ -1489,27 +1488,24 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
     layers.legend.reset();
     layers.legendSurface.clear();
     layers.legendStyle.clear();
-    for (const SceneSurface& item : surfaces) {
-        if (!drawable(item) || !item.display.has_value() ||
-            styleOf(item) == SurfaceStyle::Wireframe) {
-            continue;
-        }
-        const SurfacePaint paint = paintOf(item, ramp);
-        if (paint.colouring.has_value() && paint.colouring->coloursFaces()) {
-            layers.legend = surfaceLegend(*paint.colouring);
-            layers.legendSurface = item.name;
-            layers.legendStyle = item.display->name;
-            break;
-        }
-    }
     // Where each surface's edges begin in edges.lines.
     std::vector<std::size_t> edgeStarts;
     for (const SceneSurface& item : surfaces) {
-        if (drawable(item)) {
-            edgeStarts.push_back(layers.edges.lines.size());
-            emitSurface(item, options, ramp, {normals_, lifted_, summed_}, layers.terrain,
-                        &layers);
+        if (!drawable(item)) {
+            continue;
         }
+        // Worked out once a surface: a slope style's steepest face is a pass
+        // over every triangle.
+        const SurfacePaint paint = paintOf(item, ramp);
+        if (!layers.legend.has_value() && item.display.has_value() &&
+            styleOf(item) != SurfaceStyle::Wireframe && paint.colouring.has_value() &&
+            paint.colouring->coloursFaces()) {
+            layers.legend = surfaceLegend(*paint.colouring);
+            layers.legendSurface = item.name;
+            layers.legendStyle = item.display->name;
+        }
+        edgeStarts.push_back(layers.edges.lines.size());
+        emitSurface(item, options, paint, {normals_, lifted_, summed_}, layers.terrain, &layers);
     }
     // The edges are drawn writing no depth (renderLayers), so where two
     // surfaces coincide - a design repeating the existing triangles outside

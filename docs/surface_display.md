@@ -367,10 +367,12 @@ costs nothing (the kept drawing). The face image is most of a banded frame
 extents) and of the triangles zoomed in (49 003 edges).
 
 The 3D terrain built in a style (`BM_SurfaceSceneStyled`, `SceneBuilder::buildTerrain`
-of the same surface): smooth elevation on the kernels 4.5 ms; elevation bands,
-cut at their contours into 455 732 triangles, 27.6 ms; slope bands, a colour a
-face, 70.2 ms - paid when the terrain is rebuilt (a style or surface edit, a
-change of exaggeration), not each frame.
+of the same surface): smooth elevation on the kernels 4.2 ms; elevation bands,
+cut at their contours into 455 732 triangles, 27.0 ms; slope bands, a colour a
+face, 50.0 ms (70.2 ms while the legend worked the surface's steepest face out
+a second time; each surface's colouring is now worked out once a build) -
+paid when the terrain is rebuilt (a style or surface edit, a change of
+exaggeration), not each frame.
 
 To measure again: `katana_benchmarks --benchmark_filter=Surface` and
 `katana_qt_benchmarks --benchmark_filter=PlanPaintSurface`, alternated against
@@ -441,7 +443,7 @@ another build with `tools/compare_benchmarks.py --alternate`.
   face colouring would be a fifth `SurfaceFaces` value and a contract change.
 * Smooth elevation in plan evaluates the ramp at every pixel; a lookup table
   would roughly halve the faces' cost at extents.
-* Slope and aspect faces in 3D cost 70 ms on a 400 000-triangle surface
+* Slope and aspect faces in 3D cost 50 ms on a 400 000-triangle surface
   (a colour a face on copies of its own, as the old slope colouring did); the
   slope of each face could be kept with the surface.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
