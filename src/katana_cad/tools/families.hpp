@@ -43,6 +43,9 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report);
 // The drawing system's draw tools: 3D Polyline, Spline, Ellipse and its arc,
 // Construction Line, Ray, Double Line, Freehand Sketch, Revision Cloud.
 void addDrawProfessionalTools(ToolCatalog& catalog, const Report& report);
+// Terrain > Edit Surface: the surface edit tools, each running a SURFACE EDIT
+// line on the active surface (terrain_edit.cpp, docs/surface_editing.md).
+void addTerrainEditTools(ToolCatalog& catalog, const Report& report);
 // For the tests, which have no mouse: the Sketch tool's pen moving through
 // `at` (a no-op for any other tool).
 void sketchMoveForTests(InteractiveTool& tool, const katana::geometry::Point2& at);
