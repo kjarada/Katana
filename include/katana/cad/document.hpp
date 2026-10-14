@@ -42,6 +42,16 @@ namespace katana::cad::road {
 struct RoadObjectSet;
 }
 
+// ---- road model (docs/road_design.md) ----
+namespace katana::cad::road {
+struct RoadTemplateSet;
+struct CorridorSet;
+} // namespace katana::cad::road
+namespace katana::cad::bim {
+class BimCacheAccess;
+}
+// ---- end road model ----
+
 namespace katana::cad {
 
 // What one Document notification is about.
@@ -492,6 +502,41 @@ class Document {
                                                             SurfaceStyleSet styles,
                                                             std::string stepName);
 
+    // ---- the road model (docs/road_design.md) -----------------------------------
+    //
+    // The drawing's road templates and corridors, each kept as versioned JSON
+    // under a project metadata key of its own ("road_templates",
+    // "corridors"), as the sheets are - the storage layer carries a key it
+    // does not read, so no schema change - and parsed once per change. Empty
+    // when the project has none, or when what it has cannot be read; the
+    // status then says why, and the setters refuse to overwrite what a newer
+    // Katana wrote. Each is replaced as ONE undoable step named `stepName`;
+    // InvalidArgument for a set checkTemplate or checkCorridor refuses, or
+    // two of one name. A set equal to the current one records nothing.
+    //
+    // Every change of the road model's keys - these two and the placed
+    // objects' "road_objects" - is reported as DocumentChange::RoadModel with
+    // the step that made it (src/katana_cad/road/road_document.cpp).
+    [[nodiscard]] const road::RoadTemplateSet& roadTemplates() const;
+    [[nodiscard]] katana::core::Status roadTemplatesStatus() const;
+    [[nodiscard]] katana::core::Status
+    setRoadTemplates(const road::RoadTemplateSet& templates,
+                     std::string stepName = "SET_ROAD_TEMPLATES");
+    // As a command, for a step that does more besides (a template renamed
+    // with the corridors that name it); null when nothing changes.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    roadTemplatesCommand(const road::RoadTemplateSet& templates,
+                         std::string stepName = "SET_ROAD_TEMPLATES");
+    [[nodiscard]] const road::CorridorSet& corridors() const;
+    [[nodiscard]] katana::core::Status corridorsStatus() const;
+    [[nodiscard]] katana::core::Status setCorridors(const road::CorridorSet& corridors,
+                                                    std::string stepName = "SET_CORRIDORS");
+    // The same change as a command, for a step that does more besides -
+    // CORRIDOR NEW makes the layers its objects are shown on in the same
+    // step. Null when `corridors` equals the current set.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    corridorsCommand(const road::CorridorSet& corridors, std::string stepName = "SET_CORRIDORS");
+
     // ---- annotation (docs/annotation.md) ---------------------------------------
     //
     // The scale the plan view draws paper-sized annotation at: text, labels,
@@ -669,6 +714,23 @@ class Document {
     // The generations the last notification reported (surfacePartsChanged).
     std::uint64_t surfacesNotified_ = 0;
     std::uint64_t surfaceStylesNotified_ = 0;
+    // ---- road model (src/katana_cad/road/road_document.cpp) ----
+    // The parsed road templates and corridors and the JSON each was parsed
+    // from, shared by an undo step as the sheet set's are.
+    struct RoadTemplateCache;
+    struct CorridorCache;
+    mutable std::shared_ptr<const RoadTemplateCache> roadTemplateCache_;
+    mutable std::shared_ptr<const CorridorCache> corridorCache_;
+    // The road model's metadata keys as the last command's notification saw
+    // them: what roadModelChanged compares, to report RoadModel.
+    std::vector<std::optional<std::string>> roadModelSeen_;
+    [[nodiscard]] std::uint32_t roadModelChanged();
+    // The road model's 3D objects, made once per change of what they are
+    // made from (bim::bimModel, src/katana_cad/bim/bim_object.cpp).
+    friend class bim::BimCacheAccess;
+    struct BimCache;
+    mutable std::shared_ptr<BimCache> bimCache_;
+    // ---- end road model ----
 };
 
 } // namespace katana::cad

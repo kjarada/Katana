@@ -12,6 +12,7 @@
 #include "katana/cad/project_crs.hpp"
 #include "katana/cad/property_outline.hpp"
 #include "katana/cad/purge.hpp"
+#include "katana/cad/road/road_verbs.hpp" // road model (docs/road_design.md)
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_code_verbs.hpp"
 #include "katana/cad/survey_coding.hpp"
@@ -597,6 +598,11 @@ RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=v
           | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
           barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
           along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
+Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE ...  road
+          templates: lanes, shoulders, kerbs, footpaths, verges, medians, drains, batters and
+          their pavement courses; CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] | REGION |
+          SUPERELEVATION | BUILD | SECTION | STRINGS | SURFACE | QUANTITIES [csv=]; ROADMODEL
+          [LIST] | JSON | PROBLEMS | INFO id   the 3D road model (HELP CORRIDOR)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
           [CHORD length] [PREVIEW]   joins coded survey points into lines by the survey
           codes and their control codes, one undo step; no scope word: the selection, else
@@ -875,6 +881,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && road::isRoadObjectVerb(args.front())) {
             return road::roadObjectVerbHelp();
         }
+        // ---- road model (docs/road_design.md) ----
+        if (!args.empty() && road::isRoadVerb(args.front())) {
+            return road::roadVerbHelp();
+        }
         // Asked by either spelling, as the verb is run by either.
         if (!args.empty() && isCustomisationVerb(canonicalVerb(args.front()))) {
             return customisationVerbHelp();
@@ -913,6 +923,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (road::isRoadObjectVerb(verb)) {
         return road::runRoadObjectVerb(document_, *tokens, scopeViews_);
+    }
+    // ---- road model (docs/road_design.md) ----
+    if (road::isRoadVerb(verb)) {
+        return road::runRoadVerb(document_, *tokens);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they

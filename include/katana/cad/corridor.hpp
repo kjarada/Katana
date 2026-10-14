@@ -11,12 +11,13 @@
 // by the end-area method, that is the earthwork quantity - the number an
 // earthworks estimate, a tender and a claim are all built on.
 //
-// THE TEMPLATE IS DELIBERATELY SIMPLE. One carriageway of `halfWidth` each
-// side of the centreline, falling away at `crossfall`, with a cut batter and
-// a fill batter to daylight. Real assemblies carry kerbs, verges, benches and
-// subgrades; those are a later need and belong in a table of their own, not
-// in four more fields here. What this one already answers is the quantity to
-// within the accuracy of the ground model, which is the accuracy anyone has.
+// THE ASSEMBLY IS THE SIMPLE CASE OF A ROAD TEMPLATE. One carriageway of
+// `halfWidth` each side of the centreline, falling away at `crossfall`, with
+// a cut batter and a fill batter to daylight. Kerbs, verges, benches and
+// pavement courses are the road templates' (cad/road/road_template.hpp), and
+// these functions are that one engine (cad/road/road_section.hpp) run on
+// road::templateFromAssembly - kept for the callers that have an assembly,
+// so a quantity from either cannot come to differ.
 //
 // AVERAGE END AREA, and why. The volume between two stations is taken as the
 // mean of their cross-section areas times the distance between them. That is
@@ -103,7 +104,8 @@ corridorSection(const geometry::SolvedAlignment& alignment, const geometry::Solv
                 const Assembly& assembly, const terrain::TinSurface& ground, double station);
 
 // Sections at `interval` along the part of the alignment the profile covers,
-// always including the profile's key stations and both ends of the range, and
+// always including the alignment's and the profile's key stations and both
+// ends of the range (road::sectionStations), and
 // the end-area volumes between them. Fails with InvalidArgument for a
 // non-positive interval or an assembly that corridorSection rejects, and with
 // InvalidGeometry when the alignment and the profile do not overlap at all.

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <functional>
@@ -28,6 +29,7 @@
 
 #include "customisation/style_painter.hpp"
 #include "katana/cad/annotation/leader_presets.hpp"
+#include "katana/cad/bim/bim_view.hpp" // road model
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/document.hpp"
@@ -120,7 +122,9 @@ QColor toQColor(const katana::entity::Color& color)
 bool isShown(const katana::cad::SceneMesh& item)
 {
     return item.visible && item.mesh != nullptr && !item.mesh->empty() &&
-           item.style != katana::cad::SurfaceStyle::Hidden;
+           item.style != katana::cad::SurfaceStyle::Hidden &&
+           // The road model's objects draw their own outlines (drawRoadModel).
+           item.planFootprint;
 }
 
 bool hiddenReference(const PlanFrame& frame, std::uint64_t id)
@@ -505,6 +509,8 @@ class PlanPainter {
     void splatOnPaper(const katana::interop::PointCloudLayer& cloud,
                       const katana::geometry::SplatCloud& splat);
     void drawMeshFootprints();
+    // The road model's plan outlines (road model, docs/road_design.md).
+    void drawRoadModel();
     void drawEntities();
     // The selection on layers this frame hides and the document shows, as
     // ghosts (PlanPaintOptions::selectionGhosts): over the selection's ids
@@ -695,6 +701,7 @@ PlanPaintStats PlanPainter::paint()
     if (options_.meshFootprints) {
         drawMeshFootprints();
     }
+    drawRoadModel(); // road model, beneath the drawing as a footprint is
     if (source_.model != nullptr) {
         drawEntities();
         drawSelectionGhosts();
@@ -1191,6 +1198,57 @@ void PlanPainter::drawMeshFootprints()
         painter_.setBrush(fill);
         painter_.drawPolygon(polygon);
         painter_.setBrush(Qt::NoBrush);
+    }
+}
+
+// ---- road model (docs/road_design.md) ----
+// The road model in plan: each object shown (bim::isShown, with this view's
+// hidden layers) as its outline in its own colour, beneath the drawing, as a
+// mesh's footprint is - the road model is context for what is drawn over it.
+// Earthworks dashed, being the ground's and not the road's. Its pen is a
+// mesh footprint's, on screen and on paper.
+void PlanPainter::drawRoadModel()
+{
+    if (source_.roadModel == nullptr || source_.model == nullptr) {
+        return;
+    }
+    const katana::cad::LayerOverrides& overrides =
+        frame_.layers != nullptr ? *frame_.layers : noOverrides();
+    for (const katana::cad::bim::BimObject& object : source_.roadModel->objects) {
+        if (object.plan.empty() ||
+            !katana::cad::bim::isShown(object, *source_.model, overrides)) {
+            continue;
+        }
+        katana::entity::Color colour = object.colour;
+        if (paper() && options_.plot != nullptr) {
+            colour = cad::paperColour(colour, *options_.plot);
+        }
+        QPen pen(toQColor(colour), markSize(1.0, kMeshOutlinePaperMillimetres));
+        if (object.kind == "earthworks") {
+            pen.setStyle(Qt::DashLine);
+        }
+        painter_.setPen(pen);
+        QColor fill = toQColor(colour);
+        fill.setAlpha(30);
+        for (const katana::geometry::Polyline2& line : object.plan) {
+            const Box2 box = line.boundingBox();
+            if (box.empty() || box.max.x < visible_.min.x || box.min.x > visible_.max.x ||
+                box.max.y < visible_.min.y || box.min.y > visible_.max.y) {
+                continue;
+            }
+            QPolygonF polygon;
+            polygon.reserve(static_cast<int>(line.vertices.size()) + 1);
+            for (const Point2& vertex : line.vertices) {
+                polygon << toScreen(vertex);
+            }
+            if (line.closed) {
+                painter_.setBrush(object.kind == "earthworks" ? QBrush(Qt::NoBrush) : QBrush(fill));
+                painter_.drawPolygon(polygon);
+                painter_.setBrush(Qt::NoBrush);
+            } else {
+                painter_.drawPolyline(polygon);
+            }
+        }
     }
 }
 
@@ -2342,8 +2400,20 @@ PlanSource planSourceOf(const katana::cad::Document& document)
     source.selection = &document.selection();
     source.leaders = std::make_shared<const katana::entity::LeaderContext>(
         katana::cad::annotation::leaderContext(document));
+    if (roadModelShown()) {
+        source.roadModel = katana::cad::bim::bimModel(document); // road model
+    }
     return source;
 }
+
+// ---- road model (docs/road_design.md) ----
+namespace {
+std::atomic<bool> roadModelOn{true};
+}
+
+void setRoadModelShown(bool shown) { roadModelOn.store(shown); }
+
+bool roadModelShown() { return roadModelOn.load(); }
 
 PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source, const PlanFrame& frame,
                          const PlanPaintOptions& options, PlanPaintCache& cache)
@@ -2407,6 +2477,10 @@ Box2 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides
                 bounds.expand(cloud.worldBounds());
             }
         }
+    }
+    // The road model's outlines, as they are drawn (road model).
+    if (source.roadModel != nullptr) {
+        bounds.expand(katana::cad::bim::planBounds(*source.roadModel, *source.model, layers));
     }
     // A mesh is drawn in plan as its footprint, so it is seen and counts. A
     // drawing that is nothing but meshes framed an empty box before.

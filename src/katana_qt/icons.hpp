@@ -281,6 +281,17 @@ enum class Icon {
     // The Surfaces panel: a patch of triangulated ground, one triangle in the
     // accent - a surface picked out of the drawing's.
     SurfacesPanel,
+    // ---- road model (docs/road_design.md) ----
+    // BIM > Road Template Manager: a road's cross-section - the crowned
+    // finished surface in the accent over a course, a kerb at each edge.
+    RoadTemplate,
+    // BIM > Corridors: two kerb lines curving away together, the centreline
+    // dashed in the accent between them.
+    Corridor,
+    // BIM > Show Road Model: a block seen from above a corner, its top face
+    // in the accent - a solid, which is what the road model is made of.
+    RoadModel,
+    // ---- end road model ----
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.

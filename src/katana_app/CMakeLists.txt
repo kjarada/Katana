@@ -2276,3 +2276,8 @@ if(KATANA_BUILD_TESTS)
     include("${CMAKE_CURRENT_SOURCE_DIR}/road_objects_cli.cmake")
 endif()
 # ---- end road objects ----
+# ---- road model (docs/road_design.md) ----
+# The road verbs' cli.* tests, in road_cli.cmake beside this one.
+if(KATANA_BUILD_TESTS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/road_cli.cmake")
+endif()

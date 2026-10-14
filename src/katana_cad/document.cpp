@@ -45,6 +45,8 @@ void Document::rebuildStack()
         // The surfaces and their styles are not tables of the model: a step
         // that changed them says so by their generations.
         std::uint32_t parts = DocumentChange::History | tablesChanged() | surfacePartsChanged();
+        // The road model's definitions (road/road_document.cpp).
+        parts |= roadModelChanged();
         if (!event.changes.empty()) {
             parts |= DocumentChange::Entities;
         }

@@ -35,6 +35,8 @@
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
 #include "katana/cad/road/road_object_verbs.hpp"
+#include "katana/cad/bim/bim_object.hpp" // road model
+#include "katana/cad/road/road_verbs.hpp" // road model
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
@@ -1212,6 +1214,14 @@ constexpr std::array kResources{
              "colours, contours, ramp, bands and stops - and which is the default: what "
              "SURFACESTYLE LIST JSON gives, in the form SURFACESTYLE NEW and SET change.",
              "application/json"},
+    // ---- road model (docs/road_design.md) ----
+    // ROADMODEL JSON: every 3D object of the road model - id, class, layer,
+    // quantities, properties - and what could not be built.
+    Resource{"katana://road-model", "Road model",
+             "The road model's 3D objects - each course, kerb and earthworks solid of every "
+             "corridor and every placed road object - with their IFC class, layer, quantities "
+             "and properties, and the problems that kept anything from being built.",
+             "application/json"},
 #if defined(KATANA_WITH_INTEROP)
     // FORMATS JSON (docs/interop.md, "Formats"), as katana_formats lists it.
     Resource{"katana://formats", "GDAL formats",
@@ -1640,6 +1650,12 @@ std::optional<std::string> Server::handle(std::string_view message)
             } else if (uri == "katana://surface-styles") {
                 // The Document's own form, as SURFACESTYLE LIST JSON gives it.
                 text = katana::cad::surfaceStylesToJson(session_.document().surfaceStyles());
+            } else if (uri == "katana://road-model") {
+                // ROADMODEL JSON, read from the Document as the status is:
+                // the road model is made from the drawing's definitions, and
+                // a line would leave a ROADMODEL in a history nobody typed.
+                text = katana::cad::road::roadModelJson(
+                    *katana::cad::bim::bimModel(session_.document()));
                 mimeType = "application/json";
 #if defined(KATANA_WITH_INTEROP)
             } else if (uri == "katana://formats") {

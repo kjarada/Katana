@@ -29,13 +29,13 @@ struct TriangleMesh {
     std::vector<Point3> vertices;
     std::vector<std::array<std::uint32_t, 3>> faces;
 
-    // Exact, as Vec3's is: the same points in the same order and the same
-    // faces. What lets a value holding a mesh (cad::bim::BimObject) be
-    // compared, and its defaulted == not be deleted.
-    friend bool operator==(const TriangleMesh&, const TriangleMesh&) = default;
-
     [[nodiscard]] std::size_t triangleCount() const { return faces.size(); }
     [[nodiscard]] bool empty() const { return faces.empty(); }
+
+    // Vertex for vertex, face for face: what makes the road model's objects
+    // (cad/bim/bim_object.hpp) comparable, so a model made again that equals
+    // the last is known to.
+    friend bool operator==(const TriangleMesh&, const TriangleMesh&) = default;
 
     // nullopt for an index past the end or a face naming a vertex that does
     // not exist, so a caller that iterates cannot read out of bounds even if

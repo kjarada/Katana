@@ -65,6 +65,7 @@
 #include <QSize>
 #include <QString>
 
+#include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/scene.hpp"
@@ -114,12 +115,23 @@ struct PlanSource {
     // the drawing's surfaces and alignments (cad/annotation/leader_presets.hpp,
     // leaderContext). Null reads none: such a line of a note is dropped.
     std::shared_ptr<const katana::entity::LeaderContext> leaders{};
+    // ---- road model (docs/road_design.md) ----
+    // The road model's objects, each drawn as its plan outline beneath the
+    // drawing (cad/bim/bim_view.hpp has which are shown). Null: none.
+    std::shared_ptr<const katana::cad::bim::BimModel> roadModel;
 };
 
-// The document's drawing, library, index, selection and what its leaders read.
-// The reference data and meshes belong to the window and are the caller's to
-// add.
+// The document's drawing, library, index, selection and what its leaders
+// read, and its road model while it is shown (setRoadModelShown). The
+// reference data and meshes belong to the window and are the caller's to add.
 [[nodiscard]] PlanSource planSourceOf(const katana::cad::Document& document);
+
+// ---- road model (docs/road_design.md) ----
+// Whether planSourceOf hands the road model to the plan views, plots and
+// sheets: BIM > Show Road Model, for the whole session, as View > Thin
+// screen lines is. On until it is switched off.
+void setRoadModelShown(bool shown);
+[[nodiscard]] bool roadModelShown();
 
 // Where, and through what, the drawing is looked at.
 struct PlanFrame {

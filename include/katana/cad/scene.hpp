@@ -81,6 +81,12 @@ struct SceneMesh {
     // takes flatColor, so a partly coloured mesh is still wholly drawn.
     std::vector<katana::render::Rgba> faceColors;
     bool visible = true;
+    // Whether the plan view draws its hull as its footprint. Off for the
+    // road model's objects (bim::sceneMeshes), whose plan outline the plan
+    // view draws instead - a curved course's hull would cover the inside of
+    // the curve - and which the window puts in the 3D views' list with the
+    // imported meshes (docs/road_design.md, "In the views").
+    bool planFootprint = true;
 };
 
 // Where drawing geometry is put in z.

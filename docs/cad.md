@@ -723,10 +723,11 @@ dialog or panel follows"):
 Cut Section Along Alignment... and the corridor commands, when there is no
 alignment (or none with a profile) to use, now name Terrain > Alignment
 Manager and open it - except in a headless run. The Terrain menu is in
-sections - Alignments, Surfaces, Sections, Corridors - and its section and
-corridor items carry object names (`terrainSectionAlongAlignment`,
-`terrainSectionAlongSelection`, `terrainCorridorQuantities`,
-`terrainCorridorSurface`), so `--trigger` reaches them.
+sections - Alignments, Surfaces, Sections, Corridors - and its section items
+carry object names (`terrainSectionAlongAlignment`,
+`terrainSectionAlongSelection`), so `--trigger` reaches them; its Corridors
+section shows the BIM menu's `bimCorridors` and `bimCorridorQuantities`
+(`docs/road_design.md`, "Where the old corridor commands went").
 
 Tested by `tests/cad/test_alignment_report.cpp` (the table worked by hand from
 the circle, `PIS`), `tests/qt_widgets/test_alignment_manager.cpp` (every
@@ -788,15 +789,17 @@ grade. Cut Section Along Alignment... passes the profile through
 `cad::corridorQuantities` (`include/katana/cad/corridor.hpp`) sets a template
 across an alignment at the design elevation at every station, carries its
 edges to the ground by batter slopes, and sums the cut and fill between the
-finished shape and the ground along the alignment. Terrain > Corridor
-Quantities... drives it from a dialog and shows the schedule.
+finished shape and the ground along the alignment.
 
-**The template is deliberately simple.** One carriageway of a half width
-each side, at a crossfall, with a cut batter and a fill batter to daylight.
-Real assemblies carry kerbs, verges, benches and subgrades; they are a later
-need and belong in a table of their own, not in four more fields here. What
-the simple one already answers is the quantity to within the accuracy of the
-ground model, which is the accuracy anyone has.
+**Road templates and corridors are `docs/road_design.md`'s now.** The
+one-carriageway assembly this section describes is the simple case of a road
+template - kerbs, verges, benches, pavement courses and superelevation are
+there - and these functions are that one engine run on
+`road::templateFromAssembly`, their behaviour and their tests unchanged but
+for one thing: their stations include the alignment's key stations as well
+as the profile's. The window reaches corridors through the BIM menu and the
+`CORRIDOR` verbs; what follows is the record of the decisions the engine
+kept.
 
 **Average end area, and why.** The volume between two stations is the mean
 of their cross-section areas times the distance between them. That is the
@@ -844,8 +847,9 @@ method must.
 `cad::corridorSurface` triangulates the template strings of every complete
 section - both daylights, both edges, the centreline - as breaklines, with
 the daylight lines as the boundary so nothing is hulled across the inside of
-a curve. Terrain > Corridor Surface... adds it to the scene like any other
-surface, so the finished design is visible in 3D and in sections. Two
+a curve. `CORRIDOR SURFACE` (`docs/road_design.md`) puts a corridor's into
+the drawing's surfaces like any other, so the finished design is visible in
+3D and in sections. Two
 decisions: sections that cannot reach the ground are left out and the
 strings broken there, and when any are, the boundary is not used (a ring
 with gaps in it is not a ring) and the surface is hull-bounded instead, with
@@ -860,9 +864,10 @@ a straight with a level design both are exact and agree on 2000 m^3 to 1e-6.
 Two implementations that share nothing agreeing on the same number is the
 strongest evidence either can have.
 
-Both commands share `askCorridor`, one dialog returning the solved alignment
-and profile, the ground and the assembly, rather than two copies of eighty
-lines of dialog.
+The window's two corridor commands that asked for an assembly in a modal box
+are gone: their dialog called these functions directly, kept nothing and had
+no verb an agent could run. The BIM menu's dialogs build `CORRIDOR` lines
+instead (`docs/road_design.md`, "Where the old corridor commands went").
 
 ## Parcels
 
