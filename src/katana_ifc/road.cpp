@@ -194,8 +194,8 @@ bool templateDefines(const BaseQuantities& row, std::string_view name, QuantityK
     return listsWord(row.quantities, wanted);
 }
 
-// The lateral parts of a road, "lateral" in IfcRoadPartTypeEnum's own
-// definitions (7.9.2.2), and the one longitudinal part.
+// The parts across a road's section, written LATERAL: most a "lateral part"
+// in IfcRoadPartTypeEnum's own definitions (7.9.2.2), the rest beside one.
 constexpr std::string_view kLateralParts[] = {
     "CARRIAGEWAY", "TRAFFICLANE", "SHOULDER",       "HARDSHOULDER",  "SOFTSHOULDER",
     "SIDEWALK",    "ROADSIDE",    "ROADSIDEPART",   "CENTRALRESERVE", "ROADWAYPLATEAU"};
