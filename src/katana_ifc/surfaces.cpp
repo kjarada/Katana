@@ -7,6 +7,7 @@
 // validation service's IFC431 lists it as out of that view's scope), and a
 // face set is what every viewer draws.
 
+#include <map>
 #include <string>
 
 #include "katana/terrain/tin_surface.hpp"
@@ -14,8 +15,10 @@
 
 namespace katana::ifc::detail {
 
-void exportSurfaces(Builder& builder, const std::vector<SurfaceInput>& surfaces)
+std::map<std::string, Id> exportSurfaces(Builder& builder,
+                                         const std::vector<SurfaceInput>& surfaces)
 {
+    std::map<std::string, Id> written;
     for (const SurfaceInput& input : surfaces) {
         const terrain::TinSurface* surface = input.surface;
         if (surface == nullptr || surface->triangleCount() == 0) {
@@ -54,7 +57,9 @@ void exportSurfaces(Builder& builder, const std::vector<SurfaceInput>& surfaces)
         list.integer("Triangles", static_cast<long long>(surface->triangleCount()));
         builder.defines(key, builder.propertySet(key, "Katana_Surface", list), {element});
         ++builder.report().surfaces;
+        written.emplace(input.name, element);
     }
+    return written;
 }
 
 } // namespace katana::ifc::detail

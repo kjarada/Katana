@@ -3736,7 +3736,7 @@ Browse, headless, says to type the path instead of opening a box.
 **The dialogs write lines, and do nothing else** - the pattern of the
 Subsurface Utilities dialog below. Every choice either offers is a word of the
 verb: `EXPORT <file.ifc> ... [NOENTITIES] [SELECTED] [NOALIGNMENTS]
-[NOSURFACES] [PREVIEW]` and `IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS]
+[NOSURFACES] [NOROADMODEL] [PREVIEW]` and `IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS]
 [NOELEMENTS] [NOSURFACES] [TOLERANCE <m>] [TAKECRS | KEEPCRS]`, with `INFO`
 and `IFC RULES` (`docs/ifc.md`, "Using it"). A dialog writes the line its
 fields mean (`ifc::formatExportLine`, `ifc::formatImportLine`), shows it as it

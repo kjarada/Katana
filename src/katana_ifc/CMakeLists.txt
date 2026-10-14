@@ -6,7 +6,9 @@
 # Deliberately NOT part of katana_interop, for the reason the DXF and .12da
 # modules are not: writing IFC needs nothing but the domain model, so this
 # builds with -DKATANA_BUILD_IO=OFF. It sees survey for the AS 5488 grading
-# of the services it writes, and terrain for the surfaces.
+# of the services it writes, and terrain for the surfaces. The road model
+# (road.cpp) comes in as plain data (RoadModelInput), since this may not see
+# katana_cad, where it is made.
 add_library(katana_ifc STATIC
     step.cpp
     step_file.cpp
@@ -16,6 +18,7 @@ add_library(katana_ifc STATIC
     utilities.cpp
     drawing.cpp
     surfaces.cpp
+    road.cpp
     export.cpp
     step_reader.cpp
     import_alignment.cpp

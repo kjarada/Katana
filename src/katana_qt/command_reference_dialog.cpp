@@ -160,7 +160,7 @@ Info      INFO <file>   describe a data file through GDAL or PDAL (INFO id: an e
 IFC       IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]
           [TOLERANCE <m>] [TAKECRS | KEEPCRS] | EXPORT <file.ifc> [UTILITIES <schedule.csv>]
           [SCHEMA <schema.csv>] [RULES <rules.csv>] [SPACING <m>] [NODRAWING] [NOENTITIES]
-          [SELECTED] [NOALIGNMENTS] [NOSURFACES] [PREVIEW] | INFO <file.ifc> |
+          [SELECTED] [NOALIGNMENTS] [NOSURFACES] [NOROADMODEL] [PREVIEW] | INFO <file.ifc> |
           IFC RULES <file.csv>   IFC 4.3 (File > Import IFC, Export IFC; docs/ifc.md)
 Refs      REFS   the reference layers: rasters and point clouds
 COPC      COPC <source> <destination.copc.laz>   convert a point cloud to COPC
