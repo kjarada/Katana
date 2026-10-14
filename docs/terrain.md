@@ -1009,6 +1009,17 @@ From Point Cloud on `samples/gis/survey_scan.las` (29 512 ground points)
 triangulated in 1.28 s in the background, and the event loop paused at most
 24 ms, the Apply step included.
 
+**Not done: the ratio test is fragile in Release on a fast machine.**
+`ATriangulationRunAsAJobLeavesTheEventLoopRunning` holds the longest pause
+under half the work's time, and the same 60 000 points take far less than
+the Debug figure above in a Release build: 89 ms on the macOS release runner
+(2026-10-14), where one 52 ms pause of the loop, with the whole suite running
+in parallel beside it, failed the 44 ms bound. It failed the same way on the
+owner's machine under a full parallel suite (2026-10-06) and passes alone. A
+pause that long is the loaded machine's, not the job's; the fix is work long
+enough that the ratio stands above it (more points, or the work repeated to a
+floor of time), which is not made yet.
+
 On real data (Release, headless, three runs), Surface From Drawing on the
 owner's *Test 4 without tin* archive (27 886 entities, giving 197 287 vertices
 and 394 561 triangles) triangulated in 2.27-2.77 s on the job. Before, the GUI
