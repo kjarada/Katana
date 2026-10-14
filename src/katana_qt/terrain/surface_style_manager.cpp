@@ -29,6 +29,7 @@
 
 #include "command_word.hpp"
 #include "customisation/document_watcher.hpp"
+#include "katana/cad/colour_lookup.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/terrain/surface_colouring.hpp"
 #include "katana/cad/terrain/surface_plan.hpp"
@@ -47,6 +48,7 @@ using cad::SurfaceStyle;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
+using katana::cad::Document;
 using katana::entity::Color;
 
 namespace {
@@ -240,15 +242,22 @@ class SurfaceStylePreview final : public QWidget {
     cad::SurfacePlanStats stats_{};
 };
 
-// A colour field: #RRGGBB as typed, read through Color::fromHex.
-Result<Color> readColour(const QLineEdit& field, const QString& what)
+// A colour field: #RRGGBB, or a colour name the drawing knows - its
+// customisation's, then the standard names (cad::resolveColour), as the verbs
+// take it. The line always carries the colour as #RRGGBB.
+Result<Color> readColour(const QLineEdit& field, const QString& what, const Document* document)
 {
-    auto colour = Color::fromHex(field.text().trimmed().toStdString());
-    if (!colour) {
-        return makeError(ErrorCode::ParseFailure, what.toStdString() + " is #RRGGBB",
-                         field.text().toStdString());
+    const std::string text = field.text().trimmed().toStdString();
+    if (auto colour = Color::fromHex(text)) {
+        return *colour;
     }
-    return *colour;
+    if (document != nullptr) {
+        if (const auto named = katana::cad::resolveColour(*document, text)) {
+            return *named;
+        }
+    }
+    return makeError(ErrorCode::ParseFailure, what.toStdString() + " is #RRGGBB or a colour name",
+                     field.text().toStdString());
 }
 
 Result<double> readReal(const QLineEdit& field, const QString& what)
@@ -865,7 +874,7 @@ struct SurfaceStyleManagerDialog::Impl {
             {flatColour, &style.flatColour},           {minorColour, &style.contours.minorColour},
             {majorColour, &style.contours.majorColour}};
         for (const auto& [field, colour] : colours) {
-            auto read = readColour(*field, field->toolTip());
+            auto read = readColour(*field, field->toolTip(), alive() ? &document() : nullptr);
             if (!read) {
                 return read.error();
             }

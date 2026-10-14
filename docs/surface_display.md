@@ -277,9 +277,10 @@ a person would type and hands it to the window's executor (`docs/desktop.md`,
 | Apply | `SURFACESTYLE SET "chosen" key=value ...` - only the fields the form changed, in the verb's key order (`qt::surfaceStyleSetWords`) |
 | In This Style | `SURFACE STYLE "surface" "chosen"` |
 
-The form is a buffer, previewed as it is; a field that does not read (an
-interval that is no number, a colour that is not `#RRGGBB`) stops Apply and
-the line label says why. A reload - a `SURFACESTYLE` typed, an undo - keeps
+The form is a buffer, previewed as it is; a colour field takes `#RRGGBB` or
+a colour name the drawing knows (`cad::resolveColour`), and the line always
+carries `#RRGGBB`. A field that does not read (an interval that is no number,
+a colour that is neither) stops Apply and the line label says why. A reload - a `SURFACESTYLE` typed, an undo - keeps
 the form's unapplied edits while the style they were made to is unchanged.
 Every widget's object name is in the dialog's header; the Surfaces panel's
 Edit Styles... button triggers the same action.
