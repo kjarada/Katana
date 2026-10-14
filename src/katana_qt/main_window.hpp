@@ -87,6 +87,8 @@ class LayerManagerDialog;
 class PropertyTreePanel;
 class DatasetInfoDialog;
 class DrawingSummaryDialog;
+// Surface display (docs/surface_display.md).
+class SurfaceStyleManagerDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -408,6 +410,19 @@ class MainWindow final : public QMainWindow {
                  katana::render::Rgba color, std::vector<katana::render::Rgba> faceColors);
     // Terrain > Alignment Manager: built on first use and kept, non-modal.
     void showAlignmentManager();
+    // ---- surface display (docs/surface_display.md; terrain/main_window_surface_display.cpp)
+    // Terrain > Surface Styles... (terrainSurfaceStyles), made once and put in
+    // the Terrain menu and toolbar by the caller; it also has the 3D views
+    // follow an edit of the styles.
+    [[nodiscard]] QAction* buildSurfaceDisplay();
+    // The style manager (terrain/surface_style_manager.hpp): built on first
+    // use and kept, non-modal.
+    void showSurfaceStyleManager();
+    // Each of `items` drawn in its surface's display style
+    // (cad::applySurfaceDisplay) and shown as the drawing shows the surface.
+    void styleSceneSurfaces(std::vector<katana::cad::SceneSurface>& items) const;
+    // sceneSurfaces_ styled again, and the 3D views told: a style edited.
+    void restyleSceneSurfaces();
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
     void corridorQuantities();
@@ -712,6 +727,13 @@ class MainWindow final : public QMainWindow {
     // with its other children.
     QPointer<IfcImportDialog> ifcImport_;
     QPointer<IfcExportDialog> ifcExport_;
+    // Surface display (docs/surface_display.md): Terrain > Surface Styles,
+    // kept between uses; it holds the Document through a DocumentWatcher,
+    // which is safe should the Document go first. The listener that restyles
+    // the 3D views, and whether its queued restyle is waiting.
+    QPointer<SurfaceStyleManagerDialog> surfaceStyleManager_;
+    katana::cad::Document::ListenerHandle surfaceStylesListener_;
+    bool surfaceRestylePending_ = false;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for

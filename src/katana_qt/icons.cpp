@@ -385,6 +385,8 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        // Surface display
+        Icon::SurfaceStyles,
         Icon::Download,
     };
     return icons;
@@ -1334,6 +1336,18 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
         break;
+    case Icon::SurfaceStyles: {
+        // The band's corners lie on the outline's sides, to a twentieth of a
+        // unit: the left side x = 3 + 6 (17 - y) / 11 is 5.51 at y = 12.4 and
+        // 7.47 at 8.8, the right x = 21 - 4 (y - 8) / 12 is 20.3 at 10.1 and
+        // 19.1 at 13.7 - so the fill stops at the outline at every size.
+        ink.fill(polyline({{5.5, 12.4}, {7.5, 8.8}, {20.3, 10.1}, {19.1, 13.7}}, true), true, 120);
+        ink.stroke(polyline({{3, 17}, {9, 6}, {21, 8}, {17, 20}}, true));
+        ink.line(9, 6, 17, 20, false, 1.1);
+        ink.line(5.5, 12.4, 19.1, 13.7, true, 1.1);
+        ink.line(7.5, 8.8, 20.3, 10.1, true, 1.1);
+        break;
+    }
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,
         // so that at 16 px the shaft does not cross a third line at its base.

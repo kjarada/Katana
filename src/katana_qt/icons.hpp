@@ -238,6 +238,11 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // ---- surface display (docs/surface_display.md) ----
+    // Terrain > Surface Styles: a patch of ground cut into bands of height,
+    // the middle band filled in the accent - what a style does to a
+    // surface's faces - under its outline and one triangle's edge.
+    SurfaceStyles,
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.

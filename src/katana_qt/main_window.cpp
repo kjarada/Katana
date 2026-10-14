@@ -1050,6 +1050,9 @@ void MainWindow::buildActions()
     terrainMenu->addAction(alignmentManager);
     terrainMenu->addSection("Surfaces");
     terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
+    // Surface display (docs/surface_display.md): Terrain > Surface Styles...
+    QAction* surfaceStyles = buildSurfaceDisplay();
+    terrainMenu->addAction(surfaceStyles);
     terrainMenu->addSection("Sections");
     terrainMenu->addActions({selectionSection, alignmentSection});
     terrainMenu->addSection("Corridors");
@@ -1059,6 +1062,7 @@ void MainWindow::buildActions()
     terrainBar->addAction(alignmentManager);
     terrainBar->addSeparator();
     terrainBar->addActions({cloudSurface, rasterSurface, drawingSurface});
+    terrainBar->addAction(surfaceStyles); // surface display
     terrainBar->addSeparator();
     terrainBar->addActions({selectionSection, alignmentSection});
     terrainBar->addSeparator();
@@ -5085,6 +5089,7 @@ void MainWindow::syncSceneSurfaces()
         item.surface = named.surface.get();
         next.push_back(std::move(item));
     }
+    styleSceneSurfaces(next); // surface display: each in its style
     sceneSurfaces_ = std::move(next);
     sceneSurfacesRevision_ = surfaceStore_.revision();
     // The views hold a pointer to the VECTOR, not to its elements, so this is a
