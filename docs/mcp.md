@@ -19,9 +19,10 @@ It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a
 client instead of typed. Every tool that changes anything is a shape over the
 command line's verbs, so there is one implementation of each, pinned by the
 `cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
-not. Every change is one undoable command, as it is when typed. (Three tools
-run no line and change nothing: `katana_status` and `katana_customisation`
-read the Document for what no reply holds as structure, and
+not. Every change is one undoable command, as it is when typed. (Four tools
+run no line and change nothing: `katana_status`, `katana_customisation` and
+`katana_road_objects` read the Document for what no reply holds as structure,
+and
 `katana_check_update` asks whether a newer Katana has been released -
 "Updates", below.)
 
@@ -83,6 +84,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
+| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | nothing: read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
 | `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`src/katana_app/update_verbs.hpp`), for the surface `UpdateSurface::Mcp` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -399,6 +401,24 @@ loads the file back and reads the rule with the tool. `katana_run_commands`'
 description names the lines, and `katana_customisation`'s says that it only
 reads and where an edit goes
 (`McpServer.TheToolListSaysHowACustomisationIsLoadedWrittenAndRead`).
+
+## Road objects
+
+The barriers, guide posts, signs, light poles, culverts, walls, fences and
+line markings of `docs/road_objects.md` are placed and edited by the
+`ROADOBJECT` lines `katana_run_commands` runs (`ROADOBJECT KINDS <kind>`
+lists a kind's keys, units, ranges and defaults; `HELP ROADOBJECT` every
+word). `katana_road_objects` reads them back as structured data, from the
+Document, so asking leaves no line in the history: `objects` holds each
+definition as the drawing keeps it (`id`, `kind`, `placement`, the
+`parameters` given) with `made` - the solids made of it, each with `id`,
+`ifc_class`, `predefined_type`, `layer`, `material`, `triangles`, `closed`
+and `quantities` by their IFC names (`Length`, `Height`, `Count`,
+`GrossArea`, `GrossVolume` ...) - and its `problems`; `problems` holds every
+object's, each with its `source`. A tool rather than a resource, so an agent
+is told of it in the tool list it reads first.
+`McpServer.TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems`
+places a barrier, reads it, deletes its alignment and reads the problem.
 
 ## Geoprocessing tools
 

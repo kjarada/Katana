@@ -628,6 +628,7 @@ void MainWindow::buildActions()
     QMenu* formatMenu = topMenu("F&ormat", "formatMenu");
     QMenu* surveyMenu = topMenu("&Survey", "surveyMenu");
     QMenu* terrainMenu = topMenu("&Terrain", "terrainMenu");
+    QMenu* bimMenu = topMenu("&BIM", "bimMenu");
     QMenu* gisMenu = topMenu("&GIS", "gisMenu");
     QMenu* helpMenu = topMenu("&Help", "helpMenu");
 
@@ -1090,6 +1091,20 @@ void MainWindow::buildActions()
     terrainBar->addSeparator();
     terrainBar->addAction(volumes);
     // ---- end of volumes ----
+    QToolBar* bimBar = makeToolBar("BIM", Qt::TopToolBarArea);
+
+    // ---- road objects (docs/road_objects.md): BIM > Road Objects, from its workbench --------
+    RoadObjectServices roadObjectServices;
+    roadObjectServices.document = &document_;
+    roadObjectServices.views = views_;
+    roadObjectServices.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                           const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    roadObjectServices.run = commandRunner();
+    roadObjects_ = std::make_unique<RoadObjectWorkbench>(*this, std::move(roadObjectServices),
+                                                         *bimMenu, *bimBar);
+    // ---- end road objects ----
 
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(*gisMenu, exportAction);

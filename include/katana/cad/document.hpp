@@ -37,6 +37,10 @@
 namespace katana::cad::plotting {
 struct SheetSet;
 }
+// Road objects (docs/road_objects.md): see Document::roadObjects.
+namespace katana::cad::road {
+struct RoadObjectSet;
+}
 
 namespace katana::cad {
 
@@ -499,6 +503,27 @@ class Document {
     // Counts every change to the job list, for a panel that lists the jobs.
     [[nodiscard]] std::uint64_t surveyJobsGeneration() const { return surveyJobsGeneration_; }
 
+    // ---- road objects (docs/road_objects.md) ------------------------------------
+    //
+    // The objects placed along an alignment or a line - barriers, guide
+    // posts, signs, light poles, culverts, walls, fences, line markings
+    // (cad/road/road_objects.hpp) - kept as versioned JSON under the metadata
+    // key "road_objects", the sheets' pattern: carried by the storage layer
+    // as a key it does not read, parsed once per change. Their 3D objects are
+    // made from them every time (bim::placedObjects). An empty set when there
+    // are none or they cannot be read; roadObjectsStatus() then says why, and
+    // setRoadObjects refuses to overwrite objects a newer Katana wrote.
+    // Kept in src/katana_cad/road/road_object_store.cpp.
+    [[nodiscard]] const road::RoadObjectSet& roadObjects() const;
+    [[nodiscard]] katana::core::Status roadObjectsStatus() const;
+    // Replaces the set as ONE undoable step named `stepName`, which also
+    // makes any layer an object names that the drawing lacks; the step, its
+    // undo and its redo are reported as DocumentChange::RoadModel, as every
+    // change of a road-model key is. A set equal to the current one records
+    // nothing.
+    [[nodiscard]] katana::core::Status setRoadObjects(const road::RoadObjectSet& objects,
+                                                      std::string stepName = "SET_ROAD_OBJECTS");
+
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
     // The registration lasts as long as the handle does - keep it as a member
@@ -585,6 +610,10 @@ class Document {
     // a pointer instead of parsing the set again.
     struct SheetCache;
     mutable std::shared_ptr<const SheetCache> sheetCache_;
+    // The parsed road objects and their JSON (road/road_object_store.cpp),
+    // shared by the undo steps as the sheet cache is.
+    struct RoadObjectCache;
+    mutable std::shared_ptr<const RoadObjectCache> roadObjectCache_;
     std::vector<katana::storage::SurveyJob> surveyJobs_;
     std::uint64_t surveyJobsGeneration_ = 0;
     // The surfaces and their display styles (surfaces(), surfaceStyles()).

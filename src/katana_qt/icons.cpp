@@ -11,6 +11,8 @@
 #include <cmath>
 
 #include "theme.hpp"
+// Road objects (docs/road_objects.md): their icons are painted there.
+#include "bim/road_object_icons.hpp"
 
 namespace katana::qt {
 
@@ -387,6 +389,13 @@ const std::vector<Icon>& allIcons()
         Icon::Settings,     Icon::SurveyLinework,
         // volumes
         Icon::Volumes,      Icon::CutFillMap,
+        // ---- road objects (docs/road_objects.md) ----
+        Icon::RoadBarrier,  Icon::RoadGuidePosts,
+        Icon::RoadSign,     Icon::RoadLightPole,
+        Icon::RoadCulvert,  Icon::RoadWall,
+        Icon::RoadFence,    Icon::RoadLineMarking,
+        Icon::RoadObjects,
+        // ---- end road objects ----
         Icon::Download,
     };
     return icons;
@@ -1369,6 +1378,19 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         break;
     }
     // ---- end of volumes ----
+    // ---- road objects (docs/road_objects.md): bim/road_object_icons.cpp ----
+    case Icon::RoadBarrier:
+    case Icon::RoadGuidePosts:
+    case Icon::RoadSign:
+    case Icon::RoadLightPole:
+    case Icon::RoadCulvert:
+    case Icon::RoadWall:
+    case Icon::RoadFence:
+    case Icon::RoadLineMarking:
+    case Icon::RoadObjects:
+        (void)paintRoadObjectIcon(which, painter, neutral, accent);
+        break;
+    // ---- end road objects ----
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,
         // so that at 16 px the shaft does not cross a third line at its base.

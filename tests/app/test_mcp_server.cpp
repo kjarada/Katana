@@ -2612,3 +2612,51 @@ TEST_F(McpServer, AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool)
 }
 #endif
 // ---- end of volumes ----
+// ---- road objects (docs/road_objects.md) ----------------------------------------------------
+//
+// katana_road_objects: the road objects as structured data, read from the
+// Document. The barrier is the cad tests' own: 20 m along a straight
+// alignment, so its length is 20 by hand.
+TEST_F(McpServer, TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    Json listed;
+    for (const Json& tool : tools) {
+        if (tool["name"] == "katana_road_objects") {
+            listed = tool;
+        }
+    }
+    ASSERT_TRUE(listed.is_object()) << "katana_road_objects is not listed";
+    EXPECT_NE(listed["description"].get<std::string>().find("ROADOBJECT ADD"), std::string::npos);
+    EXPECT_EQ(listed["annotations"]["readOnlyHint"], true);
+
+    const Json placed = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"ALIGN NEW Main 0,0 100,0", "ALIGN DESIGN Main 0,10 100,10",
+               "ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4"}}});
+    ASSERT_FALSE(placed["isError"].get<bool>()) << textOf(placed);
+    const Json result = call("katana_road_objects");
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& report = result["structuredContent"];
+    ASSERT_EQ(report["objects"].size(), 1U) << report.dump();
+    const Json& barrier = report["objects"][0];
+    EXPECT_EQ(barrier["id"], "barrier-1");
+    EXPECT_EQ(barrier["kind"], "barrier");
+    EXPECT_EQ(barrier["placement"]["alignment"], "Main");
+    ASSERT_EQ(barrier["made"].size(), 1U);
+    EXPECT_EQ(barrier["made"][0]["ifc_class"], "IfcRailing");
+    EXPECT_EQ(barrier["made"][0]["closed"], true);
+    EXPECT_NEAR(barrier["made"][0]["quantities"]["Length"].get<double>(), 20.0, 1e-9);
+    EXPECT_TRUE(report["problems"].empty());
+
+    // With its alignment gone the barrier is made of nothing, and says why.
+    (void)call("katana_run_commands", Json{{"commands", {"ALIGN DELETE Main"}}});
+    const Json after = call("katana_road_objects")["structuredContent"];
+    EXPECT_TRUE(after["objects"][0]["made"].empty());
+    ASSERT_EQ(after["problems"].size(), 1U);
+    EXPECT_NE(after["problems"][0]["message"].get<std::string>().find("does not exist"),
+              std::string::npos);
+}
+// ---- end road objects ----

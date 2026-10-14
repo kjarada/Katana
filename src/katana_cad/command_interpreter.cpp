@@ -19,6 +19,8 @@
 #include "katana/cad/utilities/utility_verbs.hpp"
 // volumes: VOLUME, SURFACE DIFFERENCE and ENVELOPE (docs/volumes.md).
 #include "katana/cad/terrain/volume_verbs.hpp"
+// Road objects (docs/road_objects.md): the ROADOBJECT family.
+#include "katana/cad/road/road_object_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -587,6 +589,10 @@ Volumes   VOLUME SURFACES|DATUM|STOCKPILE|SECTIONS|GRID ...   cut and fill betwe
           drawing's surfaces, to a level, of a stockpile, along an alignment or on a grid,
           inside polygons; SURFACE DIFFERENCE|ENVELOPE ... a cut/fill map or envelope as a
           new surface (HELP VOLUME)
+RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=value ...]
+          | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
+          barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
+          along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
           [CHORD length] [PREVIEW]   joins coded survey points into lines by the survey
           codes and their control codes, one undo step; no scope word: the selection, else
@@ -853,6 +859,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && katana::core::equalsIgnoringCase(args.front(), "VOLUME")) {
             return volumeVerbHelp();
         }
+        if (!args.empty() && road::isRoadObjectVerb(args.front())) {
+            return road::roadObjectVerbHelp();
+        }
         // Asked by either spelling, as the verb is run by either.
         if (!args.empty() && isCustomisationVerb(canonicalVerb(args.front()))) {
             return customisationVerbHelp();
@@ -877,6 +886,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     // volumes: VOLUME ..., SURFACE DIFFERENCE and SURFACE ENVELOPE.
     if (isVolumeVerb(verb, args)) {
         return runVolumeVerb(document_, *tokens, scopeViews_);
+    }
+    if (road::isRoadObjectVerb(verb)) {
+        return road::runRoadObjectVerb(document_, *tokens, scopeViews_);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they
