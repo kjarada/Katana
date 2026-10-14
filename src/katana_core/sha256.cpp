@@ -9,12 +9,24 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdio>
 #include <cstring>
-#include <fstream>
+#include <memory>
 #include <system_error>
 #include <vector>
 
 #include "katana/core/path_text.hpp"
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <io.h>
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
 
 namespace katana::core {
 
@@ -43,6 +55,34 @@ constexpr std::size_t kLengthOffset = 56; // the last 8 bytes of the final block
 // How much of a file is read at once. Big enough that the stream's own
 // per-call cost is lost in the hashing, small enough to sit in cache.
 constexpr std::size_t kFileChunk = 256 * 1024;
+
+// A file opened by the C library, closed when it goes out of scope.
+struct FileCloser {
+    void operator()(std::FILE* file) const { std::fclose(file); }
+};
+using CFile = std::unique_ptr<std::FILE, FileCloser>;
+
+CFile openForReading(const std::filesystem::path& path)
+{
+#if defined(_WIN32)
+    return CFile(_wfopen(path.c_str(), L"rb"));
+#else
+    return CFile(std::fopen(path.c_str(), "rb"));
+#endif
+}
+
+// What the system says the OPEN file is: a file on a disk, and not a device
+// or a pipe that the name happened to open.
+bool isRegularFile(std::FILE* file)
+{
+#if defined(_WIN32)
+    const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(file)));
+    return handle != INVALID_HANDLE_VALUE && GetFileType(handle) == FILE_TYPE_DISK;
+#else
+    struct stat info {};
+    return fstat(fileno(file), &info) == 0 && S_ISREG(info.st_mode);
+#endif
+}
 
 // 6.2.2: one block through the compression function. The message is read as
 // big-endian words byte by byte, so the host's byte order does not matter.
@@ -201,28 +241,50 @@ Result<std::string> sha256FileHex(const std::filesystem::path& path)
     // /dev/null): either would pass for the digest of an empty file. A pipe or
     // the console would block the open or the read for good. A path that does
     // not exist is left to the open below, which says so.
-    std::error_code unknown;
-    const std::filesystem::file_status status = std::filesystem::status(path, unknown);
-    if (std::filesystem::exists(status) && !std::filesystem::is_regular_file(status)) {
+    //
+    // Asked twice. Before the open, so that a FIFO is never opened: opening one
+    // to read waits for a writer. And of the open file, which is the answer
+    // that holds: libc++'s std::filesystem::status fails on NUL with
+    // ERROR_INVALID_PARAMETER and so calls it absent, and the device then
+    // opens (measured with clang 22 and libc++ on Windows, the library of the
+    // Windows ARM64 build, 2026-10-14).
+    const auto notRegular = [&path] {
         return makeError(ErrorCode::NotFound,
                          "the file cannot be opened: it is not a regular file (a directory, "
                          "a device or a pipe)",
                          pathToUtf8(path));
+    };
+    std::error_code unknown;
+    const std::filesystem::file_status status = std::filesystem::status(path, unknown);
+    if (std::filesystem::exists(status) && !std::filesystem::is_regular_file(status)) {
+        return notRegular();
     }
-    std::ifstream in(path, std::ios::binary);
+    // Read through the C library, not a stream: a read that fails part way
+    // (another handle's lock, a disk that goes away) leaves libc++'s ifstream
+    // exactly as the end of the file does, eofbit and failbit and not badbit,
+    // while fread sets the file's error indicator and not its end-of-file one
+    // (measured as above). libstdc++'s ifstream told the two apart; the C
+    // library does on every platform.
+    const CFile in = openForReading(path);
     if (!in) {
         return makeError(ErrorCode::NotFound, "the file cannot be opened", pathToUtf8(path));
     }
+    if (!isRegularFile(in.get())) {
+        return notRegular();
+    }
     Sha256 hash;
     std::vector<char> chunk(kFileChunk);
-    while (in) {
-        in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
-        hash.update(std::string_view(chunk.data(), static_cast<std::size_t>(in.gcount())));
+    for (;;) {
+        const std::size_t got = std::fread(chunk.data(), 1, chunk.size(), in.get());
+        hash.update(std::string_view(chunk.data(), got));
+        if (got < chunk.size()) {
+            break;
+        }
     }
-    // The last, short read sets eofbit with failbit; anything else that
-    // stopped the loop is a read that failed part way, and a digest of the
-    // part read must not pass for the digest of the file.
-    if (in.bad() || !in.eof()) {
+    // A short read is the end of the file or a failure, and only the error
+    // indicator says which: a digest of the part read must not pass for the
+    // digest of the file.
+    if (std::ferror(in.get()) != 0) {
         return makeError(ErrorCode::FileImportFailure, "the file cannot be read", pathToUtf8(path));
     }
     return hash.finishHex();
