@@ -409,10 +409,12 @@ Bands, Cut Fill and Outline (`builtInSurfaceStyles`; how each draws is
 `surface_styles` as versioned JSON (`surfaceStylesToJson`), the sheets'
 arrangement, so they need no schema change.
 
-- **Written by every save, empty for the built-ins.** The metadata table is
-  never emptied (`ProjectStore::save` keeps a newer build's keys), so a key
-  the Document stopped writing would come back at the next open; an empty
-  value overwrites the row a custom set left.
+- **Written by every save, empty for the built-ins.** An empty value is
+  what a project with the built-ins holds. (It was also how the key avoided
+  coming back from an earlier save when the Document stopped writing it -
+  the metadata table was only ever REPLACEd into. A save now deletes a key
+  of the drawing's own it no longer writes: `kDrawingMetadataKeys`,
+  `docs/model.md`, "Metadata a newer build wrote".)
 - **The Document's, not the metadata's.** The key is taken out of the
   metadata at an open and written into what a save writes, so
   `Document::metadata` never carries it and `setMetadata` cannot overwrite
@@ -475,14 +477,6 @@ column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
 
 ### Not done
 
-- **A key the Document stops writing comes back.** The metadata table is
-  never emptied, so the sheets (`sheets`) and the annotation scale
-  (`annotation_scale`), which the Document stores as no key at all when they
-  are back at their defaults, come back from the previous save when the
-  project is opened again. `surface_styles` avoids it by always being
-  written; the other two keys are their areas' to fix (`docs/plotting.md`,
-  `docs/annotation.md`), in the same way or by a save that removes the keys
-  the Document owns.
 - **STATUS does not count the surfaces**, nor does katana_status: an agent
   asks katana_terrain_list.
 - **A surface has no layer.** It is shown and hidden by SURFACE SHOW and HIDE

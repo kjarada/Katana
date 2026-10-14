@@ -248,7 +248,16 @@ empty. A key this build does not read is carried in
 `ProjectMetadata::unknownKeys` on load and written back as it was, and `save`
 writes the keys it knows with `INSERT OR REPLACE` - so opening and saving a
 project in an OLDER build no longer strips what a newer one recorded, and
-Save As keeps it too. `save` refuses an unknown key that names a field this
+Save As keeps it too. The drawing keeps data of its own the same way, as text
+storage does not read - the sheets, the annotation scale, the surface styles,
+the road templates, corridors and road objects - and those keys are listed in
+`kDrawingMetadataKeys`: one the drawing no longer writes was removed by this
+build, and `save` deletes its row. Only REPLACEing let an emptied sheet set
+or a reset annotation scale come back from the last save when the project
+was opened again
+(`ProjectStoreRoundTrip.AKeyOfTheDrawingsOwnThatItStopsWritingIsGoneAfterTheNextSave`).
+A module that adds such a key adds it to that list; a key in neither list is
+a newer build's and is never deleted. `save` refuses an unknown key that names a field this
 build writes itself, rather than let it overwrite the field. The keys this
 build reads are listed once, in `kMetadataKeys` (`project_store.cpp`); a key
 added to that list and not to the writer would be read back as unknown, or

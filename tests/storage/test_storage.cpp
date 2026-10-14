@@ -1688,6 +1688,35 @@ TEST_F(ProjectStoreRoundTrip, AMetadataKeyANewerBuildWroteSurvivesOpenSaveSave)
     EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 11u);
 }
 
+// The regression: a sheet set emptied (the drawing stops writing `sheets`)
+// came back from the previous save when the project was opened again,
+// because a save only REPLACEd rows into the table. A key of the drawing's
+// own that it no longer writes is deleted; a newer build's is still kept.
+TEST_F(ProjectStoreRoundTrip, AKeyOfTheDrawingsOwnThatItStopsWritingIsGoneAfterTheNextSave)
+{
+    const Model model = sampleModel();
+    ProjectMetadata metadata;
+    metadata.name = "Removed";
+    metadata.unknownKeys = {{"sheets", "{\"version\":1,\"sheets\":[]}"},
+                            {"road_objects", "{\"version\":1}"},
+                            {"symbol_rotation_mode", "north"}};
+    auto store = ProjectStore::create(projectDir(), metadata);
+    ASSERT_TRUE(store.ok());
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+
+    metadata.unknownKeys.erase("sheets");
+    metadata.unknownKeys.erase("road_objects");
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+
+    const auto again = store->load();
+    ASSERT_TRUE(again.ok());
+    EXPECT_EQ(again->metadata.unknownKeys,
+              (std::map<std::string, std::string>{{"symbol_rotation_mode", "north"}}))
+        << "sheets and road_objects were removed; the newer build's key was not";
+    // The 10 keys this build writes + the newer build's 1.
+    EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 11u);
+}
+
 TEST_F(ProjectStoreRoundTrip, TheReferenceLayersAProjectRecordsRoundTripAsTheyWere)
 {
     // Opaque to storage: the records come back exactly, in their order.

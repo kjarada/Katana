@@ -434,6 +434,17 @@ constexpr std::string_view kMetadataKeys[] = {
     "reference_layers",
 };
 
+// The keys the drawing above storage keeps in unknownKeys as text storage
+// does not read - each the sheet-set pattern (cad/plotting/sheet_store.cpp):
+// a document's data with no schema change. They are this build's, so one
+// absent at a save was removed and its row is deleted (writeMetadata); a key
+// in neither list is a newer build's and is never deleted. A module that
+// adds such a key adds it here (docs/model.md, "Metadata a newer build
+// wrote").
+constexpr std::string_view kDrawingMetadataKeys[] = {
+    "annotation_scale", "sheets", "surface_styles", "road_templates", "corridors", "road_objects",
+};
+
 [[nodiscard]] bool isMetadataKey(std::string_view key)
 {
     return std::find(std::begin(kMetadataKeys), std::end(kMetadataKeys), key) !=
@@ -1101,6 +1112,27 @@ Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
     }
     for (const auto& [key, value] : m.unknownKeys) {
         if (auto status = write(key, value); !status) {
+            return status;
+        }
+    }
+    // A key of the drawing's own that it no longer writes was REMOVED by this
+    // build - a sheet set emptied, the annotation scale reset, the road model
+    // deleted - so its row goes too: REPLACE alone left the last save's value
+    // standing, and it came back when the project was opened again. A key
+    // this build does not know is still never deleted (above).
+    auto remove = database.prepare("DELETE FROM metadata WHERE key = ?1");
+    if (!remove) {
+        return remove.error();
+    }
+    for (const std::string_view key : kDrawingMetadataKeys) {
+        if (m.unknownKeys.contains(std::string(key))) {
+            continue;
+        }
+        Status status = remove->bind(1, key);
+        if (status) {
+            status = remove->run();
+        }
+        if (!status) {
             return status;
         }
     }
