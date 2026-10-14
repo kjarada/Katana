@@ -11,6 +11,8 @@ add_executable(katana_qt_benchmarks
     main.cpp
     bench_plan_paint.cpp
     bench_plan_cloud.cpp
+    # Surface display (docs/surface_display.md): a 400k-triangle surface in plan.
+    bench_plan_surface.cpp
     survey_drawing.cpp
     survey_drawing.hpp
 )

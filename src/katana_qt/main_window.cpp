@@ -1077,6 +1077,9 @@ void MainWindow::buildActions()
     terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
     // Edit Surface and Combine Surfaces (docs/surface_editing.md).
     surfaceEdit_->finish(*terrainMenu);
+    // Surface display (docs/surface_display.md): Terrain > Surface Styles...
+    QAction* surfaceStyles = buildSurfaceDisplay();
+    terrainMenu->addAction(surfaceStyles);
     terrainMenu->addSection("Sections");
     terrainMenu->addActions({selectionSection, alignmentSection});
     // ---- road model (docs/road_design.md) ----
@@ -1106,6 +1109,7 @@ void MainWindow::buildActions()
     terrainBar->addAction(alignmentManager);
     terrainBar->addSeparator();
     terrainBar->addActions({cloudSurface, rasterSurface, drawingSurface});
+    terrainBar->addAction(surfaceStyles); // surface display
     terrainBar->addSeparator();
     terrainBar->addActions({selectionSection, alignmentSection});
     // The Surface Edit toolbar, made before the tools filled it, goes after
@@ -5207,6 +5211,7 @@ void MainWindow::syncSceneSurfaces(bool showGained)
         next.push_back(std::move(item));
         held.push_back(named.surface);
     }
+    styleSceneSurfaces(next); // surface display: each in its style
     sceneSurfaces_ = std::move(next);
     // Only now may the surfaces the old list pointed at go.
     sceneSurfacesHeld_ = std::move(held);

@@ -1312,6 +1312,35 @@ if(TARGET katana)
             "-DEXPECT=listed surfaces=0 rasters=0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/new_drops_reference_data_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ---- surface display (docs/surface_display.md) ----
+    # A surface drawn in the plan view in its style: the sample terrain in
+    # Standard (its boundary alone), Triangles, then Elevation Bands, each
+    # paint of PlanView1 saying what it drew of the surface - triangles in
+    # view, edges stroked or tinted, the pixels its faces cover, the legends.
+    # The ink is read against the Standard paint, whose faces cover nothing:
+    # banded faces cover pixels and bring a legend, whose ten bands SURFACE
+    # LEGEND then lists. The grab is the plan view in bands.
+    add_test(NAME qt_a_surface_is_drawn_in_plan_in_its_style_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>ZOOM EXTENTS view=1|?PlanView1|>SURFACE STYLE ground Triangles|?PlanView1|>SURFACE STYLE ground \"Elevation Bands\"|?PlanView1|>SURFACE LEGEND ground|%View1"
+            "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=0 labels=0 covered=0 legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=[0-9]+ tinted=[0-9]+ contours=0 labels=0 covered=[0-9]+ legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=[0-9]+ labels=[0-9]+ covered=[1-9][0-9]* legends=1.*kind=bands entries=10"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_in_plan_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Terrain > Surface Styles, by its object names: a style's contour
+    # interval edited and applied, then a copy of it made under a new name -
+    # each the SURFACESTYLE line the dialog shows and runs through the
+    # window's executor, and the list then holding the copy.
+    add_test(NAME qt_the_surface_style_manager_runs_its_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=@terrainSurfaceStyles|surfaceStyleList=Contours|surfaceStyleInterval=0.5|?surfaceStyleLine|!surfaceStyleApply|?surfaceStyleStatus|surfaceStyleName=Fine Contours|!surfaceStyleCopy|?surfaceStyleList"
+            "-DEXPECT=surfaceStyleLine: SURFACESTYLE SET Contours interval=0[.]5.*surfaceStyleList: [^\r\n]*Fine Contours"
+            "-DFORBID=InvalidArgument|ParseFailure|NotFound"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_style_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # GIS > Dataset Information and the import dialog, described by GDAL and
     # PDAL from the file and painted. The dialog runs its INFO lines through
     # the window's one executor, so what they said is in the log.

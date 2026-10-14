@@ -26,6 +26,8 @@
 #include "katana/cad/terrain/volume_verbs.hpp"
 // Road objects (docs/road_objects.md): the ROADOBJECT family.
 #include "katana/cad/road/road_object_verbs.hpp"
+// Surface display (docs/surface_display.md): SURFACE LEGEND and SURFACE PLAN.
+#include "katana/cad/terrain/surface_display_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -626,7 +628,7 @@ Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTEN
           [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
 )" + annotationHelpText() + drawingHelpText() + surfaceEditHelpSummary() +
-           surfaceVerbSummary();
+           surfaceVerbSummary() + surfaceDisplayVerbHelp();
 }
 
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
@@ -927,6 +929,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     // ---- road model (docs/road_design.md) ----
     if (road::isRoadVerb(verb)) {
         return road::runRoadVerb(document_, *tokens);
+    }
+    // Surface display (docs/surface_display.md): SURFACE LEGEND | PLAN.
+    if (isSurfaceDisplayVerb(verb, args)) {
+        return runSurfaceDisplayVerb(document_, args, scopeViews_);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they

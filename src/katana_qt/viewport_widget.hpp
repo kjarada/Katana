@@ -106,6 +106,11 @@ class ViewportWidget final : public QWidget {
     // a layer the document shows and this view hides
     // (PlanPaintStats::ghostsDrawn; ViewState::selectionGhosts).
     [[nodiscard]] std::size_t lastGhostCount() const { return lastGhosts_; }
+    // Surface display (docs/surface_display.md): what the last paint drew of
+    // the drawing's surfaces - how many, their triangles in view, the edges
+    // stroked and the triangles tinted, contour runs, labels, the pixels
+    // their faces cover and the legends - for the headless report.
+    [[nodiscard]] const PlanPaintStats& lastPaintStats() const { return lastStats_; }
     // The grips this view offers on the selection as its last paint built
     // them: none on an entity on a layer this view hides, however selected.
     [[nodiscard]] std::size_t gripCount() const { return grips_.grips().size(); }
@@ -458,6 +463,7 @@ class ViewportWidget final : public QWidget {
     katana::cad::ViewState& state_;
     mutable std::size_t lastDrawnEntities_ = 0;
     mutable std::size_t lastGhosts_ = 0;
+    mutable PlanPaintStats lastStats_{};
     // Declared after document_ and destroyed before anything else here: the
     // listener it owns captures this widget.
     katana::cad::Document::ListenerHandle documentListener_;

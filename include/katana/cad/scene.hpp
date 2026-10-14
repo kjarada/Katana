@@ -27,6 +27,7 @@
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/selection_style.hpp"
+#include "katana/cad/terrain/surface_colouring.hpp"
 #include "katana/cad/terrain/surface_style.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/render/camera.hpp"
@@ -59,7 +60,19 @@ struct SceneSurface {
     SurfaceColoring coloring = SurfaceColoring::Elevation;
     katana::render::Rgba flatColor = katana::render::rgba(170, 170, 160);
     bool visible = true;
+    // The display style it is drawn in (cad/terrain/surface_style.hpp,
+    // docs/surface_display.md). Set, its faces3d, ramp, stops, bands, range
+    // and flat colour decide the colours, and `coloring` and `flatColor` are
+    // not read; applySurfaceDisplay sets it with `style`, its shading. Unset,
+    // the surface is coloured as before there were styles: by `coloring`,
+    // over the one elevation ramp. A copy, not a pointer into the drawing's
+    // style set, which an edit of the styles replaces.
+    std::optional<SurfaceDisplayStyle> display{};
 };
+
+// `item` drawn in `style`: its 3D shading (SurfaceDisplayStyle::shading) and
+// its colours from it. Leaves the surface, its name and its visibility.
+void applySurfaceDisplay(SceneSurface& item, const SurfaceDisplayStyle& style);
 
 // A mesh in the session: a .12da trimesh, drawn like a surface but NOT one - it
 // may be closed or overhang, so it is never sampled for a height and carries
@@ -228,6 +241,15 @@ struct SceneLayers {
     // when no visible surface is coloured by elevation.
     double rampLow = 0.0;
     double rampHigh = -1.0;
+    // What the view's legend shows: the colours of the first drawable
+    // surface that has a display style colouring its faces by value or
+    // aspect, with the one ramp's range where its style gives none
+    // (surface_colouring.hpp). Absent for surfaces with no display style,
+    // whose legend is the one ramp above.
+    std::optional<SurfaceLegend> legend{};
+    // Whose legend it is: the surface and its style.
+    std::string legendSurface{};
+    std::string legendStyle{};
     // Where linework with no height and nothing under it goes, exaggerated;
     // terrainDatum when a surface or mesh decided it (buildTerrain).
     double datum = 0.0;
@@ -365,7 +387,8 @@ renderLayers(SceneLayers& layers, katana::render::Camera& camera,
 [[nodiscard]] katana::math::AABB sceneDepthBox(const SceneLayers& layers);
 
 // The elevation ramp's colour at t in [0, 1] (clamped): what the legend of a
-// view draws, so it cannot disagree with the surfaces.
+// view draws, so it cannot disagree with the surfaces. The ramp table's
+// first ramp, "terrain" (surfaceRampColour), to the bit.
 [[nodiscard]] katana::render::Rgba elevationRampColor(double t);
 
 // The world-space box of everything the scene would draw, with any vertical

@@ -4016,6 +4016,18 @@ the decisions are in `docs/volumes.md`. The Terrain menu has it in a Volumes
 section after Corridors (`terrainVolumes`), and the Terrain toolbar its
 button.
 
+## Terrain > Surface Styles
+
+The drawing's surface display styles in a non-modal dialog the window keeps
+(`MainWindow::showSurfaceStyleManager`,
+`src/katana_qt/terrain/surface_style_manager.hpp`): every field of a style in
+four tabs with a live preview drawn through the plan view's own painter, and
+every button a `SURFACESTYLE` or `SURFACE STYLE` line through `runVerbLine`,
+the form a buffer applied by one line naming only what changed. It is in the
+Terrain menu's Surfaces section (letter Y) with the toolbar button beside the
+Surface From items, icon `SurfaceStyles`. The record is
+`docs/surface_display.md`, "In the window".
+
 ## Settings
 
 What the session's customisation IS, and the few things that are done to it

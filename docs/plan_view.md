@@ -1,8 +1,9 @@
 # The plan view: one painter for the screen, the plot and every sheet
 
-The plan drawing - imagery, point clouds, mesh footprints, every entity
-through its layer and style, library linestyles and symbols, hatches,
-dimensions, text and the alignment overlay - is painted by ONE function,
+The plan drawing - imagery, point clouds, mesh footprints, the drawing's
+surfaces in their display styles, every entity through its layer and style,
+library linestyles and symbols, hatches, dimensions, text and the alignment
+overlay - is painted by ONE function,
 `katana::qt::paintPlan` (`src/katana_qt/plan_painter.hpp`). The plan view
 (`ViewportWidget`) paints through it, its tool previews go through
 `paintPlanGeometry`, and a plot goes through `plotPlanToPdf`, which needs no
@@ -26,7 +27,7 @@ PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source,
 
 | Argument | What it is |
 |---|---|
-| `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the window's reference data and meshes. `planSourceOf(document)` fills the document's part. Every pointer but the model may be null; each null leaves out only what it provides. |
+| `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the drawing's surfaces and their display styles, the window's reference data and meshes. `planSourceOf(document)` fills the document's part. Every pointer but the model may be null; each null leaves out only what it provides. |
 | `PlanFrame` | How it is looked at: the `ViewTransform` sized to the viewport, a `rotation` (counter-clockwise, radians, about the viewport's centre), the viewport's `origin` on the device, whether to `clip` to it, and the view's hidden layers (`LayerOverrides`) and hidden reference layers. |
 | `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`rasterDpiCap`, `rasterPixelCap`); and the screen-only speed switches (`thinLines`, `symbolSprites`, `clipLines`). |
 | `PlanPaintCache` | What is kept between paints, owned by the CALLER (below). |
@@ -98,6 +99,7 @@ work on a snapshot or hold edits off.
 | Raster images, point-cloud colours | the reference layer's id (and colour mode) | converting tens of megabytes of RGBA per repaint |
 | Raster crops on paper | the layer's id, the part of the image cropped and the size it was resampled to; the eight most recently used, and no more than 32 megapixels between them | the sheet editor paints paper, and a pan of the editor or a second viewport over the same photo asks for the same crop again (below) |
 | Symbol sprites | symbol, pen, size, quarter-pixel phase; all dropped when the scale, paper scale, device ratio or library generation changes | see below |
+| A surface's cull grid, rim and breaklines joined, and contours (`cad::SurfacePlanCache`) | the surface itself (shared, immutable), and the contour settings; let go at the first paint after the drawing has lost the surface | a 400 000-triangle surface's grid is 34 ms and its contours more; a pan must not pay them (`docs/surface_display.md`) |
 
 Per paint, not kept (the tables they read can change between paints):
 
@@ -134,6 +136,17 @@ meshes' visibility and style (the panels change those without a
 notification), the view's hidden layers and references, the grid, the
 line option and the view's ghost switch (below). A mouse move, a snap marker
 or a rubber band then costs the furniture, not the drawing.
+
+### Surfaces
+
+Every visible surface of the drawing is drawn in its display style beneath
+the entities, over the imagery, the point clouds and the mesh footprints:
+its faces as an image, its triangles to a level of detail, its contours and
+their labels, breaklines, boundary and points; on screen with a legend in
+the view's corner. What is drawn is decided in `katana_cad` and only drawn
+here; the record, the level of detail and the measurements are
+`docs/surface_display.md`. A visible surface counts in `planDrawnBounds`, so
+Zoom Extents and a plot's Fit take it in.
 
 ## Screen and paper
 
