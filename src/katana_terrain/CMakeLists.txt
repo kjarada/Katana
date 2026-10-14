@@ -14,8 +14,11 @@ add_library(katana_terrain STATIC
     volume.cpp
     tiled_terrain.cpp
     super_surface.cpp
-    # The named surfaces a session keeps (docs/geoprocessing.md).
+    # The named surfaces of a drawing (docs/terrain.md, "Surfaces in the
+    # drawing").
     surface_store.cpp
+    # A surface as bytes, as a project keeps it (same chapter).
+    tin_codec.cpp
     # A sight line over the ground, for the LOS verb (docs/terrain.md).
     line_of_sight.cpp
 )
