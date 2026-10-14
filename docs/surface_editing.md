@@ -289,7 +289,9 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
   refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`.
 - `tests/qt_widgets/terrain/test_surface_edit_dialogs.cpp`: the lines, the
-  dialogs and the toolbar by object name.
+  dialogs and the toolbar by object name;
+  `qt_the_surface_heights_dialog_raises_the_surface_headless`: the real window,
+  the dialog opened by its action and its line run through the executor.
 - `cli.surface_edit_raise_moves_every_vertex_by_the_amount`,
   `cli.surface_edit_is_one_undo_step`,
   `cli.surface_edit_boundary_clips_to_the_typed_square`,
