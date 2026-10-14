@@ -16,6 +16,8 @@
 #include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
+// Surface display (docs/surface_display.md): SURFACE LEGEND and SURFACE PLAN.
+#include "katana/cad/terrain/surface_display_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -597,7 +599,7 @@ Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTEN
           ZOOM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
           [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
-)" + annotationHelpText() + drawingHelpText();
+)" + annotationHelpText() + drawingHelpText() + surfaceDisplayVerbHelp();
 }
 
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
@@ -857,6 +859,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens, scopeViews_);
+    }
+    // Surface display (docs/surface_display.md): SURFACE LEGEND | PLAN.
+    if (isSurfaceDisplayVerb(verb, args)) {
+        return runSurfaceDisplayVerb(document_, args, scopeViews_);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they
