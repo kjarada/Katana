@@ -1278,8 +1278,11 @@ Result<SectionsSurface> sectionsSurface(const std::vector<const RoadSection*>& s
     katana::terrain::TinInput input;
     std::vector<Point2> leftEdge;
     std::vector<Point2> rightEdge;
-    const auto take = [completeOnly](const RoadSection& section) {
-        return (!completeOnly || section.complete) && section.top.size() >= 2;
+    // A section goes in when it is complete (or completeness is not asked
+    // for) and the line it gives has two points at least.
+    const auto take = [completeOnly, formation](const RoadSection& section) {
+        const auto& line = formation ? section.formation : section.top;
+        return (!completeOnly || section.complete) && line.size() >= 2;
     };
     for (const RoadSection* section : sections) {
         if (!take(*section)) {
