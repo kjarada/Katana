@@ -338,7 +338,7 @@ TEST(RoadVerbs, AnObjectIsListedAndDescribedByItsId)
     session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
     const std::string list = session.ok("ROADMODEL");
     EXPECT_TRUE(contains(list, "object id=corridor/Main/left/kerb/1 kind=kerb facility=Main "
-                               "part=ROADSIDE ifc=IfcKerb.NOTDEFINED layer=road/kerb"))
+                               "part=ROADSIDE ifc=IfcKerb layer=road/kerb"))
         << list;
     EXPECT_TRUE(contains(list, "problem source=\"corridor Main\"")) << list;
     const std::string info = session.ok("ROADMODEL INFO corridor/Main/left/kerb/1");

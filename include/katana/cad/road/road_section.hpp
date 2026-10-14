@@ -138,6 +138,11 @@ roadSection(const RoadTemplate& roadTemplate, const katana::geometry::SolvedAlig
             const katana::terrain::TinSurface* ground, double station,
             std::optional<Crossfalls> superelevation = std::nullopt);
 
+// The template across a straight, level road at level 0 with no ground -
+// its pavement as designed: what ROADTEMPLATE SECTION prints and the road
+// template manager draws.
+[[nodiscard]] katana::core::Result<RoadSection> templateSection(const RoadTemplate& roadTemplate);
+
 // The stations a corridor is sectioned at from `start` to `end`: start + k *
 // interval (multiplied, so the hundredth is not off by a hundred roundings),
 // both ends, and each of `keys` inside, sorted, any two within
@@ -167,6 +172,7 @@ struct CorridorRun {
 
 struct BuiltCorridor {
     std::string name;
+    std::string surface; // the target surface it names, empty for none
     std::optional<katana::geometry::SolvedAlignment> alignment;
     double start = 0.0;
     double end = 0.0;

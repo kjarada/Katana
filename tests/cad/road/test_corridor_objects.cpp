@@ -186,6 +186,15 @@ TEST(CorridorObjects, ObjectIdsAreStableAndNameTheirDefinition)
           "corridor/Main/right/earthworks/fill/1"}) {
         EXPECT_NE(objectWithId(first, id), nullptr) << id;
     }
+    // A footpath's top course is the path, a slab; what is under it a course.
+    EXPECT_EQ(objectWithId(first, "corridor/Main/left/footpath/concrete/1")->ifcClass, "IfcSlab");
+    EXPECT_EQ(objectWithId(first, "corridor/Main/left/footpath/concrete/1")->predefinedType,
+              "SIDEWALK");
+    ASSERT_NE(objectWithId(first, "corridor/Main/left/footpath/bedding/1"), nullptr);
+    EXPECT_EQ(objectWithId(first, "corridor/Main/left/footpath/bedding/1")->ifcClass, "IfcCourse");
+    EXPECT_EQ(objectWithId(first, "corridor/Main/left/kerb/1")->predefinedType, "");
+    EXPECT_EQ(objectWithId(first, "corridor/Main/left/earthworks/fill/1")->predefinedType,
+              "EMBANKMENT");
     std::vector<std::string> ids;
     for (const BimObject& object : first.objects) {
         ids.push_back(object.id);
@@ -219,8 +228,10 @@ TEST(CorridorObjects, TheEarthworksAreTheEndAreasTheOldAssemblyMeasured)
     // m2 a section - over 200 m: 1000 m3 each side, 2000 in all, as
     // corridorQuantities has always given it.
     const auto ground = planeGround(0.0, 0.0, 0.0);
-    const auto built = buildCorridor(corridorOf("test"), setOf({laneTemplate(4.0, 0.0, {})}),
-                                     straight(), level(-1.0), &ground);
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}), straight(),
+                                     level(-1.0), &ground);
     EXPECT_NEAR(built.cut, 2000.0, 1e-6);
     EXPECT_NEAR(built.fill, 0.0, 1e-9);
     EXPECT_EQ(built.incompleteSections, 0u);
@@ -232,6 +243,11 @@ TEST(CorridorObjects, TheEarthworksAreTheEndAreasTheOldAssemblyMeasured)
     EXPECT_NEAR(quantityOf(*left, "GrossVolume"), 1000.0, 1e-6);
     EXPECT_NEAR(quantityOf(*right, "GrossVolume"), 1000.0, 1e-6);
     EXPECT_EQ(left->ifcClass, "IfcEarthworksCut");
+    EXPECT_EQ(left->predefinedType, "CUT");
+    // The surface the cut is taken from, which the IFC export reads.
+    EXPECT_NE(std::ranges::find(left->properties,
+                                std::pair<std::string, std::string>{"Target Surface", "ground"}),
+              left->properties.end());
     EXPECT_EQ(left->layer, "road/earthworks/cut");
     // No fill anywhere: no solid of nothing.
     EXPECT_EQ(objectWithId(model, "corridor/Main/left/earthworks/fill/1"), nullptr);

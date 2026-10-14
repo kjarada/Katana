@@ -619,6 +619,21 @@ Result<RoadSection> roadSection(const RoadTemplate& roadTemplate, const SolvedAl
     return buildSection(roadTemplate, alignment, profile, ground, station, superelevation);
 }
 
+Result<RoadSection> templateSection(const RoadTemplate& roadTemplate)
+{
+    katana::geometry::HorizontalAlignment straight;
+    straight.pis = {katana::geometry::AlignmentPI{Point2(0.0, 0.0)},
+                    katana::geometry::AlignmentPI{Point2(100.0, 0.0)}};
+    auto alignment = katana::geometry::solveAlignment(straight);
+    katana::geometry::VerticalAlignment level;
+    level.pvis = {katana::geometry::ProfilePVI{0.0, 0.0}, katana::geometry::ProfilePVI{100.0, 0.0}};
+    auto profile = katana::geometry::solveProfile(level);
+    if (!alignment || !profile) {
+        return makeError(ErrorCode::Internal, "the straight a template is shown on did not solve");
+    }
+    return roadSection(roadTemplate, *alignment, *profile, nullptr, 50.0);
+}
+
 std::vector<double> sectionStations(double start, double end, double interval,
                                     const std::vector<double>& keys)
 {
@@ -655,6 +670,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
 {
     BuiltCorridor built;
     built.name = corridor.name;
+    built.surface = corridor.surface;
     built.alignment = alignment;
     if (auto status = checkCorridor(corridor); !status) {
         built.problems.push_back(status.error().message);
@@ -1030,8 +1046,16 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
                 object.name =
                     built.name + " " + sideWord + " " + component.name + " " + course.name;
                 object.kind = std::string(objectKindOf(component.kind));
-                object.ifcClass = "IfcCourse";
-                object.predefinedType = course.ifcType;
+                // A footpath's top course is the path itself, a slab
+                // (IfcSlab SIDEWALK); what is under it, and every other
+                // course, an IfcCourse of the type its template names.
+                if (component.kind == ComponentKind::Footpath && *first.course == 0) {
+                    object.ifcClass = "IfcSlab";
+                    object.predefinedType = "SIDEWALK";
+                } else {
+                    object.ifcClass = "IfcCourse";
+                    object.predefinedType = course.ifcType;
+                }
                 object.material = course.material;
                 object.colour = course.colour;
                 object.properties.emplace_back("course", course.name);
@@ -1047,8 +1071,9 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
                     "corridor/" + built.name + "/" + sideWord + "/" + component.name + "/" + region;
                 object.name = built.name + " " + sideWord + " " + component.name;
                 object.kind = "kerb";
+                // IfcKerb has no predefined type of its own to name.
                 object.ifcClass = "IfcKerb";
-                object.predefinedType = "NOTDEFINED";
+                object.predefinedType.clear();
                 object.material = component.material;
                 object.colour = component.colour;
                 object.properties.emplace_back("shape", std::string(toString(component.shape)));
@@ -1142,11 +1167,17 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
                                             : katana::entity::Color{193, 80, 74, 255};
                     object.layer = cutting ? "road/earthworks/cut" : "road/earthworks/fill";
                     object.plan.push_back(outlineOf(alignment, pieceStations, columns));
-                    object.properties = range;
-                    object.properties.emplace_back("side", sideWord);
-                    object.properties.emplace_back("from", number(pieceStations.front()));
-                    object.properties.emplace_back("to", number(pieceStations.back()));
-                    object.properties.emplace_back("method", "average end area");
+                    object.properties = {{"template", run.roadTemplate.name},
+                                         {"region", region},
+                                         {"from", number(pieceStations.front())},
+                                         {"to", number(pieceStations.back())},
+                                         {"side", sideWord},
+                                         {"method", "average end area"}};
+                    // The surface a cut is taken from, which the IFC export
+                    // reads by this name.
+                    if (cutting) {
+                        object.properties.emplace_back("Target Surface", built.surface);
+                    }
                     object.quantities = {
                         quantity("Length", pieceStations.back() - pieceStations.front(), "m"),
                         quantity("GrossArea", object.plan.front().area(), "m2"),

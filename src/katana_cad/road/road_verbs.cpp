@@ -461,23 +461,6 @@ bool templateUsed(const CorridorSet& corridors, std::string_view name, std::stri
     return false;
 }
 
-// A template across a straight level road at level 0, no ground: what
-// ROADTEMPLATE SECTION and the template manager's preview show.
-Result<RoadSection> templateSection(const RoadTemplate& roadTemplate)
-{
-    katana::geometry::HorizontalAlignment straight;
-    straight.pis = {katana::geometry::AlignmentPI{katana::geometry::Point2(0.0, 0.0)},
-                    katana::geometry::AlignmentPI{katana::geometry::Point2(100.0, 0.0)}};
-    auto alignment = katana::geometry::solveAlignment(straight);
-    katana::geometry::VerticalAlignment level;
-    level.pvis = {katana::geometry::ProfilePVI{0.0, 0.0}, katana::geometry::ProfilePVI{100.0, 0.0}};
-    auto profile = katana::geometry::solveProfile(level);
-    if (!alignment || !profile) {
-        return makeError(ErrorCode::Internal, "the straight a template is shown on did not solve");
-    }
-    return roadSection(roadTemplate, *alignment, *profile, nullptr, 50.0);
-}
-
 Result<std::string> commitTemplates(Document& document, const RoadTemplateSet& set,
                                     std::string stepName, std::string reply)
 {
@@ -1089,6 +1072,14 @@ std::string objectRecord(const bim::BimObject& object)
     return out;
 }
 
+// The class and, where it has one, its predefined type: IfcKerb,
+// IfcCourse.PAVEMENT.
+std::string ifcName(const bim::BimObject& object)
+{
+    return object.predefinedType.empty() ? object.ifcClass
+                                         : object.ifcClass + "." + object.predefinedType;
+}
+
 bool belongsTo(const bim::BimObject& object, const std::string* corridor)
 {
     if (!object.id.starts_with("corridor/")) {
@@ -1688,7 +1679,7 @@ Result<std::string> roadModelVerb(const Document& document, const Tokens& args)
             for (const bim::BimObject& object : model->objects) {
                 reply += "\nobject id=" + text(object.id) + " kind=" + object.kind +
                          " facility=" + text(object.facility) + " part=" + object.part +
-                         " ifc=" + object.ifcClass + "." + object.predefinedType +
+                         " ifc=" + ifcName(object) +
                          " layer=" + text(object.layer) +
                          " triangles=" + std::to_string(object.mesh.triangleCount()) +
                          " volume=" + quantityValue(object, "GrossVolume");
@@ -1709,8 +1700,8 @@ Result<std::string> roadModelVerb(const Document& document, const Tokens& args)
                 continue;
             }
             std::string reply = objectRecord(object) + " facility=" + text(object.facility) +
-                                " part=" + object.part + " ifc=" + object.ifcClass + "." +
-                                object.predefinedType + " material=" + text(object.material) +
+                                " part=" + object.part + " ifc=" + ifcName(object) +
+                                " material=" + text(object.material) +
                                 " colour=" + object.colour.toHex() +
                                 " layer=" + text(object.layer) +
                                 " triangles=" + std::to_string(object.mesh.triangleCount());
