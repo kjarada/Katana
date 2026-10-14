@@ -6,7 +6,7 @@
 // carries the \\?\ prefix, and one that ends in a dot or a space is silently shortened. The real
 // file system (fsops_win.cpp) prefixes every path it hands to the system, so an install under a
 // deep folder works. Code that reads a file by a way other than FsOps - the SHA-256 of a file,
-// which streams it from the C++ library - has to give the same path or it fails exactly where the
+// which reads it through the C library - has to give the same path or it fails exactly where the
 // file system did not: a copy under R/.update/<tx>/new/ is about 46 characters deeper than the
 // file it will replace.
 //
@@ -23,6 +23,13 @@ inline constexpr std::size_t kLongPathLength = 240; // below MAX_PATH (260) with
 
 inline std::filesystem::path absoluteNormal(const std::filesystem::path& path)
 {
+    // An empty path names nothing and stays empty, so that every check on it fails. libc++ makes
+    // the CURRENT folder of it (absolute("") is current_path() there, with no error; measured with
+    // clang 22 on Windows, the library of the Windows ARM64 build, 2026-10-14), and an empty
+    // install root would then be planned, and changed, wherever the process happened to start.
+    if (path.empty()) {
+        return path;
+    }
     std::error_code ec;
     std::filesystem::path absolute = std::filesystem::absolute(path, ec);
     if (ec) {
@@ -64,7 +71,7 @@ inline std::wstring widePath(const std::filesystem::path& path)
 
 #endif
 
-// The path to give code that opens a file with the C++ library (core::sha256FileHex): the same
+// The path to give code that opens a file through a library (core::sha256FileHex): the same
 // file, named the way fsops_win.cpp would name it. Unchanged where paths have no such limit.
 inline std::filesystem::path openable(const std::filesystem::path& path)
 {
