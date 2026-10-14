@@ -156,6 +156,16 @@ target_sources(katana_qt_ui PRIVATE ${_katana_geo_ui})
 file(GLOB _katana_drawing_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.hpp")
 target_sources(katana_qt_ui PRIVATE ${_katana_drawing_ui})
+# The surfaces' front end - the Surfaces panel, the style manager, the edit
+# tools, the volumes (docs/terrain.md, docs/surface_display.md,
+# docs/surface_editing.md, docs/volumes.md) - and the BIM menu's road model
+# (docs/road_design.md, docs/road_objects.md). Globbed, one directory each,
+# written side by side by several authors.
+file(GLOB _katana_terrain_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.hpp")
+file(GLOB _katana_bim_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.hpp")
+target_sources(katana_qt_ui PRIVATE ${_katana_terrain_ui} ${_katana_bim_ui})
 # Help > Check for Updates' dialog (docs/update.md): named, not listed, because
 # the task that writes it adds the files without editing this list. It builds
 # UPDATE verb lines and hands them to the window's executor, like every dialog,

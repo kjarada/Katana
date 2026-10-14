@@ -27,6 +27,7 @@
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/selection_style.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
@@ -37,21 +38,8 @@ namespace katana::cad {
 
 using katana::geometry::Point2;
 
-// How a surface is drawn.
-enum class SurfaceStyle {
-    Hidden,
-    Wireframe,       // triangle edges only
-    Shaded,          // filled triangles, lit
-    ShadedWithEdges, // both; the edges fade out as the triangles shrink on screen
-    // The default: ShadedWithEdges up to kDenseSurfaceTriangles, Shaded above.
-    // A dense TIN's edges are all the eye can see at any useful zoom - they
-    // covered 73% of the pixels of a 229k-triangle survey, which drew as a
-    // black slab - and costing a line per edge they doubled the frame.
-    Automatic,
-};
-
-// Past this many triangles an Automatic surface is drawn Shaded.
-inline constexpr std::size_t kDenseSurfaceTriangles = 50000;
+// How a surface is shaded (SurfaceStyle) and kDenseSurfaceTriangles are in
+// cad/terrain/surface_style.hpp, with the display styles that choose them.
 
 // What decides a surface triangle's colour.
 enum class SurfaceColoring {

@@ -22,6 +22,7 @@
 #include "katana/cad/customisation_state.hpp"
 #include "katana/cad/drawing/drafting.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/error.hpp"
@@ -31,6 +32,7 @@
 #include "katana/entity/survey_map.hpp"
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/storage/project_store.hpp"
+#include "katana/terrain/surface_store.hpp"
 
 namespace katana::cad::plotting {
 struct SheetSet;
@@ -111,6 +113,15 @@ struct DocumentChange {
         // listener that shows the origin tests those two bits as well, or
         // compares customisationGeneration().
         Customisation = 1u << 18,
+        // The drawing's surfaces (Document::surfaces): one added, removed,
+        // edited, renamed, restyled, shown or hidden.
+        Surfaces = 1u << 19,
+        // The surface display styles (Document::surfaceStyles).
+        SurfaceStyles = 1u << 20,
+        // The road model's definitions - road templates, corridors, objects
+        // placed along an alignment (cad/bim/bim_object.hpp) - whose 3D
+        // objects are made again from them.
+        RoadModel = 1u << 21,
     };
 
     // Every table bit.
@@ -118,9 +129,11 @@ struct DocumentChange {
                                              HatchPatterns | Alignments | PropertyDefinitions |
                                              AnnotationStyles;
     // What a drawing is DRAWN from - its entities, the tables that say how
-    // they look, the customisation - as against what is only highlighted
-    // (the selection) or only bookkeeping (history, saved, metadata).
-    static constexpr std::uint32_t kDrawing = Entities | kTables | StyleLibrary | SurveyMap;
+    // they look, the customisation, its surfaces and road model - as against
+    // what is only highlighted (the selection) or only bookkeeping (history,
+    // saved, metadata).
+    static constexpr std::uint32_t kDrawing =
+        Entities | kTables | StyleLibrary | SurveyMap | Surfaces | SurfaceStyles | RoadModel;
 
     std::uint32_t parts = 0;
     // The entity-level detail of a command, undo or redo, in the order the
@@ -425,6 +438,37 @@ class Document {
     // isModified() honest the way any other command does.
     [[nodiscard]] katana::core::Status setSheetSet(const plotting::SheetSet& sheets,
                                                    std::string stepName = "SET_SHEETS");
+    // ---- surfaces (docs/terrain.md, "Surfaces in the drawing") -----------------
+    //
+    // The drawing's TIN surfaces, by name: made by SURFACE FROM, an import
+    // or a corridor, edited by the surface edits, read by the volumes, the
+    // views and a leader's surface values, and saved with the project. A
+    // change is made on a COPY of the store - a copy costs a pointer per
+    // surface, every surface being shared and immutable - and committed
+    // here as ONE undoable step named `stepName`; undo puts the exact store
+    // before it back. Committing a store equal to the current one records
+    // nothing. Cleared by newDocument(), replaced by open().
+    [[nodiscard]] const katana::terrain::SurfaceStore& surfaces() const;
+    // Counts every change to the surfaces, undo and redo included, and never
+    // goes back: a view compares it with the generation it last drew.
+    [[nodiscard]] std::uint64_t surfacesGeneration() const;
+    // InvalidArgument for a surface whose style is not in surfaceStyles().
+    [[nodiscard]] katana::core::Status setSurfaces(katana::terrain::SurfaceStore surfaces,
+                                                   std::string stepName = "SET_SURFACES");
+    // The same change as a command, for a step that does more besides - an
+    // IMPORT that brings entities and surfaces is ONE undo step. Null when
+    // `surfaces` equals the current store.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    surfacesCommand(katana::terrain::SurfaceStore surfaces, std::string stepName = "SET_SURFACES");
+
+    // The display styles (cad/terrain/surface_style.hpp): the project's, or
+    // builtInSurfaceStyles() when it saved none. Replaced as ONE undoable
+    // step; checkSurfaceStyle refuses a style that cannot be drawn, and a
+    // style a surface uses cannot be removed (InvalidArgument naming it).
+    [[nodiscard]] const SurfaceStyleSet& surfaceStyles() const;
+    [[nodiscard]] katana::core::Status setSurfaceStyles(SurfaceStyleSet styles,
+                                                        std::string stepName = "SET_SURFACE_STYLES");
+
     // ---- annotation (docs/annotation.md) ---------------------------------------
     //
     // The scale the plan view draws paper-sized annotation at: text, labels,
@@ -543,6 +587,12 @@ class Document {
     mutable std::shared_ptr<const SheetCache> sheetCache_;
     std::vector<katana::storage::SurveyJob> surveyJobs_;
     std::uint64_t surveyJobsGeneration_ = 0;
+    // The surfaces and their display styles (surfaces(), surfaceStyles()).
+    // Their implementation, persistence and undo are in
+    // src/katana_cad/terrain/surface_document.cpp.
+    katana::terrain::SurfaceStore surfaces_;
+    std::uint64_t surfacesGeneration_ = 0;
+    SurfaceStyleSet surfaceStyles_ = builtInSurfaceStyles();
 };
 
 } // namespace katana::cad
