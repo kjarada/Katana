@@ -50,6 +50,18 @@
 //   a surface                 IfcGeographicElement TERRAIN, an
 //                             IfcTriangulatedFaceSet
 //
+//   the road model            an IfcRoad per facility, aggregated into the
+//   (RoadModelInput)          site, and an IfcRoadPart per part of it
+//                             (CARRIAGEWAY, SHOULDER, SIDEWALK ...); each
+//                             element - IfcCourse, IfcKerb, IfcEarthworksFill,
+//                             IfcRailing, IfcSign ... - contained in its part,
+//                             its body a closed IfcTriangulatedFaceSet, with
+//                             its material, its quantities (IfcElementQuantity)
+//                             and its properties. A cut (IfcEarthworksCut)
+//                             voids the ground it is taken from and a line
+//                             marking (IfcSurfaceFeature) adheres to the course
+//                             it is painted on, as the schema has features.
+//
 // NOTHING IS INVENTED. A service segment is drawn in 3D - its centre line as
 // the Axis and, with a size, a swept disk as its Body - only where a level is
 // known at both ends and can be brought to the centre of the service. Where
@@ -74,10 +86,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/geometry/mesh.hpp"
+#include "katana/geometry/primitives2d.hpp"
 #include "katana/ifc/classification.hpp"
 #include "katana/math/vec3.hpp"
 #include "katana/survey/subsurface/delivery_schema.hpp"
@@ -124,10 +139,81 @@ struct UtilityInput {
     std::string sourceName; // the schedule's file name, for provenance
 };
 
+// A measured quantity of a road element, named as IFC's base quantities are
+// ("Length", "Width", "Thickness", "GrossArea", "GrossVolume", "Weight",
+// "Count") and written as the IfcPhysicalSimpleQuantity its unit says:
+// "m" IfcQuantityLength, "m2" IfcQuantityArea, "m3" IfcQuantityVolume, "kg"
+// or "t" IfcQuantityWeight (in kilograms), "" IfcQuantityCount.
+struct RoadQuantity {
+    std::string name;
+    double value = 0.0;
+    std::string unit;
+
+    friend bool operator==(const RoadQuantity&, const RoadQuantity&) = default;
+};
+
+// One 3D object of the road model - a pavement course, a kerb, a batter, a
+// barrier, a sign - as the export takes it. It mirrors cad::bim::BimObject
+// (cad/bim/bim_object.hpp) field for field without seeing it, since this
+// layer may not see cad; katana_app converts one into the other
+// (ifc_verbs.hpp, roadModelInput).
+struct RoadElement {
+    // Stable: the same definition gives the same id on every run, and the
+    // GlobalId is made from it ("road/element/<id>"), so a model handed over
+    // twice names the same things the same way.
+    std::string id;
+    std::string name;
+    // What it is in Katana's words - "pavement", "kerb", "batter", "sign" -
+    // written as the element's Description and in Katana_RoadElement.
+    std::string kind;
+    // The class, its predefined type and, for USERDEFINED, what it is. A
+    // class this export does not write, or a predefined type its enumeration
+    // does not have, leaves the element out, said.
+    IfcClass ifcClass;
+    // The IfcRoad it belongs to (a corridor's name), and its part as
+    // IfcRoadPart's predefined type ("CARRIAGEWAY", "SHOULDER", "SIDEWALK",
+    // "ROADSIDE", "CENTRALRESERVE", "ROADSEGMENT" ...); a part the
+    // enumeration does not list is a USERDEFINED part of that name. No
+    // facility: an element of the site; no part: of the road itself.
+    std::string facility;
+    std::string part;
+    std::string material; // an IfcMaterial of this name; empty for none
+    entity::Color colour{};
+    // In world coordinates, as the drawing's. Written with Closed true when
+    // every edge is shared by exactly two faces, oriented outwards.
+    geometry::TriangleMesh mesh;
+    // Its outline in plan, written as its FootPrint; empty: the mesh's plan
+    // hull is.
+    std::vector<geometry::Polyline2> plan;
+    std::vector<RoadQuantity> quantities;
+    // Further attributes, in order (Katana_RoadProperties).
+    std::vector<std::pair<std::string, std::string>> properties;
+    std::string layer; // its representations' presentation layer
+    // For a feature only. An IfcSurfaceFeature (a line marking) adheres to
+    // the element with the id `host`; given none, to the course or pavement
+    // of its facility that lies under it, the highest where several do. An
+    // IfcEarthworksCut voids the element `host`, else the surface named
+    // `ground` when the file holds it (SurfaceInput), else an
+    // IfcGeographicElement TERRAIN standing for that ground, with no shape.
+    std::string host;
+    std::string ground;
+};
+
+// The road model as the export takes it: its objects, corridors first, and
+// what it could not build ("corridor Main: the alignment has no profile"),
+// which the export's warnings repeat, since a file missing a corridor's kerbs
+// must say why.
+struct RoadModelInput {
+    std::vector<RoadElement> elements;
+    std::vector<std::string> problems;
+};
+
 struct ExportInput {
     const entity::Model* model = nullptr; // may be null: utilities or surfaces alone
     std::vector<SurfaceInput> surfaces;
     std::optional<UtilityInput> utilities;
+    // The road model's objects; empty for none (NOROADMODEL).
+    RoadModelInput road{};
 };
 
 struct ExportOptions {
@@ -204,6 +290,10 @@ struct IfcExport {
     std::size_t entitiesWritten = 0; // drawing entities written
     std::size_t entitiesSkipped = 0;
     std::size_t surfaces = 0;
+    std::size_t roadElements = 0;      // the road model's elements written
+    std::size_t roadElementsSkipped = 0; // ... and left out, each said in the warnings
+    std::size_t roads = 0;             // IfcRoad
+    std::size_t roadParts = 0;         // IfcRoadPart
     // What each source became, ordered by source, then class, then why.
     std::vector<ClassTally> tally;
     std::vector<std::string> warnings;

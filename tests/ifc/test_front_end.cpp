@@ -53,13 +53,16 @@ TEST(IfcFrontEnd, AnExportLineIsItsPathAndItsOptionsInAnyCase)
     EXPECT_EQ(arguments.schema, "s.csv");
     EXPECT_EQ(arguments.rules, "r.csv");
     EXPECT_EQ(arguments.spacing, 12.5);
-    // NODRAWING: the investigation alone - no entities, alignments or surfaces.
-    EXPECT_FALSE(arguments.entities || arguments.alignments || arguments.surfaces);
+    // NODRAWING: the investigation alone - no entities, alignments, surfaces
+    // or road model.
+    EXPECT_FALSE(arguments.entities || arguments.alignments || arguments.surfaces ||
+                 arguments.roadModel);
 
     const auto quoted = ifc::parseExportArguments("  \"C:/jobs/x y.IFC\"  ");
     ASSERT_TRUE(quoted && *quoted);
     EXPECT_EQ((*quoted)->path, "C:/jobs/x y.IFC");
-    EXPECT_TRUE((*quoted)->entities && (*quoted)->alignments && (*quoted)->surfaces);
+    EXPECT_TRUE((*quoted)->entities && (*quoted)->alignments && (*quoted)->surfaces &&
+                (*quoted)->roadModel);
     EXPECT_FALSE((*quoted)->selected || (*quoted)->preview);
     EXPECT_FALSE((*quoted)->schedule);
 }
@@ -75,13 +78,14 @@ TEST(IfcFrontEnd, ALineThatNamesNoIfcIsLeftToTheOtherFormats)
 }
 
 // The refusals, said once here for both front ends: an unknown word names
-// every option the verb takes.
+// every option the verb takes - NOROADMODEL among them since the road model
+// was added to the export (docs/ifc.md, "Road model").
 TEST(IfcFrontEnd, ARefusedExportLineSaysWhyAsTheCommandLineAlwaysHas)
 {
     EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc UTILITIS s.csv")),
               "InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file.ifc>: UTILITIES "
               "<schedule.csv>, SCHEMA <schema.csv>, RULES <rules.csv>, SPACING <m>, NODRAWING, "
-              "NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW");
+              "NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, NOROADMODEL, PREVIEW");
     EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc SCHEMA s.csv")),
               "InvalidArgument: SCHEMA describes a schedule: give it with UTILITIES");
     EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc SPACING 0")),
@@ -139,6 +143,42 @@ TEST(IfcFrontEnd, EveryChoiceOfTheDialogsIsAWordOfTheLine)
     EXPECT_FALSE((*plain)->takeCoordinateSystem);
 }
 
+// NOROADMODEL leaves the road model out and nothing else; NODRAWING leaves it
+// out with the rest of the drawing; given twice, it is refused; and a line
+// leaving out only the road model says so and reads back as it was asked.
+TEST(IfcFrontEnd, NoRoadModelIsAWordAndNoDrawingLeavesTheRoadModelOutToo)
+{
+    const auto parsed = ifc::parseExportArguments("x.ifc NoRoadModel");
+    ASSERT_TRUE(parsed && *parsed) << refusal(parsed);
+    EXPECT_FALSE((*parsed)->roadModel);
+    EXPECT_TRUE((*parsed)->entities && (*parsed)->alignments && (*parsed)->surfaces);
+
+    const auto noDrawing = ifc::parseExportArguments("x.ifc NODRAWING UTILITIES s.csv");
+    ASSERT_TRUE(noDrawing && *noDrawing);
+    EXPECT_FALSE((*noDrawing)->roadModel);
+
+    EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc NOROADMODEL noroadmodel")),
+              "InvalidArgument: NOROADMODEL is given twice");
+
+    ifc::ExportArguments roadless;
+    roadless.path = "x.ifc";
+    roadless.roadModel = false;
+    const auto line = ifc::formatExportLine(roadless);
+    ASSERT_TRUE(line.ok());
+    EXPECT_EQ(*line, "EXPORT \"x.ifc\" NOROADMODEL");
+    const auto back = ifc::parseExportArguments(line->substr(std::string("EXPORT").size()));
+    ASSERT_TRUE(back && *back);
+    EXPECT_EQ(**back, roadless);
+
+    // The rest of the drawing left out but not the road model: each word, not
+    // NODRAWING, which would leave the road model out too.
+    ifc::ExportArguments roadOnly;
+    roadOnly.path = "x.ifc";
+    roadOnly.entities = roadOnly.alignments = roadOnly.surfaces = false;
+    EXPECT_EQ(*ifc::formatExportLine(roadOnly),
+              "EXPORT \"x.ifc\" NOENTITIES NOALIGNMENTS NOSURFACES");
+}
+
 // What would be contradictory, repeated, or would import nothing is refused
 // by name rather than read one way or the other.
 TEST(IfcFrontEnd, ContradictoryOrRepeatedWordsAreRefused)
@@ -187,10 +227,10 @@ TEST(IfcFrontEnd, TheLineADialogWritesReadsBackAsItsArguments)
     everything.alignments = false;
     everything.selected = true;
     everything.preview = true;
-    ifc::ExportArguments alone;
+    ifc::ExportArguments alone; // the investigation alone: every part of the drawing left out
     alone.path = "x.ifc";
     alone.schedule = "s.csv";
-    alone.entities = alone.alignments = alone.surfaces = false;
+    alone.entities = alone.alignments = alone.surfaces = alone.roadModel = false;
     for (const ifc::ExportArguments& arguments : {everything, alone, ifc::ExportArguments{}}) {
         ifc::ExportArguments asked = arguments;
         if (asked.path.empty()) {

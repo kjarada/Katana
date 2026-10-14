@@ -13,6 +13,7 @@
 #include <QPushButton>
 #include <QTableWidget>
 
+#include "format.hpp"
 #include "ifc_dialogs.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/ifc/export.hpp"
@@ -104,7 +105,8 @@ TEST(IfcExportDialog, EveryControlHasItsObjectName)
           "ifcExportSchemaBrowse", "ifcExportSpacing",        "ifcExportRules",
           "ifcExportRulesBrowse",  "ifcExportSaveRules",      "ifcExportCrs",
           "ifcExportCommand",      "ifcExportClasses",        "ifcExportCheck",
-          "ifcExportPreview",      "ifcExportExport",         "ifcExportClose"}) {
+          "ifcExportPreview",      "ifcExportExport",         "ifcExportClose",
+          "ifcExportRoadModel"}) {
         EXPECT_NE(dialog.findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
     }
 }
@@ -219,10 +221,11 @@ TEST(IfcExportDialog, TheLineCarriesEveryChoiceAsTheVerbReadsIt)
 
     // The spacing the verb takes by default is not said; selected-only
     // means nothing once the entities are left out; leaving out every part
-    // of the drawing is NODRAWING.
+    // of the drawing - the road model is one - is NODRAWING.
     child<QLineEdit>(dialog, "ifcExportSpacing")->setText("10");
     child<QCheckBox>(dialog, "ifcExportEntities")->setChecked(false);
     child<QCheckBox>(dialog, "ifcExportAlignments")->setChecked(false);
+    child<QCheckBox>(dialog, "ifcExportRoadModel")->setChecked(false);
     EXPECT_EQ(dialog.line(), "EXPORT \"C:/jobs/site plan.ifc\" UTILITIES \"schedule.csv\" SCHEMA "
                              "\"schema.csv\" RULES \"rules.csv\" NODRAWING");
 }
@@ -447,6 +450,43 @@ TEST(IfcExportDialog, AChangedChoiceClearsThePreviewAndAProblemReplacesTheLastRe
     ASSERT_TRUE(check->text().startsWith("Wrote out.ifc")) << check->text().toStdString();
     spacing->setText("0");
     EXPECT_EQ(check->text(), "The detected spacing must be a positive number of metres.");
+}
+
+// The road model (docs/ifc.md, "Road model"): the box counts its objects,
+// is ticked by default - so a line that leaves nothing out is the line it
+// always was - and unticked, the line says NOROADMODEL. A road model alone is
+// something to write; unticked with nothing else, there is nothing.
+TEST(IfcExportDialog, TheRoadModelBoxCountsItsObjectsAndUntickedTheLineSaysNoRoadModel)
+{
+    IfcExportState road = drawing(0);
+    road.alignments = 0;
+    road.surfaces = 0;
+    road.roadObjects = 1234;
+    IfcExportDialog dialog(exportContext(road));
+    auto* box = child<QCheckBox>(dialog, "ifcExportRoadModel");
+    ASSERT_NE(box, nullptr);
+    EXPECT_TRUE(box->isChecked());
+    EXPECT_EQ(box->text(), "Road model (" + katana::qt::grouped(1234) + " objects)");
+    child<QLineEdit>(dialog, "ifcExportFile")->setText("road.ifc");
+    EXPECT_EQ(dialog.line(), "EXPORT \"road.ifc\"");
+    EXPECT_TRUE(dialog.check().isEmpty()) << dialog.check().toStdString();
+    EXPECT_TRUE(child<QLabel>(dialog, "ifcExportCheck")->text().contains("road model objects"))
+        << child<QLabel>(dialog, "ifcExportCheck")->text().toStdString();
+
+    box->setChecked(false);
+    EXPECT_FALSE(dialog.arguments().roadModel);
+    EXPECT_TRUE(dialog.check().startsWith("Nothing to write")) << dialog.check().toStdString();
+
+    // With something else to write, unticked is a word of the line, which
+    // the verb reads back as the choices made.
+    IfcExportDialog second(exportContext(drawing(5)));
+    child<QLineEdit>(second, "ifcExportFile")->setText("site.ifc");
+    child<QCheckBox>(second, "ifcExportRoadModel")->setChecked(false);
+    EXPECT_EQ(second.line(), "EXPORT \"site.ifc\" NOROADMODEL");
+    const auto back = katana::ifc::parseExportArguments(
+        second.line().mid(QStringLiteral("EXPORT").size()).toStdString());
+    ASSERT_TRUE(back && *back);
+    EXPECT_EQ(**back, second.arguments());
 }
 
 // Preview needs everything but the file - not merely a missing file.

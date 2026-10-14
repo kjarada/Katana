@@ -553,7 +553,11 @@ constexpr PredefinedTypes kPredefinedTypes[] = {
 #include "predefined_types.inc"
 };
 
-std::optional<std::string_view> predefinedTypesOf(std::string_view entity)
+} // namespace
+
+// Shared with the road model's export (road.cpp), which checks the classes
+// its objects name against the same table a rules file is checked against.
+std::optional<std::string_view> detail::predefinedTypesOf(std::string_view entity)
 {
     for (const PredefinedTypes& row : kPredefinedTypes) {
         if (row.entity == entity) {
@@ -563,7 +567,7 @@ std::optional<std::string_view> predefinedTypesOf(std::string_view entity)
     return std::nullopt;
 }
 
-bool listsWord(std::string_view values, std::string_view word)
+bool detail::listsWord(std::string_view values, std::string_view word)
 {
     std::size_t at = 0;
     while (at <= values.size()) {
@@ -575,6 +579,11 @@ bool listsWord(std::string_view values, std::string_view word)
     }
     return false;
 }
+
+namespace {
+
+using detail::listsWord;
+using detail::predefinedTypesOf;
 
 // The rows of a small CSV file: an optional BOM, '#' comment lines and blank
 // lines skipped, fields separated by commas, a field double-quoted with ""
@@ -807,10 +816,17 @@ core::Result<std::vector<ClassificationRule>> parseClassificationRules(std::stri
         if (layout == std::end(detail::kProductLayouts)) {
             std::string known;
             for (const detail::ProductLayout& candidate : detail::kProductLayouts) {
-                known += (known.empty() ? "" : ", ") + std::string(candidate.entity);
+                if (!candidate.feature) { // the road model's alone: refused below
+                    known += (known.empty() ? "" : ", ") + std::string(candidate.entity);
+                }
             }
             return fail("\"" + std::string(named) +
                         "\" is not a class this export writes; it writes " + known);
+        }
+        if (layout->feature) {
+            return fail(std::string(layout->entity) +
+                        " is a feature of another element, which a drawing entity does not "
+                        "name: it is written only for the road model");
         }
         rule.target.entity = std::string(layout->entity);
         rule.target.predefinedType = upperCase(cell(4));

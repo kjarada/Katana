@@ -1214,6 +1214,23 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "IMPORT \"${_ifc}\" LOCAL TAKECRS")
     set_tests_properties(cli.ifc_takecrs_with_local_is_refused PROPERTIES WILL_FAIL TRUE)
+    # ifc: the road model (docs/ifc.md, "Road model") goes out with the drawing;
+    # NOROADMODEL - File > Export IFC's "Road model" box - leaves it out, and is
+    # refused given twice. The scenario has no corridor, so the reply has no
+    # road record and is the scenario's own.
+    add_test(NAME cli.ifc_noroadmodel_is_a_word_of_the_export_line
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL PREVIEW")
+    set_tests_properties(cli.ifc_noroadmodel_is_a_word_of_the_export_line PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "ifc previewed file=\"cli roadless\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+\ncounts alignments=1 services=0 segments=0 segments_3d=0 located_points=0 entities_written=5 entities_skipped=0 surfaces=0\nclass name="
+        FAIL_REGULAR_EXPRESSION "road elements=")
+    add_test(NAME cli.ifc_noroadmodel_given_twice_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL NOROADMODEL")
+    set_tests_properties(cli.ifc_noroadmodel_given_twice_is_refused PROPERTIES WILL_FAIL TRUE)
 
     # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
     # EXPRESS rules, no proxy, and the alignment's geometry against its

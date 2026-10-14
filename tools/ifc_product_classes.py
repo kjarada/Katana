@@ -19,9 +19,23 @@ when its file is read rather than written into an invalid file:
 
     python tools/ifc_product_classes.py --predefined > src/katana_ifc/predefined_types.inc
 
+With --layouts it writes nothing: it checks every row of the export's list of
+the classes it writes (src/katana_ifc/product_layout.hpp - the road model's
+IfcCourse, IfcEarthworksCut, IfcEarthworksFill, IfcFooting, IfcLightFixture,
+IfcSlab and IfcSurfaceFeature among them) against IFC4X3_ADD2: the class
+exists and may be instantiated, it has a Tag exactly where the row says (the
+eighth attribute), a PredefinedType exactly where it says (the last), no
+other attribute, and it is a feature element - and a subtracting one - exactly
+where the row says so. The writer lays the attributes out from the row, so a
+wrong row is a file read shifted; prints each problem and exits 1:
+
+    python tools/ifc_product_classes.py --layouts
+
 Developer tool only (Rule 1): nothing runs it at build or run time.
 """
 
+import os
+import re
 import sys
 
 import ifcopenshell
@@ -102,5 +116,56 @@ def predefined():
         print(f'{{"{name}", "{rows[name]}"}},')
 
 
+def ancestors(entity):
+    out = set()
+    while entity is not None:
+        out.add(entity.name())
+        entity = entity.supertype()
+    return out
+
+
+def layouts():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src",
+                        "katana_ifc", "product_layout.hpp")
+    text = open(path, encoding="utf-8").read()
+    rows = re.findall(r'\{"(Ifc\w+)",\s*(true|false),\s*(true|false)'
+                      r'(?:,\s*(true|false))?(?:,\s*(true|false))?\}', text)
+    schema = ifcopenshell.ifcopenshell_wrapper.schema_by_name("IFC4X3_ADD2")
+    problems = []
+    for name, tag, predefined, feature, voids in rows:
+        try:
+            entity = schema.declaration_by_name(name)
+        except RuntimeError:
+            problems.append(f"{name}: not an IFC4X3_ADD2 entity")
+            continue
+        if entity.is_abstract():
+            problems.append(f"{name}: abstract, so it cannot be written")
+        names = [attribute.name() for attribute in entity.all_attributes()]
+        has_tag = tag == "true"
+        has_predefined = predefined == "true"
+        expected = 7 + has_tag + has_predefined
+        if len(names) != expected:
+            problems.append(f"{name}: {len(names)} attributes ({', '.join(names)}), "
+                            f"the row lays out {expected}")
+        if has_tag != (len(names) > 7 and names[7] == "Tag"):
+            problems.append(f"{name}: the row says Tag={tag}, the schema's eighth is "
+                            f"{names[7] if len(names) > 7 else 'absent'}")
+        if has_predefined != (names[-1] == "PredefinedType"):
+            problems.append(f"{name}: the row says PredefinedType={predefined}, the schema's "
+                            f"last is {names[-1]}")
+        lineage = ancestors(entity)
+        if (feature == "true") != ("IfcFeatureElement" in lineage):
+            problems.append(f"{name}: the row says feature={feature or 'false'}")
+        if (voids == "true") != ("IfcFeatureElementSubtraction" in lineage):
+            problems.append(f"{name}: the row says voids={voids or 'false'}")
+    print(f"{len(rows)} rows of product_layout.hpp checked against IFC4X3_ADD2 "
+          f"(IfcOpenShell {ifcopenshell.version}): {len(problems)} problems")
+    for problem in problems:
+        print("  " + problem)
+    return 0 if not problems else 1
+
+
 if __name__ == "__main__":
+    if "--layouts" in sys.argv[1:]:
+        sys.exit(layouts())
     predefined() if "--predefined" in sys.argv[1:] else main()

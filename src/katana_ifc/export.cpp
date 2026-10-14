@@ -63,6 +63,11 @@ std::optional<math::Vec2> extentCorner(const ExportInput& input, const ExportOpt
             include(bounds.min.x, bounds.min.y);
         }
     }
+    for (const RoadElement& element : input.road.elements) {
+        for (const auto& vertex : element.mesh.vertices) {
+            include(vertex.x, vertex.y);
+        }
+    }
     return corner;
 }
 
@@ -92,10 +97,21 @@ Result<IfcExport> writeIfc(const ExportInput& input, const ExportOptions& option
     const std::vector<ClassificationRule>& rules =
         options.rules.empty() ? defaultClassificationRules() : options.rules;
     for (const ClassificationRule& rule : rules) {
-        if (!detail::findProductLayout(rule.target.entity)) {
+        const auto layout = detail::findProductLayout(rule.target.entity);
+        if (!layout) {
             return makeError(ErrorCode::InvalidArgument,
                              "the classification rule \"" + rule.name + "\" names " +
                                  rule.target.entity + ", which is not a class this export writes",
+                             rule.target.entity);
+        }
+        if (layout->feature) {
+            // A feature exists only on the element it voids or adheres to,
+            // which a drawing entity does not name (product_layout.hpp).
+            return makeError(ErrorCode::InvalidArgument,
+                             "the classification rule \"" + rule.name + "\" names " +
+                                 rule.target.entity +
+                                 ", a feature of another element, which only the road model "
+                                 "writes",
                              rule.target.entity);
         }
         if (rule.target.predefinedType == "USERDEFINED" && rule.target.objectType.empty()) {
@@ -145,7 +161,10 @@ Result<IfcExport> writeIfc(const ExportInput& input, const ExportOptions& option
     if (input.model != nullptr && options.exportEntities) {
         detail::exportEntities(builder, *input.model, rules);
     }
-    detail::exportSurfaces(builder, input.surfaces);
+    const auto terrain = detail::exportSurfaces(builder, input.surfaces);
+    // After the surfaces, so that a cut can void the ground it is taken
+    // from (road.cpp).
+    detail::exportRoad(builder, input.road, terrain);
     builder.finish();
 
     if (builder.file().nonFinite()) {

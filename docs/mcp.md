@@ -903,6 +903,14 @@ IFC 4.3 is reached as the window's IFC dialogs reach it, by lines: `EXPORT
 project's rules to start from (`docs/ifc.md`, "Using it"). Their replies are
 `key=value` records ("Replies" there), which an agent reads as it reads any
 other verb's (`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines`).
+The road model - corridors and road objects as `IfcRoad`, its parts and their
+elements - goes out with the drawing, and `NOROADMODEL` leaves it out, as the
+export dialog's "Road model" box does; a reply that carried one has a `road
+elements= skipped= roads= parts=` record, and what the model could not build
+is among its warnings (`docs/ifc.md`, "Road model";
+`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord`). No tool of
+its own: the line is the whole of it, and the road model's own data is the
+road verbs' to report.
 
 Nothing is written to disk until a `SAVE`. Opening a project can back it up or
 migrate it in place (`docs/headless.md`), so point Claude at a copy of a
