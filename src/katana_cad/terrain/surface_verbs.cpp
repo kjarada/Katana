@@ -199,6 +199,10 @@ Result<std::string> copySurface(Document& document, const Tokens& tokens)
     NamedSurface copy = *named;
     copy.name = tokens[3];
     copy.source = "copy of " + named->name;
+    // Kept by value: `named` points into the store setSurfaces replaces, so
+    // reading it after the commit read freed memory (a crash that came and
+    // went with what the allocator had put there since).
+    const std::string from = named->name;
     SurfaceStore next = document.surfaces();
     if (auto status = next.add(copy); !status) {
         return status.error();
@@ -206,7 +210,7 @@ Result<std::string> copySurface(Document& document, const Tokens& tokens)
     if (auto status = document.setSurfaces(std::move(next), "SURFACE COPY"); !status) {
         return status.error();
     }
-    return "copied surface=" + recordValue(named->name) + " name=" + recordValue(copy.name) +
+    return "copied surface=" + recordValue(from) + " name=" + recordValue(copy.name) +
            "\n" + surfaceRecord(*document.surfaces().find(copy.name), document.surfaceStyles());
 }
 

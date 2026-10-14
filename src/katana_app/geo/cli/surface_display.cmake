@@ -9,7 +9,12 @@ set(_display_samples "${PROJECT_SOURCE_DIR}/samples/gis")
 # qt_surface_from_raster_headless hold the surface to the same), and the
 # built-in Elevation Bands cuts the surface's own range into ten bands on the
 # terrain ramp: the first from 24.892 to 24.892 + 13.927 / 10 = 26.2847, in the
-# ramp's first colour (40, 70, 140) = #28468C.
+# ramp's first colour (40, 70, 140) = #28468C. GDAL reads the text grid as
+# Float32 (docs/terrain.md, "One surface record"), and the legend's from= and
+# to= are exact, so they are the Float32 values: float32(24.892) =
+# 24.892000198364258, float32(38.819) = 38.819000244140625, and the first band
+# ends at 24.892000198364258 + (38.819000244140625 - 24.892000198364258) / 10 =
+# 26.284700202941895 (worked with Python's struct, '<f').
 add_test(NAME cli.surface_legend_lists_the_bands_of_a_surfaces_style
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli>
@@ -17,7 +22,7 @@ add_test(NAME cli.surface_legend_lists_the_bands_of_a_surfaces_style
             -c "SURFACE STYLE ground \"Elevation Bands\""
             -c "SURFACE LEGEND ground")
 set_tests_properties(cli.surface_legend_lists_the_bands_of_a_surfaces_style PROPERTIES
-    PASS_REGULAR_EXPRESSION "legend surface=\"ground\" style=\"Elevation Bands\" view=plan faces=elevation kind=bands entries=10.*entry index=1 colour=#28468C from=24\\.892 to=26\\.284"
+    PASS_REGULAR_EXPRESSION "legend surface=\"ground\" style=\"Elevation Bands\" view=plan faces=elevation kind=bands entries=10.*entry index=1 colour=#28468C from=24\\.892000198364258 to=26\\.284700202941895"
     FAIL_REGULAR_EXPRESSION "error")
 
 # The built-in Contours (1 m) over the same heights: the whole metres 25 to 38,

@@ -1328,6 +1328,10 @@ if(TARGET katana)
             "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=0 labels=0 covered=0 legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=[0-9]+ tinted=[0-9]+ contours=0 labels=0 covered=[0-9]+ legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=[0-9]+ labels=[0-9]+ covered=[1-9][0-9]* legends=1.*kind=bands entries=10"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_in_plan_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_surface_is_drawn_in_plan_in_its_style_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Surface Styles, by its object names: a style's contour
     # interval edited and applied, then a copy of it made under a new name -
     # each the SURFACESTYLE line the dialog shows and runs through the
@@ -1341,6 +1345,10 @@ if(TARGET katana)
             "-DFORBID=InvalidArgument|ParseFailure|NotFound"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_style_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_surface_style_manager_runs_its_lines_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # GIS > Dataset Information and the import dialog, described by GDAL and
     # PDAL from the file and painted. The dialog runs its INFO lines through
     # the window's one executor, so what they said is in the log.
@@ -3152,6 +3160,10 @@ if(TARGET katana)
             "-DEXPECT=surface name=ground operation=raise .*moved=10800 .*largest_change=2 changed=yes"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_heights_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_surface_heights_dialog_raises_the_surface_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Every icon-only button with a menu on a toolbar or in a dock's title
     # bar draws the sign of its menu clear of its icon (--check-toolbars,
     # tools::menuSignClashes), each measured from its own rendering against
@@ -3402,6 +3414,10 @@ if(TARGET katana)
             "-DEXPECT=ifcExportRoadModel: Road model \\(0 objects\\).*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 .*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
             "-DFORBID=IfcBuildingElementProxy|road elements="
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # File > Import IFC on that file, into a drawing with no coordinate
     # system: described, imported, and the project takes the file's EPSG:7856
     # (the dialog's default), as its own undoable step.
@@ -3413,10 +3429,13 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_import_dialog_headless.png"
             "-DEXPECT=--dialog fileImportIfc opened fileImportIfcDialog \"Import IFC\"[\r\n].*> INFO \"[^\"]*qt_ifc_dialog\\.ifc\".*ifcImportSummary: ifc described file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\".*alignment name=\"MC01\" pis=4 pvis=4.*> IMPORT \"[^\"]*qt_ifc_dialog\\.ifc\" TAKECRS[\r\n]+ifc imported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*note text=\"the project is now in EPSG:7856.*MC01  4 PIs  1000\\.000 to 1339\\.016"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # The session's surfaces go out as IFC terrain and come back as surfaces
-    # of the session: the four TINs of a .12da archive, there and back. Each
-    # is added to the session (its "Surface" line) before the import's reply
-    # is logged.
+    # The drawing's surfaces go out as IFC terrain and come back as surfaces
+    # of the drawing: the four TINs of a .12da archive, there and back. The
+    # import keeps them through cad::importSurfaces, in its one undo step,
+    # each listed after the reply by the surface record (docs/terrain.md,
+    # "Surfaces in the drawing") - named "(2)" beside the original - where the
+    # window's own import once logged a "Surface 'name': ..." line. 8
+    # triangles and 9 points: TIN SOUTH WEST in the archive, unchanged.
     add_test(NAME qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -3424,7 +3443,7 @@ if(TARGET katana)
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_headless.png"
-            "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4"
+            "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4.*surface name=\"TIN SOUTH WEST \\(2\\)\" triangles=8 points=9"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The File menu offers both - each in its submenu, File > Import and File
     # > Export, since every import and export went under those two (a menu's
@@ -3438,7 +3457,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=%fileMenu|?fileImportMenu|?fileExportMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_menu_headless.png"
-            "-DEXPECT=fileImportMenu: Import: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*[\r\n]+fileExportMenu: Export: [^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
+            "-DEXPECT=fileImportMenu: Import: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*[\r\n]+fileExportMenu: Export: [^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, NOROADMODEL, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # --import-options on a .ifc builds File > Import IFC's dialog for it.
     add_test(NAME qt_ifc_import_options_are_the_import_dialog_headless

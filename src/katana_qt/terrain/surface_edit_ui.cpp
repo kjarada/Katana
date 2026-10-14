@@ -64,10 +64,12 @@ void SurfaceEditUi::finish(QMenu& terrain)
         const char* dialog;
         int kind;
     };
-    // The letters are each one item's in the submenu: the tools take D, F, A,
-    // P, T, B, O and H (tools::withMnemonic), so these take R, M, N and L.
+    // The letters are each one item's in the submenu. The tools choose theirs
+    // (tools::withMnemonic) after Combine Surfaces has B, so Add Breakline,
+    // finding A and B taken, takes R: the levels item is V, not R, which
+    // --check-shortcuts found taken twice. These take V, M, N and L.
     static const Item kItems[] = {
-        {Icon::SurfaceLevels, "&Raise, Lower or Set Level...",
+        {Icon::SurfaceLevels, "Raise, Lower or Set Le&vel...",
          "Raise, lower, set or scale the levels of the surface, or of the part inside a polygon",
          "terrainSurfaceHeights", "surfaceHeightsDialog",
          static_cast<int>(SurfaceLevelsKind::Heights)},

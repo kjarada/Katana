@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
@@ -196,18 +197,36 @@ TEST(SurfaceStyleManager, ThePreviewDrawsTheFormsStyleBeforeItIsApplied)
     ASSERT_NE(preview, nullptr);
     preview->resize(320, 220);
     const QImage contours = preview->grab().toImage();
+    // The baseline the change is measured against: the sample surface's own
+    // footprint in this preview, counted as the pixels opaque flat faces in a
+    // colour drawn nowhere else cover. (It was a quarter of the whole
+    // preview, a guess: the sample covers less than that at this size.)
+    auto* opacity = child<QDoubleSpinBox>(dialog, "surfaceStyleOpacity");
+    ASSERT_NE(opacity, nullptr);
+    const double opacityAsShown = opacity->value();
+    fill(dialog, "surfaceStyleFlatColour", "#FF00FF");
+    opacity->setValue(1.0);
+    child<QComboBox>(dialog, "surfaceStyleFaces")->setCurrentText("flat");
+    const QImage flat = preview->grab().toImage();
+    opacity->setValue(opacityAsShown);
     child<QComboBox>(dialog, "surfaceStyleFaces")->setCurrentText("elevation");
     const QImage faces = preview->grab().toImage();
     ASSERT_EQ(contours.size(), faces.size());
+    ASSERT_EQ(flat.size(), faces.size());
+    std::size_t footprint = 0;
     std::size_t changed = 0;
     for (int y = 0; y < faces.height(); ++y) {
         for (int x = 0; x < faces.width(); ++x) {
+            footprint += flat.pixel(x, y) == qRgb(255, 0, 255) ? 1u : 0u;
             changed += contours.pixel(x, y) != faces.pixel(x, y) ? 1u : 0u;
         }
     }
-    // Faces fill most of the sample, where only lines were: a large share of
-    // the preview changes, against the same preview before.
-    EXPECT_GT(changed, static_cast<std::size_t>(faces.width() * faces.height() / 4));
+    ASSERT_GT(footprint, 0u) << "the sample was not drawn";
+    // Faces fill the sample where only lines were, so most of its footprint
+    // changes; what does not is under the contour lines, drawn over the
+    // faces alike in both - a few pixels' width along each, far less than
+    // half of the footprint.
+    EXPECT_GT(changed, footprint / 2) << "changed=" << changed << " footprint=" << footprint;
     EXPECT_TRUE(recorded.lines.isEmpty()); // nothing was run
     ASSERT_TRUE(recorded.dialog->formStyle().has_value());
     EXPECT_EQ(recorded.dialog->formStyle()->planFaces, SurfaceFaces::Elevation);

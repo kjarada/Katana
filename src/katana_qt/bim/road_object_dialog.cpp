@@ -381,6 +381,11 @@ struct RoadObjectDialog::Impl {
     QPushButton* add = nullptr;
     QPlainTextEdit* reply = nullptr;
     QLabel* status = nullptr;
+    // Whether the status says what is wrong with the form - which a refresh
+    // clears once the form is right - rather than how a run went, which a
+    // refresh keeps: the run's own change to the drawing reloads the form,
+    // and that reload wiped "Added - one undo step." as it was shown.
+    bool statusSaysForm = false;
     // Makes the line again from the fields, and the preview: every edit's.
     std::function<void()> refresh;
     // Last, so it goes first: it calls back into the fields above.
@@ -578,10 +583,14 @@ RoadObjectDialog::RoadObjectDialog(RoadObjectDialogContext context, QWidget* par
         const auto made = roadObjectAddLine(form());
         if (made) {
             self.line->setText(*made);
-            self.status->clear();
+            if (self.statusSaysForm) {
+                self.status->clear();
+                self.statusSaysForm = false;
+            }
         } else {
             self.line->clear();
             self.status->setText(qs(made.error().message));
+            self.statusSaysForm = true;
         }
         self.add->setEnabled(made.ok());
         self.previewRun->setEnabled(made.ok());
@@ -624,8 +633,10 @@ RoadObjectDialog::RoadObjectDialog(RoadObjectDialogContext context, QWidget* par
         const auto made = roadObjectAddLine(asked);
         if (!made) {
             self.status->setText(qs(made.error().message));
+            self.statusSaysForm = true;
             return;
         }
+        self.statusSaysForm = false;
         if (!self.context.run) {
             self.status->setText("There is no command line to run it on here.");
             return;

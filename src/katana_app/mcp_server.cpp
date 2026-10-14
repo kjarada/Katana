@@ -1650,6 +1650,7 @@ std::optional<std::string> Server::handle(std::string_view message)
             } else if (uri == "katana://surface-styles") {
                 // The Document's own form, as SURFACESTYLE LIST JSON gives it.
                 text = katana::cad::surfaceStylesToJson(session_.document().surfaceStyles());
+                mimeType = "application/json";
             } else if (uri == "katana://road-model") {
                 // ROADMODEL JSON, read from the Document as the status is:
                 // the road model is made from the drawing's definitions, and
