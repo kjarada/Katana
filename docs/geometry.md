@@ -357,6 +357,25 @@ centre arithmetic that could disagree with them by a sign.
 **A radius of zero is a kink, not an error.** An alignment traced from a
 surveyed polyline has no curves at all; it must solve and station.
 
+**The station of a point is the foot of its nearest perpendicular**
+(`SolvedAlignment::stationOffset`, 2026-10-15, for the leaders that read a
+station - `docs/annotation.md`). Each element is sampled every eighth of a
+turn of its curvature (one sample on a tangent), and each stretch where the
+point's distance AHEAD of the foot falls through zero is bisected to the last
+bit of a double: on an arc the near foot and the far one are half a turn
+apart, so an eighth-turn stretch holds at most one, and a RISING change - the
+far side of a curve, the furthest point, not a foot - is passed over. The
+nearest foot wins; two as near, the lower station. Outside a kink no
+perpendicular reaches the point, which is then at the PI, its offset the
+distance to it. Beyond either end there is no station at all: clamping to
+the end would make one up. Offset is positive LEFT, as
+`pointAtStationOffset` takes it. Rejected: projecting onto the chorded
+polyline (its station along a chord is short of the arc's), and Newton's
+method from a guess (it converges to the far side or off the element as
+readily as to the foot). Tested on hand-worked points of a straight line, a
+curve and a kink, and by undoing `pointAtStationOffset` inside every element
+of the spiralled alignments to 1e-8 m.
+
 ### What is refused, and why each names its PI
 
 Fewer than two PIs; consecutive PIs closer than `kCoordinate` (no tangent
@@ -385,8 +404,9 @@ rather than duplicating it. Details in `docs/cad.md`.
 
 Profiles, corridor quantities and the corridor surface, and parcels are built;
 grading has an engine (`cad::gradeToSurface`) without a GUI route or a verb.
-Nothing references an alignment BY NAME in the model, so `deleteAlignment`
-still has no in-use guard. A section view keeps the polyline it was cut along
+No table references an alignment BY NAME, so `deleteAlignment` still has no
+in-use guard; a leader's template may name one (`{station.NAME}`), and its
+lines then say nothing once the alignment is gone (`docs/annotation.md`). A section view keeps the polyline it was cut along
 (`cad::Section::alignment`, held in `ViewState::section`), not the name of an
 alignment, so deleting the alignment leaves the section as it was cut. (This
 section listed profiles, corridors and parcels as not done, and then cited a

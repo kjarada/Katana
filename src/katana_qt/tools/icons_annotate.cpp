@@ -313,7 +313,8 @@ void paintPointNameLeader(const ToolInk& ink)
     // A name tag at the landing - its hole the neutral dot - for the
     // point's name.
     presetLeader(ink, 4, 19.5, 10, 10, 12.5);
-    ink.stroke(polyline({{13, 6.5}, {19.5, 6.5}, {22.5, 10}, {19.5, 13.5}, {13, 13.5}}, true), true);
+    ink.stroke(polyline({{13, 6.5}, {19.5, 6.5}, {22.5, 10}, {19.5, 13.5}, {13, 13.5}}, true),
+               true);
     ink.dot(19.2, 10, 1.1);
 }
 

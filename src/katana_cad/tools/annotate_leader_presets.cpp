@@ -173,7 +173,8 @@ class PresetLeaderTool final : public InteractiveTool {
             std::optional<std::string> surface;
             std::optional<std::string> alignment;
             (surfaceReader() ? surface : alignment) = name;
-            auto resolved = ann::resolveLeaderPreset(*context_.document, preset_, surface, alignment);
+            auto resolved =
+                ann::resolveLeaderPreset(*context_.document, preset_, surface, alignment);
             if (!resolved) {
                 return ToolStep::rejected(resolved.error().message + ": " +
                                           resolved.error().context);

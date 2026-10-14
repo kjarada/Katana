@@ -135,8 +135,9 @@ class AlignmentReader {
         if (const auto definition = definitions_.find(name); definition != definitions_.end()) {
             if (auto horizontal = katana::geometry::solveAlignment(definition->second.horizontal)) {
                 made = Solved{std::move(*horizontal), std::nullopt};
-                if (definition->second.vertical) {
-                    if (auto profile = katana::geometry::solveProfile(*definition->second.vertical)) {
+                const auto& vertical = definition->second.vertical;
+                if (vertical) {
+                    if (auto profile = katana::geometry::solveProfile(*vertical)) {
                         made->profile = std::move(*profile);
                     }
                 }
@@ -253,7 +254,8 @@ Result<ResolvedPreset> resolveLeaderPreset(const Document& document, LeaderPrese
             const katana::terrain::NamedSurface* found = store.find(*surface);
             if (found == nullptr) {
                 return makeError(ErrorCode::NotFound,
-                                 "the drawing has no surface of that name (SURFACE LIST lists them)",
+                                 "the drawing has no surface of that name (SURFACE LIST lists "
+                                 "them)",
                                  *surface);
             }
             resolved.reads = found->name;

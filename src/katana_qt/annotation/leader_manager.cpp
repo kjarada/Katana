@@ -647,7 +647,8 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
         fillPresetReads(presetReads_, preset_, document_);
         (void)usePreset(false);
     });
-    connect(presetReads_, &QComboBox::currentIndexChanged, this, [this] { (void)usePreset(false); });
+    connect(presetReads_, &QComboBox::currentIndexChanged, this,
+            [this] { (void)usePreset(false); });
     connect(forPreset_, &QComboBox::currentIndexChanged, this, [this] {
         fillPresetReads(forPresetReads_, forPreset_, document_);
         (void)usePreset(true);
