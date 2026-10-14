@@ -2499,6 +2499,31 @@ TEST_F(McpServer, AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines)
     EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 1);
 }
 
+// ifc (docs/ifc.md, "Road model"): the road model goes out with the drawing
+// unless the line says NOROADMODEL, File > Export IFC's "Road model" box -
+// a word an agent types as the dialog writes it; given twice, refused.
+TEST_F(McpServer, AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord)
+{
+    initialize();
+    const TempDir dir("ifc-road");
+    const std::string file = dir.file("roadless.ifc");
+    const Json previewed = call(
+        "katana_run_commands",
+        Json{{"commands", {"LAYER NEW Survey/Kerb", "LAYER SET Survey/Kerb", "PL 0,0 10,0 20,5",
+                           "EXPORT \"" + file + "\" NOROADMODEL PREVIEW"}}});
+    ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
+    EXPECT_NE(textOf(previewed).find("ifc previewed file=\"roadless.ifc\" schema=IFC4X3_ADD2"),
+              std::string::npos)
+        << textOf(previewed);
+    // No road model was given, so the reply has no road record.
+    EXPECT_EQ(textOf(previewed).find("road elements="), std::string::npos);
+    EXPECT_TRUE(call("katana_run_commands",
+                     Json{{"commands", {"EXPORT \"" + file + "\" NOROADMODEL NOROADMODEL"}}})
+                    ["isError"]
+                        .get<bool>());
+    EXPECT_FALSE(std::filesystem::exists(file));
+}
+
 #if defined(KATANA_TEST_WITH_INTEROP)
 // katana_export of an .ifc hands its records as objects under their whole
 // kind: "ifc exported", with a file field - read as the kind "ifc" and a

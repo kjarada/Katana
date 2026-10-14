@@ -26,6 +26,8 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 
+#include "ifc_verbs.hpp"
+#include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/project_crs.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/ifc/front_end.hpp"
@@ -249,6 +251,12 @@ Result<std::string> MainWindow::exportIfc(const katana::ifc::ExportArguments& ar
     }
     input.utilities = std::move(files->utilities);
 
+    // The road model, converted as katana_cli converts it (ifc_verbs.hpp), so
+    // a corridor's elements are the same objects from either front end.
+    if (arguments.roadModel) {
+        input.road = katana::app::roadModelInput(*katana::cad::bim::bimModel(document_));
+    }
+
     // The options katana_cli sets, from the same metadata by the same
     // functions, so that an object's GlobalId is the same whichever front
     // end wrote it.
@@ -392,6 +400,9 @@ IfcExportContext MainWindow::ifcExportContext()
         // The writer's own test, so the dialog cannot promise what the file
         // will not do (a compound EPSG:7856+5711 is not georeferenced).
         state.georeferenced = katana::ifc::isEpsgCode(code);
+        // Made once per change of what it is made from, and shared with the
+        // views (bim_object.hpp): counting it here costs nothing more.
+        state.roadObjects = katana::cad::bim::bimModel(document_)->objects.size();
         return state;
     };
     context.runLine = [this](const QString& line) {

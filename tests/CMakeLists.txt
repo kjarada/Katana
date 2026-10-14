@@ -3328,6 +3328,18 @@ if(TARGET katana)
             "-DEXPECT=--dialog fileExportIfc opened fileExportIfcDialog \"Export IFC\"[\r\n].*> EXPORT \"preview\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\".*ifcExportClasses: [^\r\n]*layer Survey/Kerb \\| 1 \\| IfcKerb NOTDEFINED \\| \\| rule kerb[^\r\n]*service E1 \\| 3 \\| IfcCableCarrierSegment CONDUITSEGMENT \\| ELECTRICAL.*> EXPORT \"[^\"]*qt_ifc_dialog\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\"[\r\n]+ifc exported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+[\r\n]+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_dialog\\.ifc: [0-9]+ instances"
             "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ifc: File > Export IFC's "Road model" box (docs/ifc.md, "Road model"),
+    # unticked: the line says NOROADMODEL, and the window runs it. The
+    # scenario has no corridor, so the box counts no objects.
+    add_test(NAME qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=${_ifc_scenario}@fileExportIfc|?ifcExportRoadModel|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless_headless.png"
+            "-DEXPECT=ifcExportRoadModel: Road model \\(0 objects\\).*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 .*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
+            "-DFORBID=IfcBuildingElementProxy|road elements="
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # File > Import IFC on that file, into a drawing with no coordinate
     # system: described, imported, and the project takes the file's EPSG:7856
     # (the dialog's default), as its own undoable step.

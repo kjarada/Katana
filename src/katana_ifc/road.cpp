@@ -8,15 +8,15 @@
 // aggregated into the site, and an IfcRoadPart (7.9.3.4) per part of it,
 // aggregated into its road; each element contained in its part, in its road
 // when it names no part, in the site when it names no facility. The road is
-// an ELEMENT and its parts PARTIAL: "a COMPLEX parent works with an ELEMENT
-// child, and an ELEMENT parent works with a PARTIAL child" (IfcRoad,
-// CompositionType between facilities). A part's UsageType (IfcFacilityPart,
-// mandatory; IfcFacilityUsageEnum 5.4.2.11) is LATERAL for the parts of the
-// cross-section - each "lateral part" in IfcRoadPartTypeEnum's own words
-// (7.9.2.2: CARRIAGEWAY, TRAFFICLANE, SHOULDER, SIDEWALK, ROADSIDE,
-// CENTRALRESERVE ...) - LONGITUDINAL for a ROADSEGMENT ("Longitudinal, linear
-// segment of a road"), REGION for a bounded area (an INTERSECTION, a
-// ROUNDABOUT, a LAYBY ...). Every placement is relative to its container's,
+// an ELEMENT and its parts PARTIAL, the steps IfcRoad's page asks of one
+// facility over another (an ELEMENT parent over PARTIAL children). A part's
+// UsageType (IfcFacilityPart, mandatory; IfcFacilityUsageEnum 5.4.2.11) is
+// LATERAL for the parts across the road's section - most a "lateral part" in
+// IfcRoadPartTypeEnum's own definitions (7.9.2.2: CARRIAGEWAY, TRAFFICLANE,
+// SHOULDER, ROADSIDE, CENTRALRESERVE ...), the rest beside one (SIDEWALK, a
+// footpath along the side of the road; ROADSIDEPART) - LONGITUDINAL for a
+// ROADSEGMENT ("Longitudinal, linear segment of a road"), REGION for a
+// bounded area (an INTERSECTION, a ROUNDABOUT, a LAYBY ...). Every placement is relative to its container's,
 // as IfcLocalPlacement (8.7.3.14) has it: the road to the site, a part to
 // its road, an element to its part, a feature to its host.
 //

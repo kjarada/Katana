@@ -33,7 +33,7 @@
 //                         ifcExportRules, ifcExportRulesBrowse,
 //                         ifcExportSaveRules, ifcExportCrs, ifcExportCommand,
 //                         ifcExportClasses, ifcExportCheck, ifcExportPreview,
-//                         ifcExportExport, ifcExportClose
+//                         ifcExportExport, ifcExportClose, ifcExportRoadModel
 //   fileImportIfcDialog   ifcImportFile, ifcImportBrowse, ifcImportDescribe,
 //                         ifcImportSummary, ifcImportLocal,
 //                         ifcImportAlignments, ifcImportElements,
@@ -73,6 +73,9 @@ struct IfcExportState {
     std::size_t surfaces = 0;
     QString coordinateSystem;   // the project's, as a person reads it; empty for none
     bool georeferenced = false; // it has an EPSG code, which the file needs
+    // The road model's objects (cad::bim::bimModel): its corridors' courses,
+    // kerbs and earthworks, and the road objects placed along it.
+    std::size_t roadObjects = 0;
 };
 
 struct IfcExportContext {
@@ -133,6 +136,7 @@ class IfcExportDialog final : public QDialog {
     QCheckBox* selectedOnly_ = nullptr;
     QCheckBox* alignments_ = nullptr;
     QCheckBox* surfaces_ = nullptr;
+    QCheckBox* roadModel_ = nullptr;
     QLineEdit* schedule_ = nullptr;
     QLineEdit* schema_ = nullptr;
     QLineEdit* spacing_ = nullptr;

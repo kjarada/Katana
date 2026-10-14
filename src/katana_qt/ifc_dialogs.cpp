@@ -134,8 +134,9 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
 
     auto* intro = new QLabel(
         QStringLiteral("IFC 4.3 (IFC4X3_ADD2): alignments as their design, the drawing by class - "
-                       "kerbs, fences, pits, pipes - and an AS 5488 investigation graded and "
-                       "typed by its services. Nothing is written as a proxy."),
+                       "kerbs, fences, pits, pipes - the road model as roads, their parts and "
+                       "elements, and an AS 5488 investigation graded and typed by its services. "
+                       "Nothing is written as a proxy."),
         this);
     intro->setWordWrap(true);
     intro->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
@@ -172,6 +173,13 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
     form->addRow(QString(), selectedOnly_);
     form->addRow(QString(), alignments_);
     form->addRow(QString(), surfaces_);
+    // The road model: NOROADMODEL when unticked (docs/ifc.md, "Road model").
+    roadModel_ = checkBox(QStringLiteral("ifcExportRoadModel"),
+                          QStringLiteral("The road model's 3D objects - its corridors' courses, "
+                                         "kerbs and earthworks, and the road objects - as IfcRoad, "
+                                         "its parts and their elements"),
+                          true, this);
+    form->addRow(QString(), roadModel_);
 
     form->addRow(QStringLiteral("Utility schedule:"),
                  browseRow(
@@ -292,6 +300,11 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
             recheck();
         });
     }
+    connect(roadModel_, &QCheckBox::toggled, this, [this] {
+        showingResult_ = false;
+        showTally({});
+        recheck();
+    });
     connect(saveRulesButton, &QPushButton::clicked, this, [this] { saveRules(); });
     connect(preview_, &QPushButton::clicked, this, [this] { preview(); });
     connect(export_, &QPushButton::clicked, this, [this] { exportFile(); });
@@ -341,6 +354,8 @@ void IfcExportDialog::refresh()
                             QStringLiteral(", so coordinates are written as they are. File > "
                                            "Project Coordinate System sets one."));
     crs_->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
+    roadModel_->setText(QStringLiteral("Road model (") + grouped(state_.roadObjects) +
+                        QStringLiteral(" objects)"));
     recheck();
 }
 
@@ -366,6 +381,7 @@ katana::ifc::ExportArguments IfcExportDialog::arguments() const
     }
     out.entities = entities_->isChecked();
     out.selected = out.entities && selectedOnly_->isChecked();
+    out.roadModel = roadModel_->isChecked();
     out.alignments = alignments_->isChecked();
     out.surfaces = surfaces_->isChecked();
     return out;
@@ -410,7 +426,8 @@ QString IfcExportDialog::checkWithoutFile() const
     const bool drawing =
         (asked.entities && (asked.selected ? state_.selected : state_.entities) > 0) ||
         (asked.alignments && state_.alignments > 0) || (asked.surfaces && state_.surfaces > 0);
-    if (!drawing && pathOf(schedule_).isEmpty()) {
+    const bool road = asked.roadModel && state_.roadObjects > 0;
+    if (!drawing && !road && pathOf(schedule_).isEmpty()) {
         return QStringLiteral("Nothing to write: the chosen parts of the drawing are empty, and no "
                               "utility schedule is chosen.");
     }
@@ -456,6 +473,9 @@ void IfcExportDialog::recheck()
     }
     if (asked.schedule) {
         parts << QStringLiteral("the schedule's services");
+    }
+    if (asked.roadModel && state_.roadObjects > 0) {
+        parts << grouped(state_.roadObjects) + QStringLiteral(" road model objects");
     }
     say(QStringLiteral("Ready to write ") + parts.join(QStringLiteral(", ")) +
             QStringLiteral(". Preview shows the class each becomes."),
