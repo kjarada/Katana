@@ -1559,8 +1559,10 @@ TEST(SceneFrame, ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCas
     camera.setStandardView(StandardView::IsoSouthWest);
     ASSERT_TRUE(camera.frame(layers.bounds));
     const Framebuffer seen = frameOf(layers, camera);
-    const Rgba core = katana::render::rgba(0xFF, 0x9F, 0x1C);
-    const Rgba casing = katana::render::rgba(16, 18, 22);
+    // Constants, so the lambdas below read them without capturing them: clang
+    // rejects a capture that is not needed (-Wunused-lambda-capture).
+    constexpr Rgba core = katana::render::rgba(0xFF, 0x9F, 0x1C);
+    constexpr Rgba casing = katana::render::rgba(16, 18, 22);
     std::vector<Rgba> column;
     for (int row = 0; row < 100; ++row) {
         const Rgba c = seen.colorAt(100, row);
@@ -1579,10 +1581,10 @@ TEST(SceneFrame, ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCas
     // Nothing but the two, and the core in one run between the casing's.
     const auto first = std::find(column.begin(), column.end(), core);
     const auto last = std::find(column.rbegin(), column.rend(), core).base();
-    EXPECT_TRUE(std::all_of(first, last, [core](Rgba c) { return c == core; })) << drawn;
-    EXPECT_TRUE(std::all_of(column.begin(), first, [casing](Rgba c) { return c == casing; }))
+    EXPECT_TRUE(std::all_of(first, last, [](Rgba c) { return c == core; })) << drawn;
+    EXPECT_TRUE(std::all_of(column.begin(), first, [](Rgba c) { return c == casing; }))
         << drawn;
-    EXPECT_TRUE(std::all_of(last, column.end(), [casing](Rgba c) { return c == casing; }))
+    EXPECT_TRUE(std::all_of(last, column.end(), [](Rgba c) { return c == casing; }))
         << drawn;
 }
 

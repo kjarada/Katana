@@ -1727,8 +1727,12 @@ TEST(StateFile, AWriteThatCannotCompleteLeavesTheOldFileWholeAndNoLitter)
     const std::string before = readFile(temp.path() / "state.json");
 
 #ifdef _WIN32
-    // The file is read-only: Windows will not replace it.
-    fs::permissions(temp.path() / "state.json", fs::perms::owner_write, fs::perm_options::remove);
+    // The file is read-only: Windows will not replace it. Set by the attribute itself:
+    // std::filesystem::permissions does that under libstdc++, but under libc++ (the Windows ARM64
+    // build's library) removing owner_write succeeds and leaves the file writable, so the
+    // replacement went through and this test failed on a premise it never had.
+    const std::wstring record = (temp.path() / "state.json").wstring();
+    ASSERT_TRUE(SetFileAttributesW(record.c_str(), FILE_ATTRIBUTE_READONLY));
 #else
     // The folder takes no new files.
     fs::permissions(temp.path(), fs::perms::owner_write, fs::perm_options::remove);
@@ -1744,7 +1748,7 @@ TEST(StateFile, AWriteThatCannotCompleteLeavesTheOldFileWholeAndNoLitter)
     second.skippedVersion = "9.9.9";
     const core::Status status = update::writeState(temp.path(), second);
 #ifdef _WIN32
-    fs::permissions(temp.path() / "state.json", fs::perms::owner_write, fs::perm_options::add);
+    SetFileAttributesW(record.c_str(), FILE_ATTRIBUTE_NORMAL);
 #else
     fs::permissions(temp.path(), fs::perms::owner_write, fs::perm_options::add);
 #endif

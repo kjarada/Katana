@@ -2156,7 +2156,8 @@ if(TARGET katana)
     # where the build compiled in both (KATANA_BUILTIN_FILES). By hand, from
     # each file's census (docs/katana_standard.md: 221 definitions, 632 codes,
     # 1103 rules; tests/cad/customisation/test_builtin_census.cpp: 792, 632,
-    # 1,624; the window's start-up line groups thousands, the cli's does not):
+    # 1,624; the window's start-up line groups thousands in the user's locale,
+    # the cli's does not):
     #  1. Starts with Katana Standard, built in. Settings says the session is
     #     "Katana Standard (default)". NSW is chosen and Use pressed: the
     #     session is NSW, not what the next start gives (kept=no), so the
@@ -2177,6 +2178,12 @@ if(TARGET katana)
         endif()
     endforeach()
     if(_have_standard AND _have_nsw)
+        # The window's count is grouped in the locale of whoever runs it
+        # (grouped(), src/katana_qt/format.hpp): "1,103" in English, "1103" in
+        # the C locale of a Linux runner, "1.103" or "1 103" elsewhere. So the
+        # separator is any one of up to three bytes - U+202F, French's, is three
+        # in UTF-8 - and not a comma: the Linux release job failed on "1103".
+        set(_group "[^0-9]?[^0-9]?[^0-9]?")
         set(_built_in_kept "${CMAKE_CURRENT_BINARY_DIR}/qt_built_in_kept")
         add_test(NAME qt_built_in_kept_cleanup
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_kept}")
@@ -2185,7 +2192,7 @@ if(TARGET katana)
                 "-DAPP=$<TARGET_FILE:katana>"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|settingsBuiltIn=NSW|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveName|?settingsActiveKept"
-                "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1,103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none[\r\n]+settingsStatus: > CUSTOMISE BUILTIN NSW used name=NSW [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveBuiltIn: NSW[\r\n]+settingsActiveName: NSW[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
+                "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1${_group}103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none[\r\n]+settingsStatus: > CUSTOMISE BUILTIN NSW used name=NSW [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveBuiltIn: NSW[\r\n]+settingsActiveName: NSW[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_1_headless.png"
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_the_window_after_a_kept_alternate_starts_with_it_headless
@@ -2193,7 +2200,7 @@ if(TARGET katana)
                 "-DAPP=$<TARGET_FILE:katana>"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveOrigin|?settingsActiveBuiltIn|?settingsActiveName"
-                "-DEXPECT=Customisation: NSW, 792 definitions \\([0-9,]+ symbols\\) and 1,624 survey code rules, kept\\..*settingsActiveOrigin: Kept by you[\r\n]+settingsActiveBuiltIn: Based on NSW[\r\n]+settingsActiveName: NSW"
+                "-DEXPECT=Customisation: NSW, 792 definitions \\([0-9,]+ symbols\\) and 1${_group}624 survey code rules, kept\\..*settingsActiveOrigin: Kept by you[\r\n]+settingsActiveBuiltIn: Based on NSW[\r\n]+settingsActiveName: NSW"
                 "-DFORBID=made from another built-in"
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_2_headless.png"
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -2210,7 +2217,7 @@ if(TARGET katana)
                 "-DAPP=$<TARGET_FILE:katana>"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|?settingsActiveOrigin"
-                "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1,103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
+                "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1${_group}103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
                 "-DFORBID=survey code rules, kept"
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/built_in_kept_4_headless.png"
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

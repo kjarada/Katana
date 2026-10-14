@@ -241,7 +241,12 @@ class Misbehaving(FeedTest):
         self.assertEqual(get(feed.url + "/sub/inner.txt").status, 429)
         self.assertEqual(get(feed.url + "/empty.bin").status, 404)
         self.assertEqual(get(feed.url + "/alpha.bin").body, ALPHA)
-        self.assertEqual([r["behaviour"] for r in feed.requests()], ["status-403", "status-429", "status-404", "file"])
+        # The records come in the order the answers FINISHED (FakeFeed.requests), which a threaded
+        # server does not keep to the order they were asked in - the Linux release job saw 404 logged
+        # before 429 - so what is compared is the answer each path was given.
+        self.assertEqual(sorted((r["path"], r["behaviour"]) for r in feed.requests()),
+                         sorted([("/Katana-update-win64.json", "status-403"), ("/sub/inner.txt", "status-429"),
+                                 ("/empty.bin", "status-404"), ("/alpha.bin", "file")]))
 
     def test_a_status_rule_must_name_a_failure(self) -> None:
         for code in (200, 302, 399, 600):
