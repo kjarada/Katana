@@ -922,9 +922,10 @@ again before running anything.
   process with the rest of its suite, and `ctest -R Suite.Case` would no
   longer select one case. Not measured as a change.
 - **The virus scanner.** What IT could exclude, for the reasons above:
-  - folders: the checkouts and worktrees with their build trees
-    (`D:\01_PROGRAMMING\01_Katana`), the toolchain (`C:\msys64`), and the
-    ccache folder (`%LOCALAPPDATA%\ccache`);
+  - folders: the checkout and the worktrees beside it, with their build trees
+    (here `D:\01_PROGRAMMING\01_Katana` and `D:\01_PROGRAMMING\Katana-wt`),
+    the toolchain (`C:\msys64`), and the ccache folder
+    (`%LOCALAPPDATA%\ccache`);
   - processes: `ninja.exe`, `cmake.exe`, `ctest.exe`, `ccache.exe`,
     `g++.exe`, `cc1plus.exe`, `as.exe`, `ld.exe` (all under
     `C:\msys64\ucrt64`), so that the files they read and write are not
