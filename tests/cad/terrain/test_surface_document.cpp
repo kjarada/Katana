@@ -370,7 +370,11 @@ TEST(SurfaceDocument, ASurfaceTheProjectCannotReadRefusesTheOpenAndLeavesTheDraw
 TEST(SurfaceDocument, AnImportOfEntitiesAndSurfacesIsOneStepThroughTheCommand)
 {
     Document document;
-    auto command = document.surfacesCommand(with({}, "ground", tiltedSquare(0.0)), "IMPORT");
+    // Made through a const Document, as a tool holding one makes it: making
+    // the command changes nothing.
+    const Document& seen = document;
+    auto command = seen.surfacesCommand(with({}, "ground", tiltedSquare(0.0)), "IMPORT");
+    EXPECT_TRUE(document.surfaces().empty());
     ASSERT_TRUE(command.ok());
     ASSERT_TRUE(*command != nullptr);
     auto transaction = std::make_unique<katana::commands::Transaction>("IMPORT site.12da");

@@ -157,7 +157,7 @@ Status Document::surfaceStylesStatus() const
 }
 
 Result<katana::commands::CommandPtr> Document::surfacesCommand(SurfaceStore surfaces,
-                                                               std::string stepName)
+                                                               std::string stepName) const
 {
     if (auto status = checkStyleNames(surfaces, surfaces_, surfaceStyles_); !status) {
         return status.error();
@@ -169,9 +169,13 @@ Result<katana::commands::CommandPtr> Document::surfacesCommand(SurfaceStore surf
     // without copying a surface.
     auto states = std::make_shared<std::pair<SurfaceStore, SurfaceStore>>(surfaces_,
                                                                           std::move(surfaces));
-    auto apply = [this, states](bool after) {
-        surfaces_ = after ? states->second : states->first;
-        ++surfacesGeneration_;
+    // Making the command changes nothing; running it does, and a command runs
+    // only through the non-const execute() of the Document it was made by -
+    // so the Document it changes is never a const object.
+    Document* self = const_cast<Document*>(this);
+    auto apply = [self, states](bool after) {
+        self->surfaces_ = after ? states->second : states->first;
+        ++self->surfacesGeneration_;
     };
     return katana::commands::CommandPtr(
         std::make_unique<SurfaceStateCommand>(std::move(stepName), std::move(apply)));

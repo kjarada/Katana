@@ -457,9 +457,12 @@ class Document {
                                                    std::string stepName = "SET_SURFACES");
     // The same change as a command, for a step that does more besides - an
     // IMPORT that brings entities and surfaces is ONE undo step. Null when
-    // `surfaces` equals the current store.
+    // `surfaces` equals the current store. Const: it builds the command and
+    // changes nothing until the command is executed through execute(), so a
+    // tool holding a const Document can make one.
     [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
-    surfacesCommand(katana::terrain::SurfaceStore surfaces, std::string stepName = "SET_SURFACES");
+    surfacesCommand(katana::terrain::SurfaceStore surfaces,
+                    std::string stepName = "SET_SURFACES") const;
 
     // The display styles (cad/terrain/surface_style.hpp): the project's, or
     // builtInSurfaceStyles() when it saved none. Replaced as ONE undoable
