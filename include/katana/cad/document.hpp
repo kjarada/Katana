@@ -499,6 +499,11 @@ class Document {
     [[nodiscard]] katana::core::Status
     setRoadTemplates(const road::RoadTemplateSet& templates,
                      std::string stepName = "SET_ROAD_TEMPLATES");
+    // As a command, for a step that does more besides (a template renamed
+    // with the corridors that name it); null when nothing changes.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    roadTemplatesCommand(const road::RoadTemplateSet& templates,
+                         std::string stepName = "SET_ROAD_TEMPLATES");
     [[nodiscard]] const road::CorridorSet& corridors() const;
     [[nodiscard]] katana::core::Status corridorsStatus() const;
     [[nodiscard]] katana::core::Status setCorridors(const road::CorridorSet& corridors,

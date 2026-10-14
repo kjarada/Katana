@@ -199,14 +199,20 @@ Status Document::roadTemplatesStatus() const
         .status;
 }
 
-Status Document::setRoadTemplates(const road::RoadTemplateSet& templates, std::string stepName)
+Result<katana::commands::CommandPtr>
+Document::roadTemplatesCommand(const road::RoadTemplateSet& templates, std::string stepName)
 {
     if (auto status = checkTemplates(templates); !status) {
-        return status;
+        return status.error();
     }
     (void)roadTemplates();
-    auto command = changeCommand(roadTemplateCache_, metadata_, kTemplatesKey, templates,
-                                 road::roadTemplatesToJson, std::move(stepName), "road templates");
+    return changeCommand(roadTemplateCache_, metadata_, kTemplatesKey, templates,
+                         road::roadTemplatesToJson, std::move(stepName), "road templates");
+}
+
+Status Document::setRoadTemplates(const road::RoadTemplateSet& templates, std::string stepName)
+{
+    auto command = roadTemplatesCommand(templates, std::move(stepName));
     if (!command) {
         return command.error();
     }

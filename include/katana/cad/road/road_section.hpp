@@ -189,8 +189,20 @@ struct BuiltCorridor {
                                           const katana::geometry::SolvedAlignment& alignment,
                                           const katana::geometry::SolvedProfile& profile,
                                           const katana::terrain::TinSurface* ground);
-// The same from the drawing: the alignment and its profile by name, the
-// drawing's road templates, the target surface from Document::surfaces.
+// What a corridor names, found in the drawing: its alignment and design
+// profile solved, its target surface (null when it names none, or one the
+// drawing lacks), and a sentence for each that is missing or does not solve.
+// No alignment or no profile: both absent.
+struct CorridorInputs {
+    std::optional<katana::geometry::SolvedAlignment> alignment;
+    std::optional<katana::geometry::SolvedProfile> profile;
+    const katana::terrain::TinSurface* ground = nullptr;
+    std::vector<std::string> problems;
+};
+[[nodiscard]] CorridorInputs corridorInputs(const Document& document, const Corridor& corridor);
+
+// The same from the drawing: its inputs (corridorInputs) and the drawing's
+// road templates (Document::roadTemplates).
 [[nodiscard]] BuiltCorridor buildCorridor(const Document& document, const Corridor& corridor);
 
 // ---- what is made from it ------------------------------------------------------------------

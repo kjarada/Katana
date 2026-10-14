@@ -259,7 +259,7 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
         const double level = levelAt(d);
         return cut ? level >= *z : level <= *z;
     };
-    std::optional<double> daylight;
+    std::optional<double> reach;
     double previous = 0.0;
     // The steps summed may fall a hair short of the limit; the limit itself
     // is still tried.
@@ -279,30 +279,30 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
                 }
                 (*there ? high : low) = mid;
             }
-            daylight = 0.5 * (low + high);
+            reach = 0.5 * (low + high);
             break;
         }
         previous = d;
     }
-    if (!daylight) {
+    if (!reach) {
         return out;
     }
     if (batter->benchHeight > 0.0 && batter->benchWidth > 0.0) {
         const double run = cut ? batter->cutSlope : batter->fillSlope;
         const double slope = batter->benchHeight * run;
         int bench = 1;
-        for (double d = slope; d < *daylight; d += slope + batter->benchWidth, ++bench) {
+        for (double d = slope; d < *reach; d += slope + batter->benchWidth, ++bench) {
             addPoint(OutPoint{batterPrefix + "/bench" + std::to_string(bench) + "-in",
                               hinge.out + d, levelAt(d)});
-            const double far = d + batter->benchWidth;
-            if (far >= *daylight) {
+            const double benchEnd = d + batter->benchWidth;
+            if (benchEnd >= *reach) {
                 break;
             }
             addPoint(OutPoint{batterPrefix + "/bench" + std::to_string(bench) + "-out",
-                              hinge.out + far, levelAt(far)});
+                              hinge.out + benchEnd, levelAt(benchEnd)});
         }
     }
-    addPoint(OutPoint{batterPrefix + "/daylight", hinge.out + *daylight, levelAt(*daylight)});
+    addPoint(OutPoint{batterPrefix + "/daylight", hinge.out + *reach, levelAt(*reach)});
     out.reached = true;
     return out;
 }
@@ -506,11 +506,11 @@ Result<RoadSection> buildSection(const RoadTemplate& roadTemplate, const SolvedA
     const SplitArea whole = areaBetween(section.ground, formation);
     section.cutArea = whole.above;  // ground above the formation
     section.fillArea = whole.below; // the formation above the ground
-    const double far = std::max(std::abs(leftmost), std::abs(rightmost)) + 1.0;
+    const double beyond = std::max(std::abs(leftmost), std::abs(rightmost)) + 1.0;
     const SplitArea leftSplit =
-        areaBetween(clipped(section.ground, 0.0, far), clipped(formation, 0.0, far));
+        areaBetween(clipped(section.ground, 0.0, beyond), clipped(formation, 0.0, beyond));
     const SplitArea rightSplit =
-        areaBetween(clipped(section.ground, -far, 0.0), clipped(formation, -far, 0.0));
+        areaBetween(clipped(section.ground, -beyond, 0.0), clipped(formation, -beyond, 0.0));
     section.leftCut = leftSplit.above;
     section.leftFill = leftSplit.below;
     section.rightCut = rightSplit.above;
@@ -827,44 +827,55 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     return built;
 }
 
-BuiltCorridor buildCorridor(const Document& document, const Corridor& corridor)
+CorridorInputs corridorInputs(const Document& document, const Corridor& corridor)
 {
-    BuiltCorridor failed;
-    failed.name = corridor.name;
+    CorridorInputs inputs;
     const katana::entity::Alignment* alignment =
         document.model().alignments.find(corridor.alignment);
     if (alignment == nullptr) {
-        failed.problems.push_back("the alignment " + corridor.alignment + " is not in the drawing");
-        return failed;
+        inputs.problems.push_back("the alignment " + corridor.alignment + " is not in the drawing");
+        return inputs;
     }
     if (!alignment->vertical) {
-        failed.problems.push_back("the alignment " + corridor.alignment +
+        inputs.problems.push_back("the alignment " + corridor.alignment +
                                   " has no design profile (ALIGN DESIGN)");
-        return failed;
+        return inputs;
     }
     auto solved = katana::geometry::solveAlignment(alignment->horizontal);
     if (!solved) {
-        failed.problems.push_back(solved.error().describe());
-        return failed;
+        inputs.problems.push_back(solved.error().describe());
+        return inputs;
     }
     auto profile = katana::geometry::solveProfile(*alignment->vertical);
     if (!profile) {
-        failed.problems.push_back(profile.error().describe());
-        return failed;
+        inputs.problems.push_back(profile.error().describe());
+        return inputs;
     }
-    const katana::terrain::TinSurface* ground = nullptr;
-    std::vector<std::string> problems;
+    inputs.alignment = std::move(*solved);
+    inputs.profile = std::move(*profile);
     if (!corridor.surface.empty()) {
         const katana::terrain::NamedSurface* named = document.surfaces().find(corridor.surface);
         if (named == nullptr || named->surface == nullptr) {
-            problems.push_back("the surface " + corridor.surface + " is not in the drawing");
+            inputs.problems.push_back("the surface " + corridor.surface + " is not in the drawing");
         } else {
-            ground = named->surface.get();
+            inputs.ground = named->surface.get();
         }
     }
-    BuiltCorridor built =
-        buildCorridor(corridor, document.roadTemplates(), *solved, *profile, ground);
-    built.problems.insert(built.problems.begin(), problems.begin(), problems.end());
+    return inputs;
+}
+
+BuiltCorridor buildCorridor(const Document& document, const Corridor& corridor)
+{
+    const CorridorInputs inputs = corridorInputs(document, corridor);
+    if (!inputs.alignment || !inputs.profile) {
+        BuiltCorridor failed;
+        failed.name = corridor.name;
+        failed.problems = inputs.problems;
+        return failed;
+    }
+    BuiltCorridor built = buildCorridor(corridor, document.roadTemplates(), *inputs.alignment,
+                                        *inputs.profile, inputs.ground);
+    built.problems.insert(built.problems.begin(), inputs.problems.begin(), inputs.problems.end());
     return built;
 }
 
