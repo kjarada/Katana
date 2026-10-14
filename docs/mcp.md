@@ -523,6 +523,18 @@ clearance= blocked_at=` record.
 `McpServer.ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen`
 pins it.
 
+### Volumes through katana_run_commands
+
+No tool of its own: `VOLUME` and `SURFACE DIFFERENCE` / `ENVELOPE` are
+session lines (`docs/volumes.md`), so `katana_run_commands` runs them as the
+window's Terrain > Volumes does, and the replies are the records an agent
+reads - `volume method= cut= fill= net= area=` with the method's own keys,
+`polygon index= ...` per polygon with EACH, `section station= ... mass=` per
+section along an alignment. A tool would restate the verbs' options as a
+schema and add nothing the records do not carry. The surfaces to name are
+`katana_terrain_list`'s.
+`McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool` pins it.
+
 ### V5: katana_gis_query
 
 | Tool | In | Out |

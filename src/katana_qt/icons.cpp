@@ -385,6 +385,8 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        // volumes
+        Icon::Volumes,      Icon::CutFillMap,
         Icon::Download,
     };
     return icons;
@@ -1334,6 +1336,39 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
         break;
+    // ---- volumes (docs/volumes.md) ----
+    case Icon::Volumes: {
+        // A block seen from above one corner: the top face filled, so at
+        // 16 px it reads as a solid, not a wire box.
+        const QPainterPath top = polyline({{12, 3}, {21, 7.5}, {12, 12}, {3, 7.5}}, true);
+        ink.fill(top, true, 90);
+        ink.stroke(top, true);
+        ink.stroke(polyline({{3, 7.5}, {3, 16.5}, {12, 21}, {21, 16.5}, {21, 7.5}}));
+        ink.line(12, 12, 12, 21);
+        break;
+    }
+    case Icon::CutFillMap: {
+        // The map's frame, the fill side shaded in the accent, the cut side
+        // faintly in the neutral, and the line where they meet.
+        QPainterPath fillSide(QPointF(3.5, 3.5));
+        fillSide.lineTo(11, 3.5);
+        fillSide.cubicTo(14, 10, 9, 14, 13, 20.5);
+        fillSide.lineTo(3.5, 20.5);
+        fillSide.closeSubpath();
+        QPainterPath cutSide(QPointF(11, 3.5));
+        cutSide.lineTo(20.5, 3.5);
+        cutSide.lineTo(20.5, 20.5);
+        cutSide.lineTo(13, 20.5);
+        cutSide.cubicTo(9, 14, 14, 10, 11, 3.5);
+        ink.fill(fillSide, true, 110);
+        ink.fill(cutSide, false, 45);
+        QPainterPath meet(QPointF(11, 3.5));
+        meet.cubicTo(14, 10, 9, 14, 13, 20.5);
+        ink.stroke(meet, true);
+        ink.stroke(polyline({{3.5, 3.5}, {20.5, 3.5}, {20.5, 20.5}, {3.5, 20.5}}, true));
+        break;
+    }
+    // ---- end of volumes ----
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,
         // so that at 16 px the shaft does not cross a third line at its base.

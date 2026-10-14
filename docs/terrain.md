@@ -229,6 +229,22 @@ the triangles along every seam, so it is a different surface, not a faster
 route to the same one. The TIN build is therefore taken off the GUI thread
 instead (*Background jobs*, below).
 
+## Volumes on every front end
+
+The volumes - surface to surface, to a level, stockpiles and pits, along an
+alignment, on a grid, inside polygons - and the difference (cut/fill map)
+and envelope surfaces have their verbs, their dialog and their MCP route
+(`VOLUME`, `SURFACE DIFFERENCE`, Terrain > Volumes): `docs/volumes.md`.
+Until 2026-10-15 `volumeToDatum` and `compareSurfaces` were exact and tested
+but reachable by no verb, and only the window's corridor quantities measured
+anything. The pair clipping above is now `terrain::visitOverlay`
+(`include/katana/terrain/overlay.hpp`), which `compareSurfaces` visits with
+the same arithmetic in the same order, so its answers are the bits they were;
+the region, stockpile, difference and envelope work cut the ground through the
+same clipper. `volume.hpp` said the overlay "merges both triangulations into
+one constrained triangulation"; that was the design before the fix above, and
+the header now says what it does.
+
 ## Section crossings
 
 `extractSection` intersected every alignment segment with every segment of

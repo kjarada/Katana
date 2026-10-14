@@ -238,6 +238,14 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // ---- volumes (docs/volumes.md) ----
+    // Terrain > Volumes: a block of ground, its top face in the accent - the
+    // quantity between two surfaces.
+    Volumes,
+    // The Volumes dialog's Make Cut/Fill Map: a map split along the line
+    // where cut meets fill, the fill side in the accent.
+    CutFillMap,
+    // ---- end of volumes ----
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.
