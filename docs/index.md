@@ -20,6 +20,7 @@ done. There is no user guide yet.
 | [storage.md](storage.md) | why the project database is SQLite, the measurements, loading without copying | `katana_storage` (a storage engine or encoding decision) |
 | [geodesy.md](geodesy.md) | coordinate reference systems, transformations, units, grid and ground factors, geodesics, site calibration | `katana_geodesy` |
 | [terrain.md](terrain.md) | TIN surfaces, contours, volumes, tiled terrain | `katana_terrain` |
+| [surface_editing.md](surface_editing.md) | editing a surface - triangles, points, breaklines, boundaries and holes, levels, smoothing, thinning - and surfaces made of others (merge, paste with a clean seam, clip, offset): the one patch mechanism, the levels of new vertices, the `SURFACE EDIT` verbs, the Edit Surface tools and dialogs | `include/katana/terrain/tin_edit.hpp`, `src/katana_terrain/tin_*.cpp`, `include/katana/cad/terrain/surface_edit_verbs.hpp`, `src/katana_cad/tools/terrain_edit.cpp`, `src/katana_qt/terrain/surface_edit_*` |
 | [render.md](render.md) | camera, draw lists, the software rasteriser, the 3D and section views | `katana_render`, `render_view_widget.*`, `section_view_widget.*` |
 | [performance.md](performance.md) | the measurements and what moved | anything measured (`benchmarks/`) |
 | [interop.md](interop.md) | GIS, rasters, point clouds, the `.12da` archive, import and export | `katana_io`, `katana_interop`, `katana_archive12d` (the archive) |
