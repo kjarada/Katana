@@ -164,7 +164,21 @@ void paintSurfacePlan(QPainter& painter, const cad::SurfacePlan& plan, const cad
         // at 21, 0.03 mm short - below a pen's width.
         font.setPixelSize(std::max(1, static_cast<int>(std::lround(pixels))));
         const QFontMetricsF metrics(font);
-        const QColor ink = inkOf(plan.majorColour, options);
+        // In the majors' colour - unless that is too near the halo's to be
+        // read (a dark brown major on the screen's dark ground): then lighter
+        // on a dark halo, darker on a light one. Luminance by the BT.709
+        // weights on the sRGB values, near enough for "can this be read";
+        // the 0.3 is chosen here, by looking: the default major brown (110,
+        // 70, 40), 0.30, on the screen's ground (30, 35, 41), 0.13, is 0.16
+        // apart and hard to read; the minor brown (160, 120, 80), 0.49, is
+        // 0.36 apart and plain.
+        QColor ink = inkOf(plan.majorColour, options);
+        const auto luminance = [](const QColor& colour) {
+            return 0.2126 * colour.redF() + 0.7152 * colour.greenF() + 0.0722 * colour.blueF();
+        };
+        if (std::abs(luminance(ink) - luminance(options.halo)) < 0.3) {
+            ink = luminance(options.halo) < 0.5 ? ink.lighter(200) : ink.darker(200);
+        }
         QPen halo(options.halo, std::max(2.0, 0.25 * pixels));
         halo.setJoinStyle(Qt::RoundJoin);
         constexpr double kDegrees = 180.0 / std::numbers::pi;

@@ -730,7 +730,8 @@ PlanPaintStats PlanPainter::paint()
 
 void PlanPainter::drawSurfaces()
 {
-    if (source_.surfaces == nullptr || source_.surfaces->empty()) {
+    // An empty store is still painted: the cache lets go of what it kept.
+    if (source_.surfaces == nullptr) {
         return;
     }
     static const katana::cad::SurfaceStyleSet builtIn = katana::cad::builtInSurfaceStyles();
