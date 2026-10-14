@@ -15,7 +15,7 @@
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
-namespace katana::cad::testing {
+namespace katana::cad::surface_testing {
 
 // The square [x0, x0 + size] x [y0, y0 + size] as two counter-clockwise
 // triangles on the plane z = z0 + dz * x / size: its heights run from z0 on
@@ -70,4 +70,4 @@ struct ScratchDirectory {
     ScratchDirectory& operator=(const ScratchDirectory&) = delete;
 };
 
-} // namespace katana::cad::testing
+} // namespace katana::cad::surface_testing

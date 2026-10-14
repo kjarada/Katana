@@ -68,7 +68,7 @@ katana::terrain::NamedSurface surfaceIn(std::string style)
 {
     katana::terrain::NamedSurface named;
     named.name = "ground";
-    named.surface = katana::cad::testing::tiltedSquare(0.0);
+    named.surface = katana::cad::surface_testing::tiltedSquare(0.0);
     named.style = std::move(style);
     return named;
 }

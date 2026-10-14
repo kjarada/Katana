@@ -20,8 +20,8 @@ using katana::cad::CommandInterpreter;
 using katana::cad::Document;
 using katana::cad::SurfaceDisplayStyle;
 using katana::cad::builtInSurfaceStyles;
-using katana::cad::testing::tiltedSquare;
-using katana::cad::testing::with;
+using katana::cad::surface_testing::tiltedSquare;
+using katana::cad::surface_testing::with;
 using katana::core::ErrorCode;
 
 namespace {
