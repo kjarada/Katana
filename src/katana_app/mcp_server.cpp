@@ -28,6 +28,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
@@ -740,6 +741,66 @@ const std::vector<Tool>& tools()
                  "(length, area, radius...). Ids are what SELECT, INFO and the edit commands take.",
                  objectSchema(Json::object()), hints(true, false, true),
                  [](Session& session, const Json&) { return oneLine(session, "LIST"); }});
+
+        // ---- leaders (docs/annotation.md, "Presets"; docs/mcp.md, "Leaders") ----
+        list.push_back(Tool{
+            "katana_leaders", "Leaders and what they say",
+            "The drawing's leaders as structured data, each with what its note says NOW - read "
+            "live off the entity its tip is on and, for a preset or a template naming them, off "
+            "the drawing's surfaces and alignments: leaders [{id, layer, tip [x, y], vertices, "
+            "target (the entity id the tip is on, or null), anchor, smart, template, labelstyle, "
+            "preset (level, surface, cutfill, name, code, details or station when the template "
+            "is that preset's), reads (the surface or alignment it reads), arrow, callout, text, "
+            "lines}], presets [{name, title, reads (target, surface or alignment), template, "
+            "tool, says}], surfaces [...], alignments [...]. What LEADER LIST JSON prints. It "
+            "reads only. To MAKE one use katana_run_commands: LEADER #<id> <x,y> "
+            "preset=level makes a leader saying the point's level (RL); preset=surface "
+            "[surface=<name>] its height above (+) or below (-) a surface; preset=cutfill the "
+            "cut or the fill to a surface; preset=name its name (point number); preset=code its "
+            "survey code; preset=details all three; preset=station [alignment=<name>] its "
+            "station and offset (left positive). A surface or alignment not named is the first "
+            "visible surface or the first alignment, said as chosen= in the reply. LEADER FOR "
+            "<ids>|SELECTION preset=... makes one to each entity in one undo step. A template "
+            "may name {surface.NAME} {dsurface.NAME} {cut.NAME} {fill.NAME} {station.NAME} "
+            "{offset.NAME} {profile.NAME} {dprofile.NAME} itself (katana_help, under Leader).",
+            objectSchema(
+                Json{{"ids",
+                      {{"type", "array"},
+                       {"items", {{"type", "integer"}, {"minimum", 1}}},
+                       {"description", "Only these leaders (by entity id); all when left out."}}},
+                     {"target",
+                      {{"type", "integer"},
+                       {"minimum", 1},
+                       {"description", "Only the leaders whose tip is on this entity."}}}}),
+            hints(true, false, true), [](Session& session, const Json& arguments) {
+                std::vector<katana::entity::EntityId> ids;
+                if (arguments.contains("ids")) {
+                    const Json& given = arguments.at("ids");
+                    if (!given.is_array()) {
+                        throw ToolRefusal{"\"ids\" must be a list of entity ids"};
+                    }
+                    for (const Json& id : given) {
+                        if (!id.is_number_integer() || id.get<long long>() < 1) {
+                            throw ToolRefusal{"every entry of \"ids\" must be a positive "
+                                              "whole number"};
+                        }
+                        ids.push_back(static_cast<katana::entity::EntityId>(id.get<long long>()));
+                    }
+                }
+                std::optional<katana::entity::EntityId> target;
+                if (arguments.contains("target")) {
+                    const Json& id = arguments.at("target");
+                    if (!id.is_number_integer() || id.get<long long>() < 1) {
+                        throw ToolRefusal{"\"target\" must be a positive whole number"};
+                    }
+                    target = static_cast<katana::entity::EntityId>(id.get<long long>());
+                }
+                // From the Document, as katana_status is: a read leaves no
+                // line in the session's history.
+                const std::string json =
+                    katana::cad::annotation::leadersJson(session.document(), ids, target);
+                return ToolReply{json, Json::parse(json)};
+            }});
 
         list.push_back(Tool{
             "katana_describe_entity", "Describe an entity",

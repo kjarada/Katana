@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 #include "katana/core/text.hpp"
 #include "katana/geometry/chording.hpp"
@@ -253,6 +256,78 @@ Result<SolvedAlignment> solveAlignment(const HorizontalAlignment& definition)
 
 // ---- queries ------------------------------------------------------------------------
 
+namespace {
+
+// The point, tangent direction and signed curvature `local` along one
+// element, from its own start: what the station queries below answer once
+// they have found the element, and what stationOffset asks of an element at
+// its very end - where elementAt would hand over to the next one, whose
+// direction differs at a kink.
+Point2 pointOn(const AlignmentElement& element, double local)
+{
+    return std::visit(
+        [&](const auto& shape) -> Point2 {
+            using Shape = std::decay_t<decltype(shape)>;
+            if constexpr (std::is_same_v<Shape, Spiral2>) {
+                return shape.pointAt(local);
+            } else {
+                return shape.pointAt(local / element.length);
+            }
+        },
+        element.shape);
+}
+
+double directionOn(const AlignmentElement& element, double local)
+{
+    return std::visit(
+        [&](const auto& shape) -> double {
+            using Shape = std::decay_t<decltype(shape)>;
+            if constexpr (std::is_same_v<Shape, Segment2>) {
+                return directionOf(shape.start, shape.end);
+            } else if constexpr (std::is_same_v<Shape, Arc2>) {
+                // The tangent is a quarter turn ahead of the radius for a
+                // counter-clockwise arc and a quarter turn behind for a
+                // clockwise one.
+                const double radial = shape.startAngle + shape.sweep * (local / element.length);
+                return radial + (shape.sweep > 0.0 ? 0.5 : -0.5) * katana::math::kPi;
+            } else {
+                return shape.directionAt(local);
+            }
+        },
+        element.shape);
+}
+
+double curvatureOn(const AlignmentElement& element, double local)
+{
+    return std::visit(
+        [&](const auto& shape) -> double {
+            using Shape = std::decay_t<decltype(shape)>;
+            if constexpr (std::is_same_v<Shape, Segment2>) {
+                return 0.0;
+            } else if constexpr (std::is_same_v<Shape, Arc2>) {
+                return (shape.sweep > 0.0 ? 1.0 : -1.0) / shape.radius;
+            } else {
+                return shape.curvatureAt(local);
+            }
+        },
+        element.shape);
+}
+
+Vec2 unitAt(double direction)
+{
+    return Vec2(std::cos(direction), std::sin(direction));
+}
+
+// How far along `point` is from the foot of a perpendicular `local` along
+// `element`: positive while the foot is still ahead, so a foot is where it
+// falls through zero.
+double ahead(const AlignmentElement& element, double local, const Point2& point)
+{
+    return (point - pointOn(element, local)).dot(unitAt(directionOn(element, local)));
+}
+
+} // namespace
+
 const AlignmentElement* SolvedAlignment::elementAt(double station) const
 {
     if (elements_.empty() || !containsStation(station)) {
@@ -277,17 +352,7 @@ std::optional<Point2> SolvedAlignment::pointAtStation(double station) const
     if (element == nullptr) {
         return std::nullopt;
     }
-    const double local = station - element->startStation;
-    return std::visit(
-        [&](const auto& shape) -> Point2 {
-            using Shape = std::decay_t<decltype(shape)>;
-            if constexpr (std::is_same_v<Shape, Spiral2>) {
-                return shape.pointAt(local);
-            } else {
-                return shape.pointAt(local / element->length);
-            }
-        },
-        element->shape);
+    return pointOn(*element, station - element->startStation);
 }
 
 std::optional<double> SolvedAlignment::directionAtStation(double station) const
@@ -296,23 +361,7 @@ std::optional<double> SolvedAlignment::directionAtStation(double station) const
     if (element == nullptr) {
         return std::nullopt;
     }
-    const double local = station - element->startStation;
-    return std::visit(
-        [&](const auto& shape) -> double {
-            using Shape = std::decay_t<decltype(shape)>;
-            if constexpr (std::is_same_v<Shape, Segment2>) {
-                return directionOf(shape.start, shape.end);
-            } else if constexpr (std::is_same_v<Shape, Arc2>) {
-                // The tangent is a quarter turn ahead of the radius for a
-                // counter-clockwise arc and a quarter turn behind for a
-                // clockwise one.
-                const double radial = shape.startAngle + shape.sweep * (local / element->length);
-                return radial + (shape.sweep > 0.0 ? 0.5 : -0.5) * katana::math::kPi;
-            } else {
-                return shape.directionAt(local);
-            }
-        },
-        element->shape);
+    return directionOn(*element, station - element->startStation);
 }
 
 std::optional<double> SolvedAlignment::curvatureAtStation(double station) const
@@ -321,19 +370,7 @@ std::optional<double> SolvedAlignment::curvatureAtStation(double station) const
     if (element == nullptr) {
         return std::nullopt;
     }
-    const double local = station - element->startStation;
-    return std::visit(
-        [&](const auto& shape) -> double {
-            using Shape = std::decay_t<decltype(shape)>;
-            if constexpr (std::is_same_v<Shape, Segment2>) {
-                return 0.0;
-            } else if constexpr (std::is_same_v<Shape, Arc2>) {
-                return (shape.sweep > 0.0 ? 1.0 : -1.0) / shape.radius;
-            } else {
-                return shape.curvatureAt(local);
-            }
-        },
-        element->shape);
+    return curvatureOn(*element, station - element->startStation);
 }
 
 std::optional<Point2> SolvedAlignment::pointAtStationOffset(double station, double offset) const
@@ -346,6 +383,93 @@ std::optional<Point2> SolvedAlignment::pointAtStationOffset(double station, doub
     // Left normal of the tangent: rotate the direction a quarter turn
     // counter-clockwise.
     return Point2(point->x - std::sin(*direction) * offset, point->y + std::cos(*direction) * offset);
+}
+
+std::optional<StationOffset> SolvedAlignment::stationOffset(const Point2& point) const
+{
+    if (elements_.empty() || !std::isfinite(point.x) || !std::isfinite(point.y)) {
+        return std::nullopt;
+    }
+    // A foot is where `ahead` falls through zero along an element. On a curve
+    // the near foot and the far one (across the centre) are half a turn
+    // apart, so no stretch of an eighth of a turn can hold two of them, and
+    // a stretch whose ends change sign holds exactly one: sampled at that
+    // spacing and each falling sign change bisected, every foot is found. A
+    // rising change is the far side of a curve - the furthest point, not a
+    // foot.
+    constexpr double kTurnPerStretch = katana::math::kPi / 8.0;
+    // A full circle is sixteen stretches; nothing solvable turns more within
+    // one element, but a bound keeps a malformed one from looping long.
+    constexpr std::size_t kMostStretches = 64;
+    std::optional<StationOffset> best;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    // Strictly nearer only, and the feet come in station order: two as near
+    // leave the lower station.
+    const auto consider = [&](double station, const Point2& foot, double direction) {
+        const Vec2 away = point - foot;
+        const double distance = away.length();
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            const bool right = unitAt(direction).cross(away) < 0.0;
+            best = StationOffset{station, right ? -distance : distance};
+        }
+    };
+    for (std::size_t e = 0; e < elements_.size(); ++e) {
+        const AlignmentElement& element = elements_[e];
+        const double length = element.length;
+        // Curvature is constant on an arc and linear along a spiral, so the
+        // larger of its ends bounds the turning.
+        const double turn = std::max(std::abs(curvatureOn(element, 0.0)),
+                                     std::abs(curvatureOn(element, length))) *
+                            length;
+        const std::size_t stretches = std::clamp<std::size_t>(
+            static_cast<std::size_t>(std::ceil(turn / kTurnPerStretch)), 1, kMostStretches);
+        double from = 0.0;
+        double fromAhead = ahead(element, 0.0, point);
+        for (std::size_t k = 1; k <= stretches; ++k) {
+            const double to =
+                k == stretches ? length
+                               : length * static_cast<double>(k) / static_cast<double>(stretches);
+            const double toAhead = ahead(element, to, point);
+            if (fromAhead >= 0.0 && toAhead <= 0.0) {
+                double low = from;
+                double high = to;
+                if (fromAhead == 0.0) {
+                    high = from;
+                } else if (toAhead == 0.0) {
+                    low = to;
+                }
+                // Halved until the halves meet in the last bit of a double.
+                for (int step = 0; step < 200; ++step) {
+                    const double middle = 0.5 * (low + high);
+                    if (!(middle > low && middle < high)) {
+                        break;
+                    }
+                    (ahead(element, middle, point) >= 0.0 ? low : high) = middle;
+                }
+                const double local = 0.5 * (low + high);
+                consider(element.startStation + local, pointOn(element, local),
+                         directionOn(element, local));
+            }
+            from = to;
+            fromAhead = toAhead;
+        }
+        // A kink: the point is past the end of this element's foot and short
+        // of the next one's start - in the wedge outside the corner, nearest
+        // the PI itself. At a smooth joint the two directions are one, so
+        // the test cannot hold there.
+        if (e + 1 < elements_.size()) {
+            const AlignmentElement& next = elements_[e + 1];
+            if (ahead(element, length, point) > 0.0 && ahead(next, 0.0, point) < 0.0) {
+                const Vec2 bisector = unitAt(directionOn(element, length)) +
+                                      unitAt(directionOn(next, 0.0));
+                consider(element.startStation + length, pointOn(element, length),
+                         bisector.length() > 0.0 ? std::atan2(bisector.y, bisector.x)
+                                                 : directionOn(element, length));
+            }
+        }
+    }
+    return best;
 }
 
 Polyline2 SolvedAlignment::toPolyline(double tolerance) const

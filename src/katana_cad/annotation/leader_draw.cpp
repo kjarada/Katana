@@ -60,7 +60,8 @@ void appendArrowhead(Drawing& drawing, ArrowHead head, const Point2& tip, const 
 }
 
 Drawing buildLeader(const katana::entity::Model& model, const katana::entity::LeaderGeometry& leader,
-                    double scale, const TextMeasure& measure)
+                    double scale, const TextMeasure& measure,
+                    const katana::entity::LeaderContext& context)
 {
     Drawing drawing;
     const auto& v = leader.vertices;
@@ -101,7 +102,8 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
 
     // A smart leader's note is read off its target now (docs/annotation.md,
     // "Smart leaders"); one with nothing to say is drawn bare.
-    const std::string note = katana::entity::leaderNote(model, leader, codePropertyCandidates());
+    const std::string note =
+        katana::entity::leaderNote(model, leader, codePropertyCandidates(), context);
     if (!note.empty()) {
         const double gap = kLandingGap * height;
         const double margin = kCalloutMargin * height;

@@ -17,18 +17,22 @@
 // The note is entity::leaderNote's: a plain leader's text, or a smart
 // leader's template filled from the entity its tip is on as the model is now
 // (docs/annotation.md, "Smart leaders"), with the survey code looked for
-// where survey coding looks (codePropertyCandidates). A smart leader with
-// nothing to say is drawn as a bare leader.
+// where survey coding looks (codePropertyCandidates) and the drawing's
+// surfaces and alignments read through `context` (leader_presets.hpp,
+// leaderContext). A smart leader with nothing to say is drawn as a bare
+// leader.
 
 #include "katana/cad/annotation/drawing.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 
 namespace katana::cad::annotation {
 
 [[nodiscard]] Drawing buildLeader(const katana::entity::Model& model,
                                   const katana::entity::LeaderGeometry& leader, double scale,
-                                  const TextMeasure& measure);
+                                  const TextMeasure& measure,
+                                  const katana::entity::LeaderContext& context = {});
 
 // The arrowhead `head` of `size` model units at `tip` pointing along `along`
 // (a unit vector, away from the line): the shapes dimension_draw.cpp draws,

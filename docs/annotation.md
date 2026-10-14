@@ -165,11 +165,15 @@ property.
 `include/katana/entity/label_text.hpp` is the reference. A template is
 literal text with fields in braces, `{value:step:step}`, the steps applied
 left to right: unit conversions (`m`, `mm`, `km`, `ft`; `m2`, `ha`, `km2`,
-`ac`; `deg`, `rad`, `gon`), a number format (`.3f`), an angle format (`dms`,
-`dms.1`, `dm`, `qb` for a quadrant bearing), the chainage format (`ch`:
+`ac`; `deg`, `rad`, `gon`), a number format (`.3f`, or `+.3f`, which writes a
+plus before a value above nothing - `{dz:+.3f}` is `+0.250` or `-0.250`, and
+`0.000` for what rounds to nothing, neither above nor below), an angle format
+(`dms`, `dms.1`, `dm`, `qb` for a quadrant bearing), the chainage format (`ch`:
 `1+234.500`) and `upper` / `lower`. With no format step a value prints in its
 quantity's own - a length to 3 decimals, an area to 1, a bearing in whole
-seconds - so `{distance}` is already a surveyor's distance.
+seconds - so `{distance}` is already a surveyor's distance. `+.Nf` came with
+the leaders that read a surface (2026-10-15): a height difference written
+without its sign reads the same above as below.
 
     {bearing:dms} {distance:.3f}          90°00'00" 40.000
     {area:m2:.1f} m²\n{area:ha:.4f} ha    1000.0 m² / 0.1000 ha
@@ -483,6 +487,120 @@ would say nothing: its target has no prop.invrt"), since a property the
 target does not carry is far more often a typo than an intent
 (`checkLeaderSaysSomething`). So is a smart leader whose tip is on nothing.
 
+### What a leader reads of the drawing
+
+Built on 2026-10-15 at the owner's request for "a leader to display a point's
+height, a leader to get a point's difference to a TIN, a leader to display
+names". A note may also read the drawing's SURFACES (`Document::surfaces()`,
+`docs/terrain.md`) and ALIGNMENTS at its tip:
+
+| Value | Is |
+|---|---|
+| `surface.NAME` | the level of surface NAME at the tip |
+| `dsurface.NAME` | the target's level (`z`) minus that: positive ABOVE the surface |
+| `cut.NAME` | how far the target is below the surface - the cut down to it - present only there |
+| `fill.NAME` | how far it is above (or exactly on: a fill of nothing), present only there |
+| `station.NAME` | the tip's station along alignment NAME, a chainage (`{station.MC01:ch}` is `0+030.000`) |
+| `offset.NAME` | its offset from the centreline, positive LEFT looking along increasing station |
+| `profile.NAME` | the alignment's design profile level at that station |
+| `dprofile.NAME` | the target's level minus that: positive above the design |
+
+So "CUT {cut.ground:.2f}\nFILL {fill.ground:.2f}" says one line, whichever
+holds, and `{dsurface.ground:+.3f}` writes `+0.250` above and `-0.250` below.
+Decisions:
+
+* **The entity layer reads them through a context, not a reference.** The
+  values are worked out in `entity::leaderNote`, which every painter, the
+  command line and the DXF export share - and `entity` may see neither
+  `terrain` nor `cad` (`tools/check_layering.cmake`). So a plain
+  `entity::LeaderContext` - a function giving a surface's level by name and
+  point, one giving an alignment's station, offset and profile level, and the
+  two lists of names - goes through `anchorValues`, `leaderValues`,
+  `leaderNote` and `checkLeaderSaysSomething`, and `cad::annotation::leaderContext`
+  makes it from a Document (`include/katana/cad/annotation/leader_presets.hpp`).
+  It holds COPIES - of the surface store, a pointer a surface, and of the
+  alignments' definitions, each solved once when a leader first reads it -
+  so it reads the drawing as it was when it was made and is safe on another
+  thread (the background DXF export holds one). Rejected: a `Document`
+  pointer in the context (dangles under a sheet painted after the drawing is
+  replaced) and computing a station in the entity layer itself from the
+  model's alignment table (it would solve every alignment again on every
+  leader of every paint; the cad context solves each once).
+* **Every caller passes the document's** - the plan painter (`PlanSource::leaders`,
+  made by `planSourceOf`, so plots and sheet viewports too), `LIST` and `INFO`,
+  every `LEADER` and `BALLOON` verb, the label keep-out of `LABEL LAYOUT`, the
+  property panel, the Leaders manager, the Leader and preset tools, and the
+  DXF export (`EXPORT` and the window's, both through `writeDxfExport`). A
+  caller that passes none reads no surface: such a line is dropped, never
+  written as nothing. The DXF writer's own fallback - a caller that hands it
+  no drawn annotation - cannot see `cad` and passes none.
+* **Only what the template names is read.** A note is made on every paint,
+  and a drawing may hold many surfaces: `leaderNote` reads the context values
+  its template names; `LEADER VALUES`, the Leaders manager and `anchorValues`
+  read every one of every surface and alignment, to offer them.
+* **NAME is written as the drawing has it, blanks and all**:
+  `{dsurface.Existing Ground:+.3f}`. Everything between the dot and the first
+  `:` is the name, which is how the template language already read a field.
+  A name holding `:`, `{` or `}` cannot be written; a preset refuses it with
+  "rename it". Rejected: quoting a name (`{surface."Existing Ground"}`), a
+  second syntax for one case, and the quotes cannot be typed on the command
+  line inside a quoted template anyway ("Not yet", the double quote). A
+  surface is found ignoring case, as `SURFACE` finds one; an alignment
+  exactly, as `ALIGN` does.
+* **Offset is positive LEFT**, looking along increasing station: the sign
+  `geometry::SolvedAlignment::pointAtStationOffset` and a cross section
+  (`cad/corridor.hpp`) already use. Rejected: right positive, as some road
+  texts write it - a second convention in one program is a sign error waiting.
+  The station of a point is `SolvedAlignment::stationOffset`, the inverse of
+  `pointAtStationOffset` (`docs/geometry.md`).
+* **On the surface is a fill of nothing**: `fill` holds when the target is at
+  or above it, `cut` when below. Rejected: neither at exactly nothing, which
+  would make a cut/fill note vanish - and the leader be refused - for a point
+  that is exactly on grade.
+* **Absent stays absent**: a tip off the surface (outside it, in a hole),
+  beyond an alignment's ends (no perpendicular reaches it: a station is never
+  clamped to the end), at a station the profile does not reach, or a target
+  with no level leaves the value out and its line is dropped. A refusal says
+  WHY, which a missing value alone did not: "its target has no
+  dsurface.ground (the tip is off surface ground)", "(the drawing has no
+  surface grnd)", "(the target has no level)", "(the target is not below
+  surface ground)", "(alignment MC01 has no design profile at station
+  90.000)" (`entity::whyAbsent`).
+* **A smart leader's tip is still on an entity.** A surface's level at a
+  bare place is not a leader's: a note reads what it points at, and the
+  surface beneath it. "Not yet" has the free tip.
+
+### Presets
+
+A preset is a template written once, made by every front end through
+`cad::annotation::resolveLeaderPreset`:
+
+| `preset=` | Tool | Template | Says |
+|---|---|---|---|
+| `level` | Level Leader | `RL {rl:.3f}` | the point's level |
+| `surface` | Surface Difference Leader | `{dsurface.NAME:+.3f}` | how far above (+) or below (-) the surface |
+| `cutfill` | Cut/Fill Leader | `CUT {cut.NAME:.3f}` / `FILL {fill.NAME:.3f}` | the cut to a point below, the fill to one above |
+| `name` | Point Name Leader | `{point}` | the point's name (its point number) |
+| `code` | Code Leader | `{code}` | its survey code |
+| `details` | (none) | `{point}` / `{code}` / `RL {rl:.3f}` | each line that holds |
+| `station` | Station Leader | `CH {station.NAME:ch}` / `OS {offset.NAME:+.3f}` | the station and the offset, left positive |
+
+The level to the millimetre as a survey plan writes one; a difference with
+its sign always written; the chainage form a long section uses. NAME is the
+`surface=` or `alignment=` given - the drawing's spelling of it goes into the
+template - or, with none, the FIRST VISIBLE surface (the first alignment by
+name), and the reply says so: `chosen="first visible surface"`. Rejected:
+refusing a preset with no name (one surface is the common drawing, and the
+person would be asked what there is one of), and choosing without saying
+(a leader made against a surface nobody chose, in silence). The leader is a
+smart leader like any other - its template is the preset's, read live - so
+`LEADER LIST`, the property panel and the Leaders manager say which preset a
+template is (`recognisePreset`), and a template edited away from it is no
+preset. Refused: an unknown preset, `surface=` or `alignment=` without one
+or for a preset that reads neither, a name the drawing has not, a drawing
+with none to take, every surface hidden, and - as any leader - one that would
+say nothing.
+
 ### Pointing at the right place
 
 `#id@x,y` puts the tip on the entity nearest x,y and names the place ALONG it
@@ -575,6 +693,9 @@ as a reply writes it (`core::unescapeTyped`, the sheet verbs' reader too;
 | `AUTOLABEL RULE ADD \| SET \| DELETE \| LIST`, `RUN`, `PREVIEW`, `CLEAR` | `autolabel created=2 kept=0 removed=0 skipped=0` and `rule=... labels=N` |
 | `DIM LINEAR \| HORIZONTAL \| VERTICAL \| ALIGNED \| ANGULAR \| RADIUS \| DIAMETER \| ORDINATE \| BASELINE \| CONTINUE` | `created dimension id=5 kind=diameter measures=10 text=Ø10.000 associative=yes`, `created dimensions=2 ids=7,8` |
 | `LEADER p p... text= \| template= \| labelstyle= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="IL 10.500" associative=yes target=12 anchor=position template="IL {prop.invert:.3f}"` |
+| `LEADER p p... preset=level\|surface\|cutfill\|name\|code\|details\|station [surface=\|alignment=]`, also on `LEADER FOR` and `LEADER SET` | `created leader id=27 text=+4.000 associative=yes target=12 anchor=position template={dsurface.ground:+.3f} preset=surface surface=ground chosen="first visible surface"` |
+| `LEADER PRESETS` | `preset=surface title="Surface Difference" reads=surface template={dsurface.NAME:+.3f} tool=annotate.leader.surface`, one a preset |
+| `LEADER LIST [id...] [target=id] JSON` | `{"leaders": [{"id": 27, ..., "preset": "surface", "reads": "ground", "text": "+4.000", "lines": ["+4.000"]}], "presets": [...], "surfaces": ["ground"], "alignments": []}` - MCP's `katana_leaders` |
 | `DIMSTYLE LIST \| INFO name \| NEW name [field value ...] \| SET name field value [field value ...] \| DELETE name` | `dimension style site updated`; `INFO`: `name=site text=3.5 gap=0.625 ... paper=on layers=1 reads=10.000` |
 | `LEADER VALUES id \| #id[.point\|@x,y]` | `target=12 type=Point` and a `value=rl text=12.500` line each |
 | `LEADER LIST [id...] [target=id]`, `SET id... tip= at= ...`, `ATTACH id p`, `DETACH`, `FREEZE` | `id=26 layer=0 vertices=2 tip=10,10 target=12 anchor=position smart=yes template=... arrow=ClosedFilled callout=none text=...` |
@@ -813,6 +934,46 @@ dialog's problem line in the command's words.
   that changes nothing is no step
   (`ArrangeAlignsTheSelectedNotesAndRenumbersTheBalloons`).
 
+**Preset leaders** (2026-10-15). Six tools of the catalogue's Annotate
+category, group Leaders (`src/katana_cad/tools/annotate_leader_presets.cpp`):
+Level Leader (`annotate.leader.level`, `LEADERLEVEL`), Surface Difference
+Leader (`annotate.leader.surface`, `LEADERSURFACE`), Cut/Fill Leader
+(`annotate.leader.cutfill`, `LEADERCUTFILL`), Point Name Leader
+(`annotate.leader.name`, `LEADERNAME`), Code Leader (`annotate.leader.code`,
+`LEADERCODE`) and Station Leader (`annotate.leader.station`,
+`LEADERSTATION`) - so each is a menu item on Annotate and a button of its own
+on the Annotate toolbar, with a painted icon (`src/katana_qt/tools/icons_annotate.cpp`:
+the point a vertex handle, the leader the accent, and at its landing a level
+mark, a ground line with the difference dashed and a plus-or-minus, cut and
+fill arrows, a name tag, a code's bars, an alignment's chainage ticks). Click
+the point (or snap to an entity's end, middle or vertex), then where the note
+goes, or Enter for where `LEADER FOR` puts one; `S` (`A` for the station)
+chooses the surface (the alignment) by name. Each makes, through the same
+door, exactly the leader `LEADER #id@x,y x,y preset=...` makes, as one step,
+and starts again for the next point: a row of spot levels is two clicks each
+(`LeaderPresetTools.TheLevelLeaderToolMakesWhatTheLeaderLineMakes`). A point
+with nothing to say - no level, off the surface - is refused at the first
+click with why, before the note's place is asked. The surface offered is the
+one the drawing's newest leader of that preset reads, remembered by the
+drawing as Label Objects remembers a style. Not a "Leader, ..." family: a
+family is ONE toolbar button with the rest behind a drop-down, and the owner
+asked for each in one click. Their names leave the Annotate menu's letters
+room: each takes one of its own and Text keeps T - and Edit Text now takes X
+only while no tool has it, since a tool short of letters is moved onto any
+letter of its name and Text was one rename from being given X
+(`AnnotationWorkbench::addEditTextAction`).
+
+The Leaders manager's **Preset** boxes (`leaderPreset` and
+`leaderPresetReads` on the Leader tab, `leaderForPreset` and
+`leaderForPresetReads` on For Selection) put a preset's template into the
+note - its surface or alignment chosen beside it, or the first visible one,
+said in the problem line - which Apply or Make then stores, one step each,
+the same template `LEADER preset=` makes; a leader shown says which preset it
+is and what it reads, and a note typed away from the template is no preset
+(`LeaderManagerPresets.*`). Its values list the drawing's surfaces' and
+alignments' values at the tip, and the property panel shows a preset's
+**Preset** row ("Surface Difference (ground)").
+
 ## Stored with the project
 
 Migration 11 (`src/katana_storage/project_store.cpp`, `docs/model.md`) adds
@@ -858,11 +1019,16 @@ and callout frames - as lines, closed polylines and single-line texts, and
 hands them to the writer (`ExportOptions::drawn`), which writes each on its
 entity's layer and in its colour. The window's DXF export and `katana_cli`'s
 `EXPORT` both do it, with the document's annotation scale, so both write the
-same file; paper-sized text is written at that scale's height. Written
+same file; paper-sized text is written at that scale's height. A smart
+leader's note reads the drawing's surfaces and alignments there as on screen:
+both hand `drawAnnotationForExport` the document's `LeaderContext` (the
+background `EXPORT` job holds the copy it was made with). Written
 without them (a caller that passes nothing), labels and the other dimension
 kinds are skipped with a warning and a leader is its line, landing and note -
 a smart leader's note as it reads (`leaderNote`), without `{code}`, which
-survey coding decides and the writer cannot see.
+survey coding decides and the writer cannot see, and without a line reading a
+surface or an alignment, which the writer cannot see either: that line is
+dropped, never written as nothing.
 A label with no room at the scale is left out and said so. A mask, a width
 factor and a slant do not reach the file.
 
@@ -901,6 +1067,13 @@ it skipped dimensions, and so does the archive exporter.
 | `src/katana_app/CMakeLists.txt` | `cli.a_smart_leader_is_saved_with_the_point_it_reads` and the tests after it: the verbs through `katana_cli` - saved, opened by another process and read afresh, an exact along, balloons numbered again, a refusal stopping and failing the script |
 | `tests/cad/tools/test_smart_leader_tool.cpp` | the Leader tool: a tip put on what it is clicked on, fields checked as typed, a note that would say nothing refused |
 | `tests/cad/annotation/test_leader_edit.cpp` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped (negative sizes too), a label style's look lent, attaching (and again, no command), the value rows, where a leader goes on an entity (and a tip put on one, inside a lot), LEADER FOR's and ALIGN's refusals, a numbered balloon kept a circle and the largest number refusing a next |
+| `tests/entity/annotation/test_leader_context_values.cpp` | what a leader reads of the drawing through a fake context of planes and a straight alignment: a surface's level and the difference, cut and fill (one line, on the surface a fill of nothing), a name with a blank, station, offset, profile and its difference, every refusal's reason, no context, every value listed, the template check of each kind, `+.Nf` |
+| `tests/cad/annotation/test_leader_presets.cpp` | the presets on a Document with a real TIN: level, surface (the first visible chosen and said, a name in any case, a hidden one named), the note following a surface edit and its undo, cut/fill for many in one step, station with its alignment and profile, every refusal and nothing made, `LEADER PRESETS`, `LIST JSON`, `VALUES`, recognising each preset, a freeze, `LEADER SET preset=`, the context a copy, LIST and the export |
+| `tests/cad/tools/test_leader_preset_tools.cpp` | the six tools in the catalogue; the Level Leader against `LEADER #1@30,40 40,50 preset=level`; the surface chosen with `S`, and offered from the newest leader; a point with nothing to say refused at the first click; Enter's place; a row of levels; name, code and station |
+| `tests/qt_widgets/annotation/test_leader_manager_presets.cpp` | the Leaders manager's Preset boxes by object name: a preset's template written and applied in one step, a named surface and refusals, a leader shown as its preset until typed away, For Selection, the surfaces' values |
+| `tests/geometry/test_alignment.cpp` | (`StationOffset...`) the station and offset of a point on a straight alignment, a curve, outside a kink, beyond the ends, and undoing `pointAtStationOffset` on spirals |
+| `src/katana_app/geo/cli/leaders.cmake` | `cli.a_surface_leader_says_how_far_a_point_is_above_the_ground`: a surface from the sample terrain, a point at RL 30, surface, cut/fill and level leaders and LIST; one on no surface failing the script |
+| `tests/app/test_mcp_server.cpp` | `McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets` |
 | `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name and its widgets' own signals: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
@@ -951,6 +1124,25 @@ it skipped dimensions, and so does the archive exporter.
   to Selected do). An arc's or a circle's centre is reached only by typing
   (`#id.centre`). DXF export writes the note as it reads, not a field a CAD
   reader could update.
+* **A surface or an alignment is read by NAME.** Renamed or deleted, the
+  template still names the old one and its lines say nothing (a leader whose
+  every line read it is drawn bare); nothing guards a surface or an
+  alignment a leader reads, and `SURFACE RENAME` does not follow into
+  templates. As an alignment has had no in-use guard (`docs/geometry.md`).
+* **A tip on nothing reads no surface.** The ground level at a bare click -
+  a leader to a place, not a point - would need a smart leader with no
+  target, which the model refuses; put a point there.
+* **The alignment a station preset takes** with none named is the first by
+  name, not the nearest the tip: a preset is resolved once for LEADER FOR's
+  many targets, and the nearest of one is not the nearest of the next.
+* **The context is made for every paint**, a copy of the surface list and of
+  the alignments' definitions; not measured on a drawing of hundreds of
+  alignments.
+* **The Annotate menu has more items than letters.** With the six preset
+  tools, Edit Label..., Leaders..., Leaders for Selection... and Arrange...
+  have no menu letter of their own (none is shared:
+  `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless`), and the
+  Annotate toolbar down the left edge is six buttons longer.
 * **A double quote** cannot be typed in a note, a template, a style's name
   or an attribute: the command line has no escape for one inside quotes, so
   what the window and the Leader tool can put in a note, a script cannot.

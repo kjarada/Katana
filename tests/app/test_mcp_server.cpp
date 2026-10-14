@@ -615,6 +615,47 @@ TEST_F(McpServer, DescribeEntityNamesTheEntityWhateverFilesTheWorkingDirectoryHo
         << textOf(described);
 }
 
+// ---- leaders (docs/mcp.md, "Leaders") ---------------------------------------------------
+//
+// katana_leaders: what each leader says now, and the presets, read from the
+// Document as katana_status is - LEADER LIST JSON's object. A point at RL 25
+// with a level leader on it says "RL 25.000".
+TEST_F(McpServer, TheLeadersToolGivesWhatEachLeaderSaysAndThePresets)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"POINT 30,40", "SELECT 1", "PROP SET elevation 25",
+                                              "LEADER #1 40,50 preset=level"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::size_t steps = session.document().history().undoCount();
+
+    const Json all = call("katana_leaders");
+    ASSERT_FALSE(all["isError"].get<bool>()) << textOf(all);
+    const Json& leaders = all["structuredContent"]["leaders"];
+    ASSERT_EQ(leaders.size(), 1U) << all.dump();
+    EXPECT_EQ(leaders[0]["id"], 2);
+    EXPECT_EQ(leaders[0]["target"], 1);
+    EXPECT_EQ(leaders[0]["preset"], "level");
+    EXPECT_TRUE(leaders[0]["reads"].is_null());
+    EXPECT_EQ(leaders[0]["template"], "RL {rl:.3f}");
+    EXPECT_EQ(leaders[0]["text"], "RL 25.000");
+    EXPECT_EQ(leaders[0]["lines"], Json::array({"RL 25.000"}));
+    const Json& presets = all["structuredContent"]["presets"];
+    ASSERT_EQ(presets.size(), 7U);
+    EXPECT_EQ(presets[1]["name"], "surface");
+    EXPECT_EQ(presets[1]["reads"], "surface");
+    EXPECT_EQ(presets[1]["tool"], "annotate.leader.surface");
+    EXPECT_TRUE(all["structuredContent"]["surfaces"].empty());
+    EXPECT_EQ(session.document().history().undoCount(), steps) << "a read is no step";
+
+    // Only the leaders on an entity, or of given ids.
+    EXPECT_EQ(call("katana_leaders", Json{{"target", 1}})["structuredContent"]["leaders"].size(),
+              1U);
+    EXPECT_TRUE(call("katana_leaders", Json{{"ids", {99}}})["structuredContent"]["leaders"].empty());
+    EXPECT_TRUE(call("katana_leaders", Json{{"target", 0}})["isError"].get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"ids", {"two"}}})["isError"].get<bool>());
+}
+
 TEST_F(McpServer, AScriptsIndentedNoteRunsNothing)
 {
     // A line whose first non-blank is '#' is a note, as File > Run Script

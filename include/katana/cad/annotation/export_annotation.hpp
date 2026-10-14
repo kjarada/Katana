@@ -25,6 +25,7 @@
 #include "katana/cad/annotation/drawing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 
 namespace katana::cad::annotation {
@@ -39,10 +40,13 @@ using DrawnAnnotation = std::map<katana::entity::EntityId, std::vector<katana::e
 // kept out of each other and of the drawing (labelKeepOut), in label id
 // order. Aligned dimensions are left to the writer, which has always drawn
 // them. `measure` is the width the text is taken to have; the estimated one
-// is what a file with no fonts is judged by.
-[[nodiscard]] DrawnAnnotation drawAnnotationForExport(const katana::entity::Model& model,
-                                                      double scale,
-                                                      const TextMeasure& measure = estimatedMeasure());
+// is what a file with no fonts is judged by. A smart leader's note reads the
+// drawing's surfaces and alignments through `leaders` (leader_presets.hpp,
+// leaderContext), as the plan view's does.
+[[nodiscard]] DrawnAnnotation
+drawAnnotationForExport(const katana::entity::Model& model, double scale,
+                        const TextMeasure& measure = estimatedMeasure(),
+                        const katana::entity::LeaderContext& leaders = {});
 
 // A drawing's pieces as plain shapes (above).
 [[nodiscard]] std::vector<katana::entity::Geometry> plainShapes(const Drawing& drawing);

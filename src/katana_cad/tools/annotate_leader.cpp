@@ -62,6 +62,7 @@
 #include <vector>
 
 #include "annotate_common.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/survey_coding.hpp"
@@ -413,8 +414,11 @@ class LeaderTool final : public InteractiveTool {
         }
         LeaderGeometry made = leader(vertices_, lines_);
         if (document_ != nullptr) {
-            if (auto status = katana::entity::checkLeaderSaysSomething(document_->model(), made,
-                                                                       codePropertyCandidates());
+            // As it will be drawn: a note reading a surface or an alignment
+            // reads the drawing's.
+            if (auto status = katana::entity::checkLeaderSaysSomething(
+                    document_->model(), made, codePropertyCandidates(),
+                    katana::cad::annotation::leaderContext(*document_));
                 !status) {
                 return ToolStep::rejected(status.error().message + " - type U to take back a line");
             }

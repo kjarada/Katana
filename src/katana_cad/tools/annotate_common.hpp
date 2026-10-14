@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/interactive_tool.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -44,6 +45,11 @@ namespace katana::cad::tools::annotate {
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeContinueDimensionTool(const ToolContext& context);
 // annotate_balloon.cpp: BALLOON by hand.
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeBalloonTool(const ToolContext& context);
+// annotate_leader_presets.cpp: LEADER preset= by hand - Level Leader,
+// Surface Leader, Cut/Fill Leader, Point Name Leader, Code Leader, Station
+// Leader.
+[[nodiscard]] std::unique_ptr<InteractiveTool>
+makePresetLeaderTool(const ToolContext& context, katana::cad::annotation::LeaderPreset preset);
 
 // True when `typed` names the option `keyword`: the keyword or any prefix of it
 // at least `shortest` letters long, in any case - "u", "UN" and "Undo" all name

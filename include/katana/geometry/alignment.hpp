@@ -80,6 +80,15 @@ struct AlignmentElement {
 enum class AlignmentElementKind { Tangent, Spiral, Arc };
 [[nodiscard]] AlignmentElementKind kindOf(const AlignmentElement& element);
 
+// Where a point is against an alignment: SolvedAlignment::stationOffset, the
+// inverse of pointAtStationOffset.
+struct StationOffset {
+    double station = 0.0;
+    // Positive to the LEFT looking along increasing station, as
+    // pointAtStationOffset and a cross section take it.
+    double offset = 0.0;
+};
+
 // A solved alignment: the elements, and the queries a section, a profile and
 // a renderer need. Built only by `solveAlignment`, so that one cannot exist
 // that is not continuous.
@@ -106,6 +115,15 @@ class SolvedAlignment {
     // is. Left is left looking along increasing station.
     [[nodiscard]] std::optional<Point2> pointAtStationOffset(double station,
                                                              double offset) const;
+    // The inverse: the station and offset of `point`, from the foot of the
+    // perpendicular nearest it on the centreline. Where the alignment kinks
+    // (a PI with no curve), a point in the wedge outside the corner - which
+    // no perpendicular reaches - is at the PI's station, its offset its
+    // distance from the PI. nullopt for a point beyond either end, which no
+    // perpendicular reaches either, and for a non-finite one: a station is
+    // never made up by clamping to an end. Two feet as near: the lower
+    // station. What a leader reading a station reads (docs/annotation.md).
+    [[nodiscard]] std::optional<StationOffset> stationOffset(const Point2& point) const;
 
     // The element containing `station`, or nullptr outside the alignment.
     [[nodiscard]] const AlignmentElement* elementAt(double station) const;

@@ -49,10 +49,10 @@ enum RuleColumn { kRuleName, kRuleStyle, kRuleLayer, kRuleCode, kRuleType, kRule
 // the Insert Value menu offers each of them under every value it applies to,
 // which checkLabelTemplate decides - so the menu cannot offer a step the
 // template would refuse. One decimal of a second for dms.N and three places
-// for .Nf stand for the rest.
+// for .Nf and +.Nf stand for the rest.
 constexpr const char* kSteps[] = {"m",   "mm",  "km",  "ft",    "m2",  "ha",  "km2", "ac",
                                   "deg", "rad", "gon", "dms",   "dms.1", "dm", "qb",  "ch",
-                                  ".0f", ".1f", ".2f", ".3f",   "upper", "lower"};
+                                  ".0f", ".1f", ".2f", ".3f",   "+.3f", "upper", "lower"};
 
 // The values every kind has, before the kind's own (LABELSTYLE VALUES).
 constexpr const char* kCommonValues[] = {"id", "layer", "code", "point", "description"};

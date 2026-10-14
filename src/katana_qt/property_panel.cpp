@@ -25,6 +25,7 @@
 #include "format.hpp"
 #include "icons.hpp"
 #include "katana/cad/annotation/label_layout.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/property_outline.hpp"
 #include "katana/cad/survey_coding.hpp"
@@ -500,15 +501,18 @@ PropertyLevel vertexLevel(const SubjectPtr& subject)
     return level;
 }
 
-// What the geometry of one entity says, as rows.
+// What the geometry of one entity says, as rows. `leaders`: the drawing's
+// surfaces and alignments, which a leader's note may read.
 std::vector<PropertyRow> geometryRows(const katana::entity::Model& model,
-                                      const katana::entity::Geometry& geometry)
+                                      const katana::entity::Geometry& geometry,
+                                      const katana::entity::LeaderContext& leaders)
 {
     using Rows = std::vector<PropertyRow>;
     struct Visitor {
         // A label's words are worked out from its target, which is in the
         // model, not in the label.
         const katana::entity::Model& model;
+        const katana::entity::LeaderContext& leaders;
 
         Rows operator()(const katana::entity::PointGeometry& g) const
         {
@@ -603,9 +607,20 @@ std::vector<PropertyRow> geometryRows(const katana::entity::Model& model,
             Rows rows = {leaf("Tip", planPoint(g.vertices.front())),
                          leaf("Vertices", grouped(g.vertices.size())),
                          leaf("Text", qs(katana::entity::leaderNote(
-                                          model, g, katana::cad::codePropertyCandidates())))};
+                                          model, g, katana::cad::codePropertyCandidates(),
+                                          leaders)))};
             if (g.fields) {
                 rows.push_back(leaf("Template", qs(g.text)));
+                // A preset's template, by the name the Annotate menu gives it.
+                if (const auto preset = katana::cad::annotation::recognisePreset(g.text)) {
+                    const auto& info = katana::cad::annotation::presetInfo(preset->preset);
+                    rows.push_back(leaf("Preset", qs(info.title) +
+                                                      (preset->reads.empty()
+                                                           ? QString()
+                                                           : QStringLiteral(" (") +
+                                                                 qs(preset->reads) +
+                                                                 QStringLiteral(")"))));
+                }
             }
             if (!g.labelStyle.empty()) {
                 rows.push_back(leaf("Label style", qs(g.labelStyle)));
@@ -649,7 +664,7 @@ std::vector<PropertyRow> geometryRows(const katana::entity::Model& model,
                     leaf("Length", planNumber(g.length()))};
         }
     };
-    return std::visit(Visitor{model}, geometry);
+    return std::visit(Visitor{model, leaders}, geometry);
 }
 
 // The groups of one entity.
@@ -672,7 +687,13 @@ std::vector<PropertyRow> entityRows(const katana::cad::Document& document, const
     const std::size_t vertices = verticesOf(entity.geometry).size();
     PropertyRow geometry = heading("Geometry", "geometry");
     geometry.open = true;
-    std::vector<PropertyRow> shapeRows = geometryRows(document.model(), entity.geometry);
+    // The surfaces and alignments only for a leader, the one entity that
+    // reads them.
+    const katana::entity::LeaderContext leaders =
+        std::holds_alternative<katana::entity::LeaderGeometry>(entity.geometry)
+            ? katana::cad::annotation::leaderContext(document)
+            : katana::entity::LeaderContext{};
+    std::vector<PropertyRow> shapeRows = geometryRows(document.model(), entity.geometry, leaders);
     // Their count is the Vertices group's own, beside the list.
     if (vertices > 0) {
         std::erase_if(shapeRows, [](const PropertyRow& row) { return row.key == "Vertices"; });

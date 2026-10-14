@@ -27,6 +27,7 @@
 #include <QTransform>
 
 #include "customisation/style_painter.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/document.hpp"
@@ -539,6 +540,8 @@ class PlanPainter {
     // The model a text or leader is resolved against: the source's, or an
     // empty one for a preview drawn with no model.
     [[nodiscard]] const katana::entity::Model& annotationModel() const;
+    // What a leader's note reads beyond its target: the source's, or none.
+    [[nodiscard]] const katana::entity::LeaderContext& leaderContext() const;
 
     QPainter& painter_;
     const PlanSource& source_;
@@ -1405,7 +1408,8 @@ void PlanPainter::drawEntities()
             } else if (const auto* leader =
                            std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
                 annotation = cad::annotation::buildLeader(model, *leader, options_.annotationScale,
-                                                          annotationFonts_.measure());
+                                                          annotationFonts_.measure(),
+                                                          leaderContext());
             }
             Box2 drawn;
             std::optional<cad::DimensionDrawing> dimensionDrawing;
@@ -1889,7 +1893,7 @@ void PlanPainter::drawSelectionGhosts()
                                 .extent;
         } else if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&geometry)) {
             outline = cad::annotation::buildLeader(model, *leader, options_.annotationScale,
-                                                   annotationFonts_.measure())
+                                                   annotationFonts_.measure(), leaderContext())
                           .extent;
         } else if (const auto* dimension =
                        std::get_if<katana::entity::DimensionGeometry>(&geometry)) {
@@ -2000,9 +2004,9 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
         void operator()(const katana::entity::LabelGeometry&) const {}
         void operator()(const katana::entity::LeaderGeometry& g) const
         {
-            self.drawAnnotation(cad::annotation::buildLeader(self.annotationModel(), g,
-                                                             self.options_.annotationScale,
-                                                             self.annotationFonts_.measure()));
+            self.drawAnnotation(cad::annotation::buildLeader(
+                self.annotationModel(), g, self.options_.annotationScale,
+                self.annotationFonts_.measure(), self.leaderContext()));
         }
         void operator()(const katana::entity::DimensionGeometry& g) const
         {
@@ -2249,6 +2253,12 @@ const katana::entity::Model& PlanPainter::annotationModel() const
     return source_.model != nullptr ? *source_.model : empty;
 }
 
+const katana::entity::LeaderContext& PlanPainter::leaderContext() const
+{
+    static const katana::entity::LeaderContext none;
+    return source_.leaders != nullptr ? *source_.leaders : none;
+}
+
 AnnotationPaintTarget PlanPainter::annotationTarget(const QPen& pen) const
 {
     AnnotationPaintTarget target;
@@ -2330,6 +2340,8 @@ PlanSource planSourceOf(const katana::cad::Document& document)
     source.colours = &document.customisationState().colours;
     source.index = &document.spatialIndex();
     source.selection = &document.selection();
+    source.leaders = std::make_shared<const katana::entity::LeaderContext>(
+        katana::cad::annotation::leaderContext(document));
     return source;
 }
 
