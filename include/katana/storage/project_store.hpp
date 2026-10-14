@@ -89,6 +89,23 @@ struct Relationship {
     friend bool operator==(const Relationship&, const Relationship&) = default;
 };
 
+// One TIN surface of the drawing, as the project keeps it (schema 13;
+// docs/terrain.md, "Surfaces in the drawing"). OPAQUE to this layer, which
+// may not see the terrain layer (tools/check_layering.cmake): `data` is the
+// surface's bytes as terrain/tin_codec.hpp writes them, and the Document
+// (cad) turns a record into a surface and back. The rest is what a person
+// sees of it: its name, where it came from, the display style it is drawn in
+// (empty: the drawing's default) and whether the views draw it.
+struct SurfaceRecord {
+    std::string name;
+    std::string source{};
+    std::string style{};
+    bool visible = true;
+    std::string data{};
+
+    friend bool operator==(const SurfaceRecord&, const SurfaceRecord&) = default;
+};
+
 // Everything persisted for a project, as plain values.
 struct ProjectContents {
     ProjectMetadata metadata{};
@@ -113,6 +130,13 @@ struct ProjectContents {
     // large for the database (ProjectStore::checkSurveyJobSize); a project
     // from before schema 10 loads with none.
     std::vector<SurveyJob> surveyJobs{};
+    // The drawing's surfaces, in their order (SurfaceRecord), saved and
+    // loaded in the same transaction as everything else. Schema version 13.
+    // save() refuses a surface with no name or no bytes, two of one name
+    // compared without case (the drawing's store compares them so), and one
+    // too large for the database (ProjectStore::checkSurfaceSize); a project
+    // from before schema 13 loads with none.
+    std::vector<SurfaceRecord> surfaces{};
 };
 
 [[nodiscard]] ProjectContents captureModel(const katana::entity::Model& model,
@@ -162,7 +186,8 @@ class ProjectStore {
     //     - and a dimension style's paper sizing (docs/annotation.md).
     // 12: the drawing system's geometry kinds - curve polyline, ellipse and
     //     spline (docs/drawing.md) - which a schema-11 build cannot read.
-    static constexpr int kCurrentSchemaVersion = 12;
+    // 13: the drawing's TIN surfaces (SurfaceRecord; docs/terrain.md).
+    static constexpr int kCurrentSchemaVersion = 13;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // The most bytes one survey job may take in a project: its own row (the
@@ -188,6 +213,24 @@ class ProjectStore {
     // refused before a byte is written, not by SQLite halfway through.
     [[nodiscard]] static katana::core::Status
     checkSurveyJobSize(const SurveyJob& job, std::uint64_t limit = kMaxSurveyJobBytes);
+
+    // The most bytes one surface may take in a project, its row whole: the
+    // same round figure as a survey job's and for the same reason - SQLite
+    // refuses a BLOB or a row over SQLITE_MAX_LENGTH (1,000,000,000 bytes by
+    // default), and a surface that no save could write would fail every save
+    // of the whole project after it. At 13 bytes a triangle and 24 a vertex
+    // (terrain/tin_codec.hpp) it is some 30 million triangles; the surfaces
+    // Katana makes are capped at 400 000 points (SURFACE FROM's max=).
+    static constexpr std::uint64_t kMaxSurfaceBytes = 900'000'000;
+    // The bytes `surface` takes in its own row: its name, source, style and
+    // data, and eight for the flag and the position.
+    [[nodiscard]] static std::uint64_t surfaceRowBytes(const SurfaceRecord& surface);
+    // InvalidArgument, with a sentence naming the surface and saying what to
+    // do instead, when its row would be over `limit` bytes. save() calls it
+    // for every surface before a byte is written, so a surface too large is
+    // refused whole, not by SQLite halfway through.
+    [[nodiscard]] static katana::core::Status
+    checkSurfaceSize(const SurfaceRecord& surface, std::uint64_t limit = kMaxSurfaceBytes);
 
     // Creates the directory layout and an empty database. Fails if a project
     // already exists there.
