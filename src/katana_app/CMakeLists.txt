@@ -2250,3 +2250,12 @@ if(KATANA_BUILD_TESTS)
         "linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0 preview=yes${_eol}string name=BT4 key=BT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"?${_eol}string name=BU3 key=BU\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"?${_eol}string name=KB2 key=KB\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"?${_eol}linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0${_eol}string name=BT4 key=BT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"? entity=11${_eol}string name=BU3 key=BU\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"? entity=12${_eol}string name=KB2 key=KB\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"? entity=13${_eol}13 entities${_eol}.*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=buildings/outline/wall +vertices=4 +closed +length=30 +area=50${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=7 +open +length=31[.]05828[0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
 endif()
+
+# ---- road objects (docs/road_objects.md) ----
+# The ROADOBJECT verbs' cli.* tests, in their own file beside this one, so the
+# family's tests are kept with each other. Included here, where katana_cli and
+# the test variables are.
+if(KATANA_BUILD_TESTS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/road_objects_cli.cmake")
+endif()
+# ---- end road objects ----
