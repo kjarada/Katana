@@ -16,6 +16,8 @@
 #include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
+// Road objects (docs/road_objects.md): the ROADOBJECT family.
+#include "katana/cad/road/road_object_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -575,6 +577,10 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
+RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=value ...]
+          | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
+          barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
+          along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
           [CHORD length] [PREVIEW]   joins coded survey points into lines by the survey
           codes and their control codes, one undo step; no scope word: the selection, else
@@ -837,6 +843,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && utilities::isUtilityVerb(args.front())) {
             return utilities::utilityVerbHelp();
         }
+        if (!args.empty() && road::isRoadObjectVerb(args.front())) {
+            return road::roadObjectVerbHelp();
+        }
         // Asked by either spelling, as the verb is run by either.
         if (!args.empty() && isCustomisationVerb(canonicalVerb(args.front()))) {
             return customisationVerbHelp();
@@ -857,6 +866,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens, scopeViews_);
+    }
+    if (road::isRoadObjectVerb(verb)) {
+        return road::runRoadObjectVerb(document_, *tokens, scopeViews_);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they
