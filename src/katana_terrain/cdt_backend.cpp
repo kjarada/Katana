@@ -293,4 +293,12 @@ Result<CdtOutput> triangulate(const CdtInput& input)
     }
 }
 
+int orientation(const Point2& a, const Point2& b, const Point2& c)
+{
+    // CGAL::LEFT_TURN is +1, RIGHT_TURN -1, COLLINEAR 0: the sign convention
+    // the declaration promises, read off CGAL's enum rather than restated.
+    return static_cast<int>(CGAL::orientation(Kernel::Point_2(a.x, a.y), Kernel::Point_2(b.x, b.y),
+                                              Kernel::Point_2(c.x, c.y)));
+}
+
 } // namespace katana::terrain::detail

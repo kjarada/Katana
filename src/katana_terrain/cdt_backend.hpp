@@ -57,4 +57,13 @@ struct CdtOutput {
 // with InvalidArgument for out-of-range constraint indices or duplicate points.
 [[nodiscard]] katana::core::Result<CdtOutput> triangulate(const CdtInput& input);
 
+// The exact sign of the turn a -> b -> c: +1 when c lies to the left of the
+// directed line a -> b (a, b, c counter-clockwise), -1 to its right, 0 when
+// the three are collinear. CGAL's filtered predicate, the one the
+// triangulation itself decides with, so an edit that asks "which side of
+// this edge?" gets the answer the triangulation gives for the same doubles
+// (docs/surface_editing.md, "Exact where it decides").
+[[nodiscard]] int orientation(const katana::geometry::Point2& a, const katana::geometry::Point2& b,
+                              const katana::geometry::Point2& c);
+
 } // namespace katana::terrain::detail
