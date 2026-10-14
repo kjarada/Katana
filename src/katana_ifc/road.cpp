@@ -49,6 +49,11 @@
 // with none, is not written, said, since a marking on nothing would be an
 // invalid file.
 //
+// MATERIAL is an IfcMaterial of the element's material's name, written once
+// and associated (IfcRelAssociatesMaterial) with every element of it - but
+// not with a cut, which is a void: that relationship's NoVoidElement rule
+// refuses one. Every element names its material in Katana_RoadElement too.
+//
 // QUANTITIES are an IfcElementQuantity (5.4.3.21) of IfcQuantityLength, Area,
 // Volume, Weight and Count. Those a class's base quantity set names - with
 // the quantity type it gives them - go in that set (Qto_CourseBaseQuantities
@@ -389,6 +394,7 @@ class RoadWriter {
         const RoadElement* element = nullptr;
         Tessellation body;
         bool feature = false;
+        bool voids = false; // a feature that voids its host (ProductLayout::voids)
         Id product = 0;
         Id placement = 0;
     };
@@ -472,6 +478,7 @@ class RoadWriter {
         out.element = &element;
         out.body = std::move(*body);
         out.feature = layout->feature;
+        out.voids = layout->voids;
         return out;
     }
 
@@ -649,7 +656,7 @@ class RoadWriter {
             host = found->second->product;
             hostPlacement = found->second->placement;
             hostKey = "road/element/" + element.host;
-        } else if (element.ifcClass.entity == "IfcEarthworksCut") {
+        } else if (item.voids) {
             std::tie(host, hostKey) = groundOf(element);
             hostPlacement = b_.elementPlacement();
         } else {
@@ -671,7 +678,7 @@ class RoadWriter {
         item.product = b_.feature(element.ifcClass, keyOf(element), element.name, element.kind,
                                   shape, element.id, placement->second);
         item.placement = placement->second;
-        if (element.ifcClass.entity == "IfcEarthworksCut") {
+        if (item.voids) {
             b_.file().add("IfcRelVoidsElement", Args()
                                                     .string(b_.guid("voids/" + keyOf(element)))
                                                     .null()
@@ -764,6 +771,7 @@ class RoadWriter {
         own.label("Facility", element.facility);
         own.label("Part", element.part);
         own.label("Layer", element.layer);
+        own.label("Material", element.material);
         own.boolean("ClosedSolid", item.body.closed);
         b_.defines(key + "/element", b_.propertySet(key + "/element", "Katana_RoadElement", own),
                    {item.product});
@@ -786,7 +794,9 @@ class RoadWriter {
                    {item.product});
 
         writeQuantities(item, key);
-        if (!element.material.empty()) {
+        // A void takes no material (IfcRelAssociatesMaterial's NoVoidElement):
+        // a cut's - the ground it removes - is its Katana_RoadElement Material.
+        if (!element.material.empty() && !item.voids) {
             auto& objects = materials_[element.material];
             if (objects.empty()) {
                 materialOrder_.push_back(element.material);

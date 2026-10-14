@@ -27,6 +27,10 @@ struct ProductLayout {
     // drawing entity's rule may not name one, since a line on a layer has
     // nothing to be a feature of.
     bool feature = false;
+    // A feature that VOIDS its host (IfcFeatureElementSubtraction), rather
+    // than adhering to it. Such a void takes no material: IfcRelAssociatesMaterial's
+    // NoVoidElement rule refuses an IfcFeatureElementSubtraction among its objects.
+    bool voids = false;
 };
 
 // Classes IFC 4.3 deprecates (IFC102 of the buildingSMART validation
@@ -50,7 +54,7 @@ inline constexpr ProductLayout kProductLayouts[] = {
     {"IfcCourse", true, true},
     {"IfcDistributionChamberElement", true, true},
     {"IfcDistributionFlowElement", true, false},
-    {"IfcEarthworksCut", true, true, true},
+    {"IfcEarthworksCut", true, true, true, true},
     {"IfcEarthworksFill", true, true},
     {"IfcFireSuppressionTerminal", true, true},
     {"IfcFooting", true, true},
@@ -86,7 +90,7 @@ inline constexpr ProductLayout kProductLayouts[] = {
 // one is written as an element with a Tag and a PredefinedType.
 [[nodiscard]] inline ProductLayout productLayout(std::string_view entity)
 {
-    return findProductLayout(entity).value_or(ProductLayout{entity, true, true, false});
+    return findProductLayout(entity).value_or(ProductLayout{entity, true, true, false, false});
 }
 
 // The values of `entity`'s PredefinedType enumeration in IFC4X3_ADD2,
