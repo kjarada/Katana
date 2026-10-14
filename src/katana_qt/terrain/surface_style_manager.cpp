@@ -196,8 +196,12 @@ class SurfaceStylePreview final : public QWidget {
             painter.drawText(rect(), Qt::AlignCenter, "Choose a style to see it here");
             return;
         }
+        // The sample left of where the legend goes, when the style has one:
+        // a legend drawn over the sample hid its corner.
+        constexpr int kLegendRoom = 130;
+        const bool legend = style_->planFaces != SurfaceFaces::None;
         cad::ViewTransform view;
-        view.resize(width(), height());
+        view.resize(std::max(80, width() - (legend ? kLegendRoom : 0)), height());
         view.fit(sample->bounds(), 0.06);
         const katana::geometry::Box2 visible = view.visibleWorldBounds();
         cad::SurfacePlanView plan;
