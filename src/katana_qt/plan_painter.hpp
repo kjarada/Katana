@@ -80,6 +80,10 @@
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/interop/reference_data.hpp"
+// Surface display (docs/surface_display.md): the drawing's surfaces in plan.
+#include "katana/cad/terrain/surface_plan.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
+#include "katana/terrain/surface_store.hpp"
 
 class QPainter;
 
@@ -109,6 +113,13 @@ struct PlanSource {
     const katana::cad::SelectionSet* selection = nullptr;
     const katana::interop::ReferenceData* reference = nullptr;
     const std::vector<katana::cad::SceneMesh>* meshes = nullptr;
+    // Surface display (docs/surface_display.md): the drawing's surfaces and
+    // their display styles. Each visible surface is drawn in its style
+    // beneath the entities. Null: no surfaces (the styles without the
+    // surfaces draw nothing; the surfaces without styles draw in the
+    // built-in ones).
+    const katana::terrain::SurfaceStore* surfaces = nullptr;
+    const katana::cad::SurfaceStyleSet* surfaceStyles = nullptr;
 };
 
 // The document's drawing, library, index and selection. The reference data and
@@ -219,6 +230,13 @@ struct PlanPaintOptions {
     // default: plots and every caller but the plan view draw what they
     // always drew; the plan view sets it from its own switch.
     bool selectionGhosts = false;
+    // Surface display (docs/surface_display.md). The drawing's surfaces, in
+    // their styles, beneath the entities; and on screen, in the view's
+    // top-right corner, the legend of each drawn surface whose style colours
+    // its faces. A plot carries no legend: a sheet's legend belongs with its
+    // title block, which is not done.
+    bool surfaces = true;
+    bool surfaceLegends = true;
 };
 
 // What one paint did, for a view's statistics and for tests that cannot
@@ -254,6 +272,20 @@ struct PlanPaintStats {
     std::size_t rasterCropsMade = 0;
     // On paper, the pixels of the images the point clouds were splatted into.
     std::size_t cloudPixelsEmbedded = 0;
+    // Surface display (docs/surface_display.md): the surfaces drawn (visible,
+    // with something in view), their triangles in view, the edges stroked
+    // and the triangles too dense to stroke (tinted), the contour runs and
+    // labels, the pixels of their faces' images and how many they cover, and
+    // the legends drawn.
+    std::size_t surfacesDrawn = 0;
+    std::size_t surfaceTrianglesInView = 0;
+    std::size_t surfaceEdgesStroked = 0;
+    std::size_t surfaceTrianglesTinted = 0;
+    std::size_t surfaceContourRuns = 0;
+    std::size_t surfaceLabels = 0;
+    std::size_t surfaceImagePixels = 0;
+    std::size_t surfacePixelsCovered = 0;
+    std::size_t surfaceLegends = 0;
 };
 
 // Sizes of the marks the painter draws that are not the drawing's own: on
@@ -313,6 +345,8 @@ class PlanPaintCache {
         return fonts_.size() + (paperFont_.has_value() ? 1u : 0u);
     }
     [[nodiscard]] std::size_t spriteCount() const { return sprites_.size(); }
+    // What is kept of the surfaces drawn (docs/surface_display.md).
+    [[nodiscard]] const katana::cad::SurfacePlanCache& surfaceCache() const { return surfaces_; }
 
   private:
     friend class PlanPainter;
@@ -354,6 +388,10 @@ class PlanPaintCache {
     // reallocated only when the view's size changes: allocating and filling a
     // window-sized image per cloud per frame cost 2.4 ms a cloud at 1600 x 1000.
     QImage cloudLayer_;
+    // Surface display (docs/surface_display.md): each surface's cull grid,
+    // joined rim and breaklines, and traced contours, kept while the drawing
+    // has the surface (cad::SurfacePlanCache).
+    katana::cad::SurfacePlanCache surfaces_;
 
     // A symbol stamp rasterised once and blitted wherever the same symbol is
     // put in the same pen at the same size and sub-pixel position. The view

@@ -1,4 +1,6 @@
 #include "render_view_widget.hpp"
+// Surface display (docs/surface_display.md): the 3D legend of a styled surface.
+#include "terrain/surface_plan_painter.hpp"
 
 #include "katana/cad/scene_zoom.hpp"
 #include "theme.hpp"
@@ -735,7 +737,22 @@ void RenderViewWidget::paintOverlays(QPainter& painter)
 // has room for it.
 void RenderViewWidget::drawLegend(QPainter& painter) const
 {
-    if (!layers_.hasRamp() || height() < 160 || width() < 160) {
+    if (height() < 160 || width() < 160) {
+        return;
+    }
+    // Surface display (docs/surface_display.md): a surface drawn in a display
+    // style is read off its style's legend - its ramp, bands, stops or
+    // aspect sectors - drawn as the plan view draws one.
+    if (layers_.legend.has_value()) {
+        QColor backing = kBackground;
+        backing.setAlpha(200);
+        const QString caption = QString::fromStdString(layers_.legendSurface) + QStringLiteral(" - ") +
+                                QString::fromStdString(layers_.legendStyle);
+        (void)paintSurfaceLegend(painter, *layers_.legend, caption, QPointF(width() - 16.0, 16.0),
+                                 painter.font(), theme::textMuted(), backing);
+        return;
+    }
+    if (!layers_.hasRamp()) {
         return;
     }
     constexpr int kBarWidth = 10;
