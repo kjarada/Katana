@@ -1,13 +1,17 @@
 #include "katana/terrain/volume.hpp"
 
 #include "katana/core/task_pool.hpp"
-#include "katana/geometry/spatial_index.hpp"
+#include "katana/core/text.hpp"
+#include "katana/terrain/section_volume.hpp"
+#include "katana/terrain/tin_builder.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "summation.hpp"
@@ -18,6 +22,7 @@ namespace tol = katana::math::tolerance;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
+using katana::geometry::Polyline2;
 using katana::geometry::Triangle2;
 
 namespace {
@@ -101,106 +106,75 @@ class SignedIntegral {
     detail::CompensatedSum negativeArea_;
 };
 
-// A triangle's corners counter-clockwise. The clipper below needs a known
-// winding to decide which side of a clip edge is inside, and a TIN triangle's
-// stored order is whatever the triangulation produced.
-std::array<Point2, 3> orientedCorners(const Triangle2& triangle)
-{
-    std::array<Point2, 3> corners{triangle.a, triangle.b, triangle.c};
-    if (triangle.signedArea() < 0.0) {
-        std::swap(corners[1], corners[2]);
+// The overlay's pieces summed one block at a time, each block into its own
+// slot, and the slots combined in block order: the same sequence of
+// floating-point operations whatever the thread count (overlay.hpp).
+class ComparisonSums final : public OverlayVisitor {
+  public:
+    explicit ComparisonSums(std::size_t blocks) : blocks_(blocks) {}
+
+    void piece(std::size_t block, const OverlayPiece& piece) override
+    {
+        BlockSums& sums = blocks_[block];
+        sums.integral.add(piece.area, {piece.zTop[0] - piece.zBase[0],
+                                       piece.zTop[1] - piece.zBase[1],
+                                       piece.zTop[2] - piece.zBase[2]});
+        sums.planArea.add(piece.area);
+        ++sums.pieces;
     }
-    return corners;
+
+    [[nodiscard]] SurfaceComparison result() const
+    {
+        SignedIntegral integral;
+        detail::CompensatedSum planArea;
+        SurfaceComparison comparison;
+        for (const BlockSums& sums : blocks_) {
+            integral.merge(sums.integral);
+            planArea.add(sums.planArea.value());
+            comparison.overlayTriangleCount += sums.pieces;
+        }
+        comparison.fill = integral.positive();
+        comparison.cut = integral.negative();
+        comparison.net = comparison.fill - comparison.cut;
+        comparison.planArea = planArea.value();
+        comparison.fillArea = integral.positiveArea();
+        comparison.cutArea = integral.negativeArea();
+        return comparison;
+    }
+
+  private:
+    // One cache line each: neighbouring blocks are written by different
+    // threads, and sharing a line would have them invalidate each other.
+    struct alignas(64) BlockSums {
+        SignedIntegral integral;
+        detail::CompensatedSum planArea;
+        std::size_t pieces = 0;
+    };
+    std::vector<BlockSums> blocks_;
+};
+
+Result<SurfaceComparison> compare(const TinSurface& existing, const TinSurface& design,
+                                  const OverlayRegion* region, katana::core::TaskPool* pool)
+{
+    ComparisonSums sums(overlayBlockCount(existing));
+    if (auto status = visitOverlay(existing, design, sums, region, pool); !status) {
+        return status.error();
+    }
+    return sums.result();
 }
 
-// Sutherland-Hodgman clip of one triangle by another. Both are convex, so the
-// intersection is convex with at most six corners; `out` holds them counter-
-// clockwise and the count is returned. Fewer than three means the triangles
-// meet in at most a segment and contribute no area.
-//
-// WHY THIS IS EXACT WHERE IT MATTERS. The inside test is `cross >= 0`, not
-// `> 0`. For a subject corner lying exactly on a clip edge - which is the
-// normal case where two triangles share an edge or a vertex - the cross
-// product is exactly zero in IEEE arithmetic, because it evaluates to a
-// quantity of the form `a - a` when the point is one of the two that define
-// the edge. Counting it as inside means no crossing point is constructed for
-// it, so the corner is reproduced bit for bit rather than recomputed. Two
-// triangles that share an edge therefore clip to exactly that segment, whose
-// fan has signed area exactly 0.0 and is rejected by the caller's `area > 0`
-// guard. With `> 0` the same case would construct a near-degenerate polygon of
-// some tiny arbitrary area, and comparing a surface with itself would no
-// longer be exactly zero.
-std::size_t clipTriangleToTriangle(const std::array<Point2, 3>& subject,
-                                   const std::array<Point2, 3>& window,
-                                   std::array<Point2, 8>& out)
+// A comparison read as a volume to a level: the surface is the existing one,
+// the level the design, so what stands above the level is the cut.
+DatumVolume asDatumVolume(const SurfaceComparison& comparison)
 {
-    // Two buffers of eight: each clip edge can add at most one corner, and
-    // three edges applied to a triangle cannot exceed six.
-    std::array<Point2, 8> buffer{};
-    std::size_t count = 3;
-    for (std::size_t i = 0; i < 3; ++i) {
-        out[i] = subject[i];
-    }
-
-    for (std::size_t edge = 0; edge < 3 && count >= 3; ++edge) {
-        const Point2& p = window[edge];
-        const Point2& q = window[(edge + 1) % 3];
-        const double ex = q.x - p.x;
-        const double ey = q.y - p.y;
-        const auto side = [&](const Point2& v) { return ex * (v.y - p.y) - ey * (v.x - p.x); };
-
-        std::size_t produced = 0;
-        for (std::size_t i = 0; i < count; ++i) {
-            const Point2& current = out[i];
-            const Point2& next = out[(i + 1) % count];
-            const double sideCurrent = side(current);
-            const double sideNext = side(next);
-            if (sideCurrent >= 0.0) {
-                buffer[produced++] = current;
-            }
-            // A crossing only when the two strictly straddle the line. When
-            // either is exactly on it that endpoint has already been kept (or
-            // will be), so constructing a point here would duplicate it.
-            if ((sideCurrent > 0.0 && sideNext < 0.0) || (sideCurrent < 0.0 && sideNext > 0.0)) {
-                const double t = sideCurrent / (sideCurrent - sideNext);
-                buffer[produced++] = Point2(current.x + t * (next.x - current.x),
-                                            current.y + t * (next.y - current.y));
-            }
-            if (produced >= buffer.size()) {
-                break;
-            }
-        }
-        count = produced;
-        for (std::size_t i = 0; i < count; ++i) {
-            out[i] = buffer[i];
-        }
-    }
-    return count < 3 ? 0 : count;
-}
-
-// Elevation of the plane of `triangle` at the three given positions. The
-// weights are exact at the triangle's own vertices (1, 0, 0), which is what makes
-// the comparison of identical surfaces exactly zero.
-//
-// The plan triangle and its doubled area are passed in rather than looked up:
-// compareSurfaces evaluates a fan of pieces against the same pair of surface
-// triangles, so planTriangle() and the degeneracy test (three hypots and an
-// area, inside Triangle2::barycentric) are loop invariants. The caller asks
-// isDegenerate() once per surface triangle and skips it entirely when it says
-// yes, which is what the nullopt return used to do a piece at a time.
-std::array<double, 3> planeElevations(const TinSurface& surface, std::uint32_t triangle,
-                                      const Triangle2& plan, double twiceArea,
-                                      const std::array<Point2, 3>& positions)
-{
-    const TinTriangle& tri = surface.triangles()[triangle];
-    std::array<double, 3> elevations{};
-    for (std::size_t i = 0; i < 3; ++i) {
-        const std::array<double, 3> weights = plan.barycentric(positions[i], twiceArea);
-        elevations[i] = weights[0] * surface.vertices()[tri[0]].z +
-                        weights[1] * surface.vertices()[tri[1]].z +
-                        weights[2] * surface.vertices()[tri[2]].z;
-    }
-    return elevations;
+    DatumVolume volume;
+    volume.above = comparison.cut;
+    volume.below = comparison.fill;
+    volume.net = volume.above - volume.below;
+    volume.planAreaAbove = comparison.cutArea;
+    volume.planAreaBelow = comparison.fillArea;
+    volume.planArea = comparison.planArea;
+    return volume;
 }
 
 } // namespace
@@ -214,13 +188,16 @@ Result<DatumVolume> volumeToDatum(const TinSurface& surface, double datum)
         return makeError(ErrorCode::InvalidArgument, "surface has no triangles");
     }
     SignedIntegral integral;
+    detail::CompensatedSum planArea;
     for (std::size_t t = 0; t < surface.triangleCount(); ++t) {
         const TinTriangle& tri = surface.triangles()[t];
         // Heights above the datum first: subtracting the datum from the summed
         // prism volume instead would cancel most digits for elevations far from 0.
-        integral.add(surface.trianglePlanArea(t), {surface.vertices()[tri[0]].z - datum,
-                                                   surface.vertices()[tri[1]].z - datum,
-                                                   surface.vertices()[tri[2]].z - datum});
+        const double area = surface.trianglePlanArea(t);
+        integral.add(area, {surface.vertices()[tri[0]].z - datum,
+                            surface.vertices()[tri[1]].z - datum,
+                            surface.vertices()[tri[2]].z - datum});
+        planArea.add(area);
     }
     DatumVolume result;
     result.above = integral.positive();
@@ -228,148 +205,271 @@ Result<DatumVolume> volumeToDatum(const TinSurface& surface, double datum)
     result.net = result.above - result.below;
     result.planAreaAbove = integral.positiveArea();
     result.planAreaBelow = integral.negativeArea();
+    result.planArea = planArea.value();
     return result;
+}
+
+Result<DatumVolume> volumeToDatum(const TinSurface& surface, double datum,
+                                  const OverlayRegion& region, katana::core::TaskPool* pool)
+{
+    if (!std::isfinite(datum)) {
+        return makeError(ErrorCode::InvalidArgument, "datum elevation must be finite");
+    }
+    if (surface.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "surface has no triangles");
+    }
+    if (region.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the region has no area");
+    }
+    auto level = region.atLevel(datum);
+    if (!level) {
+        return level.error();
+    }
+    auto comparison = compare(surface, *level, nullptr, pool);
+    if (!comparison) {
+        return comparison.error();
+    }
+    return asDatumVolume(*comparison);
 }
 
 Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinSurface& design,
                                           katana::core::TaskPool* pool)
 {
+    return compare(existing, design, nullptr, pool);
+}
+
+Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinSurface& design,
+                                          const OverlayRegion& region,
+                                          katana::core::TaskPool* pool)
+{
+    if (region.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the region has no area");
+    }
+    return compare(existing, design, &region, pool);
+}
+
+// ---- stockpiles and pits ------------------------------------------------------------------
+
+Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polyline2& boundary,
+                                        const StockpileOptions& options,
+                                        katana::core::TaskPool* pool)
+{
+    if (surface.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "surface has no triangles");
+    }
+    if (options.base == StockpileBase::Level && !std::isfinite(options.level)) {
+        return makeError(ErrorCode::InvalidArgument, "the base level must be finite");
+    }
+    // A ring drawn back to its start repeats its first vertex at its end:
+    // the same ring without it, and its height list with it.
+    Polyline2 ring = boundary;
+    ring.closed = true;
+    std::vector<std::optional<double>> ringHeights = options.boundaryHeights;
+    while (ring.vertices.size() > 1 &&
+           ring.vertices.front().distanceTo(ring.vertices.back()) <= tol::kGeometric) {
+        ring.vertices.pop_back();
+        if (ringHeights.size() > ring.vertices.size()) {
+            ringHeights.pop_back();
+        }
+    }
+    auto region = OverlayRegion::fromPolygon(ring);
+    if (!region) {
+        return region.error();
+    }
+
+    StockpileVolume result;
+    result.base = options.base;
+    result.boundaryArea = region->area();
+    TinSurface base;
+    if (options.base == StockpileBase::Boundary) {
+        // The toe as it stands: each vertex's own height, or the ground's
+        // there. A vertex with neither is refused - its height would be a
+        // guess, and a base at 0 there would add a cone of nothing.
+        const bool own = !ringHeights.empty() && ringHeights.size() == ring.vertices.size() &&
+                         std::all_of(ringHeights.begin(), ringHeights.end(),
+                                     [](const std::optional<double>& h) {
+                                         return h.has_value() && std::isfinite(*h);
+                                     });
+        result.boundaryHeights = own;
+        TinInput input;
+        for (std::size_t v = 0; v < ring.vertices.size(); ++v) {
+            const Point2& at = ring.vertices[v];
+            const std::optional<double> height = own ? ringHeights[v] : surface.elevationAt(at);
+            if (!height) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "boundary vertex " + std::to_string(v + 1) +
+                                     " is off the surface and has no height of its own, so the "
+                                     "base has no height there; give the boundary heights, or "
+                                     "use the lowest point or a level",
+                                 "vertex=" + std::to_string(v + 1));
+            }
+            input.points.emplace_back(at.x, at.y, *height);
+        }
+        input.boundary = ring;
+        // Two vertices of the ring at one place (a ring that doubles back
+        // to touch itself is refused by the triangulator anyway) keep the
+        // first's height.
+        TinBuildOptions buildOptions;
+        buildOptions.duplicatePoints = DuplicatePointPolicy::KeepFirst;
+        auto built = buildTin(input, buildOptions);
+        if (!built) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "the boundary cannot be made a base: " + built.error().message,
+                             built.error().context);
+        }
+        base = std::move(built->surface);
+    } else {
+        double level = options.level;
+        if (options.base == StockpileBase::Lowest) {
+            // The lowest point along the boundary is at a vertex of it or
+            // where an edge of the surface crosses it: the ends of the
+            // pieces the profiler gives, which are exact.
+            const SegmentProfiler profiler(surface);
+            std::optional<double> lowest;
+            const std::size_t count = ring.vertices.size();
+            for (std::size_t v = 0; v < count; ++v) {
+                const Point2& from = ring.vertices[v];
+                const Point2& to = ring.vertices[(v + 1) % count];
+                for (const SegmentPiece& piece : profiler.along(from, to)) {
+                    const double low = std::min(piece.z0, piece.z1);
+                    lowest = lowest ? std::min(*lowest, low) : low;
+                }
+                if (const auto at = surface.elevationAt(from)) {
+                    lowest = lowest ? std::min(*lowest, *at) : *at;
+                }
+            }
+            if (!lowest) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "the boundary does not cross the surface anywhere, so it has no "
+                                 "lowest point on it");
+            }
+            level = *lowest;
+        }
+        result.level = level;
+        auto flat = region->atLevel(level);
+        if (!flat) {
+            return flat.error();
+        }
+        base = std::move(*flat);
+    }
+
+    auto comparison = compare(surface, base, nullptr, pool);
+    if (!comparison) {
+        return comparison.error();
+    }
+    result.volume = asDatumVolume(*comparison);
+    return result;
+}
+
+// ---- the grid method -----------------------------------------------------------------------
+
+Result<GridVolume> gridVolume(const TinSurface& existing, const TinSurface& design, double cell,
+                              const OverlayRegion* region, katana::core::TaskPool* pool)
+{
     if (existing.empty() || design.empty()) {
         return makeError(ErrorCode::InvalidArgument, "both surfaces must have triangles");
     }
-    SurfaceComparison result;
+    if (!(cell > 0.0) || !std::isfinite(cell)) {
+        return makeError(ErrorCode::InvalidArgument, "the cell must be a positive length");
+    }
+    GridVolume result;
+    result.cell = cell;
     if (!existing.bounds().intersects(design.bounds())) {
         return result;
     }
-    const Box2 common(Point2(std::max(existing.bounds().min.x, design.bounds().min.x),
-                             std::max(existing.bounds().min.y, design.bounds().min.y)),
-                      Point2(std::min(existing.bounds().max.x, design.bounds().max.x),
-                             std::min(existing.bounds().max.y, design.bounds().max.y)));
-    const Box2 region = common.inflated(tol::kGeometric);
-
-    // Broad phase over the design triangles that reach the common area. Only
-    // these can contribute, and only they are worth indexing.
-    std::vector<katana::geometry::SpatialEntry> entries;
-    entries.reserve(design.triangleCount());
-    for (std::size_t t = 0; t < design.triangleCount(); ++t) {
-        const Box2 box = design.planTriangle(t).boundingBox();
-        if (box.intersects(region)) {
-            entries.push_back({static_cast<katana::geometry::SpatialId>(t), box});
+    Box2 common(Point2(std::max(existing.bounds().min.x, design.bounds().min.x),
+                       std::max(existing.bounds().min.y, design.bounds().min.y)),
+                Point2(std::min(existing.bounds().max.x, design.bounds().max.x),
+                       std::min(existing.bounds().max.y, design.bounds().max.y)));
+    if (region != nullptr) {
+        if (region->empty() || !common.intersects(region->bounds())) {
+            return result;
         }
+        common = Box2(Point2(std::max(common.min.x, region->bounds().min.x),
+                             std::max(common.min.y, region->bounds().min.y)),
+                      Point2(std::min(common.max.x, region->bounds().max.x),
+                             std::min(common.max.y, region->bounds().max.y)));
     }
-    if (entries.empty()) {
-        return result;
+    // Every cell whose centre can be inside the common box: lines at whole
+    // multiples of the cell, from the one at or below the box's lower edge.
+    const double firstColumn = std::floor(common.min.x / cell);
+    const double firstRow = std::floor(common.min.y / cell);
+    const double columnsReal = std::ceil(common.max.x / cell) - firstColumn;
+    const double rowsReal = std::ceil(common.max.y / cell) - firstRow;
+    if (!(columnsReal * rowsReal <= static_cast<double>(kMaxGridVolumeCells))) {
+        const double fits = std::sqrt(common.width() * common.height() /
+                                      static_cast<double>(kMaxGridVolumeCells));
+        return makeError(ErrorCode::InvalidArgument,
+                         "a grid of " + std::to_string(static_cast<std::uint64_t>(columnsReal)) +
+                             " x " + std::to_string(static_cast<std::uint64_t>(rowsReal)) +
+                             " cells is more than the " +
+                             std::to_string(kMaxGridVolumeCells) +
+                             " allowed; a cell of at least " +
+                             katana::core::formatExactReal(std::ceil(fits * 1000.0) / 1000.0) +
+                             " fits");
     }
-    katana::geometry::SpatialIndex index;
-    index.rebuild(entries);
+    const auto columns = static_cast<std::size_t>(std::max(columnsReal, 0.0));
+    const auto rows = static_cast<std::size_t>(std::max(rowsReal, 0.0));
+    const double cellArea = cell * cell;
 
-    // The existing triangles are cut into blocks of a FIXED size, and the
-    // block, not the thread, is the unit of summation: each block sums its own
-    // pieces in index order - existing triangles ascending, and for each its
-    // design candidates in ascending id order (SpatialIndex sorts them) - and
-    // the block sums are then combined in block order. The sequence of
-    // floating-point operations is therefore fixed by the data alone, and the
-    // answer is the same bits on one thread or sixteen (Rule 7; the
-    // TaskPool(1) tests in test_volume.cpp hold it to that). The partition
-    // must never be derived from the thread count, or it would not be.
-    //
-    // 256 triangles is a few hundred microseconds of clipping, so dispatch is
-    // noise, and a 200k-triangle surface still makes ~800 blocks for sixteen
-    // threads to balance over.
-    constexpr std::size_t kBlockTriangles = 256;
-    // One cache line each: neighbouring blocks are written by different
-    // threads, and sharing a line would have them invalidate each other.
+    // Rows in blocks of a fixed size, each summed in order into its own slot,
+    // and the slots combined in order: the same bits at any thread count.
+    constexpr std::size_t kRowsPerBlock = 16;
+    const std::size_t blockCount = (rows + kRowsPerBlock - 1) / kRowsPerBlock;
     struct alignas(64) BlockSums {
-        SignedIntegral integral;
-        detail::CompensatedSum planArea;
-        std::size_t pieces = 0;
+        detail::CompensatedSum cut;
+        detail::CompensatedSum fill;
+        std::size_t cells = 0;
     };
-    const std::size_t existingCount = existing.triangleCount();
-    const std::size_t blockCount = (existingCount + kBlockTriangles - 1) / kBlockTriangles;
     std::vector<BlockSums> blocks(blockCount);
-
-    const auto compareBlocks = [&](std::size_t firstBlock, std::size_t endBlock) {
-        // Per call, not shared: the index query and the clipper each need a
-        // buffer, and a chunk of blocks runs on one thread.
-        std::vector<katana::geometry::SpatialId> candidates;
-        std::array<Point2, 8> piece{};
+    const auto sumBlocks = [&](std::size_t firstBlock, std::size_t endBlock) {
         for (std::size_t block = firstBlock; block < endBlock; ++block) {
             BlockSums& sums = blocks[block];
-            const std::size_t first = block * kBlockTriangles;
-            const std::size_t end = std::min(first + kBlockTriangles, existingCount);
-            for (std::size_t te = first; te < end; ++te) {
-                const Triangle2 planExisting = existing.planTriangle(te);
-                const Box2 boxExisting = planExisting.boundingBox();
-                if (!boxExisting.intersects(region)) {
-                    continue;
-                }
-                // Hoisted out of the candidate and fan loops below: a
-                // degenerate triangle has no plane to evaluate, so every piece
-                // cut from it was already being dropped one at a time.
-                if (planExisting.isDegenerate()) {
-                    continue;
-                }
-                const double twiceAreaExisting = planExisting.twiceSignedArea();
-                const std::array<Point2, 3> subject = orientedCorners(planExisting);
-                index.query(boxExisting, candidates);
-                for (const katana::geometry::SpatialId id : candidates) {
-                    const auto td = static_cast<std::uint32_t>(id);
-                    const Triangle2 planDesign = design.planTriangle(td);
-                    if (planDesign.isDegenerate()) {
+            const std::size_t rowEnd = std::min((block + 1) * kRowsPerBlock, rows);
+            for (std::size_t row = block * kRowsPerBlock; row < rowEnd; ++row) {
+                const double y = (firstRow + static_cast<double>(row) + 0.5) * cell;
+                for (std::size_t column = 0; column < columns; ++column) {
+                    const Point2 centre((firstColumn + static_cast<double>(column) + 0.5) * cell,
+                                        y);
+                    if (!common.contains(centre)) {
                         continue;
                     }
-                    const double twiceAreaDesign = planDesign.twiceSignedArea();
-                    const std::array<Point2, 3> window = orientedCorners(planDesign);
-                    const std::size_t corners = clipTriangleToTriangle(subject, window, piece);
-                    if (corners < 3) {
+                    if (region != nullptr && !region->contains(centre)) {
                         continue;
                     }
-                    // The clipped region is convex, so a fan from its first
-                    // vertex covers it exactly once with no coordinates that
-                    // are not already on its boundary.
-                    for (std::size_t i = 1; i + 1 < corners; ++i) {
-                        const std::array<Point2, 3> part{piece[0], piece[i], piece[i + 1]};
-                        const double area = Triangle2{part[0], part[1], part[2]}.signedArea();
-                        if (!(area > 0.0)) {
-                            continue;
-                        }
-                        // `part` lies inside both triangles by construction, so
-                        // both planes are evaluated with barycentric weights in
-                        // [0, 1] and neither surface has to be searched for the
-                        // triangle to use.
-                        const std::array<double, 3> zExisting =
-                            planeElevations(existing, static_cast<std::uint32_t>(te),
-                                            planExisting, twiceAreaExisting, part);
-                        const std::array<double, 3> zDesign =
-                            planeElevations(design, td, planDesign, twiceAreaDesign, part);
-                        sums.integral.add(area, {zDesign[0] - zExisting[0],
-                                                 zDesign[1] - zExisting[1],
-                                                 zDesign[2] - zExisting[2]});
-                        sums.planArea.add(area);
-                        ++sums.pieces;
+                    const auto zExisting = existing.elevationAt(centre);
+                    if (!zExisting) {
+                        continue;
                     }
+                    const auto zDesign = design.elevationAt(centre);
+                    if (!zDesign) {
+                        continue;
+                    }
+                    const double depth = *zDesign - *zExisting;
+                    if (depth > 0.0) {
+                        sums.fill.add(depth * cellArea);
+                    } else if (depth < 0.0) {
+                        sums.cut.add(-depth * cellArea);
+                    }
+                    ++sums.cells;
                 }
             }
         }
     };
-    // Everything the blocks read - both surfaces and the index - is immutable
-    // here, and each block writes only its own BlockSums.
     katana::core::TaskPool& workers = pool != nullptr ? *pool : katana::core::TaskPool::shared();
-    workers.parallelRanges(0, blockCount, 1, compareBlocks);
+    workers.parallelRanges(0, blockCount, 1, sumBlocks);
 
-    SignedIntegral integral;
-    detail::CompensatedSum planArea;
+    detail::CompensatedSum cut;
+    detail::CompensatedSum fill;
     for (const BlockSums& sums : blocks) {
-        integral.merge(sums.integral);
-        planArea.add(sums.planArea.value());
-        result.overlayTriangleCount += sums.pieces;
+        cut.add(sums.cut.value());
+        fill.add(sums.fill.value());
+        result.cells += sums.cells;
     }
-    result.fill = integral.positive();
-    result.cut = integral.negative();
+    result.cut = cut.value();
+    result.fill = fill.value();
     result.net = result.fill - result.cut;
-    result.planArea = planArea.value();
-    result.fillArea = integral.positiveArea();
-    result.cutArea = integral.negativeArea();
+    result.planArea = static_cast<double>(result.cells) * cellArea;
     return result;
 }
 
