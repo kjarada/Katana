@@ -219,10 +219,8 @@ void startWithTheHostsCustomisation(katana::cad::Document& document,
 // that separation is what lets katana_cad build with -DKATANA_BUILD_IO=OFF.
 struct InteropState {
     katana::interop::ReferenceData reference;
-    // The session's named surfaces (terrain/surface_store.hpp): what a
-    // geoprocessing line's SURFACE <name> finds, and where an IMPORT puts a
-    // 12d archive's.
-    katana::terrain::SurfaceStore surfaces;
+    // The surfaces are not here: they are the drawing's (Document::surfaces),
+    // saved with it and undone with it (docs/terrain.md).
 };
 
 #endif // KATANA_WITH_INTEROP
@@ -250,7 +248,7 @@ struct SessionState {
 #if defined(KATANA_WITH_INTEROP)
     InteropState interop;
     // The geoprocessing executor's view of this session (geo/geo_verbs.hpp):
-    // its drawing, interpreter, reference rasters and surfaces.
+    // its drawing (with its surfaces), interpreter and reference rasters.
     katana::app::geo::Context* geo = nullptr;
 #endif
     UpdatePart updates;
@@ -499,12 +497,12 @@ bool runLine(SessionState& session, const std::string& line)
     }
 #if defined(KATANA_WITH_INTEROP)
     if ((verb == "NEW" || verb == "OPEN") && session.geo != nullptr) {
-        // The reference layers and the surfaces go with their drawing, as
-        // the window's do (audit QT-17); an OPEN then reads again the layers
-        // the project records. A layer whose file is gone is warned of by
-        // the restore, and the drawing is open all the same.
+        // The reference layers go with their drawing, as the window's do
+        // (audit QT-17); an OPEN then reads again the layers the project
+        // records. A layer whose file is gone is warned of by the restore,
+        // and the drawing is open all the same. (The surfaces are the
+        // drawing's: New cleared them, Open read the project's.)
         session.interop.reference.clear();
-        session.interop.surfaces.clear();
         if (verb == "OPEN" && katana::app::geo::recordsReferences(*session.geo)) {
             if (const auto restored = katana::app::geo::runNow(*session.geo, "REFS RESTORE")) {
                 std::cout << *restored << '\n';
@@ -532,7 +530,6 @@ struct Session::State {
     katana::app::geo::Context geo{document,
                                   interpreter,
                                   session.interop.reference,
-                                  session.interop.surfaces,
                                   katana::app::geo::ownScratch(),
                                   {},
                                   {}};

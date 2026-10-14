@@ -13,6 +13,7 @@
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/cad/terrain/surface_style.hpp"
 #include "katana/cad/terrain/surface_verbs.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "surface_test_support.hpp"
 
 using katana::cad::CommandInterpreter;
@@ -256,6 +257,36 @@ TEST_F(SurfaceVerbs, OneOptionWordAtATimeLeavesTheStyleAsItWasWhenRefused)
     EXPECT_FALSE(style.rangeMin.has_value()) << "empty clears";
     EXPECT_TRUE(katana::cad::setSurfaceStyleOption(style, "stops", "").ok());
     EXPECT_TRUE(style.stops.empty());
+}
+
+TEST_F(SurfaceVerbs, AnImportersSurfacesJoinTheDrawingInTheImportsOneStepUnderFreeNames)
+{
+    const std::size_t steps = document.history().undoCount();
+    std::vector<katana::terrain::NamedSurface> brought(2);
+    brought[0].name = "ground"; // taken: becomes "ground (2)"
+    brought[0].surface = tiltedSquare(50.0);
+    brought[0].source = "IFC site.ifc";
+    brought[1].name = "pad";
+    brought[1].surface = tiltedSquare(51.0);
+    auto records = katana::cad::importSurfaces(
+        document, katana::commands::createPoint(katana::geometry::Point2(1.0, 1.0)),
+        std::move(brought), "IMPORT site.ifc");
+    ASSERT_TRUE(records.ok()) << records.error().describe();
+    ASSERT_EQ(records->size(), 2u);
+    EXPECT_TRUE(contains((*records)[0], "surface name=\"ground (2)\"")) << (*records)[0];
+    EXPECT_TRUE(contains((*records)[1], "surface name=pad")) << (*records)[1];
+    EXPECT_EQ(document.history().undoCount(), steps + 1) << "the point and both surfaces";
+    EXPECT_EQ(document.model().entities.size(), 1u);
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_EQ(document.surfaces().all().size(), 2u) << "the two the fixture made";
+    EXPECT_EQ(document.model().entities.size(), 0u);
+
+    // None brought: the command alone, as it always ran.
+    auto none = katana::cad::importSurfaces(
+        document, katana::commands::createPoint(katana::geometry::Point2(2.0, 2.0)), {}, "IMPORT");
+    ASSERT_TRUE(none.ok());
+    EXPECT_TRUE(none->empty());
+    EXPECT_EQ(document.model().entities.size(), 1u);
 }
 
 TEST_F(SurfaceVerbs, TheHelpNamesTheVerbsAndEveryKey)

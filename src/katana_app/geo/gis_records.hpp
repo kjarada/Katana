@@ -23,7 +23,7 @@ namespace katana::app::geo {
 [[nodiscard]] std::string referenceRecord(const katana::interop::RasterOverlay& raster);
 [[nodiscard]] std::string referenceRecord(const katana::interop::PointCloudLayer& cloud);
 
-// One named surface: surfaceRecord, terrain_verbs.hpp's.
+// One named surface: cad::surfaceRecord (cad/terrain/surface_verbs.hpp).
 
 // A record as a JSON object: {"record": kind, field: value ...}. The kind is
 // every word before the first key= ("ifc exported"). A field is a number when

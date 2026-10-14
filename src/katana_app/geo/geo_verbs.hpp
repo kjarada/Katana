@@ -21,6 +21,16 @@
 //
 // Nothing a run computes is visible until it is applied, so a cancelled or
 // failed job leaves no trace (src/katana_qt/jobs.hpp's rule).
+//
+// The surfaces are the DRAWING's (Document::surfaces). A verb reads and
+// changes Context::surfaces, a staging copy the executor makes of the
+// drawing's as prepare and as apply begin; what the phase changed is
+// committed to the drawing when it ends, as ONE undo step named after the
+// verb ("SURFACE FROM", "SURFACE REMOVE"). A phase that fails commits
+// nothing. An apply that makes a step of its own - an IMPORT whose entities
+// and surfaces are one step - commits the staging store inside it
+// (Document::surfacesCommand), and the executor then finds nothing left to
+// commit.
 
 #include <filesystem>
 #include <functional>
@@ -48,25 +58,25 @@ enum class FarApartChoice { Keep, Alongside, Cancel };
 
 // What an IMPORT brought that only a front end with 3D views shows: a 12d
 // archive's meshes, which only the window keeps, and how many surfaces it
-// added to the store.
+// added to the drawing.
 struct ImportShown {
     std::vector<katana::archive12d::ImportedMesh> meshes;
     std::size_t surfaces = 0;
 };
 
-// What a geoprocessing line runs against: the front end's drawing, its
-// interpreter (whose scope context answers VIEW in the window and refuses it
-// headless), its reference rasters and its surfaces.
+// What a geoprocessing line runs against: the front end's drawing (with its
+// surfaces), its interpreter (whose scope context answers VIEW in the window
+// and refuses it headless) and its reference rasters.
 struct Context {
     katana::cad::Document& document;
     katana::cad::CommandInterpreter& interpreter;
     katana::interop::ReferenceData& reference;
-    katana::terrain::SurfaceStore& surfaces;
     // Where derived rasters go when the drawing has no project directory.
     std::filesystem::path scratch;
     // Optional: frame what an apply added (the window's views).
     std::function<void(const katana::geometry::Box2&)> frame{};
-    // Optional: the reference rasters or the surfaces changed.
+    // Optional: the reference rasters changed. (The surfaces are the
+    // drawing's: a change of them is the Document's to notify.)
     std::function<void()> changed{};
     // Optional, the window's: asked on the calling thread, with the advice,
     // when an IMPORT that keeps its own coordinates lands far from the
@@ -80,6 +90,12 @@ struct Context {
     // drawing, the reference data and the surfaces. Absent, a 12d archive's
     // meshes are counted and said to be held nowhere.
     std::function<void(ImportShown&&)> imported{};
+    // The phase's STAGING copy of the drawing's surfaces (see the top of
+    // this file): made by the executor from Document::surfaces as prepare
+    // and apply begin, read and changed by the verbs, committed by the
+    // executor. Never a second store: nothing keeps it between phases, and
+    // a front end never fills it.
+    katana::terrain::SurfaceStore surfaces{};
 };
 
 using Progress = std::function<void(double)>;

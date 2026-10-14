@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/commands/command_stack.hpp"
 #include "katana/core/text.hpp"
 
 namespace katana::cad {
@@ -597,6 +598,52 @@ std::string surfaceRecord(const NamedSurface& named, const SurfaceStyleSet& styl
            " zmin=" + fixed3(surface.minElevation()) + " zmax=" + fixed3(surface.maxElevation()) +
            " source=" + (named.source.empty() ? std::string() : recordValue(named.source)) +
            " style=" + recordValue(styleOf(styles, named).name) + " visible=" + yesNo(named.visible);
+}
+
+Result<std::vector<std::string>> importSurfaces(Document& document,
+                                                katana::commands::CommandPtr command,
+                                                std::vector<NamedSurface> surfaces,
+                                                std::string stepName)
+{
+    if (surfaces.empty()) {
+        if (command) {
+            if (auto status = document.execute(std::move(command)); !status) {
+                return status.error();
+            }
+        }
+        return std::vector<std::string>{};
+    }
+    SurfaceStore next = document.surfaces();
+    std::vector<std::string> names;
+    for (NamedSurface& surface : surfaces) {
+        surface.name = next.uniqueName(surface.name);
+        names.push_back(surface.name);
+        if (auto status = next.add(std::move(surface)); !status) {
+            return status.error();
+        }
+    }
+    const std::string step = command ? std::string(command->name()) : stepName;
+    auto surfacesStep = document.surfacesCommand(std::move(next), step);
+    if (!surfacesStep) {
+        return surfacesStep.error();
+    }
+    auto transaction = std::make_unique<katana::commands::Transaction>(step);
+    if (command) {
+        transaction->add(std::move(command));
+    }
+    if (*surfacesStep) {
+        transaction->add(std::move(*surfacesStep));
+    }
+    if (transaction->size() != 0) {
+        if (auto status = document.execute(std::move(transaction)); !status) {
+            return status.error();
+        }
+    }
+    std::vector<std::string> records;
+    for (const std::string& name : names) {
+        records.push_back(surfaceRecord(*document.surfaces().find(name), document.surfaceStyles()));
+    }
+    return records;
 }
 
 bool isSurfaceVerb(const Tokens& tokens)

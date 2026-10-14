@@ -573,8 +573,7 @@ TEST(Formats, AGpkgHoldingOnlyARasterRoutesToRasterImport)
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    geo::Context context{document, interpreter, reference, surfaces, dir.path(), {}, {}};
+    geo::Context context{document, interpreter, reference, dir.path(), {}, {}};
     const std::string gpkg = dir.file("plane.gpkg").generic_string();
     auto converted = geo::runNow(context, "GDAL raster convert \"" + kData + "/plane.asc\" \"" +
                                               gpkg + "\" --output-format GPKG");
@@ -631,8 +630,9 @@ class FormatsVerb : public ::testing::Test {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    geo::Context context{document, interpreter, reference, surfaces, scratch.path(), {}, {}};
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
+    geo::Context context{document, interpreter, reference, scratch.path(), {}, {}};
 
     katana::core::Result<std::string> run(const std::string& line)
     {

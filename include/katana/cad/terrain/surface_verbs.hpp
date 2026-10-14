@@ -54,6 +54,17 @@ runSurfaceVerb(Document& document, const std::vector<std::string>& tokens);
 [[nodiscard]] std::string surfaceRecord(const katana::terrain::NamedSurface& surface,
                                         const SurfaceStyleSet& styles);
 
+// For an importer that brings surfaces with its entities (an IFC file; the
+// geoprocessing IMPORT of an archive does the same through its staging
+// store): `command` - the import's entities, which may be null - and
+// `surfaces` as ONE undo step, named after the command, or `stepName` when
+// there is none. Each surface joins the drawing's under its own name, or
+// "name (2)" when that is taken. The surfaces' records (surfaceRecord), in
+// their order; on a refusal nothing changes.
+[[nodiscard]] katana::core::Result<std::vector<std::string>>
+importSurfaces(Document& document, katana::commands::CommandPtr command,
+               std::vector<katana::terrain::NamedSurface> surfaces, std::string stepName);
+
 // Every word and key, for HELP SURFACESTYLE.
 [[nodiscard]] std::string surfaceVerbHelp();
 // The lines the general HELP gives these verbs.

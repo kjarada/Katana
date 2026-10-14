@@ -80,8 +80,9 @@ class DrapeAndSample : public ::testing::Test {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    geo::Context context{document, interpreter, reference, surfaces, scratch.path(), {}, {}};
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
+    geo::Context context{document, interpreter, reference, scratch.path(), {}, {}};
 
     std::string ran(const std::string& line)
     {
@@ -138,12 +139,14 @@ class DrapeAndSample : public ::testing::Test {
         auto tin = katana::terrain::TinSurface::create(
             {{0, 0, 10}, {10, 0, 10}, {10, 10, 20}, {0, 10, 10}}, {{0, 1, 2}, {0, 2, 3}});
         ASSERT_TRUE(tin.ok()) << tin.error().describe();
-        ASSERT_TRUE(surfaces
-                        .add({"fold",
+        // Into the drawing's surfaces, as SURFACE FROM would put it.
+        katana::terrain::SurfaceStore next = surfaces;
+        ASSERT_TRUE(next.add({"fold",
                               std::make_shared<const katana::terrain::TinSurface>(
                                   std::move(tin).value()),
                               "test"})
                         .ok());
+        ASSERT_TRUE(document.setSurfaces(std::move(next)).ok());
     }
 };
 
