@@ -127,8 +127,8 @@ an agent doing all of it through `katana_mcp`.
 
 File > Export IFC is a dialog (`src/katana_qt/ifc_dialogs.hpp`, `docs/desktop.md`)
 of the verb's choices, with what the window knows beside them: the file; the
-drawing's entities (or only the selected ones), its alignments and the
-session's surfaces, each with its count; the utility schedule, its delivery
+drawing's entities (or only the selected ones), its alignments and its
+surfaces, each with its count; the utility schedule, its delivery
 schema and the detected spacing; a rules file, which Save Default Rules starts
 from the defaults (`IFC RULES`); and whether the file will be georeferenced,
 from the project's coordinate system. It writes the EXPORT line its fields
@@ -170,8 +170,8 @@ drawing - its entities, alignments and surfaces - is shifted alongside or
 kept, as every import asks; declining is a cancel, which the dialog says as
 one. File > Import and a path given to the window, whose line says neither,
 ask about the coordinate system; a typed IMPORT or a headless session asks no
-one and says how (`CRS SET`). Terrain comes in as surfaces of the session,
-which Export IFC writes out again.
+one and says how (`CRS SET`). Terrain comes in as surfaces of the drawing,
+in the import's one undo step, which Export IFC writes out again.
 
 
 ## Export: what goes where

@@ -200,15 +200,20 @@ TEST(SurfacesPanelWidget, CopyRemoveAndZoomToActOnThePickedSurface)
     EXPECT_EQ(rig.lines.back(), "SURFACE REMOVE \"ground\"");
 }
 
-TEST(SurfacesPanelWidget, AChangeMadeElsewhereIsShownAtOnce)
+TEST(SurfacesPanelWidget, AChangeMadeElsewhereIsShownOnTheEventLoopNotInsideTheNotification)
 {
     Rig rig(false);
     EXPECT_EQ(rig.table()->rowCount(), 0);
     katana::terrain::SurfaceStore store;
     ASSERT_TRUE(store.add({"ground", square(5.0), "test"}).ok());
     ASSERT_TRUE(rig.document.setSurfaces(std::move(store)).ok());
-    EXPECT_EQ(rig.table()->rowCount(), 1) << "without waiting for the event loop";
+    // Not rebuilt inside the document's notification, which may come from the
+    // panel's own widget's signal (docs/desktop.md).
+    EXPECT_EQ(rig.table()->rowCount(), 0);
+    Rig::settle();
+    EXPECT_EQ(rig.table()->rowCount(), 1);
     ASSERT_TRUE(rig.document.undo().ok());
+    Rig::settle();
     EXPECT_EQ(rig.table()->rowCount(), 0);
 }
 

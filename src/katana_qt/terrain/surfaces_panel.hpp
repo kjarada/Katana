@@ -71,8 +71,8 @@ class SurfacesPanel final : public QWidget {
 
     // Reads the drawing's surfaces and styles again when either has changed
     // since the last look (their generations); the picked surface stays
-    // picked. The document's notifications call it; a change the panel made
-    // itself is read once its own handler has returned.
+    // picked. A change of the document is read on the event loop
+    // (scheduleRefresh), never inside the notification.
     void refresh();
 
     // The picked surface's name, if a row is picked.
@@ -90,8 +90,10 @@ class SurfacesPanel final : public QWidget {
     void removePicked();
     void zoomToPicked();
     void updateButtons();
-    // Runs `line` through the executor, the panel's own refresh held back
-    // until the handler that ran it has returned.
+    // One refresh queued on the event loop, however often it is asked for
+    // before it runs.
+    void scheduleRefresh();
+    // Runs `line` through the executor; what it said is lastReply().
     void run(const QString& line);
 
     katana::cad::Document& document_;
@@ -108,7 +110,6 @@ class SurfacesPanel final : public QWidget {
     std::uint64_t stylesSeen_ = 0;
     bool shownOnce_ = false;
     bool filling_ = false; // the table is being filled, not edited
-    bool acting_ = false;  // a line the panel ran is running
     bool refreshPending_ = false;
     QString lastReply_;
 };

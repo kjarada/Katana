@@ -31,7 +31,7 @@ bool contains(const std::string& text, const std::string& part)
     return text.find(part) != std::string::npos;
 }
 
-class SurfaceVerbs : public ::testing::Test {
+class DrawingSurfaceVerbs : public ::testing::Test {
   protected:
     void SetUp() override
     {
@@ -69,7 +69,7 @@ class SurfaceVerbs : public ::testing::Test {
 
 } // namespace
 
-TEST_F(SurfaceVerbs, RenameKeepsTheSurfaceAndIsOneUndoStep)
+TEST_F(DrawingSurfaceVerbs, RenameKeepsTheSurfaceAndIsOneUndoStep)
 {
     const auto ground = document.surfaces().find("ground")->surface;
     const std::string reply = ok("SURFACE RENAME GROUND \"Existing Ground\"");
@@ -83,7 +83,7 @@ TEST_F(SurfaceVerbs, RenameKeepsTheSurfaceAndIsOneUndoStep)
     EXPECT_EQ(document.surfaces().find("Existing Ground"), nullptr);
 }
 
-TEST_F(SurfaceVerbs, ARenameTheDrawingCannotTakeIsRefused)
+TEST_F(DrawingSurfaceVerbs, ARenameTheDrawingCannotTakeIsRefused)
 {
     refused("SURFACE RENAME nothing other", ErrorCode::NotFound);
     refused("SURFACE RENAME ground DESIGN", ErrorCode::AlreadyExists);
@@ -91,7 +91,7 @@ TEST_F(SurfaceVerbs, ARenameTheDrawingCannotTakeIsRefused)
     refused("SURFACE RENAME ground \"\"", ErrorCode::InvalidArgument);
 }
 
-TEST_F(SurfaceVerbs, AStyleIsGivenByItsNameInAnyCaseAndEmptyIsTheDefault)
+TEST_F(DrawingSurfaceVerbs, AStyleIsGivenByItsNameInAnyCaseAndEmptyIsTheDefault)
 {
     std::string reply = ok("SURFACE STYLE ground \"cut fill\"");
     EXPECT_EQ(document.surfaces().find("ground")->style, "Cut Fill") << "as the style spells it";
@@ -103,7 +103,7 @@ TEST_F(SurfaceVerbs, AStyleIsGivenByItsNameInAnyCaseAndEmptyIsTheDefault)
     refused("SURFACE STYLE nothing Contours", ErrorCode::NotFound);
 }
 
-TEST_F(SurfaceVerbs, HideAndShowChangeOnlyWhatTheViewsDrawInOneStep)
+TEST_F(DrawingSurfaceVerbs, HideAndShowChangeOnlyWhatTheViewsDrawInOneStep)
 {
     const std::size_t steps = document.history().undoCount();
     std::string reply = ok("SURFACE HIDE ALL");
@@ -125,7 +125,7 @@ TEST_F(SurfaceVerbs, HideAndShowChangeOnlyWhatTheViewsDrawInOneStep)
     refused("SURFACE SHOW", ErrorCode::InvalidArgument);
 }
 
-TEST_F(SurfaceVerbs, ShowAllOfNoSurfacesIsNotAnError)
+TEST_F(DrawingSurfaceVerbs, ShowAllOfNoSurfacesIsNotAnError)
 {
     document.newDocument();
     const std::string reply = ok("SURFACE SHOW ALL");
@@ -133,7 +133,7 @@ TEST_F(SurfaceVerbs, ShowAllOfNoSurfacesIsNotAnError)
     EXPECT_FALSE(document.history().canUndo());
 }
 
-TEST_F(SurfaceVerbs, ACopySharesTheTriangulationAndKeepsTheStyle)
+TEST_F(DrawingSurfaceVerbs, ACopySharesTheTriangulationAndKeepsTheStyle)
 {
     (void)ok("SURFACE STYLE ground Contours");
     const std::string reply = ok("SURFACE COPY ground \"ground before\"");
@@ -148,7 +148,7 @@ TEST_F(SurfaceVerbs, ACopySharesTheTriangulationAndKeepsTheStyle)
     refused("SURFACE COPY nothing other", ErrorCode::NotFound);
 }
 
-TEST_F(SurfaceVerbs, OnlyTheDrawingsOwnSurfaceWordsAreClaimed)
+TEST_F(DrawingSurfaceVerbs, OnlyTheDrawingsOwnSurfaceWordsAreClaimed)
 {
     using katana::cad::isSurfaceVerb;
     EXPECT_TRUE(isSurfaceVerb({"surfacestyle"}));
@@ -160,7 +160,7 @@ TEST_F(SurfaceVerbs, OnlyTheDrawingsOwnSurfaceWordsAreClaimed)
     EXPECT_FALSE(isSurfaceVerb({"SURFACE"}));
 }
 
-TEST_F(SurfaceVerbs, TheStylesAreListedAndTheirJsonIsTheDocumentsForm)
+TEST_F(DrawingSurfaceVerbs, TheStylesAreListedAndTheirJsonIsTheDocumentsForm)
 {
     const std::string reply = ok("SURFACESTYLE LIST");
     EXPECT_TRUE(contains(reply, "style name=Standard default=yes surfaces=2")) << reply;
@@ -171,7 +171,7 @@ TEST_F(SurfaceVerbs, TheStylesAreListedAndTheirJsonIsTheDocumentsForm)
     refused("SURFACESTYLE LIST XML", ErrorCode::InvalidArgument);
 }
 
-TEST_F(SurfaceVerbs, AStyleIsMadeFromAnotherSetRenamedMadeTheDefaultAndDeleted)
+TEST_F(DrawingSurfaceVerbs, AStyleIsMadeFromAnotherSetRenamedMadeTheDefaultAndDeleted)
 {
     std::string reply = ok("SURFACESTYLE NEW Fine FROM contours interval=0.5 major=4");
     EXPECT_TRUE(contains(reply, "created style=Fine from=Contours")) << reply;
@@ -210,7 +210,7 @@ TEST_F(SurfaceVerbs, AStyleIsMadeFromAnotherSetRenamedMadeTheDefaultAndDeleted)
     EXPECT_EQ(document.surfaceStyles().find("Fine Contours"), nullptr);
 }
 
-TEST_F(SurfaceVerbs, AStyleChangeThatCannotBeMadeChangesNothing)
+TEST_F(DrawingSurfaceVerbs, AStyleChangeThatCannotBeMadeChangesNothing)
 {
     refused("SURFACESTYLE NEW Standard", ErrorCode::AlreadyExists);
     refused("SURFACESTYLE NEW", ErrorCode::InvalidArgument);
@@ -231,7 +231,7 @@ TEST_F(SurfaceVerbs, AStyleChangeThatCannotBeMadeChangesNothing)
     refused("SURFACESTYLE PAINT Standard", ErrorCode::InvalidArgument);
 }
 
-TEST_F(SurfaceVerbs, WhatInfoPrintsTypedBackMakesTheSameStyle)
+TEST_F(DrawingSurfaceVerbs, WhatInfoPrintsTypedBackMakesTheSameStyle)
 {
     const std::string info = ok("SURFACESTYLE INFO \"Slope Bands\"");
     const std::size_t options = info.find("\noptions ");
@@ -243,7 +243,7 @@ TEST_F(SurfaceVerbs, WhatInfoPrintsTypedBackMakesTheSameStyle)
     EXPECT_TRUE(again == *builtInSurfaceStyles().find("Slope Bands"));
 }
 
-TEST_F(SurfaceVerbs, OneOptionWordAtATimeLeavesTheStyleAsItWasWhenRefused)
+TEST_F(DrawingSurfaceVerbs, OneOptionWordAtATimeLeavesTheStyleAsItWasWhenRefused)
 {
     SurfaceDisplayStyle style;
     style.name = "Probe";
@@ -259,7 +259,7 @@ TEST_F(SurfaceVerbs, OneOptionWordAtATimeLeavesTheStyleAsItWasWhenRefused)
     EXPECT_TRUE(style.stops.empty());
 }
 
-TEST_F(SurfaceVerbs, AnImportersSurfacesJoinTheDrawingInTheImportsOneStepUnderFreeNames)
+TEST_F(DrawingSurfaceVerbs, AnImportersSurfacesJoinTheDrawingInTheImportsOneStepUnderFreeNames)
 {
     const std::size_t steps = document.history().undoCount();
     std::vector<katana::terrain::NamedSurface> brought(2);
@@ -289,7 +289,7 @@ TEST_F(SurfaceVerbs, AnImportersSurfacesJoinTheDrawingInTheImportsOneStepUnderFr
     EXPECT_EQ(document.model().entities.size(), 1u);
 }
 
-TEST_F(SurfaceVerbs, TheHelpNamesTheVerbsAndEveryKey)
+TEST_F(DrawingSurfaceVerbs, TheHelpNamesTheVerbsAndEveryKey)
 {
     EXPECT_TRUE(contains(CommandInterpreter::helpText(), "SURFACE RENAME <name> <new>"));
     EXPECT_TRUE(contains(CommandInterpreter::helpText(), "SURFACESTYLE LIST [JSON]"));

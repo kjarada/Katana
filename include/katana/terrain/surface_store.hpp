@@ -71,8 +71,10 @@ class SurfaceStore {
     [[nodiscard]] const std::vector<NamedSurface>& all() const { return surfaces_; }
     [[nodiscard]] bool empty() const { return surfaces_.empty(); }
 
-    // Bumped by every change, including a clear of an empty store: a view
-    // compares it with the revision it last drew.
+    // Bumped by every change, including a clear of an empty store: what tells
+    // a staging copy it was changed (the geoprocessing executor's). A view
+    // keys on Document::surfacesGeneration instead - an undo puts back a
+    // store with the revision it had then.
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
 
     // `base`, or "base (2)", "base (3)" ...: the first no surface has. What a

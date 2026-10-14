@@ -75,7 +75,7 @@ katana::terrain::NamedSurface surfaceIn(std::string style)
 
 } // namespace
 
-TEST(SurfaceStyles, TheBuiltInSetIsTheSevenStylesInOrderWithStandardTheDefault)
+TEST(SurfaceStyleSets, TheBuiltInSetIsTheSevenStylesInOrderWithStandardTheDefault)
 {
     const SurfaceStyleSet set = builtInSurfaceStyles();
     EXPECT_EQ(namesOf(set), (std::vector<std::string>{"Standard", "Triangles", "Contours",
@@ -85,7 +85,7 @@ TEST(SurfaceStyles, TheBuiltInSetIsTheSevenStylesInOrderWithStandardTheDefault)
     EXPECT_TRUE(checkSurfaceStyleSet(set).ok()) << checkSurfaceStyleSet(set).error().describe();
 }
 
-TEST(SurfaceStyles, EachBuiltInStyleShowsWhatItIsNamedFor)
+TEST(SurfaceStyleSets, EachBuiltInStyleShowsWhatItIsNamedFor)
 {
     const SurfaceStyleSet set = builtInSurfaceStyles();
     const SurfaceDisplayStyle& standard = *set.find("Standard");
@@ -143,7 +143,7 @@ TEST(SurfaceStyles, EachBuiltInStyleShowsWhatItIsNamedFor)
     EXPECT_EQ(outline.shading, SurfaceStyle::Wireframe);
 }
 
-TEST(SurfaceStyles, AStyleIsFoundByItsNameInAnyCase)
+TEST(SurfaceStyleSets, AStyleIsFoundByItsNameInAnyCase)
 {
     const SurfaceStyleSet set = builtInSurfaceStyles();
     ASSERT_NE(set.find("cut fill"), nullptr);
@@ -151,7 +151,7 @@ TEST(SurfaceStyles, AStyleIsFoundByItsNameInAnyCase)
     EXPECT_EQ(set.find("Nothing"), nullptr);
 }
 
-TEST(SurfaceStyles, ASurfaceIsDrawnInItsOwnStyleElseTheDefaultElseStandard)
+TEST(SurfaceStyleSets, ASurfaceIsDrawnInItsOwnStyleElseTheDefaultElseStandard)
 {
     SurfaceStyleSet set = builtInSurfaceStyles();
     EXPECT_EQ(styleOf(set, surfaceIn("contours")).name, "Contours");
@@ -164,7 +164,7 @@ TEST(SurfaceStyles, ASurfaceIsDrawnInItsOwnStyleElseTheDefaultElseStandard)
     EXPECT_EQ(styleOf(empty, surfaceIn("Contours")).name, "Standard");
 }
 
-TEST(SurfaceStyles, TheJsonFormGivesBackEveryFieldExactly)
+TEST(SurfaceStyleSets, TheJsonFormGivesBackEveryFieldExactly)
 {
     SurfaceStyleSet set = builtInSurfaceStyles();
     set.styles.push_back(everything());
@@ -181,7 +181,7 @@ TEST(SurfaceStyles, TheJsonFormGivesBackEveryFieldExactly)
     EXPECT_EQ(surfaceStylesToJson(*back), text);
 }
 
-TEST(SurfaceStyles, ANewerVersionIsUnsupportedAndAnythingElseAParseFailure)
+TEST(SurfaceStyleSets, ANewerVersionIsUnsupportedAndAnythingElseAParseFailure)
 {
     EXPECT_EQ(surfaceStylesFromJson(R"({"format":"katana-surface-styles","version":2,"styles":[]})")
                   .error()
@@ -203,7 +203,7 @@ TEST(SurfaceStyles, ANewerVersionIsUnsupportedAndAnythingElseAParseFailure)
               ErrorCode::InvalidArgument);
 }
 
-TEST(SurfaceStyles, AStyleThatCannotBeDrawnIsRefusedNamingTheField)
+TEST(SurfaceStyleSets, AStyleThatCannotBeDrawnIsRefusedNamingTheField)
 {
     const auto refusedFor = [](auto change) {
         SurfaceDisplayStyle style;
@@ -244,7 +244,7 @@ TEST(SurfaceStyles, AStyleThatCannotBeDrawnIsRefusedNamingTheField)
     EXPECT_TRUE(checkSurfaceStyle(fine).ok());
 }
 
-TEST(SurfaceStyles, ASetNeedsAStyleNoTwoOfOneNameAndADefaultAmongThem)
+TEST(SurfaceStyleSets, ASetNeedsAStyleNoTwoOfOneNameAndADefaultAmongThem)
 {
     EXPECT_FALSE(checkSurfaceStyleSet(SurfaceStyleSet{}).ok());
     SurfaceStyleSet twice = builtInSurfaceStyles();
@@ -256,7 +256,7 @@ TEST(SurfaceStyles, ASetNeedsAStyleNoTwoOfOneNameAndADefaultAmongThem)
     EXPECT_EQ(checkSurfaceStyleSet(lost).error().code, ErrorCode::InvalidArgument);
 }
 
-TEST(SurfaceStyles, TheWordsOfFacesAndShadingReadBackInAnyCase)
+TEST(SurfaceStyleSets, TheWordsOfFacesAndShadingReadBackInAnyCase)
 {
     for (const SurfaceFaces faces : {SurfaceFaces::None, SurfaceFaces::Flat,
                                      SurfaceFaces::Elevation, SurfaceFaces::Slope,

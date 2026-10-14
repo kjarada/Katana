@@ -115,28 +115,30 @@ SurfacesPanel::SurfacesPanel(cad::Document& document, Services services, QWidget
         }
     });
 
-    // The table is rebuilt from the document, so a change the panel's own
-    // handler made - a check box ticked, a style chosen - is read once that
-    // handler has returned: rebuilding the row under the widget whose signal
-    // is still on the stack deletes it there (the Layers panel's crash,
-    // main_window.cpp). Any other change is read at once.
+    // Read on the event loop, never inside the notification: the change may
+    // come from the panel's own check box or style combo, and rebuilding the
+    // row under the widget whose signal is still on the stack deletes it
+    // there - the Layers panel's crash (docs/desktop.md, "Panels refresh on
+    // the event loop, never inside their own signal"). Coalesced, so a
+    // transaction is one rebuild.
     listener_ = document_.addListener([this](const cad::DocumentChange& change) {
-        if (!change.has(cad::DocumentChange::Surfaces | cad::DocumentChange::SurfaceStyles)) {
-            return;
-        }
-        if (!acting_) {
-            refresh();
-            return;
-        }
-        if (!refreshPending_) {
-            refreshPending_ = true;
-            QTimer::singleShot(0, this, [this] {
-                refreshPending_ = false;
-                refresh();
-            });
+        if (change.has(cad::DocumentChange::Surfaces | cad::DocumentChange::SurfaceStyles)) {
+            scheduleRefresh();
         }
     });
     refresh();
+}
+
+void SurfacesPanel::scheduleRefresh()
+{
+    if (refreshPending_) {
+        return;
+    }
+    refreshPending_ = true;
+    QTimer::singleShot(0, this, [this] {
+        refreshPending_ = false;
+        refresh();
+    });
 }
 
 void SurfacesPanel::refresh()
@@ -260,9 +262,7 @@ void SurfacesPanel::run(const QString& line)
     if (!services_.run) {
         return;
     }
-    acting_ = true;
     const VerbOutcome outcome = services_.run(line);
-    acting_ = false;
     lastReply_ = outcome.ok ? outcome.reply : outcome.error;
     if (!outcome.ok) {
         status_->setText(outcome.error);
@@ -299,15 +299,8 @@ void SurfacesPanel::onItemChanged(QTableWidgetItem* item)
     }
     // A refused line leaves the drawing as it was; the row is made again
     // from it, so the cell shows what the drawing has, not what was typed.
-    surfacesSeen_ = 0;
     shownOnce_ = false;
-    if (!refreshPending_) {
-        refreshPending_ = true;
-        QTimer::singleShot(0, this, [this] {
-            refreshPending_ = false;
-            refresh();
-        });
-    }
+    scheduleRefresh();
 }
 
 void SurfacesPanel::onStyleChosen(int row, int index)

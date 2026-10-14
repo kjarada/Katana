@@ -215,3 +215,20 @@ The entity vector is sized from `SELECT COUNT(*)` rather than from
 `nextEntityId`. The counter is free but is only an upper bound, and a drawing
 that has had most of its entities deleted would reserve for its ids instead of
 its rows.
+
+## Large values in the database, not beside it
+
+Schema 13 keeps the drawing's TIN surfaces (`storage::SurfaceRecord`,
+`docs/terrain.md`, "Surfaces in the drawing") in the database, a BLOB a
+surface - tens of megabytes for one at SURFACE FROM's cap - as schema 10 keeps
+a survey job's field files. The project directory has a `terrain/` folder for
+large datasets, and files there were the obvious place; they were rejected
+because a save is one SQLite transaction and a file is written outside it: a
+crash between the two leaves the database naming surfaces whose files are
+older, newer or gone, which is the corruption the rollback journal exists to
+prevent. The cost is a save that rewrites every surface (`save()` rewrites the
+whole model already) and the SQLite length limit, which
+`ProjectStore::checkSurfaceSize` guards as `checkSurveyJobSize` does: a row over
+900 MB is refused before a byte is written. A surface is read straight from
+SQLite's row buffer (`columnBlobSpan`), one copy, and its bytes are freed as
+soon as the Document has decoded them.

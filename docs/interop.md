@@ -937,10 +937,11 @@ warning text="..."
     3D view for new surfaces or meshes. A session counts the meshes and says
     it holds none (`meshes ... held=no`).
   - `frame` frames what the import added; `changed` redraws the reference
-    layers and surfaces.
-- **A 12d archive's surfaces go into the session's store**
-  (`terrain::SurfaceStore`), in the CLI and MCP too, where the session once
-  said it held none. A geoprocessing line then finds them by name
+    layers (a change of the surfaces is the Document's to notify).
+- **A 12d archive's surfaces go into the drawing's**
+  (`Document::surfaces`), in the CLI and MCP too, where the session once
+  said it held none - in the import's one undo step, and saved with the
+  project (`docs/terrain.md`, "Surfaces in the drawing"). A geoprocessing line then finds them by name
   (`GDAL raster hillshade FROM SURFACE "TIN SOUTH WEST" ...`), and `EXPORT
   <file>.12da` writes them back, as the window's export always did. A name
   already taken is "name (2)".
