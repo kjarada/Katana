@@ -33,6 +33,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
+#include "katana/cad/road/road_object_verbs.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
@@ -1083,6 +1084,31 @@ const std::vector<Tool>& tools()
         // The customisation as structured data, from its own file
         // (mcp_customisation.cpp).
         list.push_back(customisationTool());
+
+        // ---- road objects (docs/road_objects.md) ----
+        // Read from the Document, as the customisation is, so asking leaves
+        // no line in the history of a session nobody typed into; placing and
+        // editing are katana_run_commands' ROADOBJECT lines.
+        list.push_back(Tool{
+            "katana_road_objects", "Road objects",
+            "The drawing's road objects - safety barriers, guide posts, signs, light poles, "
+            "culverts, walls, fences and line markings placed along an alignment, along lines or "
+            "at points - as structured data: each definition as the drawing keeps it (id, kind, "
+            "placement, the parameters given), the 3D objects made of it (id, IFC class and "
+            "predefined type, layer, material, triangles, whether closed, and quantities such as "
+            "Length, Height, Count, GrossArea and GrossVolume), and what could not be made and "
+            "why. Place and edit them with katana_run_commands: ROADOBJECT ADD barrier "
+            "ALIGNMENT Main station=0 to=120 offset=4, ROADOBJECT ADD sign AT x,y,z code=R1-1, "
+            "ROADOBJECT ADD fence ALONG FROM LAYERS boundary, ROADOBJECT SET id key=value, "
+            "ROADOBJECT DELETE id; ROADOBJECT KINDS <kind> lists a kind's keys, units, ranges "
+            "and defaults (HELP ROADOBJECT).",
+            objectSchema(Json::object()), hints(true, false, true),
+            [](Session& session, const Json&) {
+                const std::string report =
+                    katana::cad::road::roadObjectsReport(session.document());
+                return ToolReply{report, Json::parse(report)};
+            }});
+        // ---- end road objects ----
 
 #if defined(KATANA_WITH_INTEROP)
         // The geoprocessing tools, from their own file (geo/mcp_geo_tools.cpp).
