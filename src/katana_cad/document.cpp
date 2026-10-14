@@ -42,6 +42,8 @@ void Document::rebuildStack()
     stack_->addListener([this](const katana::commands::CommandEvent& event) {
         applyToSpatialIndex(event.changes);
         std::uint32_t parts = DocumentChange::History | tablesChanged();
+        // The road model's definitions (road/road_document.cpp).
+        parts |= roadModelChanged();
         if (!event.changes.empty()) {
             parts |= DocumentChange::Entities;
         }

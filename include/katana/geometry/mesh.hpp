@@ -32,6 +32,11 @@ struct TriangleMesh {
     [[nodiscard]] std::size_t triangleCount() const { return faces.size(); }
     [[nodiscard]] bool empty() const { return faces.empty(); }
 
+    // Vertex for vertex, face for face: what makes the road model's objects
+    // (cad/bim/bim_object.hpp) comparable, so a model made again that equals
+    // the last is known to.
+    friend bool operator==(const TriangleMesh&, const TriangleMesh&) = default;
+
     // nullopt for an index past the end or a face naming a vertex that does
     // not exist, so a caller that iterates cannot read out of bounds even if
     // the mesh was never validated.
