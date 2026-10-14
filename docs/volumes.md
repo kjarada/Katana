@@ -58,7 +58,8 @@ signed:
 volume method=exact base=ground top=design cut=12.345 fill=100.000 net=87.655 area=400.000 cut.area=95.000 fill.area=305.000
 ```
 
-With polygons, first what the scope took (`scope ... matched=`), then
+With polygons, first what the scope took (`boundary scope= ... matched=`,
+the shared scope record), then
 `polygons used= skipped.open= skipped.other=`, then with EACH one `polygon
 index= entity= polygon.area= ...` record per polygon (`chorded=yes` when an
 arc was chorded), then the total with `polygons=` and `polygon.area=`.
@@ -315,6 +316,10 @@ records do not carry.
 - The window (`tests/qt_widgets/terrain/test_volumes_dialog.cpp`): each
   page's line by object name; Measure with the interpreter as the executor,
   filling the table and the mass haul diagram; Make Cut/Fill Map; Save CSV.
+  And the real window, headless (`tests/geo/headless/volumes.cmake`):
+  `qt_volumes_dialog_measures_inside_typed_corners_and_makes_the_cut_fill_map_headless`
+  draws the two surfaces, opens Terrain > Volumes, measures inside typed
+  corners (16 m3) and makes the cut/fill map.
 - `katana_cli` (`src/katana_app/geo/cli/volumes.cmake`):
   `cli.volume_between_two_surfaces_is_the_slab_whole_and_inside_a_square`,
   `cli.volume_to_a_level_reads_what_lies_below_it_as_fill`,

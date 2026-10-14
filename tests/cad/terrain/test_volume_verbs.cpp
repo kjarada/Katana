@@ -183,7 +183,9 @@ TEST_F(VolumeVerbs, EachPolygonAScopeTakesHasItsOwnRecordAndAnOpenLineIsCountedN
     ran("PLINE 50,50 70,50 70,60 50,60 CLOSE");   // 200 m2
     ran("LINE 0,90 90,90");                       // bounds nothing
     const std::string reply = ran("VOLUME SURFACES ground design INSIDE FROM LAYERS lots EACH");
-    EXPECT_EQ(value(record(reply, "scope"), "matched"), "3");
+    const auto boundary = record(reply, "boundary");
+    EXPECT_EQ(value(boundary, "scope"), "layers");
+    EXPECT_EQ(value(boundary, "matched"), "3");
     const auto used = record(reply, "polygons");
     EXPECT_EQ(value(used, "used"), "2");
     EXPECT_EQ(value(used, "skipped.open"), "1");

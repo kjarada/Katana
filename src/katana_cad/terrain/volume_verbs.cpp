@@ -409,7 +409,9 @@ Result<std::string> measureAreas(const Reading& reading,
         table.rows.push_back(csvRow("total", "", "", "", *whole, factors));
     } else {
         if (polygons->scope) {
-            lines.push_back(scopeRecord(*polygons->scope));
+            // What the boundary's scope took, as every verb that takes a
+            // scope says it: a record of its own, its kind first.
+            lines.push_back("boundary " + scopeRecord(*polygons->scope));
         }
         lines.push_back("polygons used=" + std::to_string(polygons->polygons.size()) +
                         " skipped.open=" + std::to_string(polygons->skippedOpen) +
