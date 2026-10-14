@@ -56,6 +56,12 @@ docs/TfNSW Reference Files/
 # checkout of its own; tracking one would embed a repository in this one.
 .claude/worktrees/
 
+# One developer's own Claude Code files: the permissions they have granted
+# here and their private notes. The shared ones - CLAUDE.md,
+# .claude/settings.json and .claude/hooks/ - are tracked.
+.claude/settings.local.json
+CLAUDE.local.md
+
 # GDAL's persistent auxiliary metadata: statistics it caches beside a raster
 # it has read. A by-product, and a stale one - samples/gis/terrain.asc.aux.xml
 # was committed by accident and held approximate statistics the DEM does not

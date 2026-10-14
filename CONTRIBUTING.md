@@ -33,6 +33,34 @@ You contribute under it and keep your copyright.
 Questions go in an issue. Issues are enabled on the repository; Discussions are
 not.
 
+## Your checkout and git
+
+- [ ] Clone once, and work from the clone's root: the folder that holds `.git`.
+      Open that folder in your editor, build there, and start an AI session
+      there (`CLAUDE.md`, "Start every session in the checkout root"). Do not
+      wrap the clone in another folder that you open instead.
+
+  ```sh
+  git clone https://github.com/kjarada/Katana.git
+  cd Katana
+  git switch -c <topic> main        # one branch per change
+  ```
+
+- [ ] Keep the branch current with `git fetch origin`, then
+      `git rebase origin/main`. Publish it with `git push -u origin <topic>`
+      and open the pull request from there (agents push only when the owner
+      asks, see "Commits").
+- [ ] `git status` should list only what you changed. Everything local is
+      ignored: `build/`, `.vscode/`, `.claude/settings.local.json`,
+      `.claude/worktrees/`, `third_party/_cache`, and the third-party
+      reference folders under `docs/`, which must never be added.
+- [ ] A second line of work at the same time gets a worktree, not a second
+      clone: `git worktree add -b <branch> ../Katana-wt/<name> main`. It
+      shares the history, has its own `build/`, and is removed with
+      `git worktree remove ../Katana-wt/<name>` once merged, then
+      `git branch -d <branch>`. A worktree is a folder beside the checkout,
+      never inside it.
+
 ## Before you start
 
 - [ ] Read the document for the area you will touch (`docs/index.md`), and its

@@ -14,6 +14,22 @@ contribute, and the install and verify reference for each platform. Detailed
 development notes belong in `docs/`, and `docs/` does not cite it
 (`tools/check_docs.py`).
 
+**Start every session in the checkout root:** the folder that holds `.git`,
+`CMakeLists.txt` and this file, and nothing above it. A session started in a
+folder that merely contains the checkout is not in a git repository, does not
+load this file or `.claude/settings.json` at the start, and puts its own
+`.claude/` in that outer folder instead of this one. Where things live:
+
+- **Tracked, shared:** `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/`.
+- **Ignored, per developer:** `.claude/settings.local.json`, `CLAUDE.local.md`,
+  `.claude/worktrees/`, `.vscode/`, `build/`.
+- **Outside the repository, by Claude Code's design:** the auto-memory and the
+  session transcripts, in `%USERPROFILE%\.claude\projects\<folder>\` (on
+  Windows). They belong to one person's account, are never committed, and are
+  keyed on the git repository, so they follow the checkout root. Nothing a
+  future session must know belongs only there: put it in this file or in
+  `docs/`.
+
 ---
 
 ## 1. Every feature ships on all three surfaces - MANDATORY
@@ -300,9 +316,14 @@ overlap, each part can be judged on its own, and together they are more than
 a few minutes of work. Read-only sweeps (audits, reviews) are the clearest
 win.
 
-- **Put worktrees under `C:/GitHubProjects/Katana-wt/<name>`**, created from
+- **Put worktrees beside the checkout, in `Katana-wt/<name>`**, created from
   the main checkout with `git worktree add -b <branch> ../Katana-wt/<name> main`.
-  Never put them under `.claude/`, which got wiped.
+  The path is relative to the checkout so that it holds on any machine, and
+  the worktree folder is a sibling of the checkout, never inside it. Never put
+  them under `.claude/`, which got wiped. When one is finished and merged,
+  remove it with `git worktree remove ../Katana-wt/<name>` and then
+  `git branch -d <branch>`; `git worktree prune` clears the record of one whose
+  folder is already gone.
   - The harness's `isolation: "worktree"` branches from `origin/main`, not
     local HEAD, so it misses unpushed commits.
   - Each worktree builds in its own `build/release`.

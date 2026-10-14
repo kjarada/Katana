@@ -34,7 +34,7 @@ On Windows, in an MSYS2 UCRT64 shell (MSYS2 installed at `C:/msys64`):
 ```sh
 pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,qt6-base,eigen3,proj,cgal,sqlite3,nlohmann-json,gdal,pdal}
 git clone https://github.com/kjarada/Katana.git
-cd Katana
+cd Katana                                   # the checkout root: open this folder in your editor
 cmake --preset release
 cmake --build build/release --parallel
 cp -r samples/site_plan my_site_plan        # open a copy: opening a project can update it in place
