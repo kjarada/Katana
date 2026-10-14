@@ -1024,12 +1024,14 @@ if(TARGET katana)
     # The Terrain menu's section and corridor items by the object names
     # --trigger reaches them by, in a drawing with no alignment: each says
     # where one is defined - the Alignment Manager, which a headless run does
-    # not open - and the menu starts with it.
+    # not open - and the menu starts with it. The corridor items are the BIM
+    # menu's Corridors... and Corridor Quantities..., which Terrain's
+    # Corridors section shows too (docs/road_design.md).
     add_test(NAME qt_terrain_commands_point_to_the_alignment_manager_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=*terrainSectionAlongAlignment|*terrainCorridorQuantities|*terrainCorridorSurface|*terrainSectionAlongSelection|?terrainMenu"
+            "-DDRIVE=*terrainSectionAlongAlignment|*bimCorridorQuantities|*bimCorridors|*terrainSectionAlongSelection|?terrainMenu"
             "-DEXPECT=Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW.*No alignment has a design profile[.] Define one in Terrain > Alignment Manager [(]Vertical[)].*No alignment has a design profile.*Select exactly one line or polyline to cut along.*terrainMenu: Terrain: Alignment Manager[.][.][.] [[]Define and edit alignments"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/terrain_commands_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1060,8 +1062,26 @@ if(TARGET katana)
             "-DEXPECT=hatchPatternTable: brick [|] 1 family [|] used by 1 layer[^;]* ; none [|] draws nothing [|] used by 1 layer, e[.]g[.] +layer=0.*hatchPatternFamilies: 45 [|] 0[.]25.*hatchPatternStatus: style brick paving created.*hatchPatternStatus: [^\r\n]*used by 1 layer and 1 style.*hatchPatternStatus: purged 0 styles, 0 linetypes and 1 hatch pattern.*hatchPatternTable: brick [|] 2 families [|] used by 1 layer and 1 style.*commandLog: .*> STYLE NEW \"brick paving\" HATCH brick style brick paving created"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hatch_patterns_tab_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ---- road model (docs/road_design.md) ----
+    # BIM > Road Template Manager and Corridors through the real window: the
+    # standard templates added from the manager (ROADTEMPLATE DEFAULTS, one
+    # line), a corridor made from the dialog's fields (CORRIDOR NEW, echoed
+    # in the log as typed), the dialog listing it and saying what it could
+    # not build - no target surface, so no batters - and the BIM menu in its
+    # sections. By hand, the rural template's left side is a lane of three
+    # courses, a shoulder of two, a drain and a batter: 4 components a side,
+    # 10 courses in all.
+    add_test(NAME qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>ALIGN NEW road 0,0 100,0|>ALIGN DESIGN road 0,10 100,10|@bimRoadTemplates|!roadTemplateDefaults|?roadTemplateList|@bimCorridors|corridorName=Main|corridorAlignment=road|corridorTemplate=urban street|!corridorNew|?corridorList|?corridorProblems|>ROADMODEL|?bimMenu|?commandLog"
+            "-DEXPECT=--dialog bimRoadTemplates opened roadTemplateManagerDialog \"Road Template Manager\".*roadTemplateList: rural two-lane [|] 4 [|] 4 [|] 10 [|].*urban street.*divided road.*--dialog bimCorridors opened corridorDialog \"Corridors\".*corridorList: Main [|] road [|] urban street.*corridorProblems: no target surface.*object id=corridor/Main/left/kerb/1 kind=kerb.*bimMenu: BIM: Road Template Manager[.][.][.] [[]Road templates.*Corridors[.][.][.] [[]Corridors.*Show Road Model [[].*Corridor Quantities[.][.][.] [[].*commandLog: .*> ROADTEMPLATE DEFAULTS added=3.*> CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" interval=10 corridor name=Main"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bim_corridor_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
+        qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
         qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
         qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         PROPERTIES ENVIRONMENT_MODIFICATION

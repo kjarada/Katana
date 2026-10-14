@@ -225,6 +225,16 @@ agent driving the window or `katana_cli` reads the same record. With the GIS
 module, `katana://formats` is the fourth: `FORMATS JSON`, every format this
 GDAL reads and writes (`katana_formats`, below).
 
+The road model (`katana://road-model`, since 2026-10-15) is `ROADMODEL JSON`
+(`road::roadModelJson`, `docs/road_design.md`): every 3D object of every
+corridor and every placed road object - its id, kind, IFC class and
+predefined type, facility and part, material, colour, layer, triangle count
+and box, quantities and properties, but not its mesh - and every problem that
+kept something from being built. Read from the Document, as the status is,
+so reading it leaves no line in the history; the verbs that make and edit
+the road model reach the server through `katana_run_commands` like any other
+(`McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`).
+
 Annotation needs no tool of its own: its verbs reply in `key=value` records
 (`docs/annotation.md`, "The verbs"), which come back in each command's
 `output`. `LABEL LAYOUT` names every label piece that found no room on a
@@ -565,9 +575,10 @@ structured content is `{gdal_version, formats: [...]}`, or the driver's
 `{format, open_options, creation_options, layer_creation_options}`. An
 unknown driver, or a `kind` or `capability` that is neither word, is
 refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
-`McpServer.TheHelpAndStatusAreResources` counts it among the resources: four
-with the GIS module and three without, each one more than before
-`katana://customisation` was added.
+`McpServer.TheHelpAndStatusAreResources` counts it among the resources: five
+with the GIS module and four without, each one more than before
+`katana://customisation` was added and one more again for
+`katana://road-model`.
 
 ### D1: katana_dataset_info
 

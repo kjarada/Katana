@@ -1189,17 +1189,21 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
     // the customisation (McpServer.TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource):
     // that one added resource is the whole reason each count below went up
     // by one, from 3 and 2.
+    // And, since 2026-10-15, the road model
+    // (McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt): one more
+    // again, from 4 and 3.
 #if defined(KATANA_TEST_WITH_INTEROP)
     // And the formats GDAL reads and writes (McpServer.FormatsReturnsStructuredDrivers).
-    ASSERT_EQ(list.size(), 4U);
+    ASSERT_EQ(list.size(), 5U);
 #else
-    ASSERT_EQ(list.size(), 3U);
+    ASSERT_EQ(list.size(), 4U);
 #endif
     std::vector<std::string> uris;
     for (const Json& resource : list) {
         uris.push_back(resource["uri"].get<std::string>());
     }
-    for (const char* uri : {"katana://help", "katana://status", "katana://customisation"}) {
+    for (const char* uri :
+         {"katana://help", "katana://status", "katana://customisation", "katana://road-model"}) {
         EXPECT_NE(std::find(uris.begin(), uris.end(), uri), uris.end()) << uri;
     }
     const Json help = request("resources/read", Json{{"uri", "katana://help"}});
@@ -1210,6 +1214,41 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
               0);
     EXPECT_EQ(request("resources/read", Json{{"uri", "katana://nothing"}})["error"]["code"],
               -32002);
+}
+
+// ---- road model (docs/road_design.md) ----
+// katana://road-model is ROADMODEL JSON: what an agent reads the road model
+// by. A corridor of the urban street on a 100 m straight with no surface: its
+// courses and kerbs, each side, the problem that there is no surface for the
+// batters, and the kerb's class as IFC names it.
+TEST_F(McpServer, TheRoadModelIsAResourceAsRoadModelJsonGivesIt)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"ALIGN NEW road 0,0 100,0", "ALIGN DESIGN road 0,10 100,10",
+                                  "ROADTEMPLATE DEFAULTS",
+                                  "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"",
+                                  "ROADMODEL JSON"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string verb =
+        made["structuredContent"]["commands"][4]["output"].get<std::string>();
+    const Json resource = request("resources/read", Json{{"uri", "katana://road-model"}});
+    const std::string text = resource["result"]["contents"][0]["text"].get<std::string>();
+    EXPECT_EQ(text, verb);
+    const Json model = Json::parse(text);
+    bool sawKerb = false;
+    for (const Json& object : model["objects"]) {
+        if (object["id"] == "corridor/Main/left/kerb/1") {
+            sawKerb = true;
+            EXPECT_EQ(object["ifcClass"], "IfcKerb");
+            EXPECT_EQ(object["layer"], "road/kerb");
+        }
+    }
+    EXPECT_TRUE(sawKerb);
+    ASSERT_FALSE(model["problems"].empty());
+    EXPECT_NE(model["problems"][0]["message"].get<std::string>().find("no target surface"),
+              std::string::npos);
 }
 
 // katana_status and katana://status are the STATUS verb's (cad/document_status.hpp),

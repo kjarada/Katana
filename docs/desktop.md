@@ -11,9 +11,9 @@ switches that run the window headlessly are `docs/headless.md`.
 
 The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with dockable Layers, Properties, Command Line and
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
-File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
-(`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
-`helpMenu`). File is the drawing as a file, what comes into it and goes out
+File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, BIM, GIS,
+Help (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
+`helpMenu`; BIM, `bimMenu`, is the road model's - `docs/road_design.md`). File is the drawing as a file, what comes into it and goes out
 of it - every import and every export, under two submenus - and the
 program's Settings ("The File menu", below); the managers of what a
 customisation brings are in Format and in Survey > Survey Coding ("The Format
@@ -568,8 +568,8 @@ makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
 the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain and GIS have a second row of their
-own (`addToolBarBreak`), because in one row they were squeezed to a button
+Format run along the top; Survey, Terrain, BIM and GIS have a second row of
+their own (`addToolBarBreak`), because in one row they were squeezed to a button
 each behind overflow arrows. Draw and Annotate run down the LEFT edge, where
 every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a
