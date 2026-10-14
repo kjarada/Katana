@@ -347,26 +347,6 @@ void addHollowSweep(TriangleMesh& mesh, std::span<const PathPoint> path,
     }
 }
 
-double meshVolume(const TriangleMesh& mesh)
-{
-    if (mesh.vertices.empty()) {
-        return 0.0;
-    }
-    const Point3 origin = mesh.vertices.front();
-    double sixTimes = 0.0;
-    for (const Face& face : mesh.faces) {
-        if (face[0] >= mesh.vertices.size() || face[1] >= mesh.vertices.size() ||
-            face[2] >= mesh.vertices.size()) {
-            continue;
-        }
-        const Vec3 a = mesh.vertices[face[0]] - origin;
-        const Vec3 b = mesh.vertices[face[1]] - origin;
-        const Vec3 c = mesh.vertices[face[2]] - origin;
-        sixTimes += a.dot(b.cross(c));
-    }
-    return sixTimes / 6.0;
-}
-
 bool isClosedMesh(const TriangleMesh& mesh)
 {
     if (mesh.faces.empty()) {

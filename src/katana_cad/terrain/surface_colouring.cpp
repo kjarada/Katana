@@ -331,22 +331,6 @@ std::string formatLegendValue(double value, int decimals)
     return result.ec == std::errc{} ? std::string(buffer, result.ptr) : std::string("?");
 }
 
-std::string_view surfaceFacesWord(SurfaceFaces faces)
-{
-    switch (faces) {
-    case SurfaceFaces::None:
-        return "none";
-    case SurfaceFaces::Flat:
-        return "flat";
-    case SurfaceFaces::Elevation:
-        return "elevation";
-    case SurfaceFaces::Slope:
-        return "slope";
-    case SurfaceFaces::Aspect:
-        return "aspect";
-    }
-    return "none";
-}
 
 SurfaceLegend surfaceLegend(const SurfaceColouring& colouring)
 {

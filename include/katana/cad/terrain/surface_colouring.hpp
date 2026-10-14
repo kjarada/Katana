@@ -188,8 +188,7 @@ struct SurfaceLegend {
 // `value` with `decimals` decimals, locale-independent ("." always).
 [[nodiscard]] std::string formatLegendValue(double value, int decimals);
 
-// The SURFACE word of each face kind, as the SURFACESTYLE verbs write it:
-// none, flat, elevation, slope, aspect.
-[[nodiscard]] std::string_view surfaceFacesWord(SurfaceFaces faces);
+// The SURFACE word of each face kind, as the SURFACESTYLE verbs write it, is
+// surfaceFacesWord (surface_style.hpp).
 
 } // namespace katana::cad

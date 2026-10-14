@@ -36,7 +36,7 @@ using katana::cad::road::buildRoadObject;
 using katana::cad::road::culvertEnds;
 using katana::cad::road::effectiveParameters;
 using katana::cad::road::isClosedMesh;
-using katana::cad::road::meshVolume;
+using katana::geometry::meshVolume;
 using katana::cad::road::parseParameter;
 using katana::cad::road::PlacedVertex;
 using katana::cad::road::placementContext;

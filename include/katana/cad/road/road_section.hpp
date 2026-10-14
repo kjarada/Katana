@@ -223,9 +223,7 @@ struct CorridorInputs {
 loftSolid(const katana::geometry::SolvedAlignment& alignment, const std::vector<double>& stations,
           const std::vector<std::vector<SolidColumn>>& columns);
 
-// The volume a closed, outward-turned mesh holds (the divergence theorem,
-// about its first vertex so that large coordinates keep their digits).
-[[nodiscard]] double meshVolume(const katana::geometry::TriangleMesh& mesh);
+// A closed, outward-turned mesh's volume is geometry::meshVolume.
 
 // The road model's objects of a built corridor (cad/bim/bim_object.hpp): a
 // closed solid per course of each component per side per run, per kerb,

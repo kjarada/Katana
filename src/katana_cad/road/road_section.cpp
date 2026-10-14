@@ -962,22 +962,6 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
     return mesh;
 }
 
-double meshVolume(const TriangleMesh& mesh)
-{
-    if (mesh.vertices.empty()) {
-        return 0.0;
-    }
-    const Point3 origin = mesh.vertices.front();
-    katana::math::CompensatedSum volume;
-    for (const auto& face : mesh.faces) {
-        const Point3 a = mesh.vertices[face[0]] - origin;
-        const Point3 b = mesh.vertices[face[1]] - origin;
-        const Point3 c = mesh.vertices[face[2]] - origin;
-        volume.add(a.dot(b.cross(c)) / 6.0);
-    }
-    return volume.value();
-}
-
 bim::BimModel corridorSolids(const BuiltCorridor& built)
 {
     bim::BimModel model;

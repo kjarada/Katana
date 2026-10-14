@@ -165,6 +165,16 @@ file(GLOB _katana_terrain_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.hpp")
 file(GLOB _katana_bim_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.hpp")
+# A main_window_*.cpp there defines MainWindow's own members, so it is the
+# window's alone (added to `katana` below): in katana_qt_ui it would leave the
+# widget tests and benchmarks, which link no MainWindow, with undefined ones.
+file(GLOB _katana_window_terrain_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/terrain/main_window_*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/bim/main_window_*.cpp")
+if(_katana_window_terrain_ui)
+    list(REMOVE_ITEM _katana_terrain_ui ${_katana_window_terrain_ui})
+    list(REMOVE_ITEM _katana_bim_ui ${_katana_window_terrain_ui})
+endif()
 target_sources(katana_qt_ui PRIVATE ${_katana_terrain_ui} ${_katana_bim_ui})
 # Help > Check for Updates' dialog (docs/update.md): named, not listed, because
 # the task that writes it adds the files without editing this list. It builds
@@ -212,6 +222,7 @@ add_executable(katana WIN32
     gis_online.cpp
     gis_online.hpp
     ${_katana_window_survey_ui}
+    ${_katana_window_terrain_ui}
 )
 katana_target_defaults(katana)
 target_link_libraries(katana PRIVATE katana_qt_ui)

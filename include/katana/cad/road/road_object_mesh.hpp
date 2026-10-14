@@ -88,11 +88,7 @@ void addHollowSweep(katana::geometry::TriangleMesh& mesh, std::span<const PathPo
                     std::span<const katana::geometry::Point2> outer,
                     std::span<const katana::geometry::Point2> inner);
 
-// The volume a closed, outward-oriented mesh encloses (the divergence
-// theorem), summed relative to its first vertex so that projected
-// coordinates of a million metres do not swamp a solid a metre across.
-// Negative for an inward-oriented one; meaningless for an open one.
-[[nodiscard]] double meshVolume(const katana::geometry::TriangleMesh& mesh);
+// A closed mesh's volume is geometry::meshVolume (geometry/mesh.hpp).
 
 // True when every edge of every face is used by exactly one other face in
 // the opposite direction: a closed, consistently oriented surface - what a

@@ -22,7 +22,7 @@ using katana::cad::road::addPrism;
 using katana::cad::road::addSweep;
 using katana::cad::road::counterClockwise;
 using katana::cad::road::isClosedMesh;
-using katana::cad::road::meshVolume;
+using katana::geometry::meshVolume;
 using katana::cad::road::PathPoint;
 using katana::cad::road::regularPolygon;
 using katana::cad::road::triangulatePolygon;

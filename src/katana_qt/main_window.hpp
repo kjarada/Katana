@@ -45,6 +45,9 @@
 #include "ifc_dialogs.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
+// Terrain > Edit Surface and its toolbar: whole, as every member held by
+// unique_ptr is, since the window's destructor is the implicit one.
+#include "terrain/surface_edit_ui.hpp"
 // Road objects (docs/road_objects.md): the BIM menu's Road Objects section.
 #include "bim/road_object_workbench.hpp"
 #include "tools/tool_menus.hpp"
@@ -89,8 +92,6 @@ class LayerManagerDialog;
 class PropertyTreePanel;
 class DatasetInfoDialog;
 class DrawingSummaryDialog;
-// Terrain > Edit Surface and its toolbar (terrain/surface_edit_ui.hpp).
-class SurfaceEditUi;
 // Surface display (docs/surface_display.md).
 class SurfaceStyleManagerDialog;
 

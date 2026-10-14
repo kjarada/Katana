@@ -65,4 +65,12 @@ struct TriangleMesh {
 // through triangle(), which refuses such a face one at a time.
 [[nodiscard]] katana::core::Status validate(const TriangleMesh& mesh);
 
+// The volume a closed, outward-turned mesh encloses (the divergence theorem),
+// summed about its first vertex so that projected coordinates of a million
+// metres do not swamp a solid a metre across, and compensated. Negative for
+// an inward-turned one; meaningless for an open one. A face naming a vertex
+// that does not exist is skipped. The one home of it: the road model's
+// solids (cad/road/) are measured by it.
+[[nodiscard]] double meshVolume(const TriangleMesh& mesh);
+
 } // namespace katana::geometry
