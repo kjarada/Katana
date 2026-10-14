@@ -725,8 +725,8 @@ std::vector<LeaderValueRow> leaderValueRows(const katana::entity::LabelValues& v
             rows.push_back({std::string(name), katana::entity::formatValue(found->second)});
         }
     }
-    // The surfaces' and the alignments': a surface's four together, then
-    // the next surface's, as LEADER VALUES of a drawing with two lists them.
+    // The surfaces' and the alignments', kind by kind - every surface's
+    // level, then every difference - each kind's in name order.
     for (const std::string_view kind : katana::entity::leaderContextKinds()) {
         for (const auto& [name, value] : values) {
             const auto parsed = katana::entity::contextValueName(name);
