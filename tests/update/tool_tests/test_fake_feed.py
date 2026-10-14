@@ -532,6 +532,10 @@ class TheCommandLine(FeedTest):
         def end() -> None:
             if process.poll() is None:
                 process.kill()
+            # A test that closed stdin to end the feed: communicate() flushes stdin first, and on a
+            # closed file that raised ValueError under the macOS release job's Python 3.12.
+            if process.stdin is not None and process.stdin.closed:
+                process.stdin = None
             process.communicate()
 
         self.addCleanup(end)

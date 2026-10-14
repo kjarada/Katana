@@ -119,6 +119,23 @@ int wholeDevicePixels(int widgetPixels, double ratio)
     return static_cast<int>(std::floor(widgetPixels * ratio + 1e-6));
 }
 
+// Whether Fusion draws its arrow the 8 px wide the by-hand positions below are
+// worked for. It draws int(dpiScaled(8)) (qt_fusion_draw_arrow), the screen's
+// logical dpi over a base of 96 - and of 72 on macOS (qstyleBaseDpi,
+// qstylehelper.cpp): 8 on Windows and Linux at 96 dpi and in the macOS window
+// at its 72, but 10 under the offscreen platform on macOS, whose 96 dpi meets
+// that base (the macOS release job drew Undo's arrow at 31..40, not 32..39).
+// There the arrow is still held inside its strip and clear of its icon.
+bool fusionArrowIsEightPixels(const QWidget& widget)
+{
+#if defined(Q_OS_DARWIN)
+    return widget.logicalDpiX() == 72;
+#else
+    (void)widget;
+    return true;
+#endif
+}
+
 // The device pixel under the centre of widget pixel `at`: where a grab at
 // `ratio` shows what the widget drew there.
 QPoint devicePixel(QPoint at, double ratio)
@@ -1084,17 +1101,22 @@ TEST(SplitButtons, UndosArrowHasAStripOfItsOwnBesideTheIcon)
     EXPECT_FALSE(strip.intersects(icon));
     if (parts.ratio == 1.0) {
         EXPECT_EQ(parts.icon, icon);
+    }
+    if (parts.ratio == 1.0 && fusionArrowIsEightPixels(button)) {
         EXPECT_EQ(parts.sign.left(), 32);
         EXPECT_EQ(parts.sign.right(), 39);
     }
-    // At any ratio the arrow is inside the strip and short of the button's
-    // last device pixel by at least the 2 px times the ratio, taken down.
+    // At any ratio the arrow is inside the strip and, where it is Fusion's
+    // 8 px, short of the button's last device pixel by at least the 2 px
+    // times the ratio, taken down.
     const QRect stripOnDevice(QPoint(wholeDevicePixels(strip.left(), parts.ratio), 0),
                               QPoint(qRound((strip.right() + 1) * parts.ratio) - 1,
                                      qRound(button.height() * parts.ratio) - 1));
     EXPECT_TRUE(stripOnDevice.contains(parts.signDevice));
-    EXPECT_LE(parts.signDevice.right(),
-              qRound(button.width() * parts.ratio) - 1 - wholeDevicePixels(2, parts.ratio));
+    if (fusionArrowIsEightPixels(button)) {
+        EXPECT_LE(parts.signDevice.right(),
+                  qRound(button.width() * parts.ratio) - 1 - wholeDevicePixels(2, parts.ratio));
+    }
 
     // A click on the icon's right edge undoes; the strip opens the history.
     const MenuWatch watch(*built.history);
@@ -1194,6 +1216,8 @@ TEST(TitleBarButtons, AViewsKindSwitcherDrawsItsArrowBesideItsIconNotOnIt)
     ASSERT_FALSE(parts.signDevice.isNull()) << "no arrow drawn";
     if (parts.ratio == 1.0) {
         EXPECT_EQ(parts.icon, QRect(4, 4, 14, 14));
+    }
+    if (parts.ratio == 1.0 && fusionArrowIsEightPixels(kind)) {
         EXPECT_EQ(parts.sign.left(), 22);
         EXPECT_EQ(parts.sign.right(), 30);
     }

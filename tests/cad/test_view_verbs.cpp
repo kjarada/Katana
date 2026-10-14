@@ -605,7 +605,11 @@ TEST_F(ViewVerbsTest, ViewsSetGhostsOffTurnsThatViewsGhostsOffAndOnAgain)
     EXPECT_TRUE(asBuilt.selectionGhosts);
     // VIEWS says so of every view.
     EXPECT_TRUE(contains(ok("VIEWS SET 1 ghosts=off"), " ghosts=off"));
-    const auto lines = katana::core::splitLines(ok("VIEWS"));
+    // splitLines gives views into its text, so the reply is kept for as long
+    // as they are read: views into the temporary dangled, and libc++ (the
+    // macOS release job) reused its memory before the checks below.
+    const std::string listing = ok("VIEWS");
+    const auto lines = katana::core::splitLines(listing);
     ASSERT_EQ(lines.size(), 3U);
     EXPECT_TRUE(lines[0].ends_with(" ghosts=off")) << lines[0];
     EXPECT_TRUE(lines[1].ends_with(" ghosts=on")) << lines[1];

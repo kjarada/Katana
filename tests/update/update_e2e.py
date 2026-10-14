@@ -354,9 +354,10 @@ def stub_program(line: str) -> Path:
 @contextlib.contextmanager
 def reserved_port() -> Iterator[int]:
     """A loopback port nobody listens on, for as long as the block lasts: a socket bound to it that never
-    listens. The system refuses a connection to it, and gives the port to nobody else meanwhile - which
-    the port of a feed that has just stopped is not safe from, when other tests are starting feeds on
-    port 0 beside this one."""
+    listens. The system accepts no connection to it - Linux and Windows refuse one, macOS drops it, so
+    that there an attempt times out - and gives the port to nobody else meanwhile, which the port of a
+    feed that has just stopped is not safe from, when other tests are starting feeds on port 0 beside
+    this one."""
     held = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         held.bind((fake.LOOPBACK, 0))
@@ -1577,12 +1578,19 @@ def installed_json_is_compared_as_the_record_it_holds() -> None:
 
 @self_test
 def a_reserved_port_refuses_a_connection_and_is_nobody_elses() -> None:
+    # macOS drops a connection to a socket that is bound and does not listen, where Linux and Windows
+    # refuse it: the macOS release job waited out the whole 60 s. There a timeout is the refusal, and the
+    # wait is short. Accepted is a failure everywhere.
+    drops = sys.platform == "darwin"
     with reserved_port() as port:
         expect(1 <= port <= 65535, f"not a port: {port}")
         try:
-            socket.create_connection((fake.LOOPBACK, port), timeout=60).close()
+            socket.create_connection((fake.LOOPBACK, port), timeout=5 if drops else 60).close()
         except ConnectionRefusedError:
             pass
+        except TimeoutError as timed_out:
+            if not drops:
+                raise Failure(f"a connection to a port nobody listens on was not refused: {timed_out!r}") from timed_out
         except OSError as other_failure:
             raise Failure(f"a connection to a port nobody listens on was not refused: {other_failure!r}") from other_failure
         else:
