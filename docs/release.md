@@ -1070,9 +1070,29 @@ not exist in it, and with the plain note "Katana X.Y.Z".
 
 ## Not done
 
-* **The workflow has not run since the update assets were added**
-  (2026-10-13), and no run of it has yet published a release. What was done
-  instead: the file was parsed by an independent YAML parser, every script
+* **The workflow has run once, and has not yet published a release.** The
+  first run, on 2026-10-14 for `v0.2.0`, passed the Version job (with the
+  update keys pinned that day) and the whole Windows x86-64 job: build, suite,
+  package, smoke test and installer test. The other four stopped before their
+  packages, and none on the workflow itself:
+  * Windows ARM64: MSYS2's package download timed out at a mirror, before any
+    of the project's code ran.
+  * macOS arm64: a test captured two constants in lambdas, which clang
+    rejects as unneeded (`-Wunused-lambda-capture` under `-Werror`).
+  * Linux x86-64 and ARM64: four headless window tests expected a count
+    grouped with a comma, which the runner's C locale does not group; and a
+    fake-feed tool test expected its records in the order the requests were
+    sent, which a threaded server does not keep.
+
+  The same day a local build with clang and libc++ (MSYS2 CLANG64, the
+  library of the Windows ARM64 build) found what that job would have met
+  next, all under libc++ on Windows only: `sha256FileHex` hashed the null
+  device as an empty file and returned the digest of a file's first part
+  when a read failed part way (libc++'s `std::filesystem::status` cannot
+  classify NUL, and its `ifstream` reports a failed read as the end of the
+  file), and the update library's path helper turned an empty path into the
+  current folder. All of these are fixed. What was done before the run,
+  for the record: the file was parsed by an independent YAML parser, every script
   in it passed `bash -n` or PowerShell's parser, every option it gives `gh`
   and the update tools was held to their own lists, and the scripts of the
   first job and of the Publish job (all but the OpenPGP step) were run as
@@ -1080,21 +1100,21 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   `gh`. The first job's key check was run under CMake 3.31.6, the version
   the hosted image carries, and under 4.4; the check that ends each
   Configure step was run on cache files CMake itself wrote, for projects
-  that do and do not declare the two options. None of that is a run: nothing
-  was tried on a runner, against the
-  real `gh` and GitHub, or on a file system that has execute bits (the
-  Windows packages' part of "Update assets"); and the smoke tests' new lines
-  need the programs. A rehearsal - two versions published in a throwaway
+  that do and do not declare the two options. Still not tried on a runner:
+  the Publish job - against the real `gh` and GitHub, and on a file system
+  that has execute bits (the Windows packages' part of "Update assets") -
+  and the smoke tests of the four packages other than Windows x86-64's. A
+  rehearsal - two versions published in a throwaway
   repository, the second installed as an update of the first - is the
   owner's acceptance step and the gate for the first real release ("To
   verify on the first release").
 * **Nor has it run since its actions were named by commit** (2026-10-14,
   "The actions the workflow runs"). The six commits were read from GitHub,
   each two ways that agree, and every `uses:` line was held to them by a
-  script of that session; the edit is those lines and a comment. The file
-  was not put through a YAML parser again (the machine had none), and no
-  runner has yet fetched an action by these digits: the first run shows it,
-  in each job's "Set up job" step.
+  script of that session; the edit is those lines and a comment. The first
+  run (2026-10-14) fetched five of the six by these digits, every job past
+  its "Set up job" step; `actions/download-artifact`, which only the Publish
+  job runs, has not been fetched yet.
 * **Nor since the packages were given the run's sequence** (2026-10-14,
   "Update assets", "The package names its own build"). What was done
   instead: the workflow's bash scripts passed `bash -n` again (the two
@@ -1104,11 +1124,12 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   without a sequence, one whose sequence only begins with the run's, one of
   another target and version, and none at all; and the cache check was run
   on the cache CMake wrote for a project that declares
-  `KATANA_UPDATE_SEQUENCE` and for one that does not. No package was built
-  with the option, and the file was not put through a YAML parser (the
-  machine had none; the edit is comments, two `env` entries and lines
-  inside `run` blocks that were there). The first run shows the rest ("To
-  verify on the first release").
+  `KATANA_UPDATE_SEQUENCE` and for one that does not. The first run
+  (2026-10-14) built the Windows x86-64 package with the option, and that
+  job's smoke test found the run's target, version and sequence in the
+  package's install record; the other four packages, and the Publish job's
+  reading of the records, have not got that far yet ("To verify on the
+  first release").
 * **Nothing in the repository holds the workflow.** The checks above were
   made with scripts of the sessions that wrote and changed the workflow;
   they are not in the repository and not in ctest. So no test fails if a
