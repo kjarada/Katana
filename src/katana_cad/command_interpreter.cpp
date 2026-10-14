@@ -2,6 +2,7 @@
 
 #include "katana/cad/alignment_report.hpp"
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/cad/linework_verbs.hpp"
@@ -248,7 +249,10 @@ std::string canonicalVerb(std::string_view word)
     return apostrophe && !isViewVerb(bare) ? verb : bare;
 }
 
-std::string describe(const katana::entity::Model& model, const Entity& entity)
+// `leaders`: the drawing's surfaces and alignments, which a leader's note
+// may read (annotation/leader_presets.hpp).
+std::string describe(const katana::entity::Model& model, const Entity& entity,
+                     const katana::entity::LeaderContext& leaders)
 {
     std::ostringstream out;
     out.precision(12);
@@ -256,6 +260,7 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
     struct Detail {
         std::ostream& out;
         const katana::entity::Model& model;
+        const katana::entity::LeaderContext& leaders;
         void operator()(const katana::entity::PointGeometry& g) const
         {
             out << "  at " << g.position.x << "," << g.position.y;
@@ -344,7 +349,8 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
                 << g.vertices.front().y;
             // What the leader says as it is drawn: a smart leader's note is
             // read off its target now (docs/annotation.md, "Smart leaders").
-            const std::string note = katana::entity::leaderNote(model, g, codePropertyCandidates());
+            const std::string note =
+                katana::entity::leaderNote(model, g, codePropertyCandidates(), leaders);
             if (!note.empty()) {
                 out << "  \"" << oneLine(note) << "\"";
             }
@@ -397,7 +403,7 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
             out << "  length=" << g.length();
         }
     };
-    std::visit(Detail{out, model}, entity.geometry);
+    std::visit(Detail{out, model, leaders}, entity.geometry);
     if (!entity.visible) {
         out << "  hidden";
     }
@@ -3044,7 +3050,7 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         if (entity == nullptr) {
             return makeError(ErrorCode::NotFound, "entity does not exist", args[0]);
         }
-        std::string text = describe(model, *entity);
+        std::string text = describe(model, *entity, annotation::leaderContext(document_));
         for (const auto& [key, value] : entity->properties) {
             text += "\n    " + key + " = ";
             std::visit(
@@ -3063,7 +3069,9 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         return usage("LIST (every entity; INFO id describes one)");
     }
     std::string text = std::to_string(model.entities.size()) + " entities";
-    model.entities.forEach([&](const Entity& entity) { text += "\n" + describe(model, entity); });
+    const katana::entity::LeaderContext leaders = annotation::leaderContext(document_);
+    model.entities.forEach(
+        [&](const Entity& entity) { text += "\n" + describe(model, entity, leaders); });
     return text;
 }
 

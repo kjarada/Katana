@@ -96,12 +96,13 @@ std::vector<Geometry> plainShapes(const DimensionDrawing& drawing)
 }
 
 DrawnAnnotation drawAnnotationForExport(const katana::entity::Model& model, double scale,
-                                        const TextMeasure& measure)
+                                        const TextMeasure& measure,
+                                        const katana::entity::LeaderContext& leaders)
 {
     DrawnAnnotation drawn;
     model.entities.forEach([&](const Entity& entity) {
         if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
-            drawn[entity.id] = plainShapes(buildLeader(model, *leader, scale, measure));
+            drawn[entity.id] = plainShapes(buildLeader(model, *leader, scale, measure, leaders));
         } else if (const auto* dimension =
                        std::get_if<katana::entity::DimensionGeometry>(&entity.geometry);
                    dimension != nullptr && dimension->kind != katana::entity::DimensionKind::Aligned) {
@@ -116,7 +117,7 @@ DrawnAnnotation drawAnnotationForExport(const katana::entity::Model& model, doub
     LabelLayoutOptions options;
     options.scale = scale;
     options.measure = measure;
-    options.linework = labelKeepOut(model, scale, measure, kKeepOutLimit);
+    options.linework = labelKeepOut(model, scale, measure, kKeepOutLimit, leaders);
     const LabelLayout layout = layoutLabels(model, labelEntities(model), options);
     for (const auto* placed : {&layout.placed, &layout.marksOnly}) {
         for (const PlacedLabel& piece : *placed) {

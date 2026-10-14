@@ -557,7 +557,8 @@ void appendLinework(const katana::entity::Geometry& geometry, std::vector<Segmen
 }
 
 std::vector<Segment2> labelKeepOut(const katana::entity::Model& model, double scale,
-                                   const TextMeasure& measure, std::size_t limit)
+                                   const TextMeasure& measure, std::size_t limit,
+                                   const katana::entity::LeaderContext& leaders)
 {
     std::vector<Segment2> out;
     model.entities.forEach([&](const Entity& entity) {
@@ -569,7 +570,7 @@ std::vector<Segment2> labelKeepOut(const katana::entity::Model& model, double sc
         if (const auto* text = std::get_if<katana::entity::TextGeometry>(&entity.geometry)) {
             appendKeepOut(layoutTextEntity(model, *text, scale, measure), out, limit);
         } else if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
-            appendKeepOut(buildLeader(model, *leader, scale, measure), out, limit);
+            appendKeepOut(buildLeader(model, *leader, scale, measure, leaders), out, limit);
         } else if (const auto* dimension =
                        std::get_if<katana::entity::DimensionGeometry>(&entity.geometry)) {
             appendKeepOut(buildDimension(*dimension, resolveDimensionStyle(model, entity), scale),

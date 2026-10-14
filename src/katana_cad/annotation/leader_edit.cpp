@@ -152,7 +152,7 @@ std::optional<AnchorRef> naturalAnchor(const Entity& entity, double angle)
 }
 
 // The context a refusal about leader `id` names.
-std::string leaderContext(EntityId id, const std::string& context)
+std::string refusalContext(EntityId id, const std::string& context)
 {
     return "leader=" + std::to_string(id) + (context.empty() ? std::string() : " " + context);
 }
@@ -199,7 +199,7 @@ Status checkLeaderChange(const Model& model, const LeaderChange& change)
 }
 
 Status applyLeaderChange(const Model& model, const LeaderChange& change, LeaderGeometry& leader,
-                         EntityId id)
+                         EntityId id, const katana::entity::LeaderContext& context)
 {
     if (auto status = checkLeaderChange(model, change); !status) {
         return status;
@@ -267,7 +267,8 @@ Status applyLeaderChange(const Model& model, const LeaderChange& change, LeaderG
     if (change.hang && !leader.vertices.empty()) {
         leader.vertices.back() = *change.hang;
     }
-    return katana::entity::checkLeaderSaysSomething(model, leader, codePropertyCandidates());
+    return katana::entity::checkLeaderSaysSomething(model, leader, codePropertyCandidates(),
+                                                    context);
 }
 
 Status requireLeaders(const Model& model, const std::vector<EntityId>& ids)
@@ -296,7 +297,8 @@ Status checkNumberedBalloon(const LeaderChange& change, bool balloon)
 }
 
 Result<LeaderGeometry> newLeader(const Model& model, const std::vector<AnchoredPoint>& points,
-                                 const LeaderChange& change, bool balloon)
+                                 const LeaderChange& change, bool balloon,
+                                 const katana::entity::LeaderContext& context)
 {
     if (auto status = checkNumberedBalloon(change, balloon); !status) {
         return status.error();
@@ -325,14 +327,15 @@ Result<LeaderGeometry> newLeader(const Model& model, const std::vector<AnchoredP
     }
     LeaderChange rest = change;
     rest.tip.reset(); // the points are the leader's already
-    if (auto status = applyLeaderChange(model, rest, leader); !status) {
+    if (auto status = applyLeaderChange(model, rest, leader, 0, context); !status) {
         return status.error();
     }
     return leader;
 }
 
 Result<CommandPtr> changeLeaders(const Model& model, std::vector<EntityId> ids,
-                                 const LeaderChange& change)
+                                 const LeaderChange& change,
+                                 const katana::entity::LeaderContext& context)
 {
     ids = unique(std::move(ids));
     if (ids.empty()) {
@@ -349,9 +352,9 @@ Result<CommandPtr> changeLeaders(const Model& model, std::vector<EntityId> ids,
     for (const EntityId id : ids) {
         Entity changed = *model.entities.find(id);
         auto& leader = std::get<LeaderGeometry>(changed.geometry);
-        if (auto status = applyLeaderChange(model, change, leader, id); !status) {
+        if (auto status = applyLeaderChange(model, change, leader, id, context); !status) {
             return makeError(status.error().code, status.error().message,
-                             leaderContext(id, status.error().context));
+                             refusalContext(id, status.error().context));
         }
         if (changed == *model.entities.find(id)) {
             continue;
@@ -364,7 +367,8 @@ Result<CommandPtr> changeLeaders(const Model& model, std::vector<EntityId> ids,
     return commandOf("SET_LEADER", std::move(changes));
 }
 
-Result<CommandPtr> attachLeader(const Model& model, EntityId id, const AnchoredPoint& place)
+Result<CommandPtr> attachLeader(const Model& model, EntityId id, const AnchoredPoint& place,
+                                const katana::entity::LeaderContext& context)
 {
     if (!place.ref.associated()) {
         return makeError(ErrorCode::InvalidArgument,
@@ -378,7 +382,7 @@ Result<CommandPtr> attachLeader(const Model& model, EntityId id, const AnchoredP
     change.tip = place;
     Entity changed = *model.entities.find(id);
     auto& leader = std::get<LeaderGeometry>(changed.geometry);
-    if (auto status = applyLeaderChange(model, change, leader, id); !status) {
+    if (auto status = applyLeaderChange(model, change, leader, id, context); !status) {
         return status.error();
     }
     if (changed == *model.entities.find(id)) {
@@ -389,7 +393,8 @@ Result<CommandPtr> attachLeader(const Model& model, EntityId id, const AnchoredP
     return commandOf("ATTACH_LEADER", std::move(changes));
 }
 
-Result<LeaderRelease> releaseLeaders(const Model& model, std::vector<EntityId> ids, bool detach)
+Result<LeaderRelease> releaseLeaders(const Model& model, std::vector<EntityId> ids, bool detach,
+                                     const katana::entity::LeaderContext& context)
 {
     ids = unique(std::move(ids));
     if (auto status = requireLeaders(model, ids); !status) {
@@ -404,7 +409,9 @@ Result<LeaderRelease> releaseLeaders(const Model& model, std::vector<EntityId> i
             continue;
         }
         if (katana::entity::isSmart(leader)) {
-            leader.text = leaderSays(model, leader);
+            // Frozen as it reads now, a surface's level and an alignment's
+            // station included.
+            leader.text = leaderSays(model, leader, context);
             leader.fields = false;
             leader.labelStyle.clear();
             ++release.frozen;
@@ -449,7 +456,8 @@ setLeaderTargetProperty(const Model& model, EntityId id, const std::string& key,
 
 Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
                               const LeadersForOptions& options, double scale,
-                              const katana::commands::EntityAttributes& attributes)
+                              const katana::commands::EntityAttributes& attributes,
+                              const katana::entity::LeaderContext& context)
 {
     targets = unique(std::move(targets));
     if (targets.empty()) {
@@ -525,7 +533,7 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
                 LeaderNote{LeaderNote::Kind::Text,
                            std::to_string(first + static_cast<long long>(changes.add.size()))};
         }
-        if (auto status = applyLeaderChange(model, change, leader); !status) {
+        if (auto status = applyLeaderChange(model, change, leader, 0, context); !status) {
             // Checked above for what does not depend on the entity, so this
             // is a note that would say nothing about this one: skipped.
             ++result.skipped;
@@ -717,6 +725,16 @@ std::vector<LeaderValueRow> leaderValueRows(const katana::entity::LabelValues& v
             rows.push_back({std::string(name), katana::entity::formatValue(found->second)});
         }
     }
+    // The surfaces' and the alignments': a surface's four together, then
+    // the next surface's, as LEADER VALUES of a drawing with two lists them.
+    for (const std::string_view kind : katana::entity::leaderContextKinds()) {
+        for (const auto& [name, value] : values) {
+            const auto parsed = katana::entity::contextValueName(name);
+            if (parsed && parsed->kind == kind) {
+                rows.push_back({name, katana::entity::formatValue(value)});
+            }
+        }
+    }
     for (const auto& [name, value] : values) {
         if (name.starts_with("prop.")) {
             rows.push_back({name, katana::entity::formatValue(value)});
@@ -725,15 +743,17 @@ std::vector<LeaderValueRow> leaderValueRows(const katana::entity::LabelValues& v
     return rows;
 }
 
-std::optional<katana::entity::LabelValues> leaderTargetValues(const Model& model,
-                                                              const LeaderGeometry& leader)
+std::optional<katana::entity::LabelValues>
+leaderTargetValues(const Model& model, const LeaderGeometry& leader,
+                   const katana::entity::LeaderContext& context)
 {
-    return katana::entity::leaderValues(model, leader, codePropertyCandidates());
+    return katana::entity::leaderValues(model, leader, codePropertyCandidates(), context);
 }
 
-std::string leaderSays(const Model& model, const LeaderGeometry& leader)
+std::string leaderSays(const Model& model, const LeaderGeometry& leader,
+                       const katana::entity::LeaderContext& context)
 {
-    return katana::entity::leaderNote(model, leader, codePropertyCandidates());
+    return katana::entity::leaderNote(model, leader, codePropertyCandidates(), context);
 }
 
 } // namespace katana::cad::annotation

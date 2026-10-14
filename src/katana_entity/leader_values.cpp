@@ -28,6 +28,29 @@ constexpr std::string_view kLeaderValues[] = {
     "dx",       "dy",       "dz",    "grade",   "segment", "chainage",    "vertices",    "radius",
     "diameter", "chord",    "delta", "tangent", "area",    "perimeter",   "measurement", "angle"};
 
+// The context's kinds (leader_values.hpp), a surface's first, then an
+// alignment's.
+constexpr std::string_view kSurfaceKinds[] = {"surface", "dsurface", "cut", "fill"};
+constexpr std::string_view kAlignmentKinds[] = {"station", "offset", "profile", "dprofile"};
+
+bool isSurfaceKind(std::string_view kind)
+{
+    return std::find(std::begin(kSurfaceKinds), std::end(kSurfaceKinds), kind) !=
+           std::end(kSurfaceKinds);
+}
+
+// ASCII case folded: a surface is found ignoring case (terrain::SurfaceStore),
+// so a refusal must not say there is no "Ground" when there is a "ground".
+bool sameIgnoringCase(std::string_view a, std::string_view b)
+{
+    const auto lower = [](char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    };
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [&](char x, char y) {
+               return lower(x) == lower(y);
+           });
+}
+
 void put(LabelValues& values, std::string_view name, LabelQuantity quantity, double number)
 {
     values.insert_or_assign(std::string(name), LabelValue::of(quantity, number));
@@ -123,8 +146,41 @@ std::vector<std::string_view> leaderValueNames()
     return {std::begin(kLeaderValues), std::end(kLeaderValues)};
 }
 
+std::vector<std::string_view> leaderContextKinds()
+{
+    std::vector<std::string_view> kinds(std::begin(kSurfaceKinds), std::end(kSurfaceKinds));
+    kinds.insert(kinds.end(), std::begin(kAlignmentKinds), std::end(kAlignmentKinds));
+    return kinds;
+}
+
+std::optional<ContextValueName> contextValueName(std::string_view value)
+{
+    const std::size_t dot = value.find('.');
+    if (dot == std::string_view::npos || dot + 1 >= value.size()) {
+        return std::nullopt;
+    }
+    const std::string_view kind = value.substr(0, dot);
+    for (const std::string_view known : leaderContextKinds()) {
+        if (known == kind) {
+            return ContextValueName{known, value.substr(dot + 1)};
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<LabelQuantity> leaderValueQuantity(std::string_view name)
 {
+    if (const auto context = contextValueName(name)) {
+        // A station is a chainage, so {station.MC01:ch} writes 0+120.000;
+        // an offset a length; the rest are levels and differences of level.
+        if (context->kind == "station") {
+            return LabelQuantity::Chainage;
+        }
+        if (context->kind == "offset") {
+            return LabelQuantity::Length;
+        }
+        return LabelQuantity::Number;
+    }
     if (std::find(std::begin(kLeaderValues), std::end(kLeaderValues), name) ==
         std::end(kLeaderValues)) {
         return std::nullopt;
@@ -161,8 +217,12 @@ Status checkLeaderTemplate(std::string_view templateText)
     });
 }
 
-LabelValues anchorValues(const Entity& target, const AnchorRef& ref, const Point2& tip,
-                         std::span<const std::string> codeProperties)
+namespace {
+
+// The target's own values at the place `ref` names (anchorValues), and in
+// `where` that place: what the context is read at.
+LabelValues targetValues(const Entity& target, const AnchorRef& ref, const Point2& tip,
+                         std::span<const std::string> codeProperties, Point2& where)
 {
     LabelValues values;
     detail::addCommonValues(target, codeProperties, values);
@@ -178,7 +238,7 @@ LabelValues anchorValues(const Entity& target, const AnchorRef& ref, const Point
             at = resolveAnchor(target, place);
         }
     }
-    const Point2 where = at.value_or(tip);
+    where = at.value_or(tip);
     put(values, "x", LabelQuantity::Length, where.x);
     put(values, "easting", LabelQuantity::Length, where.x);
     put(values, "y", LabelQuantity::Length, where.y);
@@ -291,6 +351,167 @@ LabelValues anchorValues(const Entity& target, const AnchorRef& ref, const Point
     return values;
 }
 
+// Every KIND.NAME of each surface and alignment `context` lists.
+std::vector<std::string> everyContextValue(const LeaderContext& context)
+{
+    std::vector<std::string> names;
+    for (const std::string& surface : context.surfaces) {
+        for (const std::string_view kind : kSurfaceKinds) {
+            names.push_back(std::string(kind) + "." + surface);
+        }
+    }
+    for (const std::string& alignment : context.alignments) {
+        for (const std::string_view kind : kAlignmentKinds) {
+            names.push_back(std::string(kind) + "." + alignment);
+        }
+    }
+    return names;
+}
+
+// A leader's target's values at its tip, with the context values `names`
+// names (every one the context lists when null), and where they were read.
+struct ReadValues {
+    LabelValues values;
+    Point2 at;
+};
+std::optional<ReadValues> readLeader(const Model& model, const LeaderGeometry& leader,
+                                     std::span<const std::string> codeProperties,
+                                     const LeaderContext& context,
+                                     const std::vector<std::string>* names)
+{
+    if (!leader.tipRef.associated() || leader.vertices.empty()) {
+        return std::nullopt;
+    }
+    const Entity* target = model.entities.find(leader.tipRef.entity);
+    if (target == nullptr) {
+        return std::nullopt;
+    }
+    ReadValues read;
+    read.values =
+        targetValues(*target, leader.tipRef, leader.vertices.front(), codeProperties, read.at);
+    addContextValues(read.values, read.at, context,
+                     names != nullptr ? *names : everyContextValue(context));
+    return read;
+}
+
+} // namespace
+
+LabelValues anchorValues(const Entity& target, const AnchorRef& ref, const Point2& tip,
+                         std::span<const std::string> codeProperties, const LeaderContext& context)
+{
+    Point2 where;
+    LabelValues values = targetValues(target, ref, tip, codeProperties, where);
+    addContextValues(values, where, context, everyContextValue(context));
+    return values;
+}
+
+void addContextValues(LabelValues& values, const Point2& at, const LeaderContext& context,
+                      std::span<const std::string> names)
+{
+    // The target's own level, which a difference is taken from.
+    std::optional<double> level;
+    if (const auto found = values.find("z"); found != values.end()) {
+        level = found->second.number;
+    }
+    for (const std::string& value : names) {
+        const auto parsed = contextValueName(value);
+        if (!parsed || values.contains(value)) {
+            continue;
+        }
+        if (isSurfaceKind(parsed->kind)) {
+            const auto ground =
+                context.surfaceLevel ? context.surfaceLevel(parsed->name, at) : std::nullopt;
+            if (!ground) {
+                continue;
+            }
+            if (parsed->kind == "surface") {
+                put(values, value, LabelQuantity::Number, *ground);
+                continue;
+            }
+            if (!level) {
+                continue;
+            }
+            const double above = *level - *ground;
+            if (parsed->kind == "dsurface") {
+                put(values, value, LabelQuantity::Number, above);
+            } else if (parsed->kind == "cut" && above < 0.0) {
+                put(values, value, LabelQuantity::Number, -above);
+            } else if (parsed->kind == "fill" && above >= 0.0) {
+                put(values, value, LabelQuantity::Number, above);
+            }
+            continue;
+        }
+        const auto place =
+            context.alignmentPlace ? context.alignmentPlace(parsed->name, at) : std::nullopt;
+        if (!place) {
+            continue;
+        }
+        if (parsed->kind == "station") {
+            put(values, value, LabelQuantity::Chainage, place->station);
+        } else if (parsed->kind == "offset") {
+            put(values, value, LabelQuantity::Length, place->offset);
+        } else if (parsed->kind == "profile" && place->profile) {
+            put(values, value, LabelQuantity::Number, *place->profile);
+        } else if (parsed->kind == "dprofile" && place->profile && level) {
+            put(values, value, LabelQuantity::Number, *level - *place->profile);
+        }
+    }
+}
+
+std::string whyAbsent(std::string_view name, const LabelValues& values, const Point2& at,
+                      const LeaderContext& context)
+{
+    const auto parsed = contextValueName(name);
+    if (!parsed || values.contains(name)) {
+        return {};
+    }
+    const std::string what(parsed->name);
+    const bool hasLevel = values.contains("z");
+    if (isSurfaceKind(parsed->kind)) {
+        if (!context.surfaceLevel) {
+            return "no surfaces were given to read here";
+        }
+        if (std::none_of(context.surfaces.begin(), context.surfaces.end(),
+                         [&](const std::string& surface) {
+                             return sameIgnoringCase(surface, what);
+                         })) {
+            return "the drawing has no surface " + what;
+        }
+        if (!context.surfaceLevel(parsed->name, at)) {
+            return "the tip is off surface " + what;
+        }
+        if (parsed->kind != "surface" && !hasLevel) {
+            return "the target has no level";
+        }
+        if (parsed->kind == "cut") {
+            return "the target is not below surface " + what;
+        }
+        if (parsed->kind == "fill") {
+            return "the target is below surface " + what;
+        }
+        return {};
+    }
+    if (!context.alignmentPlace) {
+        return "no alignments were given to read here";
+    }
+    if (std::find(context.alignments.begin(), context.alignments.end(), what) ==
+        context.alignments.end()) {
+        return "the drawing has no alignment " + what;
+    }
+    const auto place = context.alignmentPlace(parsed->name, at);
+    if (!place) {
+        return "the tip is beyond the ends of alignment " + what;
+    }
+    if ((parsed->kind == "profile" || parsed->kind == "dprofile") && !place->profile) {
+        return "alignment " + what + " has no design profile at station " +
+               formatFixed(place->station, 3);
+    }
+    if (parsed->kind == "dprofile" && !hasLevel) {
+        return "the target has no level";
+    }
+    return {};
+}
+
 std::optional<std::string> leaderTemplate(const Model& model, const LeaderGeometry& leader)
 {
     if (!leader.labelStyle.empty()) {
@@ -304,20 +525,18 @@ std::optional<std::string> leaderTemplate(const Model& model, const LeaderGeomet
 }
 
 std::optional<LabelValues> leaderValues(const Model& model, const LeaderGeometry& leader,
-                                        std::span<const std::string> codeProperties)
+                                        std::span<const std::string> codeProperties,
+                                        const LeaderContext& context)
 {
-    if (!leader.tipRef.associated() || leader.vertices.empty()) {
+    auto read = readLeader(model, leader, codeProperties, context, nullptr);
+    if (!read) {
         return std::nullopt;
     }
-    const Entity* target = model.entities.find(leader.tipRef.entity);
-    if (target == nullptr) {
-        return std::nullopt;
-    }
-    return anchorValues(*target, leader.tipRef, leader.vertices.front(), codeProperties);
+    return std::move(read->values);
 }
 
 std::string leaderNote(const Model& model, const LeaderGeometry& leader,
-                       std::span<const std::string> codeProperties)
+                       std::span<const std::string> codeProperties, const LeaderContext& context)
 {
     if (!isSmart(leader)) {
         return leader.text;
@@ -326,8 +545,11 @@ std::string leaderNote(const Model& model, const LeaderGeometry& leader,
     if (!templateText) {
         return {};
     }
-    const auto values = leaderValues(model, leader, codeProperties);
-    return formatLabel(*templateText, values ? *values : LabelValues{});
+    // Only what the template names is read of the context: a note is made
+    // on every paint, and a drawing may hold many surfaces.
+    const std::vector<std::string> names = templateFields(*templateText);
+    const auto read = readLeader(model, leader, codeProperties, context, &names);
+    return formatLabel(*templateText, read ? read->values : LabelValues{});
 }
 
 std::vector<std::string> missingValues(std::string_view templateText, const LabelValues& values)
@@ -342,7 +564,8 @@ std::vector<std::string> missingValues(std::string_view templateText, const Labe
 }
 
 katana::core::Status checkLeaderSaysSomething(const Model& model, const LeaderGeometry& leader,
-                                              std::span<const std::string> codeProperties)
+                                              std::span<const std::string> codeProperties,
+                                              const LeaderContext& context)
 {
     using katana::core::ErrorCode;
     using katana::core::makeError;
@@ -362,14 +585,20 @@ katana::core::Status checkLeaderSaysSomething(const Model& model, const LeaderGe
     if (!leaderTemplate(model, leader)) {
         return makeError(ErrorCode::NotFound, "label style does not exist", leader.labelStyle);
     }
-    if (!leaderNote(model, leader, codeProperties).empty()) {
+    if (!leaderNote(model, leader, codeProperties, context).empty()) {
         return {};
     }
-    const auto values = leaderValues(model, leader, codeProperties).value_or(LabelValues{});
+    const std::string templateText = leaderTemplate(model, leader).value_or(std::string());
+    const std::vector<std::string> names = templateFields(templateText);
+    const auto read = readLeader(model, leader, codeProperties, context, &names);
+    const LabelValues values = read ? read->values : LabelValues{};
     std::string missing;
-    for (const std::string& name :
-         missingValues(leaderTemplate(model, leader).value_or(std::string()), values)) {
-        missing += missing.empty() ? name : ", " + name;
+    for (const std::string& name : missingValues(templateText, values)) {
+        // A value of the context says why it is not there: a tip off the
+        // surface reads very like a misspelt surface otherwise.
+        const std::string why = read ? whyAbsent(name, values, read->at, context) : std::string();
+        const std::string said = why.empty() ? name : name + " (" + why + ")";
+        missing += missing.empty() ? said : ", " + said;
     }
     return makeError(ErrorCode::InvalidArgument,
                      "the leader would say nothing: its target has " +

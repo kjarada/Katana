@@ -41,6 +41,7 @@
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/label_values.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
@@ -169,9 +170,10 @@ void appendLinework(const katana::entity::Geometry& geometry,
 // to `limit` segments. What a caller with no view (LABEL LAYOUT)
 // passes as LabelLayoutOptions::linework, so the command line places labels
 // where the plan view does; the painter gathers the same for what it has in
-// view as it draws.
+// view as it draws. A leader's keep-out is its note as the drawing's
+// surfaces and alignments make it read (`leaders`, leader_presets.hpp).
 [[nodiscard]] std::vector<katana::geometry::Segment2>
 labelKeepOut(const katana::entity::Model& model, double scale, const TextMeasure& measure,
-             std::size_t limit);
+             std::size_t limit, const katana::entity::LeaderContext& leaders = {});
 
 } // namespace katana::cad::annotation

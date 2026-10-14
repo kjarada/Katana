@@ -348,3 +348,121 @@ TEST(Alignment, BackToBackCurvesAreAllowedWhenTheTangentBetweenThemIsExactlyUsed
     EXPECT_GT(*solved->curvatureAtStation(joint - 1.0), 0.0);
     EXPECT_LT(*solved->curvatureAtStation(joint + 1.0), 0.0);
 }
+
+// ---- station and offset of a point (the inverse of pointAtStationOffset) ----------
+
+TEST(Alignment, AStraightAlignmentGivesTheFootsStationAndTheSignedDistanceLeftPositive)
+{
+    HorizontalAlignment definition;
+    definition.pis = {AlignmentPI{Point2(0, 0)}, AlignmentPI{Point2(100, 0)}};
+    definition.startStation = 1000.0;
+    const auto solved = solveAlignment(definition);
+    ASSERT_TRUE(solved.ok()) << solved.error().describe();
+    // Looking east along increasing station, north is left.
+    const auto left = solved->stationOffset(Point2(30, 5));
+    ASSERT_TRUE(left.has_value());
+    EXPECT_NEAR(left->station, 1030.0, 1e-9);
+    EXPECT_NEAR(left->offset, 5.0, 1e-9);
+    const auto right = solved->stationOffset(Point2(30, -5));
+    ASSERT_TRUE(right.has_value());
+    EXPECT_NEAR(right->station, 1030.0, 1e-9);
+    EXPECT_NEAR(right->offset, -5.0, 1e-9);
+    const auto atStart = solved->stationOffset(Point2(0, 7));
+    ASSERT_TRUE(atStart.has_value());
+    EXPECT_NEAR(atStart->station, 1000.0, 1e-9);
+    EXPECT_NEAR(atStart->offset, 7.0, 1e-9);
+    const auto onIt = solved->stationOffset(Point2(100, 0));
+    ASSERT_TRUE(onIt.has_value());
+    EXPECT_NEAR(onIt->station, 1100.0, 1e-9);
+    EXPECT_NEAR(onIt->offset, 0.0, 1e-9);
+}
+
+TEST(Alignment, APointBeyondEitherEndHasNoStationRatherThanTheEndsOne)
+{
+    HorizontalAlignment definition;
+    definition.pis = {AlignmentPI{Point2(0, 0)}, AlignmentPI{Point2(100, 0)}};
+    const auto solved = solveAlignment(definition);
+    ASSERT_TRUE(solved.ok());
+    EXPECT_FALSE(solved->stationOffset(Point2(-1, 0)).has_value());
+    EXPECT_FALSE(solved->stationOffset(Point2(101, 3)).has_value());
+    EXPECT_FALSE(
+        solved->stationOffset(Point2(std::numeric_limits<double>::quiet_NaN(), 0)).has_value());
+    EXPECT_FALSE(
+        solved->stationOffset(Point2(std::numeric_limits<double>::infinity(), 0)).has_value());
+}
+
+TEST(Alignment, OnACurveTheStationIsAlongTheArcAndInsideTheTurnIsLeft)
+{
+    // simpleCurve: TS (50, 0) at station 50, centre (50, 50), R = 50, a
+    // quarter turn left to ST (100, 50) at 50 + 50 pi / 2.
+    const auto solved = solveAlignment(simpleCurve());
+    ASSERT_TRUE(solved.ok());
+    const double c = std::cos(-kPi / 4.0);
+    const double s = std::sin(-kPi / 4.0);
+    // Half way round the arc (-45 degrees from the centre), 40 from the
+    // centre: 10 inside the curve, which on a left turn is the left. The
+    // station is 50 + R x pi / 4 along the arc, not along a chord.
+    const auto inside = solved->stationOffset(Point2(50 + 40 * c, 50 + 40 * s));
+    ASSERT_TRUE(inside.has_value());
+    EXPECT_NEAR(inside->station, 50.0 + 50.0 * kPi / 4.0, 1e-9);
+    EXPECT_NEAR(inside->offset, 10.0, 1e-9);
+    const auto outside = solved->stationOffset(Point2(50 + 60 * c, 50 + 60 * s));
+    ASSERT_TRUE(outside.has_value());
+    EXPECT_NEAR(outside->station, 50.0 + 50.0 * kPi / 4.0, 1e-9);
+    EXPECT_NEAR(outside->offset, -10.0, 1e-9);
+    // On the exit tangent, heading north: (105, 70) is 20 past ST and 5 to
+    // the east, which is the right.
+    const auto exit = solved->stationOffset(Point2(105, 70));
+    ASSERT_TRUE(exit.has_value());
+    EXPECT_NEAR(exit->station, 50.0 + 50.0 * kPi / 2.0 + 20.0, 1e-9);
+    EXPECT_NEAR(exit->offset, -5.0, 1e-9);
+    // Across the centre from the arc: (35, 64) is 64 off the entry tangent
+    // at station 35 and 65 off the exit one, and further still from the
+    // arc's far side (a furthest point, never a foot): the entry's foot.
+    const auto across = solved->stationOffset(Point2(35, 64));
+    ASSERT_TRUE(across.has_value());
+    EXPECT_NEAR(across->station, 35.0, 1e-9);
+    EXPECT_NEAR(across->offset, 64.0, 1e-9);
+}
+
+TEST(Alignment, OutsideAKinkThePointIsAtThePIsStationItsDistanceFromThePI)
+{
+    // A left kink at (100, 0): no curve. (110, -10) lies past the first
+    // tangent's end and before the second's start - no perpendicular
+    // reaches it - so it is the PI's: station 100, 10 sqrt 2 to the right.
+    const auto solved = solveAlignment(threePIs(Point2(0, 0), Point2(100, 0), Point2(100, 100), 0.0));
+    ASSERT_TRUE(solved.ok()) << solved.error().describe();
+    const auto corner = solved->stationOffset(Point2(110, -10));
+    ASSERT_TRUE(corner.has_value());
+    EXPECT_NEAR(corner->station, 100.0, 1e-9);
+    EXPECT_NEAR(corner->offset, -10.0 * std::sqrt(2.0), 1e-9);
+    // Inside the corner both tangents reach (90, 5): 5 off the first at 90,
+    // 10 off the second at 105. The nearer.
+    const auto inside = solved->stationOffset(Point2(90, 5));
+    ASSERT_TRUE(inside.has_value());
+    EXPECT_NEAR(inside->station, 90.0, 1e-9);
+    EXPECT_NEAR(inside->offset, 5.0, 1e-9);
+}
+
+TEST(Alignment, StationOffsetUndoesPointAtStationOffsetOnSpiralsAndArcs)
+{
+    // Every element of the spiralled curves, a little over a third of the
+    // way along each, 5 m either side: 5 m is far inside the 200 and 300 m
+    // radii, so each point has one foot, and the inverse must find the
+    // station and offset that made it.
+    for (const HorizontalAlignment& definition : {equalSpirals(), unequalRightTurn()}) {
+        const auto solved = solveAlignment(definition);
+        ASSERT_TRUE(solved.ok()) << solved.error().describe();
+        for (const AlignmentElement& element : solved->elements()) {
+            const double station = element.startStation + 0.37 * element.length;
+            for (const double offset : {5.0, -5.0}) {
+                const auto point = solved->pointAtStationOffset(station, offset);
+                ASSERT_TRUE(point.has_value());
+                const auto found = solved->stationOffset(*point);
+                ASSERT_TRUE(found.has_value()) << station;
+                EXPECT_NEAR(found->station, station, 1e-8) << static_cast<int>(kindOf(element));
+                EXPECT_NEAR(found->offset, offset, 1e-8) << static_cast<int>(kindOf(element));
+            }
+        }
+    }
+}
