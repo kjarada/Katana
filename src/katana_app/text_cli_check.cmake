@@ -90,13 +90,18 @@ elseif(STEP STREQUAL "script")
     must_not_contain("${_out}" "error")
 elseif(STEP STREQUAL "pipe")
     # Standard input is a file of bytes, as a pipe from another program is: one
-    # line in the Windows-1252 that program writes (0xE9), one in UTF-8. Both
-    # are names by the end, and neither ends the session or is refused.
+    # line in the Windows-1252 that program writes (0xE9), one in UTF-8. On Windows
+    # both are names by the end, and neither ends the session or is refused. Only
+    # there: elsewhere a line's bytes are the terminal's and the file system's
+    # (Session::run), so the UTF-8 line alone is sent.
     set(_input "${WORK}/ansi_input.txt")
+    set(_ansi_line "")
+    if(WIN32)
+        set(_ansi_line "LAYER NEW Pente${_ansi_e_acute}\n")
+    endif()
     file(WRITE "${_input}"
-        "LAYER NEW Pente${_ansi_e_acute}\nLAYER NEW Caf${_e_acute}\nLAYER LIST\nSAVE \"${_folder}/piped\"\nQUIT\n")
+        "${_ansi_line}LAYER NEW Caf${_e_acute}\nLAYER LIST\nSAVE \"${_folder}/piped\"\nQUIT\n")
     run_program(0 _out "${CLI}")
-    must_contain("${_out}" "Pente${_e_acute}")
     must_contain("${_out}" "Caf${_e_acute}")
     must_contain("${_out}" "saved to")
     must_not_contain("${_out}" "error")
@@ -104,7 +109,10 @@ elseif(STEP STREQUAL "pipe")
     # reply of it cannot throw.
     set(_input "")
     run_program(0 _out "${CLI}" -c "OPEN \"${_folder}/piped\"" -c "LAYER LIST")
-    must_contain("${_out}" "Pente${_e_acute}")
+    must_contain("${_out}" "Caf${_e_acute}")
+    if(WIN32)
+        must_contain("${_out}" "Pente${_e_acute}")
+    endif()
 elseif(STEP STREQUAL "mcp")
     # katana_mcp --project <that folder>, as an MCP client is configured, answers
     # initialize; and katana_run_script finds the script by its UTF-8 path.

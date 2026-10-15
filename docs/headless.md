@@ -80,13 +80,17 @@ LEGEND JSON`). One rule now, applied where text arrives:
   is no text in either code page), and the console's output code page is set
   to UTF-8 for the run and put back after, so a reply that names `Grüße`
   shows it. A pipe or a file is bytes and is left alone.
-- **A line that is still not UTF-8 is read as Windows-1252** by `Session::run`
-  - the one door for a line in the programs with no window - which says so on
-  stderr once per session. The alternative was to refuse it, as a layer's name
-  with a stray byte used to be; that turns away a person whose pipe comes from
-  a tool that writes the ANSI page. Windows-1252 is the page `decodeText` falls
-  back on. An exception that still escapes a verb is reported as `error:
-  Internal: ...` and fails the line; it no longer ends the process.
+- **On Windows a line that is still not UTF-8 is read as Windows-1252** by
+  `Session::run` - the one door for a line in the programs with no window -
+  which says so on stderr once per session. The alternative was to refuse it,
+  as a layer's name with a stray byte used to be; that turns away a person
+  whose pipe comes from a tool that writes the ANSI page. Windows-1252 is the
+  page `decodeText` falls back on. Only on Windows: elsewhere a line's bytes
+  are the terminal's and the file system's, `core::pathFromUtf8` takes a path
+  that is not UTF-8 as the narrow name it is (a file named in Latin-1 stays
+  reachable), and a name that is not UTF-8 is refused by its table's door.
+  An exception that still escapes a verb is reported as `error: Internal:
+  ...` and fails the line; it no longer ends the process.
 - **Whatever reaches the model is UTF-8, and each kind of text is checked at
   one door** with `core::isValidUtf8`: a surface's name, source and style at
   `SurfaceStore::add`, `rename` and `setStyle`; a surface style's name and

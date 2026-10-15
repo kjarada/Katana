@@ -29,8 +29,9 @@
 //   - a script is decoded as a text file is (Session::readScript);
 //   - a console's lines are read wide as well (readLine), and its output is put
 //     in UTF-8 for the run, so the names a reply prints are readable;
-//   - any other line that is not UTF-8 - a pipe from a program writing the ANSI
-//     code page - is read as Windows-1252 by Session::run, which says so.
+//   - on Windows any other line that is not UTF-8 - a pipe from a program
+//     writing the ANSI code page - is read as Windows-1252 by Session::run,
+//     which says so.
 
 #include <cstddef>
 #include <iostream>

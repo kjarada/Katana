@@ -581,6 +581,14 @@ bool Session::run(const std::string& line)
 {
     SessionState& session = state_->session;
     try {
+#if defined(_WIN32)
+        // Only here: the bytes a Windows program is handed are the ANSI code
+        // page's, and Windows-1252 is the reading of them that decodeText also
+        // falls back on. Elsewhere a line's bytes are what the person's
+        // terminal and the file system say, and core::pathFromUtf8 takes a path
+        // that is not UTF-8 as the narrow name it is - a file named in Latin-1
+        // stays reachable - while a NAME that is not UTF-8 is refused by the
+        // door of its own table, with a sentence.
         if (!katana::core::isValidUtf8(line)) {
             if (!session.saidWindows1252) {
                 session.saidWindows1252 = true;
@@ -590,6 +598,7 @@ bool Session::run(const std::string& line)
             }
             return runLine(session, katana::core::utf8OrWindows1252(line));
         }
+#endif
         return runLine(session, line);
     } catch (const std::exception& error) {
         // Nothing up a verb's call chain catches: the standard library throws

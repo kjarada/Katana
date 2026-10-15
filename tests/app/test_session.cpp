@@ -377,7 +377,16 @@ TEST(Session, ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes)
     EXPECT_EQ(refused.err.find('\n'), refused.err.size() - 1) << refused.err;
 }
 
-TEST(Session, ALineThatIsNotUtf8IsReadAsWindows1252AndSaidOnceAndBecomesAName)
+// Whether Session::run reads a line that is not UTF-8 as Windows-1252: it does on Windows,
+// where the bytes a program is handed are the ANSI code page's; elsewhere the bytes are the
+// terminal's and the file system's, and a name that is not UTF-8 is refused by its table.
+#if defined(_WIN32)
+constexpr bool kReadsAnsiLines = true;
+#else
+constexpr bool kReadsAnsiLines = false;
+#endif
+
+TEST(Session, ALineThatIsNotUtf8IsReadAsWindows1252OnWindowsAndSaidOnceAndBecomesAName)
 {
     // What a pipe from a program that writes the ANSI code page, or a script saved
     // from an ANSI editor, hands the session: 0xE9 for e-acute, 0xB0 for the degree
@@ -386,6 +395,12 @@ TEST(Session, ALineThatIsNotUtf8IsReadAsWindows1252AndSaidOnceAndBecomesAName)
     // ended the process at the next JSON writer.
     Session session(nullptr);
     const Printed first = run(session, "LAYER NEW Caf\xE9");
+    if (!kReadsAnsiLines) {
+        // Elsewhere the door of the layer table is what answers, with a sentence.
+        EXPECT_FALSE(first.ok);
+        EXPECT_TRUE(contains(first.err, "not valid UTF-8")) << first.err;
+        return;
+    }
     EXPECT_TRUE(first.ok) << first.err;
     EXPECT_TRUE(contains(first.err, "Windows-1252")) << "the guess is said: " << first.err;
     EXPECT_TRUE(contains(first.out, "layer Caf\xC3\xA9 created")) << first.out;
@@ -405,16 +420,25 @@ TEST(Session, AStyleNamedInTheAnsiCodePageListsAsJsonAndSavesWithoutEndingThePro
 {
     // SURFACESTYLE NEW Pente + 0xB0, then SURFACESTYLE LIST JSON and SAVE, threw
     // nlohmann's type_error.316 out of Session::run (exit 127 in katana_cli, the
-    // session's work lost). The name is now text: UTF-8 from the first line on.
+    // session's work lost). On Windows the name is now text, UTF-8 from the first
+    // line on; elsewhere the style's door refuses it. Either way nothing is left
+    // in the model for a JSON writer to throw on, and nothing throws.
     const ScratchDirectory scratch("ansi-style");
     Session session(nullptr);
-    ASSERT_TRUE(run(session, "SURFACESTYLE NEW Pente\xB0").ok);
-    const Printed listed = run(session, "SURFACESTYLE LIST JSON");
+    const Printed made = run(session, "SURFACESTYLE NEW Pente\xB0");
+    EXPECT_EQ(made.ok, kReadsAnsiLines) << made.err;
+    if (!kReadsAnsiLines) {
+        EXPECT_TRUE(contains(made.err, "not valid UTF-8")) << made.err;
+    }
+    Printed listed;
+    EXPECT_NO_THROW(listed = run(session, "SURFACESTYLE LIST JSON"));
     EXPECT_TRUE(listed.ok) << listed.err;
-    EXPECT_TRUE(contains(listed.out, "\"name\":\"Pente\xC2\xB0\"")) << listed.out;
+    if (kReadsAnsiLines) {
+        EXPECT_TRUE(contains(listed.out, "\"name\":\"Pente\xC2\xB0\"")) << listed.out;
+    }
     EXPECT_TRUE(run(session, "LEADER LIST JSON").ok);
-    const Printed saved =
-        run(session, "SAVE \"" + (scratch.path / "p").generic_string() + "\"");
+    Printed saved;
+    EXPECT_NO_THROW(saved = run(session, "SAVE \"" + (scratch.path / "p").generic_string() + "\""));
     EXPECT_TRUE(saved.ok) << saved.err;
     EXPECT_TRUE(contains(saved.out, "saved to")) << saved.out;
 }
@@ -436,7 +460,7 @@ TEST(Session, ANonUtf8PathInALineIsAnAnswerNotAnExceptionOutOfRun)
     const auto missing = Session::readScript(scratch.path.generic_string() + "/none.kcs");
     ASSERT_FALSE(missing.ok());
     EXPECT_EQ(missing.error().code, katana::core::ErrorCode::NotFound);
-    const std::string script = scratch.file("ansi.kcs", "LAYER NEW Caf\xE9\r\n\r\nLAYER LIST\r\n");
+    (void)scratch.file("ansi.kcs", "LAYER NEW Caf\xE9\r\n\r\nLAYER LIST\r\n");
     testing::internal::CaptureStderr();
     const auto lines =
         Session::readScript(scratch.path.generic_string() + "/ansi.kcs");
@@ -447,7 +471,6 @@ TEST(Session, ANonUtf8PathInALineIsAnAnswerNotAnExceptionOutOfRun)
     EXPECT_EQ((*lines)[1], "");
     EXPECT_EQ((*lines)[2], "LAYER LIST");
     EXPECT_TRUE(contains(said, "Windows-1252")) << said;
-    EXPECT_FALSE(script.empty());
 }
 
 TEST(Session, InfoWithAnEntityIdDescribesTheEntityInEveryBuild)
