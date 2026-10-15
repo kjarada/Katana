@@ -11,7 +11,10 @@
 //   flat    z = 10 over x 0..300, y 0..20           (for the design profile's section)
 //
 // Each is two triangles split along the diagonal (0,0) - (x1,20), which the line
-// y = 10 crosses at x = x1 / 2: a slope break the cut must find.
+// y = 10 crosses at x = x1 / 2 and the line y = 10.01 at x = 10.01 / 0.2 = 50.05 on the
+// 100 m slabs: the triangle edge the cut must find. 50.05 is not near a multiple of
+// the 0.1 m interval, which a break at 50 would be (a break that lands on an interval
+// station is dropped as a duplicate of it: section.cpp).
 
 #include <gtest/gtest.h>
 
@@ -66,11 +69,11 @@ void setVisible(Document& document, const std::string& name, bool visible)
     ASSERT_TRUE(document.setSurfaces(std::move(store), "TEST").ok());
 }
 
-// East along y = 10 from x = 0 to x = `length`: station s is the point (s, 10).
-Polyline2 eastAlong(double length)
+// East along y = `y` from x = 0 to x = `length`: station s is the point (s, y).
+Polyline2 eastAlong(double length, double y = 10.0)
 {
     Polyline2 line;
-    line.vertices = {Point2(0.0, 10.0), Point2(length, 10.0)};
+    line.vertices = {Point2(0.0, y), Point2(length, y)};
     return line;
 }
 
@@ -94,7 +97,7 @@ TEST(SectionCut, TheShownSurfacesAreCutAlongTheAlignmentAtTheDrawingsInterval)
 {
     Document document;
     addSurface(document, "ground", slab(100.0, 10.0, 20.0));
-    const auto cut = cutDrawingSection(document, eastAlong(100.0));
+    const auto cut = cutDrawingSection(document, eastAlong(100.0, 10.01));
     ASSERT_TRUE(cut.ok()) << (cut.ok() ? "" : cut.error().describe());
 
     // 100 m of alignment at 100 / 2000 = 0.05 m is below the 0.1 m floor: 0.1 m,
@@ -117,16 +120,16 @@ TEST(SectionCut, TheShownSurfacesAreCutAlongTheAlignmentAtTheDrawingsInterval)
         ASSERT_TRUE(sample.elevation.has_value()) << sample.station;
         EXPECT_NEAR(*sample.elevation, 10.0 + sample.station / 10.0, 1e-9) << sample.station;
     }
-    // The diagonal (0,0) - (100,20) is crossed by y = 10 at x = 50, height 15: a
-    // slope break, which the cut places a sample on.
+    // The diagonal (0,0) - (100,20) is crossed by y = 10.01 at x = 50.05, height
+    // 10 + 5.005 = 15.005: the triangle edge, which the cut places a sample on.
     const auto breakAt = std::find_if(
         ground.samples.begin(), ground.samples.end(), [&](const katana::cad::SectionSample& sample) {
             const std::size_t at = static_cast<std::size_t>(&sample - ground.samples.data());
             return ground.reasons[at] == SampleReason::SurfaceBreak &&
-                   std::abs(sample.station - 50.0) < 1e-5;
+                   std::abs(sample.station - 50.05) < 1e-5;
         });
-    ASSERT_NE(breakAt, ground.samples.end()) << "no sample on the slope break at 50";
-    EXPECT_NEAR(*breakAt->elevation, 15.0, 1e-6);
+    ASSERT_NE(breakAt, ground.samples.end()) << "no sample on the triangle edge at 50.05";
+    EXPECT_NEAR(*breakAt->elevation, 15.005, 1e-6);
 }
 
 TEST(SectionCut, AHiddenSurfaceIsLeftOutOfTheCutAndPutBackWhenShown)
