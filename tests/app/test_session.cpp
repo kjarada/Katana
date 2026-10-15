@@ -478,4 +478,34 @@ TEST(Session, APlacementIsRefusedByNameForRasterAndABadOffsetForAnyFile)
     EXPECT_TRUE(contains(bad.err, "OFFSET= takes the east and north")) << bad.err;
     EXPECT_TRUE(session.document().model().entities.empty());
 }
+
+TEST(Session, OpenOfAPolylineKeepsTheReferenceLayersAndNewTakesThemOff)
+{
+    // OPEN #1 and OPEN SELECTION share the verb with OPEN of a project but
+    // open a polyline for editing: the drawing stays, and so do the reference
+    // layers worked on top of it. NEW replaces the drawing, and takes them.
+    Session session(nullptr);
+    const std::string terrain =
+        "\"" + (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string() +
+        "\"";
+    ASSERT_TRUE(run(session, "IMPORT " + terrain).ok);
+    ASSERT_TRUE(contains(run(session, "REFS").out, "references rasters=1 "));
+    ASSERT_TRUE(run(session, "PLINE 0,0 10,0 10,10 CLOSE").ok);
+
+    const Printed byId = run(session, "OPEN #1");
+    ASSERT_TRUE(byId.ok) << byId.err;
+    ASSERT_TRUE(contains(byId.out, "kind=polyline")) << "OPEN #1 did not open the polyline";
+    EXPECT_TRUE(contains(run(session, "REFS").out, "references rasters=1 "));
+
+    ASSERT_TRUE(run(session, "SELECT #1").ok);
+    const Printed bySelection = run(session, "OPEN SELECTION");
+    ASSERT_TRUE(bySelection.ok) << bySelection.err;
+    ASSERT_TRUE(contains(bySelection.out, "kind=polyline"));
+    EXPECT_TRUE(contains(run(session, "REFS").out, "references rasters=1 "));
+    // A later line that reads the raster still finds it.
+    EXPECT_TRUE(run(session, "RASTER SAMPLE RASTER 1 AT 50,50").ok);
+
+    ASSERT_TRUE(run(session, "NEW").ok);
+    EXPECT_TRUE(contains(run(session, "REFS").out, "references rasters=0 "));
+}
 #endif

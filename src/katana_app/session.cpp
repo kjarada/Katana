@@ -496,14 +496,19 @@ bool runLine(SessionState& session, const std::string& line)
         }
     }
 #if defined(KATANA_WITH_INTEROP)
-    if ((verb == "NEW" || verb == "OPEN") && session.geo != nullptr) {
+    // Only a line that REPLACES the drawing - NEW, OPEN of a project - goes
+    // here. CommandInterpreter::replacesDocument tells it from OPEN #12 and
+    // OPEN SELECTION, the polyline edits that share the verb: those keep the
+    // drawing and so its reference layers, as in the window, which asks the same.
+    if (katana::cad::CommandInterpreter::replacesDocument(line) && session.geo != nullptr) {
         // The reference layers go with their drawing, as the window's do
         // (audit QT-17); an OPEN then reads again the layers the project
         // records. A layer whose file is gone is warned of by the restore,
         // and the drawing is open all the same. (The surfaces are the
         // drawing's: New cleared them, Open read the project's.)
         session.interop.reference.clear();
-        if (verb == "OPEN" && katana::app::geo::recordsReferences(*session.geo)) {
+        if (katana::cad::CommandInterpreter::verbOf(line) == "OPEN" &&
+            katana::app::geo::recordsReferences(*session.geo)) {
             if (const auto restored = katana::app::geo::runNow(*session.geo, "REFS RESTORE")) {
                 std::cout << *restored << '\n';
             } else {

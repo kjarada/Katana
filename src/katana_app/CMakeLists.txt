@@ -1332,6 +1332,19 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
     set_tests_properties(cli.import_alongside_and_offset_place_the_data_and_say_the_move PROPERTIES
         PASS_REGULAR_EXPRESSION "bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500"
         FAIL_REGULAR_EXPRESSION "error")
+    # OPEN #1 and OPEN SELECTION open a polyline for editing: they share the
+    # verb with OPEN of a project but do not replace the drawing
+    # (CommandInterpreter::replacesDocument), so its reference layers - the
+    # DEM imported first - are still there, where they were cleared with a
+    # project's. The drawing has no project here, so REFS RESTORE does not run.
+    add_test(NAME cli.open_of_a_polyline_keeps_the_reference_layers
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "IMPORT ${_gis}/terrain.asc"
+                -c "PLINE 0,0 10,0 10,10 CLOSE" -c "OPEN #1" -c REFS
+                -c "SELECT #1" -c "OPEN SELECTION" -c REFS)
+    set_tests_properties(cli.open_of_a_polyline_keeps_the_reference_layers PROPERTIES
+        PASS_REGULAR_EXPRESSION "kind=polyline closed=no [^\r\n]*[\r\n]+references rasters=1 clouds=0 missing=0.*kind=polyline closed=no [^\r\n]*[\r\n]+references rasters=1 clouds=0 missing=0"
+        FAIL_REGULAR_EXPRESSION "error;references rasters=0")
 endif()
 
 # Labels by hand and their layout, as an agent types them (docs/annotation.md,
