@@ -363,6 +363,46 @@ Result<double> optionNumber(const std::string& key, const std::string& value)
     return *parsed;
 }
 
+// reach=<m> after a point, when it is there: the snap aperture of a click, which
+// DELETE POINT and MOVE POINT share. `reach` is left as it was when none is given.
+Status readReach(const Words& words, std::size_t& at, std::optional<double>& reach)
+{
+    auto options = readOptions(words, at, {"reach"});
+    if (!options) {
+        return options.error();
+    }
+    for (const auto& [key, value] : *options) {
+        auto parsed = optionNumber(key, value);
+        if (!parsed) {
+            return parsed.error();
+        }
+        if (!(*parsed >= 0.0)) {
+            return makeError(ErrorCode::InvalidArgument, "reach= cannot be negative", value);
+        }
+        reach = *parsed;
+    }
+    return {};
+}
+
+// The vertex a point names, for DELETE POINT and MOVE POINT: the corner of the
+// triangle under it nearest it, or with a reach the nearest vertex within it.
+Result<std::uint32_t> vertexNamed(const tin::TinSurface& surface, const Point2& point,
+                                  const std::optional<double>& reach)
+{
+    const auto vertex = tin::vertexAt(surface, point, reach);
+    if (vertex) {
+        return *vertex;
+    }
+    // Off the surface is said when the point is, whatever the reach: a
+    // reach that found nothing near it on the surface is another thing.
+    const bool onSurface = tin::triangleAt(surface, point).has_value();
+    return makeError(ErrorCode::InvalidArgument,
+                     !reach ? "the point is off the surface"
+                     : onSurface ? "no vertex of the surface within reach= of the point"
+                                 : "the point is off the surface, and no vertex is within reach=",
+                     describe(point));
+}
+
 // INSIDE <polygon>, when it comes next. `tookNothing`: a scope that took no
 // polygon - which is NOT "no INSIDE", the whole surface, but nothing to act on.
 struct InsideRead {
@@ -427,8 +467,8 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
 {
     if (at >= words.size()) {
         return makeError(ErrorCode::ParseFailure,
-                         "SURFACE EDIT <name> needs an operation: DELETE, FLIP, ADD, BREAKLINE, "
-                         "BOUNDARY, HOLE, RAISE, LOWER, SETLEVEL, SCALE, SMOOTH or THIN");
+                         "SURFACE EDIT <name> needs an operation: DELETE, MOVE, FLIP, ADD, "
+                         "BREAKLINE, BOUNDARY, HOLE, RAISE, LOWER, SETLEVEL, SCALE, SMOOTH or THIN");
     }
     EditOutcome edit;
     const std::string op = katana::core::uppered(words[at++]);
@@ -524,33 +564,13 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             if (!point) {
                 return point.error();
             }
-            auto options = readOptions(words, at, {"reach"});
-            if (!options) {
-                return options.error();
-            }
             std::optional<double> reach;
-            for (const auto& [key, value] : *options) {
-                auto parsed = optionNumber(key, value);
-                if (!parsed) {
-                    return parsed.error();
-                }
-                if (!(*parsed >= 0.0)) {
-                    return makeError(ErrorCode::InvalidArgument, "reach= cannot be negative",
-                                     value);
-                }
-                reach = *parsed;
+            if (Status s = readReach(words, at, reach); !s) {
+                return s.error();
             }
-            const auto vertex = tin::vertexAt(surface, point->at, reach);
+            const auto vertex = vertexNamed(surface, point->at, reach);
             if (!vertex) {
-                // Off the surface is said when the point is, whatever the reach: a
-                // reach that found nothing near it on the surface is another thing.
-                const bool onSurface = tin::triangleAt(surface, point->at).has_value();
-                return makeError(
-                    ErrorCode::InvalidArgument,
-                    !reach ? "the point is off the surface"
-                    : onSurface ? "no vertex of the surface within reach= of the point"
-                                : "the point is off the surface, and no vertex is within reach=",
-                    describe(point->at));
+                return vertex.error();
             }
             if (Status s = take(one(tin::deletePoints(surface, std::vector{*vertex}))); !s) {
                 return s.error();
@@ -613,6 +633,42 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
                              "DELETE takes TRIANGLE, TRIANGLES, LONG, THIN, POINT, POINTS or "
                              "BREAKLINE",
                              words[at - 1]);
+        }
+    } else if (op == "MOVE") {
+        // MOVE POINT x,y TO x2,y2 [reach=<m>]: the vertex under x,y, moved in plan to
+        // x2,y2 with its level, as ONE patch (tin::movePoint).
+        edit.operation = "move_point";
+        if (at >= words.size() || !is(words[at], "POINT")) {
+            return makeError(ErrorCode::ParseFailure, "MOVE needs POINT x,y TO x2,y2");
+        }
+        ++at;
+        auto from = requirePoint(words, at, "MOVE POINT");
+        if (!from) {
+            return from.error();
+        }
+        if (at >= words.size() || !is(words[at], "TO")) {
+            return makeError(ErrorCode::ParseFailure, "MOVE POINT x,y needs TO x2,y2");
+        }
+        ++at;
+        auto to = requirePoint(words, at, "MOVE POINT ... TO");
+        if (!to) {
+            return to.error();
+        }
+        if (to->z) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "MOVE POINT keeps the vertex's level: give the target as x,y",
+                             words[at - 1]);
+        }
+        std::optional<double> reach;
+        if (Status s = readReach(words, at, reach); !s) {
+            return s.error();
+        }
+        const auto vertex = vertexNamed(surface, from->at, reach);
+        if (!vertex) {
+            return vertex.error();
+        }
+        if (Status s = take(one(tin::movePoint(surface, *vertex, to->at))); !s) {
+            return s.error();
         }
     } else if (op == "FLIP") {
         edit.operation = "flip";
@@ -815,8 +871,8 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
         edit.outcome.levels = true;
     } else {
         return makeError(ErrorCode::ParseFailure,
-                         "SURFACE EDIT takes DELETE, FLIP, ADD, BREAKLINE, BOUNDARY, HOLE, RAISE, "
-                         "LOWER, SETLEVEL, SCALE, SMOOTH or THIN",
+                         "SURFACE EDIT takes DELETE, MOVE, FLIP, ADD, BREAKLINE, BOUNDARY, HOLE, "
+                         "RAISE, LOWER, SETLEVEL, SCALE, SMOOTH or THIN",
                          words[at - 1]);
     }
     return edit;
@@ -1114,7 +1170,7 @@ std::string surfaceEditHelpSummary()
 {
     return R"(Surfaces  SURFACE EDIT name DELETE TRIANGLE|POINT x,y | DELETE TRIANGLES INSIDE|OUTSIDE poly
           | DELETE LONG m | DELETE THIN deg | DELETE POINTS INSIDE poly | DELETE BREAKLINE line
-          | FLIP x,y | ADD POINT
+          | MOVE POINT x,y TO x,y | FLIP x,y | ADD POINT
           x,y,z ... | ADD POINTS pts | BREAKLINE line | BOUNDARY poly | HOLE poly | RAISE|LOWER
           dz | SETLEVEL z | SCALE f [base=z] [INSIDE poly] | SMOOTH [passes=] [weight=] [INSIDE
           poly] | THIN tol    SURFACE MERGE a b ... NAME new | PASTE top INTO base [NAME new]
@@ -1139,6 +1195,9 @@ SURFACE EDIT <name> DELETE POINT x,y [reach=<m>]   the vertex of the triangle un
 SURFACE EDIT <name> DELETE POINTS INSIDE <polygon> breakline and boundary vertices are held
 SURFACE EDIT <name> DELETE BREAKLINE <line>        the breakline edges along the line become
                                                    ordinary edges; the triangles are as they were
+SURFACE EDIT <name> MOVE POINT x,y TO x2,y2 [reach=<m>]
+                                                   the vertex under x,y to x2,y2, keeping its level;
+                                                   not one on a breakline or the rim, not off the surface
 SURFACE EDIT <name> FLIP x,y                       the edge nearest x,y of the triangle under it
 SURFACE EDIT <name> ADD POINT x,y,z [x,y,z ...]    off the surface, a point extends it
 SURFACE EDIT <name> ADD POINTS <points>            points and levelled vertices of the entities

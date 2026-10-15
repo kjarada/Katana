@@ -2634,6 +2634,38 @@ TEST_F(McpServer, ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads)
     EXPECT_NEAR(surfaces[0]["zmin"].get<double>(), 25.892, 1e-6);
     EXPECT_NEAR(surfaces[0]["zmax"].get<double>(), 39.819, 1e-6);
 }
+
+// DELETE BREAKLINE and MOVE POINT are lines like the other edits, so an agent
+// reaches them by katana_run_commands and reads their records
+// (docs/surface_editing.md): the row y = 51.25 of the sample's lattice from x =
+// 0.25 to 99.25 is 66 edges of a breakline, cleared by the same line; the
+// vertex (49.75, 51.25) in the middle of it, which MOVE POINT refused while the
+// breakline stood, then moves, its level kept (the vertex count is the sample's
+// 10 800 before and after).
+TEST_F(McpServer, AnAgentClearsABreaklineAndMovesAVertexByTheSurfaceEditLines)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json edited =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                    "SURFACE EDIT ground BREAKLINE 0.25,51.25 99.25,51.25",
+                    "SURFACE EDIT ground DELETE BREAKLINE 0.25,51.25 99.25,51.25",
+                    "SURFACE EDIT ground MOVE POINT 49.75,51.25 TO 49.9,51.4"}}});
+    ASSERT_FALSE(edited["isError"].get<bool>()) << textOf(edited);
+    const Json& commands = edited["structuredContent"]["commands"];
+    ASSERT_EQ(commands.size(), 4U) << commands.dump();
+    const std::string cleared = commands[2]["output"].get<std::string>();
+    EXPECT_NE(cleared.find("operation=delete_breakline"), std::string::npos) << cleared;
+    EXPECT_NE(cleared.find("edges_cleared=66 edges_held=0 changed=yes"), std::string::npos)
+        << cleared;
+    const std::string moved = commands[3]["output"].get<std::string>();
+    EXPECT_NE(moved.find("operation=move_point"), std::string::npos) << moved;
+    EXPECT_NE(moved.find("vertices_before=10800 vertices_after=10800"), std::string::npos) << moved;
+    EXPECT_NE(moved.find("moved=1"), std::string::npos) << moved;
+    EXPECT_NE(moved.find("changed=yes"), std::string::npos) << moved;
+}
 #endif
 
 // IFC through the one door an agent has: the lines File > Export IFC and

@@ -463,6 +463,99 @@ Result<TinEditResult> deletePoints(const TinSurface& surface,
 
 // ---- changing the triangulation -----------------------------------------------------------
 
+Result<TinEditResult> movePoint(const TinSurface& surface, std::uint32_t vertex,
+                                const Point2& target)
+{
+    if (const Status status = requireSurface(surface); !status) {
+        return status.error();
+    }
+    if (vertex >= surface.vertexCount()) {
+        return makeError(ErrorCode::InvalidArgument, "vertex index out of range",
+                         "vertex=" + std::to_string(vertex) +
+                             " vertices=" + std::to_string(surface.vertexCount()));
+    }
+    if (!target.isFinite()) {
+        return makeError(ErrorCode::InvalidArgument, "the target has a non-finite coordinate");
+    }
+    if (!detail::withinMagnitude(target.x) || !detail::withinMagnitude(target.y)) {
+        return detail::tooLarge(describePosition(target));
+    }
+    const detail::VertexStars stars(surface);
+    const auto around = stars.of(vertex);
+    if (around.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the vertex belongs to no triangle",
+                         "vertex=" + std::to_string(vertex));
+    }
+    const Point2 from = planOf(surface.vertices()[vertex]);
+    if (from.distanceTo(target) <= tol::kGeometric) {
+        return detail::unchanged(surface); // a move of less than the coincidence tolerance
+    }
+
+    // What the vertex holds: an end of a constrained edge, or the rim.
+    bool onBreakline = false;
+    bool onRim = false;
+    for (const std::uint32_t t : around) {
+        const TinTriangle& tri = surface.triangles()[t];
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            if (tri[k] != vertex && tri[(k + 1) % 3] != vertex) {
+                continue;
+            }
+            onBreakline = onBreakline || surface.isEdgeConstrained(t, k);
+            onRim = onRim || surface.neighbors()[t][k] == kNoTriangle;
+        }
+    }
+    const std::string where = "vertex=" + std::to_string(vertex) + " at " + describePosition(from);
+    // The rim first: its edges are constrained when a boundary or a hole made
+    // them, and "clear the breakline" would send a person after an edge
+    // DELETE BREAKLINE never clears.
+    if (onRim) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the point is on the rim of the surface or the edge of a hole: it is the "
+                         "footprint, which a vertex moved would reshape; BOUNDARY and HOLE do that",
+                         where);
+    }
+    if (onBreakline) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the point is on a breakline or boundary edge, which is kept; clear the "
+                         "breakline first (DELETE BREAKLINE) or delete the triangles around it "
+                         "instead",
+                         where);
+    }
+
+    const detail::Place place = detail::placeOf(surface, stars, target);
+    if (place.kind == detail::Place::Kind::Outside) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the target is off the surface: a point cannot be moved off it (ADD POINT "
+                         "extends the surface)",
+                         "target " + describePosition(target));
+    }
+    if (place.kind == detail::Place::Kind::Vertex) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the target is closer than the coincidence tolerance to another vertex of "
+                         "the surface",
+                         "vertex=" + std::to_string(place.vertex) + " at " +
+                             describePosition(planOf(surface.vertices()[place.vertex])));
+    }
+
+    // ONE patch: the star of the vertex (rebuildPatch takes it for a removed
+    // vertex) and the cavity the new point makes, together.
+    detail::PatchRequest request;
+    request.region.assign(surface.triangleCount(), 0);
+    request.removed.assign(surface.vertexCount(), 0);
+    request.removed[vertex] = 1;
+    detail::markInsertionCavity(surface, place, target, request.region);
+    request.points.push_back({target, surface.vertices()[vertex].z, true});
+    auto output = detail::rebuildPatch(surface, stars, std::move(request));
+    if (!output) {
+        return output.error();
+    }
+    auto result = finishPatch(surface, std::move(*output));
+    if (result) {
+        result->report.pointsMoved = 1;
+    }
+    return result;
+}
+
 Result<TinEditResult> flipEdge(const TinSurface& surface, std::uint32_t triangle,
                                std::uint32_t edge)
 {

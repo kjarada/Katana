@@ -233,3 +233,29 @@ add_test(NAME cli.surface_edit_delete_breakline_along_nothing_is_reported_and_th
 set_tests_properties(cli.surface_edit_delete_breakline_along_nothing_is_reported_and_the_session_goes_on PROPERTIES
     PASS_REGULAR_EXPRESSION "operation=delete_breakline .*edges_cleared=0 edges_held=0 changed=no[\r\n]+surface name=ground triangles=[0-9]+ "
     FAIL_REGULAR_EXPRESSION "error")
+
+# MOVE POINT moves the vertex under the first point to the second, keeping its
+# level and the footprint: the sample's 10 800 vertices are 10 800 after, its
+# levels still 24.892 to 38.819 (a move that took the plane's level at the
+# target, or dropped a vertex, would change one of them). (49.75, 51.25) is a
+# vertex in the middle of the sample (-4.25 + 1.5 k, k = 36 and 37); (49.9,
+# 51.4) is 0.15 m from it, inside the cell.
+add_test(NAME cli.surface_edit_move_point_keeps_the_vertex_count_and_the_levels
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_surface_edit_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE EDIT ground MOVE POINT 49.75,51.25 TO 49.9,51.4"
+            -c "SURFACE INFO ground")
+set_tests_properties(cli.surface_edit_move_point_keeps_the_vertex_count_and_the_levels PROPERTIES
+    PASS_REGULAR_EXPRESSION "operation=move_point .*vertices_before=10800 vertices_after=10800 points_added=1 points_removed=1 .*moved=1 .*changed=yes.*surface name=ground triangles=[0-9]+ points=10800 .*zmin=24\\.892 zmax=38\\.819"
+    FAIL_REGULAR_EXPRESSION "error")
+
+# A corner of the sample is on its rim, which a vertex moved would reshape:
+# refused, saying so.
+add_test(NAME cli.surface_edit_move_point_of_a_rim_vertex_is_refused
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_surface_edit_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE EDIT ground MOVE POINT -4.25,-4.25 TO -3.5,-3.5")
+set_tests_properties(cli.surface_edit_move_point_of_a_rim_vertex_is_refused PROPERTIES
+    PASS_REGULAR_EXPRESSION "InvalidGeometry: the point is on the rim of the surface or the edge of a hole")

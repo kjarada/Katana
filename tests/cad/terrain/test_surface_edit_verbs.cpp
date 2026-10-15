@@ -560,7 +560,7 @@ TEST_F(SurfaceEditVerbs, TheToolsActOnTheChosenSurfaceElseTheFirstVisible)
 TEST_F(SurfaceEditVerbs, HelpNamesEveryVerb)
 {
     const std::string help = reply("HELP SURFACE EDIT");
-    for (const char* word : {"DELETE TRIANGLE", "DELETE BREAKLINE", "FLIP", "ADD POINTS", "BREAKLINE", "BOUNDARY",
+    for (const char* word : {"DELETE TRIANGLE", "DELETE BREAKLINE", "MOVE POINT", "FLIP", "ADD POINTS", "BREAKLINE", "BOUNDARY",
                              "HOLE", "SETLEVEL", "SMOOTH", "THIN", "SURFACE MERGE",
                              "SURFACE PASTE", "SURFACE CLIP", "SURFACE OFFSET"}) {
         EXPECT_TRUE(contains(help, word)) << word;
@@ -640,6 +640,106 @@ TEST_F(SurfaceEditVerbs, DeleteBreaklineAlongTheConstrainedRimHoldsItAndSaysSo)
     const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 2.5,2.5 7.5,2.5");
     EXPECT_TRUE(contains(text, " edges_cleared=0 ")) << text;
     EXPECT_FALSE(contains(text, " edges_held=0 ")) << "the rim edges along the line are counted: " << text;
+    EXPECT_TRUE(contains(text, "changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointMovesTheVertexKeepingItsLevelAsOneUndoStep)
+{
+    // The plane z = 0.5 x + 0.25 y on a 4 x 4 grid: (2,2) is at 1.5, and moved to
+    // (3.5, 2.2) - across the ring of its own triangles - it stays at 1.5,
+    // where the plane there is 2.3. 25 vertices before and after, a vertex made
+    // and a vertex taken out; 32 triangles either way (a polygon of n corners
+    // round k points has n + 2k - 2).
+    putSurface(document, "ground",
+               gridSurface(4, 1.0, [](double x, double y) { return 0.5 * x + 0.25 * y; }));
+    const TinSurface before = surfaceOf(document, "ground");
+    const std::string text = reply("SURFACE EDIT ground MOVE POINT 2,2 TO 3.5,2.2");
+    EXPECT_TRUE(contains(text, "surface name=ground operation=move_point triangles_before=32 "
+                               "triangles_after=32 vertices_before=25 vertices_after=25 "
+                               "points_added=1 points_removed=1"))
+        << text;
+    EXPECT_TRUE(contains(text, " moved=1 ")) << text;
+    EXPECT_TRUE(contains(text, "changed=yes")) << text;
+    const TinSurface after = surfaceOf(document, "ground");
+    EXPECT_NEAR(after.planArea(), 16.0, 1e-9);
+    EXPECT_NEAR(*after.elevationAt(3.5, 2.2), 1.5, 1e-12);
+    EXPECT_EQ(document.history().undoName(), "SURFACE_EDIT_MOVE_POINT");
+
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground"), before);
+    ASSERT_TRUE(interpreter.run("REDO").ok());
+    EXPECT_NEAR(*surfaceOf(document, "ground").elevationAt(3.5, 2.2), 1.5, 1e-12);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointNamesTheVertexByItsReachAndPreviewsWithoutMovingIt)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    const auto generation = document.surfacesGeneration();
+    // (2.1, 2.1) is 0.14 from the vertex (2,2) and is where a click would land.
+    const std::string preview =
+        reply("SURFACE EDIT ground MOVE POINT 2.1,2.1 TO 2.4,1.7 reach=0.5 PREVIEW");
+    EXPECT_TRUE(contains(preview, " moved=1 ")) << preview;
+    EXPECT_TRUE(contains(preview, "changed=yes preview=yes")) << preview;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    reply("SURFACE EDIT ground MOVE POINT 2.1,2.1 TO 2.4,1.7 reach=0.5");
+    bool moved = false;
+    for (const auto& v : surfaceOf(document, "ground").vertices()) {
+        moved = moved || (v.x == 2.4 && v.y == 1.7);
+    }
+    EXPECT_TRUE(moved) << "a vertex at the target";
+    // A reach that finds no vertex, a negative one, a point off the surface.
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 1.5,0.2 TO 1.6,0.3 reach=0.01"),
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5,2.5 reach=-1"),
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 40,40 TO 2.5,2.5"), ErrorCode::InvalidArgument);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointIsRefusedWhereTheVertexOrTheTargetCannotBeAndSaysWhy)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 7,4");
+    const auto generation = document.surfacesGeneration();
+    // A vertex of the breakline; a corner of the rim; a target off the surface.
+    auto onLine = interpreter.run("SURFACE EDIT ground MOVE POINT 4,4 TO 4.2,4.3");
+    ASSERT_FALSE(onLine.ok());
+    EXPECT_EQ(onLine.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(onLine.error().message, "breakline")) << onLine.error().message;
+    auto onRim = interpreter.run("SURFACE EDIT ground MOVE POINT 0,0 TO 0.3,0.2");
+    ASSERT_FALSE(onRim.ok());
+    EXPECT_EQ(onRim.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(onRim.error().message, "rim")) << onRim.error().message;
+    auto off = interpreter.run("SURFACE EDIT ground MOVE POINT 5,6 TO 50,60");
+    ASSERT_FALSE(off.ok());
+    EXPECT_EQ(off.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(off.error().message, "off the surface")) << off.error().message;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    // Clear the breakline and the vertex moves.
+    reply("SURFACE EDIT ground DELETE BREAKLINE 1,4 7,4");
+    reply("SURFACE EDIT ground MOVE POINT 4,4 TO 4.2,4.3");
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 100.0, 1e-9);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointNeedsItsWordsAndAnXyTarget)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE 2,2 TO 2.5,2.5"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5"), ErrorCode::ParseFailure);
+    // A level on the target would be a change of level, which is RAISE's and ADD POINT's.
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5,2.5,9"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5,2.5 extra"), ErrorCode::ParseFailure);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointByLessThanTheToleranceIsNoMoveAndNoStep)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground MOVE POINT 2,2 TO 2.00000005,2");
     EXPECT_TRUE(contains(text, "changed=no")) << text;
     EXPECT_EQ(document.surfacesGeneration(), generation);
 }

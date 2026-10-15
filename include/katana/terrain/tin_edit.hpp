@@ -72,7 +72,9 @@ struct TinEditReport {
     // level to (ADD POINT on an existing vertex, a 3D breakline through one,
     // the seam of a paste).
     std::size_t pointsRelevelled = 0;
-    // Vertices whose level a height edit or smoothing changed.
+    // Vertices whose level a height edit or smoothing changed, or that
+    // movePoint moved in plan (the vertex it makes is a new one, so that edit
+    // also counts one added and one removed).
     std::size_t pointsMoved = 0;
     // Vertices an edit left alone on purpose: on a breakline or the rim
     // (smoothing, deleting points inside a polygon).
@@ -171,6 +173,29 @@ deletePoints(const TinSurface& surface, std::span<const std::uint32_t> vertices,
              HeldPointRule held = HeldPointRule::Refuse);
 
 // ---- changing the triangulation --------------------------------------------------------
+
+// The vertex moved in plan to `target`, keeping its level: the triangles round
+// the old position and round the new one are rebuilt as ONE patch (the vertex
+// taken out and a point put in, by the one constrained Delaunay kernel, inside
+// the ring of edges round both), so the result is a valid surface whatever the
+// distance moved - a vertex taken across a neighbouring edge is not dragged
+// through it, the triangles that would have folded are not there to fold - and
+// the rest of the surface is the same triangles. A target within
+// tolerance::kGeometric of the vertex's own position is no move: the surface as
+// it was. Fails with
+//   InvalidArgument  a vertex out of range or in no triangle, a target that is
+//                    not finite or is beyond kMostMagnitude;
+//   InvalidGeometry  the vertex is at an end of a constrained edge (a breakline
+//                    or boundary: DELETE BREAKLINE first), or on the rim or
+//                    the edge of a hole (the footprint is not moved by a vertex;
+//                    BOUNDARY and HOLE reshape it), the target is off the
+//                    surface (ADD POINT extends it) or within kGeometric of
+//                    another vertex;
+//   TriangulationFailure  from the kernel.
+// The report counts the vertex as moved (one) and, since the vertex made is a
+// new one, as one added and one removed.
+[[nodiscard]] katana::core::Result<TinEditResult>
+movePoint(const TinSurface& surface, std::uint32_t vertex, const Point2& target);
 
 // The edge swapped for the other diagonal of the quadrilateral its two
 // triangles make. Fails with

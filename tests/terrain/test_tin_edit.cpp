@@ -1942,3 +1942,161 @@ TEST(TinEdit, DeletingABreaklineNeedsALineWithLengthAndFiniteCoordinates)
                   .error().code,
               ErrorCode::InvalidArgument);
 }
+
+// ---- moving a point ----------------------------------------------------------------------------
+
+namespace {
+
+// The plane z = 0.5 x + 0.25 y on a 4 x 4 grid of unit cells: (2,2) is at 1.5.
+TinSurface plane4()
+{
+    return grid(4, 1.0, [](double x, double y) { return 0.5 * x + 0.25 * y; });
+}
+
+} // namespace
+
+TEST(TinEdit, AMovedVertexKeepsItsLevelAndTheFootprintWhereverItIsTaken)
+{
+    // The vertex (2,2) of the plane, at 1.5, taken to six places: inside its own
+    // star (the hexagon (3,2) (3,3) (2,3) (1,2) (1,1) (2,1)), across the ring
+    // onto a triangle beyond it, onto the ring edge x = 3, onto the diagonal it
+    // is an end of, two cells away, and to the diagonal of a corner cell. In
+    // each the surface is still [0,4]^2 - the area 16, no triangle overlapping
+    // another or folded (TinSurface::create refuses a clockwise one, and the
+    // areas of triangles that overlapped would sum to more than 16) - with the
+    // same 25 vertices, the moved one at its old level (1.5), not the plane's
+    // there, and every other vertex where it was.
+    const TinSurface ground = plane4();
+    const int vertex = vertexIndex(ground, 2, 2);
+    ASSERT_GE(vertex, 0);
+    for (const Point2& target : {Point2(2.4, 1.7), Point2(3.5, 2.2), Point2(3.0, 2.5),
+                                 Point2(2.5, 2.5), Point2(0.5, 0.2), Point2(3.9, 3.9)}) {
+        SCOPED_TRACE(testing::Message() << "to (" << target.x << ", " << target.y << ")");
+        const auto moved = katana::terrain::movePoint(ground, static_cast<std::uint32_t>(vertex), target);
+        ASSERT_TRUE(moved.ok()) << moved.error().describe();
+        const TinSurface& after = moved->surface;
+        EXPECT_NEAR(after.planArea(), 16.0, 1e-9);
+        EXPECT_EQ(after.vertexCount(), ground.vertexCount());
+        EXPECT_EQ(after.triangleCount(), ground.triangleCount())
+            << "a polygon of n corners round k points has n + 2k - 2 triangles whoever joins them";
+        EXPECT_EQ(vertexIndex(after, 2, 2), -1);
+        const int at = vertexIndex(after, target.x, target.y);
+        ASSERT_GE(at, 0);
+        EXPECT_DOUBLE_EQ(after.vertices()[static_cast<std::size_t>(at)].z, 1.5);
+        EXPECT_NEAR(*after.elevationAt(target.x, target.y), 1.5, 1e-12);
+        for (std::size_t other = 0; other < ground.vertexCount(); ++other) {
+            if (other != static_cast<std::size_t>(vertex)) {
+                EXPECT_GE(vertexIndex(after, ground.vertices()[other].x, ground.vertices()[other].y), 0)
+                    << "vertex " << other;
+            }
+        }
+        // The report: one vertex made, one taken out, one moved.
+        EXPECT_EQ(moved->report.pointsAdded, 1u);
+        EXPECT_EQ(moved->report.pointsRemoved, 1u);
+        EXPECT_EQ(moved->report.pointsMoved, 1u);
+        EXPECT_EQ(moved->report.verticesBefore, moved->report.verticesAfter);
+    }
+}
+
+TEST(TinEdit, AVertexMovedAcrossABreaklineLeavesTheBreaklineWhereItWas)
+{
+    // The row y = 4 from x = 1 to 7 is a breakline of six edges. The vertex
+    // (4,5) above it is taken to (4.2, 3.6), below it: the breakline stays six
+    // edges of one metre, and the ground its 100 m2.
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    ASSERT_NEAR(constrainedLength(before), 6.0, 1e-9);
+    const int vertex = vertexIndex(before, 4, 5);
+    ASSERT_GE(vertex, 0);
+    const auto moved =
+        katana::terrain::movePoint(before, static_cast<std::uint32_t>(vertex), Point2(4.2, 3.6));
+    ASSERT_TRUE(moved.ok()) << moved.error().describe();
+    EXPECT_NEAR(constrainedLength(moved->surface), 6.0, 1e-9);
+    EXPECT_NEAR(moved->surface.planArea(), 100.0, 1e-9);
+    EXPECT_EQ(vertexIndex(moved->surface, 4, 5), -1);
+    EXPECT_GE(vertexIndex(moved->surface, 4.2, 3.6), 0);
+}
+
+TEST(TinEdit, AVertexCannotBeMovedFromABreaklineTheRimOrAHoleAndTheRefusalSaysWhich)
+{
+    const auto refusal = [](const TinSurface& surface, double x, double y, const Point2& target) {
+        const int vertex = vertexIndex(surface, x, y);
+        EXPECT_GE(vertex, 0);
+        return katana::terrain::movePoint(surface, static_cast<std::uint32_t>(vertex), target);
+    };
+    // On a breakline: the vertex (4,4) of the row y = 4; and once the line is
+    // deleted, it moves.
+    const TinSurface lined = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    const auto onLine = refusal(lined, 4, 4, Point2(4.2, 4.3));
+    ASSERT_FALSE(onLine.ok());
+    EXPECT_EQ(onLine.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(onLine.error().message.find("breakline"), std::string::npos) << onLine.error().message;
+    EXPECT_NE(onLine.error().message.find("DELETE BREAKLINE"), std::string::npos);
+    const auto cleared = katana::terrain::deleteBreaklines(
+        lined, std::vector<Polyline2>{openLine({Point2(0, 4), Point2(8, 4)})});
+    ASSERT_TRUE(cleared.ok());
+    EXPECT_TRUE(refusal(cleared->surface, 4, 4, Point2(4.2, 4.3)).ok());
+
+    // On the rim: the corner (0,0); and one between corners, (2,0).
+    const TinSurface ground = flatGrid(4, 1.0);
+    for (const Point2& rim : {Point2(0, 0), Point2(2, 0)}) {
+        const auto onRim = refusal(ground, rim.x, rim.y, Point2(1.2, 1.3));
+        ASSERT_FALSE(onRim.ok()) << rim.x << ", " << rim.y;
+        EXPECT_EQ(onRim.error().code, ErrorCode::InvalidGeometry);
+        EXPECT_NE(onRim.error().message.find("rim"), std::string::npos) << onRim.error().message;
+    }
+    // On the edge of a hole: (3,3), a corner of [3,6] x [3,7] cut from the grid.
+    const auto holed = katana::terrain::cutHole(flatGrid(10, 1.0), rectangle(3, 3, 6, 7));
+    ASSERT_TRUE(holed.ok());
+    const auto onHole = refusal(holed->surface, 3, 3, Point2(2.2, 2.3));
+    ASSERT_FALSE(onHole.ok());
+    EXPECT_EQ(onHole.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(onHole.error().message.find("hole"), std::string::npos) << onHole.error().message;
+}
+
+TEST(TinEdit, AVertexCannotBeMovedOffTheSurfaceOntoAnotherVertexOrWithoutAFiniteTarget)
+{
+    const TinSurface ground = plane4();
+    const auto vertex = static_cast<std::uint32_t>(vertexIndex(ground, 2, 2));
+    const auto off = katana::terrain::movePoint(ground, vertex, Point2(9, 9));
+    ASSERT_FALSE(off.ok());
+    EXPECT_EQ(off.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(off.error().message.find("off the surface"), std::string::npos) << off.error().message;
+    // Within the coincidence tolerance (1e-7) of the vertex (3,3): 5e-8 off it.
+    const auto onto = katana::terrain::movePoint(ground, vertex, Point2(3.0, 3.00000005));
+    ASSERT_FALSE(onto.ok());
+    EXPECT_EQ(onto.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(onto.error().message.find("another vertex"), std::string::npos) << onto.error().message;
+    // 2e-7 off it is clear of it.
+    EXPECT_TRUE(katana::terrain::movePoint(ground, vertex, Point2(3.0, 3.0000002)).ok());
+    EXPECT_EQ(katana::terrain::movePoint(ground, vertex,
+                                         Point2(std::numeric_limits<double>::quiet_NaN(), 2))
+                  .error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::movePoint(ground, vertex, Point2(1e12, 2)).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::movePoint(ground, 999, Point2(2.5, 2.5)).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::movePoint(TinSurface{}, 0, Point2(2.5, 2.5)).error().code,
+              ErrorCode::InvalidArgument);
+    // A vertex no triangle uses is nothing to move.
+    const TinSurface loose = make({Point3(0, 0, 0), Point3(10, 0, 0), Point3(10, 10, 0),
+                                   Point3(0, 10, 0), Point3(5, 5, 7)},
+                                  {{0, 1, 2}, {0, 2, 3}});
+    const auto unused = katana::terrain::movePoint(loose, 4, Point2(6, 6));
+    ASSERT_FALSE(unused.ok());
+    EXPECT_EQ(unused.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TinEdit, AMoveOfLessThanTheCoincidenceToleranceIsNoMove)
+{
+    const TinSurface ground = plane4();
+    const auto vertex = static_cast<std::uint32_t>(vertexIndex(ground, 2, 2));
+    const auto stayed = katana::terrain::movePoint(ground, vertex, Point2(2.00000005, 2.0));
+    ASSERT_TRUE(stayed.ok()) << stayed.error().describe();
+    EXPECT_EQ(stayed->surface, ground) << "the surface as it was, not a copy rebuilt";
+    EXPECT_EQ(stayed->report.pointsMoved, 0u);
+    // And the same place exactly.
+    const auto same = katana::terrain::movePoint(ground, vertex, Point2(2.0, 2.0));
+    ASSERT_TRUE(same.ok());
+    EXPECT_EQ(same->surface, ground);
+}

@@ -13,7 +13,7 @@ saved, undone, styled - are `docs/terrain.md`'s.
 |---|---|---|
 | terrain | `include/katana/terrain/tin_edit.hpp`, `src/katana_terrain/tin_edit.cpp`, `tin_patch.*`, `tin_thin.cpp` | pure functions: a surface in, a NEW surface or a refusal out |
 | cad | `include/katana/cad/terrain/surface_edit_verbs.hpp`, `src/katana_cad/terrain/surface_edit_verbs.cpp` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
-| cad | `src/katana_cad/tools/terrain_edit.cpp` | eight catalogue tools, category Terrain, each running the verb |
+| cad | `src/katana_cad/tools/terrain_edit.cpp` | nine catalogue tools, category Terrain, each running the verb |
 | qt | `src/katana_qt/terrain/surface_edit_ui.*`, `surface_edit_dialogs.*`, `src/katana_qt/tools/icons_terrain.cpp` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
 
 The verbs (`HELP SURFACE EDIT` prints them all):
@@ -23,6 +23,7 @@ SURFACE EDIT <name> DELETE TRIANGLE x,y | DELETE TRIANGLES INSIDE|OUTSIDE <polyg
                     DELETE LONG <length> | DELETE THIN <degrees>
                     DELETE POINT x,y [reach=<m>] | DELETE POINTS INSIDE <polygon>
                     DELETE BREAKLINE <line>
+                    MOVE POINT x,y TO x2,y2 [reach=<m>]
                     FLIP x,y
                     ADD POINT x,y,z [x,y,z ...] | ADD POINTS <points>
                     BREAKLINE <line>
@@ -294,6 +295,34 @@ triangles, they do not reshape them.
   breakline it came from, since that vertex is a vertex of the surface); and a
   catalogue tool that picks one polyline - the Terrain menu's dialog takes the
   lines by the shared scope, which a click on one entity cannot say.
+- **MOVE POINT moves a vertex in plan as ONE patch** (`terrain::movePoint`).
+  `MOVE POINT x,y TO x2,y2` names the vertex as DELETE POINT does (the corner of
+  the triangle under `x,y` nearest it, or with `reach=` the nearest vertex within
+  it) and puts it at `x2,y2` at its own level: the target is `x,y` only, since a
+  level on it would be a change of level, which RAISE and ADD POINT make. The
+  triangles round the old position and round the new one are rebuilt together -
+  the vertex taken out of the patch's region and a point put in, by the same
+  kernel and inside the same ring of edges as every other edit - so there is no
+  triangle left to fold: a vertex taken across a neighbouring edge, or two cells
+  away, comes out as a valid surface of the same footprint, and the vertex
+  count, the triangle count (a polygon of n corners round k points has n + 2k - 2
+  triangles, whoever joins them) and every other vertex are as they were. It is
+  one undo step, not a DELETE POINT and an ADD POINT, which would be two. The
+  report counts the vertex made as one added and the one taken out as one
+  removed, and `moved=1`. *Refused*, each with its cause: a vertex at an end of a
+  constrained edge (a breakline or boundary: DELETE BREAKLINE first, or the
+  triangles round it deleted), a vertex on the rim or on the edge of a hole, a
+  target off the surface (ADD POINT extends it; a move does not), a target within
+  `tolerance::kGeometric` of another vertex. A move of less than that tolerance
+  is no move: the surface as it was, `changed=no`. The rim is refused before the
+  breakline, since a boundary or hole makes its rim edges constrained and
+  "clear the breakline" would send a person after an edge DELETE BREAKLINE never
+  clears. *Rejected:* moving a rim vertex (it reshapes the footprint, which
+  BOUNDARY and HOLE do on purpose and a drag should not, and the brief did not ask
+  for it); dragging the vertex and keeping its neighbours (a vertex taken
+  across the ring of its star folds the triangles round it, and the check for that
+  is a second implementation of what the kernel decides exactly); the target's
+  level from the surface there (the person moves a point, not its level).
 - **A point at an existing vertex gives it its level**, and no triangle
   changes (`relevelled=`). That is what a surveyor means by "the ground is
   here, at this level". Two points at one position with levels more than
@@ -442,12 +471,12 @@ triangles, they do not reshape them.
 
 ## In the window
 
-Terrain > **Edit Surface** (`terrainEditMenu`) holds the eight tools - Delete
-Triangle, Flip Edge, Add Point, Delete Point, Delete Triangles Inside, Add
-Breakline, Boundary, Hole - and below them Raise, Lower or Set Level...
+Terrain > **Edit Surface** (`terrainEditMenu`) holds the nine tools - Delete
+Triangle, Flip Edge, Add Point, Delete Point, Move Point, Delete Triangles
+Inside, Add Breakline, Boundary, Hole - and below them Raise, Lower or Set Level...
 (`surfaceHeightsDialog`), Smooth... (`surfaceSmoothDialog`), Thin...
 (`surfaceThinDialog`), Delete Long Triangles... (`surfaceDeleteLongDialog`),
-and the three that take the drawing's data by a scope, which a click on one
+and the four that take the drawing's data by a scope, which a click on one
 entity cannot say: Delete Points Inside Polygons... (`surfaceDeletePointsDialog`,
 `DELETE POINTS INSIDE FROM <scope>`), Delete Triangles by Polygons...
 (`surfaceDeleteTrianglesDialog`, `DELETE TRIANGLES INSIDE|OUTSIDE FROM <scope>`:
@@ -467,8 +496,9 @@ on the second row after Terrain) has them all, and at its head the active
 surface (`surfaceEditActive`).
 
 - **The tools are catalogue tools** (category Terrain, group Surface Edit,
-  aliases `TINDELTRI`, `TINFLIP`, `TINADDPT`, `TINDELPT`, `TINDELIN`,
-  `TINBRK`, `TINBOUNDARY`, `TINHOLE`), so the menu and toolbar are filled by
+  aliases `TINDELTRI`, `TINFLIP`, `TINADDPT`, `TINDELPT`, `TINMOVPT`,
+  `TINDELIN`, `TINBRK`, `TINBOUNDARY`, `TINHOLE`), so the menu and toolbar are
+  filled by
   `tools::fillToolMenus`, the window handing it this submenu and toolbar as
   the Terrain category's. Each turns what it was told into the SURFACE EDIT
   line a person would type, plans it with the verb's own `planSurfaceEdit`
@@ -496,6 +526,16 @@ surface (`surfaceEditActive`).
   click a hair outside a rim corner finds the corner (it was refused as "no
   vertex within reach" while one was 0.07 m away); a click off the surface with
   nothing within reach says it is off the surface. **Delete Triangles Inside** takes O for outside.
+  **Move Point** takes two clicks: the vertex (the same reach; one the verb
+  would refuse - a rim vertex, the end of a breakline or boundary edge - is
+  refused at this click, before a target is asked for) and then where it goes.
+  Between them the prompt says which vertex is held (`lastPoint`, for the
+  rubber band), the preview marks the vertex where it is (Removed) and where
+  the cursor would put it (Added), and says in red that a cursor off the surface
+  is refused; a target the verb refuses (off the surface, on another vertex)
+  leaves the vertex held for another click, and Undo or Enter lets it go. The
+  line is `SURFACE EDIT <s> MOVE POINT <vertex's own coordinates> TO x,y`, so no
+  reach decides which vertex it is on the second click.
 - **The previews** mark what a click would take - the triangle (Removed),
   the edge (Target), the vertex with its level - and say in red why a click
   would be refused: off the surface, an edge on the rim, a breakline. Delete
@@ -582,6 +622,13 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   (beyond the tolerance, 1e-7: nothing; 5e-8 above: all six), a closed line's
   closing side, several lines, the constrained rim held and counted, and every
   refusal.
+- Moving a vertex: `TinEdit.AMovedVertexKeepsItsLevelAndTheFootprintWhereverItIsTaken`
+  (the vertex (2,2) of a plane at 1.5 taken to six places - inside its own star,
+  across the ring of it onto a triangle beyond, onto the ring edge, onto the
+  diagonal it is an end of, two cells away, onto a corner cell's diagonal - each
+  leaving the area 16, the 25 vertices and 32 triangles, every other vertex where
+  it was and the moved one at 1.5 and not the plane's there), a vertex taken
+  across a breakline leaving it as long as it was, and every refusal.
 - `tests/cad/terrain/test_surface_edit_verbs.cpp`: the verbs through the
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
   refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`;
@@ -654,7 +701,10 @@ are measured on one machine in one run.
   one undo step (the surface handed to the job as the shared immutable pointer
   it already is, and `Document::surfacesCommand` built where it lands), which
   is a change of the window's executor and not of this area.
-- **Moving a vertex in plan**, and editing a vertex's level by dragging in
-  the window: only ADD POINT at an existing vertex relevels it.
+- **Editing a vertex's level by dragging it in the window**: only ADD POINT at
+  an existing vertex relevels it. (Moving a vertex in plan is MOVE POINT.)
+- **Moving a rim vertex**, or the end of a breakline, is refused (above); a
+  person reshapes the footprint with BOUNDARY and HOLE and a breakline with
+  DELETE BREAKLINE and BREAKLINE.
 - **A DELETE LONG that works from the rim inwards**, as some packages trim a
   convex hull, is not offered; BOUNDARY does the same job exactly.

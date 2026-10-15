@@ -190,8 +190,8 @@ dialogs, not catalogue tools.
 
 **Terrain > Edit Surface** (`terrain_edit.cpp`, 2026-10-15) is the first
 family of another category, Terrain: Delete Triangle, Flip Edge, Add Point,
-Delete Point, Delete Triangles Inside, Add Breakline, Boundary and Hole, each
-acting on the active surface. The window hands `tools::fillToolMenus` the
+Delete Point, Move Point, Delete Triangles Inside, Add Breakline, Boundary and
+Hole, each acting on the active surface. The window hands `tools::fillToolMenus` the
 Edit Surface submenu and the Surface Edit toolbar as the category's targets,
 so the category gets no menu of its own. A tool does not edit the surface: it
 writes the `SURFACE EDIT` line, plans it with the verb's own planner and

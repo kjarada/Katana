@@ -493,7 +493,8 @@ TEST(SurfaceEditUi, TheSubmenuToolbarAndDialogItemsAreNamedAndTheToolsFillThem)
     }
     for (const char* name :
          {"terrain.edit.deletetriangle", "terrain.edit.flip", "terrain.edit.addpoint",
-          "terrain.edit.deletepoint", "terrain.edit.deleteinside", "terrain.edit.breakline",
+          "terrain.edit.deletepoint", "terrain.edit.movepoint", "terrain.edit.deleteinside",
+          "terrain.edit.breakline",
           "terrain.edit.boundary", "terrain.edit.hole", "terrainSurfaceHeights",
           "terrainSurfaceSmooth", "terrainSurfaceThin", "terrainSurfaceDeleteLong",
           "terrainSurfaceDeletePoints", "terrainSurfaceDeleteTriangles",
