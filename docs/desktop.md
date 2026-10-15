@@ -839,7 +839,7 @@ Vertex's icon, a plus on a polyline: the wrong tool, even the opposite one,
 named by the one sign the toolbar has for a tool running. Rejected: that
 frame; the running tool's icon on the button while it runs - the icon would
 name one tool while a click starts another; and the last tool chosen
-becoming the button's own ("Not done", below). The families are behind the
+becoming the button's own ("Decided", below). The families are behind the
 Draw toolbar's overflow arrow at the window's first size, and a tool running
 behind that arrow lights it (below).
 
@@ -1043,10 +1043,15 @@ starts), `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_h
 and `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless`
 (after View > Toolbars > Large Icons, with Delete Vertex running).
 
-Not done: a family button does not remember the tool last chosen from it, as
-some CAD programs' flyouts do - that changes what a click does and wants its
-own decision; and the mark is not mirrored for a right-to-left layout, which
-the window does not use.
+Decided, 2026-10-15: a family button does not remember the tool last chosen
+from it, as some CAD programs' flyouts do. A click on it runs the family's FIRST
+tool, always, so a person who has learned where Circle is has learned what it
+does; a button that remembered would run one tool today and another tomorrow,
+and its icon - the default action's - would change with it, so the toolbar would
+not look the same from one session to the next, which `--check-toolbars` and every
+screenshot assume. It is a feature with a decision of the owner's in it (and a
+setting to turn it off), not a defect, so it stays as it is. The mark is not
+mirrored for a right-to-left layout, which the window does not use.
 
 **Every key reaches one thing.** `MainWindow::shortcutClashes` gathers every
 key a person can press - each action's key sequences, any `QShortcut`, each
@@ -1531,12 +1536,10 @@ from the checked Link's frame: the optional zoom tools keep `kTitleGap` (6
 px) clear of the title, and the tools always shown do not. Letting the
 Link drop off a narrow bar as the zoom tools do was rejected for now: the
 checked Link is what says a view is linked, and a linked view would not show
-it. The Layers popup's layer rows still set the view's layers directly
-rather than run `VIEWS HIDE` and `SHOW`: `VIEWS HIDE` reads a comma as a
-list separator, and a layer name may hold one, so a line cannot name every
-layer the popup lists - the scope widget refuses to build a line for such a
-layer, which a row the person clicked cannot do - until the verb takes one
-quoted name.
+it. Assessed again 2026-10-15 and left: linking a 3D or elevation view is a
+change to both renderers' camera units, not a small one. The Layers popup runs
+`VIEWS HIDE`, `SHOW` and `ISOLATE` for its rows now ("Per-view layers
+extend THE visibility rule", above).
 
 ### The selection in every view
 
@@ -1775,8 +1778,11 @@ each test shown failing without its fix. Not yet tested outside a
 hand-run harness, because `MainWindow` cannot be built into the widget test
 target: the four panels' bars, their exact minimise and restore, F9 from a
 floating panel, floating maximise across two screens. Not done: a Window
-menu; saving and restoring the layout (`minimisedNames` and `minimiseNamed`
-are the hooks, and `unmaximiseAll` must run before `saveState`); a floating
+menu; keeping the VIEWS between sessions - the panels' places and which are
+minimised ARE kept (`MainWindow::saveSession` and `restoreLayout`, with
+`minimisedNames` and `minimiseNamed`), and `MainWindow::saveState` does not see
+the views' docks, which are the workspace's own window's, so a maximised view
+needs no `unmaximiseAll` before it; a layout that kept the views would; a floating
 active view left minimised during an arrange stays hidden and active, since
 only the tray button (`DockChrome::restore`) raises `onRestored`. The Survey
 Point Manager dock (`SurveyPointsDock`) wears the chrome now that
