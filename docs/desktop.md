@@ -248,6 +248,18 @@ File had seventeen top-level items and has fifteen.
   File's own items do (`MainWindow::refuseFileDialog`), each naming the words
   of `IMPORT` that are its kind of data's, and `INFO <file>`
   (`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`).
+- **Open Project and Save As never start in the working folder.** Qt does when
+  it is given no folder or a bare name, and the working folder is the
+  program's own `bin\` for a zip copy (Explorer starts a double-clicked exe in
+  its folder) and the install folder, hidden under `%LOCALAPPDATA%`, for the
+  installed one: the first project was proposed as `bin\untitled.katana`, and
+  removing a zip copy, which is deleting its folder, deleted the project with
+  it. The dialogs start in the folder the open project is in,
+  else the one the last project was opened or saved in (the `files/projectFolder`
+  setting, written by a window a person used and never by a headless run), else
+  Documents, else the home folder (`katana::qt::projectDialogFolder`,
+  `ProjectFolder.TheOpenProjectsFolderComesFirstThenTheLastOneThenDocuments`);
+  Plot to PDF and the Sheet Set menu already started in Documents.
 
 `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`
 reads the three menus whole, item by item in this order, with Survey's last
