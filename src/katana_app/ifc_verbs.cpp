@@ -77,17 +77,13 @@ bool exportIfc(const katana::cad::Document& document, const katana::ifc::ExportA
     if (arguments.entities || arguments.alignments) {
         input.model = &document.model();
     }
-    // ---- the drawing's surfaces (docs/terrain.md), hidden ones too: hiding
-    // is a matter of the picture, and the window's export takes them all ----
-    if (arguments.surfaces) {
-        for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
-            input.surfaces.push_back({named.name, named.surface.get()});
-        }
-    }
     input.utilities = std::move(files->utilities);
+    // ---- the drawing's surfaces (docs/terrain.md), hidden ones too: hiding
+    // is a matter of the picture, and the window's export takes them all -
+    // what a road model's cut voids, when it names one. Once: two tasks each
+    // wrote this loop, and the merge kept both, so every surface went out
+    // twice (cli.ifc_export_writes_each_surface_of_the_drawing_once).
     if (arguments.surfaces) {
-        // The drawing's surfaces (Document::surfaces), as the window writes
-        // its own: what a road model's cut voids, when it names one.
         for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
             if (named.surface != nullptr) {
                 input.surfaces.push_back({named.name, named.surface.get()});

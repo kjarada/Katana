@@ -54,3 +54,23 @@ add_test(NAME cli.the_default_surface_style_is_not_deleted
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "SURFACESTYLE DELETE Standard")
 set_tests_properties(cli.the_default_surface_style_is_not_deleted PROPERTIES WILL_FAIL TRUE)
+
+# EXPORT to IFC writes each of the drawing's surfaces once: two surfaces, two
+# terrain elements. Two tasks each wrote the export's loop over the drawing's
+# surfaces and the merge kept both, so every surface went out twice and the
+# reply said surfaces=4 here.
+set(_surfaces_once_ifc "${CMAKE_CURRENT_BINARY_DIR}/cli-surfaces-once.ifc")
+add_test(NAME cli.ifc_export_of_surfaces_cleanup
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${_surfaces_once_ifc}")
+add_test(NAME cli.ifc_export_writes_each_surface_of_the_drawing_once
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_surface_document_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE COPY ground copy"
+            -c "EXPORT \"${_surfaces_once_ifc}\"")
+set_tests_properties(cli.ifc_export_of_surfaces_cleanup PROPERTIES
+    FIXTURES_SETUP cli_surfaces_once_clean)
+set_tests_properties(cli.ifc_export_writes_each_surface_of_the_drawing_once PROPERTIES
+    FIXTURES_REQUIRED cli_surfaces_once_clean
+    PASS_REGULAR_EXPRESSION "counts [^\r\n]* surfaces=2[\r\n].*class name=IfcGeographicElement count=2[\r\n]"
+    FAIL_REGULAR_EXPRESSION "error")

@@ -439,6 +439,15 @@ class, layer, quantities and properties, and every problem
 
 ## Not done
 
+- **An earthworks solid with no thickness along a stretch goes to IFC open.**
+  Where cut gives way to fill, or the formation meets the ground, the
+  solid's faces there have no area: the mesh is closed, but the IFC writer
+  drops a face of no area (docs/ifc.md, "Road model"), which leaves its
+  neighbours' edges used once, and it writes the solid as an open face set
+  with a warning. On the sample terrain (`samples/gis/terrain.asc`, the
+  rural two-lane template along a 150 m alignment) that was all four
+  earthworks solids of sixteen objects; every course was closed. The solid
+  should be split where its thickness is zero, into closed pieces.
 - Superelevation by design speed and radius: the table is entered by hand.
 - Shoulder rollover on the high side of a superelevated section: a
   superelevated shoulder takes the lane's crossfall.
