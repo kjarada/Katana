@@ -119,6 +119,13 @@ struct StockpileOptions {
     // vertices, when it has one (a 3D string surveyed along the toe). Used
     // only when every vertex has one; otherwise ignored for the surface's.
     std::vector<std::optional<double>> boundaryHeights{};
+    // Rings inside the boundary that are not part of the pile (a tagged hole
+    // of the toe's polygon): nothing inside them is measured, their edges are
+    // boundaries like the outer ring's for the lowest point, and a Boundary
+    // base is made round them - at the surface's heights, a hole having no
+    // heights of its own - and not across them. Any orientation; the first
+    // vertex may be repeated at the end.
+    std::vector<katana::geometry::Polyline2> holes{};
 };
 
 struct StockpileVolume {
@@ -136,9 +143,10 @@ struct StockpileVolume {
 };
 
 // Fails with InvalidArgument for an empty surface or a non-finite level;
-// InvalidGeometry for a boundary that is no polygon (OverlayRegion::fromPolygon),
-// a Boundary base whose boundary has a vertex off the surface and no height of
-// its own (naming the vertex: absent is not zero), and a Lowest base whose
+// InvalidGeometry for a boundary that is no polygon, or holes that do not lie
+// in it (OverlayRegion::fromPolygon), a Boundary base whose boundary has a
+// vertex off the surface and no height of its own, or a hole with a vertex off
+// the surface (naming the vertex: absent is not zero), and a Lowest base whose
 // boundary never crosses the surface.
 [[nodiscard]] katana::core::Result<StockpileVolume>
 stockpileVolume(const TinSurface& surface, const katana::geometry::Polyline2& boundary,

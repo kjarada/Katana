@@ -25,7 +25,7 @@ VOLUME DATUM <surface> <level> [INSIDE <polygon> [EACH]] [bulk=] [shrink=] [csv=
 VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH]
        [bulk=] [shrink=] [csv=]
 VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=] [right=]
-       [method=endarea|prismoidal|both] [bulk=] [shrink=] [csv=]
+       [method=endarea|prismoidal|both] [curvature=on|off] [bulk=] [shrink=] [csv=]
 VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
 SURFACE DIFFERENCE <base> <top> [NAME <new>] [PREVIEW]
 SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
@@ -61,9 +61,14 @@ volume method=exact base=ground top=design cut=12.345 fill=100.000 net=87.655 ar
 
 With polygons, first what the scope took (`boundary scope= ... matched=`,
 the shared scope record), then
-`polygons used= skipped.open= skipped.other=`, then with EACH one `polygon
-index= entity= polygon.area= ...` record per polygon (`chorded=yes` when an
-arc was chorded), then the total with `polygons=` and `polygon.area=`.
+`polygons used= holes= skipped.open= skipped.other=` (`holes=` the rings tagged
+as holes that joined the polygon they lie in, and so are no polygon of their own
+and not in `used=`; a `warning holes.alone=` record follows when some lie in no
+polygon of the scope), then with EACH one `polygon
+index= entity= polygon.area= ...` record per polygon (`holes=` when it has
+some, `polygon.area=` already less them; `chorded=yes` when an arc, a circle,
+an ellipse or a spline was chorded), then the total with `polygons=` and
+`polygon.area=`.
 `area=` is always the plan area measured - where both surfaces (or the
 surface and the polygon) have ground - and `polygon.area=` the polygons'
 own, so a polygon reaching off a surface shows it. A stockpile adds what it
@@ -75,8 +80,13 @@ every polygon says the same, which one polygon always does (two polygons that
 found different levels have no one `lowest=`, and EACH gives each). SECTIONS gives one
 `section station= [key=yes] cut.area= fill.area= width=` record per section,
 each after the first with its panel's `cut= fill=`, the running `cut.total=
-fill.total=` and the mass haul ordinate `mass=`, then one `volume
-method=endarea` and/or `volume method=prismoidal` total.
+fill.total=` and the mass haul ordinate `mass=` (and, on a panel that lies on a
+curve, `radius= turn=left|right curvature.cut= curvature.fill=`: its radius at
+the middle, and what the curvature correction below moved its volumes by), then
+one `volume method=endarea` and/or `volume method=prismoidal` total, each
+saying `curvature=on|off` and, when on, `curvature.cut= curvature.fill=` - what
+the correction moved that total by, signed, so a figure that differs from the
+plain end area says by how much.
 
 **What changes.** The VOLUME forms change nothing. `csv=<file>` writes the
 quantities as a table (RFC 4180: CRLF, a field with a comma or quote quoted),
@@ -94,7 +104,9 @@ per section: the section's areas and its panel's volumes, running totals and
 mass ordinate, then `method` (endarea, prismoidal or both - with
 `method=prismoidal` the plain `cut`, `fill`, `cut_total`, `fill_total` and
 `mass` columns hold the prismoidal volumes, which only this column tells from
-an end-area file, and `both` adds the `*_prismoidal` columns), `base, top,
+an end-area file, and `both` adds the `*_prismoidal` columns), `curvature` (`on`
+or `off`: whether the volumes carry the curvature correction, which only this
+column tells a file made one way from one made the other), `base, top,
 alignment, interval, left, right`, and `bulk, shrink` when given. The totals
 are the last row's running totals; the prismoidal correction is the difference
 of the two sets of columns under `both`. Rejected: appending the totals as rows
@@ -115,9 +127,10 @@ it inside (InvalidGeometry, naming each surface and the extent it covers,
 whether their boxes do not meet or meet over triangles that do not -
 `VolumeVerbs.ARefusalThatTwoSurfacesShareNoGroundNamesWhatEachCovers` runs
 every form; SECTIONS also when no section of the range reaches ground both
-have); sections that cross one another (InvalidArgument, below); an `#id` that is
-no polygon - not a closed polyline, curve polyline, circle or ellipse
-(InvalidGeometry, saying what it is); fewer than three typed corners; EACH
+have); sections that cross one another, or stretches of the alignment that run
+side by side (InvalidArgument, below); `curvature=` that is neither on nor off; an
+`#id` that is no polygon - not a closed polyline, curve polyline or spline, circle
+or ellipse (InvalidGeometry, saying what it is); fewer than three typed corners; EACH
 without INSIDE (and EACH on VOLUME GRID, which counts each cell once across
 all the polygons: the refusal names the forms that take it); a factor that is
 not more than 0; polygons that overlap without EACH (not for GRID). A scope
@@ -212,12 +225,61 @@ area, 2088.635 m3
   (`include/katana/cad/terrain/drawing_shapes.hpp`, which says what each kind
   of entity gives); `readVolumePolygons` only words its refusals. A closed
   polyline or curve polyline, one drawn back to its first vertex without
-  being closed, a circle and a full ellipse are polygons, each at its
-  heights; lines, arcs, elliptical arcs, open polylines and outlines of
-  fewer than three corners are counted as `skipped.open` (they bound no
-  area), and points, text and splines as `skipped.other`. An arc, a circle
-  and an ellipse are chorded within `geometry::kCurveChordTolerance` (1 mm
-  sagitta), and the record says `chorded=yes`.
+  being closed, a circle, a full ellipse and a closed spline are polygons,
+  each at its heights; lines, arcs, elliptical arcs, open polylines and
+  outlines of fewer than three corners are counted as `skipped.open` (they
+  bound no area), and points, text and splines that do not return to their
+  start as `skipped.other`. An arc, a circle, an ellipse and a spline are
+  chorded within `geometry::kCurveChordTolerance` (1 mm sagitta), and the
+  record says `chorded=yes`.
+- **A spline that returns to its start is a polygon.** `Spline2` has no closed
+  flag, so a spline whose end is within `kGeometric` (0.1 micrometre) of its
+  start (`Spline2::isClosedShape`) is a closed outline, flattened by
+  `Spline2::tessellate` within the same 1 mm sagitta as the circle and the
+  ellipse, its repeated end taken off, every corner at the entity's elevation
+  property when it has one (a spline holds no height of its own; the ellipse's
+  and the circle's are read the same way, so the three agree). One that does
+  not return to its start is no outline, `skipped.other` as it always was
+  (`DrawingShapes.AClosedSplineIsAPolygonChordedWithinTheToleranceAtTheEntitysElevation`,
+  `DrawingShapes.ASplineIsClosedWhenItsEndIsWithinTheGeometricToleranceOfItsStartAndNotOtherwise`,
+  `VolumeVerbs.ASplineDrawnBackToItsStartIsAVolumePolygonAndAnOpenOneIsCountedAsOther`).
+  A spline of 5e-8 between its ends is closed and one of 5e-7 is not. Rejected:
+  closing an open spline with a chord when its ends are near: a spline is not a
+  polyline that was meant to close, and a chord is a guess at the outline.
+  Because the reader is the surface edits' as well, SURFACE EDIT polygons take a
+  closed spline now too, by the rule of "One reader, the more capable rule".
+- **A lot with a hole.** The drawing has no polygon with a hole: a ring drawn
+  inside another is a polygon of its own (a building in a lot is not a hole in
+  the lot). A ring is a hole only when it says so - `source.ring=hole`, which
+  IMPORT writes into an entity's metadata, or `gis.ring=hole`, which a
+  geoprocessing result writes into its properties (`entity/ring_tags.hpp`) -
+  and then it joins the polygon it lies in, as the GIS conversion joins it
+  (`DrawingDataset.ATaggedHoleJoinsItsExterior`): the polygon whose part
+  (`source.part` or `gis.part`) it shares, else the smallest that holds every
+  vertex of it, else the one made nearest before it. The rule is one function,
+  `entity::HoleJoiner`, which the conversion (`interop::drawingDataset`) calls
+  as well, so a lot with a hole has the same area whichever reads it; it lives
+  in the entity layer because interop may not see cad and cad may not see
+  interop. The polygon is then `OverlayRegion::fromPolygon(ring, holes)`: its
+  area is the ring's less the holes', the overlay is cut by it, the grid and
+  the volume to a level take it, and a stockpile is measured round the holes
+  (`StockpileOptions::holes`: their edges count as boundary for
+  `base=lowest`, and `base=boundary` is made round them at the surface's
+  heights - a hole has none of its own, and one with a vertex off the surface
+  is refused naming it). A 50 x 50 lot with a 10 x 10 hole under a 1 m slab holds
+  2400 m3, by every method that takes a polygon
+  (`VolumeVerbs.ALotWithATaggedHoleIsMeasuredLessTheHoleByEveryMethodThatTakesAPolygon`,
+  `cli.volume_inside_a_lot_with_a_tagged_hole_measures_the_lot_less_the_hole`).
+  The rings are read together, in the one call that reads the polygons (an
+  `#id` list or a scope): a hole named before its lot joins it all the same, and
+  a tagged ring that no polygon of the call holds is measured as a polygon of
+  its own and said (`warning holes.alone=`), as the conversion keeps it. A ring
+  not tagged is a polygon, and a building in a lot overlaps it
+  (`VolumeVerbs.ARingNotTaggedAsAHoleIsAPolygonOfItsOwnAndOverlapsTheLot`).
+  Rejected: reading a ring inside another as a hole by its position alone (a
+  building in a lot is not one), and a copy of the conversion's rule in cad
+  beside the one in interop (two rules for the same words would drift, and the
+  area of a lot would depend on which verb asked).
 - **One reader, the more capable rule.** The volumes and the surface edits
   were written side by side with a reader each, and the two had come to
   disagree: these verbs refused a full ellipse and a polyline drawn back to
@@ -296,7 +358,8 @@ road job is measured and paid.
 - **Reach:** `left=` and `right=` from the centreline; absent, the diagonal
   of the ground the two surfaces share, so a section reaches across all of
   it wherever it is cut. That is right on a straight run and wrong anywhere
-  the alignment turns: see "Sections that cross" below, which refuses it.
+  the alignment turns or doubles back: see "Sections that cross" and
+  "Stretches side by side" below, which refuse it.
 - **Sections that cross are refused.** The average end area takes the volume
   of a panel from the areas of the two sections that bound it, and is right
   only while the panels tile the ground. Where two sections cross - the
@@ -319,6 +382,39 @@ road job is measured and paid.
   is a proper crossing by more than `kGeometric` at both ends. In the window
   the Left and Right fields are blank for "across the common ground", so a
   person on a curve gets the refusal in the status line and types a reach.
+- **Stretches side by side are refused too.** Two parts of an alignment that
+  run side by side nearer than twice the reach sweep the same ground twice, and
+  a section of one need not cross a section of the other to do it: the legs of
+  a U-turn made of corners, or two roads laid in one alignment, have parallel
+  sections. So the ground each panel sweeps - the quadrilateral between the
+  reach segments of its two sections, as two triangles that tile it, cut along
+  the diagonal that lies inside it because a panel across a corner can be
+  concave - is tested against that of every panel but its neighbours (which
+  share a section and touch along it), by the separating axis test: two panels
+  overlap when their shadows overlap by more than `kGeometric` on every normal
+  of every edge, which is the shortest way one would have to move to clear the
+  other, so strips that only touch, or that overlap by less than 0.1
+  micrometre, are measured. The pairs come from the same kind of box index as
+  the crossing test (`SpatialIndex`), one task per panel on the pool, and the
+  stretches are named from the panels' slots in station order, so the refusal
+  is the same words at any thread count. It names the first stretch (the run of
+  consecutive panels from the first that overlaps another, by station), the
+  stretch it overlaps, how many pairs of panels overlap, and says to shorten
+  `left=` and `right=` (with the same reach each side, under half the distance
+  between the stretches). Legs 15 m apart with 10 m each way are refused
+  ("from station 0.000 to 100.000 runs side by side with the stretch from station
+  120.000 to 215.000"); 7 each way is measured, 7.5 each way touches along one
+  line and is measured, 7.5 + 1e-6 is refused and 7.5 + 1e-8 is not
+  (`VolumesAlongAlignment.TwoLegsOfAUTurnCloserThanTwiceTheReachAreRefusedNamingTheStretches`,
+  `VolumesAlongAlignment.StripsThatOnlyTouchOrClearOneAnotherAreMeasured`,
+  `VolumesAlongAlignment.LegsWhoseStripsAreAsymmetricAreRefusedOnlyWhenTheStripsMeet`,
+  `cli.volume_sections_along_two_legs_side_by_side_are_refused_naming_the_stretches`).
+  A curve cannot do it (the legs either side of a curve of radius R are 2R
+  apart, and a reach over R crosses at its centre), so the test costs a curve
+  nothing. Cost: it is the crossing test's again - the pairs whose boxes
+  overlap - and a pair is four triangle pairs of at most six axes each, with
+  an early exit at the first axis that separates; not measured at the sizes
+  where it matters, see "Not done".
 - **A section on a surface's boundary is whole.** A corridor's finished
   surface ends on its first and last sections, and a person measuring it along
   its own alignment cuts exactly there. The ends of a section are computed
@@ -360,6 +456,70 @@ road job is measured and paid.
   less (Burden and Faires, *Numerical Analysis*, "Elements of Numerical
   Integration": Simpson's rule has degree of precision three). `method=both`
   reports both and the prismoidal correction, end area less prismoidal.
+- **On a curve the volumes carry the curvature correction (Pappus).** The
+  length L between two sections is the centreline's, but the ground at offset
+  o (left positive) on a curve of curvature k (positive turning left) is swept
+  along an arc (1 - k o) times as long: a point on the inside travels less than
+  the centreline, one on the outside more. A panel of a constant section of
+  area A, between two normals of a curve of radius R, therefore holds A (R -
+  e) theta, not A R theta, with e the centroid's offset from the centreline,
+  positive toward the centre of the curve; the end areas along the centreline
+  are off by the fixed factor R / (R - e) however short the interval (and a
+  section on the outside, e negative, holds more). A quarter circle of radius 50
+  with a strip 10 m wide on its inside, 1 m deep, holds 500 + (pi/4)(50^2 -
+  40^2) + 500 = 1000 + 225 pi = 1706.858 m3 and measured 1785.398 (the 10 m2
+  over the centreline's length 100 + 25 pi) at every interval - 4.6 % over; on
+  its outside 1000 + 275 pi = 1863.938 against the same 1785.398, 4.2 % under.
+  In the section engine, so every consumer gets it (the verbs, the window,
+  katana_mcp): each section has the first moment M of its cut and of its fill
+  about the centreline - the integral of the depth times the offset, in closed
+  form on every strip of the section (`signedTrapezoidMoments`), the same
+  strips the areas are cut into - and the volume between two normals is the
+  integral of A(s) - k(s) M(s), each section's cut and fill on their own,
+  since each has its own centroid. The average end area is then L ((A1 + A2) - k
+  (M1 + M2)) / 2, the prismoidal formula L ((A1 + 4 Am + A2) - k (M1 + 4 Mm +
+  M2)) / 6, with k the curvature at the **middle of the panel**: every panel
+  lies on one element of the alignment (the key stations are all sectioned), so
+  on an arc that is its constant 1/R, on a tangent 0, and on a spiral, where
+  curvature is linear in station, k L at the middle is exactly the angle the
+  panel turns - the sum of them is the alignment's whole deflection, whatever
+  the spirals do (a strip of 10 m2 and M = 50 along tangent, spiral, circle,
+  spiral and tangent loses 50 x pi/2 = 78.540 m3 to a 90 degree PI, which the
+  test holds to 1e-6). A panel that is not a constant section carries the
+  error of the rule it was always under: the panel sum is the trapezoid rule
+  on F = A - k M, whose error is (h^2/12)(F'(b) - F'(a)) and at most h^2 L
+  max|F''| / 12 for panels h long over a length L, and Simpson's for the
+  prismoidal; for the sloping design z = 0.02 x over the strip above, F = 9 +
+  8.1333 cos(phi) per metre of station on the arc and the exact volume is 2313.525
+  against 2435.398 uncorrected, the corrected sum within 0.0215 h^2 of it at
+  every interval - 0.086 at 2 m, 0.0215 at 1 m, 0.0013 at 0.25 m - while the
+  uncorrected stays 121.9 away
+  (`VolumesAlongAlignment.ASlopingSurfaceOnACurveIsCorrectedToItsExactVolumeAsTheIntervalShrinks`).
+  The standing tests are the strips above
+  (`VolumesAlongAlignment.AStripOnTheInsideOfAQuarterCircleIsTheAnnulusBetweenItsRadiiNotTheCentrelineArc`,
+  `VolumesAlongAlignment.AStripOnTheOutsideOfAQuarterCircleIsLongerThanItsCentrelineArc`),
+  the same way back, turning right, where the inside is the right side
+  (`VolumesAlongAlignment.TheSameStripOnAWayThatTurnsRightHasItsInsideOnTheRight`), a
+  strip symmetric about the centreline, 20 m2 and M = 0, 2000 + 500 pi =
+  3570.796 either way (`VolumesAlongAlignment.AStripSymmetricAboutTheCentrelineIsTheSameWithOrWithoutTheCorrection`),
+  and a straight, where nothing changes by a bit
+  (`VolumesAlongAlignment.OnAStraightTheCorrectionChangesNoBitOfAnAsymmetricSection`).
+  **The default changed the figures of a curved alignment with asymmetric
+  sections**; a straight and a symmetric section did not move.
+  `curvature=off` gives the plain end area along the centreline (1785.398 above,
+  and the reply and the CSV's `curvature` column say `off`). A PI with no radius
+  is a deflection, not a curve: k is 0 on each leg and the correction does not
+  see it. The reach on the inside is at most the radius (the crossing test
+  refuses more), so 1 - k o is never negative.
+  Rejected: a `CURVATURE OFF` word pair - every other choice on this verb is a
+  `key=value` and the reply says `curvature=on|off` in the same words;
+  leaving the correction off by default - it is the standard method and the
+  plain figure is 4 % wrong on a 10 m strip at a radius of 50; correcting only
+  the sections' areas by a factor of the whole alignment's radius - a
+  spiral and a compound curve have no one radius; the curvature at each end
+  of a panel in the place of its middle - on a spiral that is the
+  trapezoid on k M, whose error for a section that changes is twice the
+  midpoint's.
 - **The mass haul ordinate** is the cut less the fill, summed from the start
   of the range, with the factors applied - the mass diagram's convention,
   cut positive. Rising, the job has cut to spare; falling, fill to bring.
@@ -480,7 +640,11 @@ dialog made no longer leaves it offered, nor a Measure refused NotFound on it
 the boundary - Everywhere, the polygons the shared "Apply to" and "Only
 those that match" controls take (`ScopeFilterWidget`, prefix `volumes`), or
 typed corners - with EACH, the bulk and shrink factors, and the line the
-fields make in `volumesCommand`. Measure runs it through the window's one
+fields make in `volumesCommand`. The Along Alignment page has a "Correct for
+curvature" box (`volumesCurvature`, checked, the verb's default): unchecked, the
+line gets `curvature=off`
+(`VolumesDialog.TheCurvatureBoxIsOnByDefaultSaysNothingThenAndCurvatureOffWhenUnchecked`).
+Measure runs it through the window's one
 executor; the reply's records fill `volumesResults` (a column per key, in
 the order first met) and, along an alignment, the mass haul diagram
 (`volumesMassHaul`). Copy puts the table on the clipboard; Save CSV runs the
@@ -517,20 +681,30 @@ records do not carry.
   curved alignment; sections on a surface's boundary on every cardinal
   bearing and at every fifteenth degree, and at survey coordinates; sections
   that cross, on a curve, a corner and two legs, and the band that clears
-  them; every refusal; and the same bits at any thread count.
+  them; the first moments of a strip and of a section; the curvature
+  correction on a quarter circle inside, outside, symmetric, turning right,
+  along spirals and on a sloping design, against the annulus and the exact
+  integral; two legs side by side, touching and a hair over; every refusal; and
+  the same bits at any thread count.
+- The tagged rings (`tests/entity/test_ring_tags.cpp`): what makes a hole, the
+  part, and which exterior a hole joins - held by all of it, the part's, the
+  smallest, the nearest before.
 - The verbs (`tests/cad/terrain/test_volume_verbs.cpp`, the `VolumeVerbs`
   suite): every form through `CommandInterpreter::run`, EACH per polygon with
   an open line skipped, an ellipse and a polyline drawn back to its start as
-  polygons, overlapping polygons, the factors, the CSV, the difference as one
-  undo step, the envelope, the refusals.
+  polygons, a lot with a tagged hole by every method that takes a polygon, a
+  spline drawn back to its start, overlapping polygons, the factors, the CSV,
+  the curvature correction and its words, two legs side by side, the
+  difference as one undo step, the envelope, the refusals.
 - The polygons' reader (`tests/cad/terrain/test_drawing_shapes.cpp`, the
   `DrawingShapes` suites, shared with the surface edits): what each kind of
-  entity gives and why one gives none, typed corners with and without
-  heights, the words, and a scope that takes nothing.
+  entity gives and why one gives none, a closed spline, typed corners with and
+  without heights, the words, a scope that takes nothing, and the tagged rings
+  joined to their polygons and left alone.
 - The window (`tests/qt_widgets/terrain/test_volumes_dialog.cpp`): each
-  page's line by object name; Measure with the interpreter as the executor,
-  filling the table and the mass haul diagram; Make Cut/Fill Map; Make
-  Envelope; Save CSV.
+  page's line by object name, the curvature box included; Measure with the
+  interpreter as the executor, filling the table and the mass haul diagram;
+  Make Cut/Fill Map; Make Envelope; Save CSV.
   And the real window, headless (`tests/geo/headless/volumes.cmake`):
   `qt_volumes_dialog_measures_inside_typed_corners_and_makes_the_cut_fill_map_headless`
   draws the two surfaces, opens Terrain > Volumes, measures inside typed
@@ -542,12 +716,19 @@ records do not carry.
   `cli.volume_sections_northwards_over_the_slab_are_whole_at_its_edges`,
   `cli.volume_sections_round_a_curve_give_the_band_when_the_reach_is_short_of_its_radius`,
   `cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice`,
+  `cli.volume_sections_round_a_curve_are_corrected_for_a_strip_on_its_inside`,
+  `cli.volume_sections_round_a_curve_with_curvature_off_give_the_plain_end_area`,
+  `cli.volume_sections_along_two_legs_side_by_side_are_refused_naming_the_stretches`,
+  `cli.volume_inside_a_lot_with_a_tagged_hole_measures_the_lot_less_the_hole`,
   `cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_on_it_once`,
   `cli.volume_datum_of_a_flat_surface_at_its_own_level_has_no_cut_area_or_fill_area`,
   `cli.volume_stockpile_total_names_the_level_it_was_measured_against`,
   `cli.surface_difference_keeps_the_cut_fill_map_as_a_surface`,
   `cli.volume_of_a_surface_that_is_not_there_is_refused`.
-- `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`.
+- `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`,
+  `McpServer.SectionsRoundACurveSayWhetherTheyWereCorrectedForCurvatureAndByHowMuch`.
+- Benchmarks (`benchmarks/bench_volumes.cpp`): the refusal tests on a long run
+  and the difference surface's join; see "Not done".
 
 ## Decided
 
@@ -597,48 +778,64 @@ records do not carry.
   carries the same numbers as the reply, so the two never disagree.
 - **Volumes take no PREVIEW.** They change nothing; PREVIEW is for what does
   (SURFACE DIFFERENCE and ENVELOPE).
+- **The curvature correction is on by default, and says by how much.** It is the
+  standard method, and the plain figure is 4 % wrong for a 10 m strip at a
+  radius of 50; a person on a curve would otherwise get the wrong quantity
+  unless they knew to ask. Symmetric sections and straights do not move, so the
+  change is confined to the asymmetric sections on a curve, which were the
+  wrong ones. `curvature.cut=`/`curvature.fill=` carry the size of the
+  difference so an agent can see it, and `curvature=off` gives the old figure.
+  See "On a curve the volumes carry the curvature correction" for the
+  alternatives rejected.
+- **Stretches side by side are refused, not measured to the point where they
+  overlap.** For the reason sections that cross are: the ground the two strips
+  share belongs to neither, and a quantity cut at the overlap is a number that
+  is not the one asked for. Rejected: testing the distance between the
+  centrelines' parts - it is not the reach that sweeps the ground twice, the
+  strips are, and a curve's own sides are close without sweeping anything twice.
+- **A tagged hole joins by one rule, in the entity layer.** The GIS conversion
+  had the rule and cad could not reach it, and a second copy in cad would have
+  made the area of a lot depend on which verb asked. Off by default in the
+  shared reader (`ShapeOptions::joinTaggedHoles`) so the surface edits, whose
+  polygons are rings, read what they always read; the volume verbs ask for it.
 
 ## Not done
 
-- **The curvature correction on curved alignments.** A section's centroid
-  travels a different distance than the centreline on a curve (Pappus): a
-  panel of constant section area A between two radial cuts holds A (R -/+ e)
-  theta, with e the centroid's offset from the centreline (inside minus),
-  and end areas along the centreline give A R theta, so each panel is off by
-  the fixed factor R / (R -/+ e) whatever its length. A shorter interval
-  does NOT shrink it (a quarter circle of radius 50 with a strip 10 m wide on
-  the inside measures 1785.398 m3 at intervals of 10, 1 and 0.1, against the
-  true 1706.858 = 500 + (pi/4)(50^2 - 40^2) + 500, 4.6% over; on the outside
-  the same 1785.398 against 1863.938, 4.2% under). It cancels for a section
-  symmetric about the centreline (left= equal to right=: 3570.796, exact).
-  The correction is not made; a person on a curve keeps the reach symmetric,
-  or applies the eccentricity correction A (1 -/+ e/R) to the panel. Practice
-  shortens the interval on curves for another reason, that the section changes
-  quickly there.
-- **Stretches of an alignment side by side.** Only crossing sections are
-  refused. Two parts of the alignment that run side by side nearer than twice
-  the reach, with no section of one crossing a section of the other, still
-  sweep the same ground twice. A curve cannot do it (the legs either side of a
-  curve of radius R are 2R apart, and a reach over R crosses at its centre), but
-  a U-turn made of corners can, and so can two roads laid side by side in one
-  alignment. The spacing of legs is not tested.
-- **Not measured: the crossing test on a very long run.** It indexes the
-  sections' boxes and tests the pairs whose boxes overlap, on the task pool.
-  On an alignment along an axis no boxes overlap; on a diagonal one each
-  section pairs with every section within a reach of it, so a diagonal
-  alignment cut every 0.1 m over 10 km (100 000 sections, a 14 km default
-  reach) would test about 5e9 pairs. Nothing at that size has been timed;
-  at a road's usual 10 to 20 m interval it is a few hundred.
-- **Polygons with holes from the drawing.** The region takes holes
-  (`OverlayRegion::fromPolygon`), but the verbs take each closed outline as a
-  polygon of its own: a tagged hole joining its area, as the GIS conversion
-  reads it, is not read here yet.
-- **Splines** are not taken as polygons (`skipped.other`): `Spline2` has no
-  closed flag, and a spline drawn back to its start is not read as one.
 - **A background job.** The verbs run on the thread that runs the line; on
   the window's that is the GUI thread, and a difference of two 200 000
   triangle surfaces takes a second or two. SURFACE FROM's job pattern is the
-  way to move it.
+  way to move it, through the window's executor: one mechanism for every verb
+  that is slow, and a second one for the volumes is not built.
+- **Not measured: the refusal tests on a very long run.** Both the crossing test
+  and the side-by-side test index boxes and test the pairs whose boxes overlap,
+  on the task pool. On an alignment along an axis no boxes overlap; on a
+  diagonal one each section pairs with every section within a reach of it, so
+  a diagonal alignment cut every 0.1 m over 10 km (100 000 sections, a 14 km
+  default reach) would test about 5e9 pairs of each - extrapolated from the
+  count, not timed: `BM_VolumeSectionsAlongADiagonal` and
+  `BM_VolumeSectionsAlongAnAxis` (`benchmarks/bench_volumes.cpp`) take the same
+  run at 1250 to 10 000 sections and fit the growth (`Complexity`), and the
+  figure for 100 000 is the fitted n^2 coefficient times 1e10, to be written
+  here from the run. At a road's usual 10 to 20 m interval it is a few hundred
+  sections. The side-by-side test is a separating-axis test of up to four
+  triangle pairs where the crossing test's is one cross product, so it is
+  the dearer of the two per pair; a cheaper whole-strip reject before the four
+  would be the first thing to try if the figure is large.
 - **Not measured: the difference surface's join.** The overlay it is made of
   is (`compareSurfaces`, "One overlay" above); the cost of joining its pieces
-  into one surface on a large pair is not.
+  into one surface on a large pair is the difference of
+  `BM_VolumesDifferenceSurfaceOfALargePair` and `BM_VolumesOverlayOfALargePair`
+  (`benchmarks/bench_volumes.cpp`, two scatters of 100 000 points, about 200 000
+  triangles each, that cross), to be written here from the run.
+- **The corridor quantities do not take the curvature correction.** The road
+  engine's end areas (`docs/road_design.md`, `road::roadSection`) are sections
+  cut by a template, not by a pair of surfaces, so they do not go through
+  `volumesAlongAlignment` and are not corrected; on a curve they have the same
+  fixed factor of the centroid's offset over the radius for an asymmetric
+  section. A corridor's `compareSurfaces` of its built surface against the
+  ground is exact and has none of it.
+- **A PI with no radius is not looked at by the correction.** The curvature
+  there is 0 on each side and the ground in the wedge between the two legs'
+  normals is whatever the sections the engine cuts there make of it (the
+  crossing rule refuses a reach that sweeps the inside twice); the outside
+  wedge has not been examined.

@@ -6,8 +6,10 @@
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "katana/core/text.hpp"
+#include "katana/entity/ring_tags.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/geometry/curves2d.hpp"
 #include "katana/math/numerics.hpp"
@@ -128,6 +130,16 @@ ShapeOf polygonOf(const Entity& entity)
             return none(NotAShape::Open);
         }
         return asPolygon(chordShape(ellipse->tessellate(kCurveChordTolerance), entity));
+    }
+    if (const auto* spline = std::get_if<Spline2>(&entity.geometry)) {
+        // A spline has no closed flag; one whose end returns to its start is a
+        // closed outline, and its walk ends on its first point again, which
+        // asPolygon takes off. Not closed, it is no outline at all (it is not
+        // a line that was meant to bound anything).
+        if (!spline->isClosedShape()) {
+            return none(NotAShape::NoOutline);
+        }
+        return asPolygon(chordShape(spline->tessellate(kCurveChordTolerance), entity));
     }
     if (std::holds_alternative<Segment2>(entity.geometry) ||
         std::holds_alternative<Arc2>(entity.geometry)) {
@@ -262,8 +274,61 @@ Result<NamedEntities> entitiesNamed(const Document& document, const ShapeWords& 
     return named;
 }
 
+namespace {
+
+// Gives each tagged ring among `taken.shapes` to the polygon it lies in, by the
+// rule of entity/ring_tags.hpp, and takes it out of the shapes; a ring that no
+// polygon of the call holds is left where it is and counted.
+void joinTaggedHoles(const Document& document, DrawingShapes& taken)
+{
+    const auto entityOf = [&](const DrawingShape& shape) -> const Entity* {
+        return shape.entity ? document.model().entities.find(*shape.entity) : nullptr;
+    };
+    std::vector<std::size_t> exteriors; // index in taken.shapes
+    std::vector<katana::entity::ExteriorCandidate> candidates;
+    for (std::size_t i = 0; i < taken.shapes.size(); ++i) {
+        const Entity* entity = entityOf(taken.shapes[i]);
+        if (entity == nullptr || katana::entity::isTaggedHole(*entity)) {
+            continue; // typed corners are no hole's exterior; a hole is not one
+        }
+        exteriors.push_back(i);
+        candidates.push_back(katana::entity::ExteriorCandidate{
+            entity->id, katana::entity::ringPart(*entity), taken.shapes[i].outline});
+    }
+    const katana::entity::HoleJoiner joiner(std::move(candidates));
+    std::vector<bool> joined(taken.shapes.size(), false);
+    for (std::size_t i = 0; i < taken.shapes.size(); ++i) {
+        const Entity* entity = entityOf(taken.shapes[i]);
+        if (entity == nullptr || !katana::entity::isTaggedHole(*entity)) {
+            continue;
+        }
+        const auto best = joiner.exteriorOf(taken.shapes[i].outline.vertices, entity->id,
+                                            katana::entity::ringPart(*entity));
+        if (!best) {
+            ++taken.holesAlone;
+            continue;
+        }
+        DrawingShape& exterior = taken.shapes[exteriors[*best]];
+        exterior.holes.push_back(taken.shapes[i].outline);
+        exterior.holeEntities.push_back(entity->id);
+        joined[i] = true;
+        ++taken.holesJoined;
+    }
+    std::vector<DrawingShape> kept;
+    kept.reserve(taken.shapes.size() - taken.holesJoined);
+    for (std::size_t i = 0; i < taken.shapes.size(); ++i) {
+        if (!joined[i]) {
+            kept.push_back(std::move(taken.shapes[i]));
+        }
+    }
+    taken.shapes = std::move(kept);
+}
+
+} // namespace
+
 Result<DrawingShapes> resolveShapes(const Document& document, const ShapeWords& words,
-                                    ShapeKind kind, const ScopeViewProvider& views)
+                                    ShapeKind kind, const ScopeViewProvider& views,
+                                    const ShapeOptions& options)
 {
     DrawingShapes taken;
     if (!words.scope && words.ids.empty()) {
@@ -302,6 +367,9 @@ Result<DrawingShapes> resolveShapes(const Document& document, const ShapeWords& 
         } else {
             ++taken.skipped.noOutline;
         }
+    }
+    if (options.joinTaggedHoles && kind == ShapeKind::Polygon) {
+        joinTaggedHoles(document, taken);
     }
     return taken;
 }

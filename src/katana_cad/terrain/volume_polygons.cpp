@@ -45,7 +45,7 @@ const char* kindName(const Entity& entity, NotAShape why)
             } else if constexpr (std::is_same_v<Kind, katana::geometry::Ellipse2>) {
                 return "an elliptical arc"; // a full ellipse is a polygon
             } else if constexpr (std::is_same_v<Kind, katana::geometry::Spline2>) {
-                return "a spline";
+                return "an open spline"; // one that returns to its start is a polygon
             } else {
                 return "no outline";
             }
@@ -70,7 +70,11 @@ Result<DrawingShapes> readVolumePolygons(const Document& document,
     if (read->badId) {
         return makeError(ErrorCode::ParseFailure, "an entity is #id, a whole number", *read->badId);
     }
-    auto polygons = resolveShapes(document, *read, ShapeKind::Polygon, views);
+    // A ring tagged as a hole joins the polygon it lies in: a lot with a hole
+    // measures its area less the hole, not both as polygons of their own.
+    ShapeOptions options;
+    options.joinTaggedHoles = true;
+    auto polygons = resolveShapes(document, *read, ShapeKind::Polygon, views, options);
     if (!polygons) {
         return polygons.error();
     }

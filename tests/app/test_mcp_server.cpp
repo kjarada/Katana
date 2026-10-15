@@ -2807,6 +2807,38 @@ TEST_F(McpServer, AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool)
               std::string::npos)
         << reply;
 }
+
+// Sections round a curve carry the Pappus correction, and the reply says so: a 1 m
+// slab over [0, 200]^2 and the alignment 20,20 - 180,20 - 180,180 with a curve of
+// radius 40, a strip 10 wide on its inside (the centre is on the left): the tangents
+// hold 120 x 10 = 1200 m^3 each and the curve (pi/4)(40^2 - 30^2) = 175 pi = 549.779,
+// 2949.779 in all, 25 pi = 78.540 less than the 3028.319 along the centreline, which
+// curvature=off gives.
+TEST_F(McpServer, SectionsRoundACurveSayWhetherTheyWereCorrectedForCurvatureAndByHowMuch)
+{
+    initialize();
+    const Json ran = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LAYER NEW base", "LAYER SET base",
+               "PLINE3D 0,0,10 200,0,10 200,200,10 0,200,10 CLOSE", "LAYER NEW top",
+               "LAYER SET top", "PLINE3D 0,0,11 200,0,11 200,200,11 0,200,11 CLOSE",
+               "SURFACE FROM LAYERS base ONLY NAME base", "SURFACE FROM LAYERS top ONLY NAME top",
+               "ALIGN NEW cl 20,20 180,20 180,180", "ALIGN SET cl 1 40",
+               "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=10 right=0",
+               "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=10 right=0 curvature=off"}}});
+    ASSERT_FALSE(ran["isError"].get<bool>()) << textOf(ran);
+    const Json& lines = ran["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 12U);
+    const std::string corrected = lines[10]["output"].get<std::string>();
+    EXPECT_NE(corrected.find("curvature=on"), std::string::npos) << corrected;
+    EXPECT_NE(corrected.find("fill=2949.779"), std::string::npos) << corrected;
+    EXPECT_NE(corrected.find("curvature.fill=-78.540"), std::string::npos) << corrected;
+    const std::string plain = lines[11]["output"].get<std::string>();
+    EXPECT_NE(plain.find("curvature=off"), std::string::npos) << plain;
+    EXPECT_NE(plain.find("fill=3028.319"), std::string::npos) << plain;
+    EXPECT_EQ(plain.find("curvature.fill"), std::string::npos) << plain;
+}
 #endif
 // ---- end of volumes ----
 // ---- road objects (docs/road_objects.md) ----------------------------------------------------

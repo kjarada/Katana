@@ -323,7 +323,9 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     const QString reachTip = QStringLiteral(
         "%1. Blank reaches across all the ground the surfaces share, which is right on a "
         "straight run only: on a curve or a corner give a reach under the curve's radius, "
-        "because sections that cross one another count ground twice and the line is refused.");
+        "because sections that cross one another count ground twice and the line is refused; "
+        "so are two stretches of the alignment that run side by side, unless the reach is "
+        "under half the distance between them.");
     left_ = textBox(sectionsPage, "volumesLeft", QStringLiteral("across the common ground"),
                     reachTip.arg(QStringLiteral("How far each section reaches left of the centreline")));
     right_ = textBox(sectionsPage, "volumesRight", QStringLiteral("across the common ground"),
@@ -345,7 +347,17 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     sectionsForm->addRow(QStringLiteral("T&o station:"), to_);
     sectionsForm->addRow(QStringLiteral("&Left:"), left_);
     sectionsForm->addRow(QStringLiteral("Ri&ght:"), right_);
+    curvature_ = new QCheckBox(QStringLiteral("Correct for cur&vature"), sectionsPage);
+    curvature_->setObjectName(QStringLiteral("volumesCurvature"));
+    curvature_->setChecked(true);
+    curvature_->setToolTip(QStringLiteral(
+        "On a curve the ground at an offset from the centreline travels a different distance "
+        "than the centreline: less on the inside, more on the outside (Pappus). Checked, each "
+        "section's cut and fill are corrected for the offset of their centroids; unchecked, the "
+        "areas are taken along the centreline. A straight, and a section symmetric about the "
+        "centreline, are the same either way."));
     sectionsForm->addRow(QStringLiteral("Metho&d:"), sectionMethod_);
+    sectionsForm->addRow(QString(), curvature_);
     sectionsLayout->addLayout(sectionsForm);
     chart_ = new MassHaulChart(sectionsPage);
     sectionsLayout->addWidget(chart_);
@@ -565,6 +577,7 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
         connect(radio, &QRadioButton::toggled, this, [this] { refreshLine(); });
     }
     connect(each_, &QCheckBox::toggled, this, [this] { refreshLine(); });
+    connect(curvature_, &QCheckBox::toggled, this, [this] { refreshLine(); });
     const auto fitMethodPage = [this] {
         for (int index = 0; index < methods_->count(); ++index) {
             methods_->widget(index)->setSizePolicy(
@@ -740,6 +753,10 @@ Result<QString> VolumesDialog::line() const
         const QString method = sectionMethod_->currentData().toString();
         if (method != QStringLiteral("endarea")) {
             words << QStringLiteral("method=") + method;
+        }
+        // On is the verb's default, so only the plain figure is a word.
+        if (!curvature_->isChecked()) {
+            words << QStringLiteral("curvature=off");
         }
         break;
     }

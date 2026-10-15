@@ -605,7 +605,13 @@ session lines (`docs/volumes.md`), so `katana_run_commands` runs them as the
 window's Terrain > Volumes does, and the replies are the records an agent
 reads - `volume method= cut= fill= net= area=` with the method's own keys,
 `polygon index= ...` per polygon with EACH, `section station= ... mass=` per
-section along an alignment. A tool would restate the verbs' options as a
+section along an alignment. Along an alignment the total says whether the
+curvature correction was made (`curvature=on|off`, the verb's `curvature=`) and,
+when it was, how far it moved each total (`curvature.cut= curvature.fill=`, signed);
+a section that ends a panel on a curve adds `radius= turn=left|right` and the same
+two keys for that panel. A reach that sweeps one stretch's ground twice, across a
+curve or beside another stretch, is an `InvalidArgument` error naming the stations.
+A tool would restate the verbs' options as a
 schema and add nothing the records do not carry. The surfaces to name are
 `katana_terrain_list`'s.
 `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool` pins it.

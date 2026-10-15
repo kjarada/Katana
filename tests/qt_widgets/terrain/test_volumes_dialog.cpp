@@ -170,6 +170,49 @@ TEST(VolumesDialog, EachPageSaysTheLineItsFieldsMake)
     EXPECT_TRUE(runner.lines.isEmpty()); // building a line runs nothing
 }
 
+TEST(VolumesDialog, TheCurvatureBoxIsOnByDefaultSaysNothingThenAndCurvatureOffWhenUnchecked)
+{
+    // The correction is the verb's default, so the line only names the plain
+    // figure; the box is on the Along Alignment page alone, and the line it makes
+    // is the one handed to the executor.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    auto* command = child<QLineEdit>(dialog, "volumesCommand");
+    auto* curvature = child<QCheckBox>(dialog, "volumesCurvature");
+    dialog.setMethod(VolumeMethod::Sections);
+    EXPECT_TRUE(curvature->isChecked());
+    EXPECT_EQ(command->text(), "VOLUME SECTIONS ground design ALIGNMENT cl interval=10");
+    curvature->setChecked(false);
+    EXPECT_EQ(command->text(), "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 curvature=off");
+    auto* method = child<QComboBox>(dialog, "volumesSectionMethod");
+    method->setCurrentIndex(method->findData(QStringLiteral("both")));
+    EXPECT_EQ(command->text(),
+              "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 method=both curvature=off");
+    method->setCurrentIndex(method->findData(QStringLiteral("endarea")));
+    // The other pages take no curvature=, and say nothing of it.
+    dialog.setMethod(VolumeMethod::Surfaces);
+    EXPECT_EQ(command->text(), "VOLUME SURFACES ground design");
+    dialog.setMethod(VolumeMethod::Sections);
+
+    // Measure runs the line as shown, and the reply's volume record says the
+    // figure is the plain one.
+    child<QLineEdit>(dialog, "volumesLeft")->setText("20");
+    child<QLineEdit>(dialog, "volumesRight")->setText("20");
+    child<QPushButton>(dialog, "volumesRun")->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_EQ(runner.lines.front(),
+              "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 left=20 right=20 "
+              "curvature=off");
+    EXPECT_TRUE(dialog.resultsText().contains(QStringLiteral("\toff\t")));
+    // Checked again, the word goes.
+    curvature->setChecked(true);
+    EXPECT_EQ(command->text(),
+              "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 left=20 right=20");
+}
+
 TEST(VolumesDialog, AStockpileWithNoBoundaryIsRefusedNamingWhatIsMissingAndRunsNothing)
 {
     Document document;
