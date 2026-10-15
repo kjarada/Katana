@@ -130,10 +130,12 @@ auto hill()
     return std::move(*built);
 }
 
-SurfaceDisplayStyle bandsStyle(const std::string& name, SurfaceFaces faces, int bands)
+SurfaceDisplayStyle bandsStyle(const std::string& name, SurfaceFaces faces, int bands,
+                               const char* ramp = "terrain")
 {
     SurfaceDisplayStyle style;
     style.name = name;
+    style.ramp = ramp;
     style.faces3d = faces;
     style.banded = true;
     style.bands = bands;
@@ -159,7 +161,7 @@ TEST(SurfaceLegend3D, EachVisibleStyledSurfaceHasItsLegendStackedInDrawingOrderA
     surfaces[1].visible = false;
     surfaces[2].name = "Plain";
     surfaces[3].name = "Design";
-    katana::cad::applySurfaceDisplay(surfaces[3], bandsStyle("Steep", SurfaceFaces::Slope, 3));
+    katana::cad::applySurfaceDisplay(surfaces[3], bandsStyle("Steep", SurfaceFaces::Slope, 3, "slope"));
 
     LegendView view(surfaces, 450);
     ASSERT_NE(view.render, nullptr);

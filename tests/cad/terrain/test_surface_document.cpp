@@ -503,8 +503,8 @@ TEST(SurfaceDocument, ASurfaceSourceAndStyleAnEarlierBuildStoredAsAnsiBytesAreRe
     ASSERT_TRUE(document.open(project).ok());
     const auto* ground = document.surfaces().find("ground");
     ASSERT_NE(ground, nullptr);
-    EXPECT_EQ(ground->source, "raster cafÃ©");
-    EXPECT_EQ(ground->style, "PenteÂ°");
+    EXPECT_EQ(ground->source, "raster caf\xC3\xA9");
+    EXPECT_EQ(ground->style, "Pente\xC2\xB0");
     // The project is stable: saved and opened again, nothing moves, nothing throws.
     ASSERT_TRUE(document.save().ok());
     Document again;
@@ -520,13 +520,13 @@ TEST(SurfaceDocument, TheSaveRefusesAStyleSetTheJsonWriterCouldNotCarryRatherTha
     // reached through a Document; it is a function of the set
     // (surfaceStylesMetadataValue), handed the sets the door refuses.
     using katana::cad::detail::surfaceStylesMetadataValue;
-    const auto badName = surfaceStylesMetadataValue(withStyle("Pente°"));
+    const auto badName = surfaceStylesMetadataValue(withStyle("Pente\xB0"));
     ASSERT_FALSE(badName.ok());
     EXPECT_EQ(badName.error().code, ErrorCode::InvalidArgument);
     EXPECT_EQ(badName.error().context, "field=name");
 
     SurfaceStyleSet described = withStyle("Fine");
-    described.styles.back().description = "café";
+    described.styles.back().description = "caf\xE9";
     const auto badDescription = surfaceStylesMetadataValue(described);
     ASSERT_FALSE(badDescription.ok());
     EXPECT_EQ(badDescription.error().code, ErrorCode::InvalidArgument);

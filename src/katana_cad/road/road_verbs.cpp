@@ -2149,8 +2149,9 @@ ROADTEMPLATE IMPORT <file.json> [OVERWRITE]   the file's templates into the draw
 CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
 CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=<s>] [interval=<m>] [from=<s>] [to=<s>]
   [curvetol=<e>]   makes the layers its objects are on; road/earthworks/cut switched off
-CORRIDOR SET <c> alignment= template= surface= interval= from= to= curvetol=   (surface= from=
-  to= empty clear them; a corridor always has an alignment, a template and an interval)
+CORRIDOR SET <c> alignment= template= surface= interval= from= to= curvetol=
+  (surface= from= to= empty clear them; a corridor always has an alignment, a template and
+  an interval)
   curvetol= is the relative error of a course's area and volume on a curve, at most (0.001
   by default, up to 0.1; 0 or off adds no sections inside curves): sections are added
   inside a curve until the chords between them are that close

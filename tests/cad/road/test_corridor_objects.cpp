@@ -1098,8 +1098,12 @@ TEST(CorridorObjects, ATaperingEarthworksPieceEndsInALineAndItsVolumeIsThatOfThe
     //              is a line) and 41 at 10: 122; top 80 + bottom 80 + inner 1 +
     //              outer 0 + cap at 0 79 (its last cell is one triangle) + cap at
     //              10 none: 240 triangles. V - E + F = 122 - 360 + 240 = 2.
-    //   fill/1-2   a line, the thick section, a line: 41 + 81 + 41 = 163 vertices,
-    //              2 x 160 + inner 2 = 322 triangles: 163 - 483 + 322 = 2.
+    //   fill/1-2   a line, the thick section, a line: 41 + 81 + 41 = 163 vertices;
+    //              the cell between the line at 10 and the thick section's last
+    //              column has all three corners (10, 39), (10, 40) and (20, 40)
+    //              welded, so its top and bottom triangle (one surface twice) are
+    //              left out and (10, 40) is in no face: 162 vertices; 160 + 158 + the
+    //              wall at the first column 2 = 320 triangles: 162 - 480 + 320 = 2.
     // The mesh volume is Sum of plan area x mean thickness of each triangle's
     // corners, the plan cells 0.35 x 10 split a to c: for a section thick t_i
     // at its columns and a line beyond it that is 1.75 (2 t_i + t_(i+1)) / 3 a
@@ -1121,8 +1125,8 @@ TEST(CorridorObjects, ATaperingEarthworksPieceEndsInALineAndItsVolumeIsThatOfThe
     ASSERT_NE(last, nullptr);
     EXPECT_EQ(first->mesh.vertices.size(), 122u);
     EXPECT_EQ(first->mesh.faces.size(), 240u);
-    EXPECT_EQ(middle->mesh.vertices.size(), 163u);
-    EXPECT_EQ(middle->mesh.faces.size(), 322u);
+    EXPECT_EQ(middle->mesh.vertices.size(), 162u);
+    EXPECT_EQ(middle->mesh.faces.size(), 320u);
     EXPECT_NEAR(meshVolume(first->mesh), 226.42083333333, 1e-6);
     EXPECT_NEAR(meshVolume(middle->mesh), 449.925, 1e-6);
     EXPECT_NEAR(meshVolume(last->mesh), 223.50416666667, 1e-6);
@@ -1202,7 +1206,8 @@ TEST(CorridorObjects, NoEarthworksSolidOfTheStandardTemplatesHasAFaceOfNoAreaOrI
         double length;
     };
     std::vector<Case> cases;
-    cases.push_back({"tilted", planeGround(0.0, 0.25, 9.5), 100.0});
+    // (a tilt of 0.25 would run parallel to the standard fill batter, 1V:4H, and never daylight)
+    cases.push_back({"tilted", planeGround(0.0, 0.1, 9.5), 100.0});
     cases.push_back({"sawtooth", sawGround(), 40.0});
     cases.push_back({"two cuts across", twoCutsAcrossGround(), 100.0});
     for (const Case& each : cases) {

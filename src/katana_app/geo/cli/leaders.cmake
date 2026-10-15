@@ -56,5 +56,5 @@ add_test(NAME cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns
             -c "LEADER LIST"
             -c "SURFACE REMOVE dem")
 set_tests_properties(cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns PROPERTIES
-    PASS_REGULAR_EXPRESSION "renamed surface=ground name=dem corridors=0 roadobjects=0 leaders=1.*template=\{dsurface\.dem:\+\.3f\} preset=surface surface=dem .*text=\+2\.782.*removed surface=dem surfaces=0[\r\n]+warning text=\"leaders=1 read surface dem and will read nothing now\""
+    PASS_REGULAR_EXPRESSION "renamed surface=ground name=dem corridors=0 roadobjects=0 leaders=1.*template=[{]dsurface[.]dem:[+][.]3f[}] preset=surface surface=dem .*text=[+]2[.]782.*removed surface=dem surfaces=0[\r\n]+warning text=\"leaders=1 read surface dem and will read nothing now\""
     FAIL_REGULAR_EXPRESSION "error")

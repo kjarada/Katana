@@ -160,16 +160,19 @@ TEST(RoadObjectScope, TheLayersAScopeNamesTakeTheObjectsOnThemWithOrWithoutSubla
 TEST(RoadObjectScope, AnAreaTakesTheObjectsWhosePlanExtentMeetsIt)
 {
     ScopedSite site;
-    // x from 10 to 25 meets the 20 m barrier (-0.05 to 20.05) and no pole
-    // (0 and 30, a couple of metres wide at most), no sign (50), no other barrier.
+    // x from 10 to 25 meets the 20 m barrier (-0.05 to 20.05) and the row of poles
+    // (light-3 is ONE object, its extent from the pole at 0 to the pole at 60, so
+    // 10 to 25 lies along it though no pole stands there), not the sign (50) nor
+    // the other barrier (70 to 90).
     const auto barrier = lines(site.ok("ROADOBJECT LIST AREA 10,-10,25,10"));
     ASSERT_GE(barrier.size(), 3u);
-    EXPECT_EQ(barrier[0], "scope=area area=10,-10,25,10 matched=1");
-    EXPECT_EQ(idsOf(site.ok("ROADOBJECT LIST AREA 10,-10,25,10")), "barrier-1");
+    EXPECT_EQ(barrier[0], "scope=area area=10,-10,25,10 matched=2");
+    EXPECT_EQ(idsOf(site.ok("ROADOBJECT LIST AREA 10,-10,25,10")), "barrier-1,light-3");
     // The corners in either order are the same box, and the record says it sorted.
     EXPECT_EQ(lines(site.ok("ROADOBJECT LIST AREA 25,10,10,-10"))[0],
-              "scope=area area=10,-10,25,10 matched=1");
-    EXPECT_EQ(idsOf(site.ok("ROADOBJECT LIST AREA 45,0,55,10")), "sign-2");
+              "scope=area area=10,-10,25,10 matched=2");
+    // 45 to 55 meets the sign at 50 and, again, the row of poles along 0 to 60.
+    EXPECT_EQ(idsOf(site.ok("ROADOBJECT LIST AREA 45,0,55,10")), "sign-2,light-3");
     // The poles at 0, 30 and 60 are all in x from -5 to 65.
     const std::string poles = site.ok("ROADOBJECT LIST AREA -5,-10,65,10 WHERE PROP=kind:light");
     EXPECT_EQ(lines(poles)[0], "scope=area area=-5,-10,65,10 where=\"PROP=kind:light\" matched=1");

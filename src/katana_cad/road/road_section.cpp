@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <string>
 #include <type_traits>
@@ -1229,16 +1230,25 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
     // way by its neighbour (docs/road_design.md, "A closed solid").
     for (std::size_t k = 0; k + 1 < count; ++k) {
         for (std::size_t i = 0; i + 1 < across; ++i) {
-            // A cell with nothing between its top and bottom at all four
-            // corners is two faces on one surface, which nothing is inside:
-            // left out, it leaves the cells beside it closed along its edges.
-            if (welded(k, i) && welded(k, i + 1) && welded(k + 1, i) && welded(k + 1, i + 1)) {
-                continue;
+            // A triangle of the cell with nothing between its top and bottom
+            // at all three corners is two faces on one surface, which nothing
+            // is inside: left out, top and bottom both, it leaves the faces
+            // beside it closed along its edges. The cell is split along its
+            // diagonal (k, i) to (k + 1, i + 1): the first triangle has the
+            // corner (k, i + 1), the second (k + 1, i), and each one's bottom
+            // is its top turned over. (Left in, the pair makes the diagonal an
+            // edge four faces use - found by `closedOnItsIndices` on the pieces
+            // of a fill that tapers away along the road.)
+            const bool first = !(welded(k, i) && welded(k, i + 1) && welded(k + 1, i + 1));
+            const bool second = !(welded(k, i) && welded(k + 1, i + 1) && welded(k + 1, i));
+            if (first) {
+                triangle(vertex(k, i, 0), vertex(k, i + 1, 0), vertex(k + 1, i + 1, 0));
+                triangle(vertex(k, i, 1), vertex(k + 1, i + 1, 1), vertex(k, i + 1, 1));
             }
-            quad(vertex(k, i, 0), vertex(k, i + 1, 0), vertex(k + 1, i + 1, 0),
-                 vertex(k + 1, i, 0));
-            quad(vertex(k, i, 1), vertex(k + 1, i, 1), vertex(k + 1, i + 1, 1),
-                 vertex(k, i + 1, 1));
+            if (second) {
+                triangle(vertex(k, i, 0), vertex(k + 1, i + 1, 0), vertex(k + 1, i, 0));
+                triangle(vertex(k, i, 1), vertex(k + 1, i, 1), vertex(k + 1, i + 1, 1));
+            }
         }
         quad(vertex(k, 0, 0), vertex(k + 1, 0, 0), vertex(k + 1, 0, 1), vertex(k, 0, 1));
         quad(vertex(k + 1, last, 0), vertex(k, last, 0), vertex(k, last, 1),
@@ -1248,6 +1258,33 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
         quad(vertex(0, i + 1, 0), vertex(0, i, 0), vertex(0, i, 1), vertex(0, i + 1, 1));
         const std::size_t k = count - 1;
         quad(vertex(k, i, 0), vertex(k, i + 1, 0), vertex(k, i + 1, 1), vertex(k, i, 1));
+    }
+    // A welded vertex whose every face was left out (the end of a line of no
+    // thickness that a neighbouring triangle took) is in no face: not kept.
+    {
+        constexpr std::uint32_t kUnused = std::numeric_limits<std::uint32_t>::max();
+        std::vector<std::uint32_t> placed(mesh.vertices.size(), kUnused);
+        for (const auto& face : mesh.faces) {
+            for (const std::uint32_t index : face) {
+                placed[index] = 0;
+            }
+        }
+        decltype(mesh.vertices) kept;
+        kept.reserve(mesh.vertices.size());
+        for (std::size_t v = 0; v < mesh.vertices.size(); ++v) {
+            if (placed[v] != kUnused) {
+                placed[v] = static_cast<std::uint32_t>(kept.size());
+                kept.push_back(mesh.vertices[v]);
+            }
+        }
+        if (kept.size() != mesh.vertices.size()) {
+            for (auto& face : mesh.faces) {
+                for (std::uint32_t& index : face) {
+                    index = placed[index];
+                }
+            }
+            mesh.vertices = std::move(kept);
+        }
     }
     // Which way that turns depends on the side: offsets grow to the left, so
     // the right side's solids are mirror images. Turned outward by the sign
