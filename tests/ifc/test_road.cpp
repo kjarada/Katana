@@ -21,6 +21,7 @@
 #include "katana/ifc/classification.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/ifc/front_end.hpp"
+#include "katana/ifc/import.hpp"
 #include "katana/ifc/step.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
@@ -1135,6 +1136,81 @@ TEST(IfcExportRoad, TheModelsProblemsAreWarningsAndTheReplyCountsTheRoadModel)
     const auto without = exported(ifc::ExportInput{});
     EXPECT_EQ(ifc::formatExportReply(without, "x.ifc", false).find("road elements="),
               std::string::npos);
+}
+
+// What the export writes of a cut, the import reads back: an IfcEarthworksCut
+// is an IfcFeatureElementSubtraction, and the generated class table called every
+// such feature "not drawn" (an opening is what a wall is cut by, not an
+// object), so the largest solids of a road model vanished on a round trip, with
+// no count and no warning. A cut is drawn now, as its FootPrint outline like the
+// fill beside it. By hand, the cut batter of roadModel() is the box
+// [1000, 1100] x [1997, 2000] x [9.75, 10.5], so its plan hull is the rectangle
+// x 1000..1100, y 1997..2000, and the file (not georeferenced, so written at the
+// project's own coordinates) gives that outline back. The fill is read too, and
+// an opening is still not: a feature of another kind is not an object.
+TEST(IfcExportRoad, ACutBatterIsReadBackFromItsFileAsItsFootPrintOutline)
+{
+    const auto surface = ground();
+    const auto out = exported(roadInput(&surface));
+    const auto back = ifc::readIfc(out.text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_EQ(back->classes.at("IfcEarthworksCut"), 1u);
+    EXPECT_EQ(back->classes.at("IfcEarthworksFill"), 1u);
+    const katana::entity::Entity* cut = nullptr;
+    for (const katana::entity::Entity& entity : back->entities) {
+        const auto cls = entity.metadata.find("ifc.class");
+        if (cls != entity.metadata.end() && std::get<std::string>(cls->second) == "IfcEarthworksCut") {
+            cut = &entity;
+        }
+    }
+    ASSERT_NE(cut, nullptr) << "the cut was not read back";
+    EXPECT_EQ(std::get<std::string>(cut->metadata.at("ifc.predefinedType")), "CUT");
+    EXPECT_EQ(std::get<std::string>(cut->metadata.at("ifc.tag")), kCut);
+    EXPECT_EQ(cut->layer, "Road/batter");
+    const auto* outline = std::get_if<Polyline2>(&cut->geometry);
+    ASSERT_NE(outline, nullptr);
+    double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
+    for (const auto& vertex : outline->vertices) {
+        minX = std::min(minX, vertex.x);
+        maxX = std::max(maxX, vertex.x);
+        minY = std::min(minY, vertex.y);
+        maxY = std::max(maxY, vertex.y);
+    }
+    EXPECT_NEAR(minX, 1000.0, 1e-6);
+    EXPECT_NEAR(maxX, 1100.0, 1e-6);
+    EXPECT_NEAR(minY, 1997.0, 1e-6);
+    EXPECT_NEAR(maxY, 2000.0, 1e-6);
+}
+
+// A feature of another kind is still not an object of its own: an opening in
+// a file is read past, not drawn. And the stand-in ground a cut voids when its
+// surface is not in the file has no shape at all (no Representation): it
+// comes in as a point at its placement, counted, and the warning says no shape
+// rather than "solids", which it is not.
+TEST(IfcExportRoad, TheStandInGroundHasNoShapeAndTheImportSaysSoNotThatItIsASolid)
+{
+    const auto out = exported(roadInput()); // the cut names "ground"; no surface is given
+    const auto back = ifc::readIfc(out.text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_GE(back->productsAsPoints, 1u); // the TERRAIN stand-in at least
+    bool said = false;
+    for (const std::string& warning : back->warnings) {
+        EXPECT_EQ(warning.find("are solids"), std::string::npos) << warning;
+        said = said || warning.find("objects have no shape Katana can draw") != std::string::npos;
+    }
+    EXPECT_TRUE(said);
+
+    // An opening, read past: the same file with its cut renamed to an
+    // IfcOpeningElement (also an IfcFeatureElementSubtraction) loses the cut
+    // from the objects read, and the class table counts it nowhere.
+    std::string opening = out.text;
+    const std::size_t at = opening.find("IFCEARTHWORKSCUT(");
+    ASSERT_NE(at, std::string::npos);
+    opening.replace(at, std::string("IFCEARTHWORKSCUT(").size(), "IFCOPENINGELEMENT(");
+    const auto read = ifc::readIfc(opening);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_FALSE(read->classes.contains("IfcEarthworksCut"));
+    EXPECT_FALSE(read->classes.contains("IfcOpeningElement"));
 }
 
 // The local origin is the south-west corner of everything written, the road

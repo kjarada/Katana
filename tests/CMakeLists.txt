@@ -3468,6 +3468,22 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_headless.png"
             "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4.*surface name=\"TIN SOUTH WEST \\(2\\)\" triangles=8 points=9"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The two dialogs say what the surfaces are: the drawing's own, which the
+    # import keeps in its one undo step (so Undo takes the terrain back) and
+    # the project saves. They once called them "of this session", "not saved"
+    # and "not undone", which stopped being true when the surfaces moved into
+    # the drawing (cad::importSurfaces); the behaviour is pinned by
+    # qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless,
+    # these are the words.
+    add_test(NAME qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc max=500 NAME ground|@fileExportIfc|?ifcExportSurfaces|@fileImportIfc|ifcImportFile=${_ifc_dialog}|?ifcImportCheck"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_words_headless.png"
+            "-DEXPECT=ifcExportSurfaces: The drawing's surfaces \\(1\\), checked.*ifcImportCheck: Ready to import, as one step Undo takes back, surfaces included"
+            "-DFORBID=Surfaces of this session|surfaces are session data|not undone"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The File menu offers both - each in its submenu, File > Import and File
     # > Export, since every import and export went under those two (a menu's
     # report lists its own items, so the two submenus are asked by their
@@ -3544,11 +3560,13 @@ if(TARGET katana)
                          qt_ifc_a_path_given_to_the_window_is_imported_headless
                          qt_ifc_a_file_far_from_the_drawings_alignment_is_questioned_headless
                          qt_ifc_dataset_information_describes_the_file_headless
+                         qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
         PROPERTIES FIXTURES_REQUIRED qt_ifc_dialog_file)
     set_tests_properties(qt_ifc_typed_export_and_import_are_the_command_lines_headless
                          qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless
                          qt_ifc_import_dialog_describes_imports_and_takes_the_files_system_headless
                          qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
+                         qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
                          qt_ifc_menu_items_and_the_verbs_refusals_headless
                          qt_ifc_import_options_are_the_import_dialog_headless
                          qt_ifc_a_path_given_to_the_window_is_imported_headless

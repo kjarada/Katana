@@ -185,7 +185,12 @@ kept, as every import asks; declining is a cancel, which the dialog says as
 one. File > Import and a path given to the window, whose line says neither,
 ask about the coordinate system; a typed IMPORT or a headless session asks no
 one and says how (`CRS SET`). Terrain comes in as surfaces of the drawing,
-in the import's one undo step, which Export IFC writes out again.
+in the import's one undo step, which Export IFC writes out again. The two
+dialogs say so - "The drawing's surfaces (N)", "Ready to import, as one step
+Undo takes back, surfaces included" - where they once called the terrain
+session data that Undo leaves alone, which stopped being true when the
+surfaces moved into the drawing
+(`qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless`).
 
 
 ## Export: what goes where
@@ -705,7 +710,7 @@ are generated from IfcOpenShell's schemas (`tools/ifc_product_classes.py`,
 | In the file | In the drawing |
 |---|---|
 | `IfcAlignment` | a named alignment, its PIs and PVIs **reconstructed** from the business logic and **checked** (below); else a 3D polyline of its exact geometry on "IFC/Alignments", and a warning saying why |
-| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid) a point at its placement, counted |
+| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid), or none at all (the stand-in ground of a cut whose surface is not in the file), a point at its placement, counted and said. An `IfcEarthworksCut` is an element like the others and comes back as its `FootPrint` outline (`IfcExportRoad.ACutBatterIsReadBackFromItsFileAsItsFootPrintOutline`); the other feature elements (openings and the like) are not drawn |
 | a terrain (`IfcGeographicElement` TERRAIN, a TIN) | a surface, for a caller that keeps surfaces |
 | property sets and quantities | properties "Set/Property", lengths, areas, volumes and angles in Katana's units |
 | classifications, the system served | "Classification/<system>", "System" |
@@ -813,14 +818,21 @@ mistake in the writer and the same mistake in the reader cannot agree:
 - **Solids** are not read beyond swept disks and triangulated surfaces:
   Katana has no solid entity, so an extruded wall or a B-rep comes in as a
   point at its placement with its properties.
+- **Feature elements other than a cut** (an opening, a void, a recess, a
+  port) are skipped by the import, uncounted and unreported: they are what a
+  wall or slab is cut by, not objects of their own, and the generated class
+  table calls them not drawn. `IfcEarthworksCut` alone is drawn (a road model
+  writes each cut batter as one), by an exemption in
+  `tools/ifc_product_classes.py`.
 - **Export of 3D solids** other than swept disks and the road model's meshes
   (a drawn pit as a box) is not attempted; a pit is its footprint and, from a
   .12da archive, a cylinder from invert to top.
 - **The road model** ("Road model", above), as far as it goes:
-  - its file has not been judged by IfcOpenShell or buildingSMART's rules
-    yet ("Validation"), and whether IFC431, the Alignment-based view's scope,
-    lists IfcRoad, IfcRoadPart and the road elements is unknown - its
-    warnings, if any, are the first run's to report;
+  - its file was judged by IfcOpenShell once, which found the counts written
+    as REALs ("Validation"); the fixed writer's file has not been judged
+    again, nor by buildingSMART's rules, and whether IFC431, the
+    Alignment-based view's scope, lists IfcRoad, IfcRoadPart and the road
+    elements is unknown - its warnings, if any, are the first run's to report;
   - courses are elements of their part, not aggregated into an `IfcPavement`
     (IfcPavement's page does not model that aggregation), and they are not
     an `IfcMaterialLayerSet`; there are no type objects (`IfcCourseType` ...);
@@ -834,8 +846,7 @@ mistake in the writer and the same mistake in the reader cannot agree:
     take as a boolean of a large TIN and a long solid; cutting the ground's
     face set instead is not done;
   - the import reads a road element back as its FootPrint outline, not its
-    body (Katana has no solid entity), and `katana_cli`'s IMPORT counts a
-    file's terrain without keeping it in the drawing's surfaces;
+    body (Katana has no solid entity);
   - the road model is not scoped (above): it is all written, or none.
 - **Cant**, IFC4X1-form alignments, and transitions other than the clothoid
   have no Katana equivalent, so they come in as exact polylines.

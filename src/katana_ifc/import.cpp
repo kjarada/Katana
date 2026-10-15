@@ -2140,9 +2140,13 @@ class Reader {
                                     " objects had neither a shape Katana can draw nor a placement");
         }
         if (out_.productsAsPoints > 0) {
+            // Not only solids: an object with no representation at all (the
+            // stand-in ground a road model's cut voids, when the surface is not
+            // in the file) has no shape either, and "solids" said what it is not.
             out_.warnings.push_back(std::to_string(out_.productsAsPoints) +
-                                    " objects are solids Katana cannot draw and came in as a "
-                                    "point at their placement, with their properties");
+                                    " objects have no shape Katana can draw - a solid, or no shape "
+                                    "in the file at all - and came in as a point at their "
+                                    "placement, with their properties");
         }
         if (m_.complexInstances > 0) {
             out_.warnings.push_back(std::to_string(m_.complexInstances) +

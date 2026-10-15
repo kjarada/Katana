@@ -118,8 +118,9 @@ struct Georeference {
     std::string mapZone;       // "56"
 };
 
-// A surface to export, by name. The surfaces are session data, not the
-// model's (docs/cad.md), so the caller passes the ones it has.
+// A surface to export, by name. The drawing's surfaces are kept beside the
+// entity model, not in it (Document::surfaces), so the caller passes the ones
+// it has.
 struct SurfaceInput {
     std::string name;
     const katana::terrain::TinSurface* surface = nullptr;
