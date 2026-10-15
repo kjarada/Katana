@@ -355,6 +355,13 @@ jobs:
           records "$root/share/katana/install.json" "\"target\":\"${{ matrix.package }}\""
           records "$root/share/katana/install.json" "\"version\":\"$version\""
           records "$root/share/katana/install.json" "\"sequence\":$sequence"
+          # The licence travels with the package: LICENSE at the top, and the additional
+          # terms, the plain-words guide and the third-party notices under share/katana/licences,
+          # which the installer's licence page points to (docs/release.md, "The Windows installer").
+          test -s "$root/LICENSE" || { echo "::error::the package has no LICENSE"; exit 1; }
+          for notice in ADDITIONAL_TERMS.md LICENSING.md THIRD_PARTY_NOTICES.md; do
+            test -s "$root/share/katana/licences/$notice" || { echo "::error::the package has no share/katana/licences/$notice"; exit 1; }
+          done
           cp -r samples/site_plan smoke/project
           python tools/update_make_manifest.py --tree "$root" --out smoke/update \
             --version "$version" --target "${{ matrix.package }}" --sequence 1 \
@@ -637,6 +644,10 @@ jobs:
           records "$record" "\"target\":\"${{ matrix.package }}\""
           records "$record" "\"version\":\"$version\""
           records "$record" "\"sequence\":$sequence"
+          # The notices travel with the package (the record's folder is share/katana).
+          for notice in ADDITIONAL_TERMS.md LICENSING.md THIRD_PARTY_NOTICES.md; do
+            test -s "$(dirname "$record")/licences/$notice" || { echo "::error::the package has no share/katana/licences/$notice"; exit 1; }
+          done
           if [ "${{ matrix.archive }}" != dmg ]; then
             python3 tools/update_make_manifest.py --tree "smoke/$package" --out smoke/update \
               --version "$version" --target "${{ matrix.package }}" --sequence 1 \

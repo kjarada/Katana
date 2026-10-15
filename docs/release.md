@@ -64,7 +64,9 @@ a tag included.
 
 Each Windows and Linux archive holds `bin/katana`, `bin/katana_cli`,
 `bin/katana_mcp` and `bin/katana_updater` (the helper that swaps an install's
-files for an update's), the libraries they load, `share/katana/samples`, and
+files for an update's), the libraries they load, `share/katana/samples`,
+`LICENSE` and, under `share/katana/licences`, the additional terms, the
+plain-words guide and the third-party notices, and
 `share/katana/install.json`, which names the package's target, its version
 and the sequence of the run that built it ("Update assets", "The package
 names its own build") and is what makes a copy a release the updater will
@@ -646,6 +648,39 @@ per-machine installer.
   install: the installer offers Retry and Cancel, never the skip that NSIS
   offers by default, which would leave the old program among the new libraries
   (`AllowSkipFiles off`).
+* **The licence page.** Between Welcome and the folder page the installer shows
+  the licence. Until 2026-10-15 it showed none: CPack builds the page only when
+  `CPACK_RESOURCE_FILE_LICENSE` names a file, nothing named one, and the
+  template's `@CPACK_NSIS_LICENSE_PAGE@` was empty, so an installer went from
+  Welcome to the folder page with no licence in it. `cmake/KatanaPackaging.cmake`
+  now makes the page's text at configure time, `KatanaInstallerLicence.txt` in
+  the build folder, from the two texts that are binding: a note saying whose
+  Katana it is and that nobody has to accept the licence to run it, then
+  `LICENSE` (the GNU General Public License) whole, then `ADDITIONAL_TERMS.md`
+  whole. One file because the installer has one page for it. It is made again
+  when either text changes (`CMAKE_CONFIGURE_DEPENDS`), has Windows line ends
+  (the page's text box breaks a line on CRLF, and `LICENSE` is LF in the
+  repository) and is ASCII, which a Unicode installer reads as it is: a
+  character outside ASCII would need a byte order mark that CMake cannot write,
+  so the configure refuses one by name. The template says, before the page, that
+  the licence need not be accepted and puts **Next**, not **I Agree**, on its
+  button (the page the NSIS manual shows for a GPL program): the GPL asks for no
+  acceptance, and a button that asked would say it did. A silent install
+  (`/S`) shows no page. The packages carry the same notices, `LICENSE` at the
+  top and `ADDITIONAL_TERMS.md`, `LICENSING.md` and `THIRD_PARTY_NOTICES.md`
+  under `share/katana/licences`, and the page says where. *Under `share`, not
+  beside `LICENSE`:* the update manifest has to leave `LICENSE` out
+  (`UPDATE_EXCLUDE`: it refuses any file outside `bin`, `share`, `etc` and
+  `lib`), so a notice beside it would never be updated, and the third-party
+  notices change with the libraries an update brings. *Rejected:* a page of the
+  GPL alone, since the additional terms are as binding as it is; showing the
+  third-party audit on the page, a long table that is read in the folder it is
+  installed to. `packaging_installer_shows_the_licence` holds this build's
+  own configure to all of it (`tools/check_installer_licence.cmake`), and
+  `packaging_installer_licence_check_*` hand the check a configure wrong in one
+  way each - no licence file, a page of Unix line ends with no licence, a
+  template with no page, notices no install rule names - and read the refusal.
+  The release smoke test checks that each package holds the notices.
 * **NSIS.** The template, `cmake/NSIS.template.in`, replaces CPack's: CPack's asks
   for administrator rights, writes `HKLM` and installs to Program Files. It has no
   components, no "add to PATH" and no Install Options page (Katana has never

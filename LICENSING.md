@@ -230,8 +230,10 @@ show it.
   `tools/add_licence_notice.py`, adds it; run it once on the merged tree, so
   that it does not conflict with work in progress.
 * **Packages** install `LICENSE`, `ADDITIONAL_TERMS.md`, `LICENSING.md` and
-  `THIRD_PARTY_NOTICES.md` (only `LICENSE` is installed now) and the licence
-  text of each bundled library. The Windows installer shows the licence. A
+  `THIRD_PARTY_NOTICES.md` (done 2026-10-15: `LICENSE` at the top, the others under
+  `share/katana/licences`, which an update refreshes) and the licence
+  text of each bundled library (still to do). The Windows installer shows the
+  licence (done 2026-10-15: `docs/release.md`, "The Windows installer"). A
   written offer of source names each GPL and LGPL library it ships (poppler,
   librttopo, x264, x265, GEOS, GMP, MPFR, libheif and the others in
   `THIRD_PARTY_NOTICES.md`) with the exact URL of its source, and Eigen's

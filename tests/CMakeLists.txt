@@ -65,6 +65,10 @@ add_test(NAME packaging_installs_only_present_first_party_files
             -DKATANA_REQUIRE_CPACK=ON
             -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
 
+# The Windows installer shows the licence, and the package carries the notices the
+# licence points to (tests/packaging_licence.cmake, tools/check_installer_licence.cmake).
+include(${CMAKE_CURRENT_LIST_DIR}/packaging_licence.cmake)
+
 # The cache entry KATANA_BUILTIN_CUSTOMISATION, which keeps what an earlier
 # configure gave it: a build directory made when NSW was the default would offer
 # Katana Standard nowhere, and the suite would stay green while testing none of

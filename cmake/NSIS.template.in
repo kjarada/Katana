@@ -183,6 +183,15 @@ FunctionEnd
   @CPACK_NSIS_INSTALLER_WELCOME_TITLE_3LINES_CODE@
   !insertmacro MUI_PAGE_WELCOME
 
+  ; The GNU General Public License asks nobody to accept it to run a program, so this page is
+  ; for reading: it says so, and its button is Next, not I Agree (the page the NSIS manual
+  ; shows for a program under the GPL). What it shows is CPACK_RESOURCE_FILE_LICENSE, made by
+  ; cmake/KatanaPackaging.cmake from LICENSE and ADDITIONAL_TERMS.md. A silent install
+  ; (/S, the deployment scripts and the release smoke test) shows no page.
+  !define MUI_PAGE_HEADER_SUBTEXT "Please review the licence of Katana before installing it."
+  !define MUI_LICENSEPAGE_TEXT_TOP "Katana is free software. Scroll down to read the licence and the additional terms."
+  !define MUI_LICENSEPAGE_TEXT_BOTTOM "You do not have to accept these terms to use Katana. They tell you what you are free to do with it, and what you are asked to keep. Click Next to continue."
+  !define MUI_LICENSEPAGE_BUTTON "$(^NextBtn)"
   @CPACK_NSIS_LICENSE_PAGE@
 
   !define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckInstallFolder

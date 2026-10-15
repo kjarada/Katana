@@ -20,6 +20,9 @@
 #     bin/platforms, styles, ...         Qt plugins, where Qt looks for them
 #     share/proj, share/gdal             proj.db and the GDAL support files
 #     etc/ssl/certs/ca-bundle.crt        what libcurl checks https:// against
+#     LICENSE                            the GNU General Public License
+#     share/katana/licences              the additional terms, the plain-words guide
+#                                        and the third-party notices
 #     share/katana/samples               a project to open
 #     share/katana/install.json          CPack's package only: says this is a release and
 #                                        names its target and its version (see
@@ -117,6 +120,20 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
 foreach(_katana_top_level_file LICENSE)
     if(EXISTS "${PROJECT_SOURCE_DIR}/${_katana_top_level_file}")
         install(FILES "${PROJECT_SOURCE_DIR}/${_katana_top_level_file}" DESTINATION .)
+    endif()
+endforeach()
+
+# The rest of what Katana is licensed under, and the licences of what it ships with, beside
+# the programs the licence is for: the additional terms (ADDITIONAL_TERMS.md), the plain-words
+# guide (LICENSING.md) and the third-party audit (THIRD_PARTY_NOTICES.md). Under share/katana
+# and not at the top beside LICENSE, which the update manifest leaves out (UPDATE_EXCLUDE in
+# the release workflow: the producer refuses any other file outside bin, share, etc and lib),
+# so an update brings the notices that match the programs it brings. Only files that exist,
+# for the reason above.
+foreach(_katana_notice ADDITIONAL_TERMS.md LICENSING.md THIRD_PARTY_NOTICES.md)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/${_katana_notice}")
+        install(FILES "${PROJECT_SOURCE_DIR}/${_katana_notice}"
+            DESTINATION "${KATANA_INSTALL_DATADIR}/katana/licences")
     endif()
 endforeach()
 
@@ -327,6 +344,62 @@ if(WIN32)
         # same four as above).
         set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\katana.exe")
         set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+        # The licence page: the installer shows the licence before it asks for a folder. What it
+        # shows is made here from the two texts that are binding - LICENSE, the GNU General Public
+        # License, and ADDITIONAL_TERMS.md, the terms added under its section 7 - behind a short
+        # note that nobody has to accept them to run Katana (the template's page says so too, and
+        # its button reads Next, not I Agree: the GPL asks for no acceptance, and a button that
+        # asked would say it did). One file, because the installer has one page for it. Written
+        # with Windows line ends, which the page's text box needs to break lines: the text is
+        # made LF only here (LICENSE is LF in the repository and CRLF in a checkout that
+        # converts) and file(WRITE) is a text-mode write, which on Windows - the only host that
+        # builds this installer - ends each line CRLF; converting here as well gave CR CR LF
+        # (a blank line after every line). And in ASCII, which a Unicode
+        # installer reads as it is: a character outside it would need a byte order mark that
+        # CMake cannot write, so it is refused here, in the configure, by name, rather than shown
+        # as other characters on a user's screen. tools/check_installer_licence.cmake holds the
+        # result (the test packaging_installer_shows_the_licence).
+        if(EXISTS "${PROJECT_SOURCE_DIR}/LICENSE" AND EXISTS "${PROJECT_SOURCE_DIR}/ADDITIONAL_TERMS.md")
+            set(_katana_licence_page "${CMAKE_BINARY_DIR}/KatanaInstallerLicence.txt")
+            file(READ "${PROJECT_SOURCE_DIR}/LICENSE" _katana_gpl)
+            file(READ "${PROJECT_SOURCE_DIR}/ADDITIONAL_TERMS.md" _katana_terms)
+            set(_katana_licence_text
+"Katana, copyright (c) 2026 Jarada, https://github.com/kjarada/Katana
+
+Katana is free software. You may use it for any purpose, study and change it, and
+share it, changed or not, under the terms below: the GNU General Public License,
+version 3 or, at your option, any later version, and the additional terms that
+follow it. You do not have to accept them to install or run Katana; they are
+here so that you can read what you are free to do and what you are asked to keep.
+
+The licences of the libraries Katana is built with and ships with are in
+THIRD_PARTY_NOTICES.md, in share/katana/licences in the folder Katana is
+installed to.
+
+================================================================================
+THE GNU GENERAL PUBLIC LICENSE
+================================================================================
+
+${_katana_gpl}
+
+================================================================================
+ADDITIONAL TERMS (ADDITIONAL_TERMS.md)
+================================================================================
+
+${_katana_terms}")
+            string(REPLACE "\r\n" "\n" _katana_licence_text "${_katana_licence_text}")
+            if(_katana_licence_text MATCHES "[^\n\t -~]")
+                message(FATAL_ERROR
+                    "The installer's licence page is made of LICENSE and ADDITIONAL_TERMS.md, and one "
+                    "of them has a character outside ASCII, which the page would show as other "
+                    "characters. Write it in ASCII (cmake/KatanaPackaging.cmake says why).")
+            endif()
+            file(WRITE "${_katana_licence_page}" "${_katana_licence_text}")
+            set(CPACK_RESOURCE_FILE_LICENSE "${_katana_licence_page}")
+            # The page is made again when either text changes, not only at the next fresh configure.
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/ADDITIONAL_TERMS.md")
+        endif()
         if(EXISTS "${PROJECT_SOURCE_DIR}/resources/katana.ico")
             set(CPACK_NSIS_MUI_ICON "${PROJECT_SOURCE_DIR}/resources/katana.ico")
             set(CPACK_NSIS_MUI_UNIICON "${PROJECT_SOURCE_DIR}/resources/katana.ico")
