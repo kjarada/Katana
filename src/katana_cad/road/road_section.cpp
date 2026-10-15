@@ -457,26 +457,31 @@ std::vector<OutSpan> earthworkSpans(const std::vector<SectionVertex>& ground,
         return a.out + (b.out - a.out) * (a.thickness / (a.thickness - b.thickness));
     };
     std::vector<OutSpan> spans;
-    std::optional<double> start;
+    // A plain flag and number rather than a std::optional<double>: GCC 16 at -O3
+    // cannot see that `close` runs only while a span is open and reports the
+    // optional's payload as maybe-uninitialised, which -Werror makes a failure.
+    bool open = false;
+    double start = 0.0;
     double peak = 0.0;
     const auto close = [&](double end) {
-        if (start && peak > tol::kCoordinate && end > *start) {
-            spans.push_back(OutSpan{*start, end});
+        if (open && peak > tol::kCoordinate && end > start) {
+            spans.push_back(OutSpan{start, end});
         }
-        start.reset();
+        open = false;
     };
     for (std::size_t i = 0; i < samples.size(); ++i) {
         if (samples[i].thickness > 0.0) {
-            if (!start) {
+            if (!open) {
                 start = i == 0 ? samples[i].out : crossing(samples[i - 1], samples[i]);
+                open = true;
                 peak = 0.0;
             }
             peak = std::max(peak, samples[i].thickness);
-        } else if (start) {
+        } else if (open) {
             close(crossing(samples[i - 1], samples[i]));
         }
     }
-    if (start) {
+    if (open) {
         close(samples.back().out);
     }
     return spans;
