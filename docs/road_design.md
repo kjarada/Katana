@@ -348,7 +348,8 @@ its objects (`include/katana/cad/bim/bim_object.hpp`):
 - the earthworks CUT and FILL of each side of each run: a closed solid for
   each PIECE - a stretch of stations where that side has any (see above),
   inside a stretch of complete sections, with the one section beyond each end
-  where its end area tapers to nothing. None where there is none.
+  where its end area tapers to nothing, in a line (below). None where there
+  is none.
 
 **A closed solid** (`road::loftSolid`): the solid's columns at each station
 give a top and a bottom face, the first and last column an inner and an
@@ -358,13 +359,47 @@ edge is shared by exactly two triangles and the solid is closed and
 consistently turned. Which way that turns depends on the side (offsets grow
 to the left, so the right side's solids are mirror images): it is turned
 outward by the sign of the volume it encloses. An earthworks solid has
-`road::kEarthworksColumns` (41) columns a side - its look, not its quantity -
-spread from where its earthworks start across each section to where they end,
-not from the centreline to the daylight: a fill beside a road in cut is no
-sheet laid over the whole half-section. Where a section's earthworks have a
-gap in them (cut, fill, cut across one section) the columns span the gap with
-no thickness, and its faces there have no area, which leaves the solid
-closed.
+`road::kEarthworksColumns` (41) columns across each STRETCH of a side - its
+look, not its quantity - spread from where that stretch of earthworks starts
+across a section to where it ends, not from the centreline to the daylight: a
+fill beside a road in cut is no sheet laid over the whole half-section.
+
+**A solid may taper, and then it has no face of no area.** A column whose top
+and bottom are the same (to the model's 0.1 mm, `math::tolerance::kCoordinate`,
+the thickness under which `earthworkSpans` finds no earthworks) is ONE vertex,
+and the faces between its two, which have no area, are not made: the solid ends
+in a line with a wedge welded to it, every edge still shared by two triangles
+(`loftSolid`'s `weldBelow`). That is done in the places a solid ends: a
+station's first and last column (where the ground meets the formation, the
+daylight, a stretch's edge) and every column of the first and last station (the
+section beyond a piece, which is a line along the formation). A cell with all
+four corners welded is two faces on one surface, with nothing inside it, and
+is left out. An interior column is never welded: a welded line with a body on
+each side is an edge four faces use, and the mesh would not be closed. Before,
+the end section of a piece and the edge of every stretch were columns with a top
+and a bottom at one level, and their faces - the cap of a tapering piece, the
+sliver at the daylight - were triangles of no area in a mesh that was closed
+on its indices (the IFC export judges closure there, and wrote them as they
+were).
+
+**A section with a gap in its earthworks** (cut, fill, cut across one
+half-section: `RoadSection::leftCutSpans` holds two stretches) makes the solid
+of cut one SHELL for each stretch counted from the centreline, the
+`k`-th stretch of each section lofted over the sections that have `k` of them
+and one beyond each end that is in the piece, where it is a line along the
+formation. They are one object (one id, one quantity: the end area, whose
+outline and GrossArea are the hull, as they were) with two closed shells in its
+mesh that touch nowhere, as an IfcTriangulatedFaceSet may hold. Before, one set
+of columns spanned the gap with no thickness, and its top and bottom lay on one
+surface there. *Rejected:* a solid for each stretch as an object of its own - a
+new id and a piece number for what the end-area quantity (which cannot be
+divided between stretches without a per-stretch area) counts as one;
+*rejected:* matching the stretches of one section to those of the next by
+overlap, and ending a shell where they do not match - the mesh is the look and
+not the quantity, so the `k`-th stretch of each is enough for it to be closed
+and a wrong match only skews a drawing, where an overlap rule changes which
+solids exist; *rejected:* welding any column whose thickness is under the bound
+- the pinch above.
 
 **Object ids** are stable - the IFC export derives each GlobalId from one,
 and a model handed over twice must name the same things the same way:
@@ -737,7 +772,13 @@ class, layer, quantities and properties, and every problem
   fill that ends along the road, pieces and their ids, no sliver of the other
   kind), regions, problems, strings and surfaces; a course and a kerb round a
   quarter circle against the annulus sector's area and the arc's length, with
-  the curve tolerance on and off.
+  the curve tolerance on and off; the lofted solids that taper (a wedge, an edge
+  column of no thickness, a gap, an interior column that must not be welded)
+  with their vertex and triangle counts worked out by hand, closed on their
+  indices, and no triangle under `math::tolerance::kAbsolute` - also over every
+  earthworks solid of the three standard templates on three grounds (a tilt, a
+  sawtooth, two cuts across), where the cases that weld are counted so that the
+  property is not satisfied by luck.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache (the
   same object after an edit that left the model as it was), the RoadModel
@@ -765,18 +806,6 @@ class, layer, quantities and properties, and every problem
 
 ## Not done
 
-- **An earthworks solid still has faces of no area where it tapers to
-  nothing.** The solids are split along the road where a side has none and
-  drawn over the stretch across the section where it has some, but the end
-  section of a piece (the one with none) and a gap inside one section have
-  no thickness: the mesh is closed on its own indices, and the IFC writer
-  judges closure there first and writes it as it is (docs/ifc.md, "Road
-  model"), so the solid goes out Closed with its triangles of no area in it
-  (seen on the rural two-lane tour: every earthworks solid Closed, and
-  `tools/check_ifc.py` with no finding); a viewer that refuses a degenerate
-  triangle would still object. Every course is closed. The piece should end in
-  a real closed taper (a wedge welded to a line), and a section with a gap
-  should be two stretches across.
 - Superelevation by design speed and radius: the table is entered by hand.
 - Shoulder rollover on the high side of a superelevated section: a
   superelevated shoulder takes the lane's crossfall.

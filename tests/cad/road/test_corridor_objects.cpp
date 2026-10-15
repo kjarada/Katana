@@ -9,8 +9,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <numbers>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +21,7 @@
 #include "katana/cad/road/corridor_model.hpp"
 #include "katana/cad/road/road_section.hpp"
 #include "katana/cad/road/road_template.hpp"
+#include "katana/math/numerics.hpp"
 #include "road_fixtures.hpp"
 
 using namespace katana::cad::road;
@@ -889,4 +892,346 @@ TEST(CorridorObjects, AKerbsLengthRoundAQuarterCircleIsItsArcToAQuarterOfTheCurv
     double arc = 7.0 * 2.0 * 44.4 * std::sin(0.1);
     arc += 2.0 * 44.4 * std::sin((25.0 * std::numbers::pi - 70.0) / 100.0);
     EXPECT_NEAR(quantityOf(*chorded, "Length"), 100.0 + arc, 1e-9);
+}
+
+// ---- solids that taper: no face of no area (docs/road_design.md, "A closed solid") --------
+
+namespace {
+
+// Every edge of `mesh` used by exactly two faces, once in each direction: the
+// test the IFC writer applies to its indices for "Closed" (docs/ifc.md).
+bool closedOnItsIndices(const katana::geometry::TriangleMesh& mesh)
+{
+    std::map<std::pair<std::uint32_t, std::uint32_t>, int> undirected;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, int> directed;
+    for (const auto& face : mesh.faces) {
+        for (std::size_t e = 0; e < 3; ++e) {
+            const std::uint32_t a = face[e];
+            const std::uint32_t b = face[(e + 1) % 3];
+            ++undirected[{std::min(a, b), std::max(a, b)}];
+            ++directed[{a, b}];
+        }
+    }
+    return !mesh.faces.empty() &&
+           std::ranges::all_of(undirected, [](const auto& e) { return e.second == 2; }) &&
+           std::ranges::all_of(directed, [](const auto& e) { return e.second == 1; });
+}
+
+// The area of the smallest triangle: a face of no area is a sliver the mesh is
+// closed with and a viewer may refuse.
+double thinnestTriangle(const katana::geometry::TriangleMesh& mesh)
+{
+    double thinnest = std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < mesh.triangleCount(); ++i) {
+        thinnest = std::min(thinnest, mesh.triangle(i)->area());
+    }
+    return thinnest;
+}
+
+// How many separate pieces the faces hold: faces that share a vertex are one.
+std::size_t shellsOf(const katana::geometry::TriangleMesh& mesh)
+{
+    std::vector<std::size_t> parent(mesh.vertices.size());
+    for (std::size_t i = 0; i < parent.size(); ++i) {
+        parent[i] = i;
+    }
+    const auto root = [&parent](std::size_t i) {
+        while (parent[i] != i) {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        return i;
+    };
+    std::vector<bool> used(mesh.vertices.size(), false);
+    for (const auto& face : mesh.faces) {
+        for (const std::uint32_t index : face) {
+            used[index] = true;
+            parent[root(index)] = root(face[0]);
+        }
+    }
+    std::set<std::size_t> roots;
+    for (std::size_t i = 0; i < parent.size(); ++i) {
+        if (used[i]) {
+            roots.insert(root(i));
+        }
+    }
+    return roots.size();
+}
+
+// A ground that depends on y alone (a TIN on a grid, as sawGround is on x): 10.5
+// from the centreline to 0.5 out, falling to 9.5 at 1.5 out, level to 2.5,
+// rising to 10.5 at 3.5 and level beyond, the same each side. Under a design
+// level of 10, with a 4 m lane and 2:1 batters, each side has a CUT out to
+// where the ground crosses 10 (1.0), a FILL to where it crosses back (3.0), and
+// a cut again to where the cut batter, rising from the lane's edge at 4 m,
+// meets the ground (10.5 at 5.0): two stretches of cut across every section,
+// with a fill between them.
+katana::terrain::TinSurface twoCutsAcrossGround()
+{
+    katana::terrain::TinInput input;
+    const std::pair<double, double> profile[] = {{0.0, 10.5},  {0.5, 10.5},  {1.5, 9.5},
+                                                 {2.5, 9.5},   {3.5, 10.5},  {100.0, 10.5}};
+    for (const double x : {-10.0, 0.0, 50.0, 100.0, 110.0}) {
+        for (const auto& [y, z] : profile) {
+            input.points.emplace_back(x, y, z);
+            if (y != 0.0) {
+                input.points.emplace_back(x, -y, z);
+            }
+        }
+    }
+    auto built = katana::terrain::buildTin(input);
+    EXPECT_TRUE(built.ok()) << built.error().describe();
+    return built->surface;
+}
+
+} // namespace
+
+TEST(CorridorObjects, ASolidThatTapersToALineIsAWedgeWeldedToItWithNoFaceOfNoArea)
+{
+    // Three columns 1 m apart, 1 m thick at station 0 and nothing at station 10
+    // (its top and bottom are the one line at level 0). Vertices: 6 at station
+    // 0 and 3 at 10. Triangles: the top 4 and the bottom 4 over two cells, the
+    // inner and the outer face one each (a quad whose far side is a line is one
+    // triangle), the cap at 0 four, the cap at 10 none: 14. V - E + F = 9 - 21 +
+    // 14 = 2, a sphere. The volume is half the end area, 2 x 1 = 2 m2, over 10
+    // m: 10 m3 (a wedge).
+    const auto alignment = straight(100.0);
+    const auto wedge = loftSolid(
+        alignment, {0.0, 10.0},
+        {{SolidColumn{0, 1, 0}, SolidColumn{1, 1, 0}, SolidColumn{2, 1, 0}},
+         {SolidColumn{0, 0, 0}, SolidColumn{1, 0, 0}, SolidColumn{2, 0, 0}}});
+    ASSERT_TRUE(wedge.ok()) << wedge.error().describe();
+    EXPECT_EQ(wedge->vertices.size(), 9u);
+    EXPECT_EQ(wedge->faces.size(), 14u);
+    EXPECT_TRUE(closedOnItsIndices(*wedge));
+    EXPECT_NEAR(meshVolume(*wedge), 10.0, 1e-12);
+    EXPECT_GT(thinnestTriangle(*wedge), 1e-3) << "a face of no area is left in";
+}
+
+TEST(CorridorObjects, AnEdgeColumnOfNoThicknessIsAWeldedLineAndMakesNoFaceOfNoArea)
+{
+    // Four columns, thick 1 m but the last, which is a line (ground meeting
+    // the formation): two stations, 7 vertices each (the last column is one),
+    // 14. Triangles: top 6, bottom 6, inner 2, outer 0 (all four corners are
+    // the one line), the two caps 5 each (their last cell is one triangle): 24.
+    // V - E + F = 14 - 36 + 24 = 2. The section is 1 + 1 + 0.5 = 2.5 m2, 25 m3.
+    const auto alignment = straight(100.0);
+    const std::vector<SolidColumn> section{SolidColumn{0, 1, 0}, SolidColumn{1, 1, 0},
+                                           SolidColumn{2, 1, 0}, SolidColumn{3, 0, 0}};
+    const auto solid = loftSolid(alignment, {0.0, 10.0}, {section, section});
+    ASSERT_TRUE(solid.ok()) << solid.error().describe();
+    EXPECT_EQ(solid->vertices.size(), 14u);
+    EXPECT_EQ(solid->faces.size(), 24u);
+    EXPECT_TRUE(closedOnItsIndices(*solid));
+    EXPECT_NEAR(meshVolume(*solid), 25.0, 1e-12);
+    EXPECT_GT(thinnestTriangle(*solid), 1e-3);
+
+    // A thickness under the weld bound is a line too, at the top's level (5
+    // vertices a station); over it, a face (6). 0.00005 m is under the model's
+    // 0.1 mm, 0.0002 over it.
+    for (const auto& [thickness, welds] : {std::pair{0.00005, true}, std::pair{0.0002, false}}) {
+        const std::vector<SolidColumn> thin{SolidColumn{0, 1, 0}, SolidColumn{1, 1, 0},
+                                            SolidColumn{2, 1, 1 - thickness}};
+        const auto made = loftSolid(alignment, {0.0, 10.0}, {thin, thin}, 1e-4);
+        ASSERT_TRUE(made.ok());
+        EXPECT_EQ(made->vertices.size(), welds ? 10u : 12u) << thickness;
+        EXPECT_TRUE(closedOnItsIndices(*made)) << thickness;
+    }
+}
+
+TEST(CorridorObjects, TwoStretchesWithNothingBetweenThemAreTwoShellsAndTheGapHasNoFace)
+{
+    // Six columns, 1 m thick but the middle two (a gap), on two stations that
+    // are both ends of the solid: the cell across the gap has nothing between
+    // its top and its bottom at its four corners, two faces on one surface, and
+    // is left out. Vertices: 10 a station (the middle two are one each), 20.
+    // Triangles: top 8, bottom 8, inner 4, outer 4, the caps 6 each: 32. Two
+    // spheres: V - E + F = 20 - 48 + 32 = 4. Each shell is 1 + 0.5 = 1.5 m2:
+    // 30 m3 in all, over 10 m.
+    const auto alignment = straight(100.0);
+    const std::vector<SolidColumn> section{SolidColumn{0, 1, 0}, SolidColumn{1, 1, 0},
+                                           SolidColumn{2, 0, 0}, SolidColumn{3, 0, 0},
+                                           SolidColumn{4, 1, 0}, SolidColumn{5, 1, 0}};
+    const auto solid = loftSolid(alignment, {0.0, 10.0}, {section, section});
+    ASSERT_TRUE(solid.ok()) << solid.error().describe();
+    EXPECT_EQ(solid->vertices.size(), 20u);
+    EXPECT_EQ(solid->faces.size(), 32u);
+    EXPECT_TRUE(closedOnItsIndices(*solid));
+    EXPECT_EQ(shellsOf(*solid), 2u);
+    EXPECT_NEAR(meshVolume(*solid), 30.0, 1e-12);
+    EXPECT_GT(thinnestTriangle(*solid), 1e-3);
+}
+
+TEST(CorridorObjects, AnInteriorColumnOfNoThicknessIsNotWeldedSoASolidNeverPinchesToALine)
+{
+    // Three stations, 1 m thick everywhere but the middle column of the middle
+    // station, which is nothing. It is not welded: welded, the line it makes
+    // with a body on each side would be an edge four faces use. So the solid has
+    // 6 vertices a station, 18, and 32 triangles (top 8, bottom 8, inner 4, outer
+    // 4, the two caps 4 each), V - E + F = 18 - 48 + 32 = 2.
+    // Its volume is the plan area of each of the four cells' two triangles, 5 m2
+    // a triangle, times the mean thickness at its corners: the cells have
+    // 2/3, 2/3; 1, 2/3; 2/3, 1; 2/3, 2/3: 5 x (4/3 + 5/3 + 5/3 + 4/3) = 30 m3.
+    const auto alignment = straight(100.0);
+    const std::vector<SolidColumn> thick{SolidColumn{0, 1, 0}, SolidColumn{1, 1, 0},
+                                         SolidColumn{2, 1, 0}};
+    const std::vector<SolidColumn> pinched{SolidColumn{0, 1, 0}, SolidColumn{1, 0, 0},
+                                           SolidColumn{2, 1, 0}};
+    const auto solid = loftSolid(alignment, {0.0, 10.0, 20.0}, {thick, pinched, thick});
+    ASSERT_TRUE(solid.ok()) << solid.error().describe();
+    EXPECT_EQ(solid->vertices.size(), 18u);
+    EXPECT_EQ(solid->faces.size(), 32u);
+    EXPECT_TRUE(closedOnItsIndices(*solid));
+    EXPECT_EQ(shellsOf(*solid), 1u);
+    EXPECT_NEAR(meshVolume(*solid), 30.0, 1e-12);
+    EXPECT_GT(thinnestTriangle(*solid), 1e-3);
+}
+
+TEST(CorridorObjects, ATaperingEarthworksPieceEndsInALineAndItsVolumeIsThatOfTheSolidItWas)
+{
+    // The sawtooth ground (as EarthworksSplitWhere...): the fill beside the lane
+    // is 5 m thick to 4 m out and falls to nothing at 14 (2:1), at sections 0, 20
+    // and 40, and there is none at 10 and 30. fill/1 runs from 0 (the thick
+    // section) to 10 (a line along the formation), fill/1-2 from 10 to 30 with its
+    // thick section at 20, fill/1-3 from 30 to 40.
+    //   fill/1     41 columns of 0.35 m, 41 + 40 vertices at station 0 (the last
+    //              is a line) and 41 at 10: 122; top 80 + bottom 80 + inner 1 +
+    //              outer 0 + cap at 0 79 (its last cell is one triangle) + cap at
+    //              10 none: 240 triangles. V - E + F = 122 - 360 + 240 = 2.
+    //   fill/1-2   a line, the thick section, a line: 41 + 81 + 41 = 163 vertices,
+    //              2 x 160 + inner 2 = 322 triangles: 163 - 483 + 322 = 2.
+    // The mesh volume is Sum of plan area x mean thickness of each triangle's
+    // corners, the plan cells 0.35 x 10 split a to c: for a section thick t_i
+    // at its columns and a line beyond it that is 1.75 (2 t_i + t_(i+1)) / 3 a
+    // cell, and the other way round 1.75 (2 t_(i+1) + t_i) / 3. With t = 5 to
+    // 4 m out and 5 - (out - 4) / 2 beyond: 226.42083 and 223.50417, 449.925 for
+    // the two ends together - the end area's 225, 225 and 450 less and plus a
+    // diagonal's worth, as the old solid (a face of no area at its end) was.
+    const auto ground = sawGround();
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}), straight(40.0),
+                                     level(10.0, 0.0, 40.0), &ground);
+    const BimModel model = corridorSolids(built);
+    const BimObject* first = objectWithId(model, "corridor/Main/left/earthworks/fill/1");
+    const BimObject* middle = objectWithId(model, "corridor/Main/left/earthworks/fill/1-2");
+    const BimObject* last = objectWithId(model, "corridor/Main/left/earthworks/fill/1-3");
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(middle, nullptr);
+    ASSERT_NE(last, nullptr);
+    EXPECT_EQ(first->mesh.vertices.size(), 122u);
+    EXPECT_EQ(first->mesh.faces.size(), 240u);
+    EXPECT_EQ(middle->mesh.vertices.size(), 163u);
+    EXPECT_EQ(middle->mesh.faces.size(), 322u);
+    EXPECT_NEAR(meshVolume(first->mesh), 226.42083333333, 1e-6);
+    EXPECT_NEAR(meshVolume(middle->mesh), 449.925, 1e-6);
+    EXPECT_NEAR(meshVolume(last->mesh), 223.50416666667, 1e-6);
+    // The quantities are the end areas', as they were.
+    EXPECT_NEAR(quantityOf(*first, "GrossVolume"), 225.0, 1e-5);
+    EXPECT_NEAR(quantityOf(*middle, "GrossVolume"), 450.0, 1e-5);
+    EXPECT_NEAR(quantityOf(*first, "GrossArea"), 70.0, 1e-5);
+    EXPECT_NEAR(quantityOf(*middle, "GrossArea"), 140.0, 1e-5);
+    for (const BimObject* object : {first, middle, last}) {
+        EXPECT_TRUE(closedOnItsIndices(object->mesh)) << object->id;
+        EXPECT_GT(meshVolume(object->mesh), 0.0) << object->id << " is turned inward";
+        EXPECT_GT(thinnestTriangle(object->mesh), katana::math::tolerance::kAbsolute)
+            << object->id << " has a face of no area";
+    }
+}
+
+TEST(CorridorObjects, ASectionWithCutFillAndCutAcrossItIsTwoShellsOfCutAndOneOfFill)
+{
+    // twoCutsAcrossGround: each side has, at every section, cut from the
+    // centreline to 1.0 (0.5 thick to 0.5 out, then falling to nothing: 0.25 +
+    // 0.125 = 0.375 m2), fill from 1.0 to 3.0 (0.125 + 0.5 + 0.125 = 0.75 m2),
+    // and cut again from 3.0 to 5.0 (0.125 + 0.25 + 0.25 = 0.625 m2). Over 100
+    // m: cut 100 m3, fill 75 m3 a side. The ground's kinks and the lane's edge
+    // are on columns of 0.025 and 0.05 m (the cut's stretches are 1 and 2 m wide,
+    // the fill's 2, each in 40 steps), so the solids hold exactly that. The
+    // cut was one solid whose columns spanned the 2 m gap with no thickness; it
+    // is two shells now, and the fill one.
+    const auto ground = twoCutsAcrossGround();
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}), straight(100.0),
+                                     level(10.0, 0.0, 100.0), &ground);
+    EXPECT_EQ(built.incompleteSections, 0u);
+    EXPECT_NEAR(built.cut, 200.0, 1e-5);
+    EXPECT_NEAR(built.fill, 150.0, 1e-5);
+    const BimModel model = corridorSolids(built);
+    ASSERT_EQ(model.objects.size(), 4u) << "a cut and a fill a side, one piece each";
+    for (const std::string side : {"left", "right"}) {
+        const BimObject* cut = objectWithId(model, "corridor/Main/" + side + "/earthworks/cut/1");
+        const BimObject* fill = objectWithId(model, "corridor/Main/" + side + "/earthworks/fill/1");
+        ASSERT_NE(cut, nullptr) << side;
+        ASSERT_NE(fill, nullptr) << side;
+        EXPECT_NEAR(quantityOf(*cut, "GrossVolume"), 100.0, 1e-5) << side;
+        EXPECT_NEAR(quantityOf(*fill, "GrossVolume"), 75.0, 1e-5) << side;
+        EXPECT_NEAR(meshVolume(cut->mesh), 100.0, 1e-5) << side;
+        EXPECT_NEAR(meshVolume(fill->mesh), 75.0, 1e-5) << side;
+        EXPECT_EQ(shellsOf(cut->mesh), 2u) << side;
+        EXPECT_EQ(shellsOf(fill->mesh), 1u) << side;
+        for (const BimObject* object : {cut, fill}) {
+            EXPECT_TRUE(closedOnItsIndices(object->mesh)) << object->id;
+            EXPECT_GT(thinnestTriangle(object->mesh), katana::math::tolerance::kAbsolute)
+                << object->id;
+        }
+        // Drawn and measured as their hull (a plan outline is one polygon): the
+        // cut from the centreline to 5 m out, the fill from 1 to 3.
+        EXPECT_NEAR(quantityOf(*cut, "GrossArea"), 500.0, 1e-5) << side;
+        EXPECT_NEAR(quantityOf(*fill, "GrossArea"), 200.0, 1e-5) << side;
+    }
+}
+
+TEST(CorridorObjects, NoEarthworksSolidOfTheStandardTemplatesHasAFaceOfNoAreaOrIsOpen)
+{
+    // The three standard templates over ground that tilts across the road (cut
+    // and fill on a side), over the sawtooth ground (pieces that taper away
+    // along the road) and over the ground with two cuts across: every earthworks
+    // solid is closed on its own indices, turned outward, and has no triangle
+    // of less area than math::tolerance::kAbsolute (1e-12 m2): a face of no area
+    // is 0, or a sliver at the daylight a few 1e-13 m thick. The cases are
+    // reached: the solids are counted that have fewer vertices than 41 columns
+    // top and bottom on every station would (2 x 41 a station), which every
+    // solid whose edge or end is a line has, and each ground must have some.
+    RoadTemplateSet templates;
+    templates.templates = standardTemplates();
+    struct Case {
+        const char* name;
+        katana::terrain::TinSurface ground;
+        double length;
+    };
+    std::vector<Case> cases;
+    cases.push_back({"tilted", planeGround(0.0, 0.25, 9.5), 100.0});
+    cases.push_back({"sawtooth", sawGround(), 40.0});
+    cases.push_back({"two cuts across", twoCutsAcrossGround(), 100.0});
+    for (const Case& each : cases) {
+        std::size_t seen = 0;
+        std::size_t welded = 0;
+        for (const RoadTemplate& roadTemplate : templates.templates) {
+            Corridor corridor = corridorOf(roadTemplate.name);
+            corridor.surface = "ground";
+            const auto built = buildCorridor(corridor, templates, straight(each.length),
+                                             level(10.0, 0.0, each.length), &each.ground);
+            for (const BimObject& object : corridorSolids(built).objects) {
+                if (object.kind != "earthworks") {
+                    continue;
+                }
+                ++seen;
+                EXPECT_TRUE(closedOnItsIndices(object.mesh))
+                    << each.name << " " << roadTemplate.name << " " << object.id;
+                EXPECT_GT(meshVolume(object.mesh), 0.0) << object.id << " is turned inward";
+                EXPECT_GT(thinnestTriangle(object.mesh), katana::math::tolerance::kAbsolute)
+                    << each.name << " " << roadTemplate.name << " " << object.id;
+                // One shell of 41 columns would have 82 vertices a station,
+                // 41 at a line and 81 where one end is.
+                const double stations = quantityOf(object, "Length") / 10.0 + 1.0;
+                if (static_cast<double>(object.mesh.vertices.size()) < 82.0 * stations) {
+                    ++welded;
+                }
+            }
+        }
+        EXPECT_GT(seen, 0u) << each.name << " made no earthworks: nothing was tested";
+        EXPECT_GT(welded, 0u) << each.name << " welded nothing: no taper or edge was reached";
+    }
 }

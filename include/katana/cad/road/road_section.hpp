@@ -291,9 +291,19 @@ struct CorridorInputs {
 // triangles, the faces turned outward. `columns[k]` are station `k`'s, all
 // with the same count (two at least); `stations` has two at least.
 // InvalidArgument otherwise.
+//
+// A solid may TAPER. Where a column's top is no more than `weldBelow` above its
+// bottom, in a station's first or last column, or in any column of the first or
+// last station, the two are ONE vertex (at the top's level), and the faces that
+// would have run between them - which have no area - are not made: the solid
+// ends in a line, a wedge welded to it, and is closed as before. A cell whose
+// four corners are all welded is two faces on one surface and is left out. An
+// interior column is never welded, so a solid cannot pinch to a line with a body
+// on each side. The default, 0, welds only a column of no thickness at all,
+// which no course or kerb has (docs/road_design.md, "A closed solid").
 [[nodiscard]] katana::core::Result<katana::geometry::TriangleMesh>
 loftSolid(const katana::geometry::SolvedAlignment& alignment, const std::vector<double>& stations,
-          const std::vector<std::vector<SolidColumn>>& columns);
+          const std::vector<std::vector<SolidColumn>>& columns, double weldBelow = 0.0);
 
 // A closed, outward-turned mesh's volume is geometry::meshVolume.
 
