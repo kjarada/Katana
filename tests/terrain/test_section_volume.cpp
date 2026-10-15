@@ -745,8 +745,9 @@ TEST(SectionAreas, AreTheirFirstMomentsAboutTheLineTheOffsetIsMeasuredFrom)
     const SectionAreas areas = sectionAreas(under.along(from, to), over.along(from, to), 20.0, 10.0);
     EXPECT_NEAR(areas.fill, 20.0, 1e-10);
     EXPECT_NEAR(areas.fillMoment, 200.0 / 3.0, 1e-9);
-    EXPECT_EQ(areas.cut, 0.0);
-    EXPECT_EQ(areas.cutMoment, 0.0);
+    // The design is 0 deep at the far end, where rounding may leave -1e-16.
+    EXPECT_NEAR(areas.cut, 0.0, 1e-12);
+    EXPECT_NEAR(areas.cutMoment, 0.0, 1e-11);
     // With the offset measured from the first end itself (the default) the offset
     // is -x along the section, and the centroid is 20/3 from the deep end, which is
     // the first: the moment is 20 x (-20/3) = -400/3. By the integral:
@@ -757,8 +758,8 @@ TEST(SectionAreas, AreTheirFirstMomentsAboutTheLineTheOffsetIsMeasuredFrom)
     const SectionAreas swapped = sectionAreas(over.along(from, to), under.along(from, to), 20.0, 10.0);
     EXPECT_NEAR(swapped.cut, 20.0, 1e-10);
     EXPECT_NEAR(swapped.cutMoment, 200.0 / 3.0, 1e-9);
-    EXPECT_EQ(swapped.fill, 0.0);
-    EXPECT_EQ(swapped.fillMoment, 0.0);
+    EXPECT_NEAR(swapped.fill, 0.0, 1e-12);
+    EXPECT_NEAR(swapped.fillMoment, 0.0, 1e-11);
 }
 
 TEST(SectionAreas, ASectionWhereTheSurfacesCrossHasACutMomentOnOneSideAndAFillMomentOnTheOther)
