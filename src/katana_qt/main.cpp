@@ -54,6 +54,7 @@
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
 #include "render_view_widget.hpp"
+#include "screen_fit.hpp"
 #include "script_runner.hpp"
 #include "tools/flyout_button.hpp"
 #include "update_dialog.hpp"
@@ -827,6 +828,10 @@ int main(int argc, char* argv[])
     // Before any window exists: a widget created under the default style keeps
     // some of its metrics when the style changes beneath it.
     katana::qt::theme::apply(application);
+    // No dialog may be taller or wider than the screen it opens on, whatever it holds:
+    // each one is fitted as it is shown, and scrolls when its controls need more room
+    // than there is (src/katana_qt/screen_fit.hpp).
+    katana::qt::installScreenFit(application);
     application.setWindowIcon(katana::qt::applicationIcon());
 
     std::optional<QString> plotPath;

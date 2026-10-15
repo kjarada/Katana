@@ -67,6 +67,7 @@ add_executable(katana_qt_widget_tests
     test_plan_context_menu.cpp
     # The theme's style, stylesheet and fonts, and the icons (test_theme).
     test_theme.cpp
+    test_screen_fit.cpp
     # The Properties panel's tree (test_property_panel).
     test_property_panel.cpp
     # Terrain > Alignment Manager (test_alignment_manager).

@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -13,9 +14,12 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScreen>
+#include <QScrollArea>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTabWidget>
+#include <QGuiApplication>
 
 #include <memory>
 #include <string>
@@ -25,6 +29,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_builder.hpp"
+#include "screen_fit.hpp"
 #include "terrain/volumes_dialog.hpp"
 
 namespace {
@@ -254,4 +259,30 @@ TEST(VolumeResultTable, EveryRecordIsARowAndEveryKeyAColumnInTheOrderFirstMet)
     ASSERT_EQ(table.rows.size(), 3u);
     EXPECT_EQ(table.rows[1], (QStringList{"polygon", "2", "3.000", "4.000", "yes", ""}));
     EXPECT_EQ(table.rows[2], (QStringList{"volume", "", "4.000", "6.000", "", "exact"}));
+}
+
+// The tallest dialog the window has: every page's fields, the scope and filter
+// controls, a table and a diagram, a thousand pixels and more once shown. A laptop's
+// screen has less room than that, so it scrolls (src/katana_qt/screen_fit.hpp) and its
+// Close button is still reached.
+TEST(VolumesDialog, IsNoTallerThanTheScreenAndStillReachesItsCloseButton)
+{
+    Document document;
+    CommandInterpreter interpreter(document);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    const QRect available = QGuiApplication::primaryScreen()->availableGeometry();
+    ASSERT_GT(dialog.minimumSizeHint().height(), available.height() - 100)
+        << "the premise: the dialog needs more room than this screen has";
+    EXPECT_TRUE(katana::qt::fitDialogToScreen(dialog));
+    dialog.show();
+    QApplication::processEvents();
+    EXPECT_LE(dialog.height(), available.height());
+    auto* scroll = dialog.findChild<QScrollArea*>(katana::qt::kScreenFitScroll);
+    ASSERT_NE(scroll, nullptr);
+    auto* close = child<QPushButton>(dialog, "volumesClose");
+    scroll->ensureWidgetVisible(close, 0, 0);
+    QApplication::processEvents();
+    const QRect where(close->mapTo(scroll->viewport(), QPoint(0, 0)), close->size());
+    EXPECT_TRUE(scroll->viewport()->rect().contains(where)) << "Close cannot be scrolled into view";
 }

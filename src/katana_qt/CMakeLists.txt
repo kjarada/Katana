@@ -36,6 +36,8 @@ endif()
 # A new file here must link without them - a widget test's link error says
 # when one does not.
 add_library(katana_qt_ui OBJECT
+    screen_fit.cpp
+    screen_fit.hpp
     command_reference_dialog.cpp
     command_reference_dialog.hpp
     command_runner.hpp

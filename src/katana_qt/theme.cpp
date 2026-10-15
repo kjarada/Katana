@@ -174,6 +174,16 @@ class OverflowArrowEngine final : public QIconEngine {
 // drawing's two hundred styles in the Style box ran off the screen. This
 // style asks for the scrolling list instead.
 //
+// Long menus. Fusion lays a menu taller than its screen out in several columns
+// side by side, which a menu of sections and sub-menus (Terrain: Surfaces,
+// Sections, Corridors, Volumes, Analysis, DEM) turns into a wall nobody can
+// read down; and where a menu is placed with its first item above the screen the
+// last are unreachable. This style says menus scroll (SH_Menu_Scrollable): a menu
+// that does not fit its screen is one column the height of the room there is, with
+// an arrow at each end that scrolls while the pointer rests on it, and the wheel
+// and the cursor keys scroll it as well. The stylesheet's QMenu rules leave the hint
+// to the base style, which is this. docs/desktop.md, "Fitting the screen".
+//
 // A toolbar's overflow arrow. Qt's is a small dark image made for light
 // toolbars (QCommonStyle's toolbar-ext resources), barely there on this one;
 // this style draws it in the muted text colour, pointing the way the hidden
@@ -187,6 +197,8 @@ class KatanaStyle final : public QProxyStyle {
     {
         switch (hint) {
         case SH_Menu_SupportsSections:
+            return 1;
+        case SH_Menu_Scrollable:
             return 1;
         case SH_ComboBox_Popup:
             return 0;

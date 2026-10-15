@@ -431,6 +431,82 @@ A rename or delete of the current style clears it rather than following it
 (`docs/cad.md`, "Document"), so the toolbar then shows ByLayer.
 `qt_current_style_and_the_style_row_headless` drives both.
 
+## Fitting the screen
+
+A menu or a dialog taller than the screen it is on has its bottom off it: the
+last items, the Close button, the results. Until 2026-10-15 nothing kept a
+window on its screen but the main window's own first-run size
+(`MainWindow::fitToScreen`, above) and the choice lists
+(`KatanaStyle`, `SH_ComboBox_Popup`, "The look of the application"); the
+managers and dialogs of the terrain and road work are a thousand pixels tall
+and more, and a 1366 x 768 laptop leaves 728 under its task bar. Each piece is
+the application's, not each dialog's, because every dialog written to fit one
+screen is one more that a smaller screen proves wrong.
+
+* **Menus scroll.** `KatanaStyle` answers `SH_Menu_Scrollable` (`theme.cpp`):
+  a menu taller than its screen is ONE column as tall as the room there is,
+  with an arrow at each end that scrolls while the pointer rests on it, and the
+  wheel and the cursor keys scroll it too. Without it Qt lays such a menu out in
+  columns side by side - the Terrain menu became a wall of three, as tall as
+  the screen whatever the menu bar's place on it, so its bottom ran under the
+  task bar (`ScreenFit.AMenuTallerThanTheScreenIsOneScrollingColumn` puts the
+  last item in a second column, at x = 227 against 5, without the hint). The
+  stylesheet's `QMenu` rules leave the hint to the base style; the test sets
+  the stylesheet on the menu to hold that. A menu that fits is not changed.
+* **Dialogs are fitted as they are shown.** `installScreenFit`
+  (`src/katana_qt/screen_fit.hpp`, called by `main` after the theme) is one
+  application-wide event filter that calls `fitDialogToScreen` on every
+  top-level `QDialog` as it is shown, before the dialog's own handler centres
+  it. It takes the room the dialog's screen has - the available area, less 8 px
+  all round, less the window's frame (Qt's once the window is shown, 16 x 40
+  before) - and:
+  * a dialog whose controls need no more than that is left exactly as it was
+    written, its size only limited;
+  * one whose layout cannot be made small enough (`minimumSizeHint`, or a
+    minimum it was given, over the room in either direction) has its layout put
+    in a `QScrollArea` (`screenFitScroll`) that fills it, so every control is
+    reached by scrolling and the window is as large as the screen lets it be.
+    `QWidget::setLayout` takes the layout off the dialog and brings the widgets
+    it lays out with it, so each control keeps its object name and stays a
+    descendant of the dialog: whatever finds one by name finds it still. A
+    scroll bar's width is left in the width when the height is cut;
+  * a dialog that was moved by hand off the screen is brought back onto it;
+    one that was not is centred by `QDialog` itself, inside the screen, with the
+    size it now has;
+  * Qt's own dialogs (`QMessageBox`, `QFileDialog`, `QColorDialog`,
+    `QFontDialog`, `QInputDialog`) keep their layouts, their size alone limited.
+  Fitted once: showing a wrapped dialog again finds its scroll area and only
+  limits the size again, on whatever screen it is on now.
+* **Tests.** `ScreenFit.*` (`tests/qt_widgets/test_screen_fit.cpp`): a dialog
+  that fits is given no scroll area and keeps its layout; one of eighty
+  40 px rows, 3,200 px, scrolls, is no taller than the screen, and its first,
+  middle and last rows can each be scrolled into view; one wider than the
+  screen scrolls across to a button at the end of its row; shown three times it
+  has one scroll area; a dialog placed off the screen is brought back; a
+  `QMessageBox` is not taken apart; and
+  `VolumesDialog.IsNoTallerThanTheScreenAndStillReachesItsCloseButton` is the
+  real tallest dialog. The offscreen platform's screen is the machine's (2560
+  x 1440 here under the headless driver, 800 x 800 under the widget tests), so
+  a headless run of a dialog shows it as it was written unless the screen is
+  made smaller: `QT_SCALE_FACTOR=2` in the environment of a
+  `--dialog terrainVolumes` run halves it, and that shows Volumes as a 774 x
+  664 window with its scroll bar.
+* **Decided.** A scroll area for the whole dialog rather than a taller screen's
+  worth of smaller pages: no dialog has to be redesigned, and a person with room
+  sees nothing different. *Rejected:* each dialog sizing itself (the sizes were
+  chosen for the developer's screen, and the next dialog would forget);
+  `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that is
+  too tall (it lets the window shrink and clips or overlaps what no longer
+  fits, and nothing scrolls); a stylesheet's `menu-scrollable` (the style is
+  where the combo popup's hint already is).
+
+Not done: a dialog's own buttons (Close, Apply) scroll with the rest, where a
+button row kept below the scroll area would stay in sight; the toolbars still
+overflow behind their arrow on a 1366-pixel screen (the second row, with Survey,
+Terrain, Surface Edit, BIM and GIS, does at 1360 even with small icons and no
+names), and no setting chooses a density from the screen; a floating dock is not
+fitted.
+
 ## Failure modes
 
 Every command failure surfaces as a message in the command log and, for errors,
