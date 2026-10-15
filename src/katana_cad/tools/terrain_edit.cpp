@@ -1,6 +1,6 @@
 // Terrain > Edit Surface (see families.hpp; docs/surface_editing.md, "In the
-// window"): Delete Triangle, Flip Edge, Add Point, Delete Point, Delete
-// Triangles Inside, Add Breakline, Boundary and Hole, each acting on the
+// window"): Delete Triangle, Flip Edge, Add Point, Delete Point, Move Point,
+// Delete Triangles Inside, Add Breakline, Boundary and Hole, each acting on the
 // ACTIVE surface.
 //
 // A tool never edits a surface itself: what it was told becomes the SURFACE
@@ -54,6 +54,7 @@ enum class EditKind {
     FlipEdge,
     AddPoint,
     DeletePoint,
+    MovePoint,
     DeleteInside,
     Breakline,
     Boundary,
@@ -117,6 +118,9 @@ class SurfaceEditTool final : public InteractiveTool {
             return "Level of the point at " + coordinates(*placed_) +
                    (surfaceLevel(*placed_) ? " <" + formatNumber(*surfaceLevel(*placed_)) + ">"
                                            : std::string{});
+        case Step::Target:
+            return "Click where the vertex of " + *name + " at " + coordinates(*placed_) +
+                   " goes, or type x,y; it keeps its level";
         case Step::Main:
             break;
         }
@@ -130,6 +134,8 @@ class SurfaceEditTool final : public InteractiveTool {
                    " goes, or type x,y,z, or [Surface]";
         case EditKind::DeletePoint:
             return "Click the vertex" + on + " to delete or [Surface]";
+        case EditKind::MovePoint:
+            return "Click the vertex" + on + " to move or [Surface]";
         case EditKind::DeleteInside:
             return std::string("Pick the closed polyline to delete the triangles") + on +
                    (*outside_ ? " OUTSIDE it" : " inside it") + " or [Outside/Surface]";
@@ -146,6 +152,9 @@ class SurfaceEditTool final : public InteractiveTool {
 
     [[nodiscard]] ToolInput expects() const override
     {
+        if (step_ == Step::Target) {
+            return ToolInput::Point;
+        }
         if (step_ != Step::Main) {
             return ToolInput::Value;
         }
@@ -159,6 +168,9 @@ class SurfaceEditTool final : public InteractiveTool {
 
     ToolStep point(const Point2& at) override
     {
+        if (step_ == Step::Target) {
+            return moveTo(at);
+        }
         if (step_ != Step::Main || picksEntity(kind_)) {
             return InteractiveTool::point(at);
         }
@@ -177,6 +189,8 @@ class SurfaceEditTool final : public InteractiveTool {
             placed_ = at;
             step_ = Step::Level;
             return ToolStep::next();
+        case EditKind::MovePoint:
+            return pickVertex(at);
         default:
             return InteractiveTool::point(at);
         }
@@ -235,6 +249,9 @@ class SurfaceEditTool final : public InteractiveTool {
         if (step_ == Step::Surface) {
             return chooseSurface(text);
         }
+        if (step_ == Step::Target) {
+            return InteractiveTool::value(text); // a place is a point, not a word
+        }
         if (step_ == Step::Level) {
             const auto level = parseNumber(text);
             if (!level) {
@@ -266,12 +283,17 @@ class SurfaceEditTool final : public InteractiveTool {
             }
             return ToolStep::rejected("The point is off the surface: type its level.");
         }
+        if (step_ == Step::Target) {
+            step_ = Step::Main; // the vertex is let go
+            placed_.reset();
+            return ToolStep::next();
+        }
         return ToolStep::done(nullptr);
     }
 
     ToolStep undo() override
     {
-        if (step_ == Step::Level || step_ == Step::Surface) {
+        if (step_ == Step::Level || step_ == Step::Surface || step_ == Step::Target) {
             step_ = Step::Main;
             placed_.reset();
             return ToolStep::next();
@@ -345,6 +367,40 @@ class SurfaceEditTool final : public InteractiveTool {
             feedback.caption = "delete this vertex";
             return feedback;
         }
+        case EditKind::MovePoint: {
+            if (step_ == Step::Target) {
+                // The vertex where it is, and where the click would put it.
+                const double z = surface->elevationAt(*placed_).value_or(0.0);
+                feedback.marks.push_back({FeedbackRole::Removed, PointGeometry{*placed_},
+                                          "z " + formatNumber(z)});
+                feedback.marks.push_back({FeedbackRole::Added, PointGeometry{at}, {}});
+                if (!triangle) {
+                    feedback.caption = "off the surface: a vertex cannot be moved off it";
+                    feedback.refused = true;
+                } else {
+                    feedback.caption = "move the vertex here, keeping its level";
+                }
+                return feedback;
+            }
+            const auto vertex = katana::terrain::vertexAt(*surface, at, vertexReach(context_));
+            if (!vertex) {
+                feedback.caption = "no vertex here";
+                feedback.refused = true;
+                return feedback;
+            }
+            const auto& p = surface->vertices()[*vertex];
+            feedback.marks.push_back({FeedbackRole::Target, PointGeometry{Point2(p.x, p.y)},
+                                      "z " + formatNumber(p.z)});
+            // The verb's own rule (movePoint holds the rim and the ends of
+            // constrained edges, as smoothing does), asked of the same function.
+            if (katana::terrain::heldVertices(*surface)[*vertex] != 0) {
+                feedback.caption = "a rim, breakline or boundary vertex is kept, not moved";
+                feedback.refused = true;
+            } else {
+                feedback.caption = "move this vertex";
+            }
+            return feedback;
+        }
         case EditKind::AddPoint:
             if (triangle) {
                 feedback.marks.push_back(
@@ -365,7 +421,7 @@ class SurfaceEditTool final : public InteractiveTool {
     [[nodiscard]] std::optional<Point2> lastPoint() const override { return placed_; }
 
   private:
-    enum class Step { Main, Level, Surface };
+    enum class Step { Main, Level, Surface, Target };
 
     [[nodiscard]] std::optional<std::string> surfaceName() const
     {
@@ -408,6 +464,44 @@ class SurfaceEditTool final : public InteractiveTool {
         setSurfaceEditTarget(named->name);
         step_ = Step::Main;
         return ToolStep::next("Editing " + named->name + ".");
+    }
+
+    // The first click of Move Point: the vertex within the view's reach, held
+    // while the target is chosen. A vertex the verb would refuse is refused now,
+    // before the second click.
+    ToolStep pickVertex(const Point2& at)
+    {
+        const auto* surface = activeSurface();
+        if (surface == nullptr) {
+            return noSurface();
+        }
+        const auto vertex = katana::terrain::vertexAt(*surface, at, vertexReach(context_));
+        if (!vertex) {
+            return ToolStep::rejected("No vertex of the surface is within reach: click one.");
+        }
+        if (katana::terrain::heldVertices(*surface)[*vertex] != 0) {
+            return ToolStep::rejected(
+                "A rim, breakline or boundary vertex is kept, not moved: it is the footprint "
+                "or a line the surface keeps.");
+        }
+        const auto& p = surface->vertices()[*vertex];
+        placed_ = Point2(p.x, p.y);
+        step_ = Step::Target;
+        return ToolStep::next();
+    }
+
+    // The second: SURFACE EDIT ... MOVE POINT <vertex> TO <here>. The vertex is
+    // named by its own coordinates, so no reach decides which one it is. A
+    // refusal leaves the vertex held, for another click.
+    ToolStep moveTo(const Point2& at)
+    {
+        const Point2 from = *placed_;
+        ToolStep step = run({"MOVE", "POINT", coordinates(from), "TO", coordinates(at)});
+        if (step.outcome != ToolStep::Outcome::Rejected) {
+            step_ = Step::Main;
+            placed_.reset();
+        }
+        return step;
     }
 
     ToolStep addAt(double level)
@@ -497,6 +591,11 @@ void addTerrainEditTools(ToolCatalog& catalog, const Report& report)
                                 "Deletes the vertex of the active surface you click and fills "
                                 "the gap: SURFACE EDIT ... DELETE POINT.",
                                 EditKind::DeletePoint)));
+    report(catalog.add(editTool("terrain.edit.movepoint", "Move Point", 45, {"TINMOVPT"},
+                                "Moves the vertex of the active surface you click to the place "
+                                "you click next, keeping its level and re-triangulating round "
+                                "both: SURFACE EDIT ... MOVE POINT.",
+                                EditKind::MovePoint)));
     report(catalog.add(editTool("terrain.edit.deleteinside", "Delete Triangles Inside", 50,
                                 {"TINDELIN"},
                                 "Deletes the triangles of the active surface inside a closed "

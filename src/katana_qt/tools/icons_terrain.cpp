@@ -2,7 +2,7 @@
 // src/katana_cad/tools/terrain_edit.cpp, docs/surface_editing.md). Each
 // draws the same small TIN in the neutral tone - a quadrilateral of four
 // triangles round a centre vertex - and what the tool does to it in the
-// accent, so the eight read as one family on the Surface Edit toolbar.
+// accent, so the nine read as one family on the Surface Edit toolbar.
 
 #include "tools/tool_icons.hpp"
 
@@ -57,6 +57,15 @@ bool paintTerrainEditIcon(std::string_view toolId, const ToolInk& ink)
         drawTin(ink);
         ink.line(8.5, 8.5, 15.5, 15.5, true, 2.0);
         ink.line(15.5, 8.5, 8.5, 15.5, true, 2.0);
+        return true;
+    }
+    if (toolId == "terrain.edit.movepoint") {
+        // The vertex where it was, and an arrow in the accent to where it goes.
+        drawTin(ink, false);
+        ink.dot(8.5, 13.5, 2.0);
+        ink.line(11, 12.8, 17.5, 10.2, true, 1.8);
+        ink.line(17.5, 10.2, 14.4, 9.6, true, 1.8);
+        ink.line(17.5, 10.2, 15.6, 12.7, true, 1.8);
         return true;
     }
     if (toolId == "terrain.edit.deleteinside") {

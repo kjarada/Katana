@@ -397,6 +397,12 @@ OPENS - refusing would lock the person out of a drawing they cannot rename
 their way out of - with the name repaired the same way, made unique, and a
 warning in the log
 (`SurfaceDocument.ASurfaceNameAnEarlierBuildStoredAsAnsiBytesOrWithAQuoteIsRepairedOnOpen`).
+The source and the style that open reads are repaired by reading their bytes as
+Windows-1252 as well (`Document::readSurfaceState`, `utf8OrWindows1252`): a
+source "raster caf" + 0xE9 opens as "raster caf" + C3 A9
+(`SurfaceDocument.ASurfaceSourceAndStyleAnEarlierBuildStoredAsAnsiBytesAreReadAsWindows1252`,
+which edits the stored bytes in the project's database and fails without the
+conversion).
 
 **ALL.** `SURFACE SHOW|HIDE ALL` is a keyword, and a surface may be called
 ALL: the verb gives a surface's own name the first claim, so `SURFACE HIDE
@@ -506,7 +512,14 @@ arrangement, so they need no schema change.
   the door, since it also answers `SURFACESTYLE LIST JSON`), and what a save
   writes is guarded apart - `Document::writeSurfaceState` re-checks the set
   and refuses the save, naming the style, rather than write a U+FFFD into the
-  project (`SurfaceDocument.AStyleSetWhoseTextIsNotUtf8IsRefusedSoASaveNeverMeetsIt`,
+  project. The door never lets such a set into the Document, so no test could
+  hand the save the set it refuses; the guard is a function of the set,
+  `detail::surfaceStylesMetadataValue` (`src/katana_cad/terrain/surface_document_io.hpp`),
+  which `writeSurfaceState` calls and a test calls with the sets the door
+  refuses
+  (`SurfaceDocument.TheSaveRefusesAStyleSetTheJsonWriterCouldNotCarryRatherThanRewriteItsText`;
+  the door itself:
+  `SurfaceDocument.AStyleSetWhoseTextIsNotUtf8IsRefusedSoASaveNeverMeetsIt`,
   `SurfaceStyleSets.TextThatIsNotUtf8IsRefusedAndTheMessageDoesNotCarryItsBytes`,
   `DrawingSurfaceVerbs.NamesAndDescriptionsTypedInTheAnsiCodePageAreRefusedAndNothingChanges`).
   *Rejected:* `Result<std::string>` from `surfaceStylesToJson`: the Document

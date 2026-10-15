@@ -56,8 +56,9 @@ TEST_F(SurfaceEditTools, EveryToolIsInTheTerrainCategoryOfTheCatalogue)
 {
     for (const char* id : {"terrain.edit.deletetriangle", "terrain.edit.flip",
                            "terrain.edit.addpoint", "terrain.edit.deletepoint",
-                           "terrain.edit.deleteinside", "terrain.edit.breakline",
-                           "terrain.edit.boundary", "terrain.edit.hole"}) {
+                           "terrain.edit.movepoint", "terrain.edit.deleteinside",
+                           "terrain.edit.breakline", "terrain.edit.boundary",
+                           "terrain.edit.hole"}) {
         const ToolInfo* info = toolCatalog().find(id);
         ASSERT_NE(info, nullptr) << id;
         EXPECT_EQ(info->category, "Terrain") << id;
@@ -66,6 +67,7 @@ TEST_F(SurfaceEditTools, EveryToolIsInTheTerrainCategoryOfTheCatalogue)
     }
     EXPECT_TRUE(toolCatalogProblems().empty());
     EXPECT_NE(toolCatalog().findByAlias("tinflip"), nullptr);
+    EXPECT_NE(toolCatalog().findByAlias("tinmovpt"), nullptr);
 }
 
 TEST_F(SurfaceEditTools, DeleteTriangleRunsTheVerbOnTheActiveSurfaceAsOneUndoStep)
@@ -293,4 +295,90 @@ TEST_F(SurfaceEditTools, TheSurfaceOptionTellsTheToolbarAndOnlyWhileItIsListenin
     removeSurfaceEditTargetObserver(handle);
     setSurfaceEditTarget("ground");
     EXPECT_EQ(told, 1) << "a removed observer is not called";
+}
+
+TEST_F(SurfaceEditTools, MovePointTakesAVertexThenATargetAndRunsTheVerbAsOneUndoStep)
+{
+    // A pick tolerance of 0.5 gives a vertex reach of 0.75: the click at
+    // (2.1, 2.1) is 0.14 from the vertex (2,2) of the 4 x 4 grid.
+    putSurface(driver.document(), "ground", flatGridSurface(4, 1.0));
+    const TinSurface before = surfaceOf(driver.document(), "ground");
+    driver.setPickTolerance(0.5);
+    driver.start("terrain.edit.movepoint");
+    EXPECT_NE(driver.tool().prompt().find("to move"), std::string::npos) << driver.tool().prompt();
+    EXPECT_TRUE(rejected(driver.click(10, 10))) << "no vertex within reach of a point off the surface";
+    const ToolStep first = driver.click(2.1, 2.1);
+    ASSERT_EQ(first.outcome, ToolStep::Outcome::Continue) << first.message;
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
+    EXPECT_NE(driver.tool().prompt().find("goes"), std::string::npos) << driver.tool().prompt();
+    ASSERT_TRUE(driver.tool().lastPoint().has_value());
+    EXPECT_EQ(*driver.tool().lastPoint(), Point2(2, 2)) << "the vertex itself, not the click";
+    // A target the verb refuses leaves the vertex held for another click.
+    EXPECT_TRUE(rejected(driver.click(9, 9)));
+    EXPECT_EQ(driver.executed(), 0);
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
+
+    const ToolStep second = driver.click(3.5, 2.2);
+    ASSERT_EQ(second.outcome, ToolStep::Outcome::Done) << second.message;
+    EXPECT_EQ(driver.executed(), 1);
+    ASSERT_FALSE(driver.messages().empty());
+    EXPECT_TRUE(driver.messages().back().starts_with(
+        "SURFACE EDIT ground MOVE POINT 2,2 TO 3.5,2.2\n"))
+        << driver.messages().back();
+    const TinSurface moved = surfaceOf(driver.document(), "ground");
+    EXPECT_NEAR(moved.planArea(), 16.0, 1e-9);
+    EXPECT_EQ(moved.vertexCount(), 25u);
+    ASSERT_TRUE(driver.document().undo().ok());
+    EXPECT_EQ(surfaceOf(driver.document(), "ground"), before);
+    EXPECT_FALSE(driver.finished()) << "it starts again for the next vertex";
+}
+
+TEST_F(SurfaceEditTools, MovePointRefusesAHeldVertexAtTheFirstClickAndTheUndoLetsGoOfOne)
+{
+    // The row y = 4 from x = 1 to 7 is a breakline; the corner (0,0) is on the
+    // rim. Neither is picked up. A free vertex is, and Undo lets go of it.
+    putSurface(driver.document(), "ground", flatGridSurface(10, 1.0));
+    CommandInterpreter interpreter(driver.document());
+    ASSERT_TRUE(interpreter.run("SURFACE EDIT ground BREAKLINE 1,4 7,4").ok());
+    driver.setPickTolerance(0.5);
+    driver.start("terrain.edit.movepoint");
+    const ToolStep onLine = driver.click(4.1, 4.1);
+    ASSERT_TRUE(rejected(onLine));
+    EXPECT_NE(onLine.message.find("kept"), std::string::npos) << onLine.message;
+    EXPECT_TRUE(rejected(driver.click(0.1, 0.1)));
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
+    EXPECT_NE(driver.tool().prompt().find("to move"), std::string::npos) << "still at the first click";
+
+    ASSERT_EQ(driver.click(6.1, 6.1).outcome, ToolStep::Outcome::Continue);
+    EXPECT_NE(driver.tool().prompt().find("goes"), std::string::npos);
+    EXPECT_EQ(driver.undo().outcome, ToolStep::Outcome::Continue);
+    EXPECT_NE(driver.tool().prompt().find("to move"), std::string::npos) << driver.tool().prompt();
+    EXPECT_FALSE(driver.tool().lastPoint().has_value());
+    EXPECT_EQ(driver.executed(), 0) << "the breakline was added by the test, and no move was made";
+}
+
+TEST_F(SurfaceEditTools, ThePreviewOfMovePointMarksTheVertexThenWhereItWouldGoAndWhatItRefuses)
+{
+    putSurface(driver.document(), "ground", flatGridSurface(4, 1.0));
+    driver.setPickTolerance(0.5);
+    driver.start("terrain.edit.movepoint");
+    // Over a free vertex: marked as the one to move. Over a rim vertex: refused, saying it is kept.
+    const ToolFeedback free = driver.preview(2.05, 2.05);
+    EXPECT_FALSE(free.refused) << free.caption;
+    ASSERT_EQ(free.marks.size(), 1u);
+    EXPECT_EQ(free.marks.front().role, FeedbackRole::Target);
+    EXPECT_EQ(free.caption, "move this vertex");
+    const ToolFeedback rim = driver.preview(0.05, 0.05);
+    EXPECT_TRUE(rim.refused);
+    EXPECT_NE(rim.caption.find("kept"), std::string::npos) << rim.caption;
+    EXPECT_TRUE(driver.preview(9, 9).refused);
+
+    // After the first click: the vertex where it is and where it would go; off the surface, refused.
+    ASSERT_EQ(driver.click(2.05, 2.05).outcome, ToolStep::Outcome::Continue);
+    const ToolFeedback target = driver.preview(3.5, 2.2);
+    EXPECT_FALSE(target.refused) << target.caption;
+    ASSERT_EQ(target.marks.size(), 2u);
+    EXPECT_EQ(target.marks[0].role, FeedbackRole::Removed);
+    EXPECT_EQ(target.marks[1].role, FeedbackRole::Added);
+    EXPECT_TRUE(driver.preview(9, 9).refused);
 }

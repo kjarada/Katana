@@ -154,6 +154,28 @@ std::string formatExactReal(double value)
     return std::string(buffer, result.ptr);
 }
 
+std::string formatFixed(double value, int decimals)
+{
+    constexpr int kMostDecimals = 60;
+    decimals = decimals < 0 ? 0 : (decimals > kMostDecimals ? kMostDecimals : decimals);
+    // The longest fixed text of a double: DBL_MAX, 1.8e308, has 309 digits
+    // before the point; then the sign, the point and the decimals. A buffer of
+    // 64 held the text of a value up to 1e57 only, and the failure it reported
+    // was printed as "nan" for a finite level.
+    char buffer[309 + 2 + kMostDecimals + 1];
+    const auto result =
+        std::to_chars(buffer, buffer + sizeof buffer, value, std::chars_format::fixed, decimals);
+    if (result.ec != std::errc()) {
+        return "nan"; // not reachable for a buffer of this size; never a half-written number
+    }
+    std::string text(buffer, result.ptr);
+    // "-0.000": a sign and nothing but zeros and the point.
+    if (text.size() > 1 && text.front() == '-' && text.find_first_not_of("-0.") == std::string::npos) {
+        text.erase(0, 1);
+    }
+    return text;
+}
+
 std::string replyQuoted(std::string_view text)
 {
     std::string out = "\"";

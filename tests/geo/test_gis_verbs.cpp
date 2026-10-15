@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -660,6 +661,18 @@ TEST(GisRecords, AValueThatRoundsToZeroHasNoSign)
     EXPECT_EQ(geo::fixed3(-0.0004), "0.000");
     EXPECT_EQ(geo::fixed3(-0.0006), "-0.001");
     EXPECT_EQ(geo::fixed3(1.25), "1.250");
+}
+
+// A level a file may hold and an edit refuses (past 1e9) was "nan" in a record:
+// the formatter's buffer held 64 characters, and 1e61 has 65 with its decimals
+// (1e60, 64, filled it to the last).
+TEST(GisRecords, AFiniteValueTooLongForSixtyFourCharactersIsItsDigitsNotNan)
+{
+    EXPECT_EQ(geo::fixed3(1e60), "999999999999999949387135297074018866963645011013410073083904.000");
+    EXPECT_EQ(geo::fixed3(1e61), "9999999999999999493871352970740188669636450110134100730839040.000");
+    EXPECT_EQ(geo::fixed3(-1e300).size(), 306u);
+    EXPECT_EQ(geo::fixed3(std::numeric_limits<double>::max()).size(), 313u);
+    EXPECT_EQ(geo::fixed3(-1e-300), "0.000");
 }
 
 // ---- through a Session, as katana_cli and katana_mcp run it ----------------------------------

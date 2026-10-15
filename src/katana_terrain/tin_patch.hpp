@@ -57,7 +57,11 @@ class TriangleGrid {
     // is conservative: it may mark a triangle the segment only passes near,
     // never miss one it crosses - a region a little too large costs a few
     // triangles re-triangulated, one too small is caught and grown anyway.
-    void markAlong(const Point2& a, const Point2& b, std::vector<std::uint8_t>& marks) const;
+    // `newlyMarked`, when given, receives the triangles THIS call marked (not
+    // those `marks` already held), so a caller that needs the list does not
+    // scan the surface's every triangle for it.
+    void markAlong(const Point2& a, const Point2& b, std::vector<std::uint8_t>& marks,
+                   std::vector<std::uint32_t>* newlyMarked = nullptr) const;
 
   private:
     const TinSurface* surface_ = nullptr;
@@ -95,6 +99,16 @@ struct Place {
 // insertion does.
 void markInsertionCavity(const TinSurface& surface, const Place& place, const Point2& position,
                          std::vector<std::uint8_t>& region);
+
+// The triangles a point of an edit reaches, marked in `marks` (one per
+// triangle): the triangle it lies in, both when it lies on an edge, the whole
+// star of a vertex it lies at; none off the surface. The rule rebuildPatch
+// grows its region by, one function so a caller asking "what would this edit
+// rebuild?" (cutHoles, deciding which footprints can share a patch) cannot
+// come to a different answer. `newlyMarked`: as TriangleGrid::markAlong.
+void markReachedByPoint(const TinSurface& surface, const VertexStars& stars, const Point2& position,
+                        std::vector<std::uint8_t>& marks,
+                        std::vector<std::uint32_t>* newlyMarked = nullptr);
 
 // Tags of the constraints of a patch, reported back per edge by the kernel.
 inline constexpr std::uint8_t kTagKept = 1;   // an edge of the surface that is constrained
@@ -170,8 +184,12 @@ struct PatchOutput {
     std::size_t newVertices = 0;
 };
 
+// `grid`, when given, is the TriangleGrid of `surface` the caller already
+// built (cutHoles asks the same grid which footprints can share a patch);
+// otherwise one is built here when a line or a cut needs it.
 [[nodiscard]] katana::core::Result<PatchOutput>
-rebuildPatch(const TinSurface& surface, const VertexStars& stars, PatchRequest request);
+rebuildPatch(const TinSurface& surface, const VertexStars& stars, PatchRequest request,
+             const TriangleGrid* grid = nullptr);
 
 // The triangles that join points off the surface to its rim: the surface's
 // rim vertices and `points` triangulated with the rim edges as constraints,

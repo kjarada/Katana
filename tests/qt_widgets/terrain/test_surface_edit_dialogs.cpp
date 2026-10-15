@@ -162,12 +162,17 @@ TEST(SurfaceEditLines, TheDataDialogsWriteTheirLinesFromTheScopeAndRefuseWithout
     form.scope = "DRAWING WHERE TYPE=polyline";
     EXPECT_EQ(*katana::qt::surfaceLevelsLine(SurfaceLevelsKind::AddPoints, form),
               "SURFACE EDIT \"my ground\" ADD POINTS FROM DRAWING WHERE TYPE=polyline");
+    EXPECT_EQ(*katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeleteBreakline, form),
+              "SURFACE EDIT \"my ground\" DELETE BREAKLINE FROM DRAWING WHERE TYPE=polyline");
 
     form.scope.clear();
     EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeletePoints, form))
                   .find("Polygons"),
               std::string::npos);
     EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::AddPoints, form)).find("Points"),
+              std::string::npos);
+    EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeleteBreakline, form))
+                  .find("Lines: say which lines"),
               std::string::npos);
     form.scopeError = "no layer is ticked";
     EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeleteTriangles, form))
@@ -292,7 +297,9 @@ TEST(SurfaceLevelsDialog, TheDataDialogsAskTheScopeAlwaysAndRunTheLineShown)
           Case{SurfaceLevelsKind::DeleteTriangles, "surfaceDeleteTriangles",
                "SURFACE EDIT ground DELETE TRIANGLES INSIDE FROM DRAWING"},
           Case{SurfaceLevelsKind::AddPoints, "surfaceAddPoints",
-               "SURFACE EDIT ground ADD POINTS FROM DRAWING"}}) {
+               "SURFACE EDIT ground ADD POINTS FROM DRAWING"},
+          Case{SurfaceLevelsKind::DeleteBreakline, "surfaceDeleteBreakline",
+               "SURFACE EDIT ground DELETE BREAKLINE FROM DRAWING"}}) {
         SCOPED_TRACE(test.prefix);
         SurfaceLevelsDialog dialog(test.kind, recorder.context(&document));
         const QString p = test.prefix;
@@ -486,15 +493,16 @@ TEST(SurfaceEditUi, TheSubmenuToolbarAndDialogItemsAreNamedAndTheToolsFillThem)
     }
     for (const char* name :
          {"terrain.edit.deletetriangle", "terrain.edit.flip", "terrain.edit.addpoint",
-          "terrain.edit.deletepoint", "terrain.edit.deleteinside", "terrain.edit.breakline",
+          "terrain.edit.deletepoint", "terrain.edit.movepoint", "terrain.edit.deleteinside",
+          "terrain.edit.breakline",
           "terrain.edit.boundary", "terrain.edit.hole", "terrainSurfaceHeights",
           "terrainSurfaceSmooth", "terrainSurfaceThin", "terrainSurfaceDeleteLong",
           "terrainSurfaceDeletePoints", "terrainSurfaceDeleteTriangles",
-          "terrainSurfaceAddPoints"}) {
+          "terrainSurfaceAddPoints", "terrainSurfaceDeleteBreakline"}) {
         EXPECT_TRUE(names.contains(name)) << name;
     }
     for (const char* name : {"terrainSurfaceDeletePoints", "terrainSurfaceDeleteTriangles",
-                             "terrainSurfaceAddPoints"}) {
+                             "terrainSurfaceAddPoints", "terrainSurfaceDeleteBreakline"}) {
         auto* action = window.findChild<QAction*>(name);
         ASSERT_NE(action, nullptr) << name;
         EXPECT_FALSE(action->statusTip().isEmpty()) << name;

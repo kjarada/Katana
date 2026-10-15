@@ -46,17 +46,12 @@ bool is(const Tokens& tokens, std::size_t at, std::string_view word)
     return at < tokens.size() && katana::core::equalsIgnoringCase(tokens[at], word);
 }
 
+// A length or a level to the millimetre in a record: the one formatter
+// (core::formatFixed), which holds any finite double and signs no zero
+// (zmin=-0.000 reads as meant).
 std::string fixed3(double number)
 {
-    char buffer[64];
-    const auto [end, error] =
-        std::to_chars(buffer, buffer + sizeof(buffer), number, std::chars_format::fixed, 3);
-    if (error != std::errc()) {
-        return "nan";
-    }
-    std::string text(buffer, end);
-    // A value that rounds to nothing has no sign (zmin=-0.000 reads as meant).
-    return text == "-0.000" ? std::string("0.000") : text;
+    return katana::core::formatFixed(number, 3);
 }
 
 std::string yesNo(bool value)

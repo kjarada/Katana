@@ -102,6 +102,8 @@ QString surfaceLevelsPrefix(SurfaceLevelsKind kind)
         return "surfaceDeleteTriangles";
     case SurfaceLevelsKind::AddPoints:
         return "surfaceAddPoints";
+    case SurfaceLevelsKind::DeleteBreakline:
+        return "surfaceDeleteBreakline";
     }
     return "surfaceEdit";
 }
@@ -159,16 +161,18 @@ Result<QString> surfaceLevelsLine(SurfaceLevelsKind kind, const SurfaceLevelsFor
         return line + (form.longSides ? " DELETE LONG " : " DELETE THIN ") + form.value.trimmed();
     case SurfaceLevelsKind::DeletePoints:
     case SurfaceLevelsKind::DeleteTriangles:
+    case SurfaceLevelsKind::DeleteBreakline:
     case SurfaceLevelsKind::AddPoints: {
         // The data is always the scope's: a click on one entity is the tool's.
-        const QString what = kind == SurfaceLevelsKind::AddPoints ? "Points" : "Polygons";
+        const bool points = kind == SurfaceLevelsKind::AddPoints;
+        const bool lines = kind == SurfaceLevelsKind::DeleteBreakline;
+        const QString what = points ? "Points" : (lines ? "Lines" : "Polygons");
         if (!form.scopeError.isEmpty()) {
             return invalid(what + ": " + form.scopeError);
         }
         if (form.scope.trimmed().isEmpty()) {
             return invalid(what + ": say which " +
-                           (kind == SurfaceLevelsKind::AddPoints ? "points to add"
-                                                                 : "polygons to use"));
+                           (points ? "points to add" : (lines ? "lines to use" : "polygons to use")));
         }
         const QString from = " FROM " + form.scope.trimmed();
         switch (kind) {
@@ -177,6 +181,8 @@ Result<QString> surfaceLevelsLine(SurfaceLevelsKind kind, const SurfaceLevelsFor
         case SurfaceLevelsKind::DeleteTriangles:
             return line + (form.outside ? " DELETE TRIANGLES OUTSIDE" : " DELETE TRIANGLES INSIDE") +
                    from;
+        case SurfaceLevelsKind::DeleteBreakline:
+            return line + " DELETE BREAKLINE" + from;
         default:
             return line + " ADD POINTS" + from;
         }
@@ -312,6 +318,9 @@ SurfaceLevelsDialog::SurfaceLevelsDialog(SurfaceLevelsKind kind, SurfaceEditDial
     case SurfaceLevelsKind::AddPoints:
         setWindowTitle("Add Points from the Drawing");
         break;
+    case SurfaceLevelsKind::DeleteBreakline:
+        setWindowTitle("Delete Breaklines Along Lines");
+        break;
     }
     auto* layout = new QVBoxLayout(this);
     auto* fields = new QFormLayout();
@@ -373,13 +382,14 @@ SurfaceLevelsDialog::SurfaceLevelsDialog(SurfaceLevelsKind kind, SurfaceEditDial
         value_->hide();
         break;
     case SurfaceLevelsKind::DeletePoints:
+    case SurfaceLevelsKind::DeleteBreakline:
     case SurfaceLevelsKind::AddPoints:
         value_->hide();
         break;
     }
     layout->addLayout(fields);
     if (kind == SurfaceLevelsKind::DeletePoints || kind == SurfaceLevelsKind::DeleteTriangles ||
-        kind == SurfaceLevelsKind::AddPoints) {
+        kind == SurfaceLevelsKind::DeleteBreakline || kind == SurfaceLevelsKind::AddPoints) {
         // The scope is what these are about, so it is not behind a tick box.
         scope_ = new ScopeFilterWidget(p, this);
         scope_->views = context_.views;

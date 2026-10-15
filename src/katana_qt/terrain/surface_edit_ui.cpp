@@ -106,6 +106,11 @@ void SurfaceEditUi::finish(QMenu& terrain)
          "extends it",
          "terrainSurfaceAddPoints", "surfaceAddPointsDialog",
          static_cast<int>(SurfaceLevelsKind::AddPoints)},
+        {Icon::SurfaceEdit, "Delete Breaklines Along Lines...",
+         "Make the breakline edges that lie along the lines a scope takes ordinary edges "
+         "(the triangles stay; a point on one can then be deleted)",
+         "terrainSurfaceDeleteBreakline", "surfaceDeleteBreaklineDialog",
+         static_cast<int>(SurfaceLevelsKind::DeleteBreakline)},
     };
     menu_->addSection("Levels and Triangles");
     toolBar_->addSeparator();
