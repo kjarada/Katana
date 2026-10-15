@@ -163,7 +163,9 @@ PREVIEW reads. Four of its rows for the scenario with the sample schedule
 
 What is not written is accounted for too: a label is "not written", "a
 label: labels are not exported". Every product the report counts is in the
-table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`).
+table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`;
+a road model's `IfcRoad` and `IfcRoadPart` are rows too, "a corridor" and "a
+part of road Main", `IfcExportRoad.EveryRoadAndPartTheReportCountsIsInTheAccountOnce`).
 
 The table is the file the choices made when Preview was pressed: changing any
 of them but the file's name clears it, and a problem found since replaces the
@@ -513,7 +515,14 @@ them against the schema, and does not second-guess them.
 - aggregated into the site, and an `IfcRoadPart` (7.9.3.4) per part of it,
 aggregated into its road, in the order the model first names them; each
 element contained in its part, in its road when it names no part, in the site
-when it names no road (a sign of no corridor). The road is an ELEMENT and its
+when it names no road (a sign of no corridor). A facility, and a part within
+it, match **ignoring letter case**, as Katana finds a corridor by its name
+(`facility=main` is on the corridor Main): they are written under the
+spelling of the first element of the model that names them, so one road is
+one `IfcRoad` and a line marking of it finds the pavement under it
+(`IfcExportRoad.AFacilityAndPartMatchIgnoringCaseAsACorridorsNameDoes`).
+**Rejected:** matching them exactly, which made `main` a second `IfcRoad`
+and its marking "on no course of its road", left out. The road is an ELEMENT and its
 parts PARTIAL: between facilities IfcRoad asks for a COMPLEX parent over an
 ELEMENT child, an ELEMENT over a PARTIAL. A part's UsageType (mandatory on
 IfcFacilityPart; IfcFacilityUsageEnum, 5.4.2.11) is LATERAL for the parts of

@@ -422,6 +422,109 @@ TEST(IfcExportRoad, EachFacilityIsAnIfcRoadInTheSiteAndEachPartAnIfcRoadPartInIt
     EXPECT_EQ(out.classes.at("IfcRoadPart"), 2u);
 }
 
+// A facility is a corridor's name and Katana finds a corridor ignoring case
+// (CorridorSet::find), so facility=main beside the corridor Main is on Main:
+// one IfcRoad, not two, and a line marking of it finds the course of its road
+// under it. The same for a part ("roadside" and "ROADSIDE" are one part). The
+// road and the parts are written under the first spelling the model has: Main,
+// and ROADSIDE from the fill, which comes before the rail's "roadside".
+// By hand: 4 elements (a course, a fill, a marking, a rail) in 1 road and 2
+// parts (CARRIAGEWAY, ROADSIDE); the marking, a feature, is contained nowhere
+// and adheres to the course (its first face's centre is in the course's plan:
+// the marking box is x 1..9, y 1..1.1, the course 0..10 x 0..3.5); the rail is
+// in the ROADSIDE part. A sign with a part but no facility is the site's and
+// must not throw.
+TEST(IfcExportRoad, AFacilityAndPartMatchIgnoringCaseAsACorridorsNameDoes)
+{
+    ifc::ExportInput input;
+    input.road.elements.push_back(element("course", "pavement", {"IfcCourse", "PAVEMENT", {}},
+                                          "Main", "CARRIAGEWAY", box(0.0, 0.0, 0.0, 10.0, 3.5, 0.05)));
+    input.road.elements.push_back(element("fill", "batter",
+                                          {"IfcEarthworksFill", "SLOPEFILL", {}}, "Main",
+                                          "ROADSIDE", box(0.0, 5.1, 0.0, 10.0, 6.0, 0.5)));
+    input.road.elements.push_back(element("mark", "marking",
+                                          {"IfcSurfaceFeature", "LINEMARKING", {}}, "main",
+                                          "carriageway", box(1.0, 1.0, 0.05, 9.0, 1.1, 0.053)));
+    input.road.elements.push_back(element("rail", "barrier", {"IfcRailing", "GUARDRAIL", {}},
+                                          "MAIN", "roadside", box(0.0, 5.0, 0.0, 10.0, 5.1, 1.0)));
+    input.road.elements.push_back(element("sign", "sign", {"IfcSign", "PICTORAL", {}}, "",
+                                          "ROADSIDE", box(20.0, 0.0, 0.0, 20.5, 0.05, 2.0)));
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_EQ(out.roadElements, 5u);
+    EXPECT_EQ(out.roadElementsSkipped, 0u) << "the marking has a course under it, ignoring case";
+    EXPECT_EQ(out.roads, 1u);
+    EXPECT_EQ(out.roadParts, 2u);
+    ASSERT_EQ(ofType(all, "IFCROAD").size(), 1u);
+    const int road = ofType(all, "IFCROAD").front();
+    EXPECT_EQ(all.at(road).args[2], "'Main'");
+    std::map<std::string, int> parts;
+    for (const int part : ofType(all, "IFCROADPART")) {
+        parts.emplace(all.at(part).args[2], part);
+    }
+    ASSERT_EQ(parts.size(), 2u);
+    ASSERT_TRUE(parts.contains("'Main CARRIAGEWAY'") && parts.contains("'Main ROADSIDE'"));
+    EXPECT_EQ(containerOf(all, byTag(all, "rail")), parts.at("'Main ROADSIDE'"));
+    EXPECT_EQ(containerOf(all, byTag(all, "fill")), parts.at("'Main ROADSIDE'"));
+    EXPECT_EQ(containerOf(all, byTag(all, "sign")), ofType(all, "IFCSITE").front());
+    // The marking adheres to the course, and is contained in nothing.
+    ASSERT_EQ(ofType(all, "IFCRELADHERESTOELEMENT").size(), 1u);
+    EXPECT_EQ(refOf(all.at(ofType(all, "IFCRELADHERESTOELEMENT").front()).args[4]),
+              byTag(all, "course"));
+    EXPECT_EQ(containerOf(all, byTag(all, "mark")), 0);
+    // Not a second road in the account either: one source, "road Main".
+    for (const ifc::ClassTally& row : out.tally) {
+        EXPECT_NE(row.source, "road main");
+        EXPECT_NE(row.source, "road MAIN");
+    }
+}
+
+// Two facilities that differ by more than case stay two roads.
+TEST(IfcExportRoad, FacilitiesThatDifferByMoreThanCaseAreTwoRoads)
+{
+    ifc::ExportInput input;
+    for (const char* facility : {"Main", "MAINS", "main"}) {
+        input.road.elements.push_back(element(std::string("k-") + facility, "kerb",
+                                              {"IfcKerb", "NOTDEFINED", {}}, facility, "",
+                                              box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)));
+    }
+    const auto out = exported(input);
+    EXPECT_EQ(out.roads, 2u); // Main (twice, as "main") and MAINS
+    EXPECT_EQ(out.classes.at("IfcKerb"), 3u);
+}
+
+// Every product the report counts is in the account once (the same property
+// IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce holds for a
+// drawing): the road and each part of it too, so that File > Export IFC's
+// table, which is filled from the account, lists them. By hand, roadInput() is
+// one corridor, Main, with two parts: CARRIAGEWAY (the courses, the marking's
+// host) and ROADSIDE (the fill and the wall); the kerb is in the road itself.
+TEST(IfcExportRoad, EveryRoadAndPartTheReportCountsIsInTheAccountOnce)
+{
+    const auto out = exported(roadInput());
+    std::map<std::string, std::size_t> tallied;
+    for (const ifc::ClassTally& row : out.tally) {
+        if (!row.entity.empty()) {
+            tallied[row.entity] += row.count;
+        }
+    }
+    EXPECT_EQ(tallied, out.classes);
+    EXPECT_EQ(tallied.at("IfcRoad"), 1u);
+    EXPECT_EQ(tallied.at("IfcRoadPart"), 2u);
+    std::map<std::string, std::size_t> parts;
+    for (const ifc::ClassTally& row : out.tally) {
+        if (row.entity == "IfcRoad") {
+            EXPECT_EQ(row.source, "road Main");
+        }
+        if (row.entity == "IfcRoadPart") {
+            EXPECT_EQ(row.source, "road Main");
+            EXPECT_EQ(row.why, "a part of road Main");
+            parts[row.predefinedType] += row.count;
+        }
+    }
+    EXPECT_EQ(parts, (std::map<std::string, std::size_t>{{"CARRIAGEWAY", 1}, {"ROADSIDE", 1}}));
+}
+
 // Each element in its part, in its road when it names no part, in the site
 // when it names no road; each placed relative to its container, the part to
 // its road and the road to the site (IfcLocalPlacement, 8.7.3.14).
@@ -1017,6 +1120,17 @@ TEST(IfcExportRoad, TheModelsProblemsAreWarningsAndTheReplyCountsTheRoadModel)
         << reply;
     EXPECT_NE(reply.find("\nobject from=\"road model\" count=1 class=\"IfcSign\""),
               std::string::npos);
+    // The road and its parts are objects of the reply too: the window's
+    // preview table is filled from these records.
+    EXPECT_NE(reply.find("\nobject from=\"road Main\" count=1 class=\"IfcRoad\" "
+                         "predefined=\"NOTDEFINED\" object_type=\"\" system=\"\" "
+                         "why=\"a corridor, the road its parts and elements are in\""),
+              std::string::npos)
+        << reply;
+    EXPECT_NE(reply.find("\nobject from=\"road Main\" count=1 class=\"IfcRoadPart\" "
+                         "predefined=\"CARRIAGEWAY\""),
+              std::string::npos)
+        << reply;
 
     const auto without = exported(ifc::ExportInput{});
     EXPECT_EQ(ifc::formatExportReply(without, "x.ifc", false).find("road elements="),

@@ -387,6 +387,9 @@ class RoadWriter {
         for (const std::string& problem : road_.problems) {
             b_.warn("the road model: " + problem);
         }
+        for (const RoadElement& element : road_.elements) {
+            nameFirst(element);
+        }
         std::vector<Accepted> accepted;
         std::set<std::string> ids;
         for (const RoadElement& element : road_.elements) {
@@ -428,9 +431,49 @@ class RoadWriter {
         std::map<std::string, Container> parts;
     };
 
-    static std::string sourceOf(const RoadElement& element)
+    // A facility is a corridor's name, and Katana finds a corridor ignoring
+    // case (CorridorSet::find, "found ignoring case" in docs/road_design.md),
+    // so a road object that says facility=main beside the corridor Main is on
+    // Main. Matching the spelling exactly made it a second IfcRoad with a part
+    // of its own, and a line marking of it found no course "of its road" under
+    // it and was left out. A facility, and a part within it, are written under
+    // the spelling of the first element of the model that names them, in any
+    // letter case: the IfcRoad's and IfcRoadPart's names and GlobalIds come
+    // from that one. (Rejected: folding the case where the app converts the
+    // model - it would leave every other caller of the writer to repeat it.)
+    void nameFirst(const RoadElement& element)
     {
-        return element.facility.empty() ? std::string("road model") : "road " + element.facility;
+        if (element.facility.empty()) {
+            return;
+        }
+        const std::string facility = core::lowered(element.facility);
+        facilityNames_.emplace(facility, element.facility);
+        if (!element.part.empty()) {
+            partNames_.emplace(std::make_pair(facility, core::lowered(element.part)),
+                               element.part);
+        }
+    }
+
+    // The facility and part an element is written under (nameFirst); empty for
+    // none.
+    std::string facilityOf(const RoadElement& element) const
+    {
+        return element.facility.empty() ? std::string()
+                                        : facilityNames_.at(core::lowered(element.facility));
+    }
+
+    std::string partOf(const RoadElement& element) const
+    {
+        // A part with no facility is no part: the element is the site's.
+        return element.part.empty() || element.facility.empty()
+                   ? element.part
+                   : partNames_.at({core::lowered(element.facility), core::lowered(element.part)});
+    }
+
+    std::string sourceOf(const RoadElement& element) const
+    {
+        return element.facility.empty() ? std::string("road model")
+                                        : "road " + facilityOf(element);
     }
 
     static std::string whyOf(const RoadElement& element)
@@ -513,15 +556,16 @@ class RoadWriter {
             if (element.facility.empty() || item.feature) {
                 continue; // a feature is contained nowhere
             }
-            auto found = facilities_.find(element.facility);
+            const std::string facility = facilityOf(element);
+            auto found = facilities_.find(facility);
             if (found == facilities_.end()) {
-                found = facilities_.emplace(element.facility, writeRoad(element.facility)).first;
+                found = facilities_.emplace(facility, writeRoad(facility)).first;
                 roads.push_back(found->second.road);
             }
-            if (!element.part.empty() && !found->second.parts.contains(element.part)) {
-                found->second.parts.emplace(
-                    element.part, writePart(element.facility, found->second, element.part));
-                partOrder_[element.facility].push_back(element.part);
+            const std::string part = partOf(element);
+            if (!part.empty() && !found->second.parts.contains(part)) {
+                found->second.parts.emplace(part, writePart(facility, found->second, part));
+                partOrder_[facility].push_back(part);
             }
         }
         b_.aggregate(b_.site(), "site", roads);
@@ -551,6 +595,11 @@ class RoadWriter {
                                                      .enumeration("NOTDEFINED"));
         ++b_.report().classes["IfcRoad"];
         ++b_.report().roads;
+        // In the account too, as every product the report counts is
+        // (IfcExportTally): the preview's table is filled from it, and its
+        // count of what would be written is a sum of it.
+        b_.tally("road " + name, {"IfcRoad", "NOTDEFINED", {}}, {},
+                 "a corridor, the road its parts and elements are in");
         Facility out;
         out.road = road;
         out.container = Container{road, placement, 0, "road/" + name};
@@ -579,6 +628,8 @@ class RoadWriter {
                               .enumeration(type.predefinedType));
         ++b_.report().classes["IfcRoadPart"];
         ++b_.report().roadParts;
+        b_.tally("road " + facility, {"IfcRoadPart", type.predefinedType, type.objectType}, {},
+                 "a part of road " + facility);
         return Container{id, placement, 0, "road/" + facility + "/" + part};
     }
 
@@ -590,9 +641,9 @@ class RoadWriter {
             site_ = b_.siteContainer();
             return site_;
         }
-        Facility& facility = facilities_.at(element.facility);
+        Facility& facility = facilities_.at(facilityOf(element));
         Container& container =
-            element.part.empty() ? facility.container : facility.parts.at(element.part);
+            element.part.empty() ? facility.container : facility.parts.at(partOf(element));
         if (container.elementPlacement == 0) {
             container.elementPlacement = b_.placementIn(container.placement);
         }
@@ -754,7 +805,7 @@ class RoadWriter {
         for (const auto& entry : writtenInOrder()) {
             const Accepted* candidate = entry.second;
             const RoadElement& element = *candidate->element;
-            if (element.facility != item.element->facility ||
+            if (!core::equalsIgnoringCase(element.facility, item.element->facility) ||
                 !isSurfaceClass(element.ifcClass.entity)) {
                 continue;
             }
@@ -968,6 +1019,8 @@ class RoadWriter {
     Builder& b_;
     const RoadModelInput& road_;
     const std::map<std::string, Id>& terrain_;
+    std::map<std::string, std::string> facilityNames_; // folded -> the first spelling
+    std::map<std::pair<std::string, std::string>, std::string> partNames_;
     std::map<std::string, Facility> facilities_;
     std::map<std::string, std::vector<std::string>> partOrder_;
     Container site_;
