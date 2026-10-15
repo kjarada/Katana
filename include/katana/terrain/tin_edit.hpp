@@ -255,6 +255,42 @@ addBreaklines(const TinSurface& surface, std::span<const BreaklineInput> lines);
 [[nodiscard]] katana::core::Result<TinEditResult> cutHole(const TinSurface& surface,
                                                           const Polyline2& hole);
 
+// How cutHoles went about it: for a test and a benchmark to see that disjoint
+// footprints shared a patch, not for a front end.
+struct HoleCutStats {
+    // Whole-surface rebuilds made (copies, finishSurface, TinSurface::create):
+    // one for every batch of footprints that could be cut together.
+    std::size_t patches = 0;
+};
+
+// cutHole of each polygon in turn, each on the surface the one before left:
+// the surface, and a report that is the first step's "before", the last's
+// "after" and the counts of all summed (largestChange the greatest). The
+// same surface as that loop gives - the same triangles, the same vertices,
+// the same constrained edges, to within the numbering of the vertices the
+// edit made - but footprints that can be cut together are cut in ONE patch,
+// so 100 buildings cost one whole-surface rebuild (about a third of a second
+// on 400 000 triangles), not 100.
+//
+// Footprints share a patch when each is separate from every other in the
+// batch - further than tolerance::kGeometric from it everywhere, neither
+// inside the other - and no triangle of the surface is reached by two of
+// their edges. Anything else (overlapping, touching, nested, identical
+// footprints, two in one triangle) is cut in a patch of its own, in the
+// order the polygons are given, as it always was. A refusal is the loop's
+// refusal: when a batch fails it is cut again one polygon at a time and the
+// first refusal is the answer. Fails with
+//   InvalidArgument  no polygon, or a coordinate that is not finite or is
+//                    beyond kMostMagnitude;
+//   InvalidGeometry  a polygon with fewer than 3 distinct vertices, no area,
+//                    or that touches or crosses itself;
+//   InvalidState     everything of the surface would be cut away;
+//   TriangulationFailure  from the kernel.
+// A polygon that changes nothing leaves the surface as it was, as cutHole's.
+[[nodiscard]] katana::core::Result<TinEditResult>
+cutHoles(const TinSurface& surface, std::span<const Polyline2> holes,
+         HoleCutStats* stats = nullptr);
+
 // ---- changing levels --------------------------------------------------------------------
 
 enum class HeightOperation {

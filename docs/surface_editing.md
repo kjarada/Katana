@@ -331,6 +331,42 @@ triangles, they do not reshape them.
   import's combined surfaces use, fast, never refusing - and PASTE is the clean
   seam. The merged result is compacted (combineSurfaces keeps the vertices of
   dropped triangles).
+- **HOLE of several footprints is cut in as few patches as are correct**
+  (`terrain::cutHoles`; `HOLE FROM <scope>`, `HOLE #a #b ...`). A patch costs
+  the whole surface - the stars of its vertices, the copies, `finishSurface`'s
+  sort, `TinSurface::create`'s adjacency and locator, about a third of a second
+  on 400 000 triangles - and a hole is cut where a polygon is, not where the
+  surface is, so a hundred buildings cost a hundred rebuilds when cut one after
+  the other. The footprints are taken in the order given and gathered into a
+  batch while each one is **separate** from every one already in it - the
+  outlines nowhere within `tolerance::kGeometric` of each other (boxes first,
+  then only the edges that reach the other's box, decided with the exact
+  predicate the kernel uses), and neither inside the other - **and** reaches
+  no triangle one of them reaches (`detail::markReachedByPoint` and
+  `TriangleGrid::markAlong`, the rule `rebuildPatch` grows its region by). The
+  first footprint that is not, ends the batch: the batch is cut in one patch,
+  and the footprint begins the next one on the surface the batch left. So
+  overlapping, touching, nested and identical footprints, and two in one
+  triangle, are cut one patch each, in the order given, exactly as the loop of
+  `cutHole` cut them. Why both tests: separate outlines are what makes the cut
+  correct - a patch decides which side of the cut a piece is on from the cut
+  edges that bound it, and a piece between two footprints that overlap would be
+  taken for outside both - while a shared triangle is what makes it the loop's
+  surface: cut by two outlines at once, its pieces are triangulated together,
+  where the loop triangulated the first's pieces and then cut those. The result
+  is the loop's surface: the same triangles, vertices and constrained edges, in
+  a different numbering of the vertices the cut made (`HoleCutStats::patches`
+  counts the rebuilds; `TinEdit.HolesApartFromEachOtherAreCutInOnePatchAndGiveWhatCuttingThemOneByOneGives`
+  and its neighbours compare the two runs vertex for vertex and triangle for
+  triangle, the report field for field). A batch the kernel refuses is cut again one footprint at a time, so
+  the refusal is the loop's, with its words. *Rejected:* one patch for every
+  footprint whatever they are (wrong for the cases above); the union of the
+  polygons first (the module has no polygon clipper, and a second one beside
+  the kernel would come to disagree with it about the same polygons); cutting
+  the footprints' patches on the `TaskPool` (the cost is the global rebuild
+  each makes, not the footprint, and patches of one surface cannot be joined
+  without a rebuild of the whole). Nothing here runs in parallel, so the
+  result cannot depend on the thread count.
 - **CLIP is BOUNDARY on a copy, OFFSET is RAISE on a copy**: one function
   each, the verbs name them for the person making a new surface.
 - **The active surface is the program's, not the drawing's.** Which surface
@@ -495,28 +531,53 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   scope that takes nothing reported with the session going on
   (`src/katana_app/geo/cli/surface_edit.cmake`).
 
+## Measured performance
+
+The cases are in `benchmarks/bench_terrain.cpp` (`katana_benchmarks
+--benchmark_filter=BM_Edit`), on the surface the review measured: 447 x 447
+cells of 1 m, 399 618 triangles and 200 704 vertices, the most `SURFACE FROM`
+makes by default. One iteration each, since the slow ones take seconds. The
+polygons are regular, radius 150 m about the ground's middle; the footprints
+are 100 rectangles of 8 x 6 m, one in each 40 m cell of a 10 x 10 lattice.
+
+A polygon-scoped edit was not local in cost: every triangle or vertex was
+classified against the whole polygon, so it cost the surface times the
+polygon's corners, and HOLE FROM <scope> paid the whole-surface rebuild once
+per footprint. They are now asked once per connected piece of triangles
+outside the region (`rebuildPatch`) and through a banded polygon classifier
+(`geometry::PolygonClassifier`, the same crossing rule as
+`Polyline2::classify`, tested to agree with it point for point), and
+footprints that can be cut together are cut in one patch (above).
+
+| Case | Benchmark | Before: the review, wall time of a whole `katana_cli` run (the surface's load, 1.2 to 1.9 s, included) | Now: Release, `katana_benchmarks` |
+|---|---|---|---|
+| BOUNDARY, polygon of 8 / 500 / 5000 corners | `BM_EditBoundary` | 1.4 to 2.2 s / 4.5 s / 20.7 s | not measured |
+| DELETE TRIANGLES INSIDE, 8 / 500 / 5000 | `BM_EditDeleteTrianglesInside` | 1.2 to 1.8 s / 4.9 s / 22.2 s | not measured |
+| RAISE 1 INSIDE, 8 / 500 / 5000 | `BM_EditRaiseInside` | 2.3 s / - / 10.9 s | not measured |
+| HOLE of 100 footprints, one at a time | `BM_EditHolesOneByOne` (`patches` 100) | 33.4 s (1.6 s of it the load) | not measured |
+| HOLE of the same 100 footprints | `BM_EditHolesTogether` (`patches` 1) | - | not measured |
+| THIN, tolerance 10 mm / 100 mm | `BM_EditThin` | "seconds", not measured | not measured |
+
+The last column is empty because this change was written without a build, as
+the owner's standing instruction for a session that edits asks: the
+integration build measures it, and the figures go in the table with the commit
+that records them. `BM_EditHolesOneByOne` is the
+loop `HOLE FROM <scope>` was, kept in the same binary so that the two cases
+are measured on one machine in one run.
+
 ## Not done
 
-- **Measured performance.** No benchmark yet, and the figures below are the
-  review's, not this change's (it was written without a build): THIN
-  triangulates each candidate's neighbour polygon twice (a few tens of
-  microseconds each) and runs on the GUI thread from the window: a
-  200 000-vertex surface is seconds. The polygon-scoped edits were not local in
-  cost - a 5000-vertex polygon on a 400 000-triangle surface cost 20 s for
-  BOUNDARY, 22 s for DELETE TRIANGLES INSIDE and 10 s for RAISE INSIDE, because
-  every triangle or vertex was classified against the whole polygon. They are
-  now asked once per connected piece of triangles outside the region
-  (`rebuildPatch`) and through a banded polygon classifier
-  (`geometry::PolygonClassifier`, the same crossing rule as
-  `Polyline2::classify`, tested to agree with it point for point). Still
-  open: `HOLE FROM <scope>` cuts one footprint at a time on the evolving
-  surface, so 100 small footprints still pay the whole-surface work (copies,
-  `finishSurface`, `TinSurface::create`, about a third of a second each on the
-  400 000-triangle surface) 100 times - one patch for several holes is only
-  correct for disjoint ones, and overlapping footprints are the case the
-  sequential cut handles. A `benchmarks/bench_terrain.cpp` case (400 000
-  triangles; polygons of 8, 500 and 5000 corners; 100 holes), the before and
-  after numbers, and a background job for THIN are the follow-up.
+- **THIN runs on the GUI thread** from the window, and a 200 000-vertex surface
+  is seconds (it triangulates each candidate's neighbour polygon twice, a few
+  tens of microseconds each, then orders the flattest first; the first
+  measurement runs on the `TaskPool`, the removal sequentially). It cannot be a
+  background job yet: the window runs `SURFACE EDIT` through the interpreter on
+  the GUI thread, and the jobs it already has - `SURFACE FROM`, the imports - are
+  the geoprocessing executor's verbs, which copy their inputs on the GUI thread
+  and land the result there. A cad verb as a job needs the same two halves for
+  one undo step (the surface handed to the job as the shared immutable pointer
+  it already is, and `Document::surfacesCommand` built where it lands), which
+  is a change of the window's executor and not of this area.
 - **A level too large for the surface record.** The edits refuse anything past
   `kMostMagnitude`, but the SURFACE INFO record's number formatter (`fixed3`,
   `surface_verbs.cpp`, and the copy in `src/katana_app/geo/replies.cpp` it came

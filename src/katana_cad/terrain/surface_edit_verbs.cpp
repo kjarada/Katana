@@ -685,19 +685,17 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
                 return s.error();
             }
         } else {
-            Outcome outcome;
-            tin::TinSurface current = surface;
-            bool first = true;
+            // Every footprint, in the order the scope gave them: the footprints
+            // that can be cut together are cut in one patch, so a scope of 100
+            // buildings is one whole-surface rebuild, not 100.
+            std::vector<Polyline2> footprints;
+            footprints.reserve(geometry->shapes.size());
             for (const DrawingShape& shape : geometry->shapes) {
-                auto step = tin::cutHole(current, shape.outline);
-                if (!step) {
-                    return step.error();
-                }
-                accumulate(outcome, *step, first);
-                first = false;
-                current = outcome.surface;
+                footprints.push_back(shape.outline);
             }
-            edit.outcome = std::move(outcome);
+            if (Status s = take(one(tin::cutHoles(surface, footprints))); !s) {
+                return s.error();
+            }
         }
     } else if (op == "RAISE" || op == "LOWER" || op == "SETLEVEL" || op == "SCALE") {
         edit.operation = katana::core::lowered(op);

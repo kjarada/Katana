@@ -11,6 +11,8 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/terrain/surface_edit_verbs.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/text.hpp"
+#include "support/surface_geometry.hpp"
 #include "surface_edit_support.hpp"
 
 using namespace katana::cad;
@@ -55,6 +57,14 @@ struct SurfaceEditVerbs : ::testing::Test {
 bool contains(const std::string& text, const std::string& part)
 {
     return text.find(part) != std::string::npos;
+}
+
+// The whole number a reply gives for `key`: "points_added=4" is 4.
+std::size_t field(const std::string& text, const std::string& key)
+{
+    const auto at = text.find(" " + key + "=");
+    EXPECT_NE(at, std::string::npos) << key << " in " << text;
+    return at == std::string::npos ? 0 : std::stoul(text.substr(at + key.size() + 2));
 }
 
 } // namespace
@@ -136,6 +146,65 @@ TEST_F(SurfaceEditVerbs, ATypedPolygonClosedOnItsFirstCornerIsThatPolygon)
     putSurface(document, "ground", flatGridSurface(10, 1.0, 4.0));
     reply("SURFACE EDIT ground HOLE 3,3 6,3 6,7 3,7 3,3");
     EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 88.0, 1e-9);
+}
+
+TEST_F(SurfaceEditVerbs, HolesFromAScopeOfManyFootprintsMakeWhatOneLinePerFootprintMakes)
+{
+    // 12 footprints in the 10 m cells of a 4 x 3 lattice on a 40 x 40 m ground
+    // (1600 m2), [10 i + 2.3, 10 i + 6.0] x [10 j + 3.1, 10 j + 6.0]: 3.7 x 2.9
+    // = 10.73 m2 each, 128.76 together, 1471.24 left. Cut together they are one
+    // patch of the ground (HOLE FROM LAYERS ...); typed one line at a time they
+    // are twelve - and the same surface, the same counts, and one undo step.
+    const auto level = [](double x, double y) { return 0.5 * x + 0.25 * y; };
+    putSurface(document, "ground", gridSurface(40, 1.0, level));
+    const TinSurface before = surfaceOf(document, "ground");
+    Document typed;
+    CommandInterpreter typedLines{typed};
+    putSurface(typed, "ground", gridSurface(40, 1.0, level));
+    reply("LAYER NEW foot");
+    reply("LAYER SET foot");
+    std::size_t added = 0;
+    std::size_t removed = 0;
+    std::size_t crossings = 0;
+    std::string firstTyped;
+    std::string lastTyped;
+    for (int j = 0; j < 3; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            // Tenths, divided once, so the number is the nearest double to the decimal.
+            const double x0 = (100 * i + 23) / 10.0;
+            const double y0 = (100 * j + 31) / 10.0;
+            const double x1 = (100 * i + 60) / 10.0;
+            const double y1 = (100 * j + 60) / 10.0;
+            polyline({Point2(x0, y0), Point2(x1, y0), Point2(x1, y1), Point2(x0, y1)}, true, "foot");
+            const auto at = [](double v) { return katana::core::formatExactReal(v); };
+            const auto one = typedLines.run("SURFACE EDIT ground HOLE " + at(x0) + "," + at(y0) + " " +
+                                            at(x1) + "," + at(y0) + " " + at(x1) + "," + at(y1) +
+                                            " " + at(x0) + "," + at(y1));
+            ASSERT_TRUE(one.ok()) << one.error().describe();
+            added += field(*one, "points_added");
+            removed += field(*one, "points_removed");
+            crossings += field(*one, "crossings");
+            (firstTyped.empty() ? firstTyped : lastTyped) = *one;
+        }
+    }
+    const std::string text = reply("SURFACE EDIT ground HOLE FROM LAYERS foot ONLY");
+    EXPECT_TRUE(contains(text, "polygons=12")) << text;
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 1600.0 - 128.76, 1e-8);
+    EXPECT_TRUE(katana::test::sameSurfaceGeometry(surfaceOf(document, "ground"),
+                                                  surfaceOf(typed, "ground")));
+    // The reply is the twelve replies summed: the first's "before", the last's
+    // "after", the counts of all.
+    EXPECT_EQ(field(text, "triangles_before"), field(firstTyped, "triangles_before"));
+    EXPECT_EQ(field(text, "triangles_after"), field(lastTyped, "triangles_after"));
+    EXPECT_EQ(field(text, "vertices_before"), field(firstTyped, "vertices_before"));
+    EXPECT_EQ(field(text, "vertices_after"), field(lastTyped, "vertices_after"));
+    EXPECT_EQ(field(text, "points_added"), added);
+    EXPECT_EQ(field(text, "points_removed"), removed);
+    EXPECT_EQ(field(text, "crossings"), crossings);
+    EXPECT_GT(added, 0u);
+    // One undo step for the lot.
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground"), before);
 }
 
 TEST_F(SurfaceEditVerbs, ABoundaryFromAScopeSaysWhatTheScopeTook)

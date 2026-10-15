@@ -21,6 +21,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <numbers>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,6 +36,7 @@
 #include "katana/terrain/super_surface.hpp"
 #include "katana/terrain/tiled_terrain.hpp"
 #include "katana/terrain/tin_builder.hpp"
+#include "katana/terrain/tin_edit.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "katana/terrain/volume.hpp"
 
@@ -708,5 +711,195 @@ void BM_ArchiveSectionCrossings(benchmark::State& state)
     state.counters["entities"] = static_cast<double>(drawing.model.entities.size());
 }
 BENCHMARK(BM_ArchiveSectionCrossings)->Arg(0)->Arg(1)->Arg(2)->Arg(3)->Unit(benchmark::kMillisecond);
+
+// ---------------------------------------------------------------------------
+// Editing a surface (docs/surface_editing.md, "Measured performance")
+// ---------------------------------------------------------------------------
+//
+// The surface the review of the editing measured: 447 x 447 cells of 1 m, each
+// split along its rising diagonal - 399 618 triangles and 200 704 vertices, the
+// most SURFACE FROM makes by default - at the levels of ground. A polygon-scoped
+// edit used to cost the whole surface times the polygon's corners, and HOLE
+// FROM <scope> the whole surface once per footprint; these are the cases that
+// show it. One iteration each: the slow ones take tens of seconds.
+
+const TinSurface& editGround()
+{
+    static const TinSurface surface = [] {
+        constexpr int cells = 447;
+        std::vector<Point3> vertices;
+        vertices.reserve(static_cast<std::size_t>(cells + 1) * (cells + 1));
+        for (int j = 0; j <= cells; ++j) {
+            for (int i = 0; i <= cells; ++i) {
+                vertices.emplace_back(i, j, groundElevation(i, j));
+            }
+        }
+        const auto at = [](int i, int j) {
+            return static_cast<std::uint32_t>(j * (cells + 1) + i);
+        };
+        std::vector<katana::terrain::TinTriangle> triangles;
+        triangles.reserve(static_cast<std::size_t>(2) * cells * cells);
+        for (int j = 0; j < cells; ++j) {
+            for (int i = 0; i < cells; ++i) {
+                triangles.push_back({at(i, j), at(i + 1, j), at(i + 1, j + 1)});
+                triangles.push_back({at(i, j), at(i + 1, j + 1), at(i, j + 1)});
+            }
+        }
+        auto created = TinSurface::create(std::move(vertices), std::move(triangles), {});
+        return created ? std::move(*created) : TinSurface{};
+    }();
+    return surface;
+}
+
+// A regular polygon of `corners` corners, radius 150 m, about the ground's
+// middle (223.3, 223.7) - 8 of them an octagon, 5000 a circle.
+katana::geometry::Polyline2 editCircle(std::size_t corners)
+{
+    katana::geometry::Polyline2 ring;
+    ring.closed = true;
+    ring.vertices.reserve(corners);
+    for (std::size_t i = 0; i < corners; ++i) {
+        const double angle = 2.0 * std::numbers::pi * static_cast<double>(i) /
+                             static_cast<double>(corners);
+        ring.vertices.emplace_back(223.3 + 150.0 * std::cos(angle),
+                                   223.7 + 150.0 * std::sin(angle));
+    }
+    return ring;
+}
+
+// BOUNDARY: arg is the polygon's corners (the review measured 8, 500, 5000).
+void BM_EditBoundary(benchmark::State& state)
+{
+    const TinSurface& ground = editGround();
+    const auto ring = editCircle(static_cast<std::size_t>(state.range(0)));
+    double triangles = 0.0;
+    for (auto _ : state) {
+        auto clipped = katana::terrain::clipToBoundary(ground, ring);
+        triangles = clipped ? static_cast<double>(clipped->surface.triangleCount()) : 0.0;
+        benchmark::DoNotOptimize(triangles);
+    }
+    state.counters["triangles"] = triangles;
+}
+BENCHMARK(BM_EditBoundary)->Arg(8)->Arg(500)->Arg(5000)->Unit(benchmark::kMillisecond)->Iterations(1);
+
+// DELETE TRIANGLES INSIDE: the triangles by their centroids, then the deletion.
+void BM_EditDeleteTrianglesInside(benchmark::State& state)
+{
+    const TinSurface& ground = editGround();
+    const auto ring = editCircle(static_cast<std::size_t>(state.range(0)));
+    double triangles = 0.0;
+    for (auto _ : state) {
+        const auto chosen = katana::terrain::trianglesByPolygon(ground, ring, true);
+        auto deleted = katana::terrain::deleteTriangles(ground, chosen);
+        triangles = deleted ? static_cast<double>(deleted->surface.triangleCount()) : 0.0;
+        benchmark::DoNotOptimize(triangles);
+    }
+    state.counters["triangles"] = triangles;
+}
+BENCHMARK(BM_EditDeleteTrianglesInside)
+    ->Arg(8)
+    ->Arg(500)
+    ->Arg(5000)
+    ->Unit(benchmark::kMillisecond)
+    ->Iterations(1);
+
+// RAISE 1 INSIDE: the vertices inside the polygon.
+void BM_EditRaiseInside(benchmark::State& state)
+{
+    const TinSurface& ground = editGround();
+    const auto ring = editCircle(static_cast<std::size_t>(state.range(0)));
+    const katana::terrain::HeightChange change{katana::terrain::HeightOperation::Raise, 1.0,
+                                               std::nullopt};
+    double moved = 0.0;
+    for (auto _ : state) {
+        auto raised = katana::terrain::changeHeights(ground, change, ring);
+        moved = raised ? static_cast<double>(raised->report.pointsMoved) : 0.0;
+        benchmark::DoNotOptimize(moved);
+    }
+    state.counters["moved"] = moved;
+}
+BENCHMARK(BM_EditRaiseInside)->Arg(8)->Arg(500)->Arg(5000)->Unit(benchmark::kMillisecond)->Iterations(1);
+
+// 100 footprints of 8 x 6 m, one in each 40 m cell of a 10 x 10 lattice over
+// the ground (HOLE FROM LAYERS buildings).
+std::vector<katana::geometry::Polyline2> editFootprints()
+{
+    std::vector<katana::geometry::Polyline2> footprints;
+    for (int j = 0; j < 10; ++j) {
+        for (int i = 0; i < 10; ++i) {
+            const double x = 20.3 + 40.0 * i;
+            const double y = 20.3 + 40.0 * j;
+            katana::geometry::Polyline2 ring;
+            ring.closed = true;
+            ring.vertices = {Point2(x, y), Point2(x + 8.0, y), Point2(x + 8.0, y + 6.0),
+                             Point2(x, y + 6.0)};
+            footprints.push_back(std::move(ring));
+        }
+    }
+    return footprints;
+}
+
+// The 100 footprints cut one at a time, each on the surface the last left:
+// what HOLE FROM <scope> did, a whole-surface rebuild each. Kept as the "before"
+// of BM_EditHolesTogether, in the same binary on the same machine.
+void BM_EditHolesOneByOne(benchmark::State& state)
+{
+    const TinSurface& ground = editGround();
+    const auto footprints = editFootprints();
+    double triangles = 0.0;
+    for (auto _ : state) {
+        TinSurface current = ground;
+        for (const auto& ring : footprints) {
+            auto holed = katana::terrain::cutHole(current, ring);
+            if (!holed) {
+                state.SkipWithError(holed.error().describe().c_str());
+                return;
+            }
+            current = std::move(holed->surface);
+        }
+        triangles = static_cast<double>(current.triangleCount());
+        benchmark::DoNotOptimize(triangles);
+    }
+    state.counters["triangles"] = triangles;
+    state.counters["patches"] = static_cast<double>(footprints.size());
+}
+BENCHMARK(BM_EditHolesOneByOne)->Unit(benchmark::kMillisecond)->Iterations(1);
+
+// The same 100 footprints through cutHoles: footprints that can be cut together
+// share a patch, so these 100 are one.
+void BM_EditHolesTogether(benchmark::State& state)
+{
+    const TinSurface& ground = editGround();
+    const auto footprints = editFootprints();
+    double triangles = 0.0;
+    katana::terrain::HoleCutStats stats;
+    for (auto _ : state) {
+        auto holed = katana::terrain::cutHoles(ground, footprints, &stats);
+        if (!holed) {
+            state.SkipWithError(holed.error().describe().c_str());
+            return;
+        }
+        triangles = static_cast<double>(holed->surface.triangleCount());
+        benchmark::DoNotOptimize(triangles);
+    }
+    state.counters["triangles"] = triangles;
+    state.counters["patches"] = static_cast<double>(stats.patches);
+}
+BENCHMARK(BM_EditHolesTogether)->Unit(benchmark::kMillisecond)->Iterations(1);
+
+// THIN of the 200 704-vertex ground: arg is the tolerance in millimetres.
+void BM_EditThin(benchmark::State& state)
+{
+    const TinSurface& ground = editGround();
+    const double tolerance = static_cast<double>(state.range(0)) / 1000.0;
+    double removed = 0.0;
+    for (auto _ : state) {
+        auto thinned = katana::terrain::thinSurface(ground, tolerance);
+        removed = thinned ? static_cast<double>(thinned->report.pointsRemoved) : 0.0;
+        benchmark::DoNotOptimize(removed);
+    }
+    state.counters["removed"] = removed;
+}
+BENCHMARK(BM_EditThin)->Arg(10)->Arg(100)->Unit(benchmark::kMillisecond)->Iterations(1);
 
 } // namespace
