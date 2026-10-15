@@ -327,7 +327,8 @@ the outputs here are as `KATANA_BUILTIN_CUSTOMISATION=none` gives them. The
 second one is a 3-4-5 triangle, so you can check it in your head. More to try:
 `katana_cli samples/site_plan.kcs -c STATUS`,
 `katana_cli -c "UTILITY REPORT samples/utilities/schedule.csv"` and
-`katana_cli -c "INFO samples/gis/terrain.asc"`.
+`katana_cli -c "INFO samples/gis/terrain.asc"` (with a package, give the
+path under `share/katana/samples`, as "First steps" shows).
 
 **Start the MCP server.** An MCP client starts `katana_mcp` itself. With
 Claude Code (`docs/mcp.md` has Claude Desktop and the tools), on Windows:
@@ -740,8 +741,27 @@ the ones after it arrive as updates. `docs/update.md` has the whole of it.
 ### First steps
 
 **The window.** Open a project folder by passing it, or use **File > Open**.
-The repository's `samples/` folder holds example projects. Open a copy,
-since opening a project can update it in place.
+Every package carries example projects and data, and opening a project can
+update it in place, so open a copy of one. Where they are:
+
+| You have | The samples are in |
+|---|---|
+| the Windows installer | `%LOCALAPPDATA%\Programs\Katana\share\katana\samples` (or `share\katana\samples` in the folder you chose). Explorer hides `AppData`: paste that path into its address bar |
+| the Windows zip | `share\katana\samples`, in the folder `Katana-X.Y.Z-win64` you extracted |
+| the Linux archive | `share/katana/samples`, in the `Katana-X.Y.Z-linux-x86_64` folder you unpacked |
+| macOS | `Katana.app/Contents/Resources/share/katana/samples` (control-click Katana, **Show Package Contents**) |
+| a source checkout | `samples/` |
+
+`site_plan` is a project to open; `gis`, `utilities` and `ifc` hold the data
+the examples below use. For the installer on Windows, in PowerShell:
+
+```powershell
+$katana = "$env:LOCALAPPDATA\Programs\Katana"          # the folder you chose, if not the default
+Copy-Item -Recurse "$katana\share\katana\samples\site_plan" "$env:USERPROFILE\Documents\site_plan"
+& "$katana\bin\katana.exe" "$env:USERPROFILE\Documents\site_plan"
+```
+
+and anywhere else:
 
 ```sh
 katana path/to/a/copy/of/site_plan

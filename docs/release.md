@@ -62,6 +62,16 @@ a tag included.
 | `SHA256SUMS.txt` | the SHA-256 of each file above |
 | `*.asc`, `katana-signing-key.asc` | OpenPGP signatures and the public key, when the repository holds the key ("Signing") |
 
+**Where a person finds the samples.** Every package installs the `samples/`
+tree to `share/katana/samples` (`cmake/KatanaPackaging.cmake`; macOS: under
+`Contents/Resources`). The project's front page, in its "First steps", names
+that place for each package, because the installer's default folder is under `%LOCALAPPDATA%`,
+which Explorer hides, and nothing in the window points there. **Not done, and
+decided against for now:** a Help > Open Sample Project (a feature of its own,
+with all three surfaces, and it would have to copy the project first, since
+opening one updates it in place) and a Start menu shortcut to the folder
+(`CPACK_NSIS_CREATE_ICONS_EXTRA`, with its matching delete entry).
+
 Each Windows and Linux archive holds `bin/katana`, `bin/katana_cli`,
 `bin/katana_mcp` and `bin/katana_updater` (the helper that swaps an install's
 files for an update's), the libraries they load, `share/katana/samples`,
