@@ -317,12 +317,19 @@ struct Reading {
     bool levelReading = false; // above= and below= as well (a level or a base)
     bool areas = true;         // cut.area= and fill.area=
     bool cells = false;        // cells=
+    // The method counts each cell once across the polygons together (the
+    // grid): polygons that overlap are not refused, only said, and a cell on
+    // an edge they share is the first polygon's.
+    bool countsOnce = false;
     std::string nothing;       // why a measure of no area is refused
 };
 
-// One area: none (the whole of the surfaces) or a polygon and its region.
-using Measurer =
-    std::function<Result<Measure>(const DrawingShape* polygon, const OverlayRegion* region)>;
+// One area: none (the whole of the surfaces) or a polygon and its region, with
+// the regions of the polygons measured before it - which only a method that
+// counts cells (the grid) has any use for.
+using Measurer = std::function<Result<Measure>(const DrawingShape* polygon,
+                                               const OverlayRegion* region,
+                                               std::span<const OverlayRegion> earlier)>;
 
 std::string measureFields(const Reading& reading, const Measure& measure, const Factors& factors)
 {
@@ -398,7 +405,7 @@ Result<std::string> measureAreas(const Reading& reading,
     }
 
     if (!polygons) {
-        auto whole = measure(nullptr, nullptr);
+        auto whole = measure(nullptr, nullptr, {});
         if (!whole) {
             return whole.error();
         }
@@ -453,7 +460,7 @@ Result<std::string> measureAreas(const Reading& reading,
                 // what is counted twice is area, and a square millimetre of
                 // it is rounding, not ground.
                 if (*shared > 1e-6) {
-                    if (!each) {
+                    if (!each && !reading.countsOnce) {
                         return makeError(
                             ErrorCode::InvalidGeometry,
                             polygonName(polygons->shapes[i], i) + " and " +
@@ -475,7 +482,8 @@ Result<std::string> measureAreas(const Reading& reading,
         std::size_t cells = 0;
         for (std::size_t i = 0; i < regions.size(); ++i) {
             const DrawingShape& polygon = polygons->shapes[i];
-            auto measured = measure(&polygon, &regions[i]);
+            auto measured =
+                measure(&polygon, &regions[i], std::span<const OverlayRegion>(regions).first(i));
             if (!measured) {
                 return makeError(measured.error().code,
                                  polygonName(polygon, i) + ": " + measured.error().message,
@@ -509,8 +517,12 @@ Result<std::string> measureAreas(const Reading& reading,
                             std::to_string(j + 1) + " message=" +
                             recordValue(polygonName(polygons->shapes[i], i) + " and " +
                                         polygonName(polygons->shapes[j], j) +
-                                        " overlap: the total counts the ground they share "
-                                        "twice"));
+                                        (reading.countsOnce
+                                             ? " overlap: each cell is counted once, in the "
+                                               "first, so area= is the union's and "
+                                               "polygon.area= counts the overlap twice"
+                                             : " overlap: the total counts the ground they "
+                                               "share twice")));
         }
         Measure total;
         total.cut = cut.value();
@@ -637,8 +649,8 @@ Result<std::string> volumeSurfaces(const Document& document, Words words,
     reading.nothing = "the surfaces have no ground in common there";
     const TinSurface& existing = *base->surface;
     const TinSurface& design = *top->surface;
-    const Measurer measure = [&](const DrawingShape*,
-                                 const OverlayRegion* region) -> Result<Measure> {
+    const Measurer measure = [&](const DrawingShape*, const OverlayRegion* region,
+                                 std::span<const OverlayRegion>) -> Result<Measure> {
         auto comparison = region == nullptr
                               ? katana::terrain::compareSurfaces(existing, design)
                               : katana::terrain::compareSurfaces(existing, design, *region);
@@ -694,8 +706,8 @@ Result<std::string> volumeDatum(const Document& document, Words words,
     reading.nothing = "the polygons are off the surface";
     const TinSurface& ground = *surface->surface;
     const double datum = *level;
-    const Measurer measure = [&](const DrawingShape*,
-                                 const OverlayRegion* region) -> Result<Measure> {
+    const Measurer measure = [&](const DrawingShape*, const OverlayRegion* region,
+                                 std::span<const OverlayRegion>) -> Result<Measure> {
         auto volume = region == nullptr ? katana::terrain::volumeToDatum(ground, datum)
                                         : katana::terrain::volumeToDatum(ground, datum, *region);
         if (!volume) {
@@ -767,8 +779,8 @@ Result<std::string> volumeStockpile(const Document& document, Words words,
     reading.levelReading = true;
     reading.nothing = "the polygons are off the surface";
     const TinSurface& ground = *surface->surface;
-    const Measurer measure = [&](const DrawingShape* polygon,
-                                 const OverlayRegion*) -> Result<Measure> {
+    const Measurer measure = [&](const DrawingShape* polygon, const OverlayRegion*,
+                                 std::span<const OverlayRegion>) -> Result<Measure> {
         katana::terrain::StockpileOptions these = stockpile;
         these.boundaryHeights = polygon->heights;
         auto volume = katana::terrain::stockpileVolume(ground, polygon->outline, these);
@@ -823,8 +835,8 @@ Result<std::string> volumeGrid(const Document& document, Words words,
     }
     if (inside->each) {
         return makeError(ErrorCode::ParseFailure,
-                         "VOLUME GRID measures inside the polygons together; EACH is VOLUME "
-                         "SURFACES'");
+                         "VOLUME GRID counts each cell once across all the polygons, so it has "
+                         "no EACH; VOLUME SURFACES, DATUM and STOCKPILE take it");
     }
     auto factors = factorsOf(*options);
     if (!factors) {
@@ -835,13 +847,16 @@ Result<std::string> volumeGrid(const Document& document, Words words,
                    " top=" + recordValue(top->name) + " cell=" + exact(**cell);
     reading.areas = false;
     reading.cells = true;
+    reading.countsOnce = true;
     reading.nothing = "no cell's centre is on both surfaces";
     const TinSurface& existing = *base->surface;
     const TinSurface& design = *top->surface;
     const double side = **cell;
-    const Measurer measure = [&](const DrawingShape*,
-                                 const OverlayRegion* region) -> Result<Measure> {
-        auto grid = katana::terrain::gridVolume(existing, design, side, region);
+    const Measurer measure = [&](const DrawingShape*, const OverlayRegion* region,
+                                 std::span<const OverlayRegion> earlier) -> Result<Measure> {
+        // A cell on an edge two polygons share is the first polygon's, so the
+        // polygons' cells, summed, are those of their union.
+        auto grid = katana::terrain::gridVolume(existing, design, side, region, nullptr, earlier);
         if (!grid) {
             return grid.error();
         }
@@ -1260,7 +1275,9 @@ VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=
           ground, which a curve or a corner refuses: sections that cross one another count
           ground twice, so give a reach under the curve's radius
 VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
-          the midpoint rule on cells at whole multiples of the cell: a cross-check
+          the midpoint rule on cells at whole multiples of the cell: a cross-check; inside
+          several polygons each cell is counted once, in the first that holds its centre
+          (lots that share an edge, or overlap, are not counted twice, and it has no EACH)
 SURFACE DIFFERENCE <base> <top> [NAME <new>] [PREVIEW]
           the top minus the base as a new surface (the cut/fill map), styled Cut Fill; one
           undo step
@@ -1270,8 +1287,8 @@ SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
 <polygon>  #id [#id ...] (closed polylines, curve polylines, circles and ellipses) |
            x,y[,z] x,y[,z] x,y[,z] ... |
            FROM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
-           [WHERE k=v ...]; several polygons give one total, refused if they overlap,
-           and EACH a record per polygon as well
+           [WHERE k=v ...]; several polygons give one total, refused if they overlap
+           (GRID counts each cell once instead), and EACH a record per polygon as well
 bulk=      multiplies the cut, shrink= the fill, in the reply only (cut.adjusted=,
            fill.adjusted=, net.adjusted=, and the mass ordinate))";
 }

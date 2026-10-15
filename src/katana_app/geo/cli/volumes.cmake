@@ -94,6 +94,22 @@ set_tests_properties(cli.volume_sections_round_a_curve_with_the_default_reach_ar
     PROPERTIES
     PASS_REGULAR_EXPRESSION "error: InvalidArgument: the sections at stations [0-9.]+ and [0-9.]+ cross each other.*at most 40\.000 m")
 
+
+# Two lots sharing the edge x = 5.5, which is a line of 1 m cell centres: the
+# lots [2, 5.5] x [2, 8] and [5.5, 8] x [2, 8] hold 4 x 6 and 3 x 6 centres
+# (24 + 18 = 42 when each is measured alone and summed, the 6 on the edge
+# twice), and their union [2, 8]^2 holds 6 x 6 = 36 cells of a 1 m slab: 36 m^3.
+add_test(NAME cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_on_it_once
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_surfaces}
+            -c "LAYER NEW lots" -c "LAYER SET lots"
+            -c "PLINE 2,2 5.5,2 5.5,8 2,8 CLOSE"
+            -c "PLINE 5.5,2 8,2 8,8 5.5,8 CLOSE"
+            -c "VOLUME GRID base top cell=1 INSIDE FROM LAYERS lots")
+set_tests_properties(cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_on_it_once
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "volume method=grid base=base top=top cell=1 polygons=2 polygon\\.area=36\\.000 cut=0\\.000 fill=36\\.000 net=36\\.000 area=36\\.000 cells=36"
+    FAIL_REGULAR_EXPRESSION "error")
 # The cut/fill map: the top less the base, 1 everywhere, kept as a surface
 # the session then lists beside the two.
 add_test(NAME cli.surface_difference_keeps_the_cut_fill_map_as_a_surface

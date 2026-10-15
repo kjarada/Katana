@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
@@ -437,6 +438,87 @@ TEST(GridVolume, InsideAPolygonOnlyTheCellsWhoseCentresAreInsideCount)
     const auto offset = gridVolume(base, top, 1.0, &shifted);
     ASSERT_TRUE(offset.ok());
     EXPECT_EQ(offset->cells, 100u);
+}
+
+TEST(GridVolume, LotsSharingAnEdgeOnALineOfCentresCountItsCellsOnceNotTwice)
+{
+    // A 1 m slab over [0, 50]^2 on 1 m cells, whose centres are at k + 0.5.
+    // Lot A is [5, 25.5] x [5, 45] and lot B [25.5, 45] x [5, 45]: they share
+    // the edge x = 25.5, a line of centres. A holds the centres x = 5.5 ... 25.5
+    // (21 of them) by y = 5.5 ... 44.5 (40): 840 cells; B holds x = 25.5 ...
+    // 44.5 (20) by 40: 800. Measured on their own and summed that is 1640, the
+    // 40 centres on x = 25.5 twice. Their union [5, 45]^2 holds x = 5.5 ... 44.5
+    // (40) by 40 = 1600 cells, its area exactly, and the exact overlay agrees.
+    const TinSurface base = planeSurface(Plane{0, 0, 0}, 50.0, 30, 31);
+    const TinSurface top = planeSurface(Plane{0, 0, 1}, 50.0, 30, 32);
+    const OverlayRegion lotA =
+        regionOf(ring({Point2(5, 5), Point2(25.5, 5), Point2(25.5, 45), Point2(5, 45)}));
+    const OverlayRegion lotB =
+        regionOf(ring({Point2(25.5, 5), Point2(45, 5), Point2(45, 45), Point2(25.5, 45)}));
+    const OverlayRegion both = regionOf(square(5, 5, 40));
+    const auto alone = [&](const OverlayRegion& region) {
+        const auto grid = gridVolume(base, top, 1.0, &region);
+        EXPECT_TRUE(grid.ok());
+        return grid.ok() ? grid->cells : std::size_t{0};
+    };
+    EXPECT_EQ(alone(lotA), 840u);
+    EXPECT_EQ(alone(lotB), 800u);
+    EXPECT_EQ(alone(both), 1600u);
+
+    // One after the other, the second leaving the cells the first holds: the
+    // cells add up to the union's whichever lot goes first.
+    const auto ab =
+        gridVolume(base, top, 1.0, &lotB, nullptr, std::span<const OverlayRegion>(&lotA, 1));
+    const auto ba =
+        gridVolume(base, top, 1.0, &lotA, nullptr, std::span<const OverlayRegion>(&lotB, 1));
+    ASSERT_TRUE(ab.ok());
+    ASSERT_TRUE(ba.ok());
+    EXPECT_EQ(ab->cells, 800u - 40u); // B without the 40 centres A holds on x = 25.5
+    EXPECT_EQ(ba->cells, 840u - 40u); // A without the same 40
+    EXPECT_EQ(840u + ab->cells, 1600u);
+    EXPECT_EQ(800u + ba->cells, 1600u);
+    EXPECT_NEAR(ab->fill, 760.0, 1e-9);
+    EXPECT_NEAR(ab->planArea, 760.0, 1e-9);
+    EXPECT_EQ(ab->cut, 0.0);
+    const auto exact = compareSurfaces(base, top, both);
+    ASSERT_TRUE(exact.ok());
+    EXPECT_NEAR(exact->fill, 1600.0, 1e-9);
+}
+
+TEST(GridVolume, OverlappingPolygonsCountEachCellOnceAndTheNeighboursOfTheCaseAreUnchanged)
+{
+    // A = [5, 30] x [5, 45] holds x = 5.5 ... 29.5 (25) by 40 = 1000 cells,
+    // B = [20, 45] x [5, 45] holds x = 20.5 ... 44.5 (25) by 40 = 1000; they
+    // overlap on x = 20.5 ... 29.5 (10 columns, 400 cells). The union holds
+    // x = 5.5 ... 44.5 = 1600, so B after A counts 1000 - 400 = 600.
+    const TinSurface base = planeSurface(Plane{0, 0, 0}, 50.0, 30, 33);
+    const TinSurface top = planeSurface(Plane{0, 0, 1}, 50.0, 30, 34);
+    const OverlayRegion a =
+        regionOf(ring({Point2(5, 5), Point2(30, 5), Point2(30, 45), Point2(5, 45)}));
+    const OverlayRegion b =
+        regionOf(ring({Point2(20, 5), Point2(45, 5), Point2(45, 45), Point2(20, 45)}));
+    const auto second =
+        gridVolume(base, top, 1.0, &b, nullptr, std::span<const OverlayRegion>(&a, 1));
+    ASSERT_TRUE(second.ok());
+    EXPECT_EQ(second->cells, 600u);
+    EXPECT_EQ(gridVolume(base, top, 1.0, &a)->cells + second->cells, 1600u);
+
+    // The neighbours: nothing claimed is the grid as it was; a region claimed
+    // by itself has nothing left (cells 0, not an error); a claim that is
+    // elsewhere takes nothing from it.
+    const auto none = gridVolume(base, top, 1.0, &a, nullptr, {});
+    ASSERT_TRUE(none.ok());
+    EXPECT_EQ(none->cells, 1000u);
+    const auto itself =
+        gridVolume(base, top, 1.0, &a, nullptr, std::span<const OverlayRegion>(&a, 1));
+    ASSERT_TRUE(itself.ok());
+    EXPECT_EQ(itself->cells, 0u);
+    EXPECT_EQ(itself->fill, 0.0);
+    const OverlayRegion elsewhere = regionOf(square(100, 100, 5));
+    const auto apart =
+        gridVolume(base, top, 1.0, &a, nullptr, std::span<const OverlayRegion>(&elsewhere, 1));
+    ASSERT_TRUE(apart.ok());
+    EXPECT_EQ(apart->cells, 1000u);
 }
 
 TEST(GridVolume, RefusesACellThatIsNoLengthAndAGridTooLargeNamingACellThatFits)

@@ -176,7 +176,10 @@ area, 2088.635 m3
   `warning overlap=` record says the total counts it twice. The overlap is
   found by the overlay itself - a 1 m slab over one polygon cut by the other
   - and anything under a square millimetre is rounding, so polygons sharing
-  an edge (cadastral lots) are not refused.
+  an edge (cadastral lots) are not refused. VOLUME GRID is the exception:
+  it counts cells, not ground, and counts each cell once across all the
+  polygons (see "The grid method"), so it takes overlapping polygons and has
+  no EACH.
 - **A polygon partly off the ground** measures the ground under it, and
   `area=` against `polygon.area=` says how much that was
   (`VolumeToLevelInsidePolygon.APolygonPartlyOffTheSurfaceMeasuresTheGroundUnderIt`).
@@ -313,6 +316,27 @@ all, which the test holds to 1e-6 m3 on 5, 2, 1 and 0.5 m cells
 More than 25 million cells is refused, naming the cell that fits, as a
 surface's raster export caps its grid.
 
+**Several polygons: each cell once.** A centre on a polygon's edge is inside
+it (`OverlayRegion::contains`: the boundary counts as inside), and cell
+centres sit at (k + 0.5) x cell, so lots whose shared edge falls on a line of
+centres hold those cells in both. Measured one at a time and summed, a 1 m slab
+under lots [5, 25.5] x [5, 45] and [25.5, 45] x [5, 45] on 1 m cells gave
+840 + 800 = 1640 cells where their union [5, 45]^2 holds 40 x 40 = 1600 (and
+the exact method 1600 m3): the 40 centres on x = 25.5 twice, +432 m3 of cut on
+a site of four quadrants. Each polygon is now measured with the regions of the
+polygons before it as `claimed` (`gridVolume`), and a cell any of them holds is
+left to the first, so the cells counted, summed, are those of the union
+(`GridVolume.LotsSharingAnEdgeOnALineOfCentresCountItsCellsOnceNotTwice`,
+`VolumeVerbs.LotsThatShareAnEdgeOnAGridLineAreCountedOnceByTheGridAsByTheExactMethod`).
+Because the grid never counts a cell twice it has no use for the refusal the
+exact forms need: overlapping polygons are taken, `area=` is the union's,
+`polygon.area=` is the polygons' own summed (so it counts an overlap twice, and
+a `warning overlap=` record says so), and EACH is refused, naming the forms that take it, since the
+cells are shared out among the polygons and not each one's own. The order of the polygons
+decides only which of two lots a shared line of cells is credited to, never the
+total. A polygon's own edge cells still count (`area=` may exceed
+`polygon.area=` by the midpoint rule's usual boundary cells).
+
 The DEM tools' RASTER DIFFERENCE (`docs/terrain.md`, "The DEM tools") is
 the grid method on rasters; VOLUME GRID is the same method on the drawing's
 surfaces, so a raster's answer and a surface's can be set side by side.
@@ -403,6 +427,7 @@ records do not carry.
   `cli.volume_sections_northwards_over_the_slab_are_whole_at_its_edges`,
   `cli.volume_sections_round_a_curve_give_the_band_when_the_reach_is_short_of_its_radius`,
   `cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice`,
+  `cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_on_it_once`,
   `cli.surface_difference_keeps_the_cut_fill_map_as_a_surface`,
   `cli.volume_of_a_surface_that_is_not_there_is_refused`.
 - `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`.

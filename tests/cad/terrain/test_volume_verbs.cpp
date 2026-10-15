@@ -475,6 +475,74 @@ TEST_F(VolumeVerbs, TheGridOverstatesThePyramidByTwentyCellsSquared)
     EXPECT_EQ(refused("VOLUME GRID flat pile"), ErrorCode::InvalidArgument); // no cell=
 }
 
+TEST_F(VolumeVerbs, LotsThatShareAnEdgeOnAGridLineAreCountedOnceByTheGridAsByTheExactMethod)
+{
+    // 1 m over [0, 50]^2, 1 m cells with centres at k + 0.5. Lots [5, 25.5] x
+    // [5, 45] and [25.5, 45] x [5, 45] share the edge x = 25.5, a line of
+    // centres: 840 + 800 = 1640 cells when each is measured on its own and
+    // summed, the 40 on the edge twice. Their union [5, 45]^2 holds 40 x 40 =
+    // 1600 cells, and 1600 m2 is also what the exact method gives.
+    addSurface("lo", gridSurface(0, 0, 50, 50, [](double, double) { return 10.0; }));
+    addSurface("hi", gridSurface(0, 0, 50, 50, [](double, double) { return 11.0; }));
+    ran("PLINE 5,5 25.5,5 25.5,45 5,45 CLOSE");
+    const auto lotA = lastId();
+    ran("PLINE 25.5,5 45,5 45,45 25.5,45 CLOSE");
+    const auto lotB = lastId();
+    ran("PLINE 5,5 45,5 45,45 5,45 CLOSE");
+    const auto lots = lastId();
+    const std::string pair = " INSIDE #" + std::to_string(lotA) + " #" + std::to_string(lotB);
+    const auto grid = record(ran("VOLUME GRID lo hi cell=1" + pair), "volume");
+    EXPECT_EQ(value(grid, "cells"), "1600");
+    EXPECT_EQ(value(grid, "fill"), "1600.000");
+    EXPECT_EQ(value(grid, "area"), "1600.000");
+    EXPECT_EQ(value(grid, "polygon.area"), "1600.000");
+    const auto whole =
+        record(ran("VOLUME GRID lo hi cell=1 INSIDE #" + std::to_string(lots)), "volume");
+    EXPECT_EQ(value(whole, "cells"), "1600");
+    EXPECT_EQ(value(record(ran("VOLUME SURFACES lo hi" + pair), "volume"), "fill"), "1600.000");
+    // Other cells on the same lots: the two lots together always hold the
+    // cells of their union, none twice.
+    for (const char* cell : {"2", "0.5", "5"}) {
+        const auto pairedLots =
+            record(ran(std::string("VOLUME GRID lo hi cell=") + cell + pair), "volume");
+        const auto wholeLots = record(
+            ran(std::string("VOLUME GRID lo hi cell=") + cell + " INSIDE #" + std::to_string(lots)),
+            "volume");
+        EXPECT_EQ(value(pairedLots, "cells"), value(wholeLots, "cells")) << cell;
+        EXPECT_EQ(value(pairedLots, "fill"), value(wholeLots, "fill")) << cell;
+    }
+}
+
+TEST_F(VolumeVerbs, OverlappingPolygonsOnTheGridAreOneUnionAndSaidSoAndEachIsRefusedByName)
+{
+    // [5, 30] x [5, 45] and [20, 45] x [5, 45] overlap on [20, 30]. The grid
+    // counts each cell once, 1600 of them; the exact method refuses the pair
+    // without EACH. polygon.area= is the two polygons' own, 1000 + 1000 cells
+    // of 1 m2 - the overlap twice, which the warning says.
+    addSurface("lo", gridSurface(0, 0, 50, 50, [](double, double) { return 10.0; }));
+    addSurface("hi", gridSurface(0, 0, 50, 50, [](double, double) { return 11.0; }));
+    ran("PLINE 5,5 30,5 30,45 5,45 CLOSE");
+    const auto first = lastId();
+    ran("PLINE 20,5 45,5 45,45 20,45 CLOSE");
+    const auto second = lastId();
+    const std::string pair = " INSIDE #" + std::to_string(first) + " #" + std::to_string(second);
+    const std::string reply = ran("VOLUME GRID lo hi cell=1" + pair);
+    const auto grid = record(reply, "volume");
+    EXPECT_EQ(value(grid, "cells"), "1600");
+    EXPECT_EQ(value(grid, "fill"), "1600.000");
+    EXPECT_EQ(value(grid, "polygon.area"), "2000.000");
+    EXPECT_TRUE(record(reply, "warning").has_value()) << reply;
+    EXPECT_EQ(refused("VOLUME SURFACES lo hi" + pair), ErrorCode::InvalidGeometry);
+
+    // EACH is refused by GRID, and the refusal does not send a person to a
+    // form that refuses it: it names the forms that take it.
+    const auto each = interpreter.run("VOLUME GRID lo hi cell=1" + pair + " EACH");
+    ASSERT_FALSE(each.ok());
+    EXPECT_EQ(each.error().code, ErrorCode::ParseFailure);
+    EXPECT_NE(each.error().message.find("DATUM and STOCKPILE take it"), std::string::npos)
+        << each.error().message;
+}
+
 // ---- SURFACE DIFFERENCE and ENVELOPE --------------------------------------------------------------
 
 TEST_F(VolumeVerbs, TheDifferenceIsANewCutFillSurfaceInOneUndoStep)

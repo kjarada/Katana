@@ -364,7 +364,8 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
 // ---- the grid method -----------------------------------------------------------------------
 
 Result<GridVolume> gridVolume(const TinSurface& existing, const TinSurface& design, double cell,
-                              const OverlayRegion* region, katana::core::TaskPool* pool)
+                              const OverlayRegion* region, katana::core::TaskPool* pool,
+                              std::span<const OverlayRegion> claimed)
 {
     if (existing.empty() || design.empty()) {
         return makeError(ErrorCode::InvalidArgument, "both surfaces must have triangles");
@@ -435,6 +436,17 @@ Result<GridVolume> gridVolume(const TinSurface& existing, const TinSurface& desi
                         continue;
                     }
                     if (region != nullptr && !region->contains(centre)) {
+                        continue;
+                    }
+                    // Counted with an earlier polygon already: a centre on an
+                    // edge two polygons share is inside both.
+                    if (std::any_of(claimed.begin(), claimed.end(),
+                                    [&](const OverlayRegion& earlier) {
+                                        return earlier.bounds()
+                                                   .inflated(tol::kGeometric)
+                                                   .contains(centre) &&
+                                               earlier.contains(centre);
+                                    })) {
                         continue;
                     }
                     const auto zExisting = existing.elevationAt(centre);
