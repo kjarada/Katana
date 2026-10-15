@@ -2393,8 +2393,9 @@ void PlanPainter::drawText(const Point2& position, const std::string& text, doub
 
 const katana::entity::Model& PlanPainter::annotationModel() const
 {
-    // A tool's preview is painted with no model; its text is resolved against
-    // an empty one, which has the Standard text style and nothing else.
+    // A tool's preview is painted with no model unless it is given one
+    // (paintPlanGeometry): its text is resolved against an empty one, which
+    // has the Standard text style and nothing else.
     static const katana::entity::Model empty;
     return source_.model != nullptr ? *source_.model : empty;
 }
@@ -2515,10 +2516,10 @@ PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source, const Plan
 
 void paintPlanGeometry(QPainter& painter, const PlanFrame& frame, const PlanPaintOptions& options,
                        PlanPaintCache& cache, const katana::entity::Geometry& geometry,
-                       const katana::entity::DimensionStyle& dimensionStyle)
+                       const katana::entity::DimensionStyle& dimensionStyle, const PlanSource* source)
 {
     const PlanSource nothing;
-    PlanPainter planPainter(painter, nothing, frame, options, cache);
+    PlanPainter planPainter(painter, source != nullptr ? *source : nothing, frame, options, cache);
     planPainter.geometry(geometry, dimensionStyle);
 }
 

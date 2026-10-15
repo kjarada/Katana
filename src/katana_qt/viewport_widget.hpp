@@ -417,6 +417,13 @@ class ViewportWidget final : public QWidget {
     // document with the window's reference data and meshes, this view's
     // transform and hidden layers, and the screen.
     [[nodiscard]] PlanSource paintSource() const;
+    // What the preview or a grip drag of `shape` reads of the drawing: for a
+    // smart leader, the model and the surfaces and alignments its note reads
+    // (`leaders` made on the first, so a preview of anything else costs
+    // nothing); null for any other shape.
+    [[nodiscard]] std::optional<PlanSource>
+    shapeSource(const katana::entity::Geometry& shape,
+                std::shared_ptr<const katana::entity::LeaderContext>& leaders) const;
     [[nodiscard]] PlanFrame paintFrame() const;
     [[nodiscard]] PlanPaintOptions screenOptions() const;
 

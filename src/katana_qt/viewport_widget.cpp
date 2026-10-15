@@ -4,6 +4,7 @@
 #include "theme.hpp"
 #include "view_focus.hpp"
 
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
@@ -1249,6 +1250,23 @@ PlanSource ViewportWidget::paintSource() const
     return source;
 }
 
+std::optional<PlanSource>
+ViewportWidget::shapeSource(const katana::entity::Geometry& shape,
+                            std::shared_ptr<const katana::entity::LeaderContext>& leaders) const
+{
+    if (!std::holds_alternative<katana::entity::LeaderGeometry>(shape)) {
+        return std::nullopt;
+    }
+    if (leaders == nullptr) {
+        leaders = std::make_shared<const katana::entity::LeaderContext>(
+            katana::cad::annotation::leaderContext(document_));
+    }
+    PlanSource source;
+    source.model = &document_.model();
+    source.leaders = leaders;
+    return source;
+}
+
 PlanFrame ViewportWidget::paintFrame() const
 {
     PlanFrame frame;
@@ -1610,13 +1628,18 @@ bool ViewportWidget::drawPreview(QPainter& painter) const
     const PlanPaintOptions options = screenOptions();
     drawing::FeedbackFrame where;
     where.toScreen = [this](const Point2& p) { return toScreen(p); };
+    std::shared_ptr<const katana::entity::LeaderContext> leaders;
     where.drawShape = [&](const katana::entity::Geometry& shape) {
         katana::entity::DimensionStyle dimensionStyle{};
         if (std::holds_alternative<katana::entity::DimensionGeometry>(shape)) {
             drawn.geometry = shape;
             dimensionStyle = cad::resolveDimensionStyle(document_.model(), drawn);
         }
-        paintPlanGeometry(painter, frame, options, paintCache_, shape, dimensionStyle);
+        // A smart leader previews with its note, read off the drawing as it
+        // will be once placed; without the drawing it was a bare arrow.
+        const std::optional<PlanSource> source = shapeSource(shape, leaders);
+        paintPlanGeometry(painter, frame, options, paintCache_, shape, dimensionStyle,
+                          source ? &*source : nullptr);
     };
     where.visible = QRectF(rect());
     where.cursor = toScreen(cursorWorld_);
@@ -1670,11 +1693,13 @@ void ViewportWidget::drawGrips(QPainter& painter) const
     grips.refresh(notifications_);
     const PlanFrame frame = paintFrame();
     const PlanPaintOptions options = screenOptions();
+    std::shared_ptr<const katana::entity::LeaderContext> leaders;
     grips.paint(
         painter, [this](const Point2& p) { return toScreen(p); },
         [&](const katana::entity::Geometry& shape) {
+            const std::optional<PlanSource> source = shapeSource(shape, leaders);
             paintPlanGeometry(painter, frame, options, paintCache_, shape,
-                              katana::entity::DimensionStyle{});
+                              katana::entity::DimensionStyle{}, source ? &*source : nullptr);
         },
         QRectF(rect()).adjusted(-8, -8, 8, 8));
     if (grips.base()) {

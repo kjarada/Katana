@@ -1201,8 +1201,15 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
 - **A .dxf and a .12da take the scope too**, through a copy of the drawing
   that keeps only what the scope took: the native writers take a model, and
   the copy is already made for the worker. Rejected: threading the scope's
-  entity list through `writeDxfExport` and the archive writer, a second
-  selection mechanism beside the copy. An archive carries the session's
+  entity list through the archive writer, a second selection mechanism beside
+  the copy. A .dxf is the exception, and its copy is cut AFTER its annotation
+  is drawn from the whole of it (`writeDxfExport` with the scope): a smart
+  leader's note and a label's text are read off the entity they are on, which
+  a scope that took the leader and not that entity had already removed - the
+  callout was written as a bare arrow, `skipped=0`, no word
+  (`docs/annotation.md`, "Exchange"). A leader that still has no note is
+  said as a warning record, `leader #N is written without its note: ...`. An
+  archive draws no annotation, so it is cut first. An archive carries the session's
   surfaces with the whole drawing (no scope, or DRAWING with no filter) and
   not with a part of it, as the window's export always did. GDAL's options
   on a .dxf or a .12da are refused by name.

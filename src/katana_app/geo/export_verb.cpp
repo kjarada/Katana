@@ -219,6 +219,11 @@ struct Snapshot {
     // leaders: what a leader's note reads in a DXF - the drawing's surfaces
     // and alignments, held as copies (cad/annotation/leader_presets.hpp).
     katana::entity::LeaderContext leaders;
+    // A DXF of a scope: the entities it took. `model` stays whole until the
+    // worker has drawn the annotation from it (writeDxfExport), because a
+    // smart leader's note is read off the entity its tip is on, and the scope
+    // may have left that entity out. Empty: the whole drawing.
+    std::optional<std::set<katana::entity::EntityId>> only;
     std::vector<katana::terrain::NamedSurface> surfaces;
     // The project's coordinate system: it goes into the file, and is what a
     // KML or GPX is converted to longitude and latitude from (docs/interop.md,
@@ -230,14 +235,17 @@ struct Snapshot {
     std::vector<std::string> extra;
 };
 
-Result<std::string> write(Kind kind, const Snapshot& snapshot, const std::filesystem::path& to,
+Result<std::string> write(Kind kind, Snapshot& snapshot, const std::filesystem::path& to,
                           const std::filesystem::path& named)
 {
     std::string reply;
     switch (kind) {
     case Kind::Dxf: {
-        auto written = writeDxfExport(snapshot.model, snapshot.annotationScale, to,
-                                      snapshot.leaders);
+        auto written = snapshot.only.has_value()
+                           ? writeDxfExport(snapshot.model, snapshot.annotationScale, to,
+                                            snapshot.leaders, *snapshot.only)
+                           : writeDxfExport(snapshot.model, snapshot.annotationScale, to,
+                                            snapshot.leaders);
         if (!written) {
             return written.error();
         }
@@ -534,12 +542,17 @@ Result<Prepared> prepareExport(Context& context, const Tokens& tokens, std::stri
             vector.entities = match->matched;
         } else if (!wholeDrawing) {
             // The DXF and archive writers take a model: the copy keeps what
-            // the scope took and nothing else.
+            // the scope took and nothing else. The archive's now; a DXF's
+            // after its annotation is drawn from the whole (Snapshot::only).
             const std::set<katana::entity::EntityId> kept(match->matched.begin(),
                                                           match->matched.end());
-            for (const katana::entity::EntityId id : snapshot->model.entities.ids()) {
-                if (!kept.contains(id)) {
-                    (void)snapshot->model.entities.remove(id);
+            if (kind == Kind::Dxf) {
+                snapshot->only = kept;
+            } else {
+                for (const katana::entity::EntityId id : snapshot->model.entities.ids()) {
+                    if (!kept.contains(id)) {
+                        (void)snapshot->model.entities.remove(id);
+                    }
                 }
             }
         }

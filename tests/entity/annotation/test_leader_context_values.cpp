@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -285,4 +286,40 @@ TEST(LeaderContextValues, APlusFormatWritesTheSignOfAValueAboveNothingOnly)
         << "a text has no sign to write";
     EXPECT_FALSE(checkLabelTemplate("{dz:+.3f:m}", LabelKind::Segment).ok())
         << "a number format is the last step";
+}
+
+TEST(LeaderContextValues, APointOnTheSurfaceWithinTheToleranceIsAFillOfNothingNotACutOfTheRoundingError)
+{
+    // The surface's level is interpolated, so a point exactly on it can come
+    // out a few bits either side. Here the surface is one ulp above the
+    // point's 21 at (30, 40): 21 + 3.55e-15, so level - ground is -3.55e-15,
+    // and the exact comparison called it a cut (and the leader that asked for
+    // a fill was refused). Within the geometric tolerance (1e-7) is on it.
+    const auto contextAt = [](double ground) {
+        LeaderContext context = fakeContext();
+        context.surfaceLevel = [ground](std::string_view name, const Point2& at) -> std::optional<double> {
+            return name == "ground" && inSquare(at) ? std::optional<double>(ground) : std::nullopt;
+        };
+        return context;
+    };
+    const OnePoint on = pointAt(Point2(30, 40), 21.0);
+    const std::string cutFill = "CUT {cut.ground:.2f}\nFILL {fill.ground:.2f}";
+    const double aUlpAbove = std::nextafter(21.0, 100.0);
+    ASSERT_GT(aUlpAbove, 21.0);
+    ASSERT_LT(aUlpAbove - 21.0, 1.0e-14);
+    EXPECT_EQ(leaderNote(on.model, smartLeader(on, cutFill), {}, contextAt(aUlpAbove)), "FILL 0.00");
+    // And the other way round, a ulp below: a fill, as it always was.
+    EXPECT_EQ(leaderNote(on.model, smartLeader(on, cutFill), {}, contextAt(std::nextafter(21.0, 0.0))),
+              "FILL 0.00");
+    // A fill-only note on such a point is accepted, not refused as "below".
+    EXPECT_TRUE(checkLeaderSaysSomething(on.model, smartLeader(on, "FILL {fill.ground:.3f}"), {},
+                                         contextAt(aUlpAbove))
+                    .ok());
+    // Inside the tolerance (5e-8 of the 1e-7) is on the surface; outside it
+    // (1e-6) is a real cut of a micrometre, said as one - and not a fill.
+    EXPECT_EQ(leaderNote(on.model, smartLeader(on, cutFill), {}, contextAt(21.0 + 5.0e-8)), "FILL 0.00");
+    EXPECT_EQ(leaderNote(on.model, smartLeader(on, cutFill), {}, contextAt(21.0 + 1.0e-6)), "CUT 0.00");
+    EXPECT_FALSE(checkLeaderSaysSomething(on.model, smartLeader(on, "FILL {fill.ground:.3f}"), {},
+                                          contextAt(21.0 + 1.0e-6))
+                     .ok());
 }

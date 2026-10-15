@@ -443,9 +443,14 @@ PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source, const Plan
 
 // One geometry, in the painter's current pen, through `frame`: a tool's
 // preview, which is drawn as the geometry it will become. Never hatched.
+// `source` is what the geometry reads of the drawing, and only its model and
+// leaders are read: a smart leader's note is read off the entity its tip is on
+// (and off the surfaces and alignments) every time it is drawn, so a leader
+// previewed without them is a bare arrow. Null: the geometry reads nothing.
 void paintPlanGeometry(QPainter& painter, const PlanFrame& frame, const PlanPaintOptions& options,
                        PlanPaintCache& cache, const katana::entity::Geometry& geometry,
-                       const katana::entity::DimensionStyle& dimensionStyle);
+                       const katana::entity::DimensionStyle& dimensionStyle,
+                       const PlanSource* source = nullptr);
 
 // The model-space box the frame's viewport shows: for a rotated frame, the
 // box that bounds the rotated rectangle, so that an entity in a corner of a
