@@ -167,11 +167,12 @@ Result<ResolvedGeometry> resolvePoints(const Document& document, const ShapeWord
                           " skipped=" + std::to_string(skipped) +
                           " heightless_vertices=" + std::to_string(input.heightlessVertices);
     }
-    if (resolved.points.empty()) {
+    // A scope that takes nothing is an answer, not a refusal (CLAUDE.md 1.1):
+    // the record says what it took, and the verb says it ran nothing. Entities
+    // NAMED that have no level to give are the person's mistake, and refused.
+    if (resolved.points.empty() && !named->scope) {
         return makeError(ErrorCode::InvalidArgument, "nothing taken has a level to add as a point",
-                         resolved.record.empty()
-                             ? std::string("entities=") + std::to_string(named->ids.size())
-                             : resolved.record);
+                         std::string("entities=") + std::to_string(named->ids.size()));
     }
     return resolved;
 }
@@ -190,11 +191,18 @@ Result<ResolvedGeometry> resolveGeometry(const Document& document, const ShapeWo
     }
     if (const auto& refused = taken->refused) {
         if (!refused->entity) {
+            // The count is the distinct corners left once a polygon's closing
+            // repeat of its first corner is taken off (the reader's rule, said
+            // by the reader), with what was typed beside it: "needs three
+            // corners [corners=3]" contradicted itself.
+            const std::string counted = "corners=" + std::to_string(refused->corners) +
+                                        " typed=" + std::to_string(words.corners.size());
             return polygon ? makeError(ErrorCode::InvalidArgument,
-                                       "a polygon typed in needs at least three corners",
-                                       "corners=" + std::to_string(words.corners.size()))
+                                       "a polygon typed in needs at least three distinct corners",
+                                       counted)
                            : makeError(ErrorCode::InvalidArgument,
-                                       "a line typed in needs at least two vertices");
+                                       "a line typed in needs at least two distinct vertices",
+                                       counted);
         }
         const std::string id = "#" + std::to_string(*refused->entity);
         if (refused->why == NotAShape::NoEntity) {
@@ -211,11 +219,9 @@ Result<ResolvedGeometry> resolveGeometry(const Document& document, const ShapeWo
                           std::to_string(resolved.shapes.size()) +
                           " skipped=" + std::to_string(taken->skipped.total());
     }
-    if (resolved.shapes.empty()) {
-        return makeError(ErrorCode::InvalidArgument,
-                         std::string("the scope took no ") + (polygon ? "polygon" : "line"),
-                         resolved.record);
-    }
+    // No shape from a FROM scope is an answer: the record says what it took
+    // and skipped, and the edit does nothing. (Typed corners and #ids that are
+    // no shape were refused above.)
     return resolved;
 }
 
@@ -278,7 +284,8 @@ Outcome nothing(const tin::TinSurface& surface)
 }
 
 std::string surfaceRecord(std::string_view name, std::string_view operation,
-                          const Outcome& outcome, bool changed, bool preview)
+                          const Outcome& outcome, bool changed, bool preview,
+                          std::string_view notRun = {})
 {
     const tin::TinEditReport& r = outcome.report;
     std::string record = "surface name=" + recordValue(name) + " operation=" +
@@ -297,6 +304,9 @@ std::string surfaceRecord(std::string_view name, std::string_view operation,
         record += " largest_change=" + number(r.largestChange);
     }
     record += changed ? " changed=yes" : " changed=no";
+    if (!notRun.empty()) {
+        record += " ran=no reason=" + recordValue(notRun);
+    }
     if (preview) {
         record += " preview=yes";
     }
@@ -348,13 +358,17 @@ Result<double> optionNumber(const std::string& key, const std::string& value)
     return *parsed;
 }
 
-// INSIDE <polygon>, when it comes next.
-Result<std::optional<Polyline2>> readInside(const Document& document, const Words& words,
-                                            std::size_t& at, const ScopeViewProvider& views,
-                                            std::string& record)
+// INSIDE <polygon>, when it comes next. `tookNothing`: a scope that took no
+// polygon - which is NOT "no INSIDE", the whole surface, but nothing to act on.
+struct InsideRead {
+    std::optional<Polyline2> polygon;
+    bool tookNothing = false;
+};
+Result<InsideRead> readInside(const Document& document, const Words& words, std::size_t& at,
+                              const ScopeViewProvider& views, std::string& record)
 {
     if (at >= words.size() || !is(words[at], "INSIDE")) {
-        return std::optional<Polyline2>{};
+        return InsideRead{};
     }
     ++at;
     auto geometryWords = readGeometryWords(words, at, DataKind::Polygon);
@@ -366,11 +380,14 @@ Result<std::optional<Polyline2>> readInside(const Document& document, const Word
         return geometry.error();
     }
     record = geometry->record;
+    if (geometry->shapes.empty()) {
+        return InsideRead{std::nullopt, true};
+    }
     auto polygon = onePolygon(*geometry, "INSIDE");
     if (!polygon) {
         return polygon.error();
     }
-    return std::optional<Polyline2>(std::move(*polygon));
+    return InsideRead{std::optional<Polyline2>(std::move(*polygon)), false};
 }
 
 Result<ResolvedGeometry> readGeometry(const Document& document, const Words& words,
@@ -397,6 +414,7 @@ struct EditOutcome {
     Outcome outcome;
     std::string operation; // as the reply and the step name say it
     std::string record;    // what a scope took
+    std::string notRun;    // why nothing was done: the scope took nothing
 };
 
 Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& surface,
@@ -448,6 +466,12 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
                 return geometry.error();
             }
             edit.record = geometry->record;
+            if (geometry->shapes.empty()) {
+                // OUTSIDE of no polygon is not the whole surface: nothing was named.
+                edit.outcome = nothing(surface);
+                edit.notRun = "the scope took no polygon";
+                return edit;
+            }
             std::vector<std::vector<std::uint32_t>> sets;
             for (const DrawingShape& shape : geometry->shapes) {
                 sets.push_back(tin::trianglesByPolygon(surface, shape.outline, true));
@@ -512,10 +536,15 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             }
             const auto vertex = tin::vertexAt(surface, point->at, reach);
             if (!vertex) {
-                return makeError(ErrorCode::InvalidArgument,
-                                 reach ? "no vertex of the surface within reach= of the point"
-                                       : "the point is off the surface",
-                                 describe(point->at));
+                // Off the surface is said when the point is, whatever the reach: a
+                // reach that found nothing near it on the surface is another thing.
+                const bool onSurface = tin::triangleAt(surface, point->at).has_value();
+                return makeError(
+                    ErrorCode::InvalidArgument,
+                    !reach ? "the point is off the surface"
+                    : onSurface ? "no vertex of the surface within reach= of the point"
+                                : "the point is off the surface, and no vertex is within reach=",
+                    describe(point->at));
             }
             if (Status s = take(one(tin::deletePoints(surface, std::vector{*vertex}))); !s) {
                 return s.error();
@@ -531,6 +560,11 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
                 return geometry.error();
             }
             edit.record = geometry->record;
+            if (geometry->shapes.empty()) {
+                edit.outcome = nothing(surface);
+                edit.notRun = "the scope took no polygon";
+                return edit;
+            }
             std::vector<std::vector<std::uint32_t>> sets;
             for (const DrawingShape& shape : geometry->shapes) {
                 sets.push_back(tin::verticesInside(surface, shape.outline));
@@ -593,6 +627,11 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             }
             edit.record = geometry->record;
             points = std::move(geometry->points);
+            if (points.empty()) {
+                edit.outcome = nothing(surface);
+                edit.notRun = "the scope took no point with a level";
+                return edit;
+            }
         }
         if (Status s = take(one(tin::addPoints(surface, points))); !s) {
             return s.error();
@@ -604,23 +643,26 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             return geometry.error();
         }
         edit.record = geometry->record;
-        Outcome outcome;
-        tin::TinSurface current = surface;
-        bool first = true;
-        for (const DrawingShape& shape : geometry->shapes) {
-            std::vector<tin::BreaklineVertex> vertices;
-            for (std::size_t i = 0; i < shape.outline.vertices.size(); ++i) {
-                vertices.push_back({shape.outline.vertices[i], shape.heights[i]});
-            }
-            auto step = tin::addBreakline(current, vertices, shape.outline.closed);
-            if (!step) {
-                return step.error();
-            }
-            accumulate(outcome, *step, first);
-            first = false;
-            current = outcome.surface;
+        if (geometry->shapes.empty()) {
+            edit.outcome = nothing(surface);
+            edit.notRun = "the scope took no line";
+            return edit;
         }
-        edit.outcome = std::move(outcome);
+        // All the lines in ONE patch: lines of one edit that cross are judged
+        // against each other (3D lines at different levels are refused whatever
+        // order they are named in), and it is one rebuild, not one per line.
+        std::vector<tin::BreaklineInput> lines;
+        for (const DrawingShape& shape : geometry->shapes) {
+            tin::BreaklineInput line;
+            line.closed = shape.outline.closed;
+            for (std::size_t i = 0; i < shape.outline.vertices.size(); ++i) {
+                line.vertices.push_back({shape.outline.vertices[i], shape.heights[i]});
+            }
+            lines.push_back(std::move(line));
+        }
+        if (Status s = take(one(tin::addBreaklines(surface, lines))); !s) {
+            return s.error();
+        }
     } else if (op == "BOUNDARY" || op == "HOLE") {
         const bool boundary = op == "BOUNDARY";
         edit.operation = boundary ? "boundary" : "hole";
@@ -629,6 +671,11 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             return geometry.error();
         }
         edit.record = geometry->record;
+        if (geometry->shapes.empty()) {
+            edit.outcome = nothing(surface);
+            edit.notRun = "the scope took no polygon";
+            return edit;
+        }
         if (boundary) {
             auto polygon = onePolygon(*geometry, "BOUNDARY");
             if (!polygon) {
@@ -679,7 +726,13 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
         if (!inside) {
             return inside.error();
         }
-        if (Status s = take(one(tin::changeHeights(surface, change, *inside))); !s) {
+        if (inside->tookNothing) {
+            edit.outcome = nothing(surface);
+            edit.outcome.levels = true;
+            edit.notRun = "the scope took no polygon";
+            return edit;
+        }
+        if (Status s = take(one(tin::changeHeights(surface, change, inside->polygon))); !s) {
             return s.error();
         }
         edit.outcome.levels = true;
@@ -710,7 +763,13 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
         if (!inside) {
             return inside.error();
         }
-        if (Status s = take(one(tin::smoothSurface(surface, smooth, *inside))); !s) {
+        if (inside->tookNothing) {
+            edit.outcome = nothing(surface);
+            edit.outcome.levels = true;
+            edit.notRun = "the scope took no polygon";
+            return edit;
+        }
+        if (Status s = take(one(tin::smoothSurface(surface, smooth, inside->polygon))); !s) {
             return s.error();
         }
         edit.outcome.levels = true;
@@ -787,13 +846,32 @@ Result<SurfaceEditPlan> planSurfaceEdit(const Document& document,
         return makeError(ErrorCode::ParseFailure, "not a surface edit line");
     }
     const std::string verb = katana::core::uppered(tokens[1]);
-    // PREVIEW anywhere after the verb's own two words (and, for EDIT, the
-    // surface's name) is the preview, wherever a person typed it.
-    const std::size_t firstFree = verb == "EDIT" ? 3 : 2;
+    // PREVIEW anywhere after the verb's own two words and the surface's name
+    // is the preview, wherever a person typed it - except where the grammar
+    // wants a VALUE: a surface called Preview (the first surface of every
+    // verb is at 2, a paste's base after INTO, a merge's members before
+    // NAME), the new surface's NAME, a layer after LAYERS. The words arrive
+    // with their quotes already off, so quoting the word cannot protect it;
+    // the position does. (CommandInterpreter::modify does the same for a
+    // layer called "preview" or "set".)
+    const std::size_t firstFree = 3;
     Words words;
     bool preview = false;
+    bool pastName = false; // a MERGE's members are the words before NAME
     for (std::size_t i = 0; i < tokens.size(); ++i) {
-        if (i >= firstFree && is(tokens[i], "PREVIEW")) {
+        bool isValue = false;
+        if (i > 0) {
+            const std::string_view before = tokens[i - 1];
+            isValue = is(before, "NAME") || is(before, "INTO") || is(before, "LAYERS") ||
+                      is(before, "LAYER");
+        }
+        if (verb == "MERGE" && !pastName && document.surfaces().find(tokens[i]) != nullptr) {
+            isValue = true; // a surface of that name is named, not a flag
+        }
+        if (is(tokens[i], "NAME")) {
+            pastName = true;
+        }
+        if (i >= firstFree && !isValue && is(tokens[i], "PREVIEW")) {
             preview = true;
         } else {
             words.push_back(tokens[i]);
@@ -823,7 +901,8 @@ Result<SurfaceEditPlan> planSurfaceEdit(const Document& document,
         }
         const bool changed = !(edit->outcome.surface == surface);
         plan.reply = (edit->record.empty() ? std::string{} : edit->record + "\n") +
-                     surfaceRecord(name, edit->operation, edit->outcome, changed, preview);
+                     surfaceRecord(name, edit->operation, edit->outcome, changed, preview,
+                                   edit->notRun);
         plan.stepName = stepNameOf(edit->operation);
         if (changed && !preview) {
             if (Status s = store.replace(name, std::make_shared<const tin::TinSurface>(
@@ -911,6 +990,23 @@ Result<SurfaceEditPlan> planSurfaceEdit(const Document& document,
                 return geometry.error();
             }
             record = geometry->record;
+            if (geometry->shapes.empty()) {
+                // A scope that takes no polygon makes no surface, and says so.
+                auto name = readName(words, at, true, "SURFACE CLIP");
+                if (!name) {
+                    return name.error();
+                }
+                if (Status s = requireEnd(words, at); !s) {
+                    return s.error();
+                }
+                plan.reply = (record.empty() ? std::string{} : record + "\n") +
+                             "surface name=" + recordValue(*name) +
+                             " operation=clip changed=no ran=no reason=" +
+                             recordValue("the scope took no polygon") +
+                             (preview ? " preview=yes" : "");
+                plan.stepName = "SURFACE_CLIP";
+                return plan;
+            }
             auto polygon = onePolygon(*geometry, "SURFACE CLIP");
             if (!polygon) {
                 return polygon.error();
@@ -1032,7 +1128,8 @@ SURFACE OFFSET <name> <dz> NAME <new>              a copy raised by dz
 
 <polygon>, <line>, <points>:  #id [#id ...]  |  x,y[,z] x,y[,z] ...  |  FROM <scope> [WHERE k=v ...]
   (the scope words of HELP: SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY];
-  options come before FROM)
+  options come before FROM). A scope that takes nothing is reported, not refused:
+  changed=no ran=no reason="the scope took no polygon", and no undo step.
 
 Reply: [scope=... matched=N polygons=|lines=|points= skipped=]
        surface name= operation= triangles_before= triangles_after= vertices_before=
@@ -1054,9 +1151,42 @@ std::string& targetName()
 
 } // namespace
 
+namespace {
+
+std::vector<std::pair<std::size_t, std::function<void()>>>& observers()
+{
+    static std::vector<std::pair<std::size_t, std::function<void()>>> all;
+    return all;
+}
+
+} // namespace
+
 const std::string& surfaceEditTarget() { return targetName(); }
 
-void setSurfaceEditTarget(std::string name) { targetName() = std::move(name); }
+void setSurfaceEditTarget(std::string name)
+{
+    targetName() = std::move(name);
+    // A copy: an observer may add or remove observers.
+    const auto notify = observers();
+    for (const auto& [handle, observer] : notify) {
+        observer();
+    }
+}
+
+std::size_t addSurfaceEditTargetObserver(std::function<void()> observer)
+{
+    static std::size_t next = 0;
+    observers().emplace_back(++next, std::move(observer));
+    return next;
+}
+
+void removeSurfaceEditTargetObserver(std::size_t handle)
+{
+    auto& all = observers();
+    all.erase(std::remove_if(all.begin(), all.end(),
+                             [handle](const auto& entry) { return entry.first == handle; }),
+              all.end());
+}
 
 Result<std::string> activeEditSurface(const Document& document)
 {

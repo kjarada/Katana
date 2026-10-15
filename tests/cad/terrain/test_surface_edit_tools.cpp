@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../tools/tool_driver.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/terrain/surface_edit_verbs.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "surface_edit_support.hpp"
@@ -36,6 +37,17 @@ struct SurfaceEditTools : ::testing::Test {
     }
 
     static bool rejected(const ToolStep& step) { return step.outcome == ToolStep::Outcome::Rejected; }
+
+    // Delete Triangles Inside's Outside choice is held by its catalogue entry,
+    // which these tests share, so each says what it wants rather than toggling.
+    bool outside() { return driver.tool().prompt().find("OUTSIDE it") != std::string::npos; }
+    void setOutside(bool wanted)
+    {
+        if (outside() != wanted) {
+            driver.type("O");
+        }
+        ASSERT_EQ(outside(), wanted);
+    }
 };
 
 } // namespace
@@ -133,9 +145,10 @@ TEST_F(SurfaceEditTools, HoleBoundaryAndDeleteInsideTakeAPickedClosedPolyline)
     // Outside [1,2] x [1,9]: only that strip's 8 x 2 triangles stay, area 8.
     const EntityId strip = polyline({Point2(1, 1), Point2(2, 1), Point2(2, 9), Point2(1, 9)}, true);
     driver.start("terrain.edit.deleteinside");
-    driver.type("O");
+    setOutside(true);
     driver.pick(strip, 1, 5);
     EXPECT_NEAR(surfaceOf(driver.document(), "ground").planArea(), 8.0, 1e-9);
+    setOutside(false);
 }
 
 TEST_F(SurfaceEditTools, AddBreaklineTakesAPickedPolylineDraped)
@@ -196,4 +209,88 @@ TEST_F(SurfaceEditTools, ThePreviewMarksWhatAClickWouldTakeAndWhatItWouldRefuse)
     driver.start("terrain.edit.flip");
     EXPECT_TRUE(driver.preview(2.5, 0.01).refused); // nearest the rim along y = 0
     EXPECT_FALSE(driver.preview(2.5, 2.5).refused); // a diagonal inside
+}
+
+TEST_F(SurfaceEditTools, TheOutsideChoiceOfDeleteTrianglesInsideSurvivesTheRestartAfterAnEdit)
+{
+    // A run of picks is a run of clicks: each edit ends the tool and the host
+    // makes it again, and the Outside the person chose went with the old one,
+    // so the second polygon's INSIDE was deleted instead.
+    putSurface(driver.document(), "ground", flatGridSurface(10, 1.0, 4.0));
+    const EntityId first = polyline({Point2(1, 1), Point2(9, 1), Point2(9, 9), Point2(1, 9)}, true);
+    const EntityId second = polyline({Point2(2, 2), Point2(8, 2), Point2(8, 8), Point2(2, 8)}, true);
+    driver.start("terrain.edit.deleteinside");
+    setOutside(true);
+    // Outside [1,9]^2 goes: 64 stays, in 128 triangles.
+    driver.pick(first, 1, 5);
+    EXPECT_NEAR(surfaceOf(driver.document(), "ground").planArea(), 64.0, 1e-9);
+    EXPECT_TRUE(outside()) << "the restarted tool still says OUTSIDE: " << driver.tool().prompt();
+    // And the second pick deletes outside [2,8]^2 of what is left: 36 stays.
+    driver.pick(second, 2, 5);
+    EXPECT_NEAR(surfaceOf(driver.document(), "ground").planArea(), 36.0, 1e-9);
+    ASSERT_FALSE(driver.messages().empty());
+    EXPECT_NE(driver.messages().back().find("DELETE TRIANGLES OUTSIDE #"), std::string::npos)
+        << driver.messages().back();
+    setOutside(false);
+    EXPECT_FALSE(outside());
+}
+
+TEST_F(SurfaceEditTools, DeletePointOffersNoVertexOnABreaklineOrBoundaryEdgeThatTheClickRefuses)
+{
+    // The square with its diagonal 0-2 a breakline (triangle 0 runs it as
+    // edge 2, triangle 1 as edge 0). Vertex 0 at (0,0) is on it; vertex 1 at
+    // (10,0) is on the rim only, which Delete Point may take.
+    putSurface(driver.document(), "ground",
+               makeSurface({katana::geometry::Point3(0, 0, 0), katana::geometry::Point3(10, 0, 0),
+                            katana::geometry::Point3(10, 10, 0), katana::geometry::Point3(0, 10, 0)},
+                           {{0, 1, 2}, {0, 2, 3}}, {std::uint8_t{4}, std::uint8_t{1}}));
+    driver.setPickTolerance(0.5);
+    driver.start("terrain.edit.deletepoint");
+    const ToolFeedback kept = driver.preview(0.1, 0.1);
+    EXPECT_TRUE(kept.refused);
+    EXPECT_NE(kept.caption.find("kept"), std::string::npos) << kept.caption;
+    const ToolFeedback free = driver.preview(9.9, 0.1);
+    EXPECT_FALSE(free.refused) << free.caption;
+    EXPECT_EQ(free.caption, "delete this vertex");
+    // What the preview says is what the click does.
+    EXPECT_TRUE(rejected(driver.click(0.1, 0.1)));
+    EXPECT_FALSE(rejected(driver.click(9.9, 0.1)));
+}
+
+TEST_F(SurfaceEditTools, ACurvePolylineDrawnBackToItsStartIsAPolygonToThePickAsToTheVerb)
+{
+    // PLINE with an arc, ending where it began, is a curve polyline with the
+    // closed flag off - which the verb takes as a polygon (the one reader of
+    // the drawing's shapes) and the tool's own copy of the rule refused.
+    putSurface(driver.document(), "ground", flatGridSurface(10, 10.0, 4.0));
+    CommandInterpreter interpreter(driver.document());
+    ASSERT_TRUE(interpreter.run("PLINE 20,20 60,20 ARC 60,60 LINE 20,60 20,20").ok());
+    const EntityId curve = driver.document().lastCreatedEntities().front();
+    driver.start("terrain.edit.hole");
+    const ToolStep step = driver.pick(curve, 20, 40);
+    EXPECT_FALSE(rejected(step)) << step.message;
+    EXPECT_EQ(driver.executed(), 1);
+    // The square 20..60 is 1600 and the arc bulges by a little; the hole is
+    // between that and the 3600 of the ground's cells it crosses.
+    EXPECT_LT(surfaceOf(driver.document(), "ground").planArea(), 10000.0 - 1500.0);
+    // A line is still no polygon.
+    const EntityId open = polyline({Point2(1, 1), Point2(3, 1), Point2(3, 3)}, false);
+    EXPECT_TRUE(rejected(driver.pick(open, 2, 1)));
+}
+
+TEST_F(SurfaceEditTools, TheSurfaceOptionTellsTheToolbarAndOnlyWhileItIsListening)
+{
+    putSurface(driver.document(), "ground", flatGridSurface(4, 1.0));
+    putSurface(driver.document(), "pad", flatGridSurface(4, 1.0, 2.0));
+    int told = 0;
+    const std::size_t handle = addSurfaceEditTargetObserver([&told] { ++told; });
+    driver.start("terrain.edit.deletetriangle");
+    driver.type("S");
+    EXPECT_EQ(told, 0) << "choosing the option is not choosing the surface";
+    driver.type("pad");
+    EXPECT_EQ(told, 1);
+    EXPECT_EQ(surfaceEditTarget(), "pad");
+    removeSurfaceEditTargetObserver(handle);
+    setSurfaceEditTarget("ground");
+    EXPECT_EQ(told, 1) << "a removed observer is not called";
 }
