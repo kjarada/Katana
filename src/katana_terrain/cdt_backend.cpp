@@ -9,7 +9,19 @@
 // doubles; no tolerance is involved. The only constructed coordinates are the
 // crossing points of constraints (Exact_predicates_tag): CGAL computes them in
 // double precision and, when the rounded point falls outside the two triangles
-// it must lie in, recomputes them with exact rationals and rounds once.
+// it must lie in, recomputes it with its almost-exact construction; when THAT
+// point is outside them too it snaps the crossing to the nearer END of the
+// constrained edge it crosses (Constrained_triangulation_2.h,
+// insert_intersection, CGAL 6.2). That is harmless when the crossing is within
+// rounding of that end, and not when one constraint ends a few ulps from the
+// other (the crossing is then a few ulps from the END of the one, in or out of
+// the triangles by luck of the last bit) or they are nearly parallel: the
+// crossing snaps to an end that may be tens of metres away, and the constraint
+// is reported running through a vertex that is not on it. The kernel does not
+// say so; its callers bend a constraint through any point within
+// tolerance::kGeometric of it before asking (tin_patch.cpp,
+// pointsOnConstraints) and check afterwards that every vertex a constraint
+// runs through lies on it.
 //
 // Constrained_triangulation_plus_2 keeps the hierarchy from input constraints to
 // the sub-edges they were split into. That gives (a) the vertices along each

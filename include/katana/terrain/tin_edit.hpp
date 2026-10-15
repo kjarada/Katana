@@ -22,9 +22,12 @@
 //     an old edge - the vertex's level is interpolated along the edge whose
 //     level holds there (docs/surface_editing.md, "Levels of new vertices").
 //
-// The result is canonical, as buildTin's is: vertices of the old surface in
-// their order (those left without a triangle dropped), then new ones; every
-// triangle rotated to start at its smallest vertex and the triangles sorted.
+// An edit that rebuilds triangles gives a canonical surface, as buildTin's
+// is: vertices of the old surface in their order (those left without a
+// triangle dropped), then new ones; every triangle rotated to start at its
+// smallest vertex and the triangles sorted. A level edit (RAISE, SMOOTH ...)
+// keeps the triangles as they were, in the order they were. An edit that
+// changes nothing returns the surface as it was, not a reordered copy of it.
 // The same edit of the same surface gives the same bits.
 
 #include <cstddef>
@@ -44,6 +47,13 @@ class TaskPool;
 namespace katana::terrain {
 
 using Polyline2 = katana::geometry::Polyline2;
+
+// The largest coordinate or level, in metres, an edit accepts. Beyond a
+// projected grid or a reduced level by orders of magnitude (a UTM easting is
+// 1e7 at most), and well inside what areas and volumes (sums of products of
+// three such numbers) hold: a typing slip such as RAISE 1e308 is refused
+// where it is made, instead of making a surface whose plan area reads nan.
+inline constexpr double kMostMagnitude = 1.0e9;
 
 // What an edit did: what a verb's reply says.
 struct TinEditReport {
@@ -96,11 +106,19 @@ struct TinEdgeRef {
 [[nodiscard]] std::optional<TinEdgeRef> edgeAt(const TinSurface& surface, const Point2& position);
 
 // The corner of the triangle under `position` that lies nearest it; nullopt
-// off the surface, or when that corner is farther than `reach` (none: any
-// distance).
+// off the surface. With a `reach` (the snap aperture of a click) that corner
+// when it is within reach; else the vertex nearest `position` within reach,
+// wherever it is: a click a hair outside the rim, or in a thin triangle whose
+// corners are all farther than the vertex beside it, finds that vertex.
+// (Where a corner is within reach the answer is the one it always was.)
 [[nodiscard]] std::optional<std::uint32_t> vertexAt(const TinSurface& surface,
                                                     const Point2& position,
                                                     std::optional<double> reach = std::nullopt);
+
+// Whether `vertex` is an end of a constrained (breakline or boundary) edge:
+// the rule deletePoints refuses such a vertex by, for a front end to say so
+// before the click rather than after (the one test, not a second copy).
+[[nodiscard]] bool onConstrainedEdge(const TinSurface& surface, std::uint32_t vertex);
 
 // The triangles whose centroid lies inside `polygon` (on its edge counts as
 // inside), or outside it. `polygon` is taken as closed.
@@ -189,14 +207,35 @@ struct BreaklineVertex {
 // edge, at the edge's level, so the surface keeps its shape and only gains
 // the edges. A stretch with a level at either end is straight in 3D. Where
 // the line crosses an existing breakline it meets it at that breakline's
-// level. Fails with
-//   InvalidArgument  fewer than two vertices, a non-finite coordinate or level;
+// level. A vertex of the surface lying exactly on a 3D stretch takes the
+// stretch's level, so the line is straight end to end (one on an existing
+// breakline keeps its level, as where they cross). A vertex of the line that
+// is within tolerance::kGeometric of an existing edge is on it: the edge is
+// split there. A position the line visits twice has the level either visit
+// gives it. Fails with
+//   InvalidArgument  fewer than two vertices, a non-finite coordinate or level,
+//                    one beyond kMostMagnitude;
 //   InvalidGeometry  a vertex off the surface, the line leaving the surface
 //                    (across the rim or a hole), the line crossing itself at
-//                    two levels, or no length at all;
+//                    two levels, two levels at one position, an edge passing
+//                    so close to the end of another that the crossing cannot
+//                    be placed on it, or no length at all;
 //   TriangulationFailure  from the kernel.
 [[nodiscard]] katana::core::Result<TinEditResult>
 addBreakline(const TinSurface& surface, std::span<const BreaklineVertex> vertices, bool closed);
+
+// One line of an edit that adds several (BreaklineVertex's rules).
+struct BreaklineInput {
+    std::vector<BreaklineVertex> vertices;
+    bool closed = false;
+};
+// Several lines made constrained edges in ONE patch, so lines of the same
+// edit that cross are checked against each other as the two halves of one
+// line are: 3D lines crossing at different levels are refused (the answer
+// does not depend on the order they are named), and a draped line meets a 3D
+// one at its level. Refusals as addBreakline's, for any of the lines.
+[[nodiscard]] katana::core::Result<TinEditResult>
+addBreaklines(const TinSurface& surface, std::span<const BreaklineInput> lines);
 
 // The part of the surface inside `boundary` (an outer clip), or outside
 // `hole`. The polygon's edges become the new rim, exactly: triangles they
@@ -205,7 +244,8 @@ addBreakline(const TinSurface& surface, std::span<const BreaklineVertex> vertice
 // buildTin's boundary edges are. Either orientation. Fails with
 //   InvalidArgument  a non-finite coordinate;
 //   InvalidGeometry  fewer than 3 distinct vertices, no area, or a polygon
-//                    that touches or crosses itself;
+//                    that touches or crosses itself (a corner it visits
+//                    twice, or one on another edge, included);
 //   InvalidState     nothing of the surface would be left;
 //   TriangulationFailure  from the kernel.
 // A polygon that changes nothing (a boundary around the whole surface, a
@@ -235,8 +275,8 @@ struct HeightChange {
 // counts). The triangles are not touched, so a triangle with corners on
 // both sides of the polygon slopes between them; a breakline along the
 // polygon first (addBreakline) makes the change start exactly at it. Fails
-// with InvalidArgument for a non-finite value or base, and for a polygon
-// with no vertex of the surface inside it.
+// with InvalidArgument for a non-finite value or base, a level beyond
+// kMostMagnitude, and for a polygon with no vertex of the surface inside it.
 [[nodiscard]] katana::core::Result<TinEditResult>
 changeHeights(const TinSurface& surface, const HeightChange& change,
               const std::optional<Polyline2>& inside = std::nullopt);
