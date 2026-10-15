@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "katana/cad/code_edit.hpp"
+#include "katana/cad/csv_table.hpp"
 #include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
@@ -220,45 +221,11 @@ std::string factorFields(const Factors& factors, double cut, double fill)
 
 // ---- the CSV file ----------------------------------------------------------------------------
 
-struct Table {
-    std::vector<std::string> header;
-    std::vector<std::vector<std::string>> rows;
-};
-
-// Fields are quoted as RFC 4180 says (cad::csvField); records end in CRLF.
-
-// The table written to the file csv= names - replacing one only with
-// OVERWRITE, as every verb that writes a file does - and the reply's record.
-// Written before nothing: the VOLUME verbs change no drawing data, so a file
-// that cannot be written fails the reply and leaves nothing half done.
-Result<std::string> writeTable(const Table& table, const std::string& path, bool overwrite)
-{
-    const std::filesystem::path file = katana::core::pathFromUtf8(path);
-    std::error_code error;
-    if (std::filesystem::exists(file, error) && !overwrite) {
-        return makeError(ErrorCode::AlreadyExists,
-                         "the file is already there; OVERWRITE replaces it", path);
-    }
-    std::ofstream out(file, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return makeError(ErrorCode::FileExportFailure, "the file cannot be written", path);
-    }
-    const auto line = [&out](const std::vector<std::string>& fields) {
-        for (std::size_t i = 0; i < fields.size(); ++i) {
-            out << (i == 0 ? "" : ",") << csvField(fields[i]);
-        }
-        out << "\r\n";
-    };
-    line(table.header);
-    for (const auto& row : table.rows) {
-        line(row);
-    }
-    out.close();
-    if (!out) {
-        return makeError(ErrorCode::FileExportFailure, "the file could not be finished", path);
-    }
-    return "csv file=" + recordValue(path) + " rows=" + std::to_string(table.rows.size());
-}
+// Written by the one CSV writer of the report verbs (cad/csv_table.hpp), replacing a file
+// already there only with OVERWRITE. Written before nothing: the VOLUME verbs change no
+// drawing data, so a file that cannot be written fails the reply and leaves nothing half
+// done.
+using Table = CsvTable;
 
 // ---- surfaces --------------------------------------------------------------------------------
 
@@ -630,7 +597,7 @@ Result<std::string> measureAreas(const Reading& reading,
     }
 
     if (const std::string* path = options.find("csv")) {
-        auto written = writeTable(table, *path, overwrite);
+        auto written = writeCsvTable(table, *path, overwrite);
         if (!written) {
             return written.error();
         }
@@ -1154,7 +1121,7 @@ Result<std::string> volumeSections(const Document& document, Words words)
         lines.push_back(record);
     }
     if (const std::string* path = options->find("csv")) {
-        auto written = writeTable(table, *path, overwrite);
+        auto written = writeCsvTable(table, *path, overwrite);
         if (!written) {
             return written.error();
         }

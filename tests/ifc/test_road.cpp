@@ -761,6 +761,77 @@ TEST(IfcExportRoad, QuantitiesTheTemplateNamesAreBaseQuantitiesAndTheRestKatanas
     EXPECT_FALSE(setsOf(all, byTag(all, kWall)).contains("'Katana_Quantities'"));
 }
 
+// The road model names a solid's volume GrossVolume whatever the solid is, and a
+// course's thickness Depth (cad/road/road_section.cpp); each class's base
+// quantity set names its own. The model's name is written as the set's where the
+// set gives it that type: a cut's volume is its UndisturbedVolume, a fill's its
+// CompactedVolume, a kerb's its Volume, a course's Depth its Thickness - and
+// what the set has no name for stays in Katana_Quantities. An element that
+// already has the set's own name is left as it is.
+TEST(IfcExportRoad, TheRoadModelsQuantityNamesAreWrittenAsTheirClassesBaseQuantitiesNameThem)
+{
+    ifc::ExportInput input;
+    auto course = element("course", "pavement", {"IfcCourse", "PAVEMENT", {}}, "Main",
+                          "CARRIAGEWAY", box(0.0, 0.0, 0.0, 100.0, 3.5, 0.05));
+    course.quantities = {{"Length", 100.0, "m"},    {"Width", 3.5, "m"},
+                         {"Depth", 0.05, "m"},      {"GrossArea", 350.0, "m2"},
+                         {"GrossVolume", 17.5, "m3"}};
+    auto kerb = element("kerb", "kerb", {"IfcKerb", "NOTDEFINED", {}}, "Main", "ROADSIDE",
+                        box(0.0, 3.5, 0.0, 100.0, 3.65, 0.15));
+    kerb.quantities = {{"Length", 100.0, "m"},
+                       {"Width", 0.15, "m"},
+                       {"Height", 0.15, "m"},
+                       {"GrossVolume", 2.25, "m3"}};
+    auto cut = element("cut", "earthworks", {"IfcEarthworksCut", "CUT", {}}, "Main", "ROADSEGMENT",
+                       box(0.0, 3.65, -2.0, 100.0, 9.0, 0.0));
+    cut.quantities = {{"Length", 100.0, "m"}, {"GrossArea", 600.0, "m2"}, {"GrossVolume", 1000.0, "m3"}};
+    auto fill = element("fill", "earthworks", {"IfcEarthworksFill", "EMBANKMENT", {}}, "Main",
+                        "ROADSEGMENT", box(0.0, -9.0, -2.0, 100.0, 0.0, 0.0));
+    fill.quantities = {{"Length", 100.0, "m"}, {"GrossArea", 600.0, "m2"}, {"GrossVolume", 850.0, "m3"}};
+    // A cut that already has the set's own name keeps both, as they are.
+    auto both = element("both", "earthworks", {"IfcEarthworksCut", "CUT", {}}, "Main",
+                        "ROADSEGMENT", box(0.0, 10.0, -2.0, 100.0, 12.0, 0.0));
+    both.quantities = {{"GrossVolume", 7.0, "m3"}, {"UndisturbedVolume", 5.0, "m3"}};
+    input.road.elements = {course, kerb, cut, fill, both};
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+
+    const auto courseSets = setsOf(all, byTag(all, "course"));
+    EXPECT_EQ(quantitiesOf(all, courseSets.at("'Qto_CourseBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYLENGTH('Width',$,$,3.5,$)",
+                                     "IFCQUANTITYLENGTH('Thickness',$,$,0.05,$)",
+                                     "IFCQUANTITYVOLUME('GrossVolume',$,$,17.5,$)"}));
+    EXPECT_EQ(quantitiesOf(all, courseSets.at("'Katana_Quantities'")),
+              std::set<std::string>{"IFCQUANTITYAREA('GrossArea',$,$,350.,$)"});
+
+    const auto kerbSets = setsOf(all, byTag(all, "kerb"));
+    EXPECT_EQ(quantitiesOf(all, kerbSets.at("'Qto_KerbBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYLENGTH('Width',$,$,0.15,$)",
+                                     "IFCQUANTITYLENGTH('Height',$,$,0.15,$)",
+                                     "IFCQUANTITYVOLUME('Volume',$,$,2.25,$)"}));
+    EXPECT_FALSE(kerbSets.contains("'Katana_Quantities'")) << "nothing of the kerb's is left over";
+
+    const auto cutSets = setsOf(all, byTag(all, "cut"));
+    EXPECT_EQ(quantitiesOf(all, cutSets.at("'Qto_EarthworksCutBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYVOLUME('UndisturbedVolume',$,$,1000.,$)"}));
+    EXPECT_EQ(quantitiesOf(all, cutSets.at("'Katana_Quantities'")),
+              std::set<std::string>{"IFCQUANTITYAREA('GrossArea',$,$,600.,$)"});
+
+    const auto fillSets = setsOf(all, byTag(all, "fill"));
+    EXPECT_EQ(quantitiesOf(all, fillSets.at("'Qto_EarthworksFillBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYVOLUME('CompactedVolume',$,$,850.,$)"}));
+
+    const auto bothSets = setsOf(all, byTag(all, "both"));
+    EXPECT_EQ(quantitiesOf(all, bothSets.at("'Qto_EarthworksCutBaseQuantities'")),
+              std::set<std::string>{"IFCQUANTITYVOLUME('UndisturbedVolume',$,$,5.,$)"});
+    EXPECT_EQ(quantitiesOf(all, bothSets.at("'Katana_Quantities'")),
+              std::set<std::string>{"IFCQUANTITYVOLUME('GrossVolume',$,$,7.,$)"});
+}
+
 // A quantity in a unit IFC's simple quantities do not take, a negative one
 // (each IfcQuantity*'s WR: the value is not negative), and a name repeated
 // on one element (IfcElementQuantity's UniqueQuantityNames) are left out,

@@ -413,9 +413,9 @@ void RoadTemplateManagerDialog::Impl::build()
     auto* keysRow = new QHBoxLayout;
     keys = road_ui::field(
         "roadTemplateComponentKeys", "shape=kerbgutter height=0.15  |  cut=2 fill=4 benchheight=",
-        "key=value for the chosen component: a kerb's shape height depth gutter gutterfall "
-        "material, a drain's depth, a batter's cut fill maxwidth benchheight benchwidth, "
-        "colour=, superelevated=on|off, name=",
+        "key=value for the chosen component: a kerb's shape faces (inward, or outward for a "
+        "median's kerb) height depth gutter gutterfall material, a drain's depth, a batter's "
+        "cut fill maxwidth benchheight benchwidth, colour=, superelevated=on|off, name=",
         upper);
     auto* setKeysButton =
         road_ui::button("Set", "roadTemplateSetKeys", "ROADTEMPLATE SET with these keys", upper);

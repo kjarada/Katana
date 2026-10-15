@@ -648,7 +648,14 @@ Length, Width, Thickness, Volume, GrossVolume, Weight),
 (6.6.5.8), `Qto_SignBaseQuantities` (6.6.5.11), `Qto_RailingBaseQuantities`
 (6.1.5.10). The rest go in `Katana_Quantities`, so a take-off tool finds a
 course's volume where it looks, and nothing is claimed to be a base quantity
-its template does not define. **Rejected:** every quantity in the class's
+its template does not define. The road model names its quantities by one
+scheme for every object (GrossVolume for any solid's volume, Depth for a
+course's thickness), and the writer writes four of them under the class's name
+for them (`kQuantityAliases`): an `IfcCourse`'s Depth as Thickness, an
+`IfcKerb`'s GrossVolume as Volume, an `IfcEarthworksCut`'s as UndisturbedVolume
+and an `IfcEarthworksFill`'s as CompactedVolume - only where the element has no
+quantity of that name already, and the road model's own names stay in its
+reports (docs/road_design.md). **Rejected:** every quantity in the class's
 Qto_ set (a set holding names its template lacks), and every quantity in
 Katana's own (a take-off tool would find none). A quantity in another unit, a
 negative or non-finite one (each quantity's WR: not negative) and a second of

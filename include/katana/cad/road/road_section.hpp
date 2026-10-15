@@ -26,7 +26,8 @@
 // kerb's base, the top of what has no courses, then the batter. Where two
 // neighbours' bottoms differ, or the courses end at the hinge, the line steps:
 // the shallower corner is set kFaceRun into its own component, so the line
-// stays a function of offset - which a TIN of it, and the end areas, need.
+// stays a function of offset - which a TIN of it, and the end areas, need. A
+// side of a batter alone starts its line at the hinge, the centreline.
 //
 // EARTHWORKS are between the formation and the ground across the section:
 // cut where the ground is above, fill where it is below - the pavement box
@@ -62,8 +63,8 @@ namespace katana::cad::road {
 // under a thousandth of a square metre for a metre-deep pavement.
 inline constexpr double kFaceRun = 0.001;
 // The columns an earthworks solid has across each side - its look, not its
-// quantity, which is the end area of the true lines: every 2.5 % of a side,
-// 0.75 m on a 30 m half-width.
+// quantity, which is the end area of the true lines: spread over the stretch
+// of the side where it has earthworks, every 2.5 % of it.
 inline constexpr std::size_t kEarthworksColumns = 41;
 
 // A point of a section's line: what it is ("CL", "left/lane/outer",
@@ -74,6 +75,15 @@ struct SectionPoint {
     double level = 0.0;
 
     friend bool operator==(const SectionPoint&, const SectionPoint&) = default;
+};
+
+// A stretch of one side, as distances OUT from the centreline (from < to), over
+// which the earthworks have thickness.
+struct OutSpan {
+    double from = 0.0;
+    double to = 0.0;
+
+    friend bool operator==(const OutSpan&, const OutSpan&) = default;
 };
 
 // One vertical of a solid in a section: offset, top level, bottom level.
@@ -98,6 +108,10 @@ struct SectionSolid {
 };
 
 struct RoadSection {
+    // The run of its corridor it belongs to (CorridorRun::region, from 1); 0
+    // for a section made on its own. Where two runs meet, each has a section at
+    // the one station, and this is what tells them apart.
+    std::size_t run = 0;
     double station = 0.0;
     katana::geometry::Point2 centre{};
     double direction = 0.0; // of the alignment, radians from +x
@@ -125,6 +139,19 @@ struct RoadSection {
     double leftFill = 0.0;
     double rightCut = 0.0;
     double rightFill = 0.0;
+    // Where on each side the ground is above the formation (cut) or below it
+    // (fill) by more than math::tolerance::kCoordinate (0.1 mm) at some point
+    // of the stretch, left to right as the section is: the stretches the
+    // earthworks occupy in plan. A side with none has no cut (or fill) here,
+    // and its area above is exactly zero: the daylight is found to about
+    // 1e-13 m, so it lands on the wrong side of the ground half the time,
+    // and that sliver of 1e-26 m2 is not earthworks. One place decides what
+    // "none" means (buildSection); the objects and the quantities follow it.
+    // Empty when the section is not complete.
+    std::vector<OutSpan> leftCutSpans;
+    std::vector<OutSpan> leftFillSpans;
+    std::vector<OutSpan> rightCutSpans;
+    std::vector<OutSpan> rightFillSpans;
 };
 
 // The section of `roadTemplate` at `station`. `ground` may be null: the
@@ -172,10 +199,16 @@ struct CorridorRun {
 
 struct BuiltCorridor {
     std::string name;
-    std::string surface; // the target surface it names, empty for none
+    // The target surface it names, as the drawing spells it (the corridor may
+    // have been typed in another case); empty for none.
+    std::string surface;
     std::optional<katana::geometry::SolvedAlignment> alignment;
+    // The stations it was built over. Meaningful only when hasRange: a
+    // corridor that could not be built (no alignment, a range off it) has none,
+    // and station 0 is a real station, not a placeholder.
     double start = 0.0;
     double end = 0.0;
+    bool hasRange = false;
     std::vector<CorridorRun> runs;
     // What could not be built, a sentence each: an alignment, a profile, a
     // template or a surface that is not there, a station range outside the
@@ -183,9 +216,28 @@ struct BuiltCorridor {
     std::vector<std::string> problems;
     double cut = 0.0; // cubic metres, both sides, every run
     double fill = 0.0;
+    // Whether cut and fill were measured at all: there is a target surface and
+    // at least one run was built. Without, they are zero only because nothing
+    // was measured, which is not the zero of a road with no cut.
+    bool hasEarthworks = false;
     std::size_t sections = 0;
     std::size_t incompleteSections = 0;
 };
+
+// The stations a corridor is built over: its own range - an end it does not
+// give is the alignment's and the profile's overlap - held to that overlap.
+// `ok` is false when there is nothing to build (no overlap, or a range off
+// it), and `problems` says in a sentence each what was held to the overlap or
+// why nothing is built.
+struct CorridorRange {
+    double start = 0.0;
+    double end = 0.0;
+    bool ok = false;
+    std::vector<std::string> problems;
+};
+[[nodiscard]] CorridorRange corridorRange(const Corridor& corridor,
+                                          const katana::geometry::SolvedAlignment& alignment,
+                                          const katana::geometry::SolvedProfile& profile);
 
 // Builds what it can. A corridor whose alignment or profile is missing has
 // no runs; a template that is missing or refused leaves its stretch out; no
@@ -203,6 +255,8 @@ struct CorridorInputs {
     std::optional<katana::geometry::SolvedAlignment> alignment;
     std::optional<katana::geometry::SolvedProfile> profile;
     const katana::terrain::TinSurface* ground = nullptr;
+    // The surface's name as the drawing spells it; empty with no ground.
+    std::string surfaceName;
     std::vector<std::string> problems;
 };
 [[nodiscard]] CorridorInputs corridorInputs(const Document& document, const Corridor& corridor);
@@ -227,16 +281,20 @@ loftSolid(const katana::geometry::SolvedAlignment& alignment, const std::vector<
 
 // The road model's objects of a built corridor (cad/bim/bim_object.hpp): a
 // closed solid per course of each component per side per run, per kerb,
-// and the earthworks cut and fill of each side of each run - over each
-// stretch of complete sections - with their quantities, and its problems.
+// and the earthworks cut and fill of each side of each run - a piece for each
+// stretch of stations where that side has any, inside a stretch of complete
+// sections - with their quantities, and its problems.
 // Object ids (stable, docs/road_design.md, "Object ids"):
 //   corridor/<corridor>/<side>/<component>/<course>/<run>
 //   corridor/<corridor>/<side>/<component>/<run>                a kerb
-//   corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]
+//   corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]   (<piece> from 2)
 [[nodiscard]] bim::BimModel corridorSolids(const BuiltCorridor& built);
 
-// The sections of every run in station order, each station once: where two
-// runs meet, the first run's section stands for the station.
+// The sections of every run in station order. Where two runs meet - a region's
+// ends - both have a section at the station, the earlier run's first: the
+// templates differ there, so each run keeps its own section (RoadSection::run
+// tells them apart), and what is made from the list does not blend one into
+// the other across the interval beside the join.
 [[nodiscard]] std::vector<const RoadSection*> corridorSections(const BuiltCorridor& built);
 
 // One longitudinal string of the finished surface (or the formation): the
@@ -245,8 +303,8 @@ struct CorridorString {
     std::string code;
     std::vector<katana::geometry::Point3> points;
 };
-// Every string, each broken where a section lacks its code; a section that
-// repeats the station of the one before (where two runs meet) is left out.
+// Every string, each broken where a section lacks its code and at every join
+// of two runs, so a string runs over its own run's stations and no further.
 [[nodiscard]] std::vector<CorridorString> corridorStrings(const BuiltCorridor& built,
                                                           bool formation);
 
@@ -254,8 +312,12 @@ struct CorridorString {
 // its strings as breaklines, and its outermost points as the boundary.
 // `completeOnly` leaves the incomplete sections out, breaking the strings
 // there, and then uses no boundary if any was left out - what the old
-// corridorSurface did. InvalidGeometry when fewer than two sections go in
-// (naming how many were incomplete), else whatever buildTin reports.
+// corridorSurface did. Where two runs meet the later run's first section is
+// laid kFaceRun (1 mm) further on and the strings break between them, so the
+// surface steps from one template to the next across the join - a TIN holds
+// no two levels at one point - and not over the interval beside it.
+// InvalidGeometry when fewer than two sections go in (naming how many were
+// incomplete), else whatever buildTin reports.
 struct SectionsSurface {
     katana::terrain::TinSurface surface;
     std::size_t sections = 0;

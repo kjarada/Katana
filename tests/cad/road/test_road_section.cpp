@@ -95,6 +95,48 @@ TEST(RoadSection, AStreetIsSetOutAtItsHandWorkedOffsetsAndLevels)
     EXPECT_EQ(section->cutArea, 0.0);
 }
 
+TEST(RoadSection, TheDividedRoadsLanesSitUnderTheMedianAndItsKerbFacesTheTraffic)
+{
+    // The divided road on a level road at 0: the median 2 m wide at 0 % (its
+    // top is the profile), then the mountable kerb facing outward: 0.15 m of
+    // top at level 0, the face falling 0.1 m over 1.5 x 0.1 = 0.15 m to the lip
+    // at 2.3, -0.1. The carriageway starts at the lip: lane 1 3.5 m at -3 %
+    // falls 0.105 to 5.8 at -0.205, lane 2 to 9.3 at -0.31, the 2.5 m shoulder
+    // 0.075 more to 11.8 at -0.385. (Facing the other way the kerb rose to 0.1
+    // and the lanes started 100 mm ABOVE the profile, with a drop to the median.)
+    RoadTemplate divided;
+    for (const RoadTemplate& each : standardTemplates()) {
+        if (each.name == "divided road") {
+            divided = each;
+        }
+    }
+    ASSERT_EQ(divided.name, "divided road");
+    const auto section = templateSection(divided);
+    ASSERT_TRUE(section.ok()) << section.error().describe();
+    ASSERT_EQ(section->top.size(), 13u); // the centreline and six points a side
+    for (const double sign : {1.0, -1.0}) {
+        const std::string side = sign > 0.0 ? "left" : "right";
+        expectPoint(section->top, side + "/median/outer", sign * 2.0, 0.0);
+        expectPoint(section->top, side + "/kerb/face", sign * 2.15, 0.0);
+        expectPoint(section->top, side + "/kerb/lip", sign * 2.3, -0.1);
+        expectPoint(section->top, side + "/lane1/outer", sign * 5.8, -0.205);
+        expectPoint(section->top, side + "/lane2/outer", sign * 9.3, -0.31);
+        expectPoint(section->top, side + "/shoulder/outer", sign * 11.8, -0.385);
+    }
+    EXPECT_EQ(pointCoded(section->top, "left/kerb/back"), nullptr) << "the back is the median's edge";
+    // The kerb's base is 0.15 under its lip at -0.1: -0.25 throughout, and it
+    // is one solid of three columns that ends where the lane starts.
+    const auto kerb = std::ranges::find(section->solids, std::string("left/kerb"),
+                                        &SectionSolid::key);
+    ASSERT_NE(kerb, section->solids.end());
+    ASSERT_EQ(kerb->columns.size(), 3u);
+    EXPECT_NEAR(kerb->columns.front().offset, 2.0, 1e-12);
+    EXPECT_NEAR(kerb->columns.back().offset, 2.3, 1e-12);
+    for (const SolidColumn& column : kerb->columns) {
+        EXPECT_NEAR(column.bottom, -0.25, 1e-12);
+    }
+}
+
 TEST(RoadSection, EachCourseAndKerbIsASolidUnderItsComponent)
 {
     const auto section = roadSection(street(), straight(), level(10.0), nullptr, 100.0);
@@ -184,6 +226,74 @@ TEST(RoadSection, SuperelevationAtTheMidpointOfItsTransitionIsHalfwayBetweenItsE
     expectPoint(section->top, "left/footpath/outer", 6.675, 10.15 + 0.0375);
 }
 
+TEST(RoadSection, AnEdgeStripAndADrainBetweenSuperelevatedComponentsFollowTheTable)
+{
+    // A lane 3.5 m, a flush edge strip 0.15 m, a shoulder 1.5 m, each side; lane
+    // and shoulder superelevated by default. The table at the station is (+6,
+    // -6) outward percent. Left: the lane rises 3.5 x 6 % = 0.21 to 10.21, the
+    // strip - when it is superelevated too - 0.15 x 6 % = 0.009 to 10.219, the
+    // shoulder 1.5 x 6 % = 0.09 to 10.309. Right: 9.79, then 0.009 down to 9.781,
+    // 0.09 more to 9.691. A strip left at its own 0 % was flat at 10.21, and the
+    // shoulder's edge 9 mm low at 10.300.
+    const auto stripped = [](bool superelevated) {
+        RoadTemplate made;
+        made.name = "strip";
+        for (const Side side : {Side::Left, Side::Right}) {
+            Component lane = defaultComponent(ComponentKind::Lane, side);
+            lane.width = 3.5;
+            lane.crossfall = -3.0;
+            Component strip = defaultComponent(ComponentKind::Kerb, side);
+            strip.shape = KerbShape::EdgeStrip;
+            strip.crossfall = 0.0;
+            strip.superelevated = superelevated;
+            Component shoulder = defaultComponent(ComponentKind::Shoulder, side);
+            shoulder.width = 1.5;
+            shoulder.crossfall = -3.0;
+            made.components.insert(made.components.end(), {lane, strip, shoulder});
+        }
+        return made;
+    };
+    const Crossfalls table{6.0, -6.0};
+    const auto follows = roadSection(stripped(true), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(follows.ok()) << follows.error().describe();
+    expectPoint(follows->top, "left/lane/outer", 3.5, 10.21);
+    expectPoint(follows->top, "left/kerb/outer", 3.65, 10.219);
+    expectPoint(follows->top, "left/shoulder/outer", 5.15, 10.309);
+    expectPoint(follows->top, "right/lane/outer", -3.5, 9.79);
+    expectPoint(follows->top, "right/kerb/outer", -3.65, 9.781);
+    expectPoint(follows->top, "right/shoulder/outer", -5.15, 9.691);
+    const auto flat = roadSection(stripped(false), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(flat.ok());
+    expectPoint(flat->top, "left/kerb/outer", 3.65, 10.21);
+    expectPoint(flat->top, "left/shoulder/outer", 5.15, 10.30);
+
+    // A table drain 2 m wide with its invert 0.5 m down: its outer edge rises
+    // with the table when it is superelevated: 2 x 6 % = 0.12 above the lane's
+    // edge (10.21 + 0.12 = 10.33), and stays level with it (10.21) when it is not.
+    const auto drained = [](bool superelevated) {
+        RoadTemplate made;
+        made.name = "drained";
+        Component lane = defaultComponent(ComponentKind::Lane, Side::Left);
+        lane.width = 3.5;
+        lane.crossfall = -3.0;
+        Component drain = defaultComponent(ComponentKind::Drain, Side::Left);
+        drain.superelevated = superelevated;
+        made.components = {lane, drain};
+        return made;
+    };
+    const auto raised = roadSection(drained(true), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(raised.ok());
+    expectPoint(raised->top, "left/drain/invert", 4.5, 9.71);
+    expectPoint(raised->top, "left/drain/outer", 5.5, 10.33);
+    const auto level0 = roadSection(drained(false), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(level0.ok());
+    expectPoint(level0->top, "left/drain/outer", 5.5, 10.21);
+    // With no table at the station nothing is superelevated: the own crossfall.
+    const auto none = roadSection(stripped(true), straight(), level(10.0), nullptr, 100.0);
+    ASSERT_TRUE(none.ok());
+    expectPoint(none->top, "left/kerb/outer", 3.65, 9.895);
+}
+
 TEST(RoadSection, ACutBatterDaylightsOnAPlaneAtTheHandWorkedOffset)
 {
     // A level design 1 m under flat ground, 8 m wide, 2:1 batters: daylight
@@ -247,6 +357,98 @@ TEST(RoadSection, ThePavementBoxIsCutAndTheBatterStartsAtTheFinishedEdge)
     EXPECT_NEAR(section->cutArea, 12.3997, 1e-9);
 }
 
+TEST(RoadSection, ASideOfABatterAloneStartsItsFormationAtTheHingeAndMeasuresTheTriangleUnderIt)
+{
+    // Fill: ground at 9, design 10, a 1 in 4 fill batter. From the hinge on
+    // the centreline (0, 10) it falls 1 over 4 m to the ground: daylight at
+    // +-4, level 9. Each side is the triangle 0.5 x 4 x 1 = 2 m2 between the
+    // batter and the ground; 4 m2 in all, and nothing in cut.
+    const auto low = planeGround(0.0, 0.0, 9.0);
+    const auto fill = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), &low, 100.0);
+    ASSERT_TRUE(fill.ok()) << fill.error().describe();
+    EXPECT_TRUE(fill->complete);
+    expectPoint(fill->top, "left/batter/daylight", 4.0, 9.0);
+    expectPoint(fill->top, "right/batter/daylight", -4.0, 9.0);
+    EXPECT_NEAR(fill->fillArea, 4.0, 1e-9);
+    EXPECT_NEAR(fill->leftFill, 2.0, 1e-9);
+    EXPECT_NEAR(fill->rightFill, 2.0, 1e-9);
+    EXPECT_NEAR(fill->cutArea, 0.0, 1e-9);
+    // The formation is the batters' own line, through the hinge: the two
+    // hinges are one point at the centreline.
+    ASSERT_EQ(fill->formation.size(), 3u);
+    EXPECT_NEAR(fill->formation[0].offset, 4.0, 1e-9);
+    EXPECT_NEAR(fill->formation[1].offset, 0.0, 1e-12);
+    EXPECT_NEAR(fill->formation[1].level, 10.0, 1e-12);
+    EXPECT_NEAR(fill->formation[2].offset, -4.0, 1e-9);
+
+    // Cut: ground at 11, a 1 in 2 cut batter climbs 1 over 2 m: daylight at
+    // +-2, level 11, a triangle 0.5 x 2 x 1 = 1 m2 a side.
+    const auto high = planeGround(0.0, 0.0, 11.0);
+    const auto cut = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), &high, 100.0);
+    ASSERT_TRUE(cut.ok());
+    expectPoint(cut->top, "left/batter/daylight", 2.0, 11.0);
+    EXPECT_NEAR(cut->cutArea, 2.0, 1e-9);
+    EXPECT_NEAR(cut->leftCut, 1.0, 1e-9);
+    EXPECT_NEAR(cut->rightCut, 1.0, 1e-9);
+    EXPECT_NEAR(cut->fillArea, 0.0, 1e-9);
+
+    // At grade the batter has no area to measure and the section is complete.
+    const auto level10 = planeGround(0.0, 0.0, 10.0);
+    const auto flat = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), &level10, 100.0);
+    ASSERT_TRUE(flat.ok());
+    EXPECT_TRUE(flat->complete);
+    EXPECT_NEAR(flat->cutArea, 0.0, 1e-9);
+    EXPECT_NEAR(flat->fillArea, 0.0, 1e-9);
+
+    // No ground at all: the formation is the hinge alone, and nothing breaks.
+    const auto bare = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), nullptr, 100.0);
+    ASSERT_TRUE(bare.ok());
+    EXPECT_FALSE(bare->complete);
+    ASSERT_EQ(bare->formation.size(), 1u);
+    EXPECT_NEAR(bare->formation[0].level, 10.0, 1e-12);
+}
+
+TEST(RoadSection, ABatterAloneBesideACoursedLaneKeepsItsOwnHingeAndItsOwnArea)
+{
+    // Left: a 4 m lane at 0 % with 0.1 + 0.2 m of courses, then a 1 in 4 fill
+    // batter; right: the batter alone. Ground at 9, design 10.
+    // Left formation: 9.7 under the lane to 3.999 (the corner stepped 1 mm
+    // back), up to the hinge (4, 10), the batter down to the ground at 8.
+    //   3.999 x 0.7 = 2.7993, the 1 mm step 0.001 x 0.85 = 0.00085, the
+    //   triangle 0.5 x 4 x 1 = 2: 4.80015 m2.
+    // Right: the hinge (0, 10) is higher than the lane's 9.7 at the centreline,
+    // so it is the shallower corner and steps 1 mm out to -0.001: the step
+    // 0.001 x 0.85 = 0.00085, the batter 0.5 x 3.999 x 1 = 1.9995: 2.00035 m2.
+    // Taking the right batter from the lane's f0 (0, 9.7) to its daylight
+    // (-4, 9) instead - the line without the hinge - gives 0.5 x 4 x 0.7 =
+    // 1.4 m2, 0.6 m2 short.
+    RoadTemplate made;
+    made.name = "ramp";
+    Component lane = defaultComponent(ComponentKind::Lane, Side::Left);
+    lane.width = 4.0;
+    lane.crossfall = 0.0;
+    lane.courses = {makeCourse("AC", 0.1, "asphalt"), makeCourse("base", 0.2, "rock")};
+    Component leftBatter = defaultComponent(ComponentKind::Batter, Side::Left);
+    leftBatter.fillSlope = 4.0;
+    Component rightBatter = defaultComponent(ComponentKind::Batter, Side::Right);
+    rightBatter.fillSlope = 4.0;
+    made.components = {lane, leftBatter, rightBatter};
+    const auto ground = planeGround(0.0, 0.0, 9.0);
+    const auto section = roadSection(made, straight(), level(10.0), &ground, 100.0);
+    ASSERT_TRUE(section.ok()) << section.error().describe();
+    EXPECT_TRUE(section->complete);
+    expectPoint(section->top, "left/batter/daylight", 8.0, 9.0);
+    expectPoint(section->top, "right/batter/daylight", -4.0, 9.0);
+    EXPECT_NEAR(section->leftFill, 4.80015, 1e-9);
+    EXPECT_NEAR(section->rightFill, 2.00035, 1e-9);
+    EXPECT_NEAR(section->fillArea, 6.8005, 1e-9);
+    EXPECT_NEAR(section->cutArea, 0.0, 1e-9);
+    // The formation keeps its function of offset: strictly falling across.
+    for (std::size_t i = 0; i + 1 < section->formation.size(); ++i) {
+        EXPECT_GT(section->formation[i].offset, section->formation[i + 1].offset) << i;
+    }
+}
+
 TEST(RoadSection, ABenchedBatterHasItsBenchesAndDaylightsWhereTheyLeadIt)
 {
     // 3 m of cut, a 2:1 batter benched 2 m wide every 1 m of rise: up 1 over
@@ -272,6 +474,28 @@ TEST(RoadSection, ABenchedBatterHasItsBenchesAndDaylightsWhereTheyLeadIt)
     EXPECT_NEAR(foot->level, 0.0, 1e-9);
 }
 
+TEST(RoadSection, ATemplateWithAMillimetreBenchIsRefusedBeforeASectionIsBuilt)
+{
+    // A 1 mm bench every 1 mm of rise over a 50 m reach would be about 17 000
+    // benches a section (the cost grew with the square of that); 1e-300 never
+    // ended. Both are refused by the check every section starts with.
+    for (const double tiny : {0.001, 1e-300}) {
+        RoadTemplate benched = laneTemplate(4.0, 0.0, {});
+        for (Component& component : benched.components) {
+            if (component.kind == ComponentKind::Batter) {
+                component.benchHeight = tiny;
+                component.benchWidth = tiny;
+            }
+        }
+        const auto ground = planeGround(0.0, 0.0, 0.0);
+        const auto section = roadSection(benched, straight(), level(-3.0), &ground, 100.0);
+        ASSERT_FALSE(section.ok()) << tiny;
+        EXPECT_EQ(section.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(section.error().message.find("benches"), std::string::npos)
+            << section.error().message;
+    }
+}
+
 TEST(RoadSection, ABatterThatMeetsNoGroundLeavesItsSideUnreached)
 {
     // Ground only 3 m either side: the batters need 6 m.
@@ -291,6 +515,52 @@ TEST(RoadSection, ABatterThatMeetsNoGroundLeavesItsSideUnreached)
     ASSERT_TRUE(none.ok());
     EXPECT_FALSE(none->rightReached);
     EXPECT_TRUE(none->ground.empty());
+}
+
+TEST(RoadSection, ABatterLimitThatIsNotAMultipleOfAStepStillFindsADaylightInsideIt)
+{
+    // A 3.5 m lane at -3 % from design 10 ends at the hinge (3.5, 9.895). On
+    // ground at 9 the 1 in 4 fill batter meets it 0.895 x 4 = 3.58 m out, at
+    // offset 7.08: inside a limit of 3.7 m, but past the last half-metre step
+    // (3.5) the march used to try before it gave up.
+    const auto withLimit = [](double limit) {
+        RoadTemplate made = laneTemplate(3.5, -3.0, {}, 2.0, 4.0);
+        for (Component& component : made.components) {
+            if (component.kind == ComponentKind::Batter) {
+                component.maximumWidth = limit;
+            }
+        }
+        return made;
+    };
+    const auto ground = planeGround(0.0, 0.0, 9.0);
+    const auto inside = roadSection(withLimit(3.7), straight(), level(10.0), &ground, 100.0);
+    ASSERT_TRUE(inside.ok());
+    EXPECT_TRUE(inside->complete);
+    expectPoint(inside->top, "left/batter/daylight", 7.08, 9.0);
+    expectPoint(inside->top, "right/batter/daylight", -7.08, 9.0);
+    // Fill a side, between the ground (9) and the finished line: under the
+    // lane a trapezoid of heights 1 and 0.895 over 3.5 m, 3.5 x (1 + 0.895) /
+    // 2 = 3.31625; under the batter a triangle 0.5 x 3.58 x 0.895 = 1.60205:
+    // 4.9183 m2.
+    EXPECT_NEAR(inside->leftFill, 3.31625 + 1.60205, 1e-9);
+    // A limit short of the crossing (3.5 m < 3.58 m) leaves the side
+    // unreached, as it always did.
+    const auto short_ = roadSection(withLimit(3.5), straight(), level(10.0), &ground, 100.0);
+    ASSERT_TRUE(short_.ok());
+    EXPECT_FALSE(short_->leftReached);
+    EXPECT_FALSE(short_->complete);
+    EXPECT_EQ(short_->cutArea, 0.0);
+
+    // A limit under one step: ground at 9.85, the batter meets it 0.045 x 4 =
+    // 0.18 m out (offset 3.68) - inside 0.3 m, outside 0.1 m.
+    const auto high = planeGround(0.0, 0.0, 9.85);
+    const auto brief = roadSection(withLimit(0.3), straight(), level(10.0), &high, 100.0);
+    ASSERT_TRUE(brief.ok());
+    EXPECT_TRUE(brief->complete);
+    expectPoint(brief->top, "left/batter/daylight", 3.68, 9.85);
+    const auto tooBrief = roadSection(withLimit(0.1), straight(), level(10.0), &high, 100.0);
+    ASSERT_TRUE(tooBrief.ok());
+    EXPECT_FALSE(tooBrief->leftReached);
 }
 
 TEST(RoadSection, AnEmptyTemplateIsTheCentrelineAlone)
