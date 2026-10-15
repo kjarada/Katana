@@ -762,13 +762,20 @@ looked for beside the library instead, as PROJ's data already was on Linux
 
 | Library | Reads | From, in the package |
 |---|---|---|
-| PROJ | `proj.db` and grids | `share/proj`, beside `lib/libproj*` (`projDataDirectory`) |
+| PROJ | `proj.db` and grids | `share/proj`, beside `lib/libproj*` (`projDataDirectory`; on Windows PROJ finds `share/proj` beside its DLL itself, and `bundledProjDataDirectory` is what a failed `PROJ_DATA` or `PROJ_LIB` falls back on) |
 | GDAL | `header.dxf` and its other support files | `share/gdal`, beside `lib/libgdal*` (`locateGdalData`, `gdal_adapter.cpp`) |
 | libcurl, through GDAL | the certificates `https://` is checked against | `ssl/cacert.pem`, beside `lib/libcurl*` (`locateCertificates`, `gdal_adapter.cpp`) |
 
 Each yields to the user's own setting (`PROJ_DATA`, `GDAL_DATA`,
 `CURL_CA_BUNDLE`, `SSL_CERT_FILE`), and does nothing for a distribution's
-library, which has no such directory beside it.
+library, which has no such directory beside it. Two exceptions to "yields",
+both for the person who has not set it for Katana: a `PROJ_DATA` or `PROJ_LIB`
+that names data PROJ cannot open (another GIS package's, machine-wide) falls
+back on the package's `share/proj`, and on Windows the bundle is named to GDAL
+in UTF-8 and the Windows certificate store is trusted besides it, so the
+package works in a folder with non-ANSI characters and behind a proxy that
+re-signs `https://` (`docs/gis_online.md`, "Which certificates are trusted";
+`docs/building.md`, "PROJ's data").
 
 Qt's plugins are copied from the prefix into `lib/qt6/plugins`, and
 `bin/qt.conf` points Qt at them; without it Qt asks the prefix compiled into

@@ -1764,6 +1764,47 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.crs_set_takes_a_wkt_with_its_quotes PROPERTIES
         PASS_REGULAR_EXPRESSION "crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\" kind=\"projected\" units=metre"
         FAIL_REGULAR_EXPRESSION "error")
+    # A machine-wide PROJ_LIB or PROJ_DATA (another GIS package leaves one,
+    # naming data of its own - usually a database of an older PROJ's layout)
+    # replaces the share/proj PROJ finds beside its DLL, and Katana, with no
+    # usable proj.db, could not name a coordinate system: CRS SET failed with
+    # "not a coordinate system: give an EPSG code" for a valid code, and INFO
+    # lost the EPSG code of a file's .prj. Here the variable names a folder
+    # with no database in it: a process of its own is the only way to set it,
+    # since PROJ reads it at its first search. Both the geodesy contexts
+    # (CRS SET) and GDAL's (INFO) fall back on the data Katana carries.
+    # The expectations are the registry's, not a run's: EPSG:28356 is "GDA94 /
+    # MGA zone 56", and tests/data/proj_fallback/mga56.prj is its ESRI WKT
+    # (GDA_1994_MGA_Zone_56, which only the database can turn into that code).
+    # Windows: the package carries share/proj there; the Linux and macOS
+    # toolchains of this project's builds may be a distribution's PROJ, which
+    # has no data beside its library to fall back on.
+    if(WIN32)
+        set(_empty_proj "${CMAKE_CURRENT_BINARY_DIR}/cli_empty_proj")
+        file(MAKE_DIRECTORY "${_empty_proj}")
+        # Two tests with their names written out (tools/check_docs.py reads
+        # the names a document cites from the add_test lines).
+        set(_proj_fallback_pass
+            "crs id=EPSG:28356 name=\"GDA94 / MGA zone 56\" kind=\"projected\" units=metre.*dataset file=[^ ]*/mga56\\.asc kind=raster driver=AAIGrid crs=\"GDA94 / MGA zone 56 \\(EPSG:28356\\)\"")
+        add_test(NAME cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "PROJ_LIB=${_empty_proj}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "CRS SET EPSG:28356"
+                    -c "INFO ${PROJECT_SOURCE_DIR}/tests/data/proj_fallback/mga56.asc")
+        set_tests_properties(cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            PROPERTIES PASS_REGULAR_EXPRESSION "${_proj_fallback_pass}"
+                       FAIL_REGULAR_EXPRESSION "error")
+        add_test(NAME cli.proj_data_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "PROJ_DATA=${_empty_proj}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "CRS SET EPSG:28356"
+                    -c "INFO ${PROJECT_SOURCE_DIR}/tests/data/proj_fallback/mga56.asc")
+        set_tests_properties(cli.proj_data_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            PROPERTIES PASS_REGULAR_EXPRESSION "${_proj_fallback_pass}"
+                       FAIL_REGULAR_EXPRESSION "error")
+    endif()
 endif()
 
 # SURVEY READ and SURVEY IMPORT on the hand-built Sokkia SDR33 file

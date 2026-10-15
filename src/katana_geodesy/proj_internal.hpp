@@ -6,7 +6,9 @@
 // tools/check_layering.cmake). PROJ types stay behind the pimpl of the public
 // classes.
 
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <proj.h>
@@ -65,6 +67,10 @@ class ProjContext {
   private:
     ProjContext() = default;
     static void logCallback(void* appData, int level, const char* message);
+    // Makes a fresh context - the old one, if any, is destroyed - looking for
+    // proj.db in `data` when given, else where PROJ looks; true when proj.db
+    // opens. What went wrong is left in the diagnostics.
+    bool open(const std::optional<std::filesystem::path>& data);
 
     PJ_CONTEXT* context_ = nullptr;
     std::string log_;
