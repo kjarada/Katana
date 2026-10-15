@@ -364,6 +364,28 @@ TEST(RoadSection, ABenchedBatterHasItsBenchesAndDaylightsWhereTheyLeadIt)
     EXPECT_NEAR(foot->level, 0.0, 1e-9);
 }
 
+TEST(RoadSection, ATemplateWithAMillimetreBenchIsRefusedBeforeASectionIsBuilt)
+{
+    // A 1 mm bench every 1 mm of rise over a 50 m reach would be about 17 000
+    // benches a section (the cost grew with the square of that); 1e-300 never
+    // ended. Both are refused by the check every section starts with.
+    for (const double tiny : {0.001, 1e-300}) {
+        RoadTemplate benched = laneTemplate(4.0, 0.0, {});
+        for (Component& component : benched.components) {
+            if (component.kind == ComponentKind::Batter) {
+                component.benchHeight = tiny;
+                component.benchWidth = tiny;
+            }
+        }
+        const auto ground = planeGround(0.0, 0.0, 0.0);
+        const auto section = roadSection(benched, straight(), level(-3.0), &ground, 100.0);
+        ASSERT_FALSE(section.ok()) << tiny;
+        EXPECT_EQ(section.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(section.error().message.find("benches"), std::string::npos)
+            << section.error().message;
+    }
+}
+
 TEST(RoadSection, ABatterThatMeetsNoGroundLeavesItsSideUnreached)
 {
     // Ground only 3 m either side: the batters need 6 m.
@@ -383,6 +405,52 @@ TEST(RoadSection, ABatterThatMeetsNoGroundLeavesItsSideUnreached)
     ASSERT_TRUE(none.ok());
     EXPECT_FALSE(none->rightReached);
     EXPECT_TRUE(none->ground.empty());
+}
+
+TEST(RoadSection, ABatterLimitThatIsNotAMultipleOfAStepStillFindsADaylightInsideIt)
+{
+    // A 3.5 m lane at -3 % from design 10 ends at the hinge (3.5, 9.895). On
+    // ground at 9 the 1 in 4 fill batter meets it 0.895 x 4 = 3.58 m out, at
+    // offset 7.08: inside a limit of 3.7 m, but past the last half-metre step
+    // (3.5) the march used to try before it gave up.
+    const auto withLimit = [](double limit) {
+        RoadTemplate made = laneTemplate(3.5, -3.0, {}, 2.0, 4.0);
+        for (Component& component : made.components) {
+            if (component.kind == ComponentKind::Batter) {
+                component.maximumWidth = limit;
+            }
+        }
+        return made;
+    };
+    const auto ground = planeGround(0.0, 0.0, 9.0);
+    const auto inside = roadSection(withLimit(3.7), straight(), level(10.0), &ground, 100.0);
+    ASSERT_TRUE(inside.ok());
+    EXPECT_TRUE(inside->complete);
+    expectPoint(inside->top, "left/batter/daylight", 7.08, 9.0);
+    expectPoint(inside->top, "right/batter/daylight", -7.08, 9.0);
+    // Fill a side, between the ground (9) and the finished line: under the
+    // lane a trapezoid of heights 1 and 0.895 over 3.5 m, 3.5 x (1 + 0.895) /
+    // 2 = 3.31625; under the batter a triangle 0.5 x 3.58 x 0.895 = 1.60205:
+    // 4.9183 m2.
+    EXPECT_NEAR(inside->leftFill, 3.31625 + 1.60205, 1e-9);
+    // A limit short of the crossing (3.5 m < 3.58 m) leaves the side
+    // unreached, as it always did.
+    const auto short_ = roadSection(withLimit(3.5), straight(), level(10.0), &ground, 100.0);
+    ASSERT_TRUE(short_.ok());
+    EXPECT_FALSE(short_->leftReached);
+    EXPECT_FALSE(short_->complete);
+    EXPECT_EQ(short_->cutArea, 0.0);
+
+    // A limit under one step: ground at 9.85, the batter meets it 0.045 x 4 =
+    // 0.18 m out (offset 3.68) - inside 0.3 m, outside 0.1 m.
+    const auto high = planeGround(0.0, 0.0, 9.85);
+    const auto brief = roadSection(withLimit(0.3), straight(), level(10.0), &high, 100.0);
+    ASSERT_TRUE(brief.ok());
+    EXPECT_TRUE(brief->complete);
+    expectPoint(brief->top, "left/batter/daylight", 3.68, 9.85);
+    const auto tooBrief = roadSection(withLimit(0.1), straight(), level(10.0), &high, 100.0);
+    ASSERT_TRUE(tooBrief.ok());
+    EXPECT_FALSE(tooBrief->leftReached);
 }
 
 TEST(RoadSection, AnEmptyTemplateIsTheCentrelineAlone)

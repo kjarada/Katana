@@ -174,6 +174,25 @@ struct RoadTemplateSet {
 // its formation is its finished surface, as the assembly's was.
 [[nodiscard]] RoadTemplate templateFromAssembly(const cad::Assembly& assembly);
 
+// ---- limits -----------------------------------------------------------------------------
+
+// The most a template's length may be - a width, a kerb's or drain's depth, a
+// course's thickness, a batter's maximum width - in metres. A sanity bound,
+// not a design rule, with no standard behind the number: the road a template
+// describes is metres to tens of metres across, and a section is sampled every
+// half metre across its whole span, so a width typed in the wrong unit would
+// cost time linear in it and, past about 4.5e15 m (where adding 0.5 no longer
+// moves a double), never end. 1 km is far beyond any real component and a few
+// thousand samples at most.
+inline constexpr double kMaximumComponentLength = 1000.0;
+// The most benches a batter may make across its maximum width. A batter with a
+// bench every 6 to 10 m of rise has a handful; each bench is two named points
+// a section, and the cut and fill areas cost more than linearly in a
+// section's points, so a bench every millimetre - a typo - is refused instead
+// of taking the session with it (the same reason as kMaximumSections, a
+// corridor's most sections, road_section.cpp).
+inline constexpr std::size_t kMaximumBenches = 100;
+
 // ---- checks ---------------------------------------------------------------------------
 
 // A template name, a corridor name: not empty, no '/', '"' or control
@@ -185,10 +204,12 @@ struct RoadTemplateSet {
 // Everything a section needs to be built: its name; component names words,
 // unique on each side; finite widths and crossfalls - a width positive, a
 // crossfall within +-100 % - kerb dimensions positive (a flush edge strip's
-// height excepted), a drain's depth not negative; at most one batter a side
-// and nothing outside it; batter slopes and its maximum width positive,
-// benches both given or neither; course names words unique in their
-// component, thicknesses positive, and no courses on a kerb or a batter.
+// height excepted), a drain's depth not negative; every length at most
+// kMaximumComponentLength; at most one batter a side and nothing outside it;
+// batter slopes and its maximum width positive, benches both given or neither
+// and no more than kMaximumBenches across the maximum width; course names
+// words unique in their component, thicknesses positive, and no courses on a
+// kerb or a batter.
 // InvalidArgument naming the component (left:lane) and what is wrong.
 [[nodiscard]] katana::core::Status checkTemplate(const RoadTemplate& roadTemplate);
 

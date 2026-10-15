@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <functional>
 #include <string>
 
 #include "katana/cad/corridor.hpp"
@@ -182,6 +183,85 @@ TEST(RoadTemplate, CheckRefusesWhatCannotBeBuiltNamingTheComponent)
     RoadTemplate slash = twoLanes();
     slash.name = "a/b";
     EXPECT_FALSE(checkTemplate(slash).ok());
+}
+
+TEST(RoadTemplate, ABenchTooSmallToBuildIsRefusedNamingTheBatterAndTheNumbers)
+{
+    const auto benched = [](double height, double width) {
+        RoadTemplate made = twoLanes(); // batters at 2 and 4 run per rise, 50 m reach
+        for (Component& each : made.components) {
+            if (each.kind == ComponentKind::Batter) {
+                each.benchHeight = height;
+                each.benchWidth = width;
+            }
+        }
+        return made;
+    };
+    // A bench every 0.125 m of rise at the flatter 1 in 2 is 0.25 m of
+    // slope, and a 0.25 m flat: a bench every 0.5 m, 50 / 0.5 = 100 across
+    // the 50 m - exactly the most. All binary fractions, so exact.
+    EXPECT_TRUE(checkTemplate(benched(0.125, 0.25)).ok());
+    // A hair less flat is 50 / 0.4999 = 100.02 benches: over.
+    const auto over = checkTemplate(benched(0.125, 0.2499));
+    ASSERT_FALSE(over.ok());
+    EXPECT_EQ(over.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(over.error().message.find("left:batter"), std::string::npos) << over.error().message;
+    EXPECT_NE(over.error().message.find("100 benches"), std::string::npos) << over.error().message;
+    EXPECT_NE(over.error().message.find("0.2499"), std::string::npos) << over.error().message;
+    // A real batter's bench - 5 m of rise, a 3 m flat - and none at all.
+    EXPECT_TRUE(checkTemplate(benched(5.0, 3.0)).ok());
+    EXPECT_TRUE(checkTemplate(benched(0.0, 0.0)).ok());
+    // The millimetre typo of the report, and a value so small that adding it
+    // to a running distance changed nothing and the bench loop never ended.
+    EXPECT_FALSE(checkTemplate(benched(0.001, 0.001)).ok());
+    EXPECT_FALSE(checkTemplate(benched(1e-300, 1e-300)).ok());
+    EXPECT_FALSE(checkTemplate(benched(1e-320, 1e-320)).ok()); // a denormal: the period underflows
+    // A short reach has few benches: a 0.05 m bench (period 0.05 x 2 + 0.05 =
+    // 0.15 m) over a 50 m reach is 333, over a 5 m reach 33.
+    EXPECT_FALSE(checkTemplate(benched(0.05, 0.05)).ok());
+    RoadTemplate shortReach = benched(0.05, 0.05);
+    for (Component& each : shortReach.components) {
+        if (each.kind == ComponentKind::Batter) {
+            each.maximumWidth = 5.0;
+        }
+    }
+    EXPECT_TRUE(checkTemplate(shortReach).ok());
+}
+
+TEST(RoadTemplate, AnEnormousLengthIsRefusedAndTheLimitItselfIsAccepted)
+{
+    // 1000 m: the most; the half-metre sampling across a section is linear in
+    // a width, and past 4.5e15 m it never moved.
+    const auto with = [](const std::function<void(RoadTemplate&)>& change) {
+        RoadTemplate made = twoLanes();
+        change(made);
+        return checkTemplate(made);
+    };
+    EXPECT_TRUE(with([](RoadTemplate& t) { t.components[0].width = 1000.0; }).ok());
+    for (const double huge : {1000.001, 1e6, 1e16, 4.6e15}) {
+        const auto lane = with([&](RoadTemplate& t) { t.components[0].width = huge; });
+        ASSERT_FALSE(lane.ok()) << huge;
+        EXPECT_EQ(lane.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(lane.error().message.find("at most 1000 m"), std::string::npos)
+            << lane.error().message;
+        EXPECT_NE(lane.error().message.find("left:lane"), std::string::npos);
+    }
+    EXPECT_FALSE(with([](RoadTemplate& t) { t.components[1].maximumWidth = 5000.0; }).ok());
+    EXPECT_TRUE(with([](RoadTemplate& t) { t.components[1].maximumWidth = 1000.0; }).ok());
+    EXPECT_FALSE(with([](RoadTemplate& t) {
+                     t.components[0].courses = {makeCourse("slab", 2000.0, "concrete")};
+                 }).ok());
+    // A kerb's dimensions and a drain's.
+    EXPECT_FALSE(with([](RoadTemplate& t) {
+                     Component kerb = defaultComponent(ComponentKind::Kerb, Side::Left);
+                     kerb.width = 1e9;
+                     t.components.insert(t.components.begin() + 1, kerb);
+                 }).ok());
+    EXPECT_FALSE(with([](RoadTemplate& t) {
+                     Component drain = defaultComponent(ComponentKind::Drain, Side::Left);
+                     drain.depth = 1e9;
+                     t.components.insert(t.components.begin() + 1, drain);
+                 }).ok());
 }
 
 TEST(RoadTemplate, AnEmptyTemplateIsAcceptedToBeFilledIn)

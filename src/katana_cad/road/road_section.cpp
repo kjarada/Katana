@@ -270,9 +270,12 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
     };
     std::optional<double> reach;
     double previous = 0.0;
-    // The steps summed may fall a hair short of the limit; the limit itself
-    // is still tried.
-    for (double d = kStep; d <= batter->maximumWidth + 1e-9; d += kStep) {
+    // Half-metre steps, each counted from the hinge (k x kStep: a sum of steps
+    // drifts), and the last one the limit itself: a limit that is not a
+    // multiple of a step, or is under one step, is tried at the limit, not
+    // given up on short of it.
+    for (std::size_t k = 1;; ++k) {
+        const double d = std::min(static_cast<double>(k) * kStep, batter->maximumWidth);
         const auto at = crossed(d);
         if (!at) {
             return out;
@@ -292,6 +295,9 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
             break;
         }
         previous = d;
+        if (d >= batter->maximumWidth) {
+            break;
+        }
     }
     if (!reach) {
         return out;
@@ -299,8 +305,11 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
     if (batter->benchHeight > 0.0 && batter->benchWidth > 0.0) {
         const double run = cut ? batter->cutSlope : batter->fillSlope;
         const double slope = batter->benchHeight * run;
-        int bench = 1;
-        for (double d = slope; d < *reach; d += slope + batter->benchWidth, ++bench) {
+        // checkTemplate refuses a batter with more than kMaximumBenches; the
+        // bound here is the loop's own, so no template can make it long.
+        std::size_t bench = 1;
+        for (double d = slope; d < *reach && bench <= kMaximumBenches;
+             d += slope + batter->benchWidth, ++bench) {
             addPoint(OutPoint{batterPrefix + "/bench" + std::to_string(bench) + "-in",
                               hinge.out + d, levelAt(d)});
             const double benchEnd = d + batter->benchWidth;

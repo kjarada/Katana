@@ -68,6 +68,24 @@ The face is never vertical: a vertical face gives the finished surface two
 levels at one point, which a TIN cannot hold, and the 1 in 6 batter reads as
 upright at any scale a road is drawn at.
 
+**Limits.** `road::checkTemplate` refuses what would make a section cost the
+session: a width, depth, thickness or maximum batter width over 1 000 m
+(`road::kMaximumComponentLength`), and a batter that would make more than 100
+benches across its maximum width (`road::kMaximumBenches`: the reach divided
+by the bench period, a bench height of the flatter slope's run plus the flat).
+The first is a sanity bound with no standard behind it: a section is sampled
+every half metre across its whole span, so a width typed in the wrong unit
+cost time linear in it and, past 4.5e15 m where adding 0.5 no longer moves a
+double, never ended. The second keeps a bench every millimetre (a typo) from
+hanging the build: each bench is two named points a section and the cut and
+fill areas cost more than linearly in a section's points. *Rejected:* a floor
+on the bench's size (say 10 mm) - the cost is the number of benches, which
+depends on the reach too, and a 0.1 m reach with a 50 mm bench is a few
+points; and a linear merge-walk in `areaBetween` instead - the bound already
+keeps a section to a few hundred points. The refusal reaches every route a
+template takes into the drawing: the verbs, the JSON read back with a project,
+and a section or corridor being built.
+
 ### Defaults, and where they come from
 
 `road::defaultComponent` gives each kind its starting values; a designer
@@ -145,10 +163,14 @@ columns.
 **The batter** starts at the hinge, the last finished point, and is marched
 out to the target surface exactly as the old corridor's daylight was:
 half-metre steps until the batter and the ground change order, then forty
-bisections (`docs/cad.md`, "Corridor quantities"). Benches are flats of their
-width every bench height of rise or fall. A batter that meets no ground
-within its maximum width - or meets no surface at all - leaves its side NOT
-REACHED and the section incomplete; its pavement is still built.
+bisections (`docs/cad.md`, "Corridor quantities"). The last step is the
+maximum width itself, so a limit that is not a multiple of half a metre - or
+is under half a metre - still finds a daylight inside it
+(`RoadSection.ABatterLimitThatIsNotAMultipleOfAStepStillFindsADaylightInsideIt`).
+Benches are flats of their width every bench height of rise or fall. A batter
+that meets no ground within its maximum width - or meets no surface at all -
+leaves its side NOT REACHED and the section incomplete; its pavement is still
+built.
 
 **The formation** - the subgrade - is the bottom of each component's courses,
 a kerb's base, the top of what has no courses, and then the batter. Where two

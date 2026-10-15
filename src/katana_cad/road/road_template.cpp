@@ -425,6 +425,10 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
         return makeError(ErrorCode::InvalidArgument, "template " + roadTemplate.name + ", " +
                                                          sideName(component) + ": " + what);
     };
+    const auto tooLong = [](const std::string& what) {
+        return what + " is at most " + katana::core::formatExactReal(kMaximumComponentLength) +
+               " m";
+    };
     for (const Side side : {Side::Left, Side::Right}) {
         std::set<std::string> names;
         bool batterSeen = false;
@@ -462,15 +466,46 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                 if (!(component.maximumWidth > 0.0)) {
                     return refuse(component, "the maximum batter width must be positive");
                 }
+                if (component.maximumWidth > kMaximumComponentLength) {
+                    return refuse(component, tooLong("the maximum batter width"));
+                }
                 if (component.benchHeight < 0.0 || component.benchWidth < 0.0 ||
                     ((component.benchHeight > 0.0) != (component.benchWidth > 0.0))) {
                     return refuse(component,
                                   "a bench needs both its height and its width, or neither");
                 }
+                if (component.benchHeight > 0.0) {
+                    // The most benches the batter can make: one every period,
+                    // the run being the flatter slope's (the most benches).
+                    // An overflow to infinity is over the limit as well.
+                    const double period =
+                        component.benchHeight * std::min(component.cutSlope, component.fillSlope) +
+                        component.benchWidth;
+                    if (!(component.maximumWidth / period <=
+                          static_cast<double>(kMaximumBenches))) {
+                        return refuse(component,
+                                      "a bench of " + katana::core::formatExactReal(
+                                                          component.benchWidth) +
+                                          " m every " +
+                                          katana::core::formatExactReal(component.benchHeight) +
+                                          " m of rise would make more than " +
+                                          std::to_string(kMaximumBenches) +
+                                          " benches across the batter's maximum width of " +
+                                          katana::core::formatExactReal(component.maximumWidth) +
+                                          " m: give a bench height and width nearer a real "
+                                          "batter's");
+                    }
+                }
                 break;
             case ComponentKind::Kerb:
                 if (!(component.width > 0.0) || !(component.depth > 0.0)) {
                     return refuse(component, "a kerb's width and depth must be positive");
+                }
+                if (component.width > kMaximumComponentLength ||
+                    component.height > kMaximumComponentLength ||
+                    component.depth > kMaximumComponentLength ||
+                    component.gutterWidth > kMaximumComponentLength) {
+                    return refuse(component, tooLong("a kerb's width, height, depth and gutter"));
                 }
                 if (component.shape != KerbShape::EdgeStrip && !(component.height > 0.0)) {
                     return refuse(component, "a kerb's face height must be positive");
@@ -487,10 +522,17 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                     return refuse(component,
                                   "a drain's width must be positive and its depth not negative");
                 }
+                if (component.width > kMaximumComponentLength ||
+                    component.depth > kMaximumComponentLength) {
+                    return refuse(component, tooLong("a drain's width and depth"));
+                }
                 break;
             default:
                 if (!(component.width > 0.0)) {
                     return refuse(component, "the width must be positive");
+                }
+                if (component.width > kMaximumComponentLength) {
+                    return refuse(component, tooLong("the width"));
                 }
                 break;
             }
@@ -510,6 +552,10 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                 if (!finite(course.thickness) || !(course.thickness > 0.0)) {
                     return refuse(component,
                                   "course " + course.name + ": the thickness must be positive");
+                }
+                if (course.thickness > kMaximumComponentLength) {
+                    return refuse(component,
+                                  "course " + course.name + ": " + tooLong("the thickness"));
                 }
             }
         }
