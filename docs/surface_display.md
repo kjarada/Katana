@@ -210,7 +210,8 @@ Its cost is the pixels it covers and the triangles in view, whatever the zoom.
   both mutations run). Rejected: deciding a tie by vertex numbers, as the
   first version did - it settled an edge but a vertex only for a fan whose
   centre was numbered between its neighbours: numbered below all of them, or
-  above all (the first vertex of a `.12da` triangle list is always 0), no
+  above all (a `.12da` import numbers vertices by first use, so the first vertex
+  of its first triangle is always 0), no
   triangle had the pixel, a pinhole, and with neighbours alternating above
   and below two had it. A fan of four, its centre exactly on a pixel centre,
   covers 49 for every numbering where the old rule gave 48, 48, 50 and 49
