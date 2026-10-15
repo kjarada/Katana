@@ -9,8 +9,8 @@
 // The value a face is coloured by is its ELEVATION in drawing units, or its
 // SLOPE IN PERCENT (rise over run times 100: 100 is 45 degrees), or the
 // direction it faces (aspect, in eight sectors). The ramps themselves are in
-// surface_ramps.cpp: THE ramp table, which the 3D scene's own elevation and
-// slope colours are read from too.
+// surface_ramps.cpp: the surface styles' ramp table, which the 3D scene's own
+// elevation and slope colours are read from too.
 
 #include <array>
 #include <cstddef>

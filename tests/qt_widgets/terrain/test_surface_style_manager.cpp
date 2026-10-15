@@ -16,6 +16,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStringList>
 
 #include <memory>
@@ -348,4 +349,24 @@ TEST(SurfaceStyleManager, ARefusedNameLeavesTheStyleBeingEditedChosenWithItsUnap
     fill(dialog, "surfaceStyleName", "Style C");
     click(dialog, "surfaceStyleCopy");
     EXPECT_EQ(dialog.currentStyle(), "Style C");
+}
+
+TEST(SurfaceStyleManager, TheBandsBoxHoldsTheSameRangeAsTheStyleCheckSoNoTypedCountIsClamped)
+{
+    // The form's box, the SURFACESTYLE line and a project file hold one range
+    // (kMaximumSurfaceBands): the box was 2 to 100 while the check allowed a
+    // million, and a style the verb made with 500 bands was written back as
+    // 100 by an Apply that changed only its description.
+    Recorded recorded;
+    auto* bands = child<QSpinBox>(*recorded.dialog, "surfaceStyleBands");
+    ASSERT_NE(bands, nullptr);
+    EXPECT_EQ(bands->minimum(), 2);
+    EXPECT_EQ(bands->maximum(), katana::cad::kMaximumSurfaceBands);
+    // A count past it is refused by the check, so the box never had to clamp.
+    SurfaceDisplayStyle many;
+    many.name = "Many";
+    many.bands = katana::cad::kMaximumSurfaceBands + 1;
+    EXPECT_FALSE(katana::cad::checkSurfaceStyle(many).ok());
+    many.bands = katana::cad::kMaximumSurfaceBands;
+    EXPECT_TRUE(katana::cad::checkSurfaceStyle(many).ok());
 }

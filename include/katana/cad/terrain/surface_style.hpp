@@ -187,7 +187,7 @@ struct SurfaceStyleSet {
 // spectral.
 [[nodiscard]] std::span<const std::string_view> surfaceRampNames();
 // The colour at `t` (clamped to 0 to 1) along ramp `ramp`; an unknown name is
-// the first ramp's. The one ramp table: the 3D scene and the plan view both
+// the first ramp's. The styles' ramp table: the 3D scene and the plan view both
 // colour through it.
 [[nodiscard]] katana::entity::Color surfaceRampColour(std::string_view ramp, double t);
 
