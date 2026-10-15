@@ -3,12 +3,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <format>
+#include <limits>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "katana/core/task_pool.hpp"
 #include "katana/core/text.hpp"
+#include "katana/geometry/spatial_index.hpp"
 
 #include "summation.hpp"
 
@@ -106,9 +112,27 @@ std::vector<SegmentPiece> SegmentProfiler::along(const Point2& from, const Point
             const double ex = q.x - p.x;
             const double ey = q.y - p.y;
             const double rate = ex * d.y - ey * d.x; // how the side changes along the segment
+            // How far each end of the segment stands from this edge's line,
+            // positive on the inside.
+            const double edgeLength = std::sqrt(ex * ex + ey * ey);
+            const double sideFrom = (ex * (from.y - p.y) - ey * (from.x - p.x)) / edgeLength;
+            const double sideTo = (ex * (to.y - p.y) - ey * (to.x - p.x)) / edgeLength;
+            if (std::abs(sideFrom) <= tol::kGeometric && std::abs(sideTo) <= tol::kGeometric) {
+                // The segment lies ON this edge: it is the surface's boundary
+                // or the seam between two triangles, and a section cut there
+                // is cut on the ground, not beside it. Its ends are computed
+                // from a bearing, so a north-going section is tilted by the
+                // rounding of cos(pi/2) = 6e-17 and an exact test would
+                // clip away whichever half the tilt put outside. Inside the
+                // half-plane, as the exactly parallel case was: the triangle's
+                // other two edges still bound it, and the triangle on the
+                // edge's other side reports the same span, which pieceAt
+                // takes for one.
+                continue;
+            }
             if (rate == 0.0) {
                 // Parallel: wholly inside this edge's half-plane, or wholly out.
-                outside = ex * (from.y - p.y) - ey * (from.x - p.x) < 0.0;
+                outside = sideFrom < 0.0;
                 continue;
             }
             const EdgeCrossing crossing = crossEdge(surface, corner[k], corner[(k + 1) % 3], from, d);
@@ -257,6 +281,136 @@ struct Station {
     bool key = false;
 };
 
+// A box as a refusal names it: the corners to the millimetre.
+std::string boxText(const Box2& box)
+{
+    return std::format("{:.3f},{:.3f},{:.3f},{:.3f}", box.min.x, box.min.y, box.max.x, box.max.y);
+}
+
+// A section's two ends: left looking along increasing station, then right.
+struct SectionEnds {
+    Point2 left{};
+    Point2 right{};
+    bool valid = false;
+};
+
+// Where two sections properly cross: the fraction of each from its left end.
+// Meeting at an end within kGeometric is not crossing - sections cut as far as
+// a curve's radius all end on its centre, and that is as far as they may go.
+// Parallel sections (the sections of a straight run) never cross.
+std::optional<std::pair<double, double>> crossingOf(const SectionEnds& a, const SectionEnds& b)
+{
+    const double rx = a.right.x - a.left.x;
+    const double ry = a.right.y - a.left.y;
+    const double sx = b.right.x - b.left.x;
+    const double sy = b.right.y - b.left.y;
+    const double denominator = rx * sy - ry * sx;
+    if (denominator == 0.0) {
+        return std::nullopt;
+    }
+    // a.left + t r = b.left + u s, crossed with s and with r.
+    const double qx = b.left.x - a.left.x;
+    const double qy = b.left.y - a.left.y;
+    const double t = (qx * sy - qy * sx) / denominator;
+    const double u = (qx * ry - qy * rx) / denominator;
+    const double marginA = tol::kGeometric / std::hypot(rx, ry);
+    const double marginB = tol::kGeometric / std::hypot(sx, sy);
+    if (t > marginA && t < 1.0 - marginA && u > marginB && u < 1.0 - marginB) {
+        return std::pair<double, double>(t, u);
+    }
+    return std::nullopt;
+}
+
+struct SectionCrossing {
+    std::size_t first = 0;
+    std::size_t second = 0;
+    // The longest reach, the same each side, at which no pair of sections
+    // crosses: for a crossing, the greater of its two distances from the
+    // centreline (cut shorter than that, one of the two sections has ended
+    // before the other is reached), and the least over every crossing.
+    double nearest = std::numeric_limits<double>::infinity();
+};
+
+// The first pair of sections (in station order) that cross, and how short a
+// reach clears every crossing. The end-area method takes the volume of a
+// panel from the areas of the two sections that bound it, and is right only
+// while the panels tile the ground: where sections cross, the ground beyond
+// the crossing is swept by both, and counted by both.
+std::optional<SectionCrossing> firstCrossing(const std::vector<SectionEnds>& ends,
+                                             std::size_t count, double left, double right,
+                                             katana::core::TaskPool& workers)
+{
+    const auto boxOf = [&](std::size_t i) {
+        Box2 box;
+        box.expand(ends[i].left);
+        box.expand(ends[i].right);
+        return box.inflated(tol::kGeometric);
+    };
+    std::vector<katana::geometry::SpatialEntry> entries;
+    entries.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        if (ends[i].valid) {
+            entries.push_back({static_cast<katana::geometry::SpatialId>(i), boxOf(i)});
+        }
+    }
+    katana::geometry::SpatialIndex index;
+    index.rebuild(entries);
+
+    struct Slot {
+        bool found = false;
+        std::size_t second = 0;
+        double nearest = std::numeric_limits<double>::infinity();
+    };
+    std::vector<Slot> slots(count);
+    const double reach = left + right;
+    const auto scan = [&](std::size_t begin, std::size_t endIndex) {
+        std::vector<katana::geometry::SpatialId> candidates;
+        for (std::size_t i = begin; i < endIndex; ++i) {
+            if (!ends[i].valid) {
+                continue;
+            }
+            index.query(boxOf(i), candidates);
+            for (const katana::geometry::SpatialId id : candidates) {
+                const auto j = static_cast<std::size_t>(id);
+                if (j <= i) {
+                    continue;
+                }
+                const auto crossing = crossingOf(ends[i], ends[j]);
+                if (!crossing) {
+                    continue;
+                }
+                // The distance of the crossing from the centreline along each
+                // section: a section runs from `left` on one side of it to
+                // `right` on the other.
+                const double onFirst = std::abs(left - crossing->first * reach);
+                const double onSecond = std::abs(left - crossing->second * reach);
+                Slot& slot = slots[i];
+                if (!slot.found) {
+                    slot.found = true;
+                    slot.second = j;
+                }
+                slot.nearest = std::min(slot.nearest, std::max(onFirst, onSecond));
+            }
+        }
+    };
+    workers.parallelRanges(0, count, 16, scan);
+
+    // Combined in station order, so the pair named and the reach given are the
+    // same at any thread count.
+    std::optional<SectionCrossing> result;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!slots[i].found) {
+            continue;
+        }
+        if (!result) {
+            result = SectionCrossing{i, slots[i].second, slots[i].nearest};
+        } else {
+            result->nearest = std::min(result->nearest, slots[i].nearest);
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 Result<AlignmentVolumes> volumesAlongAlignment(const TinSurface& existing,
@@ -298,7 +452,10 @@ Result<AlignmentVolumes> volumesAlongAlignment(const TinSurface& existing,
                              std::to_string(kMaxVolumeSections) + " sections");
     }
     if (!existing.bounds().intersects(design.bounds())) {
-        return makeError(ErrorCode::InvalidGeometry, "the surfaces have no ground in common");
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the existing surface covers " + boxText(existing.bounds()) +
+                             " and the design covers " + boxText(design.bounds()) +
+                             ": they have no ground in common");
     }
     const Box2 common(Point2(std::max(existing.bounds().min.x, design.bounds().min.x),
                              std::max(existing.bounds().min.y, design.bounds().min.y)),
@@ -357,6 +514,30 @@ Result<AlignmentVolumes> volumesAlongAlignment(const TinSurface& existing,
         }
     }
 
+    // Both ends of every section, once: the crossing test and the cutting
+    // both read them.
+    std::vector<SectionEnds> ends(cuts.size());
+    for (std::size_t i = 0; i < cuts.size(); ++i) {
+        const auto leftEnd = alignment.pointAtStationOffset(cuts[i], left);
+        const auto rightEnd = alignment.pointAtStationOffset(cuts[i], -right);
+        if (leftEnd && rightEnd) { // inside the range by construction
+            ends[i] = SectionEnds{*leftEnd, *rightEnd, true};
+        }
+    }
+    katana::core::TaskPool& workers = pool != nullptr ? *pool : katana::core::TaskPool::shared();
+    if (const auto crossing = firstCrossing(ends, merged.size(), left, right, workers)) {
+        const std::string nearest = std::format("{:.3f}", crossing->nearest);
+        return makeError(
+            ErrorCode::InvalidArgument,
+            "the sections at stations " + std::format("{:.3f}", merged[crossing->first].station) +
+                " and " + std::format("{:.3f}", merged[crossing->second].station) +
+                " cross each other: sections that overlap count the ground they share more than "
+                "once, so no volume can be given. Give left= and right= of at most " + nearest +
+                " m (on a curve, no more than its radius; at a corner with no radius, no more "
+                "than the interval over the sine of its deflection)",
+            "left=,right=");
+    }
+
     const SegmentProfiler under(existing);
     const SegmentProfiler over(design);
     std::vector<StationSection> sections(cuts.size());
@@ -365,25 +546,40 @@ Result<AlignmentVolumes> volumesAlongAlignment(const TinSurface& existing,
             StationSection& section = sections[i];
             section.station = cuts[i];
             const auto centre = alignment.pointAtStation(cuts[i]);
-            const auto leftEnd = alignment.pointAtStationOffset(cuts[i], left);
-            const auto rightEnd = alignment.pointAtStationOffset(cuts[i], -right);
-            if (!centre || !leftEnd || !rightEnd) {
+            if (!centre || !ends[i].valid) {
                 continue; // inside the range by construction; nothing to cut otherwise
             }
             section.centre = *centre;
-            const double length = leftEnd->distanceTo(*rightEnd);
+            const Point2& leftEnd = ends[i].left;
+            const Point2& rightEnd = ends[i].right;
+            const double length = leftEnd.distanceTo(rightEnd);
             const SectionAreas areas =
-                sectionAreas(under.along(*leftEnd, *rightEnd), over.along(*leftEnd, *rightEnd), length);
+                sectionAreas(under.along(leftEnd, rightEnd), over.along(leftEnd, rightEnd), length);
             section.cutArea = areas.cut;
             section.fillArea = areas.fill;
             section.width = areas.width;
         }
     };
-    katana::core::TaskPool& workers = pool != nullptr ? *pool : katana::core::TaskPool::shared();
     // A section is a few hundred triangle clips; four to a task keeps the
     // dispatch small beside them. The grain cannot change a result: each
     // section is computed on its own.
     workers.parallelRanges(0, cuts.size(), 4, cutSections);
+
+    // Every other VOLUME form refuses surfaces that share no ground under what
+    // it measures. Boxes that meet over triangles that do not, or an alignment
+    // that runs clear of the common ground, measured nothing and would
+    // otherwise answer a cut of 0 and a fill of 0.
+    if (std::none_of(sections.begin(),
+                     sections.begin() + static_cast<std::ptrdiff_t>(merged.size()),
+                     [](const StationSection& section) { return section.width > 0.0; })) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "no section of the range reaches ground that both surfaces have (the "
+                         "existing surface covers " +
+                             boxText(existing.bounds()) + ", the design " +
+                             boxText(design.bounds()) +
+                             "): the alignment runs clear of it, or the two share no triangle "
+                             "there");
+    }
 
     AlignmentVolumes result;
     result.fromStation = first;

@@ -234,7 +234,8 @@ instead (*Background jobs*, below).
 The volumes - surface to surface, to a level, stockpiles and pits, along an
 alignment, on a grid, inside polygons - and the difference (cut/fill map)
 and envelope surfaces have their verbs, their dialog and their MCP route
-(`VOLUME`, `SURFACE DIFFERENCE`, Terrain > Volumes): `docs/volumes.md`.
+(`VOLUME`, `SURFACE DIFFERENCE`, `SURFACE ENVELOPE`, Terrain > Volumes, which
+has Make Cut/Fill Map and Make Envelope buttons): `docs/volumes.md`.
 Until 2026-10-15 `volumeToDatum` and `compareSurfaces` were exact and tested
 but reachable by no verb, and only the window's corridor quantities measured
 anything. The pair clipping above is now `terrain::visitOverlay`
@@ -1592,6 +1593,15 @@ the rows once left undefined. `GeoVerbUsage.EveryFormTheHelpGivesIsAccepted`
 every option, so a form the help or this page gives that the verb refuses
 fails the suite. `TO SURFACE` triangulates the raster result as `SURFACE
 FROM RASTER` would, under the name given (the GDAL verb's target).
+
+A `SURFACE <name> [CELL <m>]` source is sampled by `surfaceGrid` on the
+surface's own lattice: the top-left corner at (min x, max y), columns at
+min x + k cell and rows at max y - k cell, `ceil(width / cell)` by
+`ceil(height / cell)` cells, so the last column and row reach up to half a
+cell past the surface. That is not VOLUME GRID's lattice (cells on whole
+multiples of the cell), so RASTER DIFFERENCE of two surfaces and VOLUME GRID of
+them count the same cells only where the surfaces' rasters happen to start on
+whole multiples (`docs/volumes.md`, "The grid method").
 
 `src/katana_app/geo/dem_verbs.cpp`, on GDAL's `raster mosaic`, `clip`,
 `fill-nodata`, `footprint`, `reproject` and `calc`. A raster result is a

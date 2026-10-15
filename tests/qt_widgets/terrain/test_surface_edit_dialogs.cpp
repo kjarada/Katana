@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
@@ -295,6 +296,67 @@ TEST(SurfaceCombineDialog, EachModeWritesItsLineAndRunRunsIt)
     dialog.findChild<QLineEdit*>("surfaceCombineName")->setText("subgrade");
     dialog.findChild<QPushButton*>("surfaceCombinePreview")->click();
     EXPECT_EQ(recorder.lines.back(), "SURFACE OFFSET ground -0.5 NAME subgrade PREVIEW");
+}
+
+TEST(SurfaceLevelsDialog, TheSurfaceListFollowsTheDrawingWhileTheDialogStaysOpen)
+{
+    // The dialog is non-modal and kept. An UNDO that removes the surface it
+    // offers used to leave it offering it, with Run enabled on a line that
+    // the verb refused (NotFound); a surface made while it was open could not
+    // be chosen until it was closed and shown again.
+    katana::cad::Document document;
+    addSurfaces(document, {"ground"});
+    Recorder recorder;
+    SurfaceLevelsDialog dialog(SurfaceLevelsKind::Heights, recorder.context(&document));
+    auto* surface = dialog.findChild<QComboBox*>("surfaceHeightsSurface");
+    auto* command = dialog.findChild<QLineEdit*>("surfaceHeightsCommand");
+    auto* run = dialog.findChild<QPushButton*>("surfaceHeightsRun");
+    ASSERT_NE(surface, nullptr);
+    EXPECT_EQ(command->text(), "SURFACE EDIT ground RAISE 1");
+
+    ASSERT_TRUE(document.undo().ok());
+    QCoreApplication::processEvents();
+    EXPECT_EQ(surface->count(), 0);
+    EXPECT_FALSE(run->isEnabled());
+    EXPECT_TRUE(command->text().isEmpty());
+
+    addSurfaces(document, {"design"});
+    QCoreApplication::processEvents();
+    ASSERT_EQ(surface->count(), 1);
+    EXPECT_EQ(surface->itemText(0), "design");
+    EXPECT_EQ(command->text(), "SURFACE EDIT design RAISE 1");
+    EXPECT_TRUE(run->isEnabled());
+
+    // A surface added beside the chosen one is offered and the choice stays.
+    addSurfaces(document, {"pad"});
+    QCoreApplication::processEvents();
+    EXPECT_EQ(surface->count(), 2);
+    EXPECT_EQ(surface->currentText(), "design");
+    EXPECT_TRUE(recorder.lines.isEmpty()); // following the drawing runs nothing
+}
+
+TEST(SurfaceCombineDialog, TheListsFollowTheDrawingWhileTheDialogStaysOpen)
+{
+    katana::cad::Document document;
+    addSurfaces(document, {"ground", "pad"});
+    Recorder recorder;
+    SurfaceCombineDialog dialog(recorder.context(&document));
+    auto* merge = dialog.findChild<QListWidget*>("surfaceCombineMergeList");
+    auto* top = dialog.findChild<QComboBox*>("surfaceCombineTop");
+    ASSERT_NE(merge, nullptr);
+    EXPECT_EQ(merge->count(), 2);
+    EXPECT_EQ(top->count(), 2);
+
+    ASSERT_TRUE(document.undo().ok());
+    QCoreApplication::processEvents();
+    EXPECT_EQ(merge->count(), 0);
+    EXPECT_EQ(top->count(), 0);
+
+    addSurfaces(document, {"design", "road"});
+    QCoreApplication::processEvents();
+    EXPECT_EQ(merge->count(), 2);
+    EXPECT_GE(top->findText("road"), 0);
+    EXPECT_TRUE(recorder.lines.isEmpty());
 }
 
 TEST(SurfaceEditUi, TheSubmenuToolbarAndDialogItemsAreNamedAndTheToolsFillThem)

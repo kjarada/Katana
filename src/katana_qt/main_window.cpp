@@ -1120,10 +1120,11 @@ void MainWindow::buildActions()
     QAction* volumes =
         makeAction(Icon::Volumes, "&Volumes...",
                    "Cut and fill between surfaces, to a level, of a stockpile, along an "
-                   "alignment or on a grid, inside polygons; and the cut/fill map",
+                   "alignment or on a grid, inside polygons; and the cut/fill map and the envelope",
                    {}, "terrainVolumes");
     // The dialog it shows, by object name: how --dialog finds it. It builds
-    // VOLUME and SURFACE DIFFERENCE lines and runs them through runVerbLine.
+    // VOLUME, SURFACE DIFFERENCE and SURFACE ENVELOPE lines and runs them through
+    // runVerbLine.
     volumes->setData(QString("volumesDialog"));
     connect(volumes, &QAction::triggered, this, [this] {
         VolumesDialogContext context;

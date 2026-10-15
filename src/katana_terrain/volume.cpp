@@ -27,6 +27,39 @@ using katana::geometry::Triangle2;
 
 namespace {
 
+// The plan area of a piece on which a function is linear, split into where it is
+// above zero and where it is below, by its values at the corners.
+struct AreaSplit {
+    double positive = 0.0;
+    double negative = 0.0;
+};
+
+// With vertex values f0, f1, f2 and plan area A, when the signs differ exactly
+// one vertex p stands alone against q and r. The zero line meets edges pq and
+// pr at the fractions tq = fp/(fp-fq) and tr = fp/(fp-fr), cutting off the
+// triangle (p, mq, mr) of area A*tq*tr; the rest of the piece is on the other
+// side. A corner at zero belongs to neither side.
+AreaSplit splitArea(double area, const std::array<double, 3>& f)
+{
+    const int positives = (f[0] > 0.0) + (f[1] > 0.0) + (f[2] > 0.0);
+    const int negatives = (f[0] < 0.0) + (f[1] < 0.0) + (f[2] < 0.0);
+    if (negatives == 0 || positives == 0) {
+        return AreaSplit{positives != 0 ? area : 0.0, negatives != 0 ? area : 0.0};
+    }
+    const bool lonePositive = positives == 1;
+    std::size_t p = 0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        if (lonePositive ? f[i] > 0.0 : f[i] < 0.0) {
+            p = i;
+        }
+    }
+    const double fp = std::abs(f[p]);
+    const double fq = std::abs(f[(p + 1) % 3]);
+    const double fr = std::abs(f[(p + 2) % 3]);
+    const double tipArea = area * (fp / (fp + fq)) * (fp / (fp + fr));
+    return lonePositive ? AreaSplit{tipArea, area - tipArea} : AreaSplit{area - tipArea, tipArea};
+}
+
 // Integral of a function that is linear over a triangle, positive and negative
 // part kept apart.
 //
@@ -38,6 +71,19 @@ namespace {
 // triangles (mq, q, r) of area A*(1-tq) and (mq, r, mr) of area A*tq*(1-tr).
 // Every term of a part has the same sign, so nothing cancels, and no coordinates
 // are constructed.
+//
+// THE AREAS ARE KEPT BY WHAT THE SURFACES DO, NOT BY THE LAST BIT. The volumes
+// are summed from f as it is, so their bits are what they always were. The
+// plan areas where the function is above and below zero are sorted by f with
+// every corner within kGeometric (0.1 micrometre) of zero taken as zero: two
+// coincident surfaces are read at a piece's corners by barycentric weights
+// that sum to 1 only to a few ulps, so their difference there is +/- 1e-15
+// and not 0, and a sort by the sign of the last bit booked whole pieces of
+// ground that does not change as cut area or fill area (a flat surface
+// against its own level inside a skewed polygon: 44.6 m2 of cut and 23.3 of
+// fill; a stockpile on planar ground: 700 m2 of cut round a toe of 400). A
+// height difference under 0.1 micrometre is no earthwork on any survey, and
+// the volume it holds, under that times the area, stays in the volumes.
 class SignedIntegral {
   public:
     void add(double area, const std::array<double, 3>& f)
@@ -51,35 +97,44 @@ class SignedIntegral {
             const double volume = area * ((f[0] + f[1] + f[2]) / 3.0);
             if (positives != 0) {
                 positive_.add(volume);
-                positiveArea_.add(area);
             } else if (negatives != 0) {
                 negative_.add(-volume);
-                negativeArea_.add(area);
             }
-            return;
+        } else {
+            // Mixed signs: the lone vertex is the only positive or the only negative one.
+            const bool lonePositive = positives == 1;
+            std::size_t p = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                if (lonePositive ? f[i] > 0.0 : f[i] < 0.0) {
+                    p = i;
+                }
+            }
+            const double fp = std::abs(f[p]);
+            const double fq = std::abs(f[(p + 1) % 3]); // the others lie on the opposite
+            const double fr = std::abs(f[(p + 2) % 3]); // side or on the zero line
+            const double tq = fp / (fp + fq);
+            const double tr = fp / (fp + fr);
+            const double tipArea = area * tq * tr;
+            const double tipVolume = tipArea * fp / 3.0;
+            const double restVolume =
+                area * (1.0 - tq) * (fq + fr) / 3.0 + area * tq * (1.0 - tr) * fr / 3.0;
+            (lonePositive ? positive_ : negative_).add(tipVolume);
+            (lonePositive ? negative_ : positive_).add(restVolume);
         }
 
-        // Mixed signs: the lone vertex is the only positive or the only negative one.
-        const bool lonePositive = positives == 1;
-        std::size_t p = 0;
-        for (std::size_t i = 0; i < 3; ++i) {
-            if (lonePositive ? f[i] > 0.0 : f[i] < 0.0) {
-                p = i;
+        std::array<double, 3> counted = f;
+        for (double& value : counted) {
+            if (std::abs(value) <= tol::kGeometric) {
+                value = 0.0;
             }
         }
-        const double fp = std::abs(f[p]);
-        const double fq = std::abs(f[(p + 1) % 3]); // the others lie on the opposite
-        const double fr = std::abs(f[(p + 2) % 3]); // side or on the zero line
-        const double tq = fp / (fp + fq);
-        const double tr = fp / (fp + fr);
-        const double tipArea = area * tq * tr;
-        const double tipVolume = tipArea * fp / 3.0;
-        const double restVolume =
-            area * (1.0 - tq) * (fq + fr) / 3.0 + area * tq * (1.0 - tr) * fr / 3.0;
-        (lonePositive ? positive_ : negative_).add(tipVolume);
-        (lonePositive ? positiveArea_ : negativeArea_).add(tipArea);
-        (lonePositive ? negative_ : positive_).add(restVolume);
-        (lonePositive ? negativeArea_ : positiveArea_).add(area - tipArea);
+        const AreaSplit areas = splitArea(area, counted);
+        if (areas.positive != 0.0) {
+            positiveArea_.add(areas.positive);
+        }
+        if (areas.negative != 0.0) {
+            negativeArea_.add(areas.negative);
+        }
     }
 
     // Folds another integral's four sums into this one's. Used to combine the
@@ -282,8 +337,11 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
     result.boundaryArea = region->area();
     TinSurface base;
     if (options.base == StockpileBase::Boundary) {
-        // The toe as it stands: each vertex's own height, or the ground's
-        // there. A vertex with neither is refused - its height would be a
+        // The toe as it stands: the boundary's own heights when EVERY vertex
+        // has one, otherwise the ground's at each vertex (a vertex's own
+        // height is then not used, even where the ground has none under it:
+        // mixing the two would build a base from two sources). A vertex off
+        // the ground with no height to use is refused - its height would be a
         // guess, and a base at 0 there would add a cone of nothing.
         const bool own = !ringHeights.empty() && ringHeights.size() == ring.vertices.size() &&
                          std::all_of(ringHeights.begin(), ringHeights.end(),
@@ -296,6 +354,29 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             const Point2& at = ring.vertices[v];
             const std::optional<double> height = own ? ringHeights[v] : surface.elevationAt(at);
             if (!height) {
+                const auto hasOwn = [&](std::size_t index) {
+                    return index < ringHeights.size() && ringHeights[index].has_value() &&
+                           std::isfinite(*ringHeights[index]);
+                };
+                if (hasOwn(v)) {
+                    // This vertex has a height, but the rule is all or none:
+                    // say which vertex is the one that has none.
+                    std::size_t missing = 0;
+                    while (missing < ring.vertices.size() && hasOwn(missing)) {
+                        ++missing;
+                    }
+                    return makeError(
+                        ErrorCode::InvalidGeometry,
+                        "boundary vertex " + std::to_string(v + 1) +
+                            " is off the surface, and its own height is not used: the "
+                            "boundary's own heights are used only when every vertex has one, "
+                            "and vertex " +
+                            std::to_string(missing + 1) +
+                            " has none; give every vertex a height, or use the lowest point or "
+                            "a level",
+                        "vertex=" + std::to_string(v + 1) +
+                            " missing=" + std::to_string(missing + 1));
+                }
                 return makeError(ErrorCode::InvalidGeometry,
                                  "boundary vertex " + std::to_string(v + 1) +
                                      " is off the surface and has no height of its own, so the "
@@ -364,7 +445,8 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
 // ---- the grid method -----------------------------------------------------------------------
 
 Result<GridVolume> gridVolume(const TinSurface& existing, const TinSurface& design, double cell,
-                              const OverlayRegion* region, katana::core::TaskPool* pool)
+                              const OverlayRegion* region, katana::core::TaskPool* pool,
+                              std::span<const OverlayRegion> claimed)
 {
     if (existing.empty() || design.empty()) {
         return makeError(ErrorCode::InvalidArgument, "both surfaces must have triangles");
@@ -435,6 +517,17 @@ Result<GridVolume> gridVolume(const TinSurface& existing, const TinSurface& desi
                         continue;
                     }
                     if (region != nullptr && !region->contains(centre)) {
+                        continue;
+                    }
+                    // Counted with an earlier polygon already: a centre on an
+                    // edge two polygons share is inside both.
+                    if (std::any_of(claimed.begin(), claimed.end(),
+                                    [&](const OverlayRegion& earlier) {
+                                        return earlier.bounds()
+                                                   .inflated(tol::kGeometric)
+                                                   .contains(centre) &&
+                                               earlier.contains(centre);
+                                    })) {
                         continue;
                     }
                     const auto zExisting = existing.elevationAt(centre);

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
@@ -251,6 +252,40 @@ TEST(VolumeToLevelInsidePolygon, AWholeSurfaceRegionAgreesWithTheVolumeToTheDatu
     EXPECT_NEAR(inside->planArea, 6400.0, 1e-8);
 }
 
+TEST(VolumeToLevelInsidePolygon, AFlatSurfaceAgainstItsOwnLevelHasNeitherCutAreaNorFillArea)
+{
+    // z = 10 over [0, 10]^2 against the level 10 inside a skewed quadrilateral:
+    // above = below = 0 whatever the polygon. The region is compared with
+    // the surface as a flat surface of its own, read by weights that sum to 1
+    // only to a few ulps, so the difference at a corner that is no vertex was
+    // +/- 1e-15: 44.6 m2 of the polygon were booked as cut area and 23.3 as
+    // fill area, and none is either. The polygon's area by the shoelace sum:
+    //   (0.123 x 0.321 - 9.876 x 0.456) + (9.876 x 9.9 - 9.5 x 0.321)
+    //   + (9.5 x 9.7 - 0.2 x 9.9) + (0.2 x 0.456 - 0.123 x 9.7)
+    //   = -4.463973 + 94.7229 + 90.17 - 1.1019 = 179.327027, halved.
+    const TinSurface flat = buildFromPoints({Point3(0, 0, 10), Point3(10, 0, 10),
+                                             Point3(10, 10, 10), Point3(0, 10, 10)});
+    const OverlayRegion skewed = regionOf(ring({Point2(0.123, 0.456), Point2(9.876, 0.321),
+                                                Point2(9.5, 9.9), Point2(0.2, 9.7)}));
+    const OverlayRegion whole = regionOf(square(0, 0, 10));
+    const OverlayRegion sliver = regionOf(ring({Point2(1.3, 1.1), Point2(8.7, 1.2), Point2(8.9, 1.4)}));
+    for (const OverlayRegion* region : {&skewed, &whole, &sliver}) {
+        const auto volume = volumeToDatum(flat, 10.0, *region);
+        ASSERT_TRUE(volume.ok()) << volume.error().describe();
+        EXPECT_NEAR(volume->planArea, region->area(), 1e-9);
+        EXPECT_NEAR(volume->above, 0.0, 1e-9);
+        EXPECT_NEAR(volume->below, 0.0, 1e-9);
+        EXPECT_EQ(volume->planAreaAbove, 0.0);
+        EXPECT_EQ(volume->planAreaBelow, 0.0);
+    }
+    EXPECT_NEAR(skewed.area(), 89.6635135, 1e-9);
+    // Without a region the surface is read at its own vertices, exactly.
+    const auto exact = volumeToDatum(flat, 10.0);
+    ASSERT_TRUE(exact.ok());
+    EXPECT_EQ(exact->planAreaAbove, 0.0);
+    EXPECT_EQ(exact->planAreaBelow, 0.0);
+}
+
 TEST(VolumeToLevelInsidePolygon, RefusesANonFiniteLevelAnEmptySurfaceAndAnEmptyRegion)
 {
     const TinSurface surface = planeSurface(Plane{0, 0, 5}, 10.0, 5, 17);
@@ -307,6 +342,36 @@ TEST(Stockpile, OnSlopingGroundTheToeBaseFollowsTheSlope)
     ASSERT_TRUE(volume.ok()) << volume.error().describe();
     EXPECT_NEAR(volume->volume.above, 3600.0, 1e-8);
     EXPECT_NEAR(volume->volume.below, 0.0, 1e-9);
+}
+
+TEST(Stockpile, OnSlopingGroundWithAPolygonWiderThanTheToeOnlyTheToeIsCutArea)
+{
+    // The pile of twelve faces on a toe of radius 20 (1200 m2) on the ground
+    // z = 0.1 x + 5, measured inside the square [-30, 30]^2 of 3600 m2 with a
+    // base made of the boundary's heights read off the ground: a plane. The
+    // pile stands above it over the toe, 3600 m3, and everywhere else the
+    // ground is the base: cut area 1200, fill area 0, and the other 2400 m2
+    // neither (it was 700 m2 of cut round a toe of 400 and 75 of fill).
+    const Pile heap = pile(Plane{0.1, 0, 5}, 12, 20.0, 9.0);
+    const Polyline2 wider = square(-30, -30, 60);
+    const auto volume = stockpileVolume(heap.surface, wider, StockpileOptions{});
+    ASSERT_TRUE(volume.ok()) << volume.error().describe();
+    EXPECT_NEAR(volume->volume.above, 3600.0, 1e-7);
+    EXPECT_NEAR(volume->volume.below, 0.0, 1e-9);
+    EXPECT_NEAR(volume->volume.planArea, 3600.0, 1e-8);
+    EXPECT_NEAR(volume->volume.planAreaAbove, 1200.0, 1e-8);
+    EXPECT_EQ(volume->volume.planAreaBelow, 0.0);
+
+    // Against a level just under the whole polygon's ground the ground is
+    // all above it: the whole 3600 m2 is cut area, the pile's faces and the
+    // plane beside them alike.
+    StockpileOptions level;
+    level.base = StockpileBase::Level;
+    level.level = -5.0;
+    const auto beneath = stockpileVolume(heap.surface, wider, level);
+    ASSERT_TRUE(beneath.ok()) << beneath.error().describe();
+    EXPECT_NEAR(beneath->volume.planAreaAbove, 3600.0, 1e-8);
+    EXPECT_EQ(beneath->volume.planAreaBelow, 0.0);
 }
 
 TEST(Stockpile, AgainstTheLowestPointOfTheToeTheWedgeOfGroundBelowItIsAdded)
@@ -369,6 +434,47 @@ TEST(Stockpile, AToeVertexOffTheGroundWithNoHeightOfItsOwnIsRefusedAndWithOneIsU
     EXPECT_TRUE(used->boundaryHeights);
     EXPECT_NEAR(used->volume.above, 0.0, 1e-9);
     EXPECT_NEAR(used->volume.planArea, 100.0, 1e-9); // the quarter on the site
+}
+
+TEST(Stockpile, AnOffSurfaceVertexWithItsOwnHeightIsRefusedNamingTheVertexThatHasNone)
+{
+    // The boundary's own heights are used only when every vertex has one. The
+    // square [40, 60]^2 has its first corner on the 100 x 100 site (it ends at
+    // 50) and no height of its own, and its second, (60, 40), off the site with
+    // the height 0: the base is built from the ground's heights, so vertex 2
+    // is refused - and not as having no height of its own, which it has.
+    const Pile heap = pile(Plane{0, 0, 0}, 12, 20.0, 9.0);
+    const Polyline2 toe = square(40, 40, 20);
+    StockpileOptions options;
+    options.boundaryHeights = {std::nullopt, 0.0, 0.0, 0.0};
+    const auto refused = stockpileVolume(heap.surface, toe, options);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(refused.error().message.find("boundary vertex 2 is off the surface, and its own "
+                                           "height is not used"),
+              std::string::npos)
+        << refused.error().message;
+    EXPECT_NE(refused.error().message.find("vertex 1 has none"), std::string::npos)
+        << refused.error().message;
+    EXPECT_EQ(refused.error().message.find("no height of its own"), std::string::npos)
+        << refused.error().message;
+    EXPECT_EQ(refused.error().context, "vertex=2 missing=1");
+
+    // A height that is not finite is none: here it is vertex 4's that is missing.
+    options.boundaryHeights = {0.0, 0.0, 0.0, std::nan("")};
+    const auto nan = stockpileVolume(heap.surface, toe, options);
+    ASSERT_FALSE(nan.ok());
+    EXPECT_NE(nan.error().message.find("boundary vertex 2 is off the surface, and its own "
+                                       "height is not used"),
+              std::string::npos)
+        << nan.error().message;
+    EXPECT_NE(nan.error().message.find("vertex 4 has none"), std::string::npos)
+        << nan.error().message;
+    options.boundaryHeights = {};
+    const auto none = stockpileVolume(heap.surface, toe, options);
+    ASSERT_FALSE(none.ok());
+    EXPECT_NE(none.error().message.find("no height of its own"), std::string::npos);
+    EXPECT_EQ(none.error().context, "vertex=2");
 }
 
 TEST(Stockpile, AToeThatNeverMeetsTheGroundHasNoLowestPoint)
@@ -437,6 +543,87 @@ TEST(GridVolume, InsideAPolygonOnlyTheCellsWhoseCentresAreInsideCount)
     const auto offset = gridVolume(base, top, 1.0, &shifted);
     ASSERT_TRUE(offset.ok());
     EXPECT_EQ(offset->cells, 100u);
+}
+
+TEST(GridVolume, LotsSharingAnEdgeOnALineOfCentresCountItsCellsOnceNotTwice)
+{
+    // A 1 m slab over [0, 50]^2 on 1 m cells, whose centres are at k + 0.5.
+    // Lot A is [5, 25.5] x [5, 45] and lot B [25.5, 45] x [5, 45]: they share
+    // the edge x = 25.5, a line of centres. A holds the centres x = 5.5 ... 25.5
+    // (21 of them) by y = 5.5 ... 44.5 (40): 840 cells; B holds x = 25.5 ...
+    // 44.5 (20) by 40: 800. Measured on their own and summed that is 1640, the
+    // 40 centres on x = 25.5 twice. Their union [5, 45]^2 holds x = 5.5 ... 44.5
+    // (40) by 40 = 1600 cells, its area exactly, and the exact overlay agrees.
+    const TinSurface base = planeSurface(Plane{0, 0, 0}, 50.0, 30, 31);
+    const TinSurface top = planeSurface(Plane{0, 0, 1}, 50.0, 30, 32);
+    const OverlayRegion lotA =
+        regionOf(ring({Point2(5, 5), Point2(25.5, 5), Point2(25.5, 45), Point2(5, 45)}));
+    const OverlayRegion lotB =
+        regionOf(ring({Point2(25.5, 5), Point2(45, 5), Point2(45, 45), Point2(25.5, 45)}));
+    const OverlayRegion both = regionOf(square(5, 5, 40));
+    const auto alone = [&](const OverlayRegion& region) {
+        const auto grid = gridVolume(base, top, 1.0, &region);
+        EXPECT_TRUE(grid.ok());
+        return grid.ok() ? grid->cells : std::size_t{0};
+    };
+    EXPECT_EQ(alone(lotA), 840u);
+    EXPECT_EQ(alone(lotB), 800u);
+    EXPECT_EQ(alone(both), 1600u);
+
+    // One after the other, the second leaving the cells the first holds: the
+    // cells add up to the union's whichever lot goes first.
+    const auto ab =
+        gridVolume(base, top, 1.0, &lotB, nullptr, std::span<const OverlayRegion>(&lotA, 1));
+    const auto ba =
+        gridVolume(base, top, 1.0, &lotA, nullptr, std::span<const OverlayRegion>(&lotB, 1));
+    ASSERT_TRUE(ab.ok());
+    ASSERT_TRUE(ba.ok());
+    EXPECT_EQ(ab->cells, 800u - 40u); // B without the 40 centres A holds on x = 25.5
+    EXPECT_EQ(ba->cells, 840u - 40u); // A without the same 40
+    EXPECT_EQ(840u + ab->cells, 1600u);
+    EXPECT_EQ(800u + ba->cells, 1600u);
+    EXPECT_NEAR(ab->fill, 760.0, 1e-9);
+    EXPECT_NEAR(ab->planArea, 760.0, 1e-9);
+    EXPECT_EQ(ab->cut, 0.0);
+    const auto exact = compareSurfaces(base, top, both);
+    ASSERT_TRUE(exact.ok());
+    EXPECT_NEAR(exact->fill, 1600.0, 1e-9);
+}
+
+TEST(GridVolume, OverlappingPolygonsCountEachCellOnceAndTheNeighboursOfTheCaseAreUnchanged)
+{
+    // A = [5, 30] x [5, 45] holds x = 5.5 ... 29.5 (25) by 40 = 1000 cells,
+    // B = [20, 45] x [5, 45] holds x = 20.5 ... 44.5 (25) by 40 = 1000; they
+    // overlap on x = 20.5 ... 29.5 (10 columns, 400 cells). The union holds
+    // x = 5.5 ... 44.5 = 1600, so B after A counts 1000 - 400 = 600.
+    const TinSurface base = planeSurface(Plane{0, 0, 0}, 50.0, 30, 33);
+    const TinSurface top = planeSurface(Plane{0, 0, 1}, 50.0, 30, 34);
+    const OverlayRegion a =
+        regionOf(ring({Point2(5, 5), Point2(30, 5), Point2(30, 45), Point2(5, 45)}));
+    const OverlayRegion b =
+        regionOf(ring({Point2(20, 5), Point2(45, 5), Point2(45, 45), Point2(20, 45)}));
+    const auto second =
+        gridVolume(base, top, 1.0, &b, nullptr, std::span<const OverlayRegion>(&a, 1));
+    ASSERT_TRUE(second.ok());
+    EXPECT_EQ(second->cells, 600u);
+    EXPECT_EQ(gridVolume(base, top, 1.0, &a)->cells + second->cells, 1600u);
+
+    // The neighbours: nothing claimed is the grid as it was; a region claimed
+    // by itself has nothing left (cells 0, not an error); a claim that is
+    // elsewhere takes nothing from it.
+    const auto none = gridVolume(base, top, 1.0, &a, nullptr, {});
+    ASSERT_TRUE(none.ok());
+    EXPECT_EQ(none->cells, 1000u);
+    const auto itself =
+        gridVolume(base, top, 1.0, &a, nullptr, std::span<const OverlayRegion>(&a, 1));
+    ASSERT_TRUE(itself.ok());
+    EXPECT_EQ(itself->cells, 0u);
+    EXPECT_EQ(itself->fill, 0.0);
+    const OverlayRegion elsewhere = regionOf(square(100, 100, 5));
+    const auto apart =
+        gridVolume(base, top, 1.0, &a, nullptr, std::span<const OverlayRegion>(&elsewhere, 1));
+    ASSERT_TRUE(apart.ok());
+    EXPECT_EQ(apart->cells, 1000u);
 }
 
 TEST(GridVolume, RefusesACellThatIsNoLengthAndAGridTooLargeNamingACellThatFits)

@@ -64,6 +64,14 @@ struct SegmentPiece {
 // clipped by each triangle it crosses. Where it crosses an edge, the crossing
 // and its height are computed from the edge's own vertices (in a fixed
 // order), so the pieces on either side of an edge meet at the same bits.
+//
+// A segment that lies ON an edge - both its ends within kGeometric of the
+// edge's line, which is where a section cut at the end of a corridor lies on
+// the corridor surface's boundary - is on the ground along the whole of the
+// edge: the triangle beside the edge reports it, and so does the triangle on
+// the other side. The ends of a section are computed from a bearing, so a
+// north-going one is tilted by 1e-16 of its length, and an exact test would
+// have kept whichever half the tilt left inside.
 class SegmentProfiler {
   public:
     // Indexes the surface's triangles once; the surface must outlive this.
@@ -114,7 +122,8 @@ struct AlignmentVolumeOptions {
     // How far each section reaches left and right of the centreline (left is
     // left looking along increasing station). Absent: the diagonal of the
     // ground the two surfaces have in common, so a section reaches across
-    // all of it wherever it is cut.
+    // all of it wherever it is cut - which on a straight run is right, and
+    // on a curve or a corner is refused: see volumesAlongAlignment.
     std::optional<double> left{};
     std::optional<double> right{};
     // Also cut the section at the middle of each pair, for the prismoidal
@@ -164,10 +173,26 @@ struct AlignmentVolumes {
 // Sections between `existing` and `design` along `alignment`. Fails with
 // InvalidArgument for an empty surface, an interval that is not finite and
 // positive, a range outside the alignment or of no length, a negative or
-// non-finite reach or none at all, or more than kMaxVolumeSections sections;
-// with InvalidGeometry when the surfaces have no ground in common. Sections
-// are cut on `pool` (null: TaskPool::shared()), each on its own, and summed in
-// station order: the same bits at any thread count.
+// non-finite reach or none at all, more than kMaxVolumeSections sections, or
+// sections that cross one another; with InvalidGeometry when the surfaces
+// have no ground in common (their boxes do not meet, or no section of the
+// range reaches ground that both have).
+//
+// The average end area is the volume of a panel from the areas of the two
+// sections that bound it, and is right only while the panels tile the ground.
+// Where two sections cross - the inside of a curve cut deeper than its radius,
+// the inside of a corner cut deeper than the interval over the sine of its
+// deflection, the legs either side of a bend - the ground beyond the crossing
+// is swept by both and counted by both (a 1 m slab of 40 000 m3 measured
+// 62 101 m3 round a curve of radius 40 with the default reach). That is
+// refused, naming the stations and the longest reach that clears every
+// crossing, rather than measured; sections that only touch at their ends (a
+// reach equal to the radius) are not crossing. Not seen: two stretches of the
+// alignment running side by side nearer than the reach, with no section of
+// one crossing a section of the other.
+//
+// Sections are cut on `pool` (null: TaskPool::shared()), each on its own, and
+// summed in station order: the same bits at any thread count.
 [[nodiscard]] katana::core::Result<AlignmentVolumes>
 volumesAlongAlignment(const TinSurface& existing, const TinSurface& design,
                       const katana::geometry::SolvedAlignment& alignment,

@@ -268,6 +268,22 @@ surface (`surfaceEditActive`).
   (`src/katana_qt/customisation/scope_filter_widget.hpp`), written as `FROM
   <scope>`. The lines are made by pure functions (`surfaceLevelsLine`,
   `surfaceCombineLine`), tested without a window.
+- **The dialogs follow the Document.** They are non-modal and kept, and they
+  used to read the drawing's surfaces only when constructed, shown or after
+  their own Run: an UNDO that removed the surface they offered left Run enabled
+  on a line the verb refused (NotFound), and a surface made by a typed line
+  could not be chosen until the dialog was closed and shown again (showing it
+  from the menu while it was open sends no show event). Each now owns a
+  `DocumentWatcher` (`src/katana_qt/customisation/document_watcher.hpp`), the
+  last member so it dies first, which says from the event loop that the model
+  changed - on every execute, undo and redo, and on New and Open - and the
+  lists are read again, keeping what is chosen where it is still there
+  (`SurfaceLevelsDialog.TheSurfaceListFollowsTheDrawingWhileTheDialogStaysOpen`,
+  `SurfaceCombineDialog.TheListsFollowTheDrawingWhileTheDialogStaysOpen`).
+  Rejected: a Document listener of each dialog's own on each kind of change
+  (Surfaces, Replaced ...), reloading inside the notification: the watcher
+  already defers and coalesces, as a table rebuilt inside the command that
+  notified once crashed the layer panel (docs/cad.md).
 - **Icons**: `Icon::SurfaceEdit`, `SurfaceLevels`, `SurfaceSmooth`,
   `SurfaceThin`, `SurfaceDeleteLong`, `SurfaceCombine` (`src/katana_qt/icons.cpp`)
   and the tools' own (`src/katana_qt/tools/icons_terrain.cpp`), each the same
