@@ -31,6 +31,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <QString>
 #include <QWidget>
@@ -95,6 +96,10 @@ class SurfacesPanel final : public QWidget {
     void scheduleRefresh();
     // Runs `line` through the executor; what it said is lastReply().
     void run(const QString& line);
+    // `verb` followed by `names`, each written as a word of the line by the
+    // window's one rule (command_word.hpp). A name a line cannot carry sends
+    // nothing and is said in the status line and lastReply().
+    void run(const QString& verb, const std::vector<std::string>& names);
 
     katana::cad::Document& document_;
     Services services_;

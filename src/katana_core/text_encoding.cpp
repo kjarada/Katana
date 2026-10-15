@@ -219,6 +219,11 @@ bool isValidUtf8(std::string_view text)
     return validUtf8Scalar(bytes, text.size());
 }
 
+std::string utf8OrWindows1252(std::string_view text)
+{
+    return isValidUtf8(text) ? std::string(text) : fromWindows1252(text);
+}
+
 const char* toString(TextEncoding encoding)
 {
     switch (encoding) {

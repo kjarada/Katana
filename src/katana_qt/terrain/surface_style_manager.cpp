@@ -291,7 +291,13 @@ Result<QString> surfaceStyleSetWords(const SurfaceDisplayStyle& from, const Surf
     QStringList words;
     const auto add = [&words](const QString& key, const QString& value) { words << key + "=" + value; };
     if (from.description != to.description) {
-        auto word = commandWord(qs(to.description), "the description");
+        // The verb reads a description as a typed text (core::unescapeTyped):
+        // two backslashes are one and a backslash before an n is a line break.
+        // Each backslash is doubled so the text arrives as it was written in
+        // the box, and what SURFACESTYLE INFO prints reads back the same.
+        QString typed = qs(to.description);
+        typed.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+        auto word = commandWord(typed, "the description");
         if (!word) {
             return word.error();
         }

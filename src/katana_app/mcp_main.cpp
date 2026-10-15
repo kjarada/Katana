@@ -9,9 +9,11 @@
 // its standard streams; it is not run by hand. Diagnostics go to stderr, which
 // the clients keep as the server's log.
 
+#include <cstddef>
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #include <fcntl.h>
@@ -20,6 +22,7 @@
 #include <unistd.h>
 #endif
 
+#include "katana/update/process.hpp"
 #include "mcp_server.hpp"
 #include "session.hpp"
 
@@ -82,15 +85,21 @@ int main(int argc, char* argv[])
     // server's log; the protocol's stream is not touched.
     katana::app::recoverInterruptedUpdate();
 
+    // As UTF-8 and never from argv: on Windows that is the ANSI code page's
+    // version of the command line (update/process.hpp), so the
+    // `--project C:/Users/José/site` an MCP client is configured with arrived as
+    // bytes no path conversion accepts, and the server ended before it
+    // answered `initialize`.
+    const std::vector<std::string> arguments = katana::update::utf8Arguments(argc, argv);
     std::string project;
-    for (int i = 1; i < argc; ++i) {
-        const std::string argument = argv[i];
+    for (std::size_t i = 1; i < arguments.size(); ++i) {
+        const std::string& argument = arguments[i];
         if (argument == "-h" || argument == "--help") {
             usage(std::cout);
             return 0;
         }
-        if (argument == "--project" && i + 1 < argc) {
-            project = argv[++i];
+        if (argument == "--project" && i + 1 < arguments.size()) {
+            project = arguments[++i];
             continue;
         }
         std::cerr << "error: unexpected argument " << argument << "\n";
@@ -106,7 +115,7 @@ int main(int argc, char* argv[])
     // std::cout now reaches stderr, as everything but the protocol must - the
     // line that says which customisation the session started with among it.
     // Never nullptr, which is a session of no program (session.hpp).
-    katana::app::Session session(argc > 0 ? argv[0] : "katana_mcp");
+    katana::app::Session session(arguments.empty() ? "katana_mcp" : arguments.front().c_str());
     if (!project.empty()) {
         if (project.find('"') != std::string::npos) {
             std::cerr << "error: a project path may not contain a double quote\n";

@@ -278,3 +278,30 @@ TEST(SurfaceStyleManager, ItsLinesChangeTheDrawingThroughTheInterpreter)
     QApplication::processEvents();
     EXPECT_EQ(child<QLineEdit>(dialog, "surfaceStyleInterval")->text(), "1");
 }
+
+TEST(SurfaceStyleManager, ADescriptionWithBackslashesArrivesAsItWasWrittenInTheBox)
+{
+    // The verb reads a description as a typed text, in which two backslashes are
+    // one and a backslash before an n is a line break, so the box's own backslashes
+    // are doubled on the way to the line. The cases: a path, two backslashes then an
+    // n (which would read as a backslash and an n if doubled once too few), a text
+    // that ends in a backslash, a blank and plain text.
+    Document document;
+    katana::cad::CommandInterpreter interpreter(document);
+    ASSERT_TRUE(interpreter.run("SURFACESTYLE NEW x").ok());
+    SurfaceDisplayStyle from = *document.surfaceStyles().find("x");
+    for (const std::string description : {"C:\\dir", "a\\\\nb", "x\\", "two words", "plain"}) {
+        SurfaceDisplayStyle to = from;
+        to.description = description;
+        const auto words = katana::qt::surfaceStyleSetWords(from, to);
+        ASSERT_TRUE(words.ok()) << description;
+        auto reply = interpreter.run("SURFACESTYLE SET x " + words->toStdString());
+        ASSERT_TRUE(reply.ok()) << description << ": " << reply.error().describe();
+        EXPECT_EQ(document.surfaceStyles().find("x")->description, description) << description;
+        from = *document.surfaceStyles().find("x");
+    }
+    // Words the box can hold that a line cannot carry are refused with a sentence.
+    SurfaceDisplayStyle to = from;
+    to.description = "a\nb";
+    EXPECT_FALSE(katana::qt::surfaceStyleSetWords(from, to).ok());
+}

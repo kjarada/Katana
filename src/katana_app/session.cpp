@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -30,6 +31,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/update/install.hpp"
 #include "katana/update/recover.hpp"
 #include "dxf_verbs.hpp"
@@ -252,6 +254,10 @@ struct SessionState {
     katana::app::geo::Context* geo = nullptr;
 #endif
     UpdatePart updates;
+    // Whether Session::run has said that it read a line as Windows-1252: once a
+    // session, not once a line, or a script saved in the ANSI code page would
+    // say it on every line.
+    bool saidWindows1252 = false;
 };
 
 // This process, which the update helper waits for before it swaps a file.
@@ -573,7 +579,59 @@ Session::~Session()
 
 bool Session::run(const std::string& line)
 {
-    return runLine(state_->session, line);
+    SessionState& session = state_->session;
+    try {
+#if defined(_WIN32)
+        // Only here: the bytes a Windows program is handed are the ANSI code
+        // page's, and Windows-1252 is the reading of them that decodeText also
+        // falls back on. Elsewhere a line's bytes are what the person's
+        // terminal and the file system say, and core::pathFromUtf8 takes a path
+        // that is not UTF-8 as the narrow name it is - a file named in Latin-1
+        // stays reachable - while a NAME that is not UTF-8 is refused by the
+        // door of its own table, with a sentence.
+        if (!katana::core::isValidUtf8(line)) {
+            if (!session.saidWindows1252) {
+                session.saidWindows1252 = true;
+                std::cerr << "note: a line that is not UTF-8 text was read as Windows-1252 (the "
+                             "ANSI code page); Katana's text is UTF-8, so save a script as UTF-8 "
+                             "to say it plainly\n";
+            }
+            return runLine(session, katana::core::utf8OrWindows1252(line));
+        }
+#endif
+        return runLine(session, line);
+    } catch (const std::exception& error) {
+        // Nothing up a verb's call chain catches: the standard library throws
+        // for a path it cannot convert, nlohmann for text it cannot write, and
+        // an exception out of main ends the process - in katana_cli, with the
+        // drawing unsaved. The line fails, says why, and the session goes on.
+        std::cerr << "error: Internal: " << error.what() << '\n';
+        return false;
+    }
+}
+
+katana::core::Result<std::vector<std::string>> Session::readScript(std::string_view path)
+{
+    auto bytes = katana::core::readFileBytes(katana::core::pathFromUtf8(path));
+    if (!bytes) {
+        return bytes.error();
+    }
+    auto decoded = katana::core::decodeText(*bytes);
+    if (!decoded) {
+        return katana::core::makeError(decoded.error().code, decoded.error().message,
+                                       std::string(path));
+    }
+    // The fallback is said, never silent (text_encoding.hpp): a degree sign
+    // read under the wrong code page is a wrong character, not an error.
+    if (decoded->guessed) {
+        std::cerr << "note: the script " << path << " is not UTF-8 text; read as "
+                  << katana::core::toString(decoded->encoding) << '\n';
+    }
+    std::vector<std::string> lines;
+    for (const std::string_view one : katana::core::splitLines(decoded->text)) {
+        lines.emplace_back(one);
+    }
+    return lines;
 }
 
 katana::cad::Document& Session::document()

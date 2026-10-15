@@ -10,9 +10,16 @@
 // bit for bit - a negative zero stays negative, 0.1 stays the double nearest
 // 0.1 - and the constrained edges (breaklines, a boundary) are kept with the
 // triangles they belong to. The adjacency is not stored: TinSurface::create
-// derives it, which is also what checks the bytes on the way in, so a damaged
-// record is refused with a sentence and never becomes a surface that answers
-// wrongly.
+// derives it, which is also what checks the bytes on the way in. It checks the
+// STRUCTURE: the magic, the version, the counts against the length, every
+// index in range, the triangles counter-clockwise, no edge shared by more than
+// two triangles, a coordinate finite. A record damaged in that way is refused
+// with a sentence. It does NOT detect a coordinate changed to another finite
+// value - a flipped bit in the exponent of one height gives a surface that
+// answers a wrong height, area and volume - because the record carries no
+// checksum (neither does any other table of a project). Version 2 with a CRC-32
+// of the body, read beside this one, is how that would be closed
+// (docs/terrain.md, "Not done").
 //
 // Version 1, little-endian throughout:
 //

@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/core/text.hpp"
@@ -147,7 +149,13 @@ Result<std::string> showSurfaces(Document& document, const Tokens& tokens, bool 
                      "SURFACE " + verb + " <name>... | ALL");
     }
     std::vector<std::string> names;
-    if (tokens.size() == 3 && is(tokens, 2, "ALL")) {
+    // ALL is the keyword unless a surface has that name: the tokenizer drops
+    // the quotes, so SURFACE HIDE "ALL" - the line the Surfaces panel builds
+    // for the check box of a surface called ALL - reaches here as the bare
+    // word, and every surface would go with it. A surface's own name wins; to
+    // reach all of them in such a drawing, list their names.
+    if (tokens.size() == 3 && is(tokens, 2, "ALL") &&
+        document.surfaces().find(tokens[2]) == nullptr) {
         for (const NamedSurface& named : document.surfaces().all()) {
             names.push_back(named.name);
         }
@@ -289,7 +297,7 @@ Result<std::string> listStyles(const Document& document, const Tokens& tokens)
         return usage("SURFACESTYLE LIST takes JSON or nothing", "SURFACESTYLE LIST [JSON]");
     }
     if (json) {
-        return surfaceStylesToJson(document.surfaceStyles());
+        return surfaceStylesReport(document);
     }
     std::vector<std::string> records;
     for (const SurfaceDisplayStyle& style : document.surfaceStyles().styles) {
@@ -382,13 +390,20 @@ Result<std::string> setStyle(Document& document, const Tokens& tokens)
     if (auto status = applyOptions(document, style, tokens, 3); !status) {
         return status.error();
     }
-    const bool changed = !(style == before);
+    // The built-ins standing in for a set that could not be read are replaced
+    // by the first set given (Document::setSurfacesAndStyles), whatever it
+    // holds: that is a change, with an undo step, even when no field of this
+    // style moved - so the reply says so rather than "changed=no" over a step
+    // that was recorded and a kept text that is gone.
+    const bool replacing = !document.surfaceStylesStatus();
+    const bool changed = !(style == before) || replacing;
     if (auto status = document.setSurfaceStyles(std::move(styles), "SURFACESTYLE SET"); !status) {
         return status.error();
     }
     const SurfaceDisplayStyle& now = *document.surfaceStyles().find(name);
-    return "set style=" + recordValue(name) + " changed=" + yesNo(changed) + "\n" +
-           styleRecord(document, now) + "\n" + optionsRecord(now);
+    return "set style=" + recordValue(name) + " changed=" + yesNo(changed) +
+           (replacing ? " replaced=unreadable-styles" : "") + "\n" + styleRecord(document, now) +
+           "\n" + optionsRecord(now);
 }
 
 Result<std::string> deleteStyle(Document& document, const Tokens& tokens)
@@ -590,6 +605,33 @@ std::string stopsText(const std::vector<ColourStop>& stops)
 } // namespace
 
 // ---- the module's entry points ----------------------------------------------------------------
+
+std::string surfaceStylesReport(const Document& document)
+{
+    const std::string set = surfaceStylesToJson(document.surfaceStyles());
+    const Status status = document.surfaceStylesStatus();
+    if (status) {
+        return set;
+    }
+    // The built-ins stand in for a set this build cannot read, and the plain
+    // SURFACESTYLE LIST says so in a warning record. The JSON must as well, or
+    // an agent reading it is told the drawing has the built-ins at version 1
+    // while the project keeps a set it cannot see - and its next edit is then
+    // refused. Added here and not in surfaceStylesToJson, which is the form a
+    // save writes into the project. No exceptions: the text is this build's own
+    // output, and a parse that somehow failed leaves the set without the note.
+    nlohmann::ordered_json root = nlohmann::ordered_json::parse(set, nullptr, false);
+    if (root.is_discarded() || !root.is_object()) {
+        return set;
+    }
+    const katana::core::Error& why = status.error();
+    root["standing_in"] = {{"code", std::string(katana::core::toString(why.code))},
+                           {"message", why.describe()}};
+    // A set a newer Katana wrote is kept as it is and every edit refused; a
+    // damaged one is replaced by the first set given (docs/terrain.md).
+    root["editable"] = why.code != ErrorCode::Unsupported;
+    return root.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
+}
 
 std::string surfaceRecord(const NamedSurface& named, const SurfaceStyleSet& styles)
 {
@@ -815,7 +857,17 @@ Status setSurfaceStyleOption(SurfaceDisplayStyle& style, std::string_view key,
 
     Status status;
     if (key == "description") {
-        next.description = std::string(value);
+        // Read as a typed text, as the annotation and sheet verbs read theirs
+        // (core::unescapeTyped): two backslashes are one. SURFACESTYLE INFO
+        // prints the description through recordValue, which doubles every
+        // backslash, so reading it plain doubled them again on each trip.
+        next.description = katana::core::unescapeTyped(value);
+        if (next.description.find_first_of("\r\n") != std::string::npos) {
+            status = makeError(ErrorCode::InvalidArgument,
+                               "description holds a line break (a backslash before an n is one; "
+                               "type two backslashes for a backslash)",
+                               "description=" + std::string(value));
+        }
     } else if (key == "triangles") {
         status = flag(next.showTriangles);
     } else if (key == "trianglecolour") {

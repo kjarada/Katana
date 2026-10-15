@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "katana/cad/terrain/surface_style.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "surface_test_support.hpp"
 
 using namespace katana::cad;
@@ -242,6 +243,111 @@ TEST(SurfaceStyleSets, AStyleThatCannotBeDrawnIsRefusedNamingTheField)
     fine.stops = {{0.0, {}}};
     fine.rangeMin = 0.0;
     EXPECT_TRUE(checkSurfaceStyle(fine).ok());
+}
+
+TEST(SurfaceStyleSets, TextThatIsNotUtf8IsRefusedAndTheMessageDoesNotCarryItsBytes)
+{
+    // Windows-1252 as katana_cli's ANSI arguments carry it: 0xB0 is the degree
+    // sign and 0xE9 e-acute. Neither is UTF-8 (a continuation byte on its own; a
+    // three-byte lead with nothing after it), and the set is written as JSON.
+    SurfaceDisplayStyle named;
+    named.name = "Pente\xB0";
+    const auto badName = checkSurfaceStyle(named);
+    ASSERT_FALSE(badName.ok());
+    EXPECT_EQ(badName.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(badName.error().context, "field=name");
+    // Not echoed: a message holding the bytes would reach the same writers.
+    EXPECT_TRUE(katana::core::isValidUtf8(badName.error().describe())) << badName.error().describe();
+
+    SurfaceDisplayStyle described;
+    described.name = "Fine";
+    described.description = "caf\xE9";
+    const auto badDescription = checkSurfaceStyle(described);
+    ASSERT_FALSE(badDescription.ok());
+    EXPECT_EQ(badDescription.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(badDescription.error().context, "field=description");
+    EXPECT_TRUE(katana::core::isValidUtf8(badDescription.error().describe()));
+
+    // The same text as UTF-8 - "Pente" + U+00B0, "caf" + U+00E9 - is fine, and so
+    // are letters from other scripts.
+    SurfaceDisplayStyle fine;
+    fine.name = "Pente\xC2\xB0 \xE6\xB5\x8B";
+    fine.description = "caf\xC3\xA9";
+    EXPECT_TRUE(checkSurfaceStyle(fine).ok());
+}
+
+TEST(SurfaceStyleSets, ADescriptionACommandLineCannotCarryIsRefused)
+{
+    // SURFACESTYLE INFO prints the description for the person to type back; the
+    // tokenizer ends a word at a quote and a line at a break.
+    const auto refusedFor = [](const std::string& description) {
+        SurfaceDisplayStyle style;
+        style.name = "Probe";
+        style.description = description;
+        const auto status = checkSurfaceStyle(style);
+        return status.ok() ? std::string("accepted") : status.error().context;
+    };
+    EXPECT_EQ(refusedFor("say \"hi\""), "field=description");
+    EXPECT_EQ(refusedFor("two\nlines"), "field=description");
+    EXPECT_EQ(refusedFor("one\rtwo"), "field=description");
+    EXPECT_EQ(refusedFor(""), "accepted");
+    EXPECT_EQ(refusedFor("C:\\dir 'quoted' = fine"), "accepted");
+}
+
+TEST(SurfaceStyleSets, TheJsonWriterNeverThrowsForASetBuiltByHandWithBadBytes)
+{
+    // The Document only holds a checked set, so this is the writer's own
+    // guarantee: nlohmann's default throws type_error.316 and the verbs, the
+    // resource and the save are not ready for an exception.
+    SurfaceStyleSet set = builtInSurfaceStyles();
+    SurfaceDisplayStyle bad;
+    bad.name = "Pente\xB0";
+    bad.description = "caf\xE9";
+    set.styles.push_back(bad);
+    std::string text;
+    EXPECT_NO_THROW(text = surfaceStylesToJson(set));
+    EXPECT_TRUE(katana::core::isValidUtf8(text));
+    // U+FFFD, EF BF BD, where the bad byte was; the letters round it stay.
+    EXPECT_NE(text.find("Pente\xEF\xBF\xBD"), std::string::npos) << text;
+    EXPECT_NE(text.find("caf\xEF\xBF\xBD"), std::string::npos) << text;
+}
+
+TEST(SurfaceStyleSets, AFormatThatIsNotAStringIsAParseFailureNotAnException)
+{
+    // value("format", "") throws type_error.302 for a number, null, an object or
+    // an array; the header promises ParseFailure for text that is not the form.
+    for (const std::string text :
+         {R"({"format":5,"version":1,"styles":[]})", R"({"format":null,"version":1,"styles":[]})",
+          R"({"format":{},"version":1,"styles":[]})", R"({"format":[],"version":1,"styles":[]})",
+          R"({"format":true,"version":1,"styles":[]})", R"({"version":1,"styles":[]})",
+          R"([])", R"(null)", R"(7)", R"("katana-surface-styles")"}) {
+        try {
+            const auto read = surfaceStylesFromJson(text);
+            ASSERT_FALSE(read.ok()) << text;
+            EXPECT_EQ(read.error().code, ErrorCode::ParseFailure) << text;
+        } catch (const std::exception& thrown) {
+            ADD_FAILURE() << text << " threw " << thrown.what();
+        }
+    }
+    // The right type with the right word still reads: the guard is not a refusal
+    // of everything.
+    EXPECT_TRUE(surfaceStylesFromJson(surfaceStylesToJson(builtInSurfaceStyles())).ok());
+}
+
+TEST(SurfaceStyleSets, TextWithABadByteInItsJsonIsAParseFailureNotAnException)
+{
+    // A project whose style text holds Windows-1252 (0xE9) is no JSON: the parser
+    // refuses the string, so the set never reaches the Document and its save.
+    const std::string bad = std::string(R"({"format":"katana-surface-styles","version":1,)"
+                                        R"("default":"A","styles":[{"name":"A","description":"caf)") +
+                            "\xE9" + R"("}]})";
+    try {
+        const auto read = surfaceStylesFromJson(bad);
+        ASSERT_FALSE(read.ok());
+        EXPECT_EQ(read.error().code, ErrorCode::ParseFailure);
+    } catch (const std::exception& thrown) {
+        ADD_FAILURE() << "threw " << thrown.what();
+    }
 }
 
 TEST(SurfaceStyleSets, ASetNeedsAStyleNoTwoOfOneNameAndADefaultAmongThem)

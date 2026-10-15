@@ -394,7 +394,14 @@ std::string leadersJson(const Document& document, const std::vector<EntityId>& o
     result["presets"] = std::move(presets);
     result["surfaces"] = context.surfaces;
     result["alignments"] = context.alignments;
-    return result.dump(2);
+    // A reply, not a stored value, so U+FFFD for a byte that is not UTF-8
+    // (docs/cad.md: a name that is not UTF-8 is written so, not thrown).
+    // nlohmann's default throws, and nothing up the call chain of a verb
+    // catches: katana_cli and the window ended on a surface name typed in the
+    // ANSI code page. The stores now refuse such a name (SurfaceStore::
+    // checkName); this keeps a name that reached the drawing another way from
+    // taking LEADER LIST down with it.
+    return result.dump(2, ' ', false, Json::error_handler_t::replace);
 }
 
 } // namespace katana::cad::annotation

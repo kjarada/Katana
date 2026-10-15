@@ -361,6 +361,37 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   must not block every later change of its surfaces; `styleOf` draws such a
   surface in the default.
 
+### Surface names
+
+One rule for a surface's name, in one place (`SurfaceStore::checkName`, which
+`add` and `rename` apply, so every verb and dialog that names a surface
+does): not empty, UTF-8 (the project and the JSON replies write it, and the
+writer throws on anything else), and no double quote or line break. A line
+names a surface in quotes and the tokenizer has no escape inside them, so a
+TIN named `PAD "A"` in a 12d archive or an IFC file could be listed and never
+removed, renamed, styled or exported by name: the Surfaces panel's own
+quoting made `SURFACE REMOVE "PAD "A""`, which reads as `PAD A` and removed
+that surface when there was one. A name that is not the person's to choose
+(an importer's) goes through `SurfaceStore::nameable` in `uniqueName`: the
+quote becomes an apostrophe, a line break a blank, and bytes that are not
+UTF-8 are read as Windows-1252; a name that is typed is refused
+(`SurfaceStore.ANameACommandLineCannotCarryIsRefusedByAddAndRename`,
+`DrawingSurfaceVerbs.AnImportedNameWithAQuoteIsMadeNameableSoTheSurfaceCanBeAddressed`).
+A surface's source and style are UTF-8 text too. A project an earlier build
+wrote that holds a name the door now refuses (ANSI bytes, a quote) still
+OPENS - refusing would lock the person out of a drawing they cannot rename
+their way out of - with the name repaired the same way, made unique, and a
+warning in the log
+(`SurfaceDocument.ASurfaceNameAnEarlierBuildStoredAsAnsiBytesOrWithAQuoteIsRepairedOnOpen`).
+
+**ALL.** `SURFACE SHOW|HIDE ALL` is a keyword, and a surface may be called
+ALL: the verb gives a surface's own name the first claim, so `SURFACE HIDE
+"ALL"` - the line the panel sends for that row's check box - hides that
+surface alone (`DrawingSurfaceVerbs.HideOfASurfaceNamedAllHidesOnlyThatSurface`,
+`SurfacesPanelWidget.UntickingASurfaceCalledAllHidesThatSurfaceAlone`). To
+reach every surface of a drawing that has one called ALL, list the names.
+*Rejected:* refusing ALL as a name - an import takes its names from the file.
+
 ### Saved with the project
 
 Storage schema 13 (`docs/model.md`) adds a `surfaces` table of OPAQUE
@@ -377,9 +408,17 @@ save and reads at an open.
   about 20 MB. A negative zero stays negative and a breakline stays a
   breakline (`TinCodec.ASurfaceComesBackBitForBitWithItsConstrainedEdges`).
   The adjacency is not stored: `TinSurface::create` derives it, and is what
-  checks the bytes on the way in, so a damaged record is refused with a
-  sentence (`TinCodec.DamagedBytesAreRefusedNotRead`) and a newer version
-  with Unsupported (`TinCodec.ANewerVersionIsRefusedAsUnsupported`).
+  checks the STRUCTURE of the bytes on the way in - counts, indices in range,
+  orientation, edge sharing, finite coordinates - so a record damaged in that
+  way is refused with a sentence (`TinCodec.DamagedBytesAreRefusedNotRead`)
+  and a newer version with Unsupported
+  (`TinCodec.ANewerVersionIsRefusedAsUnsupported`). A coordinate changed to
+  another FINITE value is not detected: the record has no checksum, and nor
+  has any other table of a project, so one flipped exponent bit in a height
+  reads back as a surface of a wrong height and a wrong volume with no
+  warning. (This text, and the codec's header, once promised "never a surface
+  that answers wrongly"; the review of 2026-10-15 flipped a bit and showed it
+  false.) "Not done" has the checksum that would close it.
   *Rejected:* a text form (the size, and the doubles' exactness), and storing
   the adjacency (derivable, and it would have to be checked anyway).
 - **A surface that cannot be read refuses the open.** Dropping it would open
@@ -424,7 +463,55 @@ arrangement, so they need no schema change.
   `surfaceStylesStatus` says why, and every change of the styles is refused
   (CommandRejected) rather than overwrite them
   (`SurfaceDocument.StylesANewerKatanaWroteAreKeptAndNotOverwritten`). A
-  damaged set is replaced by the first set given.
+  damaged set is replaced by the first set given - and a SURFACESTYLE SET that
+  changes no field of its style says `changed=yes replaced=unreadable-styles`,
+  since a step was recorded and the kept text is gone
+  (`DrawingSurfaceVerbs.ASetThatChangesNoFieldOnUnreadableStylesSaysItReplacedThem`).
+  Text that is not the form at all - a `format` that is a number or null, not
+  the word - is the same ParseFailure, not an exception out of the open
+  (`SurfaceStyleSets.AFormatThatIsNotAStringIsAParseFailureNotAnException`,
+  `SurfaceDocument.AStyleSetWhoseFormatIsNotAStringLeavesTheBuiltInsInPlaceAndTheTextKept`).
+- **Stand-ins are said in the JSON too.** `SURFACESTYLE LIST JSON` and the
+  `katana://surface-styles` resource (`cad::surfaceStylesReport`) add
+  `"standing_in": {"code", "message"}` and `"editable"` (false for a newer
+  Katana's set, which every edit refuses) when the built-ins only stand in
+  for a set that could not be read; the plain LIST already said so in a
+  `warning` record. Not `surfaceStylesToJson` itself, which is the form a save
+  writes
+  (`DrawingSurfaceVerbs.TheJsonOfStylesThatOnlyStandInSaysSoAndAHealthySetDoesNot`).
+- **Text is UTF-8, and refused where it enters.** The set is written as JSON,
+  whose writer throws on a byte that is not UTF-8, and a style's name and
+  description are typed at katana_cli, which on Windows used to hand the verbs
+  the ANSI code page. `checkSurfaceStyle` is the one door: a name or
+  description that is not UTF-8 is InvalidArgument, with a message that does
+  not carry the bytes, so every route to a style - SURFACESTYLE NEW, SET and
+  RENAME, the style manager, a project's own JSON - ends in it. A
+  description may not hold a double quote or a line break either, for the
+  reason a name may not: a line cannot carry them. `surfaceStylesToJson` still
+  never throws (nlohmann's `replace` handler: U+FFFD for a byte that got past
+  the door, since it also answers `SURFACESTYLE LIST JSON`), and what a save
+  writes is guarded apart - `Document::writeSurfaceState` re-checks the set
+  and refuses the save, naming the style, rather than write a U+FFFD into the
+  project (`SurfaceDocument.AStyleSetWhoseTextIsNotUtf8IsRefusedSoASaveNeverMeetsIt`,
+  `SurfaceStyleSets.TextThatIsNotUtf8IsRefusedAndTheMessageDoesNotCarryItsBytes`,
+  `DrawingSurfaceVerbs.NamesAndDescriptionsTypedInTheAnsiCodePageAreRefusedAndNothingChanges`).
+  *Rejected:* `Result<std::string>` from `surfaceStylesToJson`: the Document
+  never holds a set the door refused, so the failure it would return cannot
+  occur, and every reply that calls it would have to handle an error that
+  cannot. The rule for every text a front end hands the model, and why
+  katana_cli now converts what reaches it, is `docs/headless.md`, "Text and
+  names".
+- **A description is a typed text.** `description=` is read as the annotation
+  and sheet verbs read theirs (`core::unescapeTyped`): two backslashes are one
+  and a backslash before an n is a line break, which a description may not hold
+  (the refusal says to type two backslashes). SURFACESTYLE INFO writes the
+  description through `recordValue`, which doubles each backslash; read plain
+  it doubled them again on every trip, now the options record typed back gives
+  the same description for any text a description may hold
+  (`DrawingSurfaceVerbs.ADescriptionsBackslashesSurviveWhatInfoPrintsTypedBack`).
+  The style manager doubles each backslash it writes. *Rejected:* making the
+  tokenizer read backslash escapes; it is every verb's, and a path is far
+  commoner on a line than a description with a backslash.
 - **Checked whole.** `checkSurfaceStyleSet`: every style drawable
   (`checkSurfaceStyle` names the field), no two of one name without case, a
   default among them. A style a surface is drawn in, and the default, are
@@ -471,7 +558,19 @@ drawing again on the event loop, never inside the document's notification
 signal"): the change may come from its own check box or combo
 (`qt_widgets.SurfacesPanelWidget.AChangeMadeElsewhereIsShownOnTheEventLoopNotInsideTheNotification`).
 The window's scene list is the one thing rebuilt inside the notification,
-for the pointer reason above; it rebuilds no widget. The name is the first
+for the pointer reason above; it builds no widget, and it opens a 3D view and
+frames it only for a surface that is NEW to the scene - neither its TIN nor
+its name was in the list. An edit, its undo and its redo put a new TIN under
+the same name and are not that: counting them so opened a 3D view in the
+middle of a tool, raised it over the plan view the tool was clicking in and
+re-framed the camera the person had set, every click
+(`qt_editing_a_surface_and_undoing_it_open_no_3d_view_headless`). The panel
+writes a name into a line by the window's one rule (`command_word.hpp`): a
+double quote or a line break sends no line and is said in the panel
+(`SurfacesPanelWidget.ANameALineCannotCarryIsRefusedInThePanelAndNoLineIsSent`),
+and View > Panels > Surfaces raises the dock to the front of its tab group as
+Terrain > Surfaces Panel does
+(`SurfacesPanelWidget.ViewPanelsSurfacesBringsThePanelToTheFrontOfItsTabGroup`). The name is the first
 column, holding the check box: a headless `--fill` picks a row by the first
 column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
 
@@ -487,6 +586,13 @@ column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
   but an import of a very large archive could make one.
 - **The panel's Remove asks nothing.** Removing is one undo step, so it is
   not confirmed, as deleting an entity is not.
+- **A stored TIN has no checksum**, so a coordinate damaged to another finite
+  value reads back as a surface that answers a wrong height, area and volume
+  (above, "Exact"). A version 2 record with a CRC-32 of the body, read beside
+  version 1, would catch it; it was not done because a project written with it
+  cannot be read by a build before it, and that is the owner's decision (the
+  alternative, an integrity pass at the open, would read tens of megabytes
+  for a check no other table has).
 
 ## Surfaces on every front end
 

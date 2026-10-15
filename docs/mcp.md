@@ -71,7 +71,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | Tool | What it does | Runs |
 |---|---|---|
 | `katana_run_commands` | a list of commands, in order; stops at the first failure unless `stop_on_error` is false | each line |
-| `katana_run_script` | a `.kcs` script file, as `katana_cli script.kcs` runs it | each line of the file |
+| `katana_run_script` | a `.kcs` script file, as `katana_cli script.kcs` runs it: the path is UTF-8 from the JSON, and the file is decoded as a text file is (a byte order mark, UTF-16 or Windows-1252 read as the text they are; `docs/headless.md`, "Text and names") | each line of the file |
 | `katana_help` | the command reference | `HELP` and the session's own verbs |
 | `katana_status` | project, unsaved changes, entity, layer and alignment counts, current layer and style, selection, undo depth | nothing: read from the Document by `cad::documentStatus`, as `STATUS` and `STATUS JSON` read it |
 | `katana_new_project` | a new, empty drawing | `NEW` |
@@ -238,7 +238,11 @@ drawing's surface display styles (`katana://surface-styles`) are the fourth:
 `SURFACESTYLE LIST JSON`, read from the Document as the customisation is, so
 reading them leaves no line in the session's history - every style, what it
 shows in plan and in 3D, its colours, contours, ramp, bands and stops, and
-which is the default (`docs/terrain.md`, "Surfaces in the drawing"); an agent
+which is the default (`docs/terrain.md`, "Surfaces in the drawing"). When the
+project's own styles could not be read - a newer Katana wrote them, or they
+are damaged - the built-ins only stand in, and the resource says so with
+`"standing_in": {"code", "message"}` and `"editable"` (`cad::surfaceStylesReport`,
+as `SURFACESTYLE LIST JSON` does); an agent
 changes them with SURFACESTYLE lines through `katana_run_commands`
 (`McpServer.TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem`). With
 the GIS module, `katana://formats` is the fifth: `FORMATS JSON`, every format

@@ -1737,14 +1737,6 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   `src/katana_qt/gis_online.cpp`, which on Windows cannot name a file outside
   the ANSI code page. (`KATANA_CUSTOMISATION` is read through
   `core::environmentVariable` by the window as by the session.)
-- **A file named on the command line still arrives through the code page.**
-  The arguments of `katana_cli` and `katana_mcp` are the narrow `argv`
-  (`src/katana_app/main.cpp`, `src/katana_app/mcp_main.cpp`), which on Windows
-  is the ANSI code page's: `katana_cli -c "CUSTOMISE <file>"` with a file under
-  a folder named outside the code page is refused as not found, its name
-  shown with `?` (tried 2026-10-07). The same line in a script saved as
-  UTF-8, or sent over MCP, names the file and loads it. Reading the arguments
-  wide is a change to both programs' start and was left for its own task.
 - **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
   writes it under one, and loading that file with `REPLACE` gives the session
   the name; `KEEP` refuses it until then, and says so.

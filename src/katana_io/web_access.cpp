@@ -313,13 +313,20 @@ katana::core::Error explainHttpFailure(const HttpFailure& failure, std::string c
     }
     // libcurl reads the certificates it checks https:// against from
     // etc/ssl/certs/ca-bundle.crt beside its own bin folder (the deploy puts
-    // it there, cmake/KatanaDeploy.cmake.in). When that file is missing every
-    // https:// request fails here, before reaching any server.
+    // it there, cmake/KatanaDeploy.cmake.in; gdal_adapter.cpp points libcurl at
+    // it by its real path on Windows too). When that file cannot be read every
+    // https:// request fails here, before reaching any server. The message says
+    // WHICH file libcurl was given - its own text names the path, and a path
+    // mangled by a code page shows as such - and does not send the person to
+    // reinstall as if that were the only cause: for an install under a folder
+    // named outside the ANSI code page it once was no cure at all.
     if (curlCode == 77 /* CURLE_SSL_CACERT_BADFILE */ || says(error, "trust anchors")) {
         return makeError(ErrorCode::FileImportFailure,
-                         "the certificates https:// is checked against could not be read "
-                         "(etc/ssl/certs/ca-bundle.crt beside Katana's bin folder); reinstall "
-                         "or rebuild Katana",
+                         "the certificates https:// is checked against could not be read (" +
+                             error +
+                             "); Katana keeps them in etc/ssl/certs/ca-bundle.crt beside its bin "
+                             "folder - put that file back, or name another certificate file in "
+                             "CURL_CA_BUNDLE",
                          std::move(context));
     }
     if (curlCode == 60 /* CURLE_PEER_FAILED_VERIFICATION */) {

@@ -9,8 +9,10 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDockWidget>
+#include <QLabel>
 #include <QMainWindow>
 #include <QMenu>
+#include <QTabBar>
 #include <QTableWidget>
 #include <QToolButton>
 
@@ -248,4 +250,79 @@ TEST(SurfacesPanelWidget, ItsDockIsReachedFromViewPanelsAndTheTerrainMenu)
     EXPECT_LT(at, items.indexOf(after));
     ui.terrainItem->trigger();
     EXPECT_FALSE(ui.dock->isHidden());
+}
+
+TEST(SurfacesPanelWidget, UntickingASurfaceCalledAllHidesThatSurfaceAlone)
+{
+    // The panel quotes the name, the tokenizer drops the quotes, and ALL used to be
+    // read as the keyword: one click on one box hid every surface.
+    Rig rig;
+    katana::terrain::SurfaceStore store = rig.document.surfaces();
+    ASSERT_TRUE(store.add({"ALL", square(98.0), "copy of ground"}).ok());
+    ASSERT_TRUE(rig.document.setSurfaces(std::move(store), "SURFACE COPY").ok());
+    Rig::settle();
+    QTableWidget* table = rig.table();
+    int row = -1;
+    for (int i = 0; i < table->rowCount(); ++i) {
+        if (table->item(i, SurfacesPanel::Name)->text() == "ALL") {
+            row = i;
+        }
+    }
+    ASSERT_GE(row, 0);
+    table->item(row, SurfacesPanel::Name)->setCheckState(Qt::Unchecked);
+    EXPECT_EQ(rig.lines.back(), "SURFACE HIDE \"ALL\"");
+    EXPECT_FALSE(rig.document.surfaces().find("ALL")->visible);
+    EXPECT_TRUE(rig.document.surfaces().find("ground")->visible);
+    EXPECT_TRUE(rig.document.surfaces().find("design")->visible);
+}
+
+TEST(SurfacesPanelWidget, ANameALineCannotCarryIsRefusedInThePanelAndNoLineIsSent)
+{
+    // A quote wrapped in quotes is a line that names something else: it ended the
+    // word early, and a Remove of PAD "A" could remove PAD A.
+    Rig rig;
+    const std::size_t steps = rig.document.history().undoCount();
+    rig.table()->item(1, SurfacesPanel::Name)->setText("design \"pad\"");
+    EXPECT_TRUE(rig.lines.isEmpty()) << "no line was sent: " << rig.lines.join("|").toStdString();
+    EXPECT_NE(rig.panel->lastReply().indexOf("double quote"), -1)
+        << rig.panel->lastReply().toStdString();
+    EXPECT_EQ(rig.document.history().undoCount(), steps);
+    EXPECT_NE(rig.document.surfaces().find("design"), nullptr);
+    Rig::settle();
+    EXPECT_EQ(rig.table()->item(1, SurfacesPanel::Name)->text(), "design")
+        << "the row shows the drawing's name again";
+}
+
+TEST(SurfacesPanelWidget, ViewPanelsSurfacesBringsThePanelToTheFrontOfItsTabGroup)
+{
+    // Qt's own toggle shows a dock; for a page of a tab group that leaves Reference
+    // Data in front with a Surfaces tab behind it. Terrain > Surfaces Panel raised.
+    QMainWindow window;
+    auto* beside = new QDockWidget("Reference Data", &window);
+    beside->setObjectName("ReferenceDock");
+    beside->setWidget(new QLabel("reference", beside));
+    window.addDockWidget(Qt::LeftDockWidgetArea, beside);
+    Document document;
+    QMenu panels("Panels");
+    const katana::qt::SurfacesPanelUi ui = katana::qt::installSurfacesPanel(
+        window, document, SurfacesPanel::Services{}, &panels, nullptr, beside);
+    window.show();
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(ui.dock->isHidden());
+
+    ui.toggle->trigger();
+    QCoreApplication::processEvents();
+    ASSERT_FALSE(ui.dock->isHidden());
+    QTabBar* group = nullptr;
+    int index = -1;
+    for (QTabBar* bar : window.findChildren<QTabBar*>()) {
+        for (int i = 0; i < bar->count(); ++i) {
+            if (bar->tabText(i) == "Surfaces") {
+                group = bar;
+                index = i;
+            }
+        }
+    }
+    ASSERT_NE(group, nullptr) << "the two docks share a tab group";
+    EXPECT_EQ(group->currentIndex(), index) << "Surfaces is in front, not a tab behind";
 }
