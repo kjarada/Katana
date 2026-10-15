@@ -435,7 +435,14 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             // where an edge of the surface crosses it: the ends of the
             // pieces the profiler gives, which are exact.
             const SegmentProfiler profiler(surface);
-            std::optional<double> lowest;
+            // A flag and a number, not an optional edited by a lambda: GCC at
+            // -O3 has raised -Wmaybe-uninitialized on that.
+            bool found = false;
+            double lowest = 0.0;
+            const auto lower = [&](double z) {
+                lowest = found ? std::min(lowest, z) : z;
+                found = true;
+            };
             // The edge of a hole is a boundary of the pile as the outer ring is.
             const auto along = [&](const Polyline2& edge) {
                 const std::size_t count = edge.vertices.size();
@@ -443,11 +450,10 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
                     const Point2& from = edge.vertices[v];
                     const Point2& to = edge.vertices[(v + 1) % count];
                     for (const SegmentPiece& piece : profiler.along(from, to)) {
-                        const double low = std::min(piece.z0, piece.z1);
-                        lowest = lowest ? std::min(*lowest, low) : low;
+                        lower(std::min(piece.z0, piece.z1));
                     }
                     if (const auto at = surface.elevationAt(from)) {
-                        lowest = lowest ? std::min(*lowest, *at) : *at;
+                        lower(*at);
                     }
                 }
             };
@@ -455,12 +461,12 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             for (const Polyline2& hole : options.holes) {
                 along(hole);
             }
-            if (!lowest) {
+            if (!found) {
                 return makeError(ErrorCode::InvalidGeometry,
                                  "the boundary does not cross the surface anywhere, so it has no "
                                  "lowest point on it");
             }
-            level = *lowest;
+            level = lowest;
         }
         result.level = level;
         auto flat = region->atLevel(level);

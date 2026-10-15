@@ -626,26 +626,32 @@ std::optional<SideBySide> firstSideBySide(const std::vector<SectionEnds>& ends, 
     workers.parallelRanges(0, panels, 16, scan);
 
     // Combined in station order, so the stretches named are the same at any
-    // thread count.
-    std::optional<SideBySide> result;
+    // thread count. A flag and a plain struct, not an optional edited in place:
+    // GCC at -O3 has raised -Wmaybe-uninitialized on that.
+    SideBySide found;
+    bool any = false;
     for (std::size_t p = 0; p < panels; ++p) {
         if (slots[p].pairs == 0) {
             continue;
         }
-        if (!result) {
-            result = SideBySide{p, p, slots[p].first, slots[p].last, slots[p].pairs};
+        if (!any) {
+            found = SideBySide{p, p, slots[p].first, slots[p].last, slots[p].pairs};
+            any = true;
             continue;
         }
-        result->pairs += slots[p].pairs;
-        if (p == result->last + 1) {
+        found.pairs += slots[p].pairs;
+        if (p == found.last + 1) {
             // The run goes on only while the panels are consecutive; once a
             // panel is missed no later one is next after `last`.
-            result->last = p;
-            result->partnerFirst = std::min(result->partnerFirst, slots[p].first);
-            result->partnerLast = std::max(result->partnerLast, slots[p].last);
+            found.last = p;
+            found.partnerFirst = std::min(found.partnerFirst, slots[p].first);
+            found.partnerLast = std::max(found.partnerLast, slots[p].last);
         }
     }
-    return result;
+    if (!any) {
+        return std::nullopt;
+    }
+    return found;
 }
 
 } // namespace
