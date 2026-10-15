@@ -1441,7 +1441,8 @@ not exist in it, and with the plain note "Katana X.Y.Z".
 * **Nothing says when a pinned action has a newer version.** An action
   stays at its commit until it is moved by hand ("The actions the workflow
   runs"), and the repository has no `.github/dependabot.yml`, which would
-  propose each move as a pull request.
+  propose each move as a pull request. Not added: it makes the repository
+  open pull requests on its own, which is the owner's to decide.
 * **`main` itself is not guarded.** The environment `release` takes runs
   of `main` only ("Update signing", step 3), and that is worth what
   decides what gets into `main`. On 2026-10-14 the right to push was all
@@ -1502,7 +1503,15 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   fails) and never skips it, but by then it has already replaced other files;
   the uninstaller leaves such a file behind and still removes its entry in
   **Settings > Apps**. Close Katana first.
-* **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball.
+* **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball, and so
+  makes no menu entry: a `.desktop` file names the program by an absolute path
+  (`Exec=`), which is wherever the person unpacked the tarball and which no file
+  inside it can know. Decided against for now: a script in the tarball that
+  writes the entry, because nothing of Linux packaging has been run on Linux
+  here (not even the desktop file's own validator), and a program that writes
+  into the person's home on its own. The project's front page gives the seven
+  lines to write by hand, in its install reference for Linux; an AppImage or a
+  `.deb` would carry the entry. macOS needs none: Launchpad finds `Katana.app`.
 * **The Windows toolchain is not frozen.** MSYS2 installs what it has on the
   day; two runs a month apart may build with different GCC and Qt versions.
   An update between two such releases therefore fetches the libraries that
