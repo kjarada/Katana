@@ -29,6 +29,7 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include "customisation/document_watcher.hpp"
 #include "geo/geo_dialog_support.hpp"
 #include "icons.hpp"
 #include "katana/core/text.hpp"
@@ -581,7 +582,17 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
 
     resize(760, 860);
     reload();
+    if (context_.document != nullptr) {
+        watcher_ = std::make_unique<DocumentWatcher>(*context_.document,
+                                                     [this](const DocumentChanges& changes) {
+                                                         if (changes.model) {
+                                                             reload();
+                                                         }
+                                                     });
+    }
 }
+
+VolumesDialog::~VolumesDialog() = default;
 
 void VolumesDialog::reload()
 {

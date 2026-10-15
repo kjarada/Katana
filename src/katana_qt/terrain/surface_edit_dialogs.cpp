@@ -17,6 +17,7 @@
 
 #include <utility>
 
+#include "customisation/document_watcher.hpp"
 #include "geo/terrain_dialog_support.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
@@ -380,6 +381,18 @@ SurfaceLevelsDialog::SurfaceLevelsDialog(SurfaceLevelsKind kind, SurfaceEditDial
     connect(run, &QPushButton::clicked, this, [this] { runLine(false); });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     reload();
+    if (context_.document != nullptr) {
+        // The dialog is non-modal and kept, so the drawing changes under it: an
+        // undo that removes the surface it offers, a typed SURFACE line, New,
+        // Open. A DocumentWatcher says so from the event loop, and the lists
+        // are read again with what is chosen kept where it is still there.
+        watcher_ = std::make_unique<DocumentWatcher>(*context_.document,
+                                                     [this](const DocumentChanges& changes) {
+                                                         if (changes.model) {
+                                                             reload();
+                                                         }
+                                                     });
+    }
 }
 
 SurfaceLevelsDialog::~SurfaceLevelsDialog() = default;
@@ -564,6 +577,15 @@ SurfaceCombineDialog::SurfaceCombineDialog(SurfaceEditDialogContext context, QWi
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     setMode(SurfaceCombineMode::Merge);
     reload();
+    if (context_.document != nullptr) {
+        // As SurfaceLevelsDialog's: the lists follow the drawing.
+        watcher_ = std::make_unique<DocumentWatcher>(*context_.document,
+                                                     [this](const DocumentChanges& changes) {
+                                                         if (changes.model) {
+                                                             reload();
+                                                         }
+                                                     });
+    }
 }
 
 SurfaceCombineDialog::~SurfaceCombineDialog() = default;

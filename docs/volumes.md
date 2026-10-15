@@ -469,7 +469,12 @@ names none), with `preview=yes` appended under PREVIEW
 ## In the window
 
 Terrain > Volumes (`terrainVolumes`, a Terrain toolbar button, the painted
-`Volumes` icon) opens `volumesDialog`, kept between uses: a page per method,
+`Volumes` icon) opens `volumesDialog`, kept between uses and following the
+drawing while it is open (a `DocumentWatcher` reads the surfaces, alignments
+and layers again from the event loop on every execute, undo, redo, New and
+Open, keeping what is chosen where it is still there - an UNDO of the map the
+dialog made no longer leaves it offered, nor a Measure refused NotFound on it
+(`VolumesDialog.TheListsFollowTheDrawingWhileTheDialogStaysOpen`)): a page per method,
 the boundary - Everywhere, the polygons the shared "Apply to" and "Only
 those that match" controls take (`ScopeFilterWidget`, prefix `volumes`), or
 typed corners - with EACH, the bulk and shrink factors, and the line the

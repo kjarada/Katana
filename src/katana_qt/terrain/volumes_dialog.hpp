@@ -35,6 +35,7 @@
 // volumesReply; volumesClose.
 
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -63,6 +64,8 @@ class QTableWidget;
 
 namespace katana::qt {
 
+class DocumentWatcher;
+
 // What the dialog needs of whoever shows it. The window's comes from
 // MainWindow; a test gives its own runner, which is how the dialog is tested
 // without a window.
@@ -70,8 +73,10 @@ struct VolumesDialogContext {
     // The window's one executor.
     CommandRunner run;
     // The drawing: its surfaces, alignments and layers, read when the dialog
-    // is reloaded. Null in a test that needs none (the lists are then empty).
-    const katana::cad::Document* document = nullptr;
+    // is reloaded, and watched, so they follow an undo, a typed line, New and
+    // Open while the dialog stays open. Null in a test that needs none (the
+    // lists are then empty).
+    katana::cad::Document* document = nullptr;
     // The workspace's open views, for the boundary's View scope.
     std::function<std::vector<ScopeFilterView>()> views{};
     // A headless session opens no file dialog: Browse says to fill the field.
@@ -110,10 +115,13 @@ enum class VolumeMethod { Surfaces, Level, Stockpile, Sections, Grid };
 class VolumesDialog final : public QDialog {
   public:
     explicit VolumesDialog(VolumesDialogContext context, QWidget* parent = nullptr);
+    ~VolumesDialog() override; // out of line: the watcher's type is incomplete here
 
     // The surfaces, alignments, layers and views read again, keeping what is
-    // chosen where it is still there: when the dialog is shown, and after a
-    // cut/fill map is made.
+    // chosen where it is still there: when the dialog is shown, after a
+    // cut/fill map or an envelope is made, and whenever the drawing changes
+    // (a DocumentWatcher, from the event loop: an undo that removes a surface
+    // the dialog offers, a typed SURFACE line, New, Open).
     void reload();
 
     void setMethod(VolumeMethod method);
@@ -212,6 +220,9 @@ class VolumesDialog final : public QDialog {
     QLabel* status_ = nullptr;
     QPlainTextEdit* reply_ = nullptr;
     VolumeResultTable table_;
+    // Last, so it is destroyed first and no change can arrive at a dialog
+    // that is half gone.
+    std::unique_ptr<DocumentWatcher> watcher_;
 };
 
 // Terrain > Volumes: the dialog, a child of `window` named volumesDialog (how

@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -306,6 +307,50 @@ TEST(VolumesDialog, MakeEnvelopeWithNoSurfaceOrARefusedNameSaysWhyAndChangesNoth
     ASSERT_EQ(runner.lines.size(), 1);
     EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("already has"));
     EXPECT_EQ(document.surfaces().all().size(), 2u);
+}
+
+TEST(VolumesDialog, TheListsFollowTheDrawingWhileTheDialogStaysOpen)
+{
+    // The dialog is non-modal and kept. A surface made by a typed line, or one
+    // an UNDO removes, used to be missed until the dialog was shown again: the
+    // line it built named a surface the drawing no longer had (NotFound), and
+    // one made meanwhile could not be chosen. Its own status said "UNDO removes
+    // it" and the removed map was still offered.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    auto* base = child<QComboBox>(dialog, "volumesBase");
+    auto* top = child<QComboBox>(dialog, "volumesTop");
+    auto* alignment = child<QComboBox>(dialog, "volumesAlignment");
+    auto* command = child<QLineEdit>(dialog, "volumesCommand");
+    EXPECT_EQ(command->text(), "VOLUME SURFACES ground design");
+    EXPECT_EQ(alignment->count(), 1);
+
+    // A surface made by a typed line is offered after a turn of the event loop.
+    ASSERT_TRUE(interpreter.run("SURFACE DIFFERENCE ground design NAME raised").ok());
+    QCoreApplication::processEvents();
+    EXPECT_GE(top->findText("raised"), 0);
+    EXPECT_GE(base->findText("raised"), 0);
+    top->setCurrentIndex(top->findText("raised"));
+    EXPECT_EQ(command->text(), "VOLUME SURFACES ground raised");
+
+    // UNDO removes it: not offered, and the line no longer names it.
+    ASSERT_TRUE(document.undo().ok());
+    QCoreApplication::processEvents();
+    EXPECT_LT(top->findText("raised"), 0);
+    EXPECT_FALSE(command->text().contains("raised"));
+
+    // The alignment, and the surface the page had chosen, go the same way.
+    ASSERT_TRUE(document.undo().ok()); // ALIGN NEW cl
+    QCoreApplication::processEvents();
+    EXPECT_EQ(alignment->count(), 0);
+    ASSERT_TRUE(document.undo().ok()); // the design
+    QCoreApplication::processEvents();
+    EXPECT_LT(top->findText("design"), 0);
+    EXPECT_FALSE(command->text().contains("design"));
+    EXPECT_TRUE(runner.lines.isEmpty()); // following the drawing runs nothing
 }
 
 TEST(VolumesDialog, SaveCsvRunsTheSameLineWritingTheFileItNames)

@@ -46,6 +46,7 @@
 #include <QStringList>
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "command_runner.hpp"
@@ -67,6 +68,8 @@ class Document;
 }
 
 namespace katana::qt {
+
+class DocumentWatcher;
 
 // What the dialogs ask of whoever shows them; the window supplies these, a
 // test its own.
@@ -168,6 +171,9 @@ class SurfaceLevelsDialog final : public QDialog {
     QPushButton* preview_ = nullptr;
     QPushButton* run_ = nullptr;
     QPlainTextEdit* reply_ = nullptr;
+    // Last, so it is destroyed first: it reloads the lists when the drawing
+    // changes under the dialog (an undo, a typed SURFACE line, New, Open).
+    std::unique_ptr<DocumentWatcher> watcher_;
 };
 
 class SurfaceCombineDialog final : public QDialog {
@@ -202,6 +208,7 @@ class SurfaceCombineDialog final : public QDialog {
     QPushButton* preview_ = nullptr;
     QPushButton* run_ = nullptr;
     QPlainTextEdit* reply_ = nullptr;
+    std::unique_ptr<DocumentWatcher> watcher_; // last: see SurfaceLevelsDialog
 };
 
 } // namespace katana::qt
