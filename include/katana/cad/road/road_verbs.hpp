@@ -35,7 +35,9 @@
 // The corridor verbs act on named definitions, not on drawing entities, so
 // they take no scope (CLAUDE.md 1.1): what a corridor is made from is named
 // in it. What they make that IS drawing data - STRINGS - goes on a layer of
-// its own and replaces only the strings the same corridor made before.
+// its own and replaces only the strings the same corridor made before, found
+// by the corridor's name ignoring case; RENAME carries them to the new name in
+// its own step, and DELETE leaves them in the drawing.
 
 #include <string>
 #include <string_view>

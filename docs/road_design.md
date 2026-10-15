@@ -443,7 +443,13 @@ corridor uses is not deleted from under it.
 **STRINGS** draws each code's points along the corridor as a 3D polyline
 (`entity::setHeights`) on `road/strings`, marked `road.corridor` and
 `road.string`, replacing in the same step the strings that corridor made
-before and nothing else. **SURFACE** puts the finished surface and the
+before and nothing else - found by its name read ignoring case, as corridors
+are found. `CORRIDOR RENAME` retags the strings with the new name in its own
+undo step (`strings=<n>` in the reply), or the next STRINGS would leave them
+beside a second set and a corridor later given the old name would delete
+them. `CORRIDOR DELETE` leaves its strings in the drawing: they are
+entities a person may have kept; a corridor later made with the same name
+replaces them on its next STRINGS. **SURFACE** puts the finished surface and the
 formation into the drawing's surfaces (`Document::setSurfaces`), as `<c>
 finished` and `<c> subgrade` unless named, replacing surfaces of those names
 in place: every section's points (the reply's `sections=` counts them, both of

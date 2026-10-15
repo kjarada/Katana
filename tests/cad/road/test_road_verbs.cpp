@@ -484,6 +484,65 @@ TEST(RoadVerbs, StringsAreThreeDimensionalPolylinesThatARerunReplaces)
     EXPECT_EQ(session.document.model().entities.size(), 3u);
 }
 
+TEST(RoadVerbs, ARenamedCorridorKeepsItsStringsAndItsNextStringsReplacesThemWhateverTheCase)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE NEW lanes");
+    session.ok("ROADTEMPLATE ADD lanes both lane width=3.5 crossfall=-3");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE lanes");
+    const auto tagged = [&](const std::string& name) {
+        std::size_t count = 0;
+        session.document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+            const auto found = entity.properties.find("road.corridor");
+            if (found != entity.properties.end() &&
+                std::get<std::string>(found->second) == name) {
+                ++count;
+            }
+        });
+        return count;
+    };
+    EXPECT_TRUE(contains(session.ok("CORRIDOR STRINGS Main"), "strings created=3 replaced=0"));
+    ASSERT_EQ(tagged("Main"), 3u);
+
+    // Renaming carries the strings with it, in the same undo step.
+    const std::size_t before = session.steps();
+    const std::string renamed = session.ok("CORRIDOR RENAME Main Road1");
+    EXPECT_TRUE(contains(renamed, "corridor renamed from=Main to=Road1 strings=3")) << renamed;
+    EXPECT_EQ(session.steps(), before + 1);
+    EXPECT_EQ(tagged("Main"), 0u);
+    EXPECT_EQ(tagged("Road1"), 3u);
+    // One undo takes the name and the tags back together.
+    session.ok("UNDO");
+    EXPECT_EQ(tagged("Main"), 3u);
+    EXPECT_EQ(tagged("Road1"), 0u);
+    EXPECT_NE(session.document.corridors().find("Main"), nullptr);
+    EXPECT_EQ(session.document.corridors().find("Road1"), nullptr);
+    session.ok("CORRIDOR RENAME Main Road1");
+    EXPECT_EQ(tagged("Road1"), 3u);
+    // So the next STRINGS replaces them: it does not add a second set.
+    const std::string again = session.ok("CORRIDOR STRINGS Road1");
+    EXPECT_TRUE(contains(again, "strings created=3 replaced=3")) << again;
+    EXPECT_EQ(session.document.model().entities.size(), 3u);
+
+    // A case-only rename the same; and the name read ignoring case, as
+    // corridors are found.
+    session.ok("CORRIDOR RENAME Road1 ROAD1");
+    EXPECT_EQ(tagged("ROAD1"), 3u);
+    EXPECT_TRUE(contains(session.ok("CORRIDOR STRINGS road1"), "created=3 replaced=3"));
+    EXPECT_EQ(session.document.model().entities.size(), 3u);
+
+    // A corridor later given the old name, on another alignment, does not take
+    // them over: its first STRINGS replaces nothing and the renamed corridor's
+    // are still there.
+    session.ok("ALIGN NEW other 0,200 60,200");
+    session.ok("ALIGN DESIGN other 0,12 60,12");
+    session.ok("CORRIDOR NEW Main ALIGNMENT other TEMPLATE lanes");
+    EXPECT_TRUE(contains(session.ok("CORRIDOR STRINGS Main"), "created=3 replaced=0"));
+    EXPECT_EQ(session.document.model().entities.size(), 6u);
+    EXPECT_EQ(tagged("ROAD1"), 3u);
+}
+
 TEST(RoadVerbs, TheFinishedAndSubgradeSurfacesGoIntoTheDrawingAsOneStep)
 {
     Session session;

@@ -1072,6 +1072,24 @@ Result<double> stationWord(const std::string& word, const char* what)
     return *value;
 }
 
+// The strings in the drawing that CORRIDOR STRINGS made for `corridor`: the
+// entities marked with both properties, the corridor's name read as corridors
+// are found, ignoring case.
+std::vector<katana::entity::EntityId> stringsMadeFor(const Document& document,
+                                                     std::string_view corridor)
+{
+    std::vector<katana::entity::EntityId> ids;
+    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+        const auto found = entity.properties.find(kCorridorProperty);
+        if (found != entity.properties.end() && entity.properties.contains(kStringProperty) &&
+            std::holds_alternative<std::string>(found->second) &&
+            is(std::get<std::string>(found->second), corridor)) {
+            ids.push_back(entity.id);
+        }
+    });
+    return ids;
+}
+
 std::string quantityValue(const bim::BimObject& object, std::string_view name)
 {
     for (const bim::Quantity& quantity : object.quantities) {
@@ -1224,15 +1242,7 @@ Result<std::string> stringsVerb(Document& document, const Corridor& corridor, co
             "corridor " + corridor.name + " has no sections to string" +
                 (built.problems.empty() ? std::string() : ": " + built.problems.front()));
     }
-    std::vector<katana::entity::EntityId> previous;
-    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
-        const auto found = entity.properties.find(kCorridorProperty);
-        if (found != entity.properties.end() && entity.properties.contains(kStringProperty) &&
-            std::holds_alternative<std::string>(found->second) &&
-            std::get<std::string>(found->second) == corridor.name) {
-            previous.push_back(entity.id);
-        }
-    });
+    const std::vector<katana::entity::EntityId> previous = stringsMadeFor(document, corridor.name);
     std::size_t points = 0;
     std::vector<katana::entity::Entity> entities;
     for (const CorridorString& string : strings) {
@@ -1552,12 +1562,32 @@ Result<std::string> corridorVerb(Document& document, const Tokens& args)
         if (const Corridor* other = current.find(args[2]); other != nullptr && other != found) {
             return makeError(ErrorCode::AlreadyExists, "there is a corridor called " + args[2]);
         }
+        // The strings it drew carry its name (road.corridor), which is how its
+        // next STRINGS finds them to replace: they follow it, in the same step,
+        // or the next STRINGS would leave them beside a second set, and a corridor
+        // later given the old name would delete them.
+        const std::vector<katana::entity::EntityId> strings =
+            stringsMadeFor(document, corridor.name);
         edited.name = args[2];
-        auto done = commitCorridors(document, set, nullptr, "CORRIDOR_RENAME");
-        if (!done) {
-            return done.error();
+        auto command = document.corridorsCommand(set, "CORRIDOR_RENAME");
+        if (!command) {
+            return command.error();
         }
-        return "corridor renamed from=" + text(corridor.name) + " to=" + text(args[2]);
+        auto transaction = std::make_unique<cmd::Transaction>("CORRIDOR_RENAME");
+        if (*command) {
+            transaction->add(std::move(*command));
+        }
+        if (!strings.empty()) {
+            transaction->add(cmd::setEntityProperty(strings, std::string(kCorridorProperty),
+                                                    katana::entity::PropertyValue(args[2])));
+        }
+        if (transaction->size() > 0) {
+            if (auto status = document.execute(std::move(transaction)); !status) {
+                return status.error();
+            }
+        }
+        return "corridor renamed from=" + text(corridor.name) + " to=" + text(args[2]) +
+               " strings=" + std::to_string(strings.size());
     }
     if (sub == "SET") {
         auto options = optionsFrom(args, 2);
