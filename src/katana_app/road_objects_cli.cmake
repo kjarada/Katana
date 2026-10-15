@@ -133,15 +133,75 @@ add_test(NAME cli.roadobject_refuses_spacing_on_a_barrier
 set_tests_properties(cli.roadobject_refuses_spacing_on_a_barrier PROPERTIES
     PASS_REGULAR_EXPRESSION "spacing= is for guide posts, signs and light poles; a barrier takes postspacing=")
 
-# LIST takes no scope: a LAYERS scope is refused, not answered with every object.
-add_test(NAME cli.roadobject_list_takes_no_scope
+# The shared scope and filter on LIST, QUANTITIES and DELETE (docs/road_objects.md,
+# "Scope and filter"). The two objects: guide posts at (10,10) and (20,10), each a
+# 100 mm post, on road/objects/guidepost; and a sign at (100,100) on road/objects/sign.
+set(_road_scoped -c "ROADOBJECT ADD guidepost AT 10,10,5 20,10,5"
+                 -c "ROADOBJECT ADD sign AT 100,100,5")
+
+# LAYERS names the sign's layer: LIST answers with the sign and leads with what the
+# scope took. It used to ignore the words and answer with every object.
+add_test(NAME cli.roadobject_list_takes_the_layers_a_scope_names
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-            $<TARGET_FILE:katana_cli> ${_road_site}
-            -c "ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
             -c "ROADOBJECT LIST LAYERS road/objects/sign")
-set_tests_properties(cli.roadobject_list_takes_no_scope PROPERTIES
-    PASS_REGULAR_EXPRESSION "ROADOBJECT LIST acts on road objects by id and takes no scope or filter"
-    FAIL_REGULAR_EXPRESSION "roadobjects count")
+set_tests_properties(cli.roadobject_list_takes_the_layers_a_scope_names PROPERTIES
+    PASS_REGULAR_EXPRESSION "scope=layers layers=road/objects/sign sublayers=yes matched=1[\r\n]+roadobjects count=1 problems=0[\r\n]+object id=sign-2 "
+    FAIL_REGULAR_EXPRESSION "error|object id=guidepost")
+
+# AREA 0,0,20,20 meets the guide posts (x from 9.95 to 20.05) and not the sign at
+# (100,100); a filter on the whole drawing reads the kind.
+add_test(NAME cli.roadobject_list_takes_an_area_and_a_filter
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
+            -c "ROADOBJECT LIST AREA 0,0,20,20"
+            -c "ROADOBJECT LIST DRAWING WHERE PROP=kind:sign")
+set_tests_properties(cli.roadobject_list_takes_an_area_and_a_filter PROPERTIES
+    PASS_REGULAR_EXPRESSION "scope=area area=0,0,20,20 matched=1[\r\n]+roadobjects count=1 problems=0[\r\n]+object id=guidepost-1 .*scope=drawing where=\"PROP=kind:sign\" matched=1[\r\n]+roadobjects count=1 problems=0[\r\n]+object id=sign-2 "
+    FAIL_REGULAR_EXPRESSION "error")
+
+# The quantities of what a scope took: the guide posts' two, and their total.
+add_test(NAME cli.roadobject_quantities_takes_a_scope
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
+            -c "ROADOBJECT QUANTITIES AREA 0,0,20,20")
+set_tests_properties(cli.roadobject_quantities_takes_a_scope PROPERTIES
+    PASS_REGULAR_EXPRESSION "scope=area area=0,0,20,20 matched=1[\r\n]+quantity object=guidepost-1 .*total kind=guidepost objects=1 count=2"
+    FAIL_REGULAR_EXPRESSION "error|quantity object=sign|total kind=sign")
+
+# DELETE by layer is one undo step: the sign goes, UNDO brings it back.
+add_test(NAME cli.roadobject_delete_takes_a_scope_in_one_undo_step
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
+            -c "ROADOBJECT DELETE LAYERS road/objects/sign"
+            -c "ROADOBJECT LIST" -c "UNDO" -c "ROADOBJECT LIST")
+set_tests_properties(cli.roadobject_delete_takes_a_scope_in_one_undo_step PROPERTIES
+    PASS_REGULAR_EXPRESSION "scope=layers layers=road/objects/sign sublayers=yes matched=1[\r\n]+deleted count=1 ids=sign-2.*roadobjects count=1 problems=0.*undone.*roadobjects count=2 problems=0"
+    FAIL_REGULAR_EXPRESSION "error")
+
+# A scope that takes nothing is reported, not refused, and deletes nothing.
+add_test(NAME cli.roadobject_delete_of_a_scope_that_takes_nothing_is_reported
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
+            -c "ROADOBJECT DELETE AREA 500,500,600,600" -c "ROADOBJECT LIST")
+set_tests_properties(cli.roadobject_delete_of_a_scope_that_takes_nothing_is_reported PROPERTIES
+    PASS_REGULAR_EXPRESSION "scope=area area=500,500,600,600 matched=0[\r\n]+deleted count=0.*roadobjects count=2 problems=0"
+    FAIL_REGULAR_EXPRESSION "error")
+
+# A filter that is about entities is refused by name, and VIEW with no window is
+# refused naming AREA.
+add_test(NAME cli.roadobject_refuses_an_entity_filter
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
+            -c "ROADOBJECT LIST DRAWING WHERE TYPE=point")
+set_tests_properties(cli.roadobject_refuses_an_entity_filter PROPERTIES
+    PASS_REGULAR_EXPRESSION "TYPE= is an entity's type and a road object is not an entity")
+add_test(NAME cli.roadobject_view_is_refused_headless_naming_area
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_site} ${_road_scoped}
+            -c "ROADOBJECT LIST VIEW")
+set_tests_properties(cli.roadobject_view_is_refused_headless_naming_area PROPERTIES
+    PASS_REGULAR_EXPRESSION "AREA x0,y0,x1,y1")
 
 # A renamed surface is followed by the road objects standing on it, in the one
 # undo step: the sign still stands on its ground and nothing is a problem.

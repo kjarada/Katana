@@ -596,10 +596,11 @@ Volumes   VOLUME SURFACES|DATUM|STOCKPILE|SECTIONS|GRID ...   cut and fill betwe
           drawing's surfaces, to a level, of a stockpile, along an alignment or on a grid,
           inside polygons; SURFACE DIFFERENCE|ENVELOPE ... a cut/fill map or envelope as a
           new surface (HELP VOLUME)
-RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=value ...]
-          | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
-          barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
-          along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
+RoadObj   ROADOBJECT KINDS | LIST [JSON|scope] | INFO id | ADD kind <placement> [key=value ...]
+          | SET id key=value ... | COPY id | DELETE id ...|ALL|scope | QUANTITIES [id ...|scope]
+          | PROBLEMS   barriers, guide posts, signs, light poles, culverts, walls, fences, line
+          markings along an alignment, along lines or at points, one undo step; LIST, QUANTITIES
+          and DELETE take the shared scope and WHERE (HELP ROADOBJECT)
 Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE ...  road
           templates: lanes, shoulders, kerbs, footpaths, verges, medians, drains, batters and
           their pavement courses; CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] | REGION |

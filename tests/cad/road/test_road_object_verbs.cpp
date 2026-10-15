@@ -503,25 +503,25 @@ TEST(RoadObjectVerbs, AnIdNamedTwiceIsOneObjectInQuantitiesAndTwiceOnAnAddIsRefu
     EXPECT_EQ(site.objects(), 2u);
 }
 
-TEST(RoadObjectVerbs, ListQuantitiesAndDeleteTakeNoScopeAndSayWhenAScopeIsGiven)
+TEST(RoadObjectVerbs, AWordListIsNotGivenIsRefusedAndNeverIgnoredOrReadAsAnId)
 {
-    // They act on ids, or on all: a LAYERS scope used to be answered by LIST
-    // with every object, and read by the other two as an id.
+    // LIST used to answer a LAYERS scope with every object - it ignored any word
+    // after it - and QUANTITIES and DELETE read one as an id that does not exist.
+    // They take the scope now (test_road_object_scope.cpp); a word that is neither
+    // a scope nor the verb's own is refused, naming it.
     Site site;
     site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4");
     site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4");
-    for (const char* line :
-         {"ROADOBJECT LIST LAYERS road/objects/sign", "ROADOBJECT LIST JSON LAYERS road/objects/sign",
-          "ROADOBJECT LIST DRAWING", "ROADOBJECT QUANTITIES LAYERS road/objects/sign",
-          "ROADOBJECT QUANTITIES VIEW", "ROADOBJECT DELETE LAYERS road/objects/sign",
-          "ROADOBJECT DELETE AREA 0,0,10,10", "ROADOBJECT DELETE sign-1 WHERE LAYER=x"}) {
-        const auto error = site.fails(line);
-        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << line;
-        EXPECT_TRUE(contains(error.message, "takes no scope")) << line << ": " << error.describe();
-    }
-    // Anything else after LIST is a usage error, not an ignored word.
-    EXPECT_EQ(site.fails("ROADOBJECT LIST sign-1").code, ErrorCode::InvalidArgument);
+    const auto afterList = site.fails("ROADOBJECT LIST sign-1");
+    EXPECT_EQ(afterList.code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(afterList.context, "sign-1");
     EXPECT_EQ(site.fails("ROADOBJECT LIST JSON sign-1").code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(site.fails("ROADOBJECT LIST JSON JSON").code, ErrorCode::InvalidArgument);
+    // The scope is read and answers: the sign alone, not both.
+    const std::string layers = site.ok("ROADOBJECT LIST LAYERS road/objects/sign");
+    EXPECT_TRUE(contains(layers, "matched=1")) << layers;
+    EXPECT_TRUE(contains(layers, "object id=sign-1")) << layers;
+    EXPECT_FALSE(contains(layers, "barrier-2")) << layers;
     // Nothing was deleted by the refused lines, and the plain words go on.
     EXPECT_EQ(site.objects(), 2u);
     EXPECT_TRUE(contains(site.ok("ROADOBJECT LIST"), "roadobjects count=2 problems=0"));

@@ -81,10 +81,7 @@ bool passes(const Model& model, const Entity& entity, const ModifyFilter& filter
     if (!filter.types.empty() && !filter.types.contains(entity.type())) {
         return false;
     }
-    if (!filter.layers.empty() &&
-        std::ranges::none_of(filter.layers, [&](const std::string& pattern) {
-            return matchesPattern(entity.layer, pattern);
-        })) {
+    if (!layerPassesFilter(filter, entity.layer)) {
         return false;
     }
     if (filter.style) {
@@ -97,23 +94,8 @@ bool passes(const Model& model, const Entity& entity, const ModifyFilter& filter
     if (filter.colour && entity.color != *filter.colour) {
         return false;
     }
-    if (filter.property) {
-        const auto found = entity.properties.find(*filter.property);
-        if (found == entity.properties.end()) {
-            return false;
-        }
-        if (filter.propertyValue &&
-            !matchesPattern(katana::entity::toString(found->second), *filter.propertyValue)) {
-            return false;
-        }
-    } else if (filter.propertyValue) {
-        // A value with no key: any property carrying it.
-        if (std::ranges::none_of(entity.properties, [&](const auto& entry) {
-                return matchesPattern(katana::entity::toString(entry.second),
-                                      *filter.propertyValue);
-            })) {
-            return false;
-        }
+    if (!propertiesPassFilter(filter, entity.properties)) {
+        return false;
     }
     if (filter.text) {
         const auto text = textOf(entity);
@@ -390,19 +372,63 @@ bool matchesPattern(std::string_view text, std::string_view pattern)
     return p == pattern.size();
 }
 
+Status checkScopeLayers(const Model& model, const ModifyScope& scope)
+{
+    if (scope.kind != ScopeKind::Layers) {
+        return {};
+    }
+    if (scope.layers.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "name at least one layer to change");
+    }
+    for (const std::string& name : scope.layers) {
+        if (!model.layers.contains(name)) {
+            return makeError(ErrorCode::NotFound, "layer does not exist", name);
+        }
+    }
+    return {};
+}
+
+bool layerInScope(const ModifyScope& scope, std::string_view layer)
+{
+    return scope.kind == ScopeKind::Layers &&
+           std::ranges::any_of(scope.layers, [&](const std::string& name) {
+               return scope.sublayers ? isWithin(layer, name) : layer == name;
+           });
+}
+
+bool layerPassesFilter(const ModifyFilter& filter, std::string_view layer)
+{
+    return filter.layers.empty() ||
+           std::ranges::any_of(filter.layers, [&](const std::string& pattern) {
+               return matchesPattern(layer, pattern);
+           });
+}
+
+bool propertiesPassFilter(const ModifyFilter& filter, const katana::entity::PropertyMap& properties)
+{
+    if (filter.property) {
+        const auto found = properties.find(*filter.property);
+        if (found == properties.end()) {
+            return false;
+        }
+        return !filter.propertyValue ||
+               matchesPattern(katana::entity::toString(found->second), *filter.propertyValue);
+    }
+    if (filter.propertyValue) {
+        // A value with no key: any property carrying it.
+        return std::ranges::any_of(properties, [&](const auto& entry) {
+            return matchesPattern(katana::entity::toString(entry.second), *filter.propertyValue);
+        });
+    }
+    return true;
+}
+
 Result<std::vector<EntityId>> matchEntities(const Document& document, const ModifyScope& scope,
                                             const ModifyFilter& filter)
 {
     const Model& model = document.model();
-    if (scope.kind == ScopeKind::Layers) {
-        if (scope.layers.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "name at least one layer to change");
-        }
-        for (const std::string& name : scope.layers) {
-            if (!model.layers.contains(name)) {
-                return makeError(ErrorCode::NotFound, "layer does not exist", name);
-            }
-        }
+    if (auto status = checkScopeLayers(model, scope); !status) {
+        return status.error();
     }
 
     std::vector<EntityId> matched;
@@ -423,9 +449,7 @@ Result<std::vector<EntityId>> matchEntities(const Document& document, const Modi
             break;
         }
         case ScopeKind::Layers:
-            if (std::ranges::none_of(scope.layers, [&](const std::string& layer) {
-                    return scope.sublayers ? isWithin(entity.layer, layer) : entity.layer == layer;
-                })) {
+            if (!layerInScope(scope, entity.layer)) {
                 return;
             }
             break;

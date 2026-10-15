@@ -363,6 +363,221 @@ TEST(PolygonTriangulate, SkipsCollinearVerticesAndRejectsBadInput)
     EXPECT_FALSE(triangulate(open).ok());
 }
 
+namespace {
+
+// Whether some triangle has a -> b among its edges, in its own (counter-
+// clockwise) order.
+bool hasDirectedEdge(const std::vector<TriangleIndices>& triangles, std::size_t a, std::size_t b)
+{
+    return std::ranges::any_of(triangles, [&](const TriangleIndices& t) {
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (t[k] == a && t[(k + 1) % 3] == b) {
+                return true;
+            }
+        }
+        return false;
+    });
+}
+
+bool usesVertex(const std::vector<TriangleIndices>& triangles, std::size_t vertex)
+{
+    return std::ranges::any_of(triangles, [&](const TriangleIndices& t) {
+        return t[0] == vertex || t[1] == vertex || t[2] == vertex;
+    });
+}
+
+// The triangles' signed areas added. A triangle of no area is allowed - it is
+// what keeping a corner of no turn can make - and so is one wound clockwise by
+// the noise of the arithmetic that called its corner straight: 1e-9 is far
+// above a rounding error of the sizes used here (a few tens of metres, whose
+// products carry 1e-13) and far below any triangle that has an area.
+double keptAreaSum(const Polyline2& polygon, const std::vector<TriangleIndices>& triangles)
+{
+    double total = 0.0;
+    for (const TriangleIndices& t : triangles) {
+        const Triangle2 triangle{polygon.vertices[t[0]], polygon.vertices[t[1]],
+                                 polygon.vertices[t[2]]};
+        EXPECT_GE(triangle.signedArea(), -1e-9) << "a triangle wound clockwise";
+        total += triangle.signedArea();
+    }
+    return total;
+}
+
+} // namespace
+
+TEST(PolygonTriangulate, KeepingCollinearVerticesUsesEveryCornerAndEveryEdgeOfThePolygon)
+{
+    // The 2 x 2 square with (1,0) on its bottom edge FIRST in the ring, which is
+    // where the default mode meets it before any ear is cut, and drops it.
+    //   index   0      1      2      3      4
+    //   vertex  (1,0)  (2,0)  (2,2)  (0,2)  (0,0)
+    const Polyline2 square2{
+        {Point2(1, 0), Point2(2, 0), Point2(2, 2), Point2(0, 2), Point2(0, 0)}, true};
+
+    // Worked by hand. Default: (1,0) has no turn, so it is dropped; the ear at
+    // (2,0) is (0,0),(2,0),(2,2) = 2, and what is left, (2,2),(0,2),(0,0), = 2.
+    const auto skipped = triangulate(square2);
+    ASSERT_TRUE(skipped.ok()) << skipped.error().describe();
+    EXPECT_EQ(skipped->size(), 2u); // four corners: two triangles
+    EXPECT_FALSE(usesVertex(*skipped, 0));
+    EXPECT_DOUBLE_EQ(triangleAreaSum(square2, *skipped), 4.0);
+
+    // Kept: (1,0) waits, the ear at (2,0) is (1,0),(2,0),(2,2) = 1, then the
+    // ear at (1,0) is (0,0),(1,0),(2,2) = 1, then (2,2),(0,2),(0,0) = 2.
+    const auto kept = triangulate(square2, CollinearVertices::Keep);
+    ASSERT_TRUE(kept.ok()) << kept.error().describe();
+    // A polygon of n corners is n - 2 triangles when every corner is used.
+    EXPECT_EQ(kept->size(), 3u);
+    for (std::size_t corner = 0; corner < 5; ++corner) {
+        EXPECT_TRUE(usesVertex(*kept, corner)) << "corner " << corner;
+        // ... and the edge from it to the next is an edge of a triangle, which
+        // is what lets a cap meet the quads standing on that edge.
+        EXPECT_TRUE(hasDirectedEdge(*kept, corner, (corner + 1) % 5)) << "edge from " << corner;
+    }
+    EXPECT_DOUBLE_EQ(keptAreaSum(square2, *kept), 4.0);
+}
+
+TEST(PolygonTriangulate, KeepingCollinearVerticesGivesNTakeTwoTrianglesForARunOfThem)
+{
+    // Three corners of no turn along the bottom of a 2 x 2 square: seven
+    // corners, five triangles, whatever order the ears are found in.
+    const Polyline2 run{{Point2(0, 0), Point2(0.5, 0), Point2(1, 0), Point2(1.5, 0), Point2(2, 0),
+                         Point2(2, 2), Point2(0, 2)},
+                        true};
+    const auto kept = triangulate(run, CollinearVertices::Keep);
+    ASSERT_TRUE(kept.ok()) << kept.error().describe();
+    EXPECT_EQ(kept->size(), 5u);
+    for (std::size_t corner = 0; corner < 7; ++corner) {
+        EXPECT_TRUE(usesVertex(*kept, corner)) << "corner " << corner;
+        EXPECT_TRUE(hasDirectedEdge(*kept, corner, (corner + 1) % 7)) << "edge from " << corner;
+    }
+    EXPECT_NEAR(keptAreaSum(run, *kept), 4.0, 1e-12);
+}
+
+TEST(PolygonTriangulate, KeepingCollinearVerticesTriangulatesAClockwisePolygonCounterClockwise)
+{
+    const Polyline2 run{{Point2(0, 0), Point2(0.5, 0), Point2(1, 0), Point2(2, 0), Point2(2, 2),
+                         Point2(0, 2)},
+                        true};
+    const Polyline2 reversed = run.reversed();
+    const auto kept = triangulate(reversed, CollinearVertices::Keep);
+    ASSERT_TRUE(kept.ok()) << kept.error().describe();
+    EXPECT_EQ(kept->size(), 4u); // six corners
+    // keptAreaSum insists no triangle is wound clockwise, which is the claim.
+    EXPECT_NEAR(keptAreaSum(reversed, *kept), 4.0, 1e-12);
+    for (std::size_t corner = 0; corner < 6; ++corner) {
+        EXPECT_TRUE(usesVertex(*kept, corner)) << "corner " << corner;
+    }
+}
+
+TEST(PolygonTriangulate, KeepingCollinearVerticesKeepsARepeatedVertexAsAnEdgeOfNoLength)
+{
+    // (2,0) twice: the second copy is a corner of no turn and no length. Worked
+    // by hand, both modes cut the ear at (0,0), (0,2),(0,0),(2,0) = 2, and the
+    // ear at (2,2), (2,0),(2,2),(0,2) = 2. Keep then has (2,0),(2,0),(0,2) left,
+    // with no area, and gives it, so the edge from the first copy to the second
+    // is an edge of a triangle; the default mode does not.
+    const Polyline2 repeated{
+        {Point2(0, 0), Point2(2, 0), Point2(2, 0), Point2(2, 2), Point2(0, 2)}, true};
+    const auto kept = triangulate(repeated, CollinearVertices::Keep);
+    ASSERT_TRUE(kept.ok()) << kept.error().describe();
+    EXPECT_EQ(kept->size(), 3u);
+    EXPECT_TRUE(hasDirectedEdge(*kept, 1, 2));
+    EXPECT_NEAR(keptAreaSum(repeated, *kept), 4.0, 1e-12);
+
+    const auto skipped = triangulate(repeated);
+    ASSERT_TRUE(skipped.ok()) << skipped.error().describe();
+    EXPECT_EQ(skipped->size(), 2u);
+    EXPECT_FALSE(hasDirectedEdge(*skipped, 1, 2));
+    EXPECT_NEAR(triangleAreaSum(repeated, *skipped), 4.0, 1e-12);
+}
+
+TEST(PolygonTriangulate, KeepingCollinearVerticesAgreesWithTheDefaultWhereNoCornerIsStraight)
+{
+    // No three consecutive corners of an inverted T are collinear, so there is
+    // nothing to keep and the two modes cut the same ears in the same order.
+    const Polyline2 tee{{Point2(-0.6, -0.4), Point2(0.6, -0.4), Point2(0.6, 0.0),
+                         Point2(0.125, 0.0), Point2(0.125, 2.0), Point2(-0.125, 2.0),
+                         Point2(-0.125, 0.0), Point2(-0.6, 0.0)},
+                        true};
+    const auto skipped = triangulate(tee);
+    const auto kept = triangulate(tee, CollinearVertices::Keep);
+    ASSERT_TRUE(skipped.ok() && kept.ok());
+    EXPECT_EQ(*skipped, *kept);
+    EXPECT_EQ(kept->size(), 6u); // eight corners
+    // The footing 1.2 x 0.4 and the stem 0.25 x 2.0: 0.48 + 0.5.
+    EXPECT_NEAR(triangleAreaSum(tee, *kept), 0.98, 1e-12);
+}
+
+TEST(PolygonTriangulate, EitherModeRefusesWhatThereIsNothingToFill)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    Polyline2 open = square(2);
+    open.closed = false;
+    const std::vector<std::pair<const char*, Polyline2>> nothing{
+        {"open", open},
+        {"empty", Polyline2{{}, true}},
+        {"two corners", Polyline2{{Point2(0, 0), Point2(1, 1)}, true}},
+        {"all on one line", Polyline2{{Point2(0, 0), Point2(1, 1), Point2(2, 2)}, true}},
+        {"one point three times", Polyline2{{Point2(1, 1), Point2(1, 1), Point2(1, 1)}, true}},
+        {"a bow-tie, whose halves cancel",
+         Polyline2{{Point2(0, 0), Point2(1, 1), Point2(1, 0), Point2(0, 1)}, true}},
+        {"a NaN", Polyline2{{Point2(0, 0), Point2(2, 0), Point2(nan, 2), Point2(0, 2)}, true}},
+        {"an infinity",
+         Polyline2{{Point2(0, 0), Point2(2, 0), Point2(inf, 2), Point2(0, 2)}, true}},
+    };
+    for (const auto& [what, polygon] : nothing) {
+        for (const CollinearVertices mode : {CollinearVertices::Skip, CollinearVertices::Keep}) {
+            const auto triangles = triangulate(polygon, mode);
+            ASSERT_FALSE(triangles.ok()) << what;
+            EXPECT_EQ(triangles.error().code, ErrorCode::TriangulationFailure) << what;
+        }
+    }
+}
+
+TEST(PolygonTriangulate, RandomPolygonsWithCornersOfNoTurnKeepEveryCornerAndPreserveArea)
+{
+    Random random;
+    int withStraightCorners = 0;
+    for (int i = 0; i < 200; ++i) {
+        const int count = random.integer(3, 30);
+        Polyline2 star;
+        star.closed = true;
+        for (int k = 0; k < count; ++k) {
+            const double angle = kTwoPi * (k + random.real(0.1, 0.9)) / count;
+            star.vertices.push_back(Point2(std::cos(angle), std::sin(angle)) *
+                                    random.real(5.0, 50.0));
+        }
+        // The midpoint of about a third of the edges added: a corner of no turn.
+        Polyline2 polygon;
+        polygon.closed = true;
+        for (std::size_t k = 0; k < star.vertices.size(); ++k) {
+            const Point2& from = star.vertices[k];
+            const Point2& to = star.vertices[(k + 1) % star.vertices.size()];
+            polygon.vertices.push_back(from);
+            if (random.integer(0, 2) == 0) {
+                polygon.vertices.push_back((from + to) * 0.5);
+            }
+        }
+        withStraightCorners += polygon.vertices.size() > star.vertices.size() ? 1 : 0;
+
+        const auto kept = triangulate(polygon, CollinearVertices::Keep);
+        ASSERT_TRUE(kept.ok()) << kept.error().describe();
+        const std::size_t corners = polygon.vertices.size();
+        ASSERT_EQ(kept->size(), corners - 2);
+        for (std::size_t corner = 0; corner < corners; ++corner) {
+            ASSERT_TRUE(hasDirectedEdge(*kept, corner, (corner + 1) % corners))
+                << "polygon " << i << ", edge from " << corner;
+        }
+        EXPECT_NEAR(keptAreaSum(polygon, *kept), polygon.area(), 1e-9 * polygon.area());
+    }
+    // The property is only worth something if it met polygons with a straight
+    // corner; with a third of the edges taking one, nearly all of them do
+    // (about 194 of 200 by the odds of no edge taking one).
+    EXPECT_GT(withStraightCorners, 150);
+}
+
 TEST(PolygonTriangulate, RandomStarPolygonsPreserveArea)
 {
     Random random;
