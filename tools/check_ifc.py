@@ -82,7 +82,22 @@ def check_alignment(alignment, settings, problems):
             design = segment.DesignParameters
             matrix = evaluate.evaluate(min(along, function.length()))
             x, y = matrix[0][3], matrix[1][3]
-            direction = math.atan2(matrix[1][0], matrix[0][0])
+            # The direction a segment STARTS in is the limit from its own side:
+            # at a kink (a PI with no curve, written as a CONTINUOUS transition)
+            # the curve at the joint itself is the previous leg's end, a quarter
+            # turn off at a right angle. So it is read a millimetre in (or half
+            # a shorter segment), where IfcOpenShell's piecewise curve has left
+            # the joint (a tenth of a micrometre in, it had not), and turned back
+            # by what the segment's own start curvature turns in that step -
+            # exact on a line and an arc, and on a clothoid off by the step
+            # squared times its rate of change over two (5e-9 rad at a 0.1/m
+            # change over 10 m), far inside DIRECTION_TOLERANCE. IFC 4.3: a
+            # radius is positive turning left (counter-clockwise), 0 is none. A
+            # segment of no length (the closing one) has only the joint.
+            step = min(1e-3, design.SegmentLength / 2.0)
+            ahead = evaluate.evaluate(min(along + step, function.length())) if step > 0 else matrix
+            radius = design.StartRadiusOfCurvature or 0.0
+            direction = math.atan2(ahead[1][0], ahead[0][0]) - (step / radius if radius else 0.0)
             sx, sy = design.StartPoint.Coordinates[:2]
             offset = math.hypot(x - sx, y - sy)
             worst = max(worst, offset)

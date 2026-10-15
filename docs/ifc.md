@@ -817,9 +817,20 @@ mistake in the writer and the same mistake in the reader cannot agree:
   and a marking written by the old writer: 9 findings, all the nine
   `IfcQuantityCount`s; the same file with those nine spelled as integers - what
   the fixed writer writes - has **0 findings** under 0.8.5 (EXPRESS rules on)
-  and 0.9.0. The fixed writer's own file has still to be judged before this is
-  called clean, and buildingSMART's rules have not been run on the road model
-  at all.
+  and 0.9.0. The fixed writer's own files were judged on 2026-10-16 (0.8.5,
+  EXPRESS rules on): a corridor of the rural two-lane template on the sample
+  terrain with a barrier and a sign, on a straight (1348 instances) and on an
+  alignment with a right-angle PI and no curve (1157), **0 findings** and the
+  alignment's geometry agreeing segment by segment. buildingSMART's rules have
+  not been run on the road model.
+  The geometry check first read a segment's start direction AT the joint,
+  which on a kink (a PI with no curve, written as a CONTINUOUS transition) is
+  the previous leg's end: a right angle was reported 1.57 rad off where the
+  file was right. It reads a millimetre in now, turned back by the segment's
+  start curvature (exact on a line and an arc); checked the other way on an
+  alignment of spirals, a left arc, a right arc and a kink, the curvature
+  turned the wrong way is reported at every curve (3.3e-5 and 5e-5 rad) and the
+  read at the joint reports the kink again.
   `tools/check_ifc.py` runs under both versions (0.9 dropped
   `entity_instance.wrapped_data`, which the alignment evaluator used).
 - **Import**: all 46 files of buildingSMART's IFC 4.3 sample models
