@@ -560,6 +560,68 @@ be pinned to a full-length commit SHA, which
 shows (`false` on 2026-10-14). It has not been turned on, and what it
 does to a run was not tried ("Not done").
 
+### The workflow's shape, held
+
+The workflow is where a secret that matters, the update signing key, meets
+code that a commit can change, so what keeps it safe is held by a check and
+not left to whoever edits the file next. `tools/check_release_workflow.py`
+reads `.github/workflows/release.yml` and refuses it, naming the line, when:
+
+1. it starts on anything but `workflow_dispatch` (a commit, a tag, a pull
+   request, a schedule or another workflow starts nothing: the owner's
+   decision of 2026-09-26);
+2. the token it is given is not `permissions: contents: read`, or any job but
+   Publish writes, or Publish does not say so itself;
+3. a `uses:` is not named by the 40 digits of a commit with the tag it was
+   read from as a comment, or one action is two commits;
+4. the environment `release` is named by any job but Publish, or by Publish
+   as anything else, or the secret `UPDATE_SIGNING_KEY` is read outside
+   Publish or more than once, or a job inherits secrets;
+5. Publish does not wait for the Version job and both build jobs, or runs
+   without a tag;
+6. a configure step (`cmake --preset`) does not pass
+   `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, `-DKATANA_UPDATE_REPO` and
+   `-DKATANA_UPDATE_SEQUENCE`;
+7. a `run:` holds `${{ inputs.* }}`, `${{ github.event.* }}` or
+   `${{ github.head_ref }}`, which a person typed when starting the run: they
+   go in through `env:` (script injection);
+8. `UPDATE_SEED`, `UPDATE_EXCLUDE` or `UPDATE_EXCLUDE_LINUX` is not what
+   "Update assets" says, which would change what an update leaves alone.
+
+With `--scripts bash` or `--scripts pwsh` it hands every `run:` of that shell
+to the shell's own parser (`bash -n`; PowerShell's `Parser`, `pwsh` first and
+Windows PowerShell if that is all there is, which does not read PowerShell
+7's `&&`), after replacing each `${{ ... }}` by a word, and runs nothing. It
+was added for one defect: `"... exited with $LASTEXITCODE: proj.db ..."` in
+the installer smoke test is a parse error in PowerShell (a colon after a
+variable name), it sat in the workflow from 1228fa5d until 2026-10-15, and
+only a run of five builds would have shown it. A shell that is not there
+or does not answer is exit status 2 and never a pass.
+
+*Decisions.* It reads lines and indentation and not YAML, because Python's
+standard library has no YAML parser and the build must not need `pip`; the
+file is regular, and a form the check does not read (triggers on the same
+line as `on:`, say) is a problem and not a pass. *Rejected:* `actionlint`,
+which checks GitHub's schema and expressions and not these rules, and is not
+on every machine; a check in CMake, where reading structure out of text is
+worse than in Python. Every rule is shown to be needed: the tests below
+remove each rule from a copy of the check in turn and at least three of them
+fail each time (done by hand when this was written, not a test).
+
+Tests, all in `tests/update`: `release_workflow_has_the_shape_the_documents_describe`
+holds the real file; `update_tools_check_release_workflow` makes 37
+changes a later edit could make to the file's own text (a push trigger, an
+action by tag, by a short digest, by branch, the key read by another job,
+`secrets: inherit`, a configure without the update keys, the tag typed into a
+script, a widened exclude list ...) and requires the check to refuse each by
+name, with the empty file, a file of comments, CRLF line ends and a missing
+file as the degenerate inputs; `release_workflow_bash_steps_parse` and
+`release_workflow_pwsh_steps_parse` run the real file through the shells'
+parsers, and `update_tools_check_release_workflow_scripts` breaks a step of
+each kind (the `$LASTEXITCODE:` case as it was) and checks the same. The last
+three are registered only where the shell answers, since a test that could
+not make its check must not pass.
+
 ### The whole suite, on the machine the package is for
 
 Before packaging, every job builds the tests and runs all of them, in
@@ -1363,18 +1425,19 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   written. And the rehearsal, the owner's acceptance step, is still to do:
   a second release installed as an update of the first. v0.2.0 is the only
   release, so no installed copy has been updated.
-* **Nothing in the repository holds the workflow.** The checks above were
-  made with scripts of the sessions that wrote and changed the workflow;
-  they are not in the repository and not in ctest. So no test fails if a
-  later edit gives the workflow a second trigger, takes the Publish job out
-  of the environment `release`, names an action by a tag again, or drops
-  `-DKATANA_REQUIRE_UPDATE_KEYS=ON` from a configure, which is what keeps a
-  release from being built with the placeholder keys. A check of the file's
-  shape that needs only Python's standard library, with a list of breaks it
-  must notice, was written for this and is not yet in the tree; when it is,
-  a `uses:` that does not end in 40 hexadecimal digits belongs among what
-  it refuses. For that one break GitHub has a setting of its own, which is
-  off ("The actions the workflow runs", at its end).
+* **What holds the workflow holds its shape, and that its scripts parse; no
+  more.** `tools/check_release_workflow.py` ("The workflow's shape, held")
+  refuses a second trigger, a write outside the Publish job, an action
+  named by a tag, the signing key read outside the environment `release`, a
+  configure without the update keys required, and the rest of the list
+  there. It does not run the scripts (a script that parses can still be
+  wrong; the workflow's own run is what shows that), does not read YAML (a
+  construct it does not know is reported, not understood), and cannot see
+  GitHub's own settings: the reads of "Update signing", step 3, do, and the
+  setting that refuses an action not named by a commit is off ("The actions
+  the workflow runs", at its end). The options the workflow gives `gh` and
+  the update tools, and the made-up packages the first job and the Publish
+  job were tried on, were checked by hand and are not in the repository.
 * **Nothing says when a pinned action has a newer version.** An action
   stays at its commit until it is moved by hand ("The actions the workflow
   runs"), and the repository has no `.github/dependabot.yml`, which would

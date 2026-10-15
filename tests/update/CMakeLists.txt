@@ -423,6 +423,62 @@ if(_katana_tool_tests_ready)
     set_tests_properties(update_tools_rfc8032_oracle PROPERTIES TIMEOUT 120)
 endif()
 
+# ---- the release workflow's shape (tools/check_release_workflow.py) ------------------------------
+#
+# What keeps the update signing key safe is written in docs/release.md: the workflow starts by hand
+# only, the key is read by one job behind the environment `release`, every action is named by its
+# commit, every configure requires the update keys. The check reads the file's lines (Python's
+# standard library has no YAML parser) and needs Python and nothing else, no openssl and no cmake:
+#
+#   release_workflow_has_the_shape_the_documents_describe   the real file
+#   update_tools_check_release_workflow                     the check on the real file's text changed in
+#                                                           one way at a time that undoes one rule
+if(Python3_Interpreter_FOUND AND Python3_VERSION VERSION_GREATER_EQUAL 3.10)
+    add_test(NAME release_workflow_has_the_shape_the_documents_describe
+        COMMAND "${KATANA_PYTHON}" -I -B "${PROJECT_SOURCE_DIR}/tools/check_release_workflow.py"
+                "${PROJECT_SOURCE_DIR}/.github/workflows/release.yml")
+    set_tests_properties(release_workflow_has_the_shape_the_documents_describe PROPERTIES
+        PASS_REGULAR_EXPRESSION "starts by hand only")
+    add_test(NAME update_tools_check_release_workflow
+        COMMAND "${KATANA_PYTHON}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/test_check_release_workflow.py")
+
+    # And every script of the workflow handed to its shell's own parser, which runs nothing
+    # (check_release_workflow.py --scripts): "exited with $LASTEXITCODE: ..." is a parse error in
+    # PowerShell and sat in the installer smoke test until it was read with the parser, since only a
+    # run of five builds would have shown it. Registered only where the shell answers (a bash that
+    # echoes - Windows' own bash.exe starts a Linux distribution that may not be installed - and a
+    # PowerShell), because a test that could not make its check must not pass; the tool itself exits 2
+    # without the shell.
+    function(katana_shell_answers out program probe_arguments)
+        set(${out} OFF PARENT_SCOPE)
+        if(program)
+            execute_process(COMMAND "${program}" ${probe_arguments}
+                OUTPUT_VARIABLE _answer RESULT_VARIABLE _status ERROR_QUIET TIMEOUT 60)
+            if(_status EQUAL 0 AND _answer MATCHES "katana-ok")
+                set(${out} ON PARENT_SCOPE)
+            endif()
+        endif()
+    endfunction()
+    find_program(KATANA_WORKFLOW_BASH NAMES bash)
+    find_program(KATANA_WORKFLOW_PWSH NAMES pwsh powershell)
+    katana_shell_answers(_katana_workflow_bash "${KATANA_WORKFLOW_BASH}" "-c;echo katana-ok")
+    katana_shell_answers(_katana_workflow_pwsh "${KATANA_WORKFLOW_PWSH}" "-NoProfile;-NonInteractive;-Command;Write-Output katana-ok")
+    foreach(_katana_shell IN ITEMS bash pwsh)
+        if(_katana_workflow_${_katana_shell})
+            add_test(NAME release_workflow_${_katana_shell}_steps_parse
+                COMMAND "${KATANA_PYTHON}" -I -B "${PROJECT_SOURCE_DIR}/tools/check_release_workflow.py"
+                        --scripts ${_katana_shell} "${PROJECT_SOURCE_DIR}/.github/workflows/release.yml")
+            set_tests_properties(release_workflow_${_katana_shell}_steps_parse PROPERTIES
+                PASS_REGULAR_EXPRESSION "[0-9]+ ${_katana_shell} step[(]s[)] of release.yml parse")
+        endif()
+    endforeach()
+    if(_katana_workflow_bash AND _katana_workflow_pwsh)
+        add_test(NAME update_tools_check_release_workflow_scripts
+            COMMAND "${KATANA_PYTHON}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/test_check_release_workflow_scripts.py")
+        set_tests_properties(update_tools_check_release_workflow_scripts PROPERTIES TIMEOUT 300)
+    endif()
+endif()
+
 # ---- the Windows installer is per user (cmake/NSIS.template.in) -----------------------------
 #
 # Decision D1 (docs/update.md): the installer asks for no administrator rights, installs under
