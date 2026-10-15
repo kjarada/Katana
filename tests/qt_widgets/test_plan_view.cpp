@@ -214,7 +214,7 @@ TEST(PlanView, ContoursTooFineToDrawAreReportedOncePerChangeNotLostInSilence)
     };
     repaint();
     ASSERT_EQ(errors.size(), 1);
-    EXPECT_TRUE(errors.front().contains("ground: contours")) << errors.front().toStdString();
+    EXPECT_TRUE(errors.front().contains("ground (style Fine): contours")) << errors.front().toStdString();
     EXPECT_TRUE(errors.front().contains("interval")) << errors.front().toStdString();
     ASSERT_EQ(view.lastPaintStats().surfaceProblems.size(), 1u);
     repaint();

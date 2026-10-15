@@ -247,15 +247,13 @@ struct SceneLayers {
     // when no visible surface is coloured by elevation.
     double rampLow = 0.0;
     double rampHigh = -1.0;
-    // What the view's legend shows: the colours of the first drawable
-    // surface that has a display style colouring its faces by value or
-    // aspect, with the one ramp's range where its style gives none
-    // (surface_colouring.hpp). Absent for surfaces with no display style,
-    // whose legend is the one ramp above.
-    std::optional<SurfaceLegend> legend{};
-    // Whose legend it is: the surface and its style.
-    std::string legendSurface{};
-    std::string legendStyle{};
+    // What the view's legends show: for each drawable surface that has a
+    // display style colouring its faces by value or aspect, in drawing order,
+    // the colours as drawn, with the one ramp's range where its style gives
+    // none (surface_colouring.hpp). A hidden surface, a wireframe (its mesh is
+    // one grey) and a surface with no display style have none - the last
+    // has the one ramp above, drawn as a bar when no surface has a legend.
+    std::vector<SurfaceLegendCard> legends{};
     // Where linework with no height and nothing under it goes, exaggerated;
     // terrainDatum when a surface or mesh decided it (buildTerrain).
     double datum = 0.0;

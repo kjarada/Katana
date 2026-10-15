@@ -115,8 +115,11 @@ struct SheetPaintStats {
     std::size_t frameTextsDrawn = 0;
     std::size_t planEntitiesDrawn = 0;
     bool logoDrawn = false;
-    // Viewports that could not be drawn as asked, one line each ("vp3: no
-    // alignment named MC01"). The viewport is outlined and left empty.
+    // What could not be drawn as asked, one line each. A viewport that could
+    // not be drawn at all ("vp3: no alignment named MC01") is outlined and left
+    // empty; a plan that was drawn without part of a surface's style ("vp1:
+    // ground (style Fine): contours: an interval of 0.000001 ... not drawn -
+    // set a larger interval") keeps the rest of its picture.
     std::vector<std::string> problems;
     // Notes the sections left out for want of room clear of the others in
     // their plots - a crossing's, the centreline's levels - each dropped

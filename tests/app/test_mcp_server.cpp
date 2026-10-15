@@ -2532,6 +2532,36 @@ TEST_F(McpServer, ContoursOfASurfaceAreDrawnThroughTheCommandTool)
     EXPECT_NE(reply.find("layer=terrain/contours"), std::string::npos) << reply;
 }
 
+// A plot's preflight reaches an agent through the command tool: PLOT and
+// PLOTSHEETS are the window's (they paint), but SHEETS CHECK is a session line,
+// and it warns of a surface whose style's contours are too fine to trace - an
+// interval of 0.0005 over the terrain crosses its triangles more than four
+// million times, so a plot would print without them - naming the surface, the
+// style and why (docs/plotting.md, "Preflight checks"). The sheet's plan,
+// 1:1000 about (85, 62), shows the terrain, which covers -4.25 to 174.25 across
+// and -4.25 to 129.25 up.
+TEST_F(McpServer, TheSheetChecksWarnOfASurfaceWhoseContoursAreTooFineToPlot)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json checked = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+               "SURFACESTYLE NEW Fine FROM Contours interval=0.0005", "SURFACE STYLE ground Fine",
+               "SHEET NEW PLAN", "VIEW ADD 1 plan scale=1000 centre=85,62", "SHEETS CHECK"}}});
+    ASSERT_FALSE(checked["isError"].get<bool>()) << textOf(checked);
+    const Json& lines = checked["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 6U);
+    const std::string reply = lines[5]["output"].get<std::string>();
+    EXPECT_NE(reply.find("warning plan.surface-style 1 vp1 message=\""), std::string::npos) << reply;
+    EXPECT_NE(reply.find("the surface ground (style Fine) without part of its style: contours: an "
+                         "interval of 0.000500 crosses this surface's triangles more than 4000000 times"),
+              std::string::npos)
+        << reply;
+    EXPECT_NE(reply.find(" subject=\"ground\""), std::string::npos) << reply;
+}
+
 // T2: a shading is a derived reference raster, which katana_terrain_list
 // then lists with the line that made it.
 TEST_F(McpServer, AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster)

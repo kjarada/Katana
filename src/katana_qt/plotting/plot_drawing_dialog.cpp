@@ -19,6 +19,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QStringList>
 #include <QVBoxLayout>
 
 #include "katana/cad/command_interpreter.hpp"
@@ -283,9 +284,18 @@ PlotDrawingDialog::PlotDrawingDialog(PlotDrawingDialogContext context, QWidget* 
     buttons->addWidget(plot_);
     buttons->addWidget(close);
 
+    // What the plot is without, from the reply's warning records: shown only
+    // when the reply had some, so a plot that lost nothing looks as it did.
+    warnings_ = new QLabel(this);
+    warnings_->setObjectName("plotDrawingWarnings");
+    warnings_->setWordWrap(true);
+    warnings_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    warnings_->setVisible(false);
+
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addLayout(buttons);
+    layout->addWidget(warnings_);
 
     connect(path_, &QLineEdit::textChanged, this, [this] { refresh(); });
     for (QComboBox* box : {paper_, orientation_, colourMode_}) {
@@ -331,6 +341,8 @@ void PlotDrawingDialog::refresh()
 
 void PlotDrawingDialog::plot()
 {
+    // Whatever the last plot was without is not this plot's.
+    warnings_->setVisible(false);
     const auto made = request();
     if (!made) {
         status_->setText(QString::fromStdString(made.error().message));
@@ -352,6 +364,16 @@ void PlotDrawingDialog::plot()
     const VerbOutcome outcome = context_.run(plotDrawingCommandLine(*made));
     status_->setText(outcome.ok ? "Plotted: " + outcome.reply.section('\n', -1)
                                 : "Not plotted: " + outcome.error.section('\n', -1));
+    // The reply's warning records, as they came: the dialog reads the reply
+    // and keeps no rule of its own about what is wrong with a plot.
+    QStringList warnings;
+    for (const QString& line : outcome.reply.split('\n', Qt::SkipEmptyParts)) {
+        if (line.startsWith(QStringLiteral("warning "))) {
+            warnings << line;
+        }
+    }
+    warnings_->setText(warnings.join('\n'));
+    warnings_->setVisible(!warnings.isEmpty());
 }
 
 void PlotDrawingDialog::suggestPath(const QString& path)

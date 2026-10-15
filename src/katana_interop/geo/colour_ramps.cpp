@@ -3,7 +3,6 @@
 #include "katana/interop/geo/colour_ramps.hpp"
 
 #include <algorithm>
-#include <array>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -13,6 +12,7 @@
 
 #include "katana/core/text.hpp"
 #include "katana/core/text_encoding.hpp"
+#include "katana/terrain/colour_ramps.hpp"
 
 namespace katana::interop::geo {
 
@@ -22,35 +22,27 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
 
-// The colours are ColorBrewer's (Cynthia Brewer, colorbrewer2.org), chosen
-// there to stay distinguishable in order and to people with the common
-// colour-vision deficiencies: RdBu for the diverging ramp and RdYlGn,
-// reversed, for slope, each at five of its eleven classes. The terrain ramp
-// follows the hypsometric tints of printed relief maps: green lowland, pale
-// tan, brown, white summits.
-const std::array<ColourRamp, 4>& ramps()
+// The ramps are the terrain layer's one table (katana/terrain/colour_ramps.hpp)
+// - the one a surface's display style names - as GDAL's colour map wants them:
+// each stop with its place along the range. Built from it once, so a stop here
+// is the style's stop (docs/surface_display.md, "The ramps").
+const std::vector<ColourRamp>& ramps()
 {
-    static const std::array<ColourRamp, 4> all{
-        ColourRamp{"terrain",
-                   {{0.0, 38, 115, 0},
-                    {0.25, 132, 186, 34},
-                    {0.5, 245, 232, 142},
-                    {0.75, 168, 112, 0},
-                    {1.0, 255, 255, 255}}},
-        ColourRamp{"diverging",
-                   {{0.0, 33, 102, 172},
-                    {0.25, 103, 169, 207},
-                    {0.5, 247, 247, 247},
-                    {0.75, 239, 138, 98},
-                    {1.0, 178, 24, 43}}},
-        ColourRamp{"slope",
-                   {{0.0, 26, 150, 65},
-                    {0.25, 166, 217, 106},
-                    {0.5, 255, 255, 191},
-                    {0.75, 253, 174, 97},
-                    {1.0, 215, 25, 28}}},
-        ColourRamp{"grey", {{0.0, 0, 0, 0}, {1.0, 255, 255, 255}}},
-    };
+    static const std::vector<ColourRamp> all = [] {
+        std::vector<ColourRamp> built;
+        for (const katana::terrain::NamedColourRamp& named : katana::terrain::colourRamps()) {
+            ColourRamp ramp;
+            ramp.name = std::string(named.name);
+            const std::size_t last = named.stops.size() - 1;
+            for (std::size_t i = 0; i < named.stops.size(); ++i) {
+                // Evenly spaced: i / 4 is exact in binary (0, .25, .5, .75, 1).
+                ramp.stops.push_back({static_cast<double>(i) / static_cast<double>(last),
+                                      named.stops[i].r, named.stops[i].g, named.stops[i].b});
+            }
+            built.push_back(std::move(ramp));
+        }
+        return built;
+    }();
     return all;
 }
 
@@ -84,19 +76,19 @@ std::vector<std::string> wordsOf(std::string_view line)
 
 const ColourRamp* builtInRamp(std::string_view name)
 {
-    for (const ColourRamp& ramp : ramps()) {
-        if (katana::core::equalsIgnoringCase(ramp.name, name)) {
-            return &ramp;
-        }
+    // The one lookup: the table finds the ramp (any case), this finds its row.
+    const katana::terrain::NamedColourRamp* found = katana::terrain::findColourRamp(name);
+    if (found == nullptr) {
+        return nullptr;
     }
-    return nullptr;
+    return &ramps()[static_cast<std::size_t>(found - katana::terrain::colourRamps().data())];
 }
 
 std::vector<std::string> builtInRampNames()
 {
     std::vector<std::string> names;
-    for (const ColourRamp& ramp : ramps()) {
-        names.push_back(ramp.name);
+    for (const std::string_view name : katana::terrain::colourRampNames()) {
+        names.emplace_back(name);
     }
     return names;
 }

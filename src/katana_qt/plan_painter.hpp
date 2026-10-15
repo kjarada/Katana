@@ -304,11 +304,13 @@ struct PlanPaintStats {
     std::size_t surfaceImagePixels = 0;
     std::size_t surfacePixelsCovered = 0;
     std::size_t surfaceLegends = 0;
-    // Why part of a surface's style was not drawn, a line a surface (contours
-    // too fine to trace are refused, naming the interval): empty when all of
-    // every style was. The plan view tells the person once; the headless
-    // report and a plot's checks read it here.
-    std::vector<std::string> surfaceProblems;
+    // Why part of a surface's style was not drawn, one for each surface that
+    // has a problem (contours too fine to trace are refused, naming the
+    // interval): empty when all of every style was. The plan view tells the
+    // person once, the headless report prints it, and a plot or a sheet
+    // viewport - which paints the same stats - passes it on to the plot's
+    // reply and the sheet's problems.
+    std::vector<katana::cad::SurfaceProblem> surfaceProblems;
 };
 
 // Sizes of the marks the painter draws that are not the drawing's own: on
@@ -494,13 +496,14 @@ struct PdfResolution {
 // viewer's tab and a document list say what the sheet is. Widget-free, so it
 // may run off the GUI thread with its own cache. Fails with
 // FileExportFailure when the file cannot be written or finished, and with
-// whatever cad::sheetFor refuses.
-[[nodiscard]] katana::core::Status plotPlanToPdf(const QString& path,
-                                                 const katana::cad::PlotSettings& settings,
-                                                 const PlanSource& source,
-                                                 const katana::cad::LayerOverrides& layers,
-                                                 const std::set<std::uint64_t>& hiddenReferences,
-                                                 PlanPaintCache& cache,
-                                                 const QString& title = QString());
+// whatever cad::sheetFor refuses. `problems`, when given, receives the parts
+// of a surface's style the plot is without (PlanPaintStats::surfaceProblems:
+// contours too fine to trace), replacing what it held; the plot is written
+// all the same.
+[[nodiscard]] katana::core::Status plotPlanToPdf(
+    const QString& path, const katana::cad::PlotSettings& settings, const PlanSource& source,
+    const katana::cad::LayerOverrides& layers, const std::set<std::uint64_t>& hiddenReferences,
+    PlanPaintCache& cache, const QString& title = QString(),
+    std::vector<katana::cad::SurfaceProblem>* problems = nullptr);
 
 } // namespace katana::qt

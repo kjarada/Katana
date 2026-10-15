@@ -651,3 +651,120 @@ TEST(SurfacePlanFaces, ALevelSurfaceColouredBySlopeIsTheRampsStartNotItsMiddle)
     ASSERT_EQ(plan.image.width, 80);
     EXPECT_EQ(pixelAt(plan, 40, 40), opaque(0, 255, 38));
 }
+
+// ---- why a style could not be drawn ------------------------------------------------------------
+
+TEST(SurfaceProblems, ContoursAreRefusedExactlyWhenTheirCrossingsPassTheLimit)
+{
+    // The square is z = x from 0 to 10, so on each of its two triangles the
+    // levels of an interval i cross floor(10 / i) times (base 0, both triangles
+    // run from 0 to 10): 2 floor(10 / i) points in all, against the limit of
+    // 4 000 000. i = 6e-6: 1 666 666 each, 3 333 332 points - drawn. i = 4e-6:
+    // 2 500 000 each, 5 000 000 points - refused. (The two sit a fifth either
+    // side of the limit, clear of the rounding of 10 / i.)
+    const auto tin = square();
+    katana::cad::SurfaceContours contours;
+    contours.interval = 6.0e-6;
+    EXPECT_EQ(katana::cad::contourRefusal(*tin, contours), "");
+    contours.interval = 4.0e-6;
+    EXPECT_EQ(katana::cad::contourRefusal(*tin, contours),
+              "contours: an interval of 0.000004 crosses this surface's triangles more than "
+              "4000000 times; not drawn - set a larger interval");
+    // The ordinary interval of the built-in Contours style is no trouble.
+    contours.interval = 1.0;
+    EXPECT_EQ(katana::cad::contourRefusal(*tin, contours), "");
+}
+
+TEST(SurfaceProblems, AnIntervalThatIsNoPositiveNumberIsRefusedWhateverTheSurface)
+{
+    // kGeometric is 1e-7: an interval at or under it is no interval. Not
+    // finite is none either, nor is a base that is not finite.
+    const auto tin = square();
+    const std::string expected = "contours: the interval must be a finite number greater than zero";
+    for (const double interval : {0.0, -1.0, 1.0e-8, std::nan(""), HUGE_VAL}) {
+        katana::cad::SurfaceContours contours;
+        contours.interval = interval;
+        EXPECT_EQ(katana::cad::contourRefusal(*tin, contours), expected) << interval;
+    }
+    katana::cad::SurfaceContours badBase;
+    badBase.interval = 1.0;
+    badBase.base = std::nan("");
+    EXPECT_EQ(katana::cad::contourRefusal(*tin, badBase), expected);
+}
+
+TEST(SurfaceProblems, ALevelSurfaceHasNoContourToCrossSoNoIntervalIsTooFine)
+{
+    // Every vertex at 5: no triangle spans two levels whatever the interval.
+    auto level = TinSurface::create({{0.0, 0.0, 5.0}, {10.0, 0.0, 5.0}, {10.0, 10.0, 5.0}, {0.0, 10.0, 5.0}},
+                                    {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(level.ok());
+    katana::cad::SurfaceContours contours;
+    contours.interval = 1.0e-6;
+    EXPECT_EQ(katana::cad::contourRefusal(*level, contours), "");
+}
+
+TEST(SurfaceProblems, ThePlanAndTheCheckGiveOneAnswer)
+{
+    // What a paint puts in SurfacePlan::problem is contourRefusal's answer,
+    // word for word: one decision, said by the plan view and found before a
+    // plot.
+    const auto tin = square();
+    SurfacePlanCache cache;
+    SurfaceDisplayStyle style = bare();
+    style.contours.show = true;
+    style.contours.interval = 1.0e-6;
+    const SurfacePlan plan = katana::cad::surfacePlan({"ground", tin, "test"}, style,
+                                                      viewOf(kSquareBox, 0.1, tin->bounds()), cache);
+    EXPECT_FALSE(plan.problem.empty());
+    EXPECT_EQ(plan.problem, katana::cad::contourRefusal(*tin, style.contours));
+}
+
+TEST(SurfaceProblems, AProblemReadsAsALineForAPersonAndARecordForAnAgent)
+{
+    const katana::cad::SurfaceProblem problem{"ground", "Fine", "contours: too fine"};
+    EXPECT_EQ(problem.text(), "ground (style Fine): contours: too fine");
+    EXPECT_EQ(problem.record(), "warning surface=\"ground\" style=\"Fine\" reason=\"contours: too fine\"");
+    // A blank in a name and a quote in the reason are quoted and escaped, so
+    // the record still splits into its three fields.
+    const katana::cad::SurfaceProblem odd{"east lot", "Two \"bands\"", "said \"no\""};
+    EXPECT_EQ(odd.record(),
+              "warning surface=\"east lot\" style=\"Two \\\"bands\\\"\" reason=\"said \\\"no\\\"\"");
+}
+
+TEST(SurfaceProblems, TheStylesOfTheDrawingsVisibleSurfacesAreCheckedWithoutPaintingAnything)
+{
+    // Fine: contours every millionth of a unit, which the 10-unit relief of the
+    // square makes 10 000 000 crossings a triangle. Three surfaces use it or
+    // not: "first" and "second" in it, drawn, in the order added; "hidden" in
+    // it but hidden, so not drawn; "plain" in the built-in Contours (every
+    // metre), which can be traced; "outline" in Standard, which shows no
+    // contours at all.
+    const auto tin = square();
+    katana::cad::SurfaceStyleSet styles = katana::cad::builtInSurfaceStyles();
+    SurfaceDisplayStyle fine = bare();
+    fine.name = "Fine";
+    fine.contours.show = true;
+    fine.contours.interval = 1.0e-6;
+    styles.styles.push_back(fine);
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store.add(NamedSurface{"first", tin, "test", "Fine", true}).ok());
+    ASSERT_TRUE(store.add(NamedSurface{"hidden", tin, "test", "Fine", false}).ok());
+    ASSERT_TRUE(store.add(NamedSurface{"plain", tin, "test", "Contours", true}).ok());
+    ASSERT_TRUE(store.add(NamedSurface{"outline", tin, "test", "Standard", true}).ok());
+    ASSERT_TRUE(store.add(NamedSurface{"second", tin, "test", "Fine", true}).ok());
+
+    const auto problems = katana::cad::surfaceStyleProblems(store, styles);
+    ASSERT_EQ(problems.size(), 2u);
+    const std::string reason = katana::cad::contourRefusal(*tin, fine.contours);
+    ASSERT_FALSE(reason.empty());
+    EXPECT_EQ(problems[0].problem, (katana::cad::SurfaceProblem{"first", "Fine", reason}));
+    EXPECT_EQ(problems[1].problem, (katana::cad::SurfaceProblem{"second", "Fine", reason}));
+    EXPECT_EQ(problems[0].bounds.min.x, 0.0);
+    EXPECT_EQ(problems[0].bounds.max.x, 10.0);
+    EXPECT_EQ(problems[0].bounds.max.y, 10.0);
+
+    // No surfaces, no problems; the surface mended, none.
+    EXPECT_TRUE(katana::cad::surfaceStyleProblems(katana::terrain::SurfaceStore{}, styles).empty());
+    styles.styles.back().contours.interval = 1.0;
+    EXPECT_TRUE(katana::cad::surfaceStyleProblems(store, styles).empty());
+}

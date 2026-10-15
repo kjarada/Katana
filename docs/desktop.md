@@ -3588,7 +3588,14 @@ now, and the menu items write their lines:
   sheet as the active plan view shows it, through the `plotDrawingToPdf`
   that `--plot` uses; what is not given is `PlotSettings`' default. It logs
   the sentence it always did and a record, `file="..." paper= orientation=
-  scale= dpi= style= lineweight=`, with the scale a fitted plot chose. File >
+  scale= dpi= style= lineweight=`, with the scale a fitted plot chose. A plot
+  that is without part of a surface's style - the contours of a style whose
+  interval is too fine to trace are refused - logs a record for each,
+  `warning surface="ground" style="Fine" reason="contours: ..."`, between the
+  sentence and the `file=` record, which stays the last line; the plot is
+  written all the same (`qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`),
+  and the dialog shows the records in `plotDrawingWarnings`, hidden when a
+  plot had none (`PlotDrawingDialog.TheWarningRecordsOfTheReplyAreShownAndTheFileRecordStaysTheStatus`). File >
   Plot to PDF (`filePlot`) opens `plotDrawingDialog`, non-modal and kept:
   every field has an object name, the colour mode
   (`plotDrawingColourMode`, Colour / Greyscale / Monochrome) and the line

@@ -8,7 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -19,6 +21,9 @@
 #include "katana/cad/plotting/sheet_json.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/plotting/tables.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "katana/terrain/tin_surface.hpp"
 
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
@@ -263,6 +268,73 @@ TEST(SheetAgentVerbs, SheetsCheckPrintsAFindingALineAnAgentCanSplit)
               "checked 1 sheet: 1 error\nerror viewport.outside 1 vp1 message=\"off the paper\" "
               "fix=\"move it\"");
     EXPECT_TRUE(asked);
+}
+
+// A plot is warned, before the paper, of a surface it will print without its
+// contours: the plan painter refuses an interval that crosses the triangles
+// more than four million times, and says so only in the sheet's problems. An
+// agent reads the same warning from SHEETS CHECK (docs/plotting.md,
+// "Preflight checks"), headless, with no painter.
+TEST(SheetAgentVerbs, SheetsCheckWarnsOfASurfaceWhoseContoursATooFineIntervalWouldLeaveOutOfThePlot)
+{
+    using katana::cad::SurfaceDisplayStyle;
+    using katana::terrain::NamedSurface;
+    using katana::terrain::TinSurface;
+    Session s;
+    // The 10 x 10 square z = x: each of its two triangles runs from 0 to 10,
+    // so an interval of a millionth crosses it ten million times a triangle,
+    // past the four million the plan allows.
+    auto tin = TinSurface::create({{0.0, 0.0, 0.0}, {10.0, 0.0, 10.0}, {10.0, 10.0, 10.0}, {0.0, 10.0, 0.0}},
+                                  {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(tin.ok());
+    const auto ground = std::make_shared<const TinSurface>(std::move(*tin));
+    katana::cad::SurfaceStyleSet styles = katana::cad::builtInSurfaceStyles();
+    SurfaceDisplayStyle fine;
+    fine.name = "Fine";
+    fine.contours.show = true;
+    fine.contours.interval = 1.0e-6;
+    styles.styles.push_back(fine);
+    ASSERT_TRUE(s.document.setSurfaceStyles(styles).ok());
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store.add(NamedSurface{"ground", ground, "test", "Fine", true}).ok());
+    ASSERT_TRUE(s.document.setSurfaces(store).ok());
+    s.ok("SHEET NEW PLAN");
+    s.ok("VIEW ADD 1 plan scale=500 centre=5,5");
+
+    const std::string reply = s.ok("SHEETS CHECK");
+    std::string found;
+    for (const std::string& line : linesOf(reply)) {
+        if (line.starts_with("warning plan.surface-style 1 vp1 message=")) {
+            found = line;
+        }
+    }
+    ASSERT_FALSE(found.empty()) << reply;
+    EXPECT_TRUE(contains(found, "the surface ground (style Fine) without part of its style: contours: "
+                                "an interval of 0.000001 crosses this surface's triangles more than "
+                                "4000000 times"))
+        << found;
+    EXPECT_TRUE(found.ends_with(" subject=\"ground\"")) << found;
+
+    // As JSON, the same finding, for an agent that wants the fields.
+    const auto findings = findingsFromJson(s.ok("SHEETS CHECK json"));
+    ASSERT_TRUE(findings.ok());
+    const auto at = std::find_if(findings->begin(), findings->end(),
+                                 [](const Finding& f) { return f.code == "plan.surface-style"; });
+    ASSERT_NE(at, findings->end());
+    EXPECT_EQ(at->subject, "ground");
+    EXPECT_EQ(at->viewportId, "vp1");
+
+    // Mended, nothing is said; hidden, the surface is not drawn and nothing is said.
+    styles.styles.back().contours.interval = 1.0;
+    ASSERT_TRUE(s.document.setSurfaceStyles(styles).ok());
+    EXPECT_FALSE(contains(s.ok("SHEETS CHECK"), "plan.surface-style"));
+    styles.styles.back().contours.interval = 1.0e-6;
+    ASSERT_TRUE(s.document.setSurfaceStyles(styles).ok());
+    EXPECT_TRUE(contains(s.ok("SHEETS CHECK"), "plan.surface-style"));
+    katana::terrain::SurfaceStore hidden;
+    ASSERT_TRUE(hidden.add(NamedSurface{"ground", ground, "test", "Fine", false}).ok());
+    ASSERT_TRUE(s.document.setSurfaces(hidden).ok());
+    EXPECT_FALSE(contains(s.ok("SHEETS CHECK"), "plan.surface-style"));
 }
 
 // ---- ARRANGE ---------------------------------------------------------------------------------

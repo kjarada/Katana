@@ -1070,7 +1070,8 @@ Where it differs from the plan:
 ### T2: Terrain shading: hillshade, colour relief, slope shading
 
 Built: `RASTER SHADE` (`src/katana_app/geo/shade_verbs.cpp`), the ramps in
-`include/katana/interop/geo/colour_ramps.hpp`, and Terrain > Analysis >
+`include/katana/interop/geo/colour_ramps.hpp` (over the one table of
+`include/katana/terrain/colour_ramps.hpp`), and Terrain > Analysis >
 Terrain Shading (`terrainShading`, `terrainShadingDialog`,
 `src/katana_qt/geo/terrain_shading_dialog.hpp`). `docs/terrain.md`,
 "Shading", has the grammar, the records and the decisions. The picture is a

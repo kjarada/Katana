@@ -217,6 +217,44 @@ TEST(PlotDrawingDialog, TheSuggestedFileFollowsTheDrawingUntilOneIsTypedAndARepl
     EXPECT_EQ(ran.size(), 2u);
 }
 
+// The PLOT reply says what a plot is without as `warning` records, before the
+// file record that stays its last line (MainWindow::plotDrawingToPdf); the
+// dialog shows those records as they came, and only while the last plot had
+// some.
+TEST(PlotDrawingDialog, TheWarningRecordsOfTheReplyAreShownAndTheFileRecordStaysTheStatus)
+{
+    const QString first = R"(warning surface="ground1" style="Fine" reason="contours: too fine")";
+    const QString second = R"(warning surface="ground2" style="Fine" reason="contours: too fine")";
+    int warnings = 2;
+    PlotDrawingDialogContext context;
+    context.run = [&](const QString&) {
+        QString reply = "Plotted to out.pdf";
+        if (warnings >= 1) {
+            reply += '\n' + first;
+        }
+        if (warnings >= 2) {
+            reply += '\n' + second;
+        }
+        reply += "\nfile=\"out.pdf\" paper=A4";
+        return VerbOutcome{true, reply, {}};
+    };
+    context.suggestedPath = "out.pdf";
+    PlotDrawingDialog dialog(std::move(context));
+    auto* shown = child<QLabel>(dialog, "plotDrawingWarnings");
+    EXPECT_TRUE(shown->isHidden()) << "nothing to say before a plot";
+
+    dialog.plot();
+    EXPECT_FALSE(shown->isHidden());
+    EXPECT_EQ(shown->text(), first + '\n' + second);
+    EXPECT_EQ(child<QLabel>(dialog, "plotDrawingStatus")->text(), "Plotted: file=\"out.pdf\" paper=A4");
+
+    // A plot that lost nothing says nothing, and the last one's words go.
+    warnings = 0;
+    dialog.plot();
+    EXPECT_TRUE(shown->isHidden());
+    EXPECT_TRUE(shown->text().isEmpty());
+}
+
 TEST(PlotDrawingDialog, AHeadlessSessionIsToldToFillThePath)
 {
     PlotDrawingDialogContext context;

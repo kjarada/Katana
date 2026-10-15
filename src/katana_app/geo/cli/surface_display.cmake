@@ -66,3 +66,38 @@ add_test(NAME cli.surfacestyle_with_more_bands_than_the_maximum_is_refused_namin
             -c "SURFACESTYLE NEW Many FROM \"Elevation Bands\" bands=101")
 set_tests_properties(cli.surfacestyle_with_more_bands_than_the_maximum_is_refused_naming_bands PROPERTIES
     PASS_REGULAR_EXPRESSION "error: InvalidArgument: [^\r\n]*bands must be 2 to 100")
+
+# A plot is warned of a surface it will print without its contours. An interval
+# of 0.0005 over the terrain's 13.9 units of relief crosses its 21 182
+# triangles more than four million times (SURFACE PLAN says so as problem=), so
+# the plan painter refuses the contours and a plot would be without them; the
+# preflight check says it before the paper, from a sheet whose plan (1:1000
+# about (85, 62), a window 385 x 250 m) reaches the terrain, which covers -4.25
+# to 174.25 across and -4.25 to 129.25 up. The finding is a record: the
+# severity, the code, the sheet and view, a message naming the surface, its
+# style and why, and the surface again as subject=.
+add_test(NAME cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_display_samples}/terrain.asc\" NAME ground"
+            -c "SURFACESTYLE NEW Fine FROM Contours interval=0.0005"
+            -c "SURFACE STYLE ground Fine"
+            -c "SHEET NEW PLAN"
+            -c "VIEW ADD 1 plan scale=1000 centre=85,62"
+            -c "SHEETS CHECK")
+set_tests_properties(cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot PROPERTIES
+    PASS_REGULAR_EXPRESSION "warning plan\\.surface-style 1 vp1 message=\"[^\r\n]*the surface ground \\(style Fine\\) without part of its style: contours: an interval of 0\\.000500 crosses this surface's triangles more than 4000000 times[^\r\n]* subject=\"ground\""
+    FAIL_REGULAR_EXPRESSION "error:")
+
+# The same plan with an interval the terrain can trace says nothing of it.
+add_test(NAME cli.sheets_check_says_nothing_of_a_surface_whose_contours_can_be_traced
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_display_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE STYLE ground Contours"
+            -c "SHEET NEW PLAN"
+            -c "VIEW ADD 1 plan scale=1000 centre=85,62"
+            -c "SHEETS CHECK")
+set_tests_properties(cli.sheets_check_says_nothing_of_a_surface_whose_contours_can_be_traced PROPERTIES
+    PASS_REGULAR_EXPRESSION "checked 1 sheet"
+    FAIL_REGULAR_EXPRESSION "plan\\.surface-style;error:")

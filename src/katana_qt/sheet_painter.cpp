@@ -1030,6 +1030,15 @@ bool SheetPainter::paintPlanViewport(const Viewport& viewport, TextSetter& text,
     plan.annotationScale = at.scale;
     const PlanPaintStats drawn = paintPlan(painter_, source_.plan, frame, plan, cache_.plan());
     stats_.planEntitiesDrawn += drawn.entitiesDrawn;
+    // A surface whose style the painter could not draw in whole - contours
+    // too fine to trace are refused - is a problem of this viewport as much as
+    // a missing alignment is: the plan is drawn, and a plot or a sheet that
+    // was silently without its contours is paper wasted. It joins the
+    // sheet's problems, which the editor shows in the viewport's panel and
+    // every plot reports.
+    for (const katana::cad::SurfaceProblem& refused : drawn.surfaceProblems) {
+        problem(viewport, refused.text());
+    }
 
     if (viewport.kind == ViewportKind::KeyPlan) {
         // The drawing faded, so the sheets over it read first.

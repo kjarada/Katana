@@ -387,9 +387,14 @@ TEST(SurfacePlanPainter, AStyleWhoseContoursAreRefusedSaysWhyInTheStatisticsNotN
     const SurfaceStore refused = storeIn("Fine");
     const Painted painted = paint(&refused, set);
     ASSERT_EQ(painted.stats.surfaceProblems.size(), 1u);
-    EXPECT_NE(painted.stats.surfaceProblems.front().find("ground: contours"), std::string::npos)
-        << painted.stats.surfaceProblems.front();
-    EXPECT_NE(painted.stats.surfaceProblems.front().find("interval"), std::string::npos);
+    // Whose it is - the surface and its style - and why; an interval of a
+    // millionth is written to six decimals, 0.000001.
+    const katana::cad::SurfaceProblem& problem = painted.stats.surfaceProblems.front();
+    EXPECT_EQ(problem.surface, "ground");
+    EXPECT_EQ(problem.style, "Fine");
+    EXPECT_NE(problem.reason.find("contours: an interval of 0.000001"), std::string::npos)
+        << problem.reason;
+    EXPECT_EQ(problem.text().find("ground (style Fine): contours"), 0u) << problem.text();
     // A style whose contours are drawn says nothing.
     const SurfaceStore fine1 = storeIn("Contours");
     EXPECT_TRUE(paint(&fine1, set).stats.surfaceProblems.empty());

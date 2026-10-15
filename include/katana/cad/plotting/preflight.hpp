@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "katana/cad/plotting/sheet_set.hpp"
+#include "katana/cad/terrain/surface_plan.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -110,6 +111,11 @@ struct PreflightOptions {
     // How many surfaces the sections are cut from; nothing when not known,
     // and then the sections' surfaces are not checked.
     std::optional<std::size_t> sectionSurfaces;
+    // The visible surfaces whose styles cannot be drawn in whole, each with
+    // where it lies (cad::surfaceStyleProblems): what a plan whose window
+    // reaches one will be without. Nothing when not known, and then no
+    // surface is checked; empty when every style can be drawn.
+    std::optional<std::vector<SurfaceStyleProblem>> surfaceProblems;
     // Whether the set's logo file was found and read; nothing when not known.
     std::optional<bool> logoReadable;
     // Where an Image viewport's file is looked for; empty: not looked for.
@@ -134,8 +140,8 @@ struct PreflightOptions {
                                                const PreflightOptions& options = {});
 
 // The same for a document's own sheets: its drawing, its spatial index, its
-// project fields, whether its logo file is there and where its images are.
-// Options the caller set are kept.
+// project fields, whether its logo file is there, where its images are and
+// whether its surfaces' styles can be drawn. Options the caller set are kept.
 [[nodiscard]] std::vector<Finding> checkDocumentSheets(const Document& document,
                                                        PreflightOptions options = {});
 

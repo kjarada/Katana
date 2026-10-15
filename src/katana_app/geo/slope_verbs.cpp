@@ -220,8 +220,9 @@ std::vector<SlopeClass> classesOf(const std::vector<double>& breaks)
             made.to = breaks[i];
         }
         made.name = gdalNumber(made.from) + (made.to ? "-" + gdalNumber(*made.to) : "+");
-        // The slope ramp read at the class's place among them: green for the
-        // gentlest, red for the steepest.
+        // The slope ramp (the table's, the one a surface style's slope ramp
+        // is) read at the class's place among them: green for the gentlest,
+        // red for the steepest.
         const double position =
             count > 1 ? static_cast<double>(i) / static_cast<double>(count - 1) : 0.5;
         const auto colours = igeo::spread(ramp, 0.0, 1.0);
@@ -487,8 +488,10 @@ Result<Analysed> analyse(const gp::DatasetValue& input, const SlopeWords& words,
         }
     } else {
         // Aspect is a direction: a grey ramp would draw north (0) and north
-        // (360) as black and white. Eight compass colours, the ramp's hues
-        // around the circle, north at both ends.
+        // (360) as black and white. Eight compass colours round the circle,
+        // north at both ends: hues from ColorBrewer's schemes, a constant of
+        // their own and not a row of the ramp table (docs/surface_display.md,
+        // "Not done").
         const std::uint8_t compass[9][3] = {{215, 25, 28},  {253, 174, 97}, {255, 255, 191},
                                             {166, 217, 106}, {26, 150, 65},  {43, 131, 186},
                                             {94, 60, 153},   {194, 75, 160}, {215, 25, 28}};

@@ -14,8 +14,12 @@
 #include <QPushButton>
 #include <QStringList>
 
+#include <cstddef>
+#include <string>
+
 #include "geo/terrain_shading_dialog.hpp"
 #include "katana/interop/reference_data.hpp"
+#include "katana/terrain/colour_ramps.hpp"
 #include "katana/terrain/surface_store.hpp"
 
 namespace {
@@ -131,6 +135,26 @@ TEST(TerrainShadingDialog, EveryFieldHasItsNameAndRunRunsTheLineShown)
               "ran " + recorder.lines.front());
     dialog.findChild<QPushButton*>("shadingPreview")->click();
     EXPECT_TRUE(recorder.lines.back().endsWith(" PREVIEW"));
+}
+
+TEST(TerrainShadingDialog, TheRampBoxOffersEveryRampOfTheOneTableInItsOrder)
+{
+    // The box is filled from the table the verb and the surface styles read
+    // (katana/terrain/colour_ramps.hpp), so earth and spectral - the styles'
+    // own until the tables were made one - are offered with the rest.
+    katana::interop::ReferenceData reference;
+    katana::terrain::SurfaceStore surfaces;
+    Recorder recorder;
+    TerrainShadingDialog dialog(recorder.context(&reference, &surfaces));
+    const auto* ramp = dialog.findChild<QComboBox*>("shadingRamp");
+    ASSERT_NE(ramp, nullptr);
+    const auto names = katana::terrain::colourRampNames();
+    ASSERT_EQ(ramp->count(), static_cast<int>(names.size()));
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        EXPECT_EQ(ramp->itemText(static_cast<int>(i)).toStdString(), std::string(names[i])) << i;
+    }
+    EXPECT_GE(ramp->findText("spectral"), 0);
+    EXPECT_GE(ramp->findText("earth"), 0);
 }
 
 TEST(TerrainShadingDialog, WithNothingToShadeRunIsOffAndTheCommandSaysWhy)

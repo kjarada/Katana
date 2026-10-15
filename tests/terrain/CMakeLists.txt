@@ -8,4 +8,6 @@ katana_add_test_suite(terrain
             test_tin_edit.cpp test_tin_edit_combine.cpp
             # A surface as bytes, as a project keeps it (tin_codec.hpp).
             test_tin_codec.cpp
+            # The one table of colour ramps (docs/surface_display.md, "The ramps").
+            test_colour_ramps.cpp
 )

@@ -16,6 +16,7 @@
 #include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -25,6 +26,8 @@
 #include "geo/replies.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/terrain/surface_colouring.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/core/text.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/geo/colour_ramps.hpp"
@@ -240,13 +243,41 @@ TEST_F(ShadeVerb, LegendRecordsListTheRampStops)
     EXPECT_EQ(ramp[0].get("from").value_or(""), "data");
 }
 
+TEST_F(ShadeVerb, ARampOnlyTheSurfaceStylesHadIsAcceptedAndLegendedInItsOwnColours)
+{
+    // earth and spectral were the surface styles' alone: RASTER SHADE refused
+    // them. Spectral is ColorBrewer's five-class Spectral reversed, #2b83ba
+    // (43, 131, 186) low to #d7191c (215, 25, 28) high; its legend is five
+    // stops, the first and the last at the range's ends.
+    const std::string reply = ran("RASTER SHADE FILE \"" + kPlane + "\" style=relief ramp=spectral");
+    const auto ramp = records(reply, "ramp");
+    ASSERT_EQ(ramp.size(), 1U) << reply;
+    EXPECT_EQ(ramp[0].get("name").value_or(""), "spectral");
+    const auto legend = records(reply, "legend");
+    ASSERT_EQ(legend.size(), 5U) << reply;
+    EXPECT_EQ(legend.front().get("r").value_or(""), "43");
+    EXPECT_EQ(legend.front().get("g").value_or(""), "131");
+    EXPECT_EQ(legend.front().get("b").value_or(""), "186");
+    EXPECT_EQ(legend.back().get("r").value_or(""), "215");
+    EXPECT_EQ(legend.back().get("g").value_or(""), "25");
+    EXPECT_EQ(legend.back().get("b").value_or(""), "28");
+    // The lowest cells take the ramp's first colour exactly, as terrain's do.
+    const RasterOverlay& raster = made();
+    const Rgba low = pixel(raster, 0, 0);
+    EXPECT_EQ(low.r, 43);
+    EXPECT_EQ(low.g, 131);
+    EXPECT_EQ(low.b, 186);
+}
+
 TEST_F(ShadeVerb, ReliefOverHillshadeOnFlatGroundKeepsTheRampHue)
 {
     // range=100,200 puts the flat ground's 100 at the terrain ramp's first
-    // colour, (38, 115, 0). hsv-value keeps its hue and saturation and takes
-    // the hillshade's 181 as the value: the colour scaled so its greatest
-    // channel is 181, (38 x 181 / 115, 181, 0) = (59.8, 181, 0). An 8-bit
-    // channel rounds it: within 1.
+    // colour, (40, 70, 140): the one table's, the surface styles' (the
+    // shading's own green, (38, 115, 0), until the two tables were made one).
+    // hsv-value keeps its hue and saturation and takes the
+    // hillshade's 181 as the value: the colour scaled so its greatest channel,
+    // the blue, is 181, (40 x 181 / 140, 70 x 181 / 140, 181) = (51.71, 90.5,
+    // 181). An 8-bit channel rounds it: within 1.
     const std::string flat = flatGrid(files, "flat.asc", 8, 6, 100.0);
     ran("RASTER SHADE FILE \"" + flat + "\" style=relief+hillshade range=100,200");
     const RasterOverlay& raster = made();
@@ -254,9 +285,9 @@ TEST_F(ShadeVerb, ReliefOverHillshadeOnFlatGroundKeepsTheRampHue)
     for (int row = 0; row < raster.height; ++row) {
         for (int column = 0; column < raster.width; ++column) {
             const Rgba shade = pixel(raster, column, row);
-            ASSERT_NEAR(shade.r, 38.0 * 181.0 / 115.0, 1.0) << column << "," << row;
-            ASSERT_EQ(shade.g, 181);
-            ASSERT_EQ(shade.b, 0);
+            ASSERT_NEAR(shade.r, 40.0 * 181.0 / 140.0, 1.0) << column << "," << row;
+            ASSERT_NEAR(shade.g, 70.0 * 181.0 / 140.0, 1.0);
+            ASSERT_EQ(shade.b, 181);
         }
     }
 }
@@ -331,7 +362,9 @@ TEST_F(ShadeVerb, AReferenceRasterIsShadedFromItsFile)
     ASSERT_EQ(reference.rasters().size(), 2U);
     EXPECT_EQ(reference.rasters().back().name, "grey-plane");
     EXPECT_EQ(reference.rasters().back().displayStyle, RasterDisplayStyle::Plain);
-    EXPECT_EQ(records(reply, "legend").size(), 2U); // the grey ramp's two stops
+    // The grey ramp's five stops (the table's: 32 to 224 in steps of 48; it
+    // was two, black and white, in the shading's own table).
+    EXPECT_EQ(records(reply, "legend").size(), 5U);
 }
 
 TEST_F(ShadeVerb, APictureLongerThanTheDisplayCopyIsAveragedDownToIt)
@@ -397,7 +430,13 @@ TEST_F(ShadeVerb, WhatTheVerbCannotDoIsRefusedNamingIt)
         ASSERT_FALSE(refused.ok()) << words;
         EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument) << words;
     }
-    EXPECT_EQ(run(plane + " style=relief ramp=no-such-ramp").error().code, ErrorCode::NotFound);
+    const auto unknown = run(plane + " style=relief ramp=no-such-ramp");
+    ASSERT_FALSE(unknown.ok());
+    EXPECT_EQ(unknown.error().code, ErrorCode::NotFound);
+    // The refusal names every ramp of the table, the style's two as well.
+    EXPECT_NE(unknown.error().message.find("terrain, earth, diverging, slope, grey or spectral"),
+              std::string::npos)
+        << unknown.error().message;
     EXPECT_EQ(run("RASTER SHADE DRAWING").error().code, ErrorCode::InvalidArgument);
     EXPECT_EQ(run("RASTER SHADE SURFACE nothing").error().code, ErrorCode::NotFound);
     EXPECT_TRUE(reference.rasters().empty());
@@ -417,8 +456,54 @@ TEST(ColourRamps, ASpreadRampHitsItsEndsExactlyAndWritesGdalsText)
     EXPECT_EQ(igeo::colourMapText({{1.5, 1, 2, 3}}, true), "1.5 1 2 3 255\nnv 0 0 0 0\n");
     EXPECT_EQ(igeo::colourMapText({{-2, 0, 0, 0}}, false), "-2 0 0 0 255\n");
     EXPECT_EQ(igeo::builtInRampNames(),
-              (std::vector<std::string>{"terrain", "diverging", "slope", "grey"}));
+              (std::vector<std::string>{"terrain", "earth", "diverging", "slope", "grey", "spectral"}));
     EXPECT_EQ(igeo::builtInRamp("rainbow"), nullptr);
+}
+
+TEST(ColourRamps, TheShadingsRampsAreTheSurfaceStylesRampsStopForStop)
+{
+    // One table: RASTER SHADE's ramp=terrain is the surface style's
+    // ramp=terrain, whichever of the two a person types. For every ramp of
+    // the table, in its order, the shading's stops are the style's, at 0, 1/4,
+    // 1/2, 3/4 and 1 - five, evenly spaced.
+    const auto names = katana::cad::surfaceRampNames();
+    ASSERT_EQ(names.size(), 6U);
+    for (const std::string_view name : names) {
+        const igeo::ColourRamp* shading = igeo::builtInRamp(name);
+        ASSERT_NE(shading, nullptr) << name;
+        const katana::cad::SurfaceRampStops& style = katana::cad::surfaceRampStops(name);
+        ASSERT_EQ(shading->stops.size(), style.size()) << name;
+        for (std::size_t i = 0; i < style.size(); ++i) {
+            EXPECT_EQ(shading->stops[i].position, static_cast<double>(i) / 4.0) << name << " " << i;
+            EXPECT_EQ(shading->stops[i].r, style[i].r) << name << " " << i;
+            EXPECT_EQ(shading->stops[i].g, style[i].g) << name << " " << i;
+            EXPECT_EQ(shading->stops[i].b, style[i].b) << name << " " << i;
+        }
+    }
+    // And the colours themselves, from outside this program: terrain is the
+    // 3D view's elevation ramp, deep blue (40, 70, 140) to snow (245, 245,
+    // 245); diverging is ColorBrewer's RdBu five-class, reversed, #0571b0 ...
+    // #ca0020; grey runs 32 to 224. The older shading table had terrain from
+    // (38, 115, 0) to white, diverging from (33, 102, 172) to (178, 24, 43) and
+    // grey from black to white.
+    const igeo::ColourRamp* terrain = igeo::builtInRamp("TERRAIN");
+    ASSERT_NE(terrain, nullptr);
+    EXPECT_EQ(terrain->stops.front().r, 40);
+    EXPECT_EQ(terrain->stops.front().g, 70);
+    EXPECT_EQ(terrain->stops.front().b, 140);
+    EXPECT_EQ(terrain->stops.back().r, 245);
+    const igeo::ColourRamp* diverging = igeo::builtInRamp("diverging");
+    ASSERT_NE(diverging, nullptr);
+    EXPECT_EQ(diverging->stops.front().r, 0x05);
+    EXPECT_EQ(diverging->stops.front().g, 0x71);
+    EXPECT_EQ(diverging->stops.front().b, 0xb0);
+    EXPECT_EQ(diverging->stops.back().r, 0xca);
+    EXPECT_EQ(diverging->stops.back().g, 0x00);
+    EXPECT_EQ(diverging->stops.back().b, 0x20);
+    const igeo::ColourRamp* grey = igeo::builtInRamp("grey");
+    ASSERT_NE(grey, nullptr);
+    EXPECT_EQ(grey->stops.front().r, 32);
+    EXPECT_EQ(grey->stops.back().r, 224);
 }
 
 TEST(ColourRamps, AColourMapFileIsReadAsGdalReadsIt)
