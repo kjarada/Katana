@@ -770,16 +770,52 @@ const std::vector<Tool>& tools()
             "visible surface or the first alignment, said as chosen= in the reply. LEADER FOR "
             "<ids>|SELECTION preset=... makes one to each entity in one undo step. A template "
             "may name {surface.NAME} {dsurface.NAME} {cut.NAME} {fill.NAME} {station.NAME} "
-            "{offset.NAME} {profile.NAME} {dprofile.NAME} itself (katana_help, under Leader).",
+            "{offset.NAME} {profile.NAME} {dprofile.NAME} itself (katana_help, under Leader). "
+            "Which leaders: all of them; or \"ids\"; or the ones a scope and filter take - the "
+            "same grammar as Global Modify, MODIFY and the UTILITY verbs: \"scope\" selection, "
+            "drawing, area (with \"area\") or layers (with \"scope_layers\" and \"only\"), and "
+            "\"scope_where\" conditions - and then the reply also carries scope {record "
+            "(scope=layers layers=... matched=N), matched}, N counting the leaders the scope "
+            "took; a scope that takes none gives leaders [] and matched 0, not an error. "
+            "\"target\" narrows either.",
             objectSchema(
                 Json{{"ids",
                       {{"type", "array"},
                        {"items", {{"type", "integer"}, {"minimum", 1}}},
-                       {"description", "Only these leaders (by entity id); all when left out."}}},
+                       {"description", "Only these leaders (by entity id); all when left out. "
+                                       "Not with a scope."}}},
                      {"target",
                       {{"type", "integer"},
                        {"minimum", 1},
-                       {"description", "Only the leaders whose tip is on this entity."}}}}),
+                       {"description", "Only the leaders whose tip is on this entity."}}},
+                     {"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "Only the leaders this takes of the drawing (the shared scope grammar); "
+                        "area with \"area\", layers with \"scope_layers\" and \"only\". VIEW is "
+                        "the window's. \"scope_where\" alone filters the selection."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description",
+                        "[x0, y0, x1, y1] in the drawing's coordinates: scope area (given alone, "
+                        "it is the scope)."}}},
+                     {"scope_layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"scope_where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on what the scope takes: [\"LAYER=notes\", "
+                        "\"PROP=owner:Smith*\"]."}}}}),
             hints(true, false, true), [](Session& session, const Json& arguments) {
                 std::vector<katana::entity::EntityId> ids;
                 if (arguments.contains("ids")) {
@@ -803,10 +839,54 @@ const std::vector<Tool>& tools()
                     }
                     target = static_cast<katana::entity::EntityId>(id.get<long long>());
                 }
+                // Which leaders: the ids, or what the scope and filter take.
+                // The scope is read by the one reading of a scope in JSON
+                // (scopeWordsOf) and the one grammar (parseScopeWords), and
+                // resolved by the one matcher; VIEW is the window's, so none.
+                std::optional<std::vector<katana::entity::EntityId>> only;
+                std::optional<katana::cad::annotation::LeadersScopeReport> scopeReport;
+                const Json& scopeKind = argument(arguments, "scope");
+                const Json& area = argument(arguments, "area");
+                const Json& where = argument(arguments, "scope_where");
+                if (!scopeKind.is_null() || !area.is_null() || !where.is_null()) {
+                    if (!ids.empty()) {
+                        throw ToolRefusal{"give \"ids\" or a scope, not both"};
+                    }
+                    if (!scopeKind.is_null() && !scopeKind.is_string()) {
+                        throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+                    }
+                    const std::string kind = scopeKind.is_string() ? scopeKind.get<std::string>()
+                                             : !area.is_null()      ? "area"
+                                                                    : "selection";
+                    const std::string words =
+                        scopeWordsOf(kind, area, argument(arguments, "scope_layers"),
+                                     optionalBool(arguments, "only", false), where);
+                    const auto tokens = katana::cad::CommandInterpreter::tokenize(words);
+                    if (!tokens) {
+                        throw ToolRefusal{tokens.error().describe()};
+                    }
+                    std::size_t at = 0;
+                    const auto scope = katana::cad::parseScopeWords(*tokens, at);
+                    if (!scope) {
+                        throw ToolRefusal{scope.error().describe()};
+                    }
+                    const auto match =
+                        katana::cad::annotation::matchLeaders(session.document(), *scope, {});
+                    if (!match) {
+                        throw ToolRefusal{match.error().describe()};
+                    }
+                    only = match->matched;
+                    scopeReport = katana::cad::annotation::LeadersScopeReport{
+                        katana::cad::scopeRecord(*match), match->matched.size()};
+                } else if (!ids.empty()) {
+                    only = ids;
+                }
                 // From the Document, as katana_status is: a read leaves no
                 // line in the session's history.
-                const std::string json =
-                    katana::cad::annotation::leadersJson(session.document(), ids, target);
+                katana::cad::annotation::LeadersReport report =
+                    katana::cad::annotation::leadersReport(session.document(), only, target);
+                report.scope = scopeReport;
+                const std::string json = katana::cad::annotation::leadersJsonOf(report);
                 return ToolReply{json, Json::parse(json)};
             }});
 

@@ -2,6 +2,7 @@
 
 #include "katana/cad/alignment_report.hpp"
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
+#include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
@@ -2026,8 +2027,17 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
                           std::to_string(args.size() - 2) + " PIs");
     }
     if (action == "DELETE") {
+        // The leaders whose notes read it by name will read nothing: said, not
+        // refused (docs/annotation.md, "A surface or an alignment is read by
+        // name"); UNDO puts the alignment back with its readers.
+        const std::size_t readers =
+            ann::leadersReading(model, ann::ReadKind::Alignment, name);
         return finish(document_.execute(cmd::deleteAlignment(name)),
-                      "alignment " + name + " deleted");
+                      "alignment " + name + " deleted" +
+                          (readers > 0 ? "\nwarning leaders=" + std::to_string(readers) +
+                                             " read alignment " + name +
+                                             " and will read nothing now"
+                                       : std::string()));
     }
 
     const katana::entity::Alignment* existing = model.alignments.find(name);

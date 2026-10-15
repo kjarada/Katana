@@ -142,6 +142,11 @@ std::vector<std::string_view> leaderContextKinds()
     return kinds;
 }
 
+bool isSurfaceContextKind(std::string_view kind)
+{
+    return isSurfaceKind(kind);
+}
+
 std::optional<ContextValueName> contextValueName(std::string_view value)
 {
     const std::size_t dot = value.find('.');

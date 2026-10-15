@@ -107,6 +107,11 @@ struct ContextValueName {
 };
 [[nodiscard]] std::optional<ContextValueName> contextValueName(std::string_view value);
 
+// Whether a context KIND reads a surface (surface, dsurface, cut, fill) and
+// not an alignment (station, offset, profile, dprofile): what tells a rename
+// of a surface from a rename of an alignment.
+[[nodiscard]] bool isSurfaceContextKind(std::string_view kind);
+
 // Every value name a leader's template may use besides prop.NAME, in the
 // order LEADER VALUES and HELP list them. Which of them a target HAS depends
 // on what it is and where the tip is on it (docs/annotation.md has the

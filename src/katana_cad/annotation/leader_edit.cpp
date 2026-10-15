@@ -430,28 +430,68 @@ Result<LeaderRelease> releaseLeaders(const Model& model, std::vector<EntityId> i
     return release;
 }
 
-Result<CommandPtr>
-setLeaderTargetProperty(const Model& model, EntityId id, const std::string& key,
-                        const std::optional<katana::entity::PropertyValue>& value)
+Result<LeadersProperty>
+setLeadersTargetProperty(const Model& model, std::vector<EntityId> ids, const std::string& key,
+                         const std::optional<katana::entity::PropertyValue>& value)
 {
-    if (auto status = requireLeaders(model, {id}); !status) {
+    ids = unique(std::move(ids));
+    if (ids.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no leader to set an attribute through");
+    }
+    if (auto status = requireLeaders(model, ids); !status) {
         return status.error();
     }
-    const AnchorRef tipRef = leaderIn(model, id).tipRef;
-    if (!tipRef.associated()) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "that leader's tip is on no entity, so it has no attributes to set",
-                         "id=" + std::to_string(id));
+    LeadersProperty result;
+    std::vector<EntityId> entities;
+    // The first leader left out says why, a flag and not an optional: that
+    // reason is what a single leader's refusal is.
+    Status firstReason;
+    for (const EntityId id : ids) {
+        const AnchorRef tipRef = leaderIn(model, id).tipRef;
+        if (!tipRef.associated()) {
+            ++result.skipped;
+            if (firstReason) {
+                firstReason = makeError(
+                    ErrorCode::InvalidArgument,
+                    "that leader's tip is on no entity, so it has no attributes to set",
+                    "id=" + std::to_string(id));
+            }
+            continue;
+        }
+        if (!model.entities.contains(tipRef.entity)) {
+            ++result.skipped;
+            if (firstReason) {
+                firstReason = makeError(ErrorCode::NotFound,
+                                        "the entity the leader's tip is on is gone",
+                                        "id=" + std::to_string(tipRef.entity));
+            }
+            continue;
+        }
+        entities.push_back(tipRef.entity);
+        ++result.leaders;
     }
-    if (!model.entities.contains(tipRef.entity)) {
-        return makeError(ErrorCode::NotFound, "the entity the leader's tip is on is gone",
-                         "id=" + std::to_string(tipRef.entity));
+    if (result.leaders == 0) {
+        return firstReason.error();
     }
     if (key.empty()) {
         return makeError(ErrorCode::InvalidArgument, "an attribute needs a name");
     }
-    return value ? cmd::setEntityProperty({tipRef.entity}, key, *value)
-                 : cmd::removeEntityProperty({tipRef.entity}, key);
+    entities = unique(std::move(entities));
+    result.entities = entities.size();
+    result.command = value ? cmd::setEntityProperty(entities, key, *value)
+                           : cmd::removeEntityProperty(entities, key);
+    return result;
+}
+
+Result<CommandPtr>
+setLeaderTargetProperty(const Model& model, EntityId id, const std::string& key,
+                        const std::optional<katana::entity::PropertyValue>& value)
+{
+    auto many = setLeadersTargetProperty(model, {id}, key, value);
+    if (!many) {
+        return many.error();
+    }
+    return std::move(many->command);
 }
 
 Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
@@ -659,12 +699,22 @@ Result<LeaderAlignment> alignLeaders(const Model& model, std::vector<EntityId> i
     return alignment;
 }
 
-BalloonRenumbering renumberBalloons(const Model& model, int start, BalloonOrder order)
+BalloonRenumbering renumberBalloons(const Model& model, int start, BalloonOrder order,
+                                    const std::optional<std::vector<EntityId>>& within)
 {
     std::vector<EntityId> balloons;
+    // The ids are searched as they are given: a scope's matches arrive in id
+    // order, and a caller's own list need not.
+    // A flag and a list, not the optional itself, in the lambda below.
+    const bool limited = within.has_value();
+    std::vector<EntityId> allowed;
+    if (limited) {
+        allowed = unique(*within);
+    }
     model.entities.forEach([&](const Entity& entity) {
         const auto* leader = std::get_if<LeaderGeometry>(&entity.geometry);
-        if (leader != nullptr && isNumberedBalloon(*leader)) {
+        if (leader != nullptr && isNumberedBalloon(*leader) &&
+            (!limited || std::binary_search(allowed.begin(), allowed.end(), entity.id))) {
             balloons.push_back(entity.id);
         }
     });
@@ -754,6 +804,89 @@ std::string leaderSays(const Model& model, const LeaderGeometry& leader,
                        const katana::entity::LeaderContext& context)
 {
     return katana::entity::leaderNote(model, leader, codePropertyCandidates(), context);
+}
+
+namespace {
+
+// A surface is found ignoring case (SurfaceStore::find, which is what a
+// note's {surface.NAME} reads through), an alignment exactly (ALIGN).
+bool sameName(ReadKind kind, std::string_view a, std::string_view b)
+{
+    return kind == ReadKind::Surface ? katana::core::equalsIgnoringCase(a, b) : a == b;
+}
+
+// Whether the template field `field` ("dsurface.Existing Ground") reads
+// `name` of `kind`.
+bool fieldReads(ReadKind kind, std::string_view name, std::string_view field)
+{
+    const auto parsed = katana::entity::contextValueName(field);
+    return parsed && katana::entity::isSurfaceContextKind(parsed->kind) == (kind == ReadKind::Surface) &&
+           sameName(kind, parsed->name, name);
+}
+
+bool templateReads(ReadKind kind, std::string_view name, const std::string& templateText)
+{
+    for (const std::string& field : katana::entity::templateFields(templateText)) {
+        if (fieldReads(kind, name, field)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+std::size_t leadersReading(const Model& model, ReadKind kind, std::string_view name)
+{
+    std::size_t count = 0;
+    model.entities.forEach([&](const Entity& entity) {
+        const auto* leader = std::get_if<LeaderGeometry>(&entity.geometry);
+        if (leader != nullptr && leader->fields && templateReads(kind, name, leader->text)) {
+            ++count;
+        }
+    });
+    return count;
+}
+
+LeaderReadsRenamed renameLeaderReads(const Model& model, ReadKind kind, std::string_view from,
+                                     std::string_view to)
+{
+    LeaderReadsRenamed result;
+    const bool writable = !to.empty() && to.find_first_of(":{}") == std::string_view::npos;
+    ChangeSet changes;
+    model.entities.forEach([&](const Entity& entity) {
+        const auto* leader = std::get_if<LeaderGeometry>(&entity.geometry);
+        if (leader == nullptr || !leader->fields || !templateReads(kind, from, leader->text)) {
+            return;
+        }
+        // On a locked layer (its own or a parent's) a leader cannot be
+        // changed, and one leader in the way would refuse the whole rename:
+        // it is left reading the old name, counted.
+        const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
+        if (!writable || layer.layer == nullptr || layer.locked) {
+            ++result.unfollowed;
+            return;
+        }
+        Entity changed = entity;
+        auto& rewritten = std::get<LeaderGeometry>(changed.geometry);
+        rewritten.text = katana::entity::renameTemplateFields(
+            leader->text, [&](std::string_view field) -> std::optional<std::string> {
+                if (!fieldReads(kind, from, field)) {
+                    return std::nullopt;
+                }
+                const auto parsed = katana::entity::contextValueName(field);
+                return std::string(parsed->kind) + "." + std::string(to);
+            });
+        if (rewritten.text == leader->text) {
+            return; // renamed to its own spelling: nothing to say
+        }
+        changes.modify.push_back(std::move(changed));
+        ++result.followed;
+    });
+    if (!changes.empty()) {
+        result.command = commandOf("RENAME_LEADER_READS", std::move(changes));
+    }
+    return result;
 }
 
 } // namespace katana::cad::annotation

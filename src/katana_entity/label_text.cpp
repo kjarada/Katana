@@ -499,6 +499,52 @@ std::vector<std::string> templateFields(std::string_view templateText)
     return names;
 }
 
+std::string
+renameTemplateFields(std::string_view templateText,
+                     const std::function<std::optional<std::string>(std::string_view)>& rename)
+{
+    std::string result;
+    result.reserve(templateText.size());
+    std::size_t i = 0;
+    while (i < templateText.size()) {
+        const char c = templateText[i];
+        if (c == '{' && i + 1 < templateText.size() && templateText[i + 1] == '{') {
+            result += "{{";
+            i += 2;
+        } else if (c == '}' && i + 1 < templateText.size() && templateText[i + 1] == '}') {
+            result += "}}";
+            i += 2;
+        } else if (c == '}') {
+            return std::string(templateText); // a lone '}': not balanced
+        } else if (c == '{') {
+            // A field is one line's: the same bound walk() puts on it.
+            const std::size_t close = templateText.find('}', i + 1);
+            if (close == std::string_view::npos) {
+                return std::string(templateText);
+            }
+            const std::string_view inside = templateText.substr(i + 1, close - i - 1);
+            if (inside.find_first_of("{\n") != std::string_view::npos) {
+                return std::string(templateText);
+            }
+            const Field field = parseField(inside);
+            const std::optional<std::string> renamed = rename(field.name);
+            result += '{';
+            if (renamed) {
+                result += *renamed;
+                result += inside.substr(field.name.size());
+            } else {
+                result += inside;
+            }
+            result += '}';
+            i = close + 1;
+        } else {
+            result += c;
+            ++i;
+        }
+    }
+    return result;
+}
+
 std::string formatLabel(std::string_view templateText, const LabelValues& values)
 {
     std::string result;

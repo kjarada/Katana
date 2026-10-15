@@ -580,6 +580,34 @@ Decisions:
 * **A smart leader's tip is still on an entity.** A surface's level at a
   bare place is not a leader's: a note reads what it points at, and the
   surface beneath it. "Not yet" has the free tip.
+* **A surface or an alignment is read by name, and the name follows a
+  rename.** `SURFACE RENAME` rewrites the leaders whose own template names the
+  surface - `{surface.NAME}`, `{dsurface.NAME}`, `{cut.NAME}`, `{fill.NAME}`,
+  found ignoring case as the store finds a surface - to the new name in the
+  SAME undo step as the rename and the corridors and road objects it already
+  carries (`annotation::renameLeaderReads`; the steps, the literal text, the
+  line breaks and the doubled braces of a template are kept,
+  `entity::renameTemplateFields`). A preset leader so still reads the surface
+  and `recognisePreset` still knows it. The reply says `leaders=N`. Two kinds
+  of leader are left reading the old name, counted in a `warning` record and
+  not hidden: one whose new name no template can write (empty, or holding
+  `:`, `{` or `}`, as `presetTemplate` refuses the same), and one on a locked
+  layer, because a single leader in the way would have refused the whole
+  rename, which is worth more than they are
+  (`LeaderScope.ANameANoteCannotWriteLeavesTheReadersAndSaysSoInAWarning`,
+  `LeaderScope.ALeaderOnALockedLayerIsLeftReadingTheOldNameAndTheRenameStillRuns`).
+  A label style's template cannot name a surface (`checkLabelTemplate`), so
+  none is rewritten. `SURFACE REMOVE` and `ALIGN DELETE` do not refuse while a
+  leader reads the thing: they say, in a `warning` record, how many leaders
+  will read nothing (`annotation::leadersReading`) and go on, and UNDO brings
+  the thing back with its readers. Rejected: refusing the removal while a
+  leader reads it - the choice the road objects made too (`docs/road_objects.md`:
+  a removal that is refused makes a surface that was meant to go stay) - and
+  a quiet removal, which leaves a leader drawn bare with nobody told. There
+  is no alignment rename (no `ALIGN RENAME`, no command), so there is nothing
+  for the readers of an alignment to follow yet: `renameLeaderReads` takes
+  `ReadKind::Alignment` and is tested, for the verb that will call it
+  (`LeaderScope.RenameLeaderReadsFollowsAnAlignmentByTheFunctionTheRenameWillUse`).
 
 ### Presets
 
@@ -633,7 +661,7 @@ replies with the note as it now reads; `LEADER PROP id DELETE key` removes it
 
 ### Many at once
 
-`LEADER FOR id... | SELECTION [template= | labelstyle= | text=]` makes a
+`LEADER FOR id... | <scope> [template= | labelstyle= | text=]` makes a
 leader to each entity as ONE step: its tip at a point's or a text's position,
 the middle of a line or an arc, halfway along an open polyline, inside a
 closed one, and on a circle on the side the note goes; the note `length=` mm
@@ -653,7 +681,7 @@ refused rather than make a number that would be given again
 
 ### Arranging them
 
-`LEADER ALIGN id id... | SELECTION [x=] [spacing=mm]` lines the notes up in a
+`LEADER ALIGN id id... | <scope> [x=] [spacing=mm]` lines the notes up in a
 column, as AutoCAD's MLEADERALIGN does: each leader's last vertex - where its
 note hangs - goes to one x (the topmost note's, or `x=`), and with `spacing=`
 the notes are stacked that many paper millimetres apart from the top down, in
@@ -663,6 +691,65 @@ the order they were; nothing else of a leader moves
 order they were made, across the sheet by their tips, or down it; a smart
 balloon is left alone (`RenumberingNumbersTheBalloonsInTheOrderAsked`). Each
 is one step, and none when nothing moves.
+
+### Scope and filter
+
+Every verb that reads or changes a SET of drawing data takes the one grammar
+Global Modify, `MODIFY`, `EXPORT` and the UTILITY verbs take (the contributors'
+contract, "Every tool acts on a scope and a filter"; `docs/cad.md`), in place of ids:
+
+    [SELECTION | VIEW [id] [EXTENTS] | DRAWING | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]]
+    [WHERE TYPE=.. LAYER=.. STYLE=.. COLOUR=.. PROP=.. TEXT=.. DRAWN]
+
+It is read by `cad::parseScopeWords` and resolved by `cad::matchScope` -
+`annotation::matchLeaders` narrows what that matched to the leaders, so the
+`matched=` it reports counts leaders - and there is no second reader of a
+scope here. `LEADER LIST [JSON]`, `VALUES`, `SET`, `FREEZE`, `DETACH`,
+`PROP`, `ALIGN` and `BALLOON RENUMBER` act on the leaders it takes; `LEADER
+FOR` and `BALLOON FOR` on the entities it takes - of any kind, those with no
+place for a leader counted in `skipped=` as before. `ATTACH` puts one tip on
+one place and stays an id. Decisions:
+
+* **The reply leads with the scope's record**, as the other verbs' do:
+  `scope=layers layers=notes sublayers=yes matched=4`, then the verb's own
+  reply (`frozen leaders=3`). `VALUES` adds `skipped=` (leaders whose tip is on
+  nothing have no values), `PROP` adds `entities=` and `skipped=` (two leaders
+  on one pit set it once, in one step). Ids carry no record.
+* **A scope that takes nothing is said, not refused, and never means
+  "all"**: `matched=0`, `updated leaders=0`, no step; `LEADER LIST DRAWING
+  WHERE TYPE=point JSON` is `"leaders": []`, not every leader
+  (`LeaderScope.AScopeThatTakesNoLeaderListsNoneAndNeverAll`: an empty id list
+  means "all" to `leadersJson`, so the scope's goes through `leadersReport`,
+  which tells none from all). The one exception is MODIFY's: an EDIT of
+  `SELECTION` with no leader selected (nothing, for `FOR`) is refused as it was -
+  "no leader is selected; use SELECT first" - since forgetting to select is a
+  mistake a script should stop at. Rejected: `matched=0` there, which lets a
+  script that selected nothing go on as if it had worked.
+* **Ids or a scope, never both**: "name the entities by id or by a scope".
+  Rejected: their intersection, which makes `LEADER FREEZE 5 DRAWING` mean
+  something nobody typed on purpose. With neither, a verb is as it was: `LEADER
+  LIST` lists every leader, `BALLOON RENUMBER` numbers every numbered balloon.
+  Any scope or `WHERE` word makes the grammar's rule apply, `WHERE` alone
+  being the selection's filter. A scoped `RENUMBER` numbers the balloons it
+  takes from `start=` and leaves the others, so it can give a number another
+  balloon has; no scope numbers them all again.
+* **The verb's own options go before `WHERE`**: after it a key that is a WHERE
+  key (`TYPE LAYER STYLE COLOUR PROP TEXT`) is the condition and not the
+  option, which matters for `text=` and `style=` (the note, the text style),
+  so `LEADER FOR DRAWING text=NOTE WHERE TYPE=point LAYER=plan`
+  (`LeaderScope.AWhereKeyAfterWhereIsTheConditionAndNotTheVerbsOwnOption`).
+  Any other option (`preset=`, `arrow=`) may stand after it. Rejected: reading
+  `style=` after `WHERE` as the option, which would make the same word two
+  things in one line. `PROP` takes the scope before `SET` or `DELETE`, which
+  end it (the word after `LAYERS` is a layer, even one called `set`).
+* **`VIEW` is the window's plan view**, with its own hidden layers and its area
+  (`VIEW <id>` another view, `VIEW EXTENTS` without the area); headless it is
+  refused in favour of `AREA`, as everywhere (`ScopeViewProvider`).
+* **MCP**: `katana_leaders` takes `scope`, `area`, `scope_layers`, `only` and
+  `scope_where` (the names `katana_import` uses, read by the same
+  `scopeWordsOf`), reads the leaders the scope took from the Document - still no
+  line in the history - and adds `scope: {record, matched}` to its object; with
+  `ids` too it is refused. `LEADER LIST ... JSON` prints the same object.
 
 ### One set of edits
 
@@ -706,13 +793,13 @@ as a reply writes it (`core::unescapeTyped`, the sheet verbs' reader too;
 | `LEADER p p... text= \| template= \| labelstyle= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="IL 10.500" associative=yes target=12 anchor=position template="IL {prop.invert:.3f}"` |
 | `LEADER p p... preset=level\|surface\|cutfill\|name\|code\|details\|station [surface=\|alignment=]`, also on `LEADER FOR` and `LEADER SET` | `created leader id=27 text=+4.000 associative=yes target=12 anchor=position template={dsurface.ground:+.3f} preset=surface surface=ground chosen="first visible surface"` |
 | `LEADER PRESETS` | `preset=surface title="Surface Difference" reads=surface template={dsurface.NAME:+.3f} tool=annotate.leader.surface`, one a preset |
-| `LEADER LIST [id...] [target=id] JSON` | `{"leaders": [{"id": 27, ..., "preset": "surface", "reads": "ground", "text": "+4.000", "lines": ["+4.000"]}], "presets": [...], "surfaces": ["ground"], "alignments": []}` - MCP's `katana_leaders`. Written with nlohmann's `replace` handler (U+FFFD for a byte that is not UTF-8, never an exception, as `docs/cad.md` says of the other replies): a surface name typed at katana_cli in the ANSI code page ended it here, and the window with it (`docs/headless.md`, "Text and names") |
+| `LEADER LIST [id... \| <scope>] [target=id] JSON` | `{"leaders": [{"id": 27, ..., "preset": "surface", "reads": "ground", "text": "+4.000", "lines": ["+4.000"]}], "presets": [...], "surfaces": ["ground"], "alignments": []}`, and `"scope": {"record": ..., "matched": N}` when a scope chose the leaders - MCP's `katana_leaders`. Written with nlohmann's `replace` handler (U+FFFD for a byte that is not UTF-8, never an exception, as `docs/cad.md` says of the other replies): a surface name typed at katana_cli in the ANSI code page ended it here, and the window with it (`docs/headless.md`, "Text and names") |
 | `DIMSTYLE LIST \| INFO name \| NEW name [field value ...] \| SET name field value [field value ...] \| DELETE name` | `dimension style site updated`; `INFO`: `name=site text=3.5 gap=0.625 ... paper=on layers=1 reads=10.000` |
-| `LEADER VALUES id \| #id[.point\|@x,y]` | `target=12 type=Point` and a `value=rl text=12.500` line each |
-| `LEADER LIST [id...] [target=id]`, `SET id... tip= at= ...`, `ATTACH id p`, `DETACH`, `FREEZE` | `id=26 layer=0 vertices=2 tip=10,10 target=12 anchor=position smart=yes template=... arrow=ClosedFilled callout=none text=...` |
-| `LEADER PROP id SET key value [type] \| DELETE key` | `leader=26 target=12 property=invert text="IL 10.500"` |
-| `LEADER FOR id... \| SELECTION`, `BALLOON FOR` | `created leaders=4 ids=7,8,9,10 skipped=1` |
-| `LEADER ALIGN id... [x= spacing=mm]`, `BALLOON RENUMBER [start= order=id\|x\|y]` | `aligned leaders=3 x=22 spacing=4`, `balloons=3 renumbered=3` |
+| `LEADER VALUES id \| #id[.point\|@x,y] \| <scope>` | `target=12 type=Point` and a `value=rl text=12.500` line each; over a scope `scope=layers layers=notes sublayers=yes matched=4 skipped=1`, then a `leader=26 target=12 type=Point` block for each leader on an entity |
+| `LEADER LIST [id... \| <scope>] [target=id]`, `SET id... \| <scope> tip= at= ...`, `ATTACH id p`, `DETACH`, `FREEZE` (ids or a scope) | `id=26 layer=0 vertices=2 tip=10,10 target=12 anchor=position smart=yes template=... arrow=ClosedFilled callout=none text=...` |
+| `LEADER PROP id \| <scope> SET key value [type] \| DELETE key` | `leader=26 target=12 property=invert text="IL 10.500"`; over a scope its record adds `entities=2 skipped=1` |
+| `LEADER FOR id... \| <scope>`, `BALLOON FOR` | `created leaders=4 ids=7,8,9,10 skipped=1` (led by `scope=... matched=N` over a scope) |
+| `LEADER ALIGN id... \| <scope> [x= spacing=mm]`, `BALLOON RENUMBER [<scope>] [start= order=id\|x\|y]` | `aligned leaders=3 x=22 spacing=4`, `balloons=3 renumbered=3` |
 
 `TS`, `LS`, `MT` and `LE` are aliases. `LABEL` of many entities, `AUTOLABEL
 RUN` and `DIM BASELINE` are each ONE undo step (`ManyLabelsAreOneStep`). A
@@ -1108,7 +1195,9 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/qt_widgets/annotation/test_leader_manager_presets.cpp` | the Leaders manager's Preset boxes by object name: a preset's template written and applied in one step, a named surface and refusals, a leader shown as its preset until typed away, For Selection, the surfaces' values |
 | `tests/geometry/test_alignment.cpp` | (`StationOffset...`) the station and offset of a point on a straight alignment, a curve, outside a kink, beyond the ends, and undoing `pointAtStationOffset` on spirals |
 | `src/katana_app/geo/cli/leaders.cmake` | `cli.a_surface_leader_says_how_far_a_point_is_above_the_ground`: a surface from the sample terrain, a point at RL 30, surface, cut/fill and level leaders and LIST; one on no surface failing the script |
-| `tests/app/test_mcp_server.cpp` | `McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets` |
+| `tests/app/test_mcp_server.cpp` | `McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`, and `McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`: a layer, an area given alone, a filter, a scope that takes none giving none, a filter alone on the selection, and the refusals (ids with a scope, a layer that is not there, VIEW, an area that is not four numbers) |
+| `tests/cad/annotation/test_leader_scope.cpp` | the leader verbs over the shared scope and filter, each value worked out by hand: LIST (a layer, an area, a filter, the selection, the window's view with its hidden layers), VALUES, SET, FREEZE, DETACH, PROP (two leaders on one pit set it once), ALIGN, FOR and BALLOON FOR and RENUMBER; a scope that takes nothing is said and never means "all"; the refusals (ids with a scope, two scopes, a missing layer, VIEW headless, an edit of an empty selection); a WHERE key after WHERE is the condition; `SURFACE RENAME` rewriting the notes that read the surface in its one undo step (any case, steps and doubled braces kept, a locked layer or an unwritable name left and warned), `ALIGN DELETE`'s warning, `renameLeaderReads` for an alignment, `renameTemplateFields`; and the JSON writer handed a byte that is not UTF-8 |
+| `src/katana_app/CMakeLists.txt` | `cli.leaders_take_a_scope_and_say_how_many_they_took`, `cli.leaders_named_by_id_and_by_scope_are_refused`, `cli.balloons_of_one_layer_are_numbered_again_by_scope`; `src/katana_app/geo/cli/leaders.cmake` adds `cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns` |
 | `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name and its widgets' own signals: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_leader_preview.cpp` | a smart leader painted as a preview or a grip drag with the drawing it reads says its note, a plain one and one whose target is gone are as they were |
@@ -1160,11 +1249,11 @@ it skipped dimensions, and so does the archive exporter.
   to Selected do). An arc's or a circle's centre is reached only by typing
   (`#id.centre`). DXF export writes the note as it reads, not a field a CAD
   reader could update.
-* **A surface or an alignment is read by NAME.** Renamed or deleted, the
-  template still names the old one and its lines say nothing (a leader whose
-  every line read it is drawn bare); nothing guards a surface or an
-  alignment a leader reads, and `SURFACE RENAME` does not follow into
-  templates. As an alignment has had no in-use guard (`docs/geometry.md`).
+* **A surface or an alignment is read by name.** A surface renamed is
+  followed ("What a leader reads of the drawing"); one removed leaves the
+  leaders that read it drawn bare, with a warning saying how many, and an
+  alignment has no rename to follow (no `ALIGN RENAME` exists; `renameLeaderReads`
+  is ready for it) and no in-use guard (`docs/geometry.md`).
 * **A tip on nothing reads no surface.** The ground level at a bare click -
   a leader to a place, not a point - would need a smart leader with no
   target, which the model refuses; put a point there.
@@ -1198,19 +1287,7 @@ it skipped dimensions, and so does the archive exporter.
   RENUMBER` - save a note holding a double quote (above); the change is an
   executor handed to the dialog, as the utilities dialog is given one, and
   its tests driving lines.
-* **Scope and filter.** `LEADER FOR`, `LEADER ALIGN`, `LEADER LIST` (and its
-  `JSON` form), `LEADER FREEZE` and `DETACH`, `BALLOON FOR` and `BALLOON
-  RENUMBER`, the MCP tool `katana_leaders` (its `ids` and `target` are all it
-  narrows by) and the Leaders manager's For Selection and Arrange tabs act on
-  ids, the selection or every balloon - not yet on the Global Modify scope and
-  filter (a view, layers, an area; only those that match) that the
-  contributors' contract asks of every tool. The shared grammar and widget
-  exist and have since 2026-09-26 (`cad::parseScopeWords`, `matchScope` and
-  `scopeRecord`, `ScopeFilterWidget`; MODIFY, EXPORT, the UTILITY and surface
-  verbs take them) - this entry said until 2026-10-15 that they "are not built
-  yet", which was true when it was written and not a day later. What is not
-  done is moving these verbs onto them: the scope words before the `key=value`
-  options (a `WHERE` key would be read as an unknown option today, and a scope
-  word as an entity id), the scope record in each reply, `scope`, `area`,
-  `layers` and `where` arguments on `katana_leaders`, and the manager's "Apply
-  to" box. Until then an agent lists the leaders and filters them itself.
+* **Scope and filter in the Leaders manager.** The verbs and `katana_leaders`
+  take the shared scope and filter ("Scope and filter" above); the manager's
+  lists and its For Selection and Arrange tabs still act on the shown leader, the
+  selection or every balloon.

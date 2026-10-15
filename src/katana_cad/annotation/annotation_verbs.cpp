@@ -579,17 +579,24 @@ Leader    LEADER p p [p...] [text= | template= | labelstyle=] [arrow=closed|open
           preset=level|surface|cutfill|name|code|details|station [surface=name|alignment=name]
           a ready template (LEADER PRESETS lists them); with none named, the first visible
           surface or the first alignment, said as chosen= in the reply
-          LEADER VALUES id | #id[.point|@x,y]   every value a note there can name
-          LEADER LIST [id...] [target=id] [JSON] | PRESETS | SET id...|SELECTION [text= template=
+          LEADER VALUES id | #id[.point|@x,y] | <scope>   every value a note there can name
+          LEADER LIST [id...] [target=id] [JSON] | PRESETS | SET id...|<scope> [text= template=
           labelstyle= preset= arrow= callout= style= paper= arrowsize= landing= tip=p at=p]
-          LEADER ATTACH id #id[.point|@x,y] | DETACH id...|SELECTION | FREEZE id...|SELECTION
-          LEADER PROP id SET key value [type] | PROP id DELETE key   the tip entity's attribute
-          LEADER FOR id...|SELECTION [text=|template=|labelstyle=|preset=] [angle=deg length=mm]
+          LEADER ATTACH id #id[.point|@x,y] | DETACH id...|<scope> | FREEZE id...|<scope>
+          LEADER PROP id|<scope> SET key value [type] | PROP id|<scope> DELETE key   the tip
+          entity's attribute
+          LEADER FOR id...|<scope> [text=|template=|labelstyle=|preset=] [angle=deg length=mm]
           a leader to each entity, one undo step (a point, mid-line, mid-arc, inside a lot)
-          LEADER ALIGN id id...|SELECTION [x=] [spacing=mm]   the notes in a column
+          LEADER ALIGN id id...|<scope> [x=] [spacing=mm]   the notes in a column
           BALLOON p p [p...] [n=number | template= | labelstyle=] [style= paper=]   a numbered
-          circle callout; BALLOON FOR id...|SELECTION numbers one to each entity;
-          BALLOON RENUMBER [start=1] [order=id|x|y]   the numbered balloons, in order)";
+          circle callout; BALLOON FOR id...|<scope> numbers one to each entity;
+          BALLOON RENUMBER [<scope>] [start=1] [order=id|x|y]   the numbered balloons, in order
+          <scope>   SELECTION | VIEW [id] [EXTENTS] | DRAWING | AREA x0,y0,x1,y1 | LAYERS a,b
+          [ONLY], then WHERE TYPE=.. LAYER=.. STYLE=.. COLOUR=.. PROP=.. TEXT=.. DRAWN - the grammar
+          of MODIFY and the UTILITY verbs, in place of ids. A reply leads with scope=... matched=N
+          (the leaders, or for FOR the entities, it took); one that took none is said, not refused.
+          The verb's own key=value options go BEFORE WHERE: after it style= and text= are
+          conditions.)";
 }
 
 CommandInterpreter::Reply CommandInterpreter::annotation(const std::string& verb,
@@ -1817,28 +1824,13 @@ std::string describeLeader(const katana::entity::Model& model, const Entity& ent
     return line.str();
 }
 
-// The ids `tokens` name, in id order and each once: the selection's for
-// SELECTION, restricted to leaders when `leadersOnly`.
+// The ids `tokens` name, in id order and each once, restricted to leaders
+// when `leadersOnly` (the selection and the rest of the shared scope are
+// choose() below).
 Result<std::vector<EntityId>> idsOf(const std::vector<std::string>& tokens,
                                     const katana::cad::Document& document, bool leadersOnly)
 {
     std::vector<EntityId> ids;
-    if (tokens.size() == 1 && upperCase(tokens.front()) == "SELECTION") {
-        for (const EntityId id : document.selection().ids()) {
-            const Entity* entity = document.model().entities.find(id);
-            if (entity != nullptr &&
-                (!leadersOnly ||
-                 std::holds_alternative<katana::entity::LeaderGeometry>(entity->geometry))) {
-                ids.push_back(id);
-            }
-        }
-        if (ids.empty()) {
-            return makeError(ErrorCode::InvalidState,
-                             leadersOnly ? "no leader is selected; use SELECT first"
-                                         : "nothing is selected; use SELECT first");
-        }
-        return ids;
-    }
     for (const std::string& token : tokens) {
         auto id = idOf(token);
         if (!id) {
@@ -1858,6 +1850,166 @@ Result<std::vector<EntityId>> idsOf(const std::vector<std::string>& tokens,
     std::sort(ids.begin(), ids.end());
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     return ids;
+}
+
+// ---- what a leader verb acts on: ids, or the shared scope -----------------------------------
+//
+// Every verb that reads or changes a set of drawing data takes the one scope
+// and filter grammar (docs/cad.md; include/katana/cad/scope_verbs.hpp):
+//
+//   [SELECTION | VIEW | DRAWING | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]] [WHERE k=v ...]
+//
+// read by cad::parseScopeWords and resolved by cad::matchScope, beside ids,
+// which stay the other way to name them. The verb's own key=value options
+// stand where they like BEFORE a WHERE; after it a key that is a WHERE key
+// (TYPE LAYER STYLE COLOUR PROP TEXT) is the condition and not the option -
+// so style= and text= go before WHERE.
+
+struct Subject {
+    // The words before any scope word (ids; JSON for LIST) and the options.
+    Arguments args{};
+    // Set when a scope word or WHERE was given.
+    std::optional<ScopeWords> scope{};
+    // The words after the scope that the grammar did not take: a trailing
+    // JSON, for the verb to read or refuse.
+    std::vector<std::string> after{};
+};
+
+bool knowsOption(std::initializer_list<std::string_view> known, const std::string& key)
+{
+    return std::find(known.begin(), known.end(), key) != known.end();
+}
+
+// `tokens[from, to)` as a Subject; the options are those in `known`.
+Result<Subject> subjectOf(const std::vector<std::string>& tokens, std::size_t from,
+                          std::size_t to, std::initializer_list<std::string_view> known)
+{
+    Subject subject;
+    std::vector<std::string> words;
+    bool inScope = false;
+    bool afterWhere = false;
+    for (std::size_t i = from; i < to; ++i) {
+        const std::string& token = tokens[i];
+        const std::size_t equals = token.find('=');
+        const bool keyed = equals != std::string::npos && isKey(std::string_view(token).substr(0, equals));
+        const std::string key = keyed ? lowerCase(token.substr(0, equals)) : std::string();
+        if (upperCase(token) == "WHERE") {
+            inScope = true;
+            afterWhere = true;
+            words.push_back(token);
+        } else if (afterWhere) {
+            // A condition is the grammar's - its key may be one of the verb's
+            // options too - and a key it does not know is named by the
+            // grammar as one that is no condition. Only an option that is no
+            // WHERE key stays the verb's.
+            if (keyed && !isWhereKey(key) && knowsOption(known, key)) {
+                subject.args.options[key] = token.substr(equals + 1);
+            } else {
+                words.push_back(token);
+            }
+        } else if (keyed) {
+            if (!knowsOption(known, key)) {
+                std::string list;
+                for (const std::string_view k : known) {
+                    list += list.empty() ? "" : " ";
+                    list += k;
+                }
+                return makeError(ErrorCode::InvalidArgument, "unknown option '" + key + "'",
+                                 "known: " + list);
+            }
+            subject.args.options[key] = token.substr(equals + 1);
+        } else if (inScope || isScopeWord(token)) {
+            inScope = true;
+            words.push_back(token);
+        } else {
+            subject.args.positional.push_back(token);
+        }
+    }
+    if (!words.empty()) {
+        std::size_t at = 0;
+        auto scope = parseScopeWords(words, at);
+        if (!scope) {
+            return scope.error();
+        }
+        subject.scope = std::move(*scope);
+        subject.after.assign(words.begin() + static_cast<std::ptrdiff_t>(at), words.end());
+    }
+    return subject;
+}
+
+// What a verb acts on once its words are read.
+struct Chosen {
+    // Ascending, each once.
+    std::vector<EntityId> ids{};
+    // The scope's record (cad::scopeRecord) - how many it took, said with the
+    // result - or empty when ids were named.
+    std::string record{};
+    bool scoped = false;
+};
+
+// The ids `named` name or the scope of `subject` takes, as leaders when
+// `leadersOnly` (what a scope matched is narrowed to the leaders among it,
+// so `matched=` counts them). Both is refused, and neither is the caller's to
+// refuse with its own usage. A scope that takes nothing is no failure - the
+// record says matched=0 - except for an EDIT of the selection with nothing
+// suitable selected, which is the mistake MODIFY refuses too: it forgot to
+// select.
+Result<Chosen> choose(const katana::cad::Document& document, const ScopeViewProvider& views,
+                      const Subject& subject, const std::vector<std::string>& named,
+                      bool leadersOnly, bool edit)
+{
+    Chosen result;
+    if (!subject.scope) {
+        auto ids = idsOf(named, document, leadersOnly);
+        if (!ids) {
+            return ids.error();
+        }
+        result.ids = std::move(*ids);
+        return result;
+    }
+    if (!named.empty()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "name the entities by id or by a scope (SELECTION, VIEW, DRAWING, AREA, "
+                         "LAYERS ... WHERE ...), not both",
+                         named.front());
+    }
+    if (!subject.after.empty()) {
+        return makeError(ErrorCode::ParseFailure,
+                         "not a word that follows a scope and its WHERE conditions here",
+                         subject.after.front());
+    }
+    if (edit && subject.scope->source == ScopeSource::Selection) {
+        bool any = false;
+        for (const EntityId id : document.selection().ids()) {
+            const Entity* entity = document.model().entities.find(id);
+            any = any || (entity != nullptr &&
+                          (!leadersOnly ||
+                           std::holds_alternative<katana::entity::LeaderGeometry>(entity->geometry)));
+        }
+        if (!any) {
+            return makeError(ErrorCode::InvalidState,
+                             leadersOnly ? "no leader is selected; use SELECT first"
+                                         : "nothing is selected; use SELECT first");
+        }
+    }
+    auto match = leadersOnly ? ann::matchLeaders(document, *subject.scope, views)
+                             : katana::cad::matchScope(document, *subject.scope, views);
+    if (!match) {
+        return match.error();
+    }
+    result.ids = match->matched;
+    result.record = scopeRecord(*match);
+    result.scoped = true;
+    return result;
+}
+
+// `reply` led by the scope's record, when a scope chose what it is about.
+std::string withScope(const Chosen& chosen, const std::string& reply)
+{
+    if (!chosen.scoped) {
+        return reply;
+    }
+    return reply.empty() ? chosen.record : chosen.record + "\n" + reply;
 }
 
 } // namespace
@@ -1894,51 +2046,126 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     }
 
     if (!balloon && action == "LIST") {
-        auto parsed = splitArguments(args, 1, {"target"});
-        if (!parsed) {
-            return parsed.error();
+        auto subject = subjectOf(args, 1, args.size(), {"target"});
+        if (!subject) {
+            return subject.error();
         }
         bool json = false;
-        std::set<EntityId> only;
-        for (const std::string& token : parsed->positional) {
+        std::vector<std::string> named;
+        for (const std::string& token : subject->args.positional) {
             if (upperCase(token) == "JSON") {
                 json = true;
-                continue;
+            } else {
+                named.push_back(token);
             }
-            auto id = idOf(token);
-            if (!id) {
-                return id.error();
-            }
-            only.insert(*id);
+        }
+        // JSON may stand after the scope too: LEADER LIST LAYERS notes JSON.
+        if (subject->scope && subject->after.size() == 1 &&
+            upperCase(subject->after.front()) == "JSON") {
+            json = true;
+            subject->after.clear();
         }
         std::optional<EntityId> target;
-        if (const std::string* value = parsed->find("target")) {
+        if (const std::string* value = subject->args.find("target")) {
             auto id = idOf(*value);
             if (!id) {
                 return id.error();
             }
             target = *id;
         }
+        // Not every leader but those named or those the scope took - and
+        // none, not all, when the scope took none. Ids are only looked at
+        // as ids: one that is no leader lists nothing, as it always did.
+        bool limited = false;
+        std::vector<EntityId> limit;
+        Chosen picked;
+        if (subject->scope) {
+            auto scoped = choose(document_, scopeViews_, *subject, named, true, false);
+            if (!scoped) {
+                return scoped.error();
+            }
+            picked = std::move(*scoped);
+            limited = true;
+            limit = picked.ids;
+        } else if (!named.empty()) {
+            std::vector<EntityId> ids;
+            for (const std::string& token : named) {
+                auto id = idOf(token);
+                if (!id) {
+                    return id.error();
+                }
+                ids.push_back(*id);
+            }
+            std::sort(ids.begin(), ids.end());
+            ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+            limited = true;
+            limit = std::move(ids);
+        }
         if (json) {
-            return ann::leadersJson(document_, std::vector<EntityId>(only.begin(), only.end()),
-                                    target);
+            ann::LeadersReport report = ann::leadersReport(
+                document_, limited ? std::optional<std::vector<EntityId>>(limit) : std::nullopt,
+                target);
+            if (picked.scoped) {
+                report.scope = ann::LeadersScopeReport{picked.record, picked.ids.size()};
+            }
+            return ann::leadersJsonOf(report);
         }
         std::string out;
         model.entities.forEach([&](const Entity& entity) {
             const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
-            if (leader == nullptr || (!only.empty() && !only.contains(entity.id)) ||
+            if (leader == nullptr ||
+                (limited && !std::binary_search(limit.begin(), limit.end(), entity.id)) ||
                 (target && leader->tipRef.entity != *target)) {
                 return;
             }
             out += out.empty() ? "" : "\n";
             out += describeLeader(model, entity, context);
         });
-        return out;
+        return withScope(picked, out);
+    }
+
+    if (!balloon && action == "VALUES" && args.size() >= 2 && isScopeWord(args[1])) {
+        // Every value a note could name, for each leader a scope takes whose
+        // tip is on an entity: the block LEADER VALUES id prints, for each.
+        auto subject = subjectOf(args, 1, args.size(), {});
+        if (!subject) {
+            return subject.error();
+        }
+        auto picked =
+            choose(document_, scopeViews_, *subject, subject->args.positional, true, false);
+        if (!picked) {
+            return picked.error();
+        }
+        std::string blocks;
+        std::size_t skipped = 0;
+        for (const EntityId id : picked->ids) {
+            const auto& leader =
+                std::get<katana::entity::LeaderGeometry>(model.entities.find(id)->geometry);
+            if (!leader.tipRef.associated()) {
+                ++skipped;
+                continue;
+            }
+            const auto read = ann::leaderTargetValues(model, leader, context);
+            if (!read) {
+                ++skipped;
+                continue;
+            }
+            blocks += blocks.empty() ? "" : "\n";
+            blocks += "leader=" + std::to_string(id) +
+                      " target=" + std::to_string(leader.tipRef.entity) +
+                      " type=" + read->at("type").text;
+            for (const ann::LeaderValueRow& row : ann::leaderValueRows(*read)) {
+                blocks += "\nvalue=" + field(row.name) + " text=" + field(row.text);
+            }
+        }
+        // Those with a tip on nothing have no values to list: counted, said.
+        picked->record += " skipped=" + std::to_string(skipped);
+        return withScope(*picked, blocks);
     }
 
     if (!balloon && action == "VALUES") {
         if (args.size() != 2 || args[1].empty()) {
-            return usageOf("LEADER VALUES id | #id[.point] | #id@x,y");
+            return usageOf("LEADER VALUES id | #id[.point] | #id@x,y | <scope>");
         }
         katana::entity::LabelValues values;
         std::ostringstream out;
@@ -1978,58 +2205,64 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     }
 
     if (!balloon && action == "SET") {
-        auto parsed = splitArguments(args, 1,
-                                     {"text", "template", "labelstyle", "preset", "surface",
-                                      "alignment", "arrow", "callout", "style", "paper",
-                                      "arrowsize", "landing", "tip", "at"});
-        if (!parsed) {
-            return parsed.error();
+        auto subject = subjectOf(args, 1, args.size(),
+                                 {"text", "template", "labelstyle", "preset", "surface",
+                                  "alignment", "arrow", "callout", "style", "paper",
+                                  "arrowsize", "landing", "tip", "at"});
+        if (!subject) {
+            return subject.error();
         }
-        if (parsed->positional.empty() || parsed->options.empty()) {
-            return usageOf("LEADER SET id [id...] | SELECTION [text= template= labelstyle= "
+        Arguments& parsed = subject->args;
+        if ((parsed.positional.empty() && !subject->scope) || parsed.options.empty()) {
+            return usageOf("LEADER SET id [id...] | <scope> [text= template= labelstyle= "
                            "preset= surface=name alignment=name arrow= callout= style= paper= "
-                           "arrowsize= landing= tip=p at=p]");
+                           "arrowsize= landing= tip=p at=p]   (options before WHERE)");
         }
-        auto ids = idsOf(parsed->positional, document_, true);
-        if (!ids) {
-            return ids.error();
+        auto picked = choose(document_, scopeViews_, *subject, parsed.positional, true, true);
+        if (!picked) {
+            return picked.error();
         }
-        auto change = leaderChangeOf(*parsed);
+        auto change = leaderChangeOf(parsed);
         if (!change) {
             return change.error();
         }
-        auto preset = presetOf(*parsed, document_, *change);
+        auto preset = presetOf(parsed, document_, *change);
         if (!preset) {
             return preset.error();
         }
-        if (const std::string* value = parsed->find("tip")) {
+        if (const std::string* value = parsed.find("tip")) {
             auto point = parseAnchoredPoint(*value);
             if (!point) {
                 return point.error();
             }
             change->tip = *point;
         }
-        if (const std::string* value = parsed->find("at")) {
+        if (const std::string* value = parsed.find("at")) {
             auto point = parsePoint(*value);
             if (!point) {
                 return point.error();
             }
             change->hang = *point;
         }
-        auto command = ann::changeLeaders(model, *ids, *change, context);
+        if (picked->ids.empty()) {
+            // A scope that took no leader: said, not refused.
+            return withScope(*picked, "updated leaders=0" + presetReply(*preset));
+        }
+        auto command = ann::changeLeaders(model, picked->ids, *change, context);
         if (!command) {
             return command.error();
         }
         if (auto status = run(std::move(*command)); !status) {
             return status.error();
         }
-        std::string out = "updated leaders=" + std::to_string(ids->size()) + presetReply(*preset);
-        for (const EntityId id : *ids) {
+        std::string out =
+            "updated leaders=" + std::to_string(picked->ids.size()) + presetReply(*preset);
+        for (const EntityId id : picked->ids) {
             if (const Entity* entity = model.entities.find(id)) {
                 out += "\n" + describeLeader(model, *entity, context);
             }
         }
-        return out;
+        return withScope(*picked, out);
     }
 
     if (!balloon && action == "ATTACH") {
@@ -2058,80 +2291,123 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
 
     if (!balloon && (action == "DETACH" || action == "FREEZE")) {
         const bool detach = action == "DETACH";
-        if (args.size() < 2) {
-            return usageOf(detach ? "LEADER DETACH id [id...] | SELECTION"
-                                  : "LEADER FREEZE id [id...] | SELECTION");
+        auto subject = subjectOf(args, 1, args.size(), {});
+        if (!subject) {
+            return subject.error();
         }
-        auto ids = idsOf(Tokens(args.begin() + 1, args.end()), document_, true);
-        if (!ids) {
-            return ids.error();
+        if (subject->args.positional.empty() && !subject->scope) {
+            return usageOf(detach ? "LEADER DETACH id [id...] | <scope>"
+                                  : "LEADER FREEZE id [id...] | <scope>");
         }
-        auto release = ann::releaseLeaders(model, *ids, detach, context);
+        auto picked = choose(document_, scopeViews_, *subject, subject->args.positional, true, true);
+        if (!picked) {
+            return picked.error();
+        }
+        if (picked->ids.empty()) {
+            return withScope(*picked, detach ? "detached leaders=0 frozen=0" : "frozen leaders=0");
+        }
+        auto release = ann::releaseLeaders(model, picked->ids, detach, context);
         if (!release) {
             return release.error();
         }
         if (auto status = run(std::move(release->command)); !status) {
             return status.error();
         }
-        return detach ? "detached leaders=" + std::to_string(release->changed) +
-                            " frozen=" + std::to_string(release->frozen)
-                      : "frozen leaders=" + std::to_string(release->frozen);
+        return withScope(*picked, detach ? "detached leaders=" + std::to_string(release->changed) +
+                                               " frozen=" + std::to_string(release->frozen)
+                                         : "frozen leaders=" + std::to_string(release->frozen));
     }
 
     if (!balloon && action == "PROP") {
         static constexpr const char* kUsage =
-            "LEADER PROP id SET key value [text|integer|real|boolean] | LEADER PROP id DELETE key";
-        if (args.size() < 4) {
+            "LEADER PROP id | <scope> SET key value [text|integer|real|boolean] | LEADER PROP id "
+            "| <scope> DELETE key";
+        // SET or DELETE ends the subject: the scope's words, which may hold
+        // WHERE conditions, stand before it. The word after LAYERS is a layer
+        // list, even if a layer is called set.
+        std::size_t at = 0;
+        for (std::size_t i = 2; i < args.size() && at == 0; ++i) {
+            const std::string before = upperCase(args[i - 1]);
+            const std::string word = upperCase(args[i]);
+            at = (word == "SET" || word == "DELETE") && before != "LAYERS" && before != "LAYER"
+                     ? i
+                     : 0;
+        }
+        if (at == 0 || args.size() < at + 2) {
             return usageOf(kUsage);
         }
-        auto ids = idsOf({args[1]}, document_, true);
-        if (!ids) {
-            return ids.error();
+        auto subject = subjectOf(args, 1, at, {});
+        if (!subject) {
+            return subject.error();
         }
-        const EntityId id = ids->front();
-        const std::string sub = upperCase(args[2]);
-        const std::string& key = args[3];
+        if (subject->args.positional.empty() && !subject->scope) {
+            return usageOf(kUsage);
+        }
+        auto picked = choose(document_, scopeViews_, *subject, subject->args.positional, true, true);
+        if (!picked) {
+            return picked.error();
+        }
+        const std::string sub = upperCase(args[at]);
+        const std::string& key = args[at + 1];
         std::optional<katana::entity::PropertyValue> value;
         if (sub == "SET") {
-            if (args.size() < 5 || args.size() > 6) {
+            // key value [type]
+            if (args.size() < at + 3 || args.size() > at + 4) {
                 return usageOf(kUsage);
             }
-            auto read = propertyValue(args[4], args.size() == 6 ? &args[5] : nullptr);
+            auto read = propertyValue(args[at + 2], args.size() == at + 4 ? &args[at + 3] : nullptr);
             if (!read) {
                 return read.error();
             }
             value = std::move(*read);
-        } else if (sub != "DELETE" || args.size() != 4) {
+        } else if (args.size() != at + 2) {
             return usageOf(kUsage);
         }
-        auto command = ann::setLeaderTargetProperty(model, id, key, value);
-        if (!command) {
-            return command.error();
+        if (picked->ids.empty()) {
+            return withScope(*picked, "property=" + field(key) + " leaders=0");
         }
-        if (auto status = run(std::move(*command)); !status) {
+        auto set = ann::setLeadersTargetProperty(model, picked->ids, key, value);
+        if (!set) {
+            return set.error();
+        }
+        if (auto status = run(std::move(set->command)); !status) {
             return status.error();
         }
-        const auto& leader =
-            std::get<katana::entity::LeaderGeometry>(model.entities.find(id)->geometry);
-        return "leader=" + std::to_string(id) + " target=" + std::to_string(leader.tipRef.entity) +
-               " property=" + field(key) +
-               " text=" + field(ann::leaderSays(model, leader, context));
+        std::string out;
+        for (const EntityId id : picked->ids) {
+            const auto& leader =
+                std::get<katana::entity::LeaderGeometry>(model.entities.find(id)->geometry);
+            if (!leader.tipRef.associated() || !model.entities.contains(leader.tipRef.entity)) {
+                continue; // skipped: it had no entity to set the attribute on
+            }
+            out += out.empty() ? "" : "\n";
+            out += "leader=" + std::to_string(id) +
+                   " target=" + std::to_string(leader.tipRef.entity) +
+                   " property=" + field(key) +
+                   " text=" + field(ann::leaderSays(model, leader, context));
+        }
+        if (picked->scoped) {
+            picked->record += " entities=" + std::to_string(set->entities) +
+                              " skipped=" + std::to_string(set->skipped);
+        }
+        return withScope(*picked, out);
     }
 
     if (!balloon && action == "ALIGN") {
-        auto parsed = splitArguments(args, 1, {"x", "spacing"});
-        if (!parsed) {
-            return parsed.error();
+        auto subject = subjectOf(args, 1, args.size(), {"x", "spacing"});
+        if (!subject) {
+            return subject.error();
         }
-        if (parsed->positional.empty()) {
-            return usageOf("LEADER ALIGN id id [id...] | SELECTION [x=] [spacing=mm]");
+        Arguments& parsed = subject->args;
+        if (parsed.positional.empty() && !subject->scope) {
+            return usageOf("LEADER ALIGN id id [id...] | <scope> [x=] [spacing=mm]");
         }
-        auto ids = idsOf(parsed->positional, document_, true);
-        if (!ids) {
-            return ids.error();
+        auto picked = choose(document_, scopeViews_, *subject, parsed.positional, true, true);
+        if (!picked) {
+            return picked.error();
         }
         std::optional<double> x;
-        if (const std::string* value = parsed->find("x")) {
+        if (const std::string* value = parsed.find("x")) {
             auto number = numberOf(*value, "x");
             if (!number) {
                 return number.error();
@@ -2139,7 +2415,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             x = *number;
         }
         std::optional<double> spacing;
-        if (const std::string* value = parsed->find("spacing")) {
+        if (const std::string* value = parsed.find("spacing")) {
             auto number = numberOf(*value, "spacing");
             if (!number) {
                 return number.error();
@@ -2150,27 +2426,32 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             }
             spacing = katana::entity::annotationModelSize(*number, document_.annotationScale());
         }
-        auto alignment = ann::alignLeaders(model, *ids, x, spacing);
+        if (picked->ids.empty()) {
+            return withScope(*picked, "aligned leaders=0");
+        }
+        auto alignment = ann::alignLeaders(model, picked->ids, x, spacing);
         if (!alignment) {
             return alignment.error();
         }
         if (auto status = run(std::move(alignment->command)); !status) {
             return status.error();
         }
-        return "aligned leaders=" + std::to_string(alignment->count) + " x=" + real(alignment->x) +
-               (spacing ? " spacing=" + real(*spacing) : std::string());
+        return withScope(*picked, "aligned leaders=" + std::to_string(alignment->count) +
+                                      " x=" + real(alignment->x) +
+                                      (spacing ? " spacing=" + real(*spacing) : std::string()));
     }
 
     if (balloon && action == "RENUMBER") {
-        auto parsed = splitArguments(args, 1, {"start", "order"});
-        if (!parsed) {
-            return parsed.error();
+        auto subject = subjectOf(args, 1, args.size(), {"start", "order"});
+        if (!subject) {
+            return subject.error();
         }
-        if (!parsed->positional.empty()) {
-            return usageOf("BALLOON RENUMBER [start=1] [order=id|x|y]");
+        Arguments& parsed = subject->args;
+        if (!parsed.positional.empty()) {
+            return usageOf("BALLOON RENUMBER [<scope>] [start=1] [order=id|x|y]");
         }
         int start = 1;
-        if (const std::string* value = parsed->find("start")) {
+        if (const std::string* value = parsed.find("start")) {
             auto number = integerOf(*value, "start");
             if (!number) {
                 return number.error();
@@ -2178,44 +2459,63 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             start = *number;
         }
         const std::string order =
-            parsed->has("order") ? lowerCase(*parsed->find("order")) : std::string("id");
+            parsed.has("order") ? lowerCase(*parsed.find("order")) : std::string("id");
         if (order != "id" && order != "x" && order != "y") {
             return makeError(ErrorCode::InvalidArgument, "order= is id, x or y", order);
+        }
+        // Every numbered balloon in the drawing, as it always was, unless a
+        // scope limits it to some: those it takes are numbered from `start`
+        // and the others keep their numbers.
+        std::optional<std::vector<EntityId>> within;
+        Chosen picked;
+        if (subject->scope) {
+            auto scoped = choose(document_, scopeViews_, *subject, {}, true, true);
+            if (!scoped) {
+                return scoped.error();
+            }
+            picked = std::move(*scoped);
+            within = picked.ids;
         }
         auto renumbering = ann::renumberBalloons(
             model, start,
             order == "x" ? ann::BalloonOrder::X
-                         : (order == "y" ? ann::BalloonOrder::Y : ann::BalloonOrder::Id));
+                         : (order == "y" ? ann::BalloonOrder::Y : ann::BalloonOrder::Id),
+            within);
         if (auto status = run(std::move(renumbering.command)); !status) {
             return status.error();
         }
-        return "balloons=" + std::to_string(renumbering.balloons) +
-               " renumbered=" + std::to_string(renumbering.renumbered);
+        return withScope(picked, "balloons=" + std::to_string(renumbering.balloons) +
+                                     " renumbered=" + std::to_string(renumbering.renumbered));
     }
 
     if (action == "FOR") {
-        auto parsed = splitArguments(args, 1,
-                                     {"text", "template", "labelstyle", "n", "preset", "surface",
-                                      "alignment", "arrow", "callout", "style", "paper",
-                                      "arrowsize", "landing", "angle", "length"});
-        if (!parsed) {
-            return parsed.error();
+        auto subject = subjectOf(args, 1, args.size(),
+                                 {"text", "template", "labelstyle", "n", "preset", "surface",
+                                  "alignment", "arrow", "callout", "style", "paper",
+                                  "arrowsize", "landing", "angle", "length"});
+        if (!subject) {
+            return subject.error();
         }
-        if (parsed->positional.empty()) {
-            return usageOf(balloon ? "BALLOON FOR id [id...] | SELECTION [n= template= "
-                                     "labelstyle= angle=deg length=mm ...]"
-                                   : "LEADER FOR id [id...] | SELECTION [text= template= "
-                                     "labelstyle= preset= angle=deg length=mm ...]");
+        Arguments& parsed = subject->args;
+        if (parsed.positional.empty() && !subject->scope) {
+            return usageOf(balloon ? "BALLOON FOR id [id...] | <scope> [n= template= "
+                                     "labelstyle= angle=deg length=mm ...]   (options before WHERE)"
+                                   : "LEADER FOR id [id...] | <scope> [text= template= "
+                                     "labelstyle= preset= angle=deg length=mm ...]   (options "
+                                     "before WHERE)");
         }
-        auto targets = idsOf(parsed->positional, document_, false);
-        if (!targets) {
-            return targets.error();
+        // The entities the leaders are made for: named, or what the scope
+        // and filter take - of any kind, those with no place for a leader
+        // counted in skipped=.
+        auto picked = choose(document_, scopeViews_, *subject, parsed.positional, false, true);
+        if (!picked) {
+            return picked.error();
         }
-        auto change = leaderChangeOf(*parsed);
+        auto change = leaderChangeOf(parsed);
         if (!change) {
             return change.error();
         }
-        auto preset = presetOf(*parsed, document_, *change);
+        auto preset = presetOf(parsed, document_, *change);
         if (!preset) {
             return preset.error();
         }
@@ -2223,21 +2523,26 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         options.change = std::move(*change);
         options.balloon = balloon;
         // Degrees typed; left out, LeadersForOptions' own (its one source).
-        if (const std::string* value = parsed->find("angle")) {
+        if (const std::string* value = parsed.find("angle")) {
             auto number = numberOf(*value, "angle");
             if (!number) {
                 return number.error();
             }
             options.angle = *number * katana::math::kDegToRad;
         }
-        if (const std::string* value = parsed->find("length")) {
+        if (const std::string* value = parsed.find("length")) {
             auto number = numberOf(*value, "length");
             if (!number) {
                 return number.error();
             }
             options.length = *number;
         }
-        auto made = ann::leadersFor(model, *targets, options, document_.annotationScale(),
+        if (picked->ids.empty()) {
+            // A scope that took nothing to put a leader on: said, not refused.
+            return withScope(*picked, std::string("created ") + (balloon ? "balloons=" : "leaders=") +
+                                          "0 ids= skipped=0" + presetReply(*preset));
+        }
+        auto made = ann::leadersFor(model, picked->ids, options, document_.annotationScale(),
                                     document_.currentAttributes(), context);
         if (!made) {
             return made.error();
@@ -2246,9 +2551,10 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             return status.error();
         }
         const auto ids = document_.lastCreatedEntities();
-        return std::string("created ") + (balloon ? "balloons=" : "leaders=") +
-               std::to_string(ids.size()) + " ids=" + idList(ids) +
-               " skipped=" + std::to_string(made->skipped) + presetReply(*preset);
+        return withScope(*picked, std::string("created ") + (balloon ? "balloons=" : "leaders=") +
+                                      std::to_string(ids.size()) + " ids=" + idList(ids) +
+                                      " skipped=" + std::to_string(made->skipped) +
+                                      presetReply(*preset));
     }
 
     // Making one: LEADER p p [p...] / BALLOON p p [p...].

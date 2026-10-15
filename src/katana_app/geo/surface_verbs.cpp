@@ -34,6 +34,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/geo/surface_input.hpp"
 #include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/core/text.hpp"
@@ -239,13 +240,24 @@ Result<Prepared> remove(Context& context, const Tokens& tokens, std::size_t at)
                          tokens[at]);
     }
     const std::string name = named->name;
+    // The leaders whose notes read it by name will read nothing: their lines
+    // are dropped, and one whose every line read it is drawn bare. Said, not
+    // refused - the surface is the person's to remove, and UNDO puts it back
+    // with its readers; the alternative, refusing while a leader reads it,
+    // would make a surface that was meant to go stay (docs/annotation.md).
+    const std::size_t readers = katana::cad::annotation::leadersReading(
+        context.document.model(), katana::cad::annotation::ReadKind::Surface, name);
     // Removed as the line runs - there is nothing to wait for - from the
     // phase's staging copy, which the executor commits as one undo step
     // ("SURFACE REMOVE"): UNDO puts the surface back.
     (void)context.surfaces.remove(name);
-    return answeredWith("SURFACE REMOVE", "removed surface=" + value(name) +
-                                              " surfaces=" +
-                                              std::to_string(context.surfaces.all().size()));
+    std::string reply = "removed surface=" + value(name) +
+                        " surfaces=" + std::to_string(context.surfaces.all().size());
+    if (readers > 0) {
+        reply += "\n" + warningRecord("leaders=" + std::to_string(readers) + " read surface " +
+                                      name + " and will read nothing now");
+    }
+    return answeredWith("SURFACE REMOVE", std::move(reply));
 }
 
 // ---- FROM ---------------------------------------------------------------------------------------
