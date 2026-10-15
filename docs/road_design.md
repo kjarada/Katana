@@ -207,6 +207,20 @@ measured by the AVERAGE END AREA between two complete sections, as
 the method specifications and measurement standards name. An interval
 touching an incomplete section adds nothing, and the count is a problem.
 
+A side has cut (or fill) at a section only where the ground and the formation
+are more than 0.1 mm apart (`math::tolerance::kCoordinate`, the TIN's
+duplicate tolerance) at some point of the stretch: `RoadSection::leftCutSpans`
+and its three kin hold those stretches, out from the centreline, found
+exactly where the two lines cross between the ground samples. A side with none
+has an area of exactly zero. The daylight is bisected to about 1e-13 m, so it
+lands on either side of the ground by that much, and the other kind of
+earthworks was a sliver of 1e-26 m2 that "area > 0" took for a solid: a
+full-length cut object beside a road in fill. *Rejected:* a volume
+threshold on the object (1e-6 m3 or so) - the area is the thing wrong, and
+`built.cut` and `CORRIDOR SECTION` would still carry it. The price: a sheet
+of earthworks thinner than 0.1 mm over a wide road is left out (0.05 mm over
+a 30 m width and 100 m is 0.15 m3).
+
 **One engine.** `cad::corridorSection`, `corridorQuantities` and
 `corridorSurface` (`include/katana/cad/corridor.hpp`) are this engine run on
 `road::templateFromAssembly` - a lane each side at the assembly's half width
@@ -230,8 +244,10 @@ its objects (`include/katana/cad/bim/bim_object.hpp`):
 
 - a closed solid per COURSE of each component, per side, per run;
 - one per KERB per side per run;
-- the earthworks CUT and FILL of each side of each run, over each stretch of
-  complete sections; none where there is none.
+- the earthworks CUT and FILL of each side of each run: a closed solid for
+  each PIECE - a stretch of stations where that side has any (see above),
+  inside a stretch of complete sections, with the one section beyond each end
+  where its end area tapers to nothing. None where there is none.
 
 **A closed solid** (`road::loftSolid`): the solid's columns at each station
 give a top and a bottom face, the first and last column an inner and an
@@ -242,7 +258,12 @@ consistently turned. Which way that turns depends on the side (offsets grow
 to the left, so the right side's solids are mirror images): it is turned
 outward by the sign of the volume it encloses. An earthworks solid has
 `road::kEarthworksColumns` (41) columns a side - its look, not its quantity -
-and where it has no thickness its faces have no area, which leaves it closed.
+spread from where its earthworks start across each section to where they end,
+not from the centreline to the daylight: a fill beside a road in cut is no
+sheet laid over the whole half-section. Where a section's earthworks have a
+gap in them (cut, fill, cut across one section) the columns span the gap with
+no thickness, and its faces there have no area, which leaves the solid
+closed.
 
 **Object ids** are stable - the IFC export derives each GlobalId from one,
 and a model handed over twice must name the same things the same way:
@@ -251,7 +272,11 @@ and a model handed over twice must name the same things the same way:
     corridor/<corridor>/<side>/<component>/<run>                  a kerb
     corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]
 
-`<piece>` only from the second stretch of complete sections in a run.
+`<piece>` only from the second piece of that kind and side in a run, counted
+in station order over the pieces made: a fill that ends along the road and
+begins again is `fill/1` and `fill/1-2`. A piece is a stretch of stations
+over which that side has cut (or fill), inside a stretch of complete sections
+(`CorridorObjects.EarthworksSplitWhereTheirThicknessEndsAndTheSecondPieceCarriesItsNumber`).
 
 **IFC classes**, as the IFC export reads them (`docs/ifc.md`): a pavement,
 verge, median or drain course is an IfcCourse of its course's type (PAVEMENT
@@ -269,7 +294,16 @@ part is an IfcRoadPartTypeEnum word.
 |---|---|---|---|---|---|
 | course | the run's stations | the component's | Depth: its thickness | its plan outline | the solid's own volume |
 | kerb | its lip line in plan | the shape's | Height: its face | - | the solid's own volume |
-| earthworks | the stretch's stations | - | - | its plan outline | end area |
+| earthworks | the piece's stations | - | - | its footprint's plan area | end area |
+
+An earthworks object's GrossArea is the plan area of its footprint: its plan
+outline runs from where the earthworks start to where they end across each
+section, narrowing to a point over the last interval where the end area
+tapers to nothing (as the average-end-area volume does), so on a straight a
+side's cut and fill add up to the side's footprint
+(`CorridorObjects.ASideWithCutAndFillGivesEachItsOwnFootprintAndTheTwoAddUpToTheSide`).
+A section with the earthworks in two separate stretches draws and measures
+their hull.
 
 A course's volume is the SOLID'S, so the model and its quantity agree and a
 course on the outside of a curve - longer than the centreline - is measured
@@ -473,15 +507,15 @@ class, layer, quantities and properties, and every problem
 
 ## Not done
 
-- **An earthworks solid with no thickness along a stretch goes to IFC open.**
-  Where cut gives way to fill, or the formation meets the ground, the
-  solid's faces there have no area: the mesh is closed, but the IFC writer
-  drops a face of no area (docs/ifc.md, "Road model"), which leaves its
-  neighbours' edges used once, and it writes the solid as an open face set
-  with a warning. On the sample terrain (`samples/gis/terrain.asc`, the
-  rural two-lane template along a 150 m alignment) that was all four
-  earthworks solids of sixteen objects; every course was closed. The solid
-  should be split where its thickness is zero, into closed pieces.
+- **An earthworks solid still has faces of no area where it tapers to
+  nothing.** The solids are split along the road where a side has none and
+  drawn over the stretch across the section where it has some, but the end
+  section of a piece (the one with none) and a gap inside one section have
+  no thickness: the mesh is closed, but the IFC writer drops a face of no
+  area (docs/ifc.md, "Road model"), which leaves its neighbours' edges used
+  once, and writes the solid as an open face set with a warning. Every course
+  is closed. The piece should end in a real closed taper (a wedge welded to a
+  line), and a section with a gap should be two stretches across.
 - Superelevation by design speed and radius: the table is entered by hand.
 - Shoulder rollover on the high side of a superelevated section: a
   superelevated shoulder takes the lane's crossfall.

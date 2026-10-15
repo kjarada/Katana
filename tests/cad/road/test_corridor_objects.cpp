@@ -88,6 +88,25 @@ katana::geometry::SolvedAlignment curved()
     return *solved;
 }
 
+// Ground that depends on x alone, on a grid so that every triangle lies in one
+// cell of it: 5 m at x = 0, 20 and 40, 15 m at x = 10 and 30, and 5 m beyond.
+// Under a design level of 10 the sections at 0, 20 and 40 are in fill and the
+// ones at 10 and 30 in cut.
+katana::terrain::TinSurface sawGround()
+{
+    katana::terrain::TinInput input;
+    for (int i = -10; i <= 40; ++i) {
+        const double x = 10.0 * i;
+        const double z = (i >= 0 && i <= 4 && i % 2 == 1) ? 15.0 : 5.0;
+        for (const double y : {-100.0, -50.0, 0.0, 50.0, 100.0}) {
+            input.points.emplace_back(x, y, z);
+        }
+    }
+    auto built = katana::terrain::buildTin(input);
+    EXPECT_TRUE(built.ok()) << built.error().describe();
+    return built->surface;
+}
+
 } // namespace
 
 TEST(CorridorObjects, CourseVolumesOnAStraightAreWidthTimesThicknessTimesLength)
@@ -299,6 +318,211 @@ TEST(CorridorObjects, AnEmbankmentOfBattersAloneIsTheTrianglesUnderTheirSlopesAn
     ASSERT_TRUE(trench.ok());
     EXPECT_NEAR(*trench->surface.elevationAt(50.0, 0.0), 10.0, 1e-9);
     EXPECT_NEAR(*trench->surface.elevationAt(50.0, 1.0), 10.5, 1e-9);
+}
+
+TEST(CorridorObjects, ASideWithCutAndFillGivesEachItsOwnFootprintAndTheTwoAddUpToTheSide)
+{
+    // Ground z = 9.5 + 0.25 y, rising to the left; design 10; a 4 m lane at 0 %
+    // with 2:1 batters. Left of the centreline the ground is below the lane
+    // out to y = 2 (z 10) and above it beyond: fill thick 0.5 at the
+    // centreline down to nothing at 2 m (0.5 x 2 x 0.5 = 0.5 m2); cut thick
+    // nothing at 2 m, 0.5 at the hinge (4, 10, the ground 10.5), nothing again
+    // where the batter (10 + d/2) meets the ground (10.5 + d/4) at d = 2, out
+    // 6: two triangles of 0.5 x 2 x 0.5, 1.0 m2. Right of the centreline the
+    // ground falls away: fill 0.5 at the centreline and 1.5 at the hinge
+    // (ground 8.5), (0.5 + 1.5) / 2 x 4 = 4 m2 under the lane; the batter
+    // 10 - d/2 meets 8.5 - d/4 at d = 6, out 10: 0.5 x 6 x 1.5 = 4.5 m2. Over
+    // 100 m: volumes 50, 100 and 850 m3; footprints 2, 4 and 10 m wide.
+    const auto ground = planeGround(0.0, 0.25, 9.5);
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}), straight(100.0),
+                                     level(10.0, 0.0, 100.0), &ground);
+    EXPECT_TRUE(built.problems.empty()) << built.problems.front();
+    EXPECT_NEAR(built.cut, 100.0, 1e-6);
+    EXPECT_NEAR(built.fill, 900.0, 1e-6);
+    const BimModel model = corridorSolids(built);
+    ASSERT_EQ(model.objects.size(), 3u) << "left cut, left fill, right fill; no right cut";
+    EXPECT_EQ(objectWithId(model, "corridor/Main/right/earthworks/cut/1"), nullptr);
+
+    const BimObject* leftFill = objectWithId(model, "corridor/Main/left/earthworks/fill/1");
+    const BimObject* leftCut = objectWithId(model, "corridor/Main/left/earthworks/cut/1");
+    const BimObject* rightFill = objectWithId(model, "corridor/Main/right/earthworks/fill/1");
+    ASSERT_NE(leftFill, nullptr);
+    ASSERT_NE(leftCut, nullptr);
+    ASSERT_NE(rightFill, nullptr);
+    EXPECT_NEAR(quantityOf(*leftFill, "GrossVolume"), 50.0, 1e-6);
+    EXPECT_NEAR(quantityOf(*leftCut, "GrossVolume"), 100.0, 1e-6);
+    EXPECT_NEAR(quantityOf(*rightFill, "GrossVolume"), 850.0, 1e-6);
+    // The footprints: fill 0 to 2 m out, cut 2 to 6, so together the 6 m
+    // from the centreline to the daylight and not 6 m twice; the right
+    // fill 10 m. The solids are drawn over the same stretches, so a straight
+    // thickness needs no columns to be exact.
+    EXPECT_NEAR(quantityOf(*leftFill, "GrossArea"), 2.0 * 100.0, 1e-6);
+    EXPECT_NEAR(quantityOf(*leftCut, "GrossArea"), 4.0 * 100.0, 1e-6);
+    EXPECT_NEAR(quantityOf(*rightFill, "GrossArea"), 10.0 * 100.0, 1e-6);
+    EXPECT_NEAR(quantityOf(*leftFill, "GrossArea") + quantityOf(*leftCut, "GrossArea"), 600.0, 1e-6);
+    EXPECT_NEAR(meshVolume(leftFill->mesh), 50.0, 1e-6);
+    EXPECT_NEAR(meshVolume(leftCut->mesh), 100.0, 1e-6);
+    EXPECT_NEAR(meshVolume(rightFill->mesh), 850.0, 1e-6);
+    // The plan outline is the footprint too: the cut's is a strip 4 m wide
+    // from 2 m out.
+    const auto box = leftCut->plan.front().boundingBox();
+    EXPECT_NEAR(box.min.y, 2.0, 1e-9);
+    EXPECT_NEAR(box.max.y, 6.0, 1e-9);
+}
+
+TEST(CorridorObjects, AFillThatEndsAlongTheRoadIsASolidOfItsOwnStationsAndTheCutBeginsWhereItEnds)
+{
+    // Ground z = 5 + 0.1 x under a design level of 10: it meets the design at
+    // x = 50, in fill before it and in cut after. A 4 m lane, 2:1 batters.
+    // At 10 m sections the fill depth D = 5, 4, 3, 2, 1, 0 at x = 0 ... 50
+    // gives, a side, 4 D + D2 = 45, 32, 21, 12, 5, 0 m2 (the lane, and the
+    // batter's triangle 0.5 x 2D x D) and a footprint 4 + 2 D = 14, 12, 10, 8,
+    // 6 m wide. End areas: (45 + 32) 5 + (32 + 21) 5 + (21 + 12) 5 + (12 + 5) 5
+    // + (5 + 0) 5 = 925 m3. Plan area: the trapezoids (14 + 12) 5 + (12 + 10)
+    // 5 + (10 + 8) 5 + (8 + 6) 5 = 130 + 110 + 90 + 70 = 400, and the last
+    // interval narrowing from 6 m to a point, 0.5 x 6 x 10 = 30: 430 m2.
+    // The cut mirrors it from x = 50 to 100.
+    const auto ground = planeGround(0.1, 0.0, 5.0);
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}), straight(100.0),
+                                     level(10.0, 0.0, 100.0), &ground);
+    EXPECT_NEAR(built.cut, 1850.0, 1e-5);
+    EXPECT_NEAR(built.fill, 1850.0, 1e-5);
+    const BimModel model = corridorSolids(built);
+    ASSERT_EQ(model.objects.size(), 4u);
+    const auto property = [](const BimObject& object, const std::string& name) {
+        for (const auto& [key, value] : object.properties) {
+            if (key == name) {
+                return value;
+            }
+        }
+        return std::string("(none)");
+    };
+    for (const std::string side : {"left", "right"}) {
+        const BimObject* fill = objectWithId(model, "corridor/Main/" + side + "/earthworks/fill/1");
+        const BimObject* cut = objectWithId(model, "corridor/Main/" + side + "/earthworks/cut/1");
+        ASSERT_NE(fill, nullptr) << side;
+        ASSERT_NE(cut, nullptr) << side;
+        EXPECT_EQ(property(*fill, "from"), "0");
+        EXPECT_EQ(property(*fill, "to"), "50");
+        EXPECT_EQ(property(*cut, "from"), "50");
+        EXPECT_EQ(property(*cut, "to"), "100");
+        EXPECT_NEAR(quantityOf(*fill, "Length"), 50.0, 1e-9);
+        EXPECT_NEAR(quantityOf(*cut, "Length"), 50.0, 1e-9);
+        EXPECT_NEAR(quantityOf(*fill, "GrossVolume"), 925.0, 1e-5);
+        EXPECT_NEAR(quantityOf(*cut, "GrossVolume"), 925.0, 1e-5);
+        EXPECT_NEAR(quantityOf(*fill, "GrossArea"), 430.0, 1e-5);
+        EXPECT_NEAR(quantityOf(*cut, "GrossArea"), 430.0, 1e-5);
+    }
+}
+
+TEST(CorridorObjects, EarthworksSplitWhereTheirThicknessEndsAndTheSecondPieceCarriesItsNumber)
+{
+    // The sawtooth ground, 40 m of road at 10 m sections: fill at 0, 20 and 40
+    // (D = 5: 45 m2 a side, 14 m wide), cut at 10 and 30 (45 m2, 14 m wide),
+    // nothing at the sections between. Each piece runs over its sections and
+    // one more at each end, where its end area tapers to nothing:
+    //   fill 1    x 0-10    (45 + 0) 5 = 225 m3,  triangle 0.5 x 14 x 10 = 70 m2
+    //   fill 1-2  x 10-30   450 m3, a diamond 20 long and 14 wide, 140 m2
+    //   fill 1-3  x 30-40   225 m3, 70 m2
+    //   cut 1     x 0-20    450 m3, 140 m2;  cut 1-2  x 20-40  450 m3, 140 m2.
+    const auto ground = sawGround();
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}), straight(40.0),
+                                     level(10.0, 0.0, 40.0), &ground);
+    EXPECT_EQ(built.incompleteSections, 0u);
+    const BimModel model = corridorSolids(built);
+    struct Expected {
+        const char* id;
+        double length;
+        double volume;
+        double area;
+    };
+    for (const Expected& expected :
+         {Expected{"corridor/Main/left/earthworks/fill/1", 10.0, 225.0, 70.0},
+          Expected{"corridor/Main/left/earthworks/fill/1-2", 20.0, 450.0, 140.0},
+          Expected{"corridor/Main/left/earthworks/fill/1-3", 10.0, 225.0, 70.0},
+          Expected{"corridor/Main/left/earthworks/cut/1", 20.0, 450.0, 140.0},
+          Expected{"corridor/Main/left/earthworks/cut/1-2", 20.0, 450.0, 140.0}}) {
+        const BimObject* object = objectWithId(model, expected.id);
+        ASSERT_NE(object, nullptr) << expected.id;
+        EXPECT_NEAR(quantityOf(*object, "Length"), expected.length, 1e-9) << expected.id;
+        EXPECT_NEAR(quantityOf(*object, "GrossVolume"), expected.volume, 1e-5) << expected.id;
+        EXPECT_NEAR(quantityOf(*object, "GrossArea"), expected.area, 1e-5) << expected.id;
+    }
+    EXPECT_EQ(objectWithId(model, "corridor/Main/left/earthworks/fill/1-4"), nullptr);
+    EXPECT_EQ(objectWithId(model, "corridor/Main/left/earthworks/cut/1-3"), nullptr);
+    // Five pieces a side, ten in all, and the pieces' volumes are the
+    // corridor's: 900 m3 of fill and 900 of cut a side.
+    EXPECT_EQ(model.objects.size(), 10u);
+    EXPECT_NEAR(built.fill, 1800.0, 1e-5);
+    EXPECT_NEAR(built.cut, 1800.0, 1e-5);
+}
+
+TEST(CorridorObjects, GroundOnTheOtherSideOfTheDesignByNothingMakesNoEarthworksAtAll)
+{
+    // The daylight is found by bisection, to about 1e-13 m, so it lands on
+    // either side of the ground by that much and leaves a sliver of the other
+    // kind of earthworks, about 1e-26 m2, that a test of "area > 0" took for
+    // a solid: a full-length cut object with the whole half-section's area
+    // beside a road in fill, and a fill beside one in cut. Ground tilted
+    // across the road, so the daylight is never at a round number.
+    for (const double tilt : {0.03, 0.05, 0.07, 0.11}) {
+        Corridor corridor = corridorOf("test");
+        corridor.surface = "ground";
+        const auto below = planeGround(0.0, tilt, 5.0); // under the design of 10
+        const auto fill = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}),
+                                        straight(100.0), level(10.0, 0.0, 100.0), &below);
+        EXPECT_EQ(fill.incompleteSections, 0u) << tilt;
+        EXPECT_EQ(fill.cut, 0.0) << "no cut at all, not 1e-26 of it, tilt " << tilt;
+        EXPECT_GT(fill.fill, 0.0);
+        const BimModel fillModel = corridorSolids(fill);
+        ASSERT_EQ(fillModel.objects.size(), 2u) << tilt;
+        for (const BimObject& object : fillModel.objects) {
+            EXPECT_EQ(object.ifcClass, "IfcEarthworksFill") << object.id << " tilt " << tilt;
+        }
+
+        const auto above = planeGround(0.0, tilt, 15.0); // over it
+        const auto cut = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}),
+                                       straight(100.0), level(10.0, 0.0, 100.0), &above);
+        EXPECT_EQ(cut.fill, 0.0) << "no fill at all, tilt " << tilt;
+        EXPECT_GT(cut.cut, 0.0);
+        const BimModel cutModel = corridorSolids(cut);
+        ASSERT_EQ(cutModel.objects.size(), 2u) << tilt;
+        for (const BimObject& object : cutModel.objects) {
+            EXPECT_EQ(object.ifcClass, "IfcEarthworksCut") << object.id << " tilt " << tilt;
+        }
+    }
+
+    // Ground at the design level: nothing to build, no object, no area.
+    Corridor corridor = corridorOf("test");
+    corridor.surface = "ground";
+    const auto flat = planeGround(0.0, 0.0, 10.0);
+    const auto atGrade = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}),
+                                       straight(100.0), level(10.0, 0.0, 100.0), &flat);
+    EXPECT_EQ(atGrade.cut, 0.0);
+    EXPECT_EQ(atGrade.fill, 0.0);
+    EXPECT_TRUE(corridorSolids(atGrade).objects.empty());
+
+    // The tolerance is the model's 0.1 mm (the TIN's duplicate tolerance): a
+    // sheet of cut 0.05 mm thick is not earthworks, 0.2 mm is. A side of it:
+    // 4 m of lane at 0.0002 m, 8e-4 m2, and the batter 2:1 up to the ground
+    // 0.0004 m out, 0.5 x 0.0004 x 0.0002 = 4e-8 m2: 0.080004 m3 over 100 m,
+    // 0.160008 m3 both sides.
+    const auto thin = planeGround(0.0, 0.0, 10.00005);
+    const auto sheet = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}),
+                                     straight(100.0), level(10.0, 0.0, 100.0), &thin);
+    EXPECT_EQ(sheet.cut, 0.0);
+    EXPECT_TRUE(corridorSolids(sheet).objects.empty());
+    const auto thick = planeGround(0.0, 0.0, 10.0002);
+    const auto layer = buildCorridor(corridor, setOf({laneTemplate(4.0, 0.0, {})}),
+                                     straight(100.0), level(10.0, 0.0, 100.0), &thick);
+    EXPECT_NEAR(layer.cut, 0.160008, 1e-6);
+    EXPECT_EQ(corridorSolids(layer).objects.size(), 2u);
 }
 
 TEST(CorridorObjects, ARegionIsARunOfItsOwnNumberedInStationOrder)

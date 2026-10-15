@@ -405,6 +405,67 @@ std::vector<SectionVertex> vertices(const std::vector<SectionPoint>& points)
     return out;
 }
 
+// The stretches of one side - distances OUT from the centreline, ascending -
+// where the ground is above the formation (`cutting`) or below it, thick
+// somewhere by more than kCoordinate. `formationLevels[i]` is the formation's
+// level under `ground[i]`. The ground samples include every vertex of the
+// formation, so between two samples both lines are straight and their
+// difference crosses zero at one point, found exactly. A stretch whose
+// thickest point is under kCoordinate (0.1 mm, the TIN's duplicate tolerance)
+// is not earthworks: the daylight is bisected to about 1e-13 m, and lands on
+// either side of the ground by that much.
+std::vector<OutSpan> earthworkSpans(const std::vector<SectionVertex>& ground,
+                                    const std::vector<double>& formationLevels, Side side,
+                                    bool cutting)
+{
+    struct Sample {
+        double out;
+        double thickness;
+    };
+    const double sign = side == Side::Left ? 1.0 : -1.0;
+    std::vector<Sample> samples;
+    for (std::size_t i = 0; i < ground.size() && i < formationLevels.size(); ++i) {
+        const double out = sign * ground[i].offset;
+        if (out < -tol::kAbsolute) {
+            continue; // the other side of the centreline
+        }
+        const double thickness = cutting ? ground[i].elevation - formationLevels[i]
+                                         : formationLevels[i] - ground[i].elevation;
+        samples.push_back(Sample{std::max(out, 0.0), thickness});
+    }
+    std::sort(samples.begin(), samples.end(),
+              [](const Sample& a, const Sample& b) { return a.out < b.out; });
+    // Where the thickness is zero between two samples of opposite sign (or
+    // one of them zero).
+    const auto crossing = [](const Sample& a, const Sample& b) {
+        return a.out + (b.out - a.out) * (a.thickness / (a.thickness - b.thickness));
+    };
+    std::vector<OutSpan> spans;
+    std::optional<double> start;
+    double peak = 0.0;
+    const auto close = [&](double end) {
+        if (start && peak > tol::kCoordinate && end > *start) {
+            spans.push_back(OutSpan{*start, end});
+        }
+        start.reset();
+    };
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        if (samples[i].thickness > 0.0) {
+            if (!start) {
+                start = i == 0 ? samples[i].out : crossing(samples[i - 1], samples[i]);
+                peak = 0.0;
+            }
+            peak = std::max(peak, samples[i].thickness);
+        } else if (start) {
+            close(crossing(samples[i - 1], samples[i]));
+        }
+    }
+    if (start) {
+        close(samples.back().out);
+    }
+    return spans;
+}
+
 Result<RoadSection> buildSection(const RoadTemplate& roadTemplate, const SolvedAlignment& alignment,
                                  const SolvedProfile& profile,
                                  const katana::terrain::TinSurface* ground, double station,
@@ -533,6 +594,34 @@ Result<RoadSection> buildSection(const RoadTemplate& roadTemplate, const SolvedA
     section.leftFill = leftSplit.below;
     section.rightCut = rightSplit.above;
     section.rightFill = rightSplit.below;
+    // Where the earthworks have thickness; a side with none has no cut (or no
+    // fill) whatever sliver of area the daylight's last 1e-13 m left. This is
+    // the one place that decides it: the end areas, the quantities and the
+    // objects all follow.
+    std::vector<double> formationLevels;
+    formationLevels.reserve(section.ground.size());
+    for (const SectionVertex& sample : section.ground) {
+        formationLevels.push_back(levelOn(formation, sample.offset));
+    }
+    section.leftCutSpans = earthworkSpans(section.ground, formationLevels, Side::Left, true);
+    section.leftFillSpans = earthworkSpans(section.ground, formationLevels, Side::Left, false);
+    section.rightCutSpans = earthworkSpans(section.ground, formationLevels, Side::Right, true);
+    section.rightFillSpans = earthworkSpans(section.ground, formationLevels, Side::Right, false);
+    bool trimmed = false;
+    const auto settle = [&trimmed](const std::vector<OutSpan>& spans, double& area) {
+        if (spans.empty() && area != 0.0) {
+            area = 0.0;
+            trimmed = true;
+        }
+    };
+    settle(section.leftCutSpans, section.leftCut);
+    settle(section.leftFillSpans, section.leftFill);
+    settle(section.rightCutSpans, section.rightCut);
+    settle(section.rightFillSpans, section.rightFill);
+    if (trimmed) {
+        section.cutArea = section.leftCut + section.rightCut;
+        section.fillArea = section.leftFill + section.rightFill;
+    }
     return section;
 }
 
@@ -980,6 +1069,181 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
     return mesh;
 }
 
+namespace {
+
+const std::vector<OutSpan>& spansOf(const RoadSection& section, Side side, bool cutting)
+{
+    if (side == Side::Left) {
+        return cutting ? section.leftCutSpans : section.leftFillSpans;
+    }
+    return cutting ? section.rightCutSpans : section.rightFillSpans;
+}
+
+double areaOf(const RoadSection& section, Side side, bool cutting)
+{
+    if (side == Side::Left) {
+        return cutting ? section.leftCut : section.leftFill;
+    }
+    return cutting ? section.rightCut : section.rightFill;
+}
+
+// The cut (or fill) of one side of one run, as a closed solid for each piece:
+// a stretch of stations over which the side has earthworks at all
+// (RoadSection::leftCutSpans ...), inside a stretch of complete sections. Each
+// piece runs over the sections that have earthworks and one beyond each end
+// where there is one (a section with none), because the end-area volume of
+// the interval between the two tapers to nothing there. Its columns run from
+// where its earthworks start across the section to where they end, so the
+// solid, its plan outline and its GrossArea are the earthworks and not the
+// whole half-section between the centreline and the daylight.
+void addEarthworks(bim::BimModel& model, const BuiltCorridor& built, const CorridorRun& run,
+                   Side side, bool cutting)
+{
+    const SolvedAlignment& alignment = *built.alignment;
+    const std::string source = "corridor " + built.name;
+    const std::string sideWord(toString(side));
+    const std::string region = std::to_string(run.region);
+    const std::string what = cutting ? "cut" : "fill";
+    const double sign = side == Side::Left ? 1.0 : -1.0;
+    const auto active = [&](std::size_t index) {
+        return !spansOf(run.sections[index], side, cutting).empty();
+    };
+    std::size_t emitted = 0;
+    std::size_t k = 0;
+    while (k < run.sections.size()) {
+        if (!run.sections[k].complete) {
+            ++k;
+            continue;
+        }
+        std::size_t last = k;
+        while (last + 1 < run.sections.size() && run.sections[last + 1].complete) {
+            ++last;
+        }
+        const std::size_t first = k;
+        k = last + 1;
+        if (last == first) {
+            continue;
+        }
+        // The runs of sections that have earthworks, inside [first, last].
+        for (std::size_t j = first; j <= last; ++j) {
+            if (!active(j)) {
+                continue;
+            }
+            std::size_t lastActive = j;
+            while (lastActive + 1 <= last && active(lastActive + 1)) {
+                ++lastActive;
+            }
+            const std::size_t firstActive = j;
+            j = lastActive;
+            const std::size_t from = firstActive > first ? firstActive - 1 : firstActive;
+            const std::size_t to = lastActive < last ? lastActive + 1 : lastActive;
+            if (from == to) {
+                continue;
+            }
+            katana::math::CompensatedSum endArea;
+            for (std::size_t m = from; m < to; ++m) {
+                const RoadSection& a = run.sections[m];
+                const RoadSection& b = run.sections[m + 1];
+                endArea.add(0.5 * (areaOf(a, side, cutting) + areaOf(b, side, cutting)) *
+                            (b.station - a.station));
+            }
+            if (!(endArea.value() > 0.0)) {
+                continue;
+            }
+            std::vector<double> stations;
+            std::vector<std::vector<SolidColumn>> columns;
+            std::vector<Point2> inner;
+            std::vector<Point2> outer;
+            for (std::size_t m = from; m <= to; ++m) {
+                const RoadSection& section = run.sections[m];
+                // A section with none takes the stretch of its neighbour that
+                // has some, with no thickness there; in plan it is a point
+                // at the middle of it, which makes the outline taper as the
+                // end-area volume does.
+                const bool has = active(m);
+                const std::size_t like = has ? m : (m == from ? m + 1 : m - 1);
+                const auto& spans = spansOf(run.sections[like], side, cutting);
+                const double outFrom = spans.front().from;
+                const double outTo = spans.back().to;
+                const std::vector<SectionVertex> formation = vertices(section.formation);
+                std::vector<SolidColumn> across;
+                for (std::size_t c = 0; c < kEarthworksColumns; ++c) {
+                    const double out = outFrom + (outTo - outFrom) * static_cast<double>(c) /
+                                                  static_cast<double>(kEarthworksColumns - 1);
+                    const double offset = sign * out;
+                    const double f = levelOn(formation, offset);
+                    const double g = levelOn(section.ground, offset);
+                    across.push_back(cutting ? SolidColumn{offset, std::max(g, f), f}
+                                             : SolidColumn{offset, f, std::min(g, f)});
+                }
+                stations.push_back(section.station);
+                columns.push_back(std::move(across));
+                const double lo = has ? outFrom : 0.5 * (outFrom + outTo);
+                const double hi = has ? outTo : lo;
+                if (const auto p = alignment.pointAtStationOffset(section.station, sign * lo)) {
+                    inner.push_back(*p);
+                }
+                if (const auto p = alignment.pointAtStationOffset(section.station, sign * hi)) {
+                    outer.push_back(*p);
+                }
+            }
+            auto mesh = loftSolid(alignment, stations, columns);
+            if (!mesh) {
+                model.problems.push_back(
+                    bim::BimProblem{source, "earthworks " + sideWord + ": " + mesh.error().message});
+                continue;
+            }
+            katana::geometry::Polyline2 outline;
+            outline.closed = true;
+            outline.vertices = inner;
+            for (auto it = outer.rbegin(); it != outer.rend(); ++it) {
+                // A tapered end is one point, not two.
+                if (outline.vertices.empty() || !(outline.vertices.back() == *it)) {
+                    outline.vertices.push_back(*it);
+                }
+            }
+            if (outline.vertices.size() > 2 && outline.vertices.back() == outline.vertices.front()) {
+                outline.vertices.pop_back(); // the outline is closed: no point twice
+            }
+            ++emitted;
+            bim::BimObject object;
+            object.id = "corridor/" + built.name + "/" + sideWord + "/earthworks/" + what + "/" +
+                        region + (emitted > 1 ? "-" + std::to_string(emitted) : "");
+            object.name = built.name + " " + sideWord + " earthworks " + what;
+            object.kind = "earthworks";
+            object.facility = built.name;
+            object.part = "ROADSEGMENT";
+            object.ifcClass = cutting ? "IfcEarthworksCut" : "IfcEarthworksFill";
+            object.predefinedType = cutting ? "CUT" : "EMBANKMENT";
+            object.material = cutting ? "excavated material" : "fill";
+            // As a cut and fill map colours them (the "Cut Fill" surface
+            // style): blue cut, red fill.
+            object.colour = cutting ? katana::entity::Color{74, 127, 193, 255}
+                                    : katana::entity::Color{193, 80, 74, 255};
+            object.layer = cutting ? "road/earthworks/cut" : "road/earthworks/fill";
+            object.plan.push_back(std::move(outline));
+            object.properties = {{"template", run.roadTemplate.name},
+                                 {"region", region},
+                                 {"from", number(stations.front())},
+                                 {"to", number(stations.back())},
+                                 {"side", sideWord},
+                                 {"method", "average end area"}};
+            // The surface a cut is taken from, which the IFC export reads by
+            // this name.
+            if (cutting) {
+                object.properties.emplace_back("Target Surface", built.surface);
+            }
+            object.quantities = {quantity("Length", stations.back() - stations.front(), "m"),
+                                 quantity("GrossArea", object.plan.front().area(), "m2"),
+                                 quantity("GrossVolume", endArea.value(), "m3")};
+            object.mesh = std::move(*mesh);
+            model.objects.push_back(std::move(object));
+        }
+    }
+}
+
+} // namespace
+
 bim::BimModel corridorSolids(const BuiltCorridor& built)
 {
     bim::BimModel model;
@@ -1094,99 +1358,8 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
 
         // ---- earthworks -----------------------------------------------------------------
         for (const Side side : {Side::Left, Side::Right}) {
-            const std::string sideWord(toString(side));
             for (const bool cutting : {true, false}) {
-                std::size_t piece = 0;
-                std::size_t k = 0;
-                while (k < run.sections.size()) {
-                    if (!run.sections[k].complete) {
-                        ++k;
-                        continue;
-                    }
-                    std::size_t last = k;
-                    while (last + 1 < run.sections.size() && run.sections[last + 1].complete) {
-                        ++last;
-                    }
-                    const std::size_t first = k;
-                    k = last + 1;
-                    if (last == first) {
-                        continue;
-                    }
-                    katana::math::CompensatedSum endArea;
-                    for (std::size_t j = first; j < last; ++j) {
-                        const RoadSection& a = run.sections[j];
-                        const RoadSection& b = run.sections[j + 1];
-                        const double areaA = side == Side::Left
-                                                 ? (cutting ? a.leftCut : a.leftFill)
-                                                 : (cutting ? a.rightCut : a.rightFill);
-                        const double areaB = side == Side::Left
-                                                 ? (cutting ? b.leftCut : b.leftFill)
-                                                 : (cutting ? b.rightCut : b.rightFill);
-                        endArea.add(0.5 * (areaA + areaB) * (b.station - a.station));
-                    }
-                    ++piece;
-                    if (!(endArea.value() > 0.0)) {
-                        continue; // no cut (or fill) on this side here: no solid of nothing
-                    }
-                    std::vector<double> pieceStations;
-                    std::vector<std::vector<SolidColumn>> columns;
-                    for (std::size_t j = first; j <= last; ++j) {
-                        const RoadSection& section = run.sections[j];
-                        const double outermost = side == Side::Left ? section.top.front().offset
-                                                                    : section.top.back().offset;
-                        const std::vector<SectionVertex> formation = vertices(section.formation);
-                        std::vector<SolidColumn> across;
-                        for (std::size_t c = 0; c < kEarthworksColumns; ++c) {
-                            const double offset = outermost * static_cast<double>(c) /
-                                                  static_cast<double>(kEarthworksColumns - 1);
-                            const double f = levelOn(formation, offset);
-                            const double g = levelOn(section.ground, offset);
-                            across.push_back(cutting ? SolidColumn{offset, std::max(g, f), f}
-                                                     : SolidColumn{offset, f, std::min(g, f)});
-                        }
-                        pieceStations.push_back(section.station);
-                        columns.push_back(std::move(across));
-                    }
-                    auto mesh = loftSolid(alignment, pieceStations, columns);
-                    if (!mesh) {
-                        fail("earthworks " + sideWord + ": " + mesh.error().message);
-                        continue;
-                    }
-                    bim::BimObject object;
-                    const std::string what = cutting ? "cut" : "fill";
-                    object.id = "corridor/" + built.name + "/" + sideWord + "/earthworks/" + what +
-                                "/" + region + (piece > 1 ? "-" + std::to_string(piece) : "");
-                    object.name = built.name + " " + sideWord + " earthworks " + what;
-                    object.kind = "earthworks";
-                    object.facility = built.name;
-                    object.part = "ROADSEGMENT";
-                    object.ifcClass = cutting ? "IfcEarthworksCut" : "IfcEarthworksFill";
-                    object.predefinedType = cutting ? "CUT" : "EMBANKMENT";
-                    object.material = cutting ? "excavated material" : "fill";
-                    // As a cut and fill map colours them (the "Cut Fill"
-                    // surface style): blue cut, red fill.
-                    object.colour = cutting ? katana::entity::Color{74, 127, 193, 255}
-                                            : katana::entity::Color{193, 80, 74, 255};
-                    object.layer = cutting ? "road/earthworks/cut" : "road/earthworks/fill";
-                    object.plan.push_back(outlineOf(alignment, pieceStations, columns));
-                    object.properties = {{"template", run.roadTemplate.name},
-                                         {"region", region},
-                                         {"from", number(pieceStations.front())},
-                                         {"to", number(pieceStations.back())},
-                                         {"side", sideWord},
-                                         {"method", "average end area"}};
-                    // The surface a cut is taken from, which the IFC export
-                    // reads by this name.
-                    if (cutting) {
-                        object.properties.emplace_back("Target Surface", built.surface);
-                    }
-                    object.quantities = {
-                        quantity("Length", pieceStations.back() - pieceStations.front(), "m"),
-                        quantity("GrossArea", object.plan.front().area(), "m2"),
-                        quantity("GrossVolume", endArea.value(), "m3")};
-                    object.mesh = std::move(*mesh);
-                    model.objects.push_back(std::move(object));
-                }
+                addEarthworks(model, built, run, side, cutting);
             }
         }
     }

@@ -63,8 +63,8 @@ namespace katana::cad::road {
 // under a thousandth of a square metre for a metre-deep pavement.
 inline constexpr double kFaceRun = 0.001;
 // The columns an earthworks solid has across each side - its look, not its
-// quantity, which is the end area of the true lines: every 2.5 % of a side,
-// 0.75 m on a 30 m half-width.
+// quantity, which is the end area of the true lines: spread over the stretch
+// of the side where it has earthworks, every 2.5 % of it.
 inline constexpr std::size_t kEarthworksColumns = 41;
 
 // A point of a section's line: what it is ("CL", "left/lane/outer",
@@ -75,6 +75,15 @@ struct SectionPoint {
     double level = 0.0;
 
     friend bool operator==(const SectionPoint&, const SectionPoint&) = default;
+};
+
+// A stretch of one side, as distances OUT from the centreline (from < to), over
+// which the earthworks have thickness.
+struct OutSpan {
+    double from = 0.0;
+    double to = 0.0;
+
+    friend bool operator==(const OutSpan&, const OutSpan&) = default;
 };
 
 // One vertical of a solid in a section: offset, top level, bottom level.
@@ -126,6 +135,19 @@ struct RoadSection {
     double leftFill = 0.0;
     double rightCut = 0.0;
     double rightFill = 0.0;
+    // Where on each side the ground is above the formation (cut) or below it
+    // (fill) by more than math::tolerance::kCoordinate (0.1 mm) at some point
+    // of the stretch, left to right as the section is: the stretches the
+    // earthworks occupy in plan. A side with none has no cut (or fill) here,
+    // and its area above is exactly zero: the daylight is found to about
+    // 1e-13 m, so it lands on the wrong side of the ground half the time,
+    // and that sliver of 1e-26 m2 is not earthworks. One place decides what
+    // "none" means (buildSection); the objects and the quantities follow it.
+    // Empty when the section is not complete.
+    std::vector<OutSpan> leftCutSpans;
+    std::vector<OutSpan> leftFillSpans;
+    std::vector<OutSpan> rightCutSpans;
+    std::vector<OutSpan> rightFillSpans;
 };
 
 // The section of `roadTemplate` at `station`. `ground` may be null: the
@@ -228,12 +250,13 @@ loftSolid(const katana::geometry::SolvedAlignment& alignment, const std::vector<
 
 // The road model's objects of a built corridor (cad/bim/bim_object.hpp): a
 // closed solid per course of each component per side per run, per kerb,
-// and the earthworks cut and fill of each side of each run - over each
-// stretch of complete sections - with their quantities, and its problems.
+// and the earthworks cut and fill of each side of each run - a piece for each
+// stretch of stations where that side has any, inside a stretch of complete
+// sections - with their quantities, and its problems.
 // Object ids (stable, docs/road_design.md, "Object ids"):
 //   corridor/<corridor>/<side>/<component>/<course>/<run>
 //   corridor/<corridor>/<side>/<component>/<run>                a kerb
-//   corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]
+//   corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]   (<piece> from 2)
 [[nodiscard]] bim::BimModel corridorSolids(const BuiltCorridor& built);
 
 // The sections of every run in station order, each station once: where two
