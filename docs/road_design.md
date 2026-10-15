@@ -512,22 +512,45 @@ it once more than it changed; what listens rebuilds from a cache, so that
 costs nothing (below).
 
 **The cache** (`bim::bimModel`, `src/katana_cad/bim/bim_object.cpp`). Made
-once per change of what it is made from, in two halves: the corridors' on the
-two keys' text, the alignments' revision and the surfaces' generation - so a
-line drawn does not rebuild them - and the placed objects' on their key and
-every step. (That is wider than they need: they read only their key, the
-alignments and the surfaces, and a line is copied into an object, never
-followed - `road_objects.md`, "Not done".) A half made again that equals what
-it replaced keeps the old one - BOTH halves, the corridors' too: the
-alignments' revision and the surfaces' generation move for an alignment or a
-surface no corridor uses, and a model handed to the views as a different
-object made every 3D view build its terrain again - so the model a view holds
-is the same object until something in it changes
+once per change of what it is made from, in two halves, each keyed on what it
+reads and nothing wider:
+
+| Half | Made again when |
+|---|---|
+| the corridors' | the road templates' or the corridors' text changes, the alignments' revision moves, or a surface a corridor TARGETS (its `surface=`; it reads no other) is another object |
+| the placed objects' | the `road_objects` text changes, the alignments' revision moves, or a surface an object NAMES (`surface=`) is another object |
+
+So a line drawn, a layer, a surface no corridor targets and no object names - an
+edit of it, a hide, a removal, a new one - make neither again, and a template
+edit leaves the placed objects alone, as a placed object leaves the corridors
+(`bim::bimBuildCounts` counts each half's makings, for the tests and the
+benchmark). Before, the corridors' half was keyed on the surfaces' whole
+generation and the placed objects' on every command, so any edit of any surface
+sectioned every corridor again for a model that came out the same. A surface is
+told apart by IDENTITY, not by its name: an edit replaces the object
+(`SurfaceStore::replace`), so the same object is the same ground, and an undo
+that puts back the old one is a change. The cache holds each as a `weak_ptr`,
+which keeps the identity alive after the surface is gone, so a new surface made
+at the same address is not taken for the old. *Rejected:* the surfaces'
+generation with the names compared - it moves for the surfaces nobody reads,
+which is the cost; and a content hash of the TIN - it would be read on every
+paint. A half made again that equals what it replaced
+keeps the old one - BOTH halves: an alignment no corridor uses moves the
+alignments' revision (both halves read the whole set, which is
+conservative), and a model handed to the views as a different object made
+every 3D view build its terrain again - so the model a view holds is the same
+object until something in it changes
 (`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`,
 `RoadVerbs.TheRoadModelIsTheSameObjectAfterAnEditThatLeftItAsItWas`). The
 views call it every paint; while nothing it is made from moved that is a few
-counters and two texts, and a half made again is compared with the old one
-(vertex for vertex) only after a key moved.
+counters, two texts and a lookup of each surface named, and a half made again
+is compared with the old one (vertex for vertex) only after a key moved. The
+one way a placed object reads a surface is `placement.surface`; a new way
+would need its name in that key (`placedGrounds`). What it costs is measured by
+`benchmarks/bench_road.cpp` (`BM_RoadModelUnchanged`,
+`BM_RoadModelAfterAnUnrelatedSurface` against `...AfterTheTargetedSurface`):
+not yet run - the corridors of a kilometre of the urban street are the work an
+unrelated surface edit no longer repeats.
 
 ## The verbs
 
@@ -781,9 +804,12 @@ class, layer, quantities and properties, and every problem
   property is not satisfied by luck.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache (the
-  same object after an edit that left the model as it was), the RoadModel
-  change, the JSON the project keeps; several components or courses set by one
-  line, one step, and a refused value in any group changing none.
+  same object after an edit that left the model as it was, and which half each
+  kind of edit makes again, counted: a surface nothing reads neither, the
+  corridors' ground the corridors, the object's the placed objects, an
+  alignment both), the RoadModel change, the JSON the project keeps; several
+  components or courses set by one line, one step, and a refused value in any
+  group changing none.
 - `tests/cad/test_corridor.cpp`: the old functions, unchanged, on the new engine.
 - `tests/qt_widgets/bim/test_road_dialogs.cpp`: each dialog's lines and the
   workbench's menu and meshes; the dialogs' state across New, Rename, an
@@ -833,9 +859,5 @@ class, layer, quantities and properties, and every problem
   templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
 - The window's Command Reference shows the road verbs in its Commands
   section from the general help, not a section of their own.
-- The corridors are sectioned again when ANY surface changes (the road
-  model's corridor half is keyed on the surfaces' whole generation), though
-  the model comes out the same object when nothing in it moved; keying the
-  half on the surfaces a corridor targets would skip the work as well.
 - Corridor Quantities clears its listing when the road model changes and does
   not list again by itself: pressing List Quantities is the person's act.

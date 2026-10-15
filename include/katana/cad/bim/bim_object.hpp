@@ -104,8 +104,22 @@ struct BimModel {
 // placed (src/katana_cad/road/road_objects.cpp).
 [[nodiscard]] BimModel placedObjects(const Document& document);
 // Both, corridors first, made once per change of what they are made from -
-// the definitions, the alignments, the surfaces - and shared, so a view can
-// call it every frame (src/katana_cad/bim/bim_object.cpp).
+// the definitions, the alignments, and the surfaces the corridors target and
+// the placed objects name (not the others) - and shared, so a view can call it
+// every frame (src/katana_cad/bim/bim_object.cpp).
 [[nodiscard]] std::shared_ptr<const BimModel> bimModel(const Document& document);
+
+// How many times bimModel has made each half of `document`'s model - the
+// corridors', the placed objects' - rather than found it as it was. What the
+// tests ask to show that an edit of nothing a half is made from makes it again
+// no more: the model it hands out is the same object either way when the
+// result is equal, so only the work differs.
+struct BimBuildCounts {
+    std::size_t corridors = 0;
+    std::size_t placed = 0;
+
+    friend bool operator==(const BimBuildCounts&, const BimBuildCounts&) = default;
+};
+[[nodiscard]] BimBuildCounts bimBuildCounts(const Document& document);
 
 } // namespace katana::cad::bim

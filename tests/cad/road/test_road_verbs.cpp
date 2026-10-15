@@ -1274,3 +1274,130 @@ TEST(RoadVerbs, ACurvedCorridorHasTheSectionsItsToleranceNeedsAndAStraightOneHas
         EXPECT_TRUE(contains(session.ok(line), "runs=1 sections=11 ")) << tolerance;
     }
 }
+
+// ---- the road model's cache keys (docs/road_design.md, "The cache") --------------------------
+
+namespace {
+
+// The surface `name` replaced by a different one, as an edit of a surface
+// replaces it (SurfaceStore::replace): the same name, another object.
+void replaceGround(Session& session, const std::string& name, double level)
+{
+    katana::terrain::SurfaceStore store = session.document.surfaces();
+    auto shared = std::make_shared<const katana::terrain::TinSurface>(
+        katana::cad::road::testing::planeGround(0.0, 0.0, level));
+    ASSERT_TRUE(store.replace(name, std::move(shared)).ok());
+    ASSERT_TRUE(session.document.setSurfaces(std::move(store), "TEST_SURFACE_EDIT").ok());
+}
+
+// How many times each half of the road model was made since `before`, after
+// asking for the model as a view does.
+katana::cad::bim::BimBuildCounts madeSince(Session& session,
+                                           const katana::cad::bim::BimBuildCounts& before)
+{
+    (void)katana::cad::bim::bimModel(session.document);
+    const auto now = katana::cad::bim::bimBuildCounts(session.document);
+    return {now.corridors - before.corridors, now.placed - before.placed};
+}
+
+// A road with a corridor targeting "ground" and a sign naming "dem", with
+// "other" in the drawing for no one; the model asked for once, so that its two
+// halves are made.
+struct CachedRoad : Session {
+    CachedRoad()
+    {
+        road();
+        ok("ROADTEMPLATE DEFAULTS");
+        for (const char* name : {"ground", "dem", "other"}) {
+            addGround(*this, name, 9.0);
+        }
+        ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" surface=ground");
+        ok("ROADOBJECT ADD sign ALIGNMENT road station=50 offset=4 surface=dem");
+        first = katana::cad::bim::bimModel(document);
+        counts = katana::cad::bim::bimBuildCounts(document);
+    }
+
+    std::shared_ptr<const katana::cad::bim::BimModel> first;
+    katana::cad::bim::BimBuildCounts counts;
+};
+
+} // namespace
+
+TEST(RoadVerbs, AnEditOfASurfaceNeitherACorridorTargetsNorAnObjectNamesMakesNeitherHalfAgain)
+{
+    CachedRoad s;
+    ASSERT_FALSE(s.first->objects.empty()) << "an empty model would not tell";
+    // "other" replaced by another surface (an edit of it), then hidden and
+    // removed, and a new one added: the surfaces' generation moves each time, and
+    // neither half reads any of them.
+    replaceGround(s, "other", 8.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 0}))
+        << "an edit of a surface nothing names";
+    katana::terrain::SurfaceStore store = s.document.surfaces();
+    ASSERT_TRUE(store.setVisible("other", false).ok());
+    ASSERT_TRUE(s.document.setSurfaces(store, "TEST").ok());
+    ASSERT_TRUE(store.remove("other"));
+    ASSERT_TRUE(s.document.setSurfaces(store, "TEST").ok());
+    addGround(s, "another", 7.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 0}))
+        << "hidden, removed and added";
+    // And nothing else in the drawing: a line, a layer, an undo of one.
+    s.ok("LINE 0,50 10,50");
+    s.ok("LAYER HIDE road/kerb");
+    s.ok("UNDO");
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 0}))
+        << "a line, a layer, an undo";
+    EXPECT_EQ(katana::cad::bim::bimModel(s.document), s.first);
+}
+
+TEST(RoadVerbs, AnEditOfTheSurfaceACorridorTargetsMakesTheCorridorsAgainAndNotThePlacedObjects)
+{
+    CachedRoad s;
+    replaceGround(s, "ground", 8.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    // The earthworks are the new ground's: the model is not the one it was.
+    EXPECT_NE(*katana::cad::bim::bimModel(s.document), *s.first);
+    // An undo puts the old surface object back, which is another change.
+    const auto counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("UNDO");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    EXPECT_EQ(*katana::cad::bim::bimModel(s.document), *s.first);
+    // Removed, the corridor loses its ground (and says so): the corridors again.
+    const auto beforeRemoval = katana::cad::bim::bimBuildCounts(s.document);
+    katana::terrain::SurfaceStore store = s.document.surfaces();
+    ASSERT_TRUE(store.remove("ground"));
+    ASSERT_TRUE(s.document.setSurfaces(std::move(store), "TEST").ok());
+    EXPECT_EQ(madeSince(s, beforeRemoval), (katana::cad::bim::BimBuildCounts{1, 0}));
+}
+
+TEST(RoadVerbs, AnEditOfTheSurfaceAPlacedObjectNamesMakesThePlacedObjectsAgainAndNotTheCorridors)
+{
+    CachedRoad s;
+    replaceGround(s, "dem", 8.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 1}));
+    // The sign stands on the new surface: its model is not the one it was.
+    EXPECT_NE(*katana::cad::bim::bimModel(s.document), *s.first);
+}
+
+TEST(RoadVerbs, EachDefinitionMakesOnlyTheHalfItIsPartOfAndAnAlignmentBoth)
+{
+    CachedRoad s;
+    // A template: the corridors', not the placed objects'.
+    s.ok("ROADTEMPLATE SET \"urban street\" lane width=3.6");
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    // A placed object: the placed objects', not the corridors'.
+    auto counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("ROADOBJECT ADD sign ALIGNMENT road station=60 offset=4");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{0, 1}));
+    // An alignment: both read the alignments, and it moves their revision.
+    counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("ALIGN NEW elsewhere 0,500 100,500");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{1, 1}));
+    // The corridor's own definition: the corridors'.
+    counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("CORRIDOR SET Main interval=20");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    // Asking again when nothing moved makes nothing.
+    counts = katana::cad::bim::bimBuildCounts(s.document);
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{0, 0}));
+}
