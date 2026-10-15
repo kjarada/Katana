@@ -1329,6 +1329,31 @@ Result<TinEditResult> pasteSurface(const TinSurface& base, const TinSurface& top
             resultOf[v] = output.pointVertex[pointOfVertex[v]];
         }
     }
+    // The patch takes two points within kGeometric for one, so two vertices of
+    // the top's rim that close to each other - or to one vertex of the base -
+    // come out as one vertex, and a top triangle between them names it twice:
+    // TinSurface::create refused that as "triangle names a vertex twice",
+    // naming the triangle and not the cause. Said here, with the vertices. (Two
+    // rim vertices that merge but share no triangle - a rim that touches itself
+    // at a duplicated vertex - are one vertex of a valid surface, and pass.)
+    for (std::uint32_t t = 0; t < top.triangleCount(); ++t) {
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            const std::uint32_t a = topTriangles[t][k];
+            const std::uint32_t b = topTriangles[t][(k + 1) % 3];
+            if (a != b && resultOf[a] != kNoVertex && resultOf[a] == resultOf[b]) {
+                return makeError(
+                    ErrorCode::InvalidGeometry,
+                    "two vertices of the top surface's rim land on one vertex of the result: they "
+                    "are closer to each other, or to one vertex of the base, than the coincidence "
+                    "tolerance (" + katana::core::formatExactReal(tol::kGeometric) +
+                        " m), and the top's triangle between them would have no area; delete one "
+                        "of them from the top first",
+                    "top vertices " + std::to_string(a) + " and " + std::to_string(b) + " at " +
+                        describePosition(planOf(topVertices[a])) + " and " +
+                        describePosition(planOf(topVertices[b])));
+            }
+        }
+    }
     const auto mapped = [&](std::uint32_t v) {
         if (resultOf[v] == kNoVertex) {
             resultOf[v] = static_cast<std::uint32_t>(output.vertices.size());

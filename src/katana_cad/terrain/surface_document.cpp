@@ -17,6 +17,7 @@
 #include "katana/core/text_encoding.hpp"
 #include "katana/storage/project_store.hpp"
 #include "katana/terrain/tin_codec.hpp"
+#include "surface_document_io.hpp"
 
 namespace katana::cad {
 
@@ -358,22 +359,33 @@ Status Document::writeSurfaceState(katana::storage::ProjectContents& contents) c
     // Styles that could not be read are in the metadata still, and go back
     // as they came. Read ones are the Document's, written every time.
     if (surfaceStylesStatus_) {
-        // The set is one checkSurfaceStyleSet accepted on the way in, so this
-        // is a guard and not an expected refusal. It is here because a save
-        // promises a Status and the JSON writer must never be what ends it:
-        // text that is not UTF-8 is a refusal that names the style, rather than
-        // either an exception out of the save or a name silently rewritten
-        // with U+FFFD in the user's project.
-        if (auto status = checkSurfaceStyleSet(surfaceStyles_); !status) {
-            return status;
+        auto value = detail::surfaceStylesMetadataValue(surfaceStyles_);
+        if (!value) {
+            return value.error();
         }
-        contents.metadata.unknownKeys.insert_or_assign(
-            std::string(kStylesKey),
-            surfaceStyles_ == builtInSurfaceStyles() ? std::string()
-                                                     : surfaceStylesToJson(surfaceStyles_));
+        contents.metadata.unknownKeys.insert_or_assign(std::string(kStylesKey),
+                                                       std::move(*value));
     }
     return {};
 }
+
+namespace detail {
+
+Result<std::string> surfaceStylesMetadataValue(const SurfaceStyleSet& styles)
+{
+    // The set is one checkSurfaceStyleSet accepted on the way in, so this is a
+    // guard and not an expected refusal. It is here because a save promises a
+    // Status and the JSON writer must never be what ends it: text that is not
+    // UTF-8 is a refusal that names the style, rather than either an exception
+    // out of the save or a name silently rewritten with U+FFFD in the user's
+    // project.
+    if (auto status = checkSurfaceStyleSet(styles); !status) {
+        return status.error();
+    }
+    return styles == builtInSurfaceStyles() ? std::string() : surfaceStylesToJson(styles);
+}
+
+} // namespace detail
 
 std::uint32_t Document::surfacePartsChanged()
 {

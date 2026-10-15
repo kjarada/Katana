@@ -385,6 +385,25 @@ triangles, they do not reshape them.
   notation when it is too large for a buffer (a record's `zmax=1e+61` would be
   a number of another shape than every other, and a reader that parses fixed
   text would take it for a bound it is not).
+- **PASTE says why when the top's rim cannot be kept apart.** The seam is the
+  top's rim, so its vertices are points of the patch, and the patch takes two
+  within `tolerance::kGeometric` for one (the rule buildTin merges by): a top
+  with two rim vertices that close - an imported surface's sliver - came out
+  with a triangle naming one vertex twice, which `TinSurface::create` refused
+  as "triangle names a vertex twice" with the number of a triangle of the
+  result. `pasteSurface` now looks at the top's triangles after the patch, where
+  two corners that are different vertices of the top have become one of the
+  result, and refuses with the cause: InvalidGeometry, "two vertices of the top
+  surface's rim land on one vertex of the result: they are closer to each other,
+  or to one vertex of the base, than the coincidence tolerance", the vertices
+  and where they are. The test is of the TRIANGLE and not of the pair: a top
+  whose rim touches itself at a vertex that is duplicated (two triangles meeting
+  at a point, each with a vertex of its own there) merges the pair into one
+  vertex of a valid surface, and is pasted as it always was
+  (`TinEditCombine.ATopWhoseRimTouchesItselfAtADuplicatedVertexIsStillPasted`).
+  *Rejected:* looking at the rim's vertices before the patch, which would
+  refuse that pasteable top as well, and merging the pair silently, which makes
+  a triangle of no area.
 - **CLIP is BOUNDARY on a copy, OFFSET is RAISE on a copy**: one function
   each, the verbs name them for the person making a new surface.
 - **The active surface is the program's, not the drawing's.** Which surface
@@ -601,9 +620,5 @@ are measured on one machine in one run.
   natural addition.
 - **Moving a vertex in plan**, and editing a vertex's level by dragging in
   the window: only ADD POINT at an existing vertex relevels it.
-- **PASTE with a top whose rim touches itself** (a hole touching the outer
-  rim) is handled, but a top with two rim vertices closer than
-  `tolerance::kGeometric` is refused by `TinSurface::create` with a message
-  that names the triangle, not the cause.
 - **A DELETE LONG that works from the rim inwards**, as some packages trim a
   convex hull, is not offered; BOUNDARY does the same job exactly.

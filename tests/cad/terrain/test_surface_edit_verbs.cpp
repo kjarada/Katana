@@ -309,6 +309,28 @@ TEST_F(SurfaceEditVerbs, PasteMergeClipAndOffsetMakeSurfacesByName)
     EXPECT_DOUBLE_EQ(*surfaceOf(document, "ground").elevationAt(50, 50), 15.0);
 }
 
+TEST_F(SurfaceEditVerbs, APasteOfATopWithTwoRimVerticesInsideTheToleranceIsRefusedSayingSo)
+{
+    // The rectangle [2.3, 12.3] x [3.7, 13.7] with two vertices 1e-9 m apart on
+    // its upper side (tin_edit's case): the refusal names the rim and the
+    // tolerance, not "triangle names a vertex twice".
+    using katana::geometry::Point3;
+    putSurface(document, "ground", flatGridSurface(20, 1.0));
+    putSurface(document, "top",
+               makeSurface({Point3(2.3, 3.7, 1), Point3(12.3, 3.7, 1), Point3(12.3, 13.7, 1),
+                            Point3(2.3, 13.7, 1), Point3(8.6, 13.7, 1),
+                            Point3(8.600000001, 13.7, 1)},
+                           {{0, 1, 2}, {0, 2, 5}, {0, 5, 4}, {0, 4, 3}}));
+    const auto generation = document.surfacesGeneration();
+    auto result = interpreter.run("SURFACE PASTE top INTO ground NAME out");
+    ASSERT_FALSE(result.ok()) << *result;
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(result.error().message, "rim")) << result.error().message;
+    EXPECT_TRUE(contains(result.error().message, "coincidence tolerance")) << result.error().message;
+    EXPECT_FALSE(contains(result.error().message, "names a vertex twice")) << result.error().message;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+}
+
 TEST_F(SurfaceEditVerbs, EveryRefusalSaysWhatWasWrongAndChangesNothing)
 {
     putSurface(document, "ground", squareSurface());
