@@ -1793,9 +1793,11 @@ The mapping is documented in full at the head of
   of the list wins is NOT in the manual - this follows the sample archive's
   own comment, "base surface first, then the pads that substitute it over
   their footprints" - and a triangle of a lower member is dropped whole
-  where a higher one covers any of it, so the seam is ragged by up to one
-  triangle and no point ever has two answers. See docs/cad.md for why that
-  trade was made in that direction.
+  where a higher one covers any AREA of it, so the seam is ragged by up to one
+  triangle and no point ever has two answers. A member that only abuts a
+  triangle (an edge or a corner in common, or an overlap thinner than
+  `kGeometric`) covers none of it, and the triangle stays (docs/surface_editing.md,
+  "MERGE"). See docs/cad.md for why that trade was made in that direction.
 - **Point clouds** become reference layers. A `ref_data` cloud names a LAS
   file relative to a 12d project the archive has left behind; the file is
   looked for BESIDE the archive - where a 12da and its scans travel together
