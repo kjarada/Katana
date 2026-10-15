@@ -519,7 +519,9 @@ formation into the drawing's surfaces (`Document::setSurfaces`), as `<c>
 finished` and `<c> subgrade` unless named, replacing surfaces of those names
 in place: every section's points (the reply's `sections=` counts them, both of
 a join's), each code's string as a breakline, the outermost points as the
-boundary. Both have PREVIEW.
+boundary. Both have PREVIEW. A corridor with fewer than two sections (its
+range off its alignment) is refused with its own first problem, as STRINGS
+refuses it, and not blamed on "the ground".
 
 **Scope.** The corridor verbs act on named definitions, not on drawing
 entities, so they take no scope or filter (the scope and filter words are for
@@ -599,12 +601,16 @@ class, layer, quantities and properties, and every problem
   exact.
 - `tests/cad/road/test_road_section.cpp`: a street set out at hand-worked
   offsets and levels, its solids, the formation's steps, superelevation at
-  the middle of its transition, batters daylighting on a plane in cut, fill
-  and on sidelong ground, the pavement box cut, benches, refusals.
+  the middle of its transition (and of an edge strip and a drain), batters
+  daylighting on a plane in cut, fill and on sidelong ground, a side of a
+  batter alone, a limit that is not a multiple of a step, the pavement box
+  cut, benches, the divided road's kerb, refusals.
 - `tests/cad/road/test_corridor_objects.cpp`: course volumes on a straight as
   width x thickness x length, every solid closed and turned outward, stable
   ids and IFC classes, a kerb's length and volume, the earthworks against the
-  old assembly's end areas, regions, problems, strings and surfaces.
+  old assembly's end areas and their footprints (a side with cut and fill, a
+  fill that ends along the road, pieces and their ids, no sliver of the other
+  kind), regions, problems, strings and surfaces.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache, the
   RoadModel change, the JSON the project keeps.
@@ -614,9 +620,12 @@ class, layer, quantities and properties, and every problem
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
   window.
-- `src/katana_app/road_cli.cmake`: `katana_cli` end to end, and a road model
+- `src/katana_app/road_cli.cmake`: `katana_cli` end to end, a road model
   saved and read back by another process
-  (`cli.a_saved_road_model_is_read_back_by_another_process`).
+  (`cli.a_saved_road_model_is_read_back_by_another_process`), and the refusals
+  and replies the review found wrong (a name removed from both sides, a bench
+  too small, a renamed corridor's strings, a section outside the corridor, a
+  CSV replaced only with OVERWRITE).
 - `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`.
 
 ## Not done
@@ -663,6 +672,8 @@ class, layer, quantities and properties, and every problem
   in a window verb): an agent hides the objects by their layers.
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
+- The Road Template Manager's grid has no column for a kerb's facing; the
+  keys field takes `faces=inward|outward`.
 - `ROADTEMPLATE` has no import or export to a file of its own; a project's
   templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
 - The window's Command Reference shows the road verbs in its Commands
