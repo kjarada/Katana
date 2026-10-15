@@ -115,6 +115,16 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
 {
     const double sign = side == Side::Left ? 1.0 : -1.0;
     const std::string sideWord(toString(side));
+    // A component's crossfall at this station: the corridor's superelevation
+    // table's for its side when it is superelevated and the table has an entry,
+    // else its own. Every component that has a crossfall reads it here - a lane,
+    // an edge strip between superelevated lanes and shoulders, a drain.
+    const auto crossfallOf = [&](const Component& component) {
+        if (component.superelevated && superelevation) {
+            return side == Side::Left ? superelevation->left : superelevation->right;
+        }
+        return component.crossfall;
+    };
     SideBuild out;
     out.top.push_back(OutPoint{"CL", 0.0, designLevel});
     double atOut = 0.0;
@@ -140,7 +150,11 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
         std::vector<ShapeColumn> surface;
         std::vector<std::string> codes;
         if (component.kind == ComponentKind::Kerb) {
-            for (const ShapeColumn& column : kerbShape(component)) {
+            // Only an edge strip has a crossfall (checkTemplate refuses a
+            // superelevated barrier, mountable or kerb-and-gutter kerb).
+            Component shaped = component;
+            shaped.crossfall = crossfallOf(component);
+            for (const ShapeColumn& column : kerbShape(shaped)) {
                 surface.push_back(
                     ShapeColumn{atOut + column.out, atLevel + column.top, atLevel + column.bottom});
             }
@@ -169,16 +183,12 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
                            ShapeColumn{atOut + component.width / 2.0, atLevel - component.depth,
                                        atLevel - component.depth},
                            ShapeColumn{atOut + component.width,
-                                       atLevel + component.width * component.crossfall / 100.0,
+                                       atLevel + component.width * crossfallOf(component) / 100.0,
                                        0.0}};
                 surface.back().bottom = surface.back().top;
                 codes = {"invert", "outer"};
             } else {
-                double crossfall = component.crossfall;
-                if (component.superelevated && superelevation) {
-                    crossfall = side == Side::Left ? superelevation->left : superelevation->right;
-                }
-                const double outer = atLevel + component.width * crossfall / 100.0;
+                const double outer = atLevel + component.width * crossfallOf(component) / 100.0;
                 surface = {ShapeColumn{atOut, atLevel, atLevel},
                            ShapeColumn{atOut + component.width, outer, outer}};
                 codes = {"outer"};
@@ -777,6 +787,45 @@ std::vector<double> sectionStations(double start, double end, double interval,
 
 // ---- a corridor -------------------------------------------------------------------------
 
+CorridorRange corridorRange(const Corridor& corridor, const SolvedAlignment& alignment,
+                            const SolvedProfile& profile)
+{
+    CorridorRange range;
+    if (auto status = checkCorridor(corridor); !status) {
+        range.problems.push_back(status.error().message);
+        return range;
+    }
+    const double low = std::max(alignment.startStation(), profile.startStation());
+    const double high = std::min(alignment.endStation(), profile.endStation());
+    if (!(high - low > tol::kCoordinate)) {
+        range.problems.push_back("the alignment " + corridor.alignment +
+                                 " and its design profile do not overlap in station");
+        return range;
+    }
+    double start = corridor.start.value_or(low);
+    double end = corridor.end.value_or(high);
+    if (start < low) {
+        range.problems.push_back("the corridor starts at " + number(start) +
+                                 ", before its alignment and profile begin: built from " +
+                                 number(low));
+        start = low;
+    }
+    if (end > high) {
+        range.problems.push_back("the corridor ends at " + number(end) +
+                                 ", after its alignment and profile end: built to " + number(high));
+        end = high;
+    }
+    if (!(end - start > tol::kCoordinate)) {
+        range.problems.push_back("the corridor's stations " + number(start) + " to " +
+                                 number(end) + " are not on its alignment and profile");
+        return range;
+    }
+    range.start = start;
+    range.end = end;
+    range.ok = true;
+    return range;
+}
+
 BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& templates,
                             const SolvedAlignment& alignment, const SolvedProfile& profile,
                             const katana::terrain::TinSurface* ground)
@@ -785,35 +834,13 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     built.name = corridor.name;
     built.surface = corridor.surface;
     built.alignment = alignment;
-    if (auto status = checkCorridor(corridor); !status) {
-        built.problems.push_back(status.error().message);
+    const CorridorRange range = corridorRange(corridor, alignment, profile);
+    built.problems.insert(built.problems.end(), range.problems.begin(), range.problems.end());
+    if (!range.ok) {
         return built;
     }
-    const double low = std::max(alignment.startStation(), profile.startStation());
-    const double high = std::min(alignment.endStation(), profile.endStation());
-    if (!(high - low > tol::kCoordinate)) {
-        built.problems.push_back("the alignment " + corridor.alignment +
-                                 " and its design profile do not overlap in station");
-        return built;
-    }
-    double start = corridor.start.value_or(low);
-    double end = corridor.end.value_or(high);
-    if (start < low) {
-        built.problems.push_back("the corridor starts at " + number(start) +
-                                 ", before its alignment and profile begin: built from " +
-                                 number(low));
-        start = low;
-    }
-    if (end > high) {
-        built.problems.push_back("the corridor ends at " + number(end) +
-                                 ", after its alignment and profile end: built to " + number(high));
-        end = high;
-    }
-    if (!(end - start > tol::kCoordinate)) {
-        built.problems.push_back("the corridor's stations " + number(start) + " to " + number(end) +
-                                 " are not on its alignment and profile");
-        return built;
-    }
+    const double start = range.start;
+    const double end = range.end;
     if ((end - start) / corridor.interval > static_cast<double>(kMaximumSections)) {
         built.problems.push_back("an interval of " + number(corridor.interval) + " over " +
                                  number(end - start) + " m is more than " +
@@ -822,6 +849,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     }
     built.start = start;
     built.end = end;
+    built.hasRange = true;
 
     // Every key station: where the geometry, the grade, the superelevation
     // or the template changes character, which a schedule must not step over.
@@ -954,6 +982,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     }
     built.cut = cut.value();
     built.fill = fill.value();
+    built.hasEarthworks = ground != nullptr && !built.runs.empty();
     return built;
 }
 
@@ -989,6 +1018,7 @@ CorridorInputs corridorInputs(const Document& document, const Corridor& corridor
             inputs.problems.push_back("the surface " + corridor.surface + " is not in the drawing");
         } else {
             inputs.ground = named->surface.get();
+            inputs.surfaceName = named->name;
         }
     }
     return inputs;
@@ -1006,6 +1036,11 @@ BuiltCorridor buildCorridor(const Document& document, const Corridor& corridor)
     BuiltCorridor built = buildCorridor(corridor, document.roadTemplates(), *inputs.alignment,
                                         *inputs.profile, inputs.ground);
     built.problems.insert(built.problems.begin(), inputs.problems.begin(), inputs.problems.end());
+    // The surface as the drawing spells it: the lookup ignores case, and the
+    // IFC export finds the cut's ground by this name, exactly.
+    if (!inputs.surfaceName.empty()) {
+        built.surface = inputs.surfaceName;
+    }
     return built;
 }
 
@@ -1353,10 +1388,14 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
                 // IfcKerb's Mountable attribute.
                 object.properties.emplace_back(
                     "mountable", component.shape == KerbShape::Mountable ? "true" : "false");
+                // A kerb's Height is its face; an edge strip is flush and has none,
+                // so it reports how thick it is instead.
                 object.quantities = {
                     quantity("Length", planLength(alignment, stations, columns), "m"),
                     quantity("Width", kerbWidth(component), "m"),
-                    quantity("Height", component.height, "m"),
+                    component.shape == KerbShape::EdgeStrip
+                        ? quantity("Depth", component.depth, "m")
+                        : quantity("Height", component.height, "m"),
                     quantity("GrossVolume", volume, "m3")};
             }
             object.mesh = std::move(*mesh);
@@ -1522,9 +1561,15 @@ Result<SectionsSurface> sectionsSurface(const std::vector<const RoadSection*>& s
         ++result.sections;
     }
     if (result.sections < 2) {
+        // Only a surface of complete sections leaves one out for not reaching
+        // the ground; otherwise it is the sections there are that are too few.
         return makeError(ErrorCode::InvalidGeometry,
-                         "fewer than two sections reach the ground: there is no surface to build",
-                         std::to_string(result.leftOut) + " incomplete");
+                         completeOnly
+                             ? "fewer than two sections reach the ground: there is no surface to "
+                               "build"
+                             : "fewer than two sections have a line to triangulate: there is no "
+                               "surface to build",
+                         std::to_string(result.leftOut) + (completeOnly ? " incomplete" : " left out"));
     }
     for (const CorridorString& string : stringsOver(placed, alignment, formation, take)) {
         katana::terrain::Breakline breakline;

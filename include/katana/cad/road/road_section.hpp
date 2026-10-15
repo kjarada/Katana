@@ -199,10 +199,16 @@ struct CorridorRun {
 
 struct BuiltCorridor {
     std::string name;
-    std::string surface; // the target surface it names, empty for none
+    // The target surface it names, as the drawing spells it (the corridor may
+    // have been typed in another case); empty for none.
+    std::string surface;
     std::optional<katana::geometry::SolvedAlignment> alignment;
+    // The stations it was built over. Meaningful only when hasRange: a
+    // corridor that could not be built (no alignment, a range off it) has none,
+    // and station 0 is a real station, not a placeholder.
     double start = 0.0;
     double end = 0.0;
+    bool hasRange = false;
     std::vector<CorridorRun> runs;
     // What could not be built, a sentence each: an alignment, a profile, a
     // template or a surface that is not there, a station range outside the
@@ -210,9 +216,28 @@ struct BuiltCorridor {
     std::vector<std::string> problems;
     double cut = 0.0; // cubic metres, both sides, every run
     double fill = 0.0;
+    // Whether cut and fill were measured at all: there is a target surface and
+    // at least one run was built. Without, they are zero only because nothing
+    // was measured, which is not the zero of a road with no cut.
+    bool hasEarthworks = false;
     std::size_t sections = 0;
     std::size_t incompleteSections = 0;
 };
+
+// The stations a corridor is built over: its own range - an end it does not
+// give is the alignment's and the profile's overlap - held to that overlap.
+// `ok` is false when there is nothing to build (no overlap, or a range off
+// it), and `problems` says in a sentence each what was held to the overlap or
+// why nothing is built.
+struct CorridorRange {
+    double start = 0.0;
+    double end = 0.0;
+    bool ok = false;
+    std::vector<std::string> problems;
+};
+[[nodiscard]] CorridorRange corridorRange(const Corridor& corridor,
+                                          const katana::geometry::SolvedAlignment& alignment,
+                                          const katana::geometry::SolvedProfile& profile);
 
 // Builds what it can. A corridor whose alignment or profile is missing has
 // no runs; a template that is missing or refused leaves its stretch out; no
@@ -230,6 +255,8 @@ struct CorridorInputs {
     std::optional<katana::geometry::SolvedAlignment> alignment;
     std::optional<katana::geometry::SolvedProfile> profile;
     const katana::terrain::TinSurface* ground = nullptr;
+    // The surface's name as the drawing spells it; empty with no ground.
+    std::string surfaceName;
     std::vector<std::string> problems;
 };
 [[nodiscard]] CorridorInputs corridorInputs(const Document& document, const Corridor& corridor);

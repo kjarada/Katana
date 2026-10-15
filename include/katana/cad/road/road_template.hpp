@@ -227,6 +227,15 @@ inline constexpr std::size_t kMaximumBenches = 100;
 // InvalidArgument naming the component (left:lane) and what is wrong.
 [[nodiscard]] katana::core::Status checkTemplate(const RoadTemplate& roadTemplate);
 
+// The keys ROADTEMPLATE ADD and SET take for a component of `kind`: what its
+// JSON keeps (name, layer, colour for all; width, crossfall and superelevated
+// for all but a batter; a kerb's shape, faces, height, depth, gutter,
+// gutterfall and material; a drain's depth; a batter's cut, fill, maxwidth,
+// benchheight and benchwidth). `color` and `thickness` are read as `colour`
+// and `depth` and not listed. A key a kind does not keep changes nothing, so
+// the verbs refuse it rather than reply "updated".
+[[nodiscard]] std::vector<std::string_view> componentKeys(ComponentKind kind);
+
 // ---- a kerb's shape ------------------------------------------------------------------
 
 // One vertical of a solid's cross-section: its distance out from where it

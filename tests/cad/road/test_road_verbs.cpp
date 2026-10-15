@@ -19,6 +19,8 @@
 #include "katana/cad/road/road_template.hpp"
 #include "katana/cad/road/road_verbs.hpp"
 #include "katana/core/text.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "road_fixtures.hpp"
 
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
@@ -57,6 +59,17 @@ struct Session {
 bool contains(const std::string& text, const std::string& part)
 {
     return text.find(part) != std::string::npos;
+}
+
+// A flat surface named `name` at `level` over the test road, put in the
+// drawing as SURFACE puts one.
+void addGround(Session& session, const std::string& name, double level)
+{
+    katana::terrain::SurfaceStore store = session.document.surfaces();
+    auto shared = std::make_shared<const katana::terrain::TinSurface>(
+        katana::cad::road::testing::planeGround(0.0, 0.0, level));
+    ASSERT_TRUE(store.add(katana::terrain::NamedSurface{name, shared, "test", {}, true}).ok());
+    ASSERT_TRUE(session.document.setSurfaces(std::move(store), "TEST_SURFACE").ok());
 }
 
 } // namespace
@@ -390,7 +403,9 @@ TEST(RoadVerbs, QuantitiesListEachObjectWithTotalsAndWriteTheCsv)
     const std::string quantities = session.ok("CORRIDOR QUANTITIES Main");
     // 100 m of AC14 50 mm and base 200 mm, 3.5 m wide, each side: by hand
     // 17.5 and 70 m3 a side; totals 35 and 140 m3 over 700 m2 each.
-    EXPECT_TRUE(contains(quantities, "quantities corridor=Main objects=4 cut=0.000 fill=0.000"))
+    // No target surface: no earthworks were measured, so cut, fill and net are
+    // empty - not the 0.000 of a road with none (CLAUDE.md: absent is not zero).
+    EXPECT_TRUE(contains(quantities, "quantities corridor=Main objects=4 cut= fill= net=\n"))
         << quantities;
     EXPECT_TRUE(contains(quantities, "object id=corridor/Main/left/lane/AC14/1 kind=pavement "
                                      "name=\"Main left lane AC14\" Length=100.000 Width=3.500 "
@@ -408,17 +423,44 @@ TEST(RoadVerbs, QuantitiesListEachObjectWithTotalsAndWriteTheCsv)
     const std::string written =
         session.ok("CORRIDOR QUANTITIES ALL csv=\"" + file.generic_string() + "\"");
     EXPECT_TRUE(contains(written, "rows=4")) << written;
-    std::ifstream in(file);
+    // RFC 4180 records end in CRLF, as the VOLUME verbs' do: read as bytes.
+    std::ifstream in(file, std::ios::binary);
     std::stringstream text;
     text << in.rdbuf();
     EXPECT_TRUE(text.str().starts_with(
-        "id,name,kind,facility,part,material,Length,Width,Depth,Height,GrossArea,GrossVolume\n"))
+        "id,name,kind,facility,part,material,Length,Width,Depth,Height,GrossArea,GrossVolume\r\n"))
         << text.str();
     EXPECT_TRUE(contains(text.str(), "corridor/Main/right/lane/base/1,Main right lane base,"
                                      "pavement,Main,TRAFFICLANE,crushed rock,100.000,3.500,"
                                      "0.200,,350.000,70.000"))
         << text.str();
     in.close();
+    // A file already there is not replaced without OVERWRITE, as VOLUME's is
+    // not; with it, it is, and the same rows are written.
+    {
+        std::ofstream keep(file, std::ios::binary | std::ios::trunc);
+        keep << "keep me";
+    }
+    const auto refused = session.refused("CORRIDOR QUANTITIES Main csv=\"" + file.generic_string() + "\"");
+    EXPECT_EQ(refused.code, ErrorCode::AlreadyExists);
+    EXPECT_TRUE(contains(refused.message, "OVERWRITE")) << refused.message;
+    {
+        std::ifstream check(file, std::ios::binary);
+        std::stringstream kept;
+        kept << check.rdbuf();
+        EXPECT_EQ(kept.str(), "keep me");
+    }
+    const std::string replaced = session.ok("CORRIDOR QUANTITIES Main csv=\"" +
+                                            file.generic_string() + "\" OVERWRITE");
+    EXPECT_TRUE(contains(replaced, "rows=4")) << replaced;
+    {
+        std::ifstream check(file, std::ios::binary);
+        std::stringstream rewritten;
+        rewritten << check.rdbuf();
+        EXPECT_TRUE(rewritten.str().starts_with("id,name,kind,")) << rewritten.str();
+    }
+    // OVERWRITE belongs to a file.
+    EXPECT_EQ(session.refused("CORRIDOR QUANTITIES Main OVERWRITE").code, ErrorCode::ParseFailure);
     std::filesystem::remove(file);
     EXPECT_EQ(session.refused("CORRIDOR QUANTITIES nowhere").code, ErrorCode::NotFound);
 }
@@ -541,6 +583,257 @@ TEST(RoadVerbs, ARenamedCorridorKeepsItsStringsAndItsNextStringsReplacesThemWhat
     EXPECT_TRUE(contains(session.ok("CORRIDOR STRINGS Main"), "created=3 replaced=0"));
     EXPECT_EQ(session.document.model().entities.size(), 6u);
     EXPECT_EQ(tagged("ROAD1"), 3u);
+}
+
+TEST(RoadVerbs, WhatWasNotBuiltOrMeasuredIsEmptyAndAMeasuredZeroIsZero)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    // No target surface: the earthworks are not measured. The range was built.
+    const std::string made =
+        session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    EXPECT_TRUE(contains(made, "built corridor=Main from=0.000 to=100.000 runs=1 sections=11"))
+        << made;
+    EXPECT_TRUE(contains(made, " cut= fill= net= problems=1")) << made;
+    // A kerb has no area: its total says nothing of one rather than 0.000, and
+    // the courses, which do have one, say it.
+    const std::string quantities = session.ok("CORRIDOR QUANTITIES Main");
+    EXPECT_TRUE(contains(quantities, "total kind=kerb material=concrete count=2 length=200.000 "
+                                     "area= volume=19.125"))
+        << quantities;
+    // 3.3 m of lane and 2.3 m of parking, 100 m, both sides: 1120 m2, 56 m3.
+    EXPECT_TRUE(contains(quantities, "total kind=pavement material=asphalt count=4 length=400.000 "
+                                     "area=1120.000 volume=56.000"))
+        << quantities;
+
+    // A corridor that could not be built has no range: from= and to= empty.
+    session.ok("ALIGN DELETE road");
+    const std::string gone = session.ok("CORRIDOR BUILD Main");
+    EXPECT_TRUE(contains(gone, "built corridor=Main from= to= runs=0 sections=0")) << gone;
+    EXPECT_TRUE(contains(gone, " cut= fill= net= problems=1")) << gone;
+    session.ok("CORRIDOR DELETE Main");
+
+    // A range off the alignment is not built either.
+    session.road();
+    session.ok("CORRIDOR NEW Far ALIGNMENT road TEMPLATE \"urban street\" from=200 to=300");
+    const std::string off = session.ok("CORRIDOR BUILD Far");
+    EXPECT_TRUE(contains(off, "built corridor=Far from= to= runs=0")) << off;
+
+    // Measured against a surface, a corridor with no cut says 0.000 of it: the
+    // two are different. Ground at 9 under a design of 10, a 4 m lane with no
+    // courses and 1 in 4 fill batters: the lane's 4 x 1 and each batter's
+    // 0.5 x 4 x 1 = 2 make 6 m2 a side, 1200 m3 in 100 m.
+    session.ok("ROADTEMPLATE NEW fillonly");
+    session.ok("ROADTEMPLATE ADD fillonly both lane width=4 crossfall=0");
+    session.ok("ROADTEMPLATE COURSE fillonly lane REMOVE AC14");
+    session.ok("ROADTEMPLATE COURSE fillonly lane REMOVE base");
+    session.ok("ROADTEMPLATE COURSE fillonly lane REMOVE subbase");
+    session.ok("ROADTEMPLATE ADD fillonly both batter");
+    addGround(session, "ground", 9.0);
+    const std::string measured =
+        session.ok("CORRIDOR NEW Fill ALIGNMENT road TEMPLATE fillonly surface=ground");
+    EXPECT_TRUE(contains(measured, " cut=0.000 fill=1200.000 net=1200.000 problems=0")) << measured;
+    EXPECT_TRUE(contains(session.ok("CORRIDOR QUANTITIES Fill"),
+                         "quantities corridor=Fill objects=2 cut=0.000 fill=1200.000 net=1200.000"));
+    // Another corridor with a surface does not make the unmeasured one measured.
+    EXPECT_TRUE(contains(session.ok("CORRIDOR QUANTITIES Far"), " cut= fill= net="));
+}
+
+TEST(RoadVerbs, AKeyAComponentsKindDoesNotKeepIsRefusedAndNotAnsweredUpdated)
+{
+    Session session;
+    session.ok("ROADTEMPLATE NEW t");
+    session.ok("ROADTEMPLATE ADD t both lane");
+    session.ok("ROADTEMPLATE ADD t both batter");
+    const std::size_t steps = session.steps();
+    // A lane keeps no material or batter slope, a batter no width or crossfall;
+    // each was answered "updated" and made no step.
+    for (const char* line :
+         {"ROADTEMPLATE SET t left:lane material=concrete", "ROADTEMPLATE SET t left:lane cut=3",
+          "ROADTEMPLATE SET t left:lane depth=0.4", "ROADTEMPLATE SET t left:lane shape=barrier",
+          "ROADTEMPLATE SET t left:batter width=5", "ROADTEMPLATE SET t left:batter crossfall=-10",
+          "ROADTEMPLATE SET t left:batter superelevated=on",
+          "ROADTEMPLATE ADD t left lane height=0.3", "ROADTEMPLATE ADD t left kerb benchheight=1",
+          "ROADTEMPLATE SET t lane flavour=sweet"}) {
+        const auto error = session.refused(line);
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure) << line;
+        EXPECT_EQ(session.steps(), steps) << line << " made a step";
+    }
+    const auto lane = session.refused("ROADTEMPLATE SET t left:lane material=concrete");
+    EXPECT_TRUE(contains(lane.message, "a lane has no material=; its keys are name layer colour "
+                                       "width crossfall superelevated"))
+        << lane.message;
+    EXPECT_TRUE(contains(session.refused("ROADTEMPLATE SET t left:batter width=5").message,
+                         "its keys are name layer colour cut fill maxwidth benchheight benchwidth"));
+    // What a kind keeps is taken, `color` and `thickness` as `colour` and `depth`.
+    session.ok("ROADTEMPLATE SET t left:lane color=#00FF00 width=3.6");
+    session.ok("ROADTEMPLATE SET t left:batter cut=3 benchheight=2 benchwidth=3");
+    const std::string drain = session.ok("ROADTEMPLATE ADD t left drain thickness=0.4");
+    EXPECT_TRUE(contains(drain, "kind=drain")) << drain;
+    EXPECT_TRUE(contains(drain, "depth=0.4")) << drain;
+    EXPECT_EQ(session.steps(), steps + 3);
+}
+
+TEST(RoadVerbs, AnEdgeStripIsReportedWithoutAFaceAndKeepsItsSuperelevation)
+{
+    Session session;
+    session.ok("ROADTEMPLATE NEW s");
+    session.ok("ROADTEMPLATE ADD s both lane");
+    const std::string strip = session.ok("ROADTEMPLATE ADD s left kerb shape=edgestrip");
+    // A flush strip has no face to give a height to or to turn; it has a
+    // crossfall, and says whether a superelevation table sets it.
+    EXPECT_FALSE(contains(strip, "height=")) << strip;
+    EXPECT_FALSE(contains(strip, "faces=")) << strip;
+    EXPECT_TRUE(contains(strip, "shape=edgestrip width=0.15 depth=0.15 crossfall=0 superelevated=no"))
+        << strip;
+    // Another kerb's superelevation means nothing and is refused.
+    const auto refused = session.refused("ROADTEMPLATE ADD s right kerb superelevated=on");
+    EXPECT_EQ(refused.code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(refused.message, "only an edge strip has")) << refused.message;
+    const std::string drain = session.ok("ROADTEMPLATE ADD s right drain superelevated=on");
+    EXPECT_TRUE(contains(drain, "superelevated=yes")) << drain;
+}
+
+TEST(RoadVerbs, ACorridorOffItsAlignmentSaysSoAndASectionOutsideItsRangeIsRefused)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" from=20 to=60");
+    // Sections only over the corridor's stations, the ends included.
+    for (const char* station : {"20", "40", "60"}) {
+        EXPECT_TRUE(contains(session.ok(std::string("CORRIDOR SECTION Main ") + station),
+                             "section corridor=Main station="))
+            << station;
+    }
+    for (const char* station : {"19.9", "60.1", "90", "-5"}) {
+        const auto error = session.refused(std::string("CORRIDOR SECTION Main ") + station);
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << station;
+        EXPECT_TRUE(contains(error.message, "is outside corridor Main's stations 20 to 60"))
+            << error.message;
+    }
+
+    // A corridor whose whole range is off the alignment has no stations at all.
+    session.ok("CORRIDOR SET Main from=200 to=300");
+    const auto none = session.refused("CORRIDOR SECTION Main 250");
+    EXPECT_EQ(none.code, ErrorCode::InvalidState);
+    EXPECT_TRUE(contains(none.message, "after its alignment and profile end")) << none.message;
+    // SURFACE names that, as STRINGS does, and not "the ground".
+    const auto surface = session.refused("CORRIDOR SURFACE Main");
+    EXPECT_EQ(surface.code, ErrorCode::InvalidState);
+    EXPECT_TRUE(contains(surface.message, "after its alignment and profile end")) << surface.message;
+    EXPECT_FALSE(contains(surface.message, "ground")) << surface.message;
+    EXPECT_TRUE(contains(session.refused("CORRIDOR STRINGS Main").message,
+                         "after its alignment and profile end"));
+}
+
+TEST(RoadVerbs, ACorridorSetsEmptyOnlyWhatItCanDoWithout)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    addGround(session, "ground", 9.0);
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" surface=ground "
+               "from=10 to=90");
+    const std::size_t steps = session.steps();
+    // Empty clears a surface and each end of the range.
+    const std::string cleared = session.ok("CORRIDOR SET Main surface= from= to=");
+    EXPECT_TRUE(contains(cleared, "surface=\"\" interval=10 from= to=")) << cleared;
+    // A corridor always has an alignment and a template: said so, naming the
+    // key, not "no road template : ..." with the name left blank.
+    for (const char* line : {"CORRIDOR SET Main alignment=", "CORRIDOR SET Main template="}) {
+        const auto error = session.refused(line);
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure) << line;
+        EXPECT_TRUE(contains(error.message, "needs a name")) << error.message;
+    }
+    EXPECT_EQ(session.refused("CORRIDOR SET Main interval=").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(session.steps(), steps + 1);
+    // The help says which keys clear.
+    const std::string help = session.ok("HELP CORRIDOR");
+    EXPECT_TRUE(contains(help, "surface= from= to=")) << help;
+    EXPECT_FALSE(contains(help, "(empty clears)")) << help;
+}
+
+TEST(RoadVerbs, ATemplateIsNotDeletedWhileTheCorridorsThatMayUseItCannotBeRead)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    for (const char* damage : {"{not json", R"({"format":"katana-corridors","version":9,"corridors":[]})"}) {
+        auto metadata = session.document.metadata();
+        metadata.unknownKeys["corridors"] = damage;
+        session.document.setMetadata(metadata);
+        // The corridors are empty to the guard, which is why it must ask.
+        const auto deleted = session.refused("ROADTEMPLATE DELETE \"urban street\"");
+        EXPECT_EQ(deleted.code, ErrorCode::InvalidState) << damage;
+        EXPECT_TRUE(contains(deleted.message, "corridors cannot be read")) << deleted.message;
+        EXPECT_NE(session.document.roadTemplates().find("urban street"), nullptr);
+        // And BUILD ALL does not say there are none to build.
+        EXPECT_EQ(session.refused("CORRIDOR BUILD ALL").code, ErrorCode::InvalidState) << damage;
+    }
+}
+
+TEST(RoadVerbs, CorridorProblemsAndQuantitiesAllListTheCorridorsAndNotThePlacedObjects)
+{
+    Session session;
+    session.road();
+    session.ok("ALIGN NEW other 0,20 100,20");
+    session.ok("ALIGN DESIGN other 0,10 100,10");
+    session.ok("ROADOBJECT ADD barrier ALIGNMENT other station=10 to=50");
+    session.ok("ALIGN DELETE other");
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    // The placed barrier's alignment is gone: that is a problem of the road
+    // model, and ROADMODEL PROBLEMS lists it among the corridor's.
+    const std::string model = session.ok("ROADMODEL PROBLEMS");
+    ASSERT_TRUE(contains(model, "source=\"object ")) << "the premise: the barrier has a problem\n"
+                                                      << model;
+    const std::string problems = session.ok("CORRIDOR PROBLEMS");
+    EXPECT_TRUE(contains(problems, "problems=1\n")) << problems;
+    EXPECT_TRUE(contains(problems, "source=\"corridor Main\"")) << problems;
+    EXPECT_FALSE(contains(problems, "source=\"object ")) << problems;
+    EXPECT_TRUE(contains(session.ok("CORRIDOR PROBLEMS Main"), "problems=1\n"));
+    const std::string all = session.ok("CORRIDOR QUANTITIES ALL");
+    EXPECT_TRUE(contains(all, "source=\"corridor Main\"")) << all;
+    EXPECT_FALSE(contains(all, "source=\"object ")) << all;
+}
+
+TEST(RoadVerbs, ACorridorsEarthworksNameTheSurfaceAsTheDrawingSpellsItWhateverWasTyped)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE NEW fillonly");
+    session.ok("ROADTEMPLATE ADD fillonly both lane width=4 crossfall=0");
+    session.ok("ROADTEMPLATE ADD fillonly both batter");
+    addGround(session, "Ground", 11.0);
+    // Typed as GROUND, built against "Ground" (the lookup ignores case): the cut
+    // carries the drawing's spelling, which the IFC export finds the ground by,
+    // exactly.
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE fillonly surface=GROUND");
+    const std::string info = session.ok("ROADMODEL INFO corridor/Main/left/earthworks/cut/1");
+    EXPECT_TRUE(contains(info, "property name=\"Target Surface\" value=Ground")) << info;
+    EXPECT_FALSE(contains(info, "value=GROUND")) << info;
+}
+
+TEST(RoadVerbs, AComponentCannotTakeTheNameOfTheEarthworksObjects)
+{
+    Session session;
+    session.ok("ROADTEMPLATE NEW t");
+    session.ok("ROADTEMPLATE ADD t both lane");
+    const std::size_t steps = session.steps();
+    // corridor/<c>/<side>/earthworks/cut/<run> is the cut's id: a component of
+    // that name with a course called cut would have made the same id.
+    for (const char* line : {"ROADTEMPLATE ADD t both verge name=earthworks",
+                             "ROADTEMPLATE ADD t left verge name=Earthworks",
+                             "ROADTEMPLATE SET t lane name=EARTHWORKS"}) {
+        const auto error = session.refused(line);
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << line;
+        EXPECT_TRUE(contains(error.message, "earthworks")) << error.message;
+    }
+    EXPECT_EQ(session.steps(), steps);
+    session.ok("ROADTEMPLATE SET t lane name=earthwork");
 }
 
 TEST(RoadVerbs, TheFinishedAndSubgradeSurfacesGoIntoTheDrawingAsOneStep)

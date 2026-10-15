@@ -182,6 +182,39 @@ TEST(RoadTemplate, AKerbFacingOutwardIsTheSameKerbFromItsLipBackToItsBack)
     }
 }
 
+TEST(RoadTemplate, OnlyAnEdgeStripOfTheKerbsCanBeSuperelevatedAndNoComponentMayBeNamedEarthworks)
+{
+    RoadTemplate kerbs = twoLanes();
+    Component kerb = defaultComponent(ComponentKind::Kerb, Side::Left);
+    kerb.superelevated = true;
+    kerbs.components.insert(kerbs.components.begin() + 1, kerb);
+    for (const KerbShape shape :
+         {KerbShape::Barrier, KerbShape::Mountable, KerbShape::KerbAndGutter}) {
+        kerbs.components[1].shape = shape;
+        const auto refused = checkTemplate(kerbs);
+        ASSERT_FALSE(refused.ok()) << toString(shape);
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(refused.error().message.find("only an edge strip has"), std::string::npos)
+            << refused.error().message;
+        EXPECT_NE(refused.error().message.find("left:kerb"), std::string::npos);
+    }
+    kerbs.components[1].shape = KerbShape::EdgeStrip;
+    EXPECT_TRUE(checkTemplate(kerbs).ok());
+
+    // The corridor's earthworks objects have ids of their own, in any case.
+    for (const char* name : {"earthworks", "Earthworks", "EARTHWORKS"}) {
+        RoadTemplate named = twoLanes();
+        named.components[0].name = name;
+        const auto refused = checkTemplate(named);
+        ASSERT_FALSE(refused.ok()) << name;
+        EXPECT_NE(refused.error().message.find("earthworks is the name"), std::string::npos)
+            << refused.error().message;
+    }
+    RoadTemplate close = twoLanes();
+    close.components[0].name = "earthwork";
+    EXPECT_TRUE(checkTemplate(close).ok());
+}
+
 TEST(RoadTemplate, TheDividedRoadsMedianKerbFallsToTheCarriagewayAndAnEdgeStripTakesNoFacing)
 {
     const auto templates = standardTemplates();

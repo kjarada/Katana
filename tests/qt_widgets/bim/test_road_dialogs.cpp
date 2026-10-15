@@ -13,6 +13,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
@@ -299,7 +300,9 @@ TEST(CorridorQuantities, ListsEveryObjectsQuantitiesAndSavesThemAsCsv)
     const auto model = katana::cad::bim::bimModel(document);
     auto* table = child<QTableWidget>(dialog, "corridorQuantitiesTable");
     EXPECT_EQ(table->rowCount(), static_cast<int>(model->objects.size()));
-    EXPECT_TRUE(label(dialog, "corridorQuantitiesTotals").startsWith("Cut 0.000 m3"))
+    // No target surface: nothing was measured, which is not a road with 0.000
+    // of cut (CLAUDE.md: absent is not zero).
+    EXPECT_TRUE(label(dialog, "corridorQuantitiesTotals").startsWith("Cut and fill not measured"))
         << label(dialog, "corridorQuantitiesTotals").toStdString();
 
     // Browse opens no file dialog in a headless session; the path is typed.
@@ -314,6 +317,27 @@ TEST(CorridorQuantities, ListsEveryObjectsQuantitiesAndSavesThemAsCsv)
     EXPECT_TRUE(executor.last().starts_with("CORRIDOR QUANTITIES Main ")) << executor.last();
     EXPECT_NE(executor.last().find("csv="), std::string::npos) << executor.last();
     EXPECT_TRUE(QFile::exists(path));
+
+    // A file already there is kept unless the box says to replace it: the line
+    // is the one a person would type, with OVERWRITE only when asked for.
+    ASSERT_TRUE(QFile::exists(path));
+    QFile existing(path);
+    ASSERT_TRUE(existing.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    existing.write("keep me\n");
+    existing.close();
+    click(dialog, "corridorQuantitiesSaveCsv");
+    EXPECT_EQ(executor.last().find("OVERWRITE"), std::string::npos) << executor.last();
+    EXPECT_TRUE(label(dialog, "corridorQuantitiesStatus").contains("already there"))
+        << label(dialog, "corridorQuantitiesStatus").toStdString();
+    QFile kept(path);
+    ASSERT_TRUE(kept.open(QIODevice::ReadOnly));
+    EXPECT_EQ(kept.readAll(), QByteArray("keep me\n"));
+    kept.close();
+    child<QCheckBox>(dialog, "corridorQuantitiesOverwrite")->setChecked(true);
+    click(dialog, "corridorQuantitiesSaveCsv");
+    EXPECT_NE(executor.last().find(" OVERWRITE"), std::string::npos) << executor.last();
+    ASSERT_TRUE(kept.open(QIODevice::ReadOnly));
+    EXPECT_TRUE(kept.readAll().startsWith("id,name,kind,"));
 }
 
 TEST(RoadWorkbench, TheBimMenuHasItsSectionsAndTheRoadModelGoesToThe3dViews)

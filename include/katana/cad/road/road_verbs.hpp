@@ -20,7 +20,7 @@
 //   CORRIDOR BUILD <c>|ALL | SECTION <c> <station>
 //   CORRIDOR STRINGS <c> [layer=<layer>] [PREVIEW]
 //   CORRIDOR SURFACE <c> [finished=<name>] [subgrade=<name>] [PREVIEW]
-//   CORRIDOR QUANTITIES <c>|ALL [csv=<file>]
+//   CORRIDOR QUANTITIES <c>|ALL [csv=<file> [OVERWRITE]]
 //
 //   ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>
 //
@@ -44,6 +44,7 @@
 #include <vector>
 
 #include "katana/cad/bim/bim_object.hpp"
+#include "katana/cad/csv_table.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::cad {
@@ -70,10 +71,10 @@ namespace katana::cad::road {
 // resource katana://road-model.
 [[nodiscard]] std::string roadModelJson(const bim::BimModel& model);
 
-// The quantities of `objects` as CORRIDOR QUANTITIES' csv= writes them: a
-// header, then a row per object: id, name, kind, facility, part, material,
-// then Length, Width, Depth, Height, GrossArea and GrossVolume (empty where
-// an object has none), to three places.
-[[nodiscard]] std::string quantitiesCsv(const std::vector<bim::BimObject>& objects);
+// The quantities of `objects` as CORRIDOR QUANTITIES' csv= writes them (by
+// cad::writeCsvTable, the one CSV writer): a header, then a row per object: id,
+// name, kind, facility, part, material, then Length, Width, Depth, Height,
+// GrossArea and GrossVolume (empty where an object has none), to three places.
+[[nodiscard]] CsvTable quantitiesTable(const std::vector<bim::BimObject>& objects);
 
 } // namespace katana::cad::road

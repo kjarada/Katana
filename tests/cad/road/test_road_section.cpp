@@ -226,6 +226,74 @@ TEST(RoadSection, SuperelevationAtTheMidpointOfItsTransitionIsHalfwayBetweenItsE
     expectPoint(section->top, "left/footpath/outer", 6.675, 10.15 + 0.0375);
 }
 
+TEST(RoadSection, AnEdgeStripAndADrainBetweenSuperelevatedComponentsFollowTheTable)
+{
+    // A lane 3.5 m, a flush edge strip 0.15 m, a shoulder 1.5 m, each side; lane
+    // and shoulder superelevated by default. The table at the station is (+6,
+    // -6) outward percent. Left: the lane rises 3.5 x 6 % = 0.21 to 10.21, the
+    // strip - when it is superelevated too - 0.15 x 6 % = 0.009 to 10.219, the
+    // shoulder 1.5 x 6 % = 0.09 to 10.309. Right: 9.79, then 0.009 down to 9.781,
+    // 0.09 more to 9.691. A strip left at its own 0 % was flat at 10.21, and the
+    // shoulder's edge 9 mm low at 10.300.
+    const auto stripped = [](bool superelevated) {
+        RoadTemplate made;
+        made.name = "strip";
+        for (const Side side : {Side::Left, Side::Right}) {
+            Component lane = defaultComponent(ComponentKind::Lane, side);
+            lane.width = 3.5;
+            lane.crossfall = -3.0;
+            Component strip = defaultComponent(ComponentKind::Kerb, side);
+            strip.shape = KerbShape::EdgeStrip;
+            strip.crossfall = 0.0;
+            strip.superelevated = superelevated;
+            Component shoulder = defaultComponent(ComponentKind::Shoulder, side);
+            shoulder.width = 1.5;
+            shoulder.crossfall = -3.0;
+            made.components.insert(made.components.end(), {lane, strip, shoulder});
+        }
+        return made;
+    };
+    const Crossfalls table{6.0, -6.0};
+    const auto follows = roadSection(stripped(true), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(follows.ok()) << follows.error().describe();
+    expectPoint(follows->top, "left/lane/outer", 3.5, 10.21);
+    expectPoint(follows->top, "left/kerb/outer", 3.65, 10.219);
+    expectPoint(follows->top, "left/shoulder/outer", 5.15, 10.309);
+    expectPoint(follows->top, "right/lane/outer", -3.5, 9.79);
+    expectPoint(follows->top, "right/kerb/outer", -3.65, 9.781);
+    expectPoint(follows->top, "right/shoulder/outer", -5.15, 9.691);
+    const auto flat = roadSection(stripped(false), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(flat.ok());
+    expectPoint(flat->top, "left/kerb/outer", 3.65, 10.21);
+    expectPoint(flat->top, "left/shoulder/outer", 5.15, 10.30);
+
+    // A table drain 2 m wide with its invert 0.5 m down: its outer edge rises
+    // with the table when it is superelevated: 2 x 6 % = 0.12 above the lane's
+    // edge (10.21 + 0.12 = 10.33), and stays level with it (10.21) when it is not.
+    const auto drained = [](bool superelevated) {
+        RoadTemplate made;
+        made.name = "drained";
+        Component lane = defaultComponent(ComponentKind::Lane, Side::Left);
+        lane.width = 3.5;
+        lane.crossfall = -3.0;
+        Component drain = defaultComponent(ComponentKind::Drain, Side::Left);
+        drain.superelevated = superelevated;
+        made.components = {lane, drain};
+        return made;
+    };
+    const auto raised = roadSection(drained(true), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(raised.ok());
+    expectPoint(raised->top, "left/drain/invert", 4.5, 9.71);
+    expectPoint(raised->top, "left/drain/outer", 5.5, 10.33);
+    const auto level0 = roadSection(drained(false), straight(), level(10.0), nullptr, 100.0, table);
+    ASSERT_TRUE(level0.ok());
+    expectPoint(level0->top, "left/drain/outer", 5.5, 10.21);
+    // With no table at the station nothing is superelevated: the own crossfall.
+    const auto none = roadSection(stripped(true), straight(), level(10.0), nullptr, 100.0);
+    ASSERT_TRUE(none.ok());
+    expectPoint(none->top, "left/kerb/outer", 3.65, 9.895);
+}
+
 TEST(RoadSection, ACutBatterDaylightsOnAPlaneAtTheHandWorkedOffset)
 {
     // A level design 1 m under flat ground, 8 m wide, 2:1 batters: daylight

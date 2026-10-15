@@ -54,19 +54,25 @@ superelevated lane being the common cases; outward percent is the one sign
 for all of them.
 
 **A kerb is a shape, not a width** (`road::kerbShape`). Its columns run out
-from the lip - the pavement's edge - at each change of its top, with a level
-base `depth` under the lip:
+from the lip - the pavement's edge - at each change of its top, with a base
+`depth` under the lip: level under a barrier or a mountable kerb, following
+the channel under a kerb and gutter (`depth` below the lip at the lip, then
+`depth` below the invert from the invert on), and `depth` below the top, at
+its crossfall, under an edge strip:
 
 | Shape | Profile | Defaults |
 |---|---|---|
 | barrier | the face `height` high, battered 1 in 6, then `width` of top | 150 mm face, 150 mm top, 150 mm deep |
 | mountable | the face rising `height` over 1.5 x height, then `width` | 100 mm face in the divided road |
 | kerbgutter | the gutter `gutter` wide falling `gutterfall` %, then a barrier face | 300 mm gutter at 6 % |
-| edgestrip | flush: `width` at the component's crossfall, `depth` thick | 300 mm by 150 mm |
+| edgestrip | flush: `width` at the component's crossfall, `depth` thick | 150 mm by 150 mm |
 
 The face is never vertical: a vertical face gives the finished surface two
 levels at one point, which a TIN cannot hold, and the 1 in 6 batter reads as
-upright at any scale a road is drawn at.
+upright at any scale a road is drawn at. (The edge strip's default was written
+as 300 mm wide; the code has always made it 150 mm, one default width for
+every shape, and a shape given after a width cannot change it without the
+verb knowing the order of its keys - the document was wrong, not the code.)
 
 **A kerb faces one way** (`Component::faces`, `faces=inward|outward`, inward
 by default). The shapes above are a kerb on the outer edge of a carriageway:
@@ -146,7 +152,11 @@ at (10 m by default), REGIONS where another template applies, and the
 SUPERELEVATION table.
 
 **Superelevation** is a table of stations, each with the crossfall of the
-superelevated components (lanes and shoulders by default) on each side,
+superelevated components (lanes and shoulders by default; any component that
+has a crossfall - a footpath, a verge, a median, a table drain, an edge strip
+between superelevated lanes and shoulders - may be set `superelevated=on`; a
+barrier, mountable or kerb-and-gutter kerb has its own shape and no crossfall,
+and a template that marks one is refused) on each side,
 outward percent: (+6, -6) is full superelevation falling to the right, for a
 curve to the right. Between two entries it is linear; outside the table each
 component keeps its template crossfall. A table is entered as a
@@ -271,6 +281,13 @@ unchanged and are the check that the engine is the old one where the two
 meet. The only difference: their stations now include the alignment's key
 stations as well as the profile's.
 
+**The target surface is named as the drawing spells it.** A corridor typed with
+`surface=GROUND` over a surface `ground` builds against it (the lookup ignores
+case), and its cut's `Target Surface` is `ground`, the name the IFC export
+finds the ground by, exactly: otherwise it did not find it and wrote a second,
+empty TERRAIN element, voided by the cuts, beside the real one
+(`RoadVerbs.ACorridorsEarthworksNameTheSurfaceAsTheDrawingSpellsItWhateverWasTyped`).
+
 **What it cannot build it says.** `road::BuiltCorridor::problems` lists,
 a sentence each: an alignment, a design profile, a template or a surface the
 drawing lacks; a template that cannot be built; a range off the alignment;
@@ -313,6 +330,13 @@ and a model handed over twice must name the same things the same way:
     corridor/<corridor>/<side>/<component>/<run>                  a kerb
     corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]
 
+No component can be named `earthworks`, in any case (`checkTemplate`): the
+earthworks' ids are `corridor/<c>/<side>/earthworks/cut|fill/<run>`, and a
+component of that name with a course called `cut` or `fill` made the same id,
+which the IFC export answers by keeping the first element and skipping the
+later (the cut itself). Every other id differs in length or in a word no name
+can be (a run number, a `-<piece>`).
+
 `<piece>` only from the second piece of that kind and side in a run, counted
 in station order over the pieces made: a fill that ends along the road and
 begins again is `fill/1` and `fill/1-2`. A piece is a stretch of stations
@@ -329,12 +353,20 @@ IfcEarthworksCut CUT or an IfcEarthworksFill EMBANKMENT, the cut carrying the
 `Target Surface` property the export reads. The facility is the corridor; the
 part is an IfcRoadPartTypeEnum word.
 
-**Quantities**, named as IFC's base quantities are, units m, m2, m3:
+**Quantities**, units m, m2, m3, named by one scheme for every object (Length, Width, Depth, Height,
+GrossArea, GrossVolume). The IFC export (`docs/ifc.md`) writes each under the
+name its class's base quantity set gives it where that differs: a course's
+Depth is its Thickness, a kerb's GrossVolume its Volume, an earthworks cut's
+its UndisturbedVolume and a fill's its CompactedVolume (the in-place volume
+the end areas measure); what the set has no name for - an earthworks object's
+GrossArea - stays in `Katana_Quantities`. Renaming at the builder instead would
+have changed CORRIDOR QUANTITIES, its CSV and ROADMODEL JSON, which total by
+these names (`IfcExportRoad.TheRoadModelsQuantityNamesAreWrittenAsTheirClassesBaseQuantitiesNameThem`).
 
 | Object | Length | Width | Depth / Height | GrossArea | GrossVolume |
 |---|---|---|---|---|---|
 | course | the run's stations | the component's | Depth: its thickness | its plan outline | the solid's own volume |
-| kerb | its lip line in plan | the shape's | Height: its face | - | the solid's own volume |
+| kerb | its lip line in plan | the shape's | Height: its face (an edge strip is flush and has none: Depth, its thickness) | - | the solid's own volume |
 | earthworks | the piece's stations | - | - | its footprint's plan area | end area |
 
 An earthworks object's GrossArea is the plan area of its footprint: its plan
@@ -348,7 +380,7 @@ their hull.
 
 A course's volume is the SOLID'S, so the model and its quantity agree and a
 course on the outside of a curve - longer than the centreline - is measured
-as the longer thing it is. The earthworks' is the END AREA, the measurement
+as the longer thing it is (to the chords between its sections: Not done). The earthworks' is the END AREA, the measurement
 standard, as above; the solid drawn for them differs from it by the corners
 its 41 columns cut, which the tests work out by hand
 (`CorridorObjects.TheEarthworksAreTheEndAreasTheOldAssemblyMeasured`).
@@ -421,7 +453,7 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR
     CORRIDOR BUILD <c>|ALL | SECTION <c> <station>
     CORRIDOR STRINGS <c> [layer=] [PREVIEW] | SURFACE <c> [finished=] [subgrade=] [PREVIEW]
-    CORRIDOR QUANTITIES <c>|ALL [csv=<file>]
+    CORRIDOR QUANTITIES <c>|ALL [csv=<file> [OVERWRITE]]
     ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>
 
 A `<component>` is `side:name` or `name`, every side that has one. A
@@ -439,6 +471,39 @@ read, `InvalidArgument` for a template or corridor that cannot be built
 (`road::checkTemplate`, `road::checkCorridor`), `AlreadyExists` for a name in
 use, `InvalidState` for definitions that cannot be read. A template a
 corridor uses is not deleted from under it.
+
+**Absent is not zero.** A reply writes a quantity it did not measure empty, as a
+corridor's own `from=` and `to=` are when it gives none: `BUILD` and
+`QUANTITIES` leave `from= to=` empty for a corridor that could not be built
+(no alignment, a range off it - station 0 is a real station) and `cut= fill=
+net=` empty for one with no target surface, or whose alignment, profile or
+surface the drawing lacks (a road measured to have no cut says `cut=0.000`);
+a `total` leaves `length=`, `area=` or `volume=` empty when no object of its
+kind carries one (a kerb has no area). The dialog says "not measured".
+(`BuiltCorridor::hasRange` and `hasEarthworks` carry it.)
+
+**A key a component does not keep is refused.** `ROADTEMPLATE ADD` and `SET`
+take the keys the component's kind keeps (`road::componentKeys`, what its
+JSON writes): a lane has no `material=`, a batter no `width=`. Before, the
+key was read, the JSON came out as it was, no step was made, and the reply
+said "updated". The refusal is a `ParseFailure` naming the kind's keys.
+
+**`CORRIDOR SECTION` is refused outside the corridor's stations** (its
+`from=` to `to=` held to the alignment and the profile, `road::corridorRange`,
+the range `BUILD` uses): a section at 90 on a corridor of 20 to 60 looked
+built and was not part of anything.
+
+**`CORRIDOR PROBLEMS` and the problems of `QUANTITIES ALL` are the corridors'**
+(and the road templates' and corridors' own read problems): a placed road
+object's ("object <id>") are in `ROADMODEL PROBLEMS` with them. **`ROADTEMPLATE
+DELETE` and `CORRIDOR BUILD ALL` refuse when the corridors cannot be read**,
+as `RENAME` and `LIST` do: an empty set would say that none uses the template.
+
+**`QUANTITIES csv=`** writes through the one CSV writer of the report verbs
+(`cad::writeCsvTable`, shared with VOLUME): RFC 4180, records ending in CRLF,
+and a file already there is only replaced with the word `OVERWRITE` (the
+dialog has a box for it). Before, it was a copy that replaced silently and
+ended records in LF.
 
 **STRINGS** draws each code's points along the corridor as a 3D polyline
 (`entity::setHeights`) on `road/strings`, marked `road.corridor` and
@@ -485,7 +550,8 @@ coloured and its vertical exaggerated so a 50 mm course can be seen),
 `src/katana_qt/bim/corridor_dialog.hpp` (the corridors, their regions and
 superelevation, Build, Build Strings, Build Surfaces, and the problems) and
 `src/katana_qt/bim/corridor_quantities_dialog.hpp` (the records of CORRIDOR
-QUANTITIES as a table, Copy and Save CSV; no file dialog in a headless run).
+QUANTITIES as a table, Copy and Save CSV with its Replace box, which adds
+OVERWRITE; no file dialog in a headless run).
 
 **Where the old corridor commands went.** Terrain > Corridor Quantities... and
 Corridor Surface... asked for an alignment, a surface and an assembly in a
@@ -564,6 +630,18 @@ class, layer, quantities and properties, and every problem
   once, and writes the solid as an open face set with a warning. Every course
   is closed. The piece should end in a real closed taper (a wedge welded to a
   line), and a section with a gap should be two stretches across.
+- **Course areas and volumes and kerb lengths on a curve are chord
+  approximations.** A course is lofted between sections with flat quads and a
+  kerb's Length sums the chords between sections, so on an arc of radius R a
+  step of arc angle theta (the interval over R) makes areas and volumes short
+  by about theta^2 / 6 and a kerb's length by about theta^2 / 24: 0.65 % and
+  0.16 % for a 10 m interval on R = 50 m (a 90 degree curve, left lane AC14
+  12.450 m3 against 12.531 exact; the interval of 1 m gives 12.531), 0.04 % on
+  R = 200 m. The error is always low and falls with the interval, which the
+  person shortens on a curve as for the volumes (`docs/volumes.md`); the
+  sections could be added inside curves to a stated tolerance
+  (R x sqrt(6 x tolerance)) but that adds earthworks sections too, which the
+  existing station-count tests would have to be reviewed for.
 - Superelevation by design speed and radius: the table is entered by hand.
 - Shoulder rollover on the high side of a superelevated section: a
   superelevated shoulder takes the lane's crossfall.

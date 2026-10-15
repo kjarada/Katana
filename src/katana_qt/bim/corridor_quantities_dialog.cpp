@@ -1,6 +1,7 @@
 #include "corridor_quantities_dialog.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QFileDialog>
@@ -46,6 +47,7 @@ struct CorridorQuantitiesDialog::Impl {
     QTableWidget* table = nullptr;
     QLabel* totals = nullptr;
     QLineEdit* csvPath = nullptr;
+    QCheckBox* overwrite = nullptr;
     QLabel* status = nullptr;
 
     [[nodiscard]] bool alive() const { return watcher != nullptr && watcher->documentAlive(); }
@@ -95,12 +97,20 @@ struct CorridorQuantitiesDialog::Impl {
                                    road_ui::cell(qs(record->value(kQuantities[i]).value_or(""))));
                 }
             } else if (kind == "quantities") {
-                summary.prepend(QString("Cut %1 m3, fill %2 m3, net %3 m3 (fill less cut) "
-                                        "over %4 objects")
-                                    .arg(qs(record->value("cut").value_or("")),
-                                         qs(record->value("fill").value_or("")),
-                                         qs(record->value("net").value_or("")),
-                                         qs(record->value("objects").value_or(""))));
+                // The record leaves cut, fill and net empty when no earthworks
+                // were measured (no target surface): not a road with no cut.
+                const QString measured = qs(record->value("cut").value_or(""));
+                if (measured.isEmpty()) {
+                    summary.prepend(QString("Cut and fill not measured (they need a target "
+                                            "surface) over %1 objects")
+                                        .arg(qs(record->value("objects").value_or(""))));
+                } else {
+                    summary.prepend(QString("Cut %1 m3, fill %2 m3, net %3 m3 (fill less cut) "
+                                            "over %4 objects")
+                                        .arg(measured, qs(record->value("fill").value_or("")),
+                                             qs(record->value("net").value_or("")),
+                                             qs(record->value("objects").value_or(""))));
+                }
             } else if (kind == "total") {
                 summary << QString("%1 %2: %3 of them, %4 m long, %5 m2, %6 m3")
                                .arg(qs(record->value("kind").value_or("")),
@@ -174,6 +184,11 @@ void CorridorQuantitiesDialog::Impl::build()
     csvRow->addWidget(save);
     csvRow->addWidget(copy);
     layout->addLayout(csvRow);
+    overwrite = new QCheckBox("Replace the file if it is there (OVERWRITE)", dialog);
+    overwrite->setObjectName("corridorQuantitiesOverwrite");
+    overwrite->setToolTip("A file already there is only replaced with OVERWRITE, as every "
+                          "report verb writes it");
+    layout->addWidget(overwrite);
     status = new QLabel(dialog);
     status->setObjectName("corridorQuantitiesStatus");
     status->setWordWrap(true);
@@ -215,7 +230,8 @@ void CorridorQuantitiesDialog::Impl::build()
         }
         const auto file = road_ui::option(status, "csv", csvPath->text().trimmed());
         if (file) {
-            show("CORRIDOR QUANTITIES " + *corridorWord + " " + *file);
+            show("CORRIDOR QUANTITIES " + *corridorWord + " " + *file +
+                 (overwrite->isChecked() ? " OVERWRITE" : ""));
         }
     });
     connect(copy, &QPushButton::clicked, [this] {

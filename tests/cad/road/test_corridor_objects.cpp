@@ -249,6 +249,41 @@ TEST(CorridorObjects, ADividedRoadsKerbAndLanesAreSetOutUnderTheMedianNotAboveIt
     }
 }
 
+TEST(CorridorObjects, AFlushEdgeStripReportsHowThickItIsAndNoFaceHeight)
+{
+    // 0.15 m wide at 0 % and 0.15 m thick: 0.0225 m2, 2.25 m3 in 100 m. It has
+    // no face: its Height was the kerb default 0.15 (or whatever was typed,
+    // 5 m in the finding) and the IFC base quantity carried it.
+    RoadTemplate made;
+    made.name = "strips";
+    for (const Side side : {Side::Left, Side::Right}) {
+        Component lane = defaultComponent(ComponentKind::Lane, side);
+        Component strip = defaultComponent(ComponentKind::Kerb, side);
+        strip.shape = KerbShape::EdgeStrip;
+        strip.crossfall = 0.0;
+        strip.height = 5.0;
+        made.components.insert(made.components.end(), {lane, strip});
+    }
+    const BimModel model = corridorSolids(buildCorridor(corridorOf("strips"), setOf({made}),
+                                                        straight(100.0), level(10.0, 0.0, 100.0),
+                                                        nullptr));
+    const BimObject* strip = objectWithId(model, "corridor/Main/left/kerb/1");
+    ASSERT_NE(strip, nullptr);
+    EXPECT_NEAR(quantityOf(*strip, "Width"), 0.15, 1e-12);
+    EXPECT_NEAR(quantityOf(*strip, "Depth"), 0.15, 1e-12);
+    EXPECT_NEAR(quantityOf(*strip, "GrossVolume"), 2.25, 1e-9);
+    EXPECT_TRUE(std::ranges::none_of(strip->quantities, [](const katana::cad::bim::Quantity& each) {
+        return each.name == "Height";
+    }));
+    // A kerb with a face keeps its Height, the face.
+    RoadTemplateSet templates;
+    templates.templates = standardTemplates();
+    const BimModel urban = corridorSolids(buildCorridor(
+        corridorOf("urban street"), templates, straight(100.0), level(10.0, 0.0, 100.0), nullptr));
+    EXPECT_NEAR(quantityOf(*objectWithId(urban, "corridor/Main/left/kerb/1"), "Height"), 0.15,
+                1e-15);
+}
+
 TEST(CorridorObjects, AKerbsLengthIsItsLipLineAndItsShapeIsItsWidth)
 {
     RoadTemplateSet templates;

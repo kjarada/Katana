@@ -466,6 +466,15 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
             if (auto status = checkWord("a component", component.name); !status) {
                 return refuse(component, status.error().message);
             }
+            // The corridor's earthworks objects are corridor/<c>/<side>/earthworks/
+            // cut|fill/<run>: a component of that name with a course called cut or
+            // fill would make the same id, and the IFC export keeps the first
+            // element of an id and skips the later one.
+            if (katana::core::equalsIgnoringCase(component.name, "earthworks")) {
+                return refuse(component,
+                              "earthworks is the name of the corridor's cut and fill solids; a "
+                              "component cannot take it");
+            }
             if (!names.insert(katana::core::lowered(component.name)).second) {
                 return refuse(component, "a second component of that name on this side");
             }
@@ -544,6 +553,11 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                     return refuse(component,
                                   "an edge strip is flush: it has no face to turn outward");
                 }
+                if (component.superelevated && component.shape != KerbShape::EdgeStrip) {
+                    return refuse(component, "a " + std::string(toString(component.shape)) +
+                                                 " kerb has its own shape and no crossfall to "
+                                                 "superelevate; only an edge strip has");
+                }
                 if (component.shape == KerbShape::KerbAndGutter &&
                     (!(component.gutterWidth > 0.0) || std::abs(component.gutterFall) > 100.0)) {
                     return refuse(component,
@@ -595,6 +609,31 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
         }
     }
     return {};
+}
+
+// ---- the keys ------------------------------------------------------------------------------
+
+std::vector<std::string_view> componentKeys(ComponentKind kind)
+{
+    std::vector<std::string_view> keys{"name", "layer", "colour"};
+    if (kind != ComponentKind::Batter) {
+        keys.insert(keys.end(), {"width", "crossfall", "superelevated"});
+    }
+    switch (kind) {
+    case ComponentKind::Kerb:
+        keys.insert(keys.end(),
+                    {"shape", "faces", "height", "depth", "gutter", "gutterfall", "material"});
+        break;
+    case ComponentKind::Drain:
+        keys.push_back("depth");
+        break;
+    case ComponentKind::Batter:
+        keys.insert(keys.end(), {"cut", "fill", "maxwidth", "benchheight", "benchwidth"});
+        break;
+    default:
+        break;
+    }
+    return keys;
 }
 
 // ---- the kerb's shape --------------------------------------------------------------------

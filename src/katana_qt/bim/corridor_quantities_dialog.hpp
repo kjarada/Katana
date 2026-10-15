@@ -18,7 +18,8 @@
 //   corridorQuantitiesTotals    the cut, fill and net, and the totals by kind and material
 //   corridorQuantitiesCsvPath   the file Save CSV writes
 //   corridorQuantitiesBrowse    a file dialog for it (none in a headless run)
-//   corridorQuantitiesSaveCsv   CORRIDOR QUANTITIES <corridor>|ALL csv="<file>"
+//   corridorQuantitiesSaveCsv   CORRIDOR QUANTITIES <corridor>|ALL csv="<file>" [OVERWRITE]
+//   corridorQuantitiesOverwrite replace a file already there (the line gets OVERWRITE)
 //   corridorQuantitiesCopy      the table to the clipboard, tab separated
 //   corridorQuantitiesStatus    what the last line replied, or why it was refused
 //   corridorQuantitiesClose
