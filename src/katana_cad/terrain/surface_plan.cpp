@@ -50,7 +50,6 @@ struct ContourSet {
 
 struct SurfaceEntry {
     std::shared_ptr<const TinSurface> surface;
-    std::uint64_t used = 0;
 
     // The cull grid: a uniform grid over the surface's plan box, each cell
     // listing the triangles whose box reaches into it (CSR, ascending).
@@ -546,11 +545,21 @@ class FaceImage {
     }
 
     // The pixels of triangle `t` whose centres it covers, in rows first to
-    // last. A pixel centre on an edge two triangles share goes to exactly one
-    // of them: each edge's function is worked out from its lower-numbered
-    // vertex to its higher, the same arithmetic in both triangles, and a tie
-    // (exactly zero) goes to the triangle that runs the edge that way round -
-    // so a surface's image has no pinholes along its edges and nothing twice.
+    // last. Each edge's function is worked out from its lower-numbered vertex
+    // to its higher, the same arithmetic in both triangles that share it, so
+    // a centre exactly on the edge (exactly zero) is a tie they both see, and
+    // the tie goes by the edge's direction in the image, never by vertex
+    // numbers: the top-left rule of the graphics APIs. A tie is the
+    // triangle's when its edge runs up the image (a left edge), or along it
+    // with the inside below (a top edge) - the inside being on the edge's
+    // positive side. That is the same as testing the centre moved by an
+    // infinitesimal (e, e^2), which no edge passes through, so a centre on an
+    // edge goes to one of the two triangles and one on a VERTEX to exactly
+    // one of those round it: no pinholes, nothing twice. (Deciding by vertex
+    // numbers settled an edge, but a vertex only for a fan whose centre was
+    // numbered between its neighbours: a vertex numbered below all of them,
+    // or above all, was no triangle's, and one whose neighbours alternated
+    // was two's.)
     std::size_t rasterise(std::uint32_t t, int first, int last, bool dense, const FaceRule& rule)
     {
         if (first > last) {
@@ -576,6 +585,7 @@ class FaceImage {
         struct Edge {
             double ax, ay, dx, dy; // from the canonical start, along it
             double sign;           // orientation times +1 (canonical) or -1
+            bool owns;             // a centre exactly on it is this triangle's
         };
         std::array<Edge, 3> edges{};
         for (std::size_t k = 0; k < 3; ++k) {
@@ -584,14 +594,21 @@ class FaceImage {
             const bool forward = corners[from] < corners[to];
             const std::size_t lo = forward ? from : to;
             const std::size_t hi = forward ? to : from;
-            edges[k] = {px[lo], py[lo], px[hi] - px[lo], py[hi] - py[lo],
-                        orientation * (forward ? 1.0 : -1.0)};
+            const double dx = px[hi] - px[lo];
+            const double dy = py[hi] - py[lo];
+            const double sign = orientation * (forward ? 1.0 : -1.0);
+            // The edge run so the inside is on its positive side; the image's
+            // y runs down. Up is a left edge, along with the inside below a
+            // top edge. The neighbour across it sees the exact opposite.
+            const double upX = sign * dx;
+            const double upY = sign * dy;
+            edges[k] = {px[lo], py[lo], dx, dy, sign, upY < 0.0 || (upY == 0.0 && upX > 0.0)};
         }
         const auto edgeValue = [](const Edge& edge, double x, double y) {
             return edge.sign * (edge.dx * (y - edge.ay) - edge.dy * (x - edge.ax));
         };
         const auto inside = [](const Edge& edge, double value) {
-            return value > 0.0 || (value == 0.0 && edge.sign > 0.0);
+            return value > 0.0 || (value == 0.0 && edge.owns);
         };
 
         // The colour of the whole triangle, when it does not vary across it.
@@ -702,31 +719,25 @@ class FaceImage {
 
 struct SurfacePlanCache::Impl {
     std::vector<std::unique_ptr<SurfaceEntry>> entries;
-    std::uint64_t clock = 0;
     std::size_t tracings = 0;
     std::size_t grids = 0;
 
-    // At most this many surfaces kept: a view showing more than this many
-    // at once rebuilds the least recently drawn.
-    static constexpr std::size_t kMaximumSurfaces = 32;
-
+    // Every surface asked about is kept until retain() lets it go: the
+    // caller bounds the cache to the drawing. A count cap evicting the least
+    // recently used would be wrong for a paint, which asks for every visible
+    // surface in the same order each time: with one more surface than the cap
+    // the one wanted next is always the one just evicted, and every paint
+    // rebuilds every grid and traces every contour again (measured with 33
+    // surfaces: 61-69 ms a repaint against 3-7 ms with 32).
     SurfaceEntry& entryFor(const std::shared_ptr<const TinSurface>& surface)
     {
-        ++clock;
         for (const auto& entry : entries) {
             if (entry->surface.get() == surface.get()) {
-                entry->used = clock;
                 return *entry;
             }
         }
-        if (entries.size() >= kMaximumSurfaces) {
-            const auto oldest = std::ranges::min_element(
-                entries, {}, [](const std::unique_ptr<SurfaceEntry>& entry) { return entry->used; });
-            entries.erase(oldest);
-        }
         auto entry = std::make_unique<SurfaceEntry>();
         entry->surface = surface;
-        entry->used = clock;
         buildGrid(*entry);
         ++grids;
         entries.push_back(std::move(entry));

@@ -776,7 +776,10 @@ record of the reference raster, `saved file=` with `save=`, then one
   zero, so zero is its white. A span of one value is widened a unit about
   it. The ends are written exactly, so the cells at the range's ends take
   the ramp's end colours exactly
-  (`ShadeVerb.ARampMapsItsEndpointsExactly`).
+  (`ShadeVerb.ARampMapsItsEndpointsExactly`). These are the shading verbs'
+  ramps; a surface style has a table of its own whose terrain, diverging,
+  slope and grey are other colours (`docs/surface_display.md`, "The ramps"),
+  so `ramp=terrain` on `RASTER SHADE` and on a surface style are two maps.
 - **The reference raster** is named `NAME`, or the source's name and the
   style's (`terrain-relief-hillshade`), made unique; its role is Derived,
   its derivation the line, and its display style the style.

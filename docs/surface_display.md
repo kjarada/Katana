@@ -18,7 +18,7 @@ document is what is DONE with a style.
 
 | Where | What |
 |---|---|
-| `src/katana_cad/terrain/surface_ramps.cpp` | THE ramp table: `surfaceRampNames`, `surfaceRampColour`, `surfaceRampStops` |
+| `src/katana_cad/terrain/surface_ramps.cpp` | the surface styles' ramp table: `surfaceRampNames`, `surfaceRampColour`, `surfaceRampStops` (RASTER SHADE keeps one of its own: "The ramps") |
 | `include/katana/cad/terrain/surface_colouring.hpp` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
 | `include/katana/cad/terrain/surface_plan.hpp` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surfacePlan`, `SurfacePlanCache`) |
 | `include/katana/cad/terrain/surface_display_verbs.hpp` | `SURFACE LEGEND` and `SURFACE PLAN` |
@@ -46,6 +46,27 @@ parameters are filled from the ramp the style names
 | grey | 32, 80, 128, 176, 224 | chosen here: equal steps, so order survives a monochrome plot |
 | spectral | #2b83ba #abdda4 #ffffbf #fdae61 #d7191c | ColorBrewer Spectral, five classes, reversed |
 
+**A second table, on purpose.** `RASTER SHADE` and `RASTER SLOPE` have a ramp
+table of their own (`src/katana_interop/geo/colour_ramps.cpp`, `docs/terrain.md`,
+"Shading") with four of the same names - terrain, diverging, slope and grey -
+and different colours: its terrain is the hypsometric green to white, (38, 115,
+0) to (255, 255, 255), where this one is the 3D scene's deep blue to white; its
+diverging and slope are ColorBrewer's eleven-class RdBu and RdYlGn, where these
+are five-class and the scene's green-yellow-red; its grey runs 0 to 255 where
+this runs 32 to 224. So `ramp=terrain` on a surface style and on `RASTER
+SHADE` are two maps (the legends each prints say which: `SURFACE LEGEND` and
+`RASTER SHADE`'s `legend value=` records), and `RASTER SHADE` takes a GDAL
+colour-map file where a style does not, and refuses `ramp=spectral` and
+`earth` where a style takes them. They are not merged: each table is held to
+its own colours by tests (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
+here, the legend records of `cli.raster_shade_*` and `ShadeVerb` there), and
+which look wins - the 3D view's colours or the shading's - is the owner's to
+say, because either choice moves pictures people have seen. Nothing but that
+choice stops it: both tables are data without GDAL, and the `terrain` layer is
+visible to `cad` and `interop` alike ("Not done"). An earlier version of this
+file and of `surface_ramps.cpp` called this "THE ramp table"; it is the
+surface styles'.
+
 The scene's `elevationRampColor` is now the table's terrain ramp, operation
 for operation (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
 holds it at a thousand points), so every existing scene and kernel test holds.
@@ -68,24 +89,69 @@ spans:
   surface's own: its lowest and highest vertex for elevation, 0 to its
   steepest face for slope. In 3D an open end of an elevation range is the
   one range of every visible surface ("In 3D", below).
-* **Smooth ramp.** The ramp at (value - low) / (high - low), clamped; a range
-  narrower than the geometric tolerance is the ramp's middle, as the scene's
-  one ramp always was.
+* **Smooth ramp.** The ramp at (value - low) / (high - low), clamped.
 * **Banded ramp.** `bands` bands of equal width over the range; below it is
   the first band and above it the last. Band k is the ramp at k / (bands - 1),
-  so the first and last bands are the ramp's two ends.
-* **Stops.** They override the ramp and are absolute values. Smooth, a value
-  is blended between the two stops either side; banded, each stop is the lower
-  edge of a band in its colour, the first band open below and the last open
-  above.
+  so the first and last bands are the ramp's two ends. **At most 100 bands**
+  (`kMaximumSurfaceBands`, refused by `checkSurfaceStyle`, so the verb, the
+  form and a project file hold to it alike). The 3D view cuts each triangle
+  at every band edge it crosses, so its geometry grew by about 643 triangles
+  a band on the 21 182-triangle sample terrain (28 078 triangles at 10 bands,
+  3 235 844 at 5 000, 32 163 345 at 50 000; the verb allowed a million, which
+  extrapolates to some 640 million triangles), and a legend has 16 rows however many bands there are. 100 is the
+  form's own box and a 0.14 m band on that terrain's 13.9 m of relief; at
+  most that many pieces a triangle
+  (`SurfaceBandPieces.ATriangleAcrossTheMaximumNumberOfBandsIsAtMostThatManyPieces`).
+  Rejected: a piece budget in the 3D build that falls back to colouring the
+  vertices - a style that looks different on a big surface and on a small
+  one - and caching the legend, which a count of 100 makes cheap.
+* **A range that is a point.** A range narrower than the geometric tolerance
+  (a level surface, or `min=40` over ground wholly below it, which collapses
+  the range to 40) is one point, and a value keeps its side of it: below is
+  the first band or the ramp's start, above the last band or its end, and at
+  it the middle - as the scene's one ramp always was for a level surface - or,
+  for slope, the start, because the point is a face with no steepness (a level
+  pad is green, as the 3D view drew it before styles, not the yellow middle).
+  The one middle for every value drew a terrain wholly below the minimum in
+  its middle band (`SurfaceColouring.ACollapsedRangeIsAPointAndAValueKeepsTheSideOfItItIsOn`,
+  `SurfacePlanFaces.ARangeAboveTheWholeSurfaceColoursEveryFaceTheFirstBandNotTheMiddleOne`,
+  `SurfacePlanFaces.ALevelSurfaceColouredBySlopeIsTheRampsStartNotItsMiddle`).
+* **Stops.** They override the ramp and are absolute values; at most 100 of
+  them, since banded a stop is a band. Smooth, a value is blended between the
+  two stops either side; banded, each stop is the lower edge of a band in its
+  colour, the first band open below and the last open above (one stop is open
+  both ways: every value is in it).
 * **Not finite** (a face vertical in plan has no slope): the flat colour, as
   is a level face coloured by aspect.
 
 The legend (`cad::surfaceLegend`) says the same: one swatch a band or stop
 labelled by its edges ("24.892 - 26.285", "< 2", "33 +"), the eight sectors
-and "level" for aspect, or for a smooth ramp a gradient labelled at its ends.
-A label has the fewest decimals, at most three, that write every edge to a
-millionth of a unit (`cad::legendDecimals`).
+and "level" for aspect, or for a smooth ramp or smooth stops a gradient
+labelled at its ends. A label has the fewest decimals, at most three, that
+write every edge to a millionth of a unit (`cad::legendDecimals`).
+
+* **An end band the data runs past is open.** With `min=30 max=35` over
+  ground of 24.9 to 38.8, the first band is drawn on everything below 31 and
+  the last on everything above 34, so they read "< 31" and "34 +" and
+  `SURFACE LEGEND` leaves `from=` / `to=` out there, as a stop's open ends do;
+  they read closed ("24.892 - 26.285") only while the range is the data's own
+  or holds it (`SurfaceColouring::openBelow` and `openAbove`, set by
+  `surfaceColouring` where a given `min` is above the lowest value or a given
+  `max` below the highest). Closed, they said a colour covered 30 to 31 that
+  covered everything under it. The picture is not changed by what the legend
+  says.
+* **A range that is a point** (above) has three swatches, below, at and
+  above it, in the colours those really are ("< 40", "40", "> 40"; for slope
+  "0" and "> 0": slope is never below 0) - not N swatches of "40 - 40" in N
+  colours that did not say which one was drawn.
+* **A gradient places each stop at its value**, from the first stop's to the
+  last's, so the built-in Cut Fill style (stops at -2, -1, -0.5, 0, 0.5, 1, 2)
+  reads true against its labelled ends; placed by its place in the list the
+  -1 stop sat at 1/6 and the +1 at 5/6 of a bar labelled -2 to 2, and a
+  1 m fill read as 1.33 m. Every labelled stop is written beside its place
+  where it clears the label above by a line, the two ends always. A ramp's
+  nine samples are evenly spaced, so they look as they did
+  (`SurfacePlanPainter.ASmoothLegendPlacesEachStopAtItsValueNotAtItsPlaceInTheList`).
 
 ## In plan
 
@@ -130,12 +196,25 @@ Its cost is the pixels it covers and the triangles in view, whatever the zoom.
 * **No pinholes, nothing twice.** A pixel centre exactly on an edge two
   triangles share goes to one of them: each edge function is worked out from
   its lower-numbered vertex to its higher, the same arithmetic in both
-  triangles, and a tie goes to the triangle that runs the edge that way round.
+  triangles, so both see the same tie - and the tie goes by the edge's
+  direction in the image, the top-left rule of the graphics APIs: it is the
+  triangle's when the edge, run so that the triangle is on its positive side,
+  goes up the image (a left edge) or along it with the triangle below (a top
+  edge). That is the same as testing the centre moved by an infinitesimal
+  (e, e squared), which lies on no edge, so a centre on an edge goes to one of
+  the two triangles and a centre on a VERTEX to exactly one of those round it.
   On an eighth-of-a-unit grid 80 centres lie exactly on the square's shared
   diagonal; the image covers 6 400 pixels, and the test fails with 6 480 when
   a tie goes to both and 6 320 when to neither
   (`SurfacePlanFaces.EveryPixelOfTheSurfaceIsCoveredOnceEvenOnTheSharedDiagonal`,
-  both mutations run).
+  both mutations run). Rejected: deciding a tie by vertex numbers, as the
+  first version did - it settled an edge but a vertex only for a fan whose
+  centre was numbered between its neighbours: numbered below all of them, or
+  above all (the first vertex of a `.12da` triangle list is always 0), no
+  triangle had the pixel, a pinhole, and with neighbours alternating above
+  and below two had it. A fan of four, its centre exactly on a pixel centre,
+  covers 49 for every numbering where the old rule gave 48, 48, 50 and 49
+  (`SurfacePlanFaces.AVertexOnAPixelCentreIsOneTrianglesWhateverTheVertexNumbersAre`).
 * **The same at any thread count.** Rows are painted in bands of 32 across the
   task pool, each band writing only its rows and taking its triangles in
   ascending order (`SurfacePlanFaces.TheImageIsTheSameAtAnyThreadCount`).
@@ -196,7 +275,16 @@ for the settings last drawn - traced once by `terrain::contours` and again
 only when the interval, base or major spacing change. It is keyed on the
 surface itself, which is shared and immutable (an edited surface is a new
 one), keeps it alive while kept, and lets a surface go at the first paint
-after the drawing has lost it. A copy of the cache starts empty.
+after the drawing has lost it. A copy of the cache starts empty. **There is no
+cap on how many it keeps**: the caller bounds it to the drawing's surfaces
+(`retain`, which a paint calls with all of them). A cap of 32, evicting the
+least recently used, was wrong for a paint, which asks for every visible
+surface in the same order each time: the 33rd evicted the very surface the
+next paint wanted first, and every repaint rebuilt every grid and traced every
+contour again - 61-69 ms a repaint with 33 surfaces against 3-7 ms with 32
+(`SurfacePlanCache.MoreSurfacesInViewThanAnyCapAreKeptNotRebuiltOnEveryPaint`).
+Rejected: evicting only entries an earlier paint used (a paint generation) -
+a cache that still grows past its cap in the case it was for.
 
 Contours whose tracing would make more than four million points
 (`kPlanMaximumContourPoints`, estimated from the levels crossing each
@@ -240,6 +328,20 @@ styles, by `SceneSurface::coloring`. With one, its `faces3d`:
 * **Slope, Aspect** - a colour a face on copies of its own, lit by the face's
   normal, as the old slope colouring was.
 * **Flat** - one colour.
+
+A range that is a point (above) is coloured by the colouring, on the scalar
+loop, not by the kernels: their ramp has only a middle for a range that
+narrow, where a height below the point is the ramp's start
+(`SceneSurfaceStyle.ARangeAboveTheWholeSurfaceColoursItsVerticesTheRampsStartNotItsMiddle`).
+
+**A wireframe colours nothing.** Its lines are one grey whatever its style
+says of `faces3d`, so it takes no part in the one range that open ends are
+stretched over, brings up no legend bar when it is the only surface, and
+`SURFACE LEGEND <name> 3D` says `faces=none kind=none entries=0` for it. A
+shaded surface above a mesh (the design as the built-in Outline, the ground
+shaded) is coloured over its own heights, not over the two surfaces' - the
+mesh stretched the ramp to 200 and the ground's top sat a twentieth of the way
+along it (`SceneSurfaceStyle.AWireframeColoursNothingSoItsHeightsStretchNoRampAndAloneItBringsNoBar`).
 
 A style on the terrain ramp draws exactly what the scene drew before
 (`SceneSurfaceStyle.AStyleOnTheTerrainRampColoursASurfaceAsTheSceneAlwaysDid`).
@@ -302,19 +404,41 @@ to know). A head record, then one a band, stop or sector:
 
 ```
 legend surface="ground" style="Elevation Bands" view=plan faces=elevation kind=bands entries=10
-entry index=1 colour=#28468C from=24.892 to=26.2847 label="24.892 - 26.285"
+entry index=1 colour=#28468C from=24.892000198364258 to=26.284700202941895 label="24.892 - 26.285"
 ```
+
+`from=` and `to=` are the edges exactly (`formatExactReal`): the sample terrain's
+heights are Float32 (GDAL reads the text grid so), so the edges show their
+stored values, 24.892000198364258 and not 24.892, and the label carries the
+rounded form. Rejected: rounding the edges as `SURFACE`'s own record does
+(`docs/terrain.md`, "One surface record"), which drops the storage noise - a
+value an agent compares against one it holds should be that value, and the
+label is the rounded one already
+(`cli.surface_legend_lists_the_bands_of_a_surfaces_style` pins the digits). An
+open end has no `from=` or `to=` (JSON: `null`); a style that draws a surface
+as a mesh in 3D has `kind=none` (above).
 
 `SURFACE PLAN` is what the plan view draws of it looking at AREA (default: the
 whole surface) through a view of W x H pixels (default 1600 x 1000, the plan
 benchmark's), or at what the window's plan view shows (VIEW, through the one
-scope parser; headless it is refused naming AREA): the triangles in view,
+scope parser; headless it is refused naming AREA) - its own area at its own
+size and scale (`ScopeView::frame`, the view's `ViewTransform`), so what is
+stroked, tinted or hidden is what that view drew, to the triangle (a 327 x 488
+view at extents drew 21 182 triangles tinted and none stroked; the verb, told
+1600 x 1000 for it, said all stroked and none tinted); `pixels=W,H` asks for
+another frame of the view's area; `VIEW EXTENTS` is refused, naming EXTENTS: the
+triangles in view,
 stroked and tinted, the image and the pixels covered, the contour levels and
 runs and whether the minors and majors are drawn, labels, points, the
 boundary and breakline runs, and the scope record. A surface hidden in the
 drawing is still described (`visible=no`): hiding is the picture's. Refused:
 no such surface (NotFound), a word neither takes, WHERE ("a surface is not
-entities"), a scope other than AREA or VIEW, a bad AREA or pixels=.
+entities"), a scope other than AREA or VIEW, a bad AREA (not four numbers,
+or one with no width and no height: a point has no frame, and the reply of a
+plan that was never worked out - every count 0 - would read as a point the
+surface does not cover) or pixels=
+(`SurfaceDisplayVerbs.PlanOfTheViewIsWhatTheViewDrawsAtItsOwnSizeAndScale`,
+`PlanOfAnAreaThatIsAPointIsRefusedNotAnsweredWithZeroCounts`).
 
 No MCP tool of its own: the legend as JSON (`SURFACE LEGEND name JSON`) is the
 structured form an agent wants, and it comes back through
@@ -433,6 +557,23 @@ another build with `tools/compare_benchmarks.py --alternate`.
   legend panel docked in the window was rejected as one more panel for what
   the view itself can say where the surface is.
 * **No new MCP tool** - the verbs' JSON reaches an agent already.
+* **A style has at most 100 bands and 100 stops**, checked where every style
+  passes (`checkSurfaceStyle`) rather than limited in the 3D build: one number
+  for the line, the form and a project file, and a style that draws the same
+  on a big surface as on a small one. Rejected: a piece budget with a
+  fallback to vertex colours. A project saved with more (the verb took a
+  million) opens with the built-in styles and the refusal as the styles'
+  status, its saved set kept to be written back as it was
+  (`surface_document.cpp`: a set that is refused is not repaired by guessing).
+* **The plan cache has no cap** - the caller's `retain` bounds it. Rejected: a
+  count cap with least-recently-used eviction (a paint's cyclic access misses
+  every time one over the cap), and a paint generation protecting this
+  paint's entries.
+* **The rasteriser's tie rule is the top-left rule**, not vertex numbers.
+* **A range that is a point keeps a value's side of it** (and slope's point is
+  the ramp's start), rather than the one middle colour for everything.
+* **Two ramp tables stay two** until the owner chooses whose colours win
+  ("The ramps", "Not done").
 
 ## Not done
 
@@ -449,5 +590,14 @@ another build with `tools/compare_benchmarks.py --alternate`.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
   batters and flat pads they go from the flats when the batters crowd them.
 * The 3D view's legend shows the first styled surface only.
+* `RASTER SHADE` / `RASTER SLOPE` and the surface styles keep separate ramp
+  tables whose terrain, diverging, slope and grey differ in colour ("The
+  ramps"). One data table below both layers, with a decision about whose
+  colours stay, would remove the second way of doing it; it moves pictures
+  either way, so it is not done.
+* The contours refused for the plan are told to the plan view's log and its
+  headless report; a plot or a sheet viewport paints the same stats
+  (`PlanPaintStats::surfaceProblems`) and nothing there reads them, so a plot
+  of a style with too-fine contours is still silent.
 * Labels are not kept off each other or off the drawing's own labels (the
   label placer, `docs/annotation.md`, places entity labels only).

@@ -470,6 +470,7 @@ Result<ResolvedScope> resolveScope(const ScopeWords& words, const ScopeViewProvi
         }
         resolved.viewLayers = std::make_shared<const LayerOverrides>(std::move(view->layers));
         resolved.view = view->id;
+        resolved.frame = view->frame;
         scope.kind = ScopeKind::View;
         scope.view = resolved.viewLayers.get();
         if (!words.extents) {
@@ -505,6 +506,7 @@ Result<ScopeView> scopeViewOf(ViewSet& views, std::optional<std::uint32_t> id)
     answer.layers = state->layers;
     if (state->kind == ViewKind::Plan) {
         answer.area = state->plan.visibleWorldBounds();
+        answer.frame = state->plan;
     }
     return answer;
 }

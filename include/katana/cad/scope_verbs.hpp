@@ -58,6 +58,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/cad/layer_overrides.hpp"
+#include "katana/cad/view_transform.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -146,6 +147,12 @@ struct ScopeView {
     // draws, wherever it lies - a view with no plan extent (3D, a section)
     // answers so. VIEW ... EXTENTS leaves it out whatever the window says.
     std::optional<katana::geometry::Box2> area{};
+    // A plan view's whole transform - its size in pixels and its scale - when
+    // it has one, with `area`. A verb that says what the view DRAWS (SURFACE
+    // PLAN VIEW) needs the pixels per unit the level of detail is judged at,
+    // which the box alone does not give: the same box is 400 pixels wide or
+    // 1600.
+    std::optional<ViewTransform> frame{};
 };
 
 // Answers VIEW: the active plan view when `id` is empty, else the view with
@@ -173,6 +180,8 @@ struct ResolvedScope {
     ModifyFilter filter{};
     // VIEW: the view it resolved to.
     std::optional<std::uint32_t> view{};
+    // VIEW: its plan transform (ScopeView::frame), when it has one.
+    std::optional<ViewTransform> frame{};
     std::shared_ptr<const LayerOverrides> viewLayers{};
 };
 

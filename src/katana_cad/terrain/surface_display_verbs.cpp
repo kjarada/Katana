@@ -35,7 +35,9 @@ using katana::geometry::Point2;
 constexpr int kDefaultWidthPixels = 1600;
 constexpr int kDefaultHeightPixels = 1000;
 // The largest frame a verb is asked to look through: twice a 4K display each
-// way, past any view a person has, and an image of 138 megabytes at most.
+// way, past any view a person has. The image a frame gets is held to
+// kImagePixelCap whatever the frame: 16 million pixels of 4 bytes, 64
+// megabytes at most (an uncapped 7680 x 7680 image would be 236).
 constexpr int kMaximumPixels = 7680;
 // The pixel cap the plan painter gives a surface's image on screen
 // (PlanPaintOptions::rasterPixelCap).
@@ -91,7 +93,12 @@ katana::core::Result<std::string> legendVerb(const Document& document,
         }
     }
     const SurfaceDisplayStyle& style = styleOf(document.surfaceStyles(), *named);
-    const SurfaceFaces faces = threeD ? style.faces3d : style.planFaces;
+    // A wireframe or hidden surface is drawn in no colour of its faces
+    // (docs/surface_display.md, "In 3D"), whatever faces3d says.
+    const bool facesDrawn = !threeD || (style.shading != SurfaceStyle::Wireframe &&
+                                        style.shading != SurfaceStyle::Hidden);
+    const SurfaceFaces faces =
+        !facesDrawn ? SurfaceFaces::None : (threeD ? style.faces3d : style.planFaces);
     const SurfaceColouring colouring = surfaceColouring(style, faces, *named->surface);
     const SurfaceLegend legend = surfaceLegend(colouring);
 
@@ -173,6 +180,7 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
     std::vector<std::string> words;
     int width = kDefaultWidthPixels;
     int height = kDefaultHeightPixels;
+    bool pixelsGiven = false;
     for (std::size_t i = 2; i < args.size(); ++i) {
         const std::string lowered = katana::core::lowered(args[i]);
         if (lowered.starts_with("pixels=")) {
@@ -181,6 +189,7 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
                 return read.error();
             }
             std::tie(width, height) = *read;
+            pixelsGiven = true;
             continue;
         }
         if (lowered == "where") {
@@ -195,6 +204,10 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
     // view shows - through the one scope parser.
     Box2 area = named->surface->bounds();
     std::string scope = "scope=surface";
+    // VIEW: the plan view's own transform, so the surface is judged at the
+    // pixels per unit the view draws it at (absent: the area is fitted to
+    // width x height).
+    std::optional<ViewTransform> viewFrame;
     if (!words.empty()) {
         std::size_t at = 0;
         auto parsed = parseScopeWords(words, at);
@@ -211,6 +224,14 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
             area = parsed->area;
             scope = "scope=area area=" + boxText(area);
         } else if (parsed->source == ScopeSource::View) {
+            // EXTENTS drops the view's area (resolveScope), and a plan is
+            // looked at through one: say so, not that the view has none.
+            if (parsed->extents) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "SURFACE PLAN looks at an area, and VIEW EXTENTS has none: drop "
+                                 "EXTENTS for the view's own area, or give AREA x0,y0,x1,y1",
+                                 "EXTENTS");
+            }
             auto resolved = resolveScope(*parsed, views);
             if (!resolved) {
                 return resolved.error();
@@ -223,6 +244,15 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
             area = *resolved->scope.area;
             scope = "scope=view view=" + std::to_string(resolved->view.value_or(0)) +
                     " area=" + boxText(area);
+            // The view's own size and scale, unless pixels= asks for another
+            // frame: what the plan view draws, not what a 1600 x 1000 one
+            // would.
+            if (!pixelsGiven && resolved->frame.has_value() && resolved->frame->scale > 0.0 &&
+                std::isfinite(resolved->frame->scale)) {
+                viewFrame = resolved->frame;
+                width = std::clamp(static_cast<int>(std::lround(viewFrame->widthPixels)), 1, kMaximumPixels);
+                height = std::clamp(static_cast<int>(std::lround(viewFrame->heightPixels)), 1, kMaximumPixels);
+            }
         } else {
             return makeError(ErrorCode::InvalidArgument,
                              "a surface is not entities: SURFACE PLAN takes AREA x0,y0,x1,y1 or VIEW",
@@ -230,26 +260,35 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
         }
     }
 
-    // Looking at `area` as a plan view of width x height pixels frames it:
+    // The plan view's own frame (VIEW): its box at its scale. Otherwise
+    // looking at `area` as a plan view of width x height pixels frames it:
     // centred, at the scale that fits it on both sides.
     const double unitsPerPixel =
-        std::max(area.width() / static_cast<double>(width), area.height() / static_cast<double>(height));
-    SurfacePlan plan;
-    if (unitsPerPixel > 0.0 && std::isfinite(unitsPerPixel)) {
-        const Point2 centre = area.center();
-        const Box2 visible(Point2(centre.x - 0.5 * width * unitsPerPixel, centre.y - 0.5 * height * unitsPerPixel),
-                           Point2(centre.x + 0.5 * width * unitsPerPixel, centre.y + 0.5 * height * unitsPerPixel));
-        SurfacePlanView view;
-        view.visible = visible;
-        view.unitsPerPixel = unitsPerPixel;
-        const SurfacePlanImageGrid grid =
-            planImageGrid(visible, named->surface->bounds(), unitsPerPixel, kImagePixelCap);
-        view.imageBox = grid.box;
-        view.imageWidth = grid.width;
-        view.imageHeight = grid.height;
-        SurfacePlanCache cache;
-        plan = surfacePlan(*named, styleOf(document.surfaceStyles(), *named), view, cache);
+        viewFrame.has_value()
+            ? 1.0 / viewFrame->scale
+            : std::max(area.width() / static_cast<double>(width), area.height() / static_cast<double>(height));
+    // A point has no frame: the counts of a plan that was never worked out
+    // would read as "nothing of the surface is there".
+    if (!(unitsPerPixel > 0.0) || !std::isfinite(unitsPerPixel)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "AREA has no width and no height: a plan view cannot frame a point", boxText(area));
     }
+    Box2 visible = area;
+    if (!viewFrame.has_value()) {
+        const Point2 centre = area.center();
+        visible = Box2(Point2(centre.x - 0.5 * width * unitsPerPixel, centre.y - 0.5 * height * unitsPerPixel),
+                       Point2(centre.x + 0.5 * width * unitsPerPixel, centre.y + 0.5 * height * unitsPerPixel));
+    }
+    SurfacePlanView view;
+    view.visible = visible;
+    view.unitsPerPixel = unitsPerPixel;
+    const SurfacePlanImageGrid grid =
+        planImageGrid(visible, named->surface->bounds(), unitsPerPixel, kImagePixelCap);
+    view.imageBox = grid.box;
+    view.imageWidth = grid.width;
+    view.imageHeight = grid.height;
+    SurfacePlanCache cache;
+    const SurfacePlan plan = surfacePlan(*named, styleOf(document.surfaceStyles(), *named), view, cache);
     const SurfaceDisplayStyle& style = styleOf(document.surfaceStyles(), *named);
     const SurfacePlanStats& s = plan.stats;
     std::string reply = "plan surface=" + replyQuoted(named->name) + " style=" + replyQuoted(style.name) +

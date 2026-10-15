@@ -219,9 +219,13 @@ struct Ramp {
 
 // Whether a surface's heights stretch the one elevation ramp: coloured by
 // elevation, by a ramp (stops are absolute), with an end of its range left to
-// the scene.
+// the scene. A wireframe colours nothing - its lines are one grey - so its
+// heights stretch no ramp and, alone, bring up no legend bar.
 [[nodiscard]] bool sharesRamp(const SceneSurface& item)
 {
+    if (styleOf(item) == SurfaceStyle::Wireframe) {
+        return false;
+    }
     if (!item.display.has_value()) {
         return item.coloring == SurfaceColoring::Elevation;
     }
@@ -302,7 +306,11 @@ struct SurfacePaint {
         if (style.banded) {
             paint.vertex = SurfacePaint::Vertex::Value;
             paint.faces = SurfacePaint::Faces::Bands;
-        } else if (!style.stops.empty()) {
+        } else if (!style.stops.empty() || paint.colouring->collapsed()) {
+            // A range too narrow to stretch the ramp over is a point, and a
+            // height below or above it is the ramp's start or end: the
+            // colouring's rule, which the kernels' ramp (the middle only)
+            // does not know.
             paint.vertex = SurfacePaint::Vertex::Value;
         } else {
             paint.vertex = SurfacePaint::Vertex::Ramp;

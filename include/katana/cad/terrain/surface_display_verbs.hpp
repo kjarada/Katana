@@ -11,23 +11,30 @@
 //       (faces3d, over the surface's own heights - a 3D view stretches an
 //       open range over every visible surface, which a verb has no view to
 //       know). One record a band, stop or sector after a head record:
-//         legend surface=ground style="Elevation Bands" view=plan faces=elevation kind=bands entries=10
-//         entry index=1 colour=#2846AA from=24.892 to=26.2847 label="24.892 - 26.285"
-//       kind is bands, gradient (a smooth ramp or smooth stops: entries are
-//       colours from lowest to highest), sectors (aspect), flat or none.
-//       JSON: the same as one object.
+//         legend surface="ground" style="Elevation Bands" view=plan faces=elevation kind=bands entries=10
+//         entry index=1 colour=#28468C from=24.892000198364258 to=26.284700202941895 label="24.892 - 26.285"
+//       from and to are the edges exactly (the sample terrain's heights are
+//       Float32, so they show their stored values); the label is the rounded
+//       form a person reads. kind is bands, gradient (a smooth ramp or smooth
+//       stops: entries are colours from lowest to highest), sectors (aspect),
+//       flat or none. A band that takes in everything past an edge has no
+//       from or to there. JSON: the same as one object.
 //
 //   SURFACE PLAN <name> [AREA x0,y0,x1,y1 | VIEW [<id>]] [pixels=W,H]
 //       What the plan view draws of it (cad/terrain/surface_plan.hpp) looking
 //       at AREA (default: the whole surface) through a view of W x H pixels
-//       (default 1600,1000), or at what the window's plan view shows: how
-//       many triangles are in view, stroked and tinted, the contours, labels,
-//       points and pixels. One record, plus the scope's.
+//       (default 1600,1000), or at what the window's plan view shows - its own
+//       area at its own size and scale, so what is stroked, tinted or hidden
+//       is what that view drew; pixels=W,H frames the view's area as another
+//       size instead. VIEW EXTENTS is refused: a plan is looked at through an
+//       area. How many triangles are in view, stroked and tinted, the
+//       contours, labels, points and pixels. One record, plus the scope's.
 //
 // Both only read, so neither is an undo step. A surface hidden in the
 // drawing is still described (visible=no says so): hiding is the picture's,
 // and the question is what its style would draw. Refused: no such surface
-// (NotFound, naming it), a word neither verb takes, a bad AREA or pixels=.
+// (NotFound, naming it), a word neither verb takes, a bad AREA (not four
+// numbers, or one with no width and no height) or pixels=.
 
 #include <span>
 #include <string>

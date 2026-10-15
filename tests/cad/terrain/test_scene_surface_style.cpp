@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -268,4 +269,78 @@ TEST(SceneSurfaceStyle, ApplyingAStyleSetsTheShadingAndKeepsACopyOfTheStyle)
     // A copy: changing the style afterwards changes nothing drawn.
     style.ramp = "grey";
     EXPECT_EQ(item.display->ramp, "terrain");
+}
+
+TEST(SceneSurfaceStyle, AWireframeColoursNothingSoItsHeightsStretchNoRampAndAloneItBringsNoBar)
+{
+    // ground 0 to 10 shaded on the one ramp; design 100 to 200 drawn as a
+    // grey mesh (the built-in Outline style). The mesh is one grey whatever
+    // its heights, so they are no part of the range the shaded surface is
+    // coloured over: ground's top, at 10, is the ramp's end (245, 245, 245).
+    // Counted in, the range was 0 to 200 and ground's top a twentieth of the
+    // way along it, nearly the ramp's start; the bar read 200.
+    const TinSurface ground = square([](double x, double) { return x; });
+    const TinSurface design = square([](double x, double) { return 100.0 + 10.0 * x; });
+    SurfaceDisplayStyle outline = styled(SurfaceFaces::Elevation);
+    outline.shading = SurfaceStyle::Wireframe;
+    SceneBuilder builder;
+    SceneLayers layers;
+    builder.buildTerrain({itemOf(ground, styled(SurfaceFaces::Elevation)), itemOf(design, outline)}, {}, unlit(),
+                         layers);
+    EXPECT_EQ(layers.rampLow, 0.0);
+    EXPECT_EQ(layers.rampHigh, 10.0);
+    EXPECT_NE(std::ranges::find(layers.terrain.colors, rgba(245, 245, 245)), layers.terrain.colors.end());
+    EXPECT_NE(std::ranges::find(layers.terrain.colors, rgba(40, 70, 140)), layers.terrain.colors.end());
+
+    // Alone, the mesh brings up no elevation bar: nothing in view is coloured
+    // by elevation. (It was the old bar, 200 / 100, over a grey mesh.)
+    builder.buildTerrain({itemOf(design, outline)}, {}, unlit(), layers);
+    EXPECT_FALSE(layers.hasRamp());
+    EXPECT_FALSE(layers.legend.has_value());
+
+    // And a surface with no style, wireframe, in the scene's own rule from
+    // before styles.
+    SceneSurface plain;
+    plain.name = "design";
+    plain.surface = &design;
+    plain.style = SurfaceStyle::Wireframe;
+    plain.coloring = SurfaceColoring::Elevation;
+    builder.buildTerrain({plain}, {}, unlit(), layers);
+    EXPECT_FALSE(layers.hasRamp());
+}
+
+TEST(SceneSurfaceStyle, ARangeAboveTheWholeSurfaceColoursItsVerticesTheRampsStartNotItsMiddle)
+{
+    // z = x is 0 to 10 and min=40 is above all of it: the range collapses to
+    // the point 40 with every height below it, so every vertex is the ramp's
+    // start (40, 70, 140). The kernels' ramp has only a middle for a range
+    // that narrow, (235, 220, 130), and drew it for all of them.
+    const TinSurface tin = square([](double x, double) { return x; });
+    SurfaceDisplayStyle style = styled(SurfaceFaces::Elevation);
+    style.rangeMin = 40.0;
+    SceneBuilder builder;
+    DrawList list;
+    builder.appendSurfaces({itemOf(tin, style)}, unlit(), list);
+    ASSERT_EQ(list.colors.size(), 4u);
+    for (const Rgba colour : list.colors) {
+        EXPECT_EQ(colour, rgba(40, 70, 140));
+    }
+}
+
+TEST(SceneSurfaceStyle, ALevelFaceColouredBySlopeIsTheSlopeRampsStartAsItAlwaysWas)
+{
+    // The old 3D slope line gave 0 % the ramp's green start, (0, 255, 38); the
+    // style's range is 0 to the steepest face, which on a level pad is 0, and
+    // the middle (255, 255, 38) was drawn for it.
+    const TinSurface tin = square([](double, double) { return 5.0; });
+    SurfaceDisplayStyle style = styled(SurfaceFaces::Slope);
+    style.ramp = "slope";
+    SceneBuilder builder;
+    DrawList list;
+    builder.appendSurfaces({itemOf(tin, style)}, unlit(), list);
+    const auto faces = facesOf(list);
+    ASSERT_EQ(faces.size(), 2u);
+    for (const Face& face : faces) {
+        EXPECT_EQ(face.colour, rgba(0, 255, 38));
+    }
 }

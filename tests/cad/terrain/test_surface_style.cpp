@@ -271,3 +271,74 @@ TEST(SurfaceStyleSets, TheWordsOfFacesAndShadingReadBackInAnyCase)
     EXPECT_EQ(parseSurfaceShading("EDGES"), SurfaceStyle::ShadedWithEdges);
     EXPECT_FALSE(parseSurfaceFaces("stripes").has_value());
 }
+
+namespace {
+
+// The field a style that cannot be drawn is refused for ("" when it is drawn).
+template <typename Change> std::string fieldRefusedFor(Change change)
+{
+    SurfaceDisplayStyle style;
+    style.name = "Probe";
+    change(style);
+    const auto status = checkSurfaceStyle(style);
+    return status.ok() ? std::string() : status.error().context;
+}
+
+} // namespace
+
+TEST(SurfaceStyleSets, TheBandCountIsHeldToTwoThroughTheMaximumNotLeftToGrowWithoutBound)
+{
+    // The 3D view cuts each triangle at every band edge it crosses, so its
+    // geometry grew by about 643 triangles a band on the 21 182-triangle
+    // sample terrain (28 078 at 10 bands, 3 235 844 at 5 000, 32 163 345 at
+    // 50 000): a count the verb allowed up to 1 000 000 built tens of
+    // gigabytes. One number, 100, the form's own range, for the line, the
+    // form and a project file.
+    ASSERT_EQ(kMaximumSurfaceBands, 100);
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = 2; }), "");
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = 100; }), "");
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = 101; }), "field=bands");
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = 1'000'000; }), "field=bands");
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = std::numeric_limits<int>::max(); }),
+              "field=bands");
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = 1; }), "field=bands");
+    EXPECT_EQ(fieldRefusedFor([](SurfaceDisplayStyle& s) { s.bands = -3; }), "field=bands");
+    // The refusal says the range it holds.
+    SurfaceDisplayStyle many;
+    many.name = "Many";
+    many.bands = 101;
+    const auto status = checkSurfaceStyle(many);
+    ASSERT_FALSE(status.ok());
+    EXPECT_NE(status.error().message.find("2 to 100"), std::string::npos) << status.error().describe();
+}
+
+TEST(SurfaceStyleSets, AListOfStopsIsHeldToTheSameMaximumBecauseABandedOneIsABandAStop)
+{
+    const auto stopsOf = [](int count) {
+        std::vector<ColourStop> stops;
+        for (int i = 0; i < count; ++i) {
+            stops.push_back({static_cast<double>(i), Color{0, 0, 0, 255}});
+        }
+        return stops;
+    };
+    EXPECT_EQ(fieldRefusedFor([&](SurfaceDisplayStyle& s) { s.stops = stopsOf(100); }), "");
+    EXPECT_EQ(fieldRefusedFor([&](SurfaceDisplayStyle& s) { s.stops = stopsOf(101); }), "field=stops");
+}
+
+TEST(SurfaceStyleSets, AProjectFileWithAMillionBandsIsRefusedWhenItIsRead)
+{
+    SurfaceStyleSet set = builtInSurfaceStyles();
+    std::string text = surfaceStylesToJson(set);
+    const std::string ten = "\"bands\":10";
+    const std::size_t at = text.find(ten);
+    ASSERT_NE(at, std::string::npos) << text;
+    text.replace(at, ten.size(), "\"bands\":1000000");
+    const auto read = surfaceStylesFromJson(text);
+    ASSERT_FALSE(read.ok());
+    EXPECT_EQ(read.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(read.error().describe().find("bands"), std::string::npos) << read.error().describe();
+    // The same text with a count within the maximum reads.
+    std::string fine = surfaceStylesToJson(set);
+    fine.replace(fine.find(ten), ten.size(), "\"bands\":100");
+    EXPECT_TRUE(surfaceStylesFromJson(fine).ok());
+}

@@ -45,6 +45,16 @@ enum class SurfaceStyle {
 // Past this many triangles an Automatic surface is drawn Shaded.
 inline constexpr std::size_t kDenseSurfaceTriangles = 50000;
 
+// The most bands a banded ramp may have, and the most stops a style may list
+// (a banded set of stops is a band a stop). The 3D view cuts each triangle at
+// every band edge it crosses, so its geometry grows by about 643 triangles a
+// band on the 21 182-triangle sample terrain (measured: 28 078 triangles at 10
+// bands, 3 235 844 at 5 000), and a legend shows 16 rows however many there
+// are. 100 bands is a 0.14 m band on that terrain's 13.9 m of relief, and is
+// the Surface Styles form's own range - one number for the form, the line and
+// a project file.
+inline constexpr int kMaximumSurfaceBands = 100;
+
 // What colours a surface's faces.
 enum class SurfaceFaces {
     None,      // no faces: lines only (the plan view's default)
@@ -144,8 +154,9 @@ struct SurfaceStyleSet {
 
 // InvalidArgument, naming the field, for a style that cannot be drawn: an
 // empty name, a contour interval that is not finite and positive, an opacity
-// outside 0 to 1, fewer than two bands, stops out of order or not finite, a
-// range that is not finite or empty, an unknown ramp.
+// outside 0 to 1, fewer than two or more than kMaximumSurfaceBands bands, more
+// than that many stops, stops out of order or not finite, a range that is not
+// finite or empty, an unknown ramp.
 [[nodiscard]] katana::core::Status checkSurfaceStyle(const SurfaceDisplayStyle& style);
 
 // checkSurfaceStyle for every style, and the set as a whole: at least one

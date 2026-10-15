@@ -190,8 +190,11 @@ Status checkSurfaceStyle(const SurfaceDisplayStyle& style)
     if (!std::isfinite(style.planOpacity) || style.planOpacity < 0.0 || style.planOpacity > 1.0) {
         return refuse(style, "opacity", "must be from 0 to 1");
     }
-    if (style.bands < 2) {
-        return refuse(style, "bands", "must be 2 or more");
+    if (style.bands < 2 || style.bands > kMaximumSurfaceBands) {
+        return refuse(style, "bands", "must be 2 to " + std::to_string(kMaximumSurfaceBands));
+    }
+    if (style.stops.size() > static_cast<std::size_t>(kMaximumSurfaceBands)) {
+        return refuse(style, "stops", "may be at most " + std::to_string(kMaximumSurfaceBands));
     }
     for (std::size_t i = 0; i < style.stops.size(); ++i) {
         if (!std::isfinite(style.stops[i].value)) {
