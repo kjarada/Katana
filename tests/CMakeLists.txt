@@ -3422,6 +3422,25 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # A leader goes into the window's IFC file as the note it says, not as its
+    # template (docs/ifc.md, "Drawing entities"): the window hands the export
+    # the drawing's surfaces (app::setLeaderNotes). A point at RL 12 on a surface
+    # at RL 10; its preset=level leader says "RL 12.000", its preset=surface
+    # one 12 - 10 = "+2.000". Read back, a text is a Text.
+    set(_ifc_leaders "${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_leaders.ifc")
+    add_test(NAME qt_ifc_export_writes_a_leaders_note_not_its_template_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=>PLINE3D 0,0,10 100,0,10 100,100,10 0,100,10 CLOSE|>SURFACE FROM DRAWING NAME ground|>POINT 50,50|>SELECT 2|>PROP SET elevation 12 real|>SELECT NONE|>LEADER #2 60,60 preset=level|>LEADER #2 40,60 preset=surface|>EXPORT ${_ifc_leaders} NOSURFACES|>NEW|>IMPORT ${_ifc_leaders}|>LIST"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_leaders_headless.png"
+            "-DEXPECT=ifc exported file=\"qt_ifc_leaders\\.ifc\".*Text  layer=0  \"RL 12\\.000\".*Text  layer=0  \"\\+2\\.000\""
+            "-DFORBID=Text  layer=0  \"[^\"]*[{]"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_ifc_export_writes_a_leaders_note_not_its_template_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # File > Import IFC on that file, into a drawing with no coordinate
     # system: described, imported, and the project takes the file's EPSG:7856
     # (the dialog's default), as its own undoable step.

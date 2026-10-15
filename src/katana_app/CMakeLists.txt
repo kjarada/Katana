@@ -1231,6 +1231,26 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli>
                 -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL NOROADMODEL")
     set_tests_properties(cli.ifc_noroadmodel_given_twice_is_refused PROPERTIES WILL_FAIL TRUE)
+    # A leader goes into the file as the note it says, not as its template
+    # (docs/ifc.md, "Drawing entities"): a point at RL 12 on a surface at RL 10,
+    # a preset=level leader ("RL {rl:.3f}" says "RL 12.000") and a preset=surface
+    # one ("{dsurface.ground:+.3f}" says 12 - 10 = "+2.000"), exported and read
+    # back - the IFC import turns an IfcTextLiteral into a Text. The template is
+    # in the reply that made the leader, so what must not appear is a TEXT that
+    # holds a brace.
+    add_test(NAME cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "PLINE3D 0,0,10 100,0,10 100,100,10 0,100,10 CLOSE"
+                -c "SURFACE FROM DRAWING NAME ground"
+                -c "POINT 50,50" -c "SELECT 2" -c "PROP SET elevation 12 real" -c "SELECT NONE"
+                -c "LEADER #2 60,60 preset=level" -c "LEADER #2 40,60 preset=surface"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli leaders.ifc\" NOSURFACES"
+                -c "NEW" -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli leaders.ifc\"" -c "LIST")
+    set_tests_properties(cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "Text  layer=0  \"RL 12\\.000\".*Text  layer=0  \"\\+2\\.000\""
+        FAIL_REGULAR_EXPRESSION "Text  layer=0  \"[^\"]*[{]")
 
     # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
     # EXPRESS rules, no proxy, and the alignment's geometry against its

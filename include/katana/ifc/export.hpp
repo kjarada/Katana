@@ -90,6 +90,7 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -250,6 +251,20 @@ struct ExportOptions {
     std::vector<ClassificationRule> rules;
     bool exportEntities = true;
     bool exportAlignments = true;
+
+    // What a smart leader's note is read from. A leader is written as the
+    // note it SAYS (entity::leaderNote), never as its template: a template is
+    // "RL {rl:.3f}", the note "RL 12.000". The note reads the entity the tip
+    // is on and, for a value of a surface or an alignment ({dsurface.ground},
+    // {station.MC01}), the drawing's own, which this layer cannot see
+    // (check_layering.cmake: katana_ifc sees entity and terrain, not cad), so
+    // the front end hands them over - cad::annotation::leaderContext(document)
+    // and cad::codePropertyCandidates(), as every other consumer of a leader
+    // does. Left empty, a leader's note is read off its target alone, and a
+    // line that names a surface or an alignment is dropped from it, as the
+    // DXF writer's own fallback does (nothing made up).
+    katana::entity::LeaderContext leaderContext{};
+    std::vector<std::string> codeProperties;
 };
 
 // One line of the account of what an export wrote: so many objects of one

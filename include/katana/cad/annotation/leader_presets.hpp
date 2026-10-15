@@ -9,8 +9,9 @@
 // {dsurface.NAME}, {cut.NAME}, {fill.NAME}, {station.NAME}, {offset.NAME},
 // {profile.NAME}, {dprofile.NAME}). Every caller that shows what a leader
 // says - the plan painter and so plots and sheets, LIST and LEADER, the
-// property panel, the Leaders manager, the tools, the DXF export - asks it
-// of the one Document, so they cannot say different things.
+// property panel, the Leaders manager, the tools, the DXF export and the IFC
+// export (app::setLeaderNotes) - asks it of the one Document, so they cannot
+// say different things.
 //
 // A PRESET is a named template: the level of a point, its height above a
 // surface, the cut or the fill to one, its name, its code, its details, its

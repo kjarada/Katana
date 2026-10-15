@@ -613,8 +613,14 @@ class DrawingWriter {
                     if (const Id id = curve(shape.vertices, {}, false, false)) {
                         drawn.items.push_back(id);
                     }
-                    if (!shape.text.empty()) {
-                        drawn.items.push_back(textAt(shape.vertices.back(), 0.0, shape.text));
+                    // The note the leader SAYS, not shape.text: for a smart
+                    // leader that is its template ("RL {rl:.3f}"), and for
+                    // one made from a label style it is empty. The plan, LIST
+                    // and the DXF all write the note (entity::leaderNote).
+                    const std::string note = entity::leaderNote(
+                        model_, shape, b_.options().codeProperties, b_.options().leaderContext);
+                    if (!note.empty()) {
+                        drawn.items.push_back(textAt(shape.vertices.back(), 0.0, note));
                     }
                     drawn.type = "Annotation2D";
                 } else if constexpr (std::is_same_v<T, geometry::CurvePolyline2>) {

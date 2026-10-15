@@ -412,7 +412,22 @@ out as how it was drawn rather than what it is. A curve polyline or spline is
 a run to the default rules, so a kerb drawn with an arc is still an `IfcKerb`,
 and a rules file's `kinds` may name `CurvePolyline`, `Ellipse` and `Spline`.
 Text is `IfcTextLiteralWithExtent` (plain
-`IfcTextLiteral` is deprecated in 4.3). Each entity keeps its layer as an
+`IfcTextLiteral` is deprecated in 4.3). A leader is its curve and the NOTE it
+says (`entity::leaderNote`), not its `text`: a smart leader's `text` is a
+template (`RL {rl:.3f}`) and one made from a label style has none, so a
+template written as it stands, or no words at all, would say what the plan,
+`LIST` and the DXF do not. The note reads the entity the tip is on and, for
+`{dsurface.ground}` or `{station.MC01}`, the drawing's surfaces and
+alignments, which this layer cannot see, so both front ends hand them over
+(`ExportOptions::leaderContext` and `codeProperties`, set by
+`app::setLeaderNotes` from `cad::annotation::leaderContext` and
+`cad::codePropertyCandidates`, as every other consumer of a leader does). A
+writer given none (a library caller) reads a note off its target alone, and a
+line that names a surface or an alignment is dropped from it, as the DXF
+writer's own fallback drops it: absent is not a made-up figure
+(`IfcExportLeaders.ASmartLeaderIsWrittenAsTheNoteItSaysNotItsTemplate`,
+`cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template`). Each
+entity keeps its layer as an
 `IfcPresentationLayerAssignment`, its colour as a curve style, its properties
 (`Katana_Attributes`) and its provenance (`Katana_Provenance`). Labels are not
 written: what a label says and where it stands are the placer's, which this

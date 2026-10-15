@@ -529,8 +529,10 @@ Decisions:
 * **Every caller passes the document's** - the plan painter (`PlanSource::leaders`,
   made by `planSourceOf`, so plots and sheet viewports too), `LIST` and `INFO`,
   every `LEADER` and `BALLOON` verb, the label keep-out of `LABEL LAYOUT`, the
-  property panel, the Leaders manager, the Leader and preset tools, and the
-  DXF export (`EXPORT` and the window's, both through `writeDxfExport`). A
+  property panel, the Leaders manager, the Leader and preset tools, the
+  DXF export (`EXPORT` and the window's, both through `writeDxfExport`) and
+  the IFC export (`EXPORT x.ifc`, katana_cli's and the window's, through
+  `app::setLeaderNotes`: an IFC leader is its note, not its template). A
   caller that passes none reads no surface: such a line is dropped, never
   written as nothing. The DXF writer's own fallback - a caller that hands it
   no drawn annotation - cannot see `cad` and passes none.
