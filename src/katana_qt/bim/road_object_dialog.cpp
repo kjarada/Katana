@@ -15,6 +15,7 @@
 #include <QPolygonF>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScrollArea>
 #include <QShowEvent>
 #include <QSignalBlocker>
 #include <QStringList>
@@ -158,7 +159,36 @@ class PreviewWidget final : public QWidget {
             return QPointF(this->width() / 2.0 + (h - centreH) * scale,
                            this->height() - margin - 14 - (z - z0) * scale);
         };
+        // A culvert's headwalls stand round the ends of its barrel, and seen
+        // along it each is a slab as large as the barrel and more: filled they
+        // would hide it, whichever is drawn first or last, in a colour the
+        // barrel shares. They are drawn first, as outlines, and the barrel
+        // over them.
+        const auto isHeadwall = [](const katana::cad::bim::BimObject& object) {
+            return object.id.find("/headwall/") != std::string::npos;
+        };
         for (const auto& object : model_.objects) {
+            if (!isHeadwall(object) || object.mesh.vertices.empty()) {
+                continue;
+            }
+            double a0 = std::numeric_limits<double>::infinity();
+            double a1 = -a0;
+            double c0 = a0;
+            double c1 = -a0;
+            for (const auto& vertex : object.mesh.vertices) {
+                a0 = std::min(a0, across(vertex));
+                a1 = std::max(a1, across(vertex));
+                c0 = std::min(c0, vertex.z);
+                c1 = std::max(c1, vertex.z);
+            }
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(qColour(object.colour).darker(160), 1.5));
+            painter.drawRect(QRectF(map(a0, c1), map(a1, c0)));
+        }
+        for (const auto& object : model_.objects) {
+            if (isHeadwall(object)) {
+                continue;
+            }
             painter.setPen(Qt::NoPen);
             painter.setBrush(qColour(object.colour));
             for (const auto& face : object.mesh.faces) {
@@ -281,7 +311,12 @@ Result<QString> roadObjectAddLine(const RoadObjectForm& form)
     case RoadObjectForm::Place::Lines:
     case RoadObjectForm::Place::DrawnPoints:
         if (form.scope.trimmed().isEmpty()) {
-            return makeError(ErrorCode::InvalidArgument, "say which part of the drawing");
+            // The scope's own reason (a colour that does not read, no layer
+            // ticked, a view that has closed) when it gave one: "say which
+            // part" would be wrong to someone who has.
+            return makeError(ErrorCode::InvalidArgument,
+                             form.scopeError.isEmpty() ? std::string("say which part of the drawing")
+                                                       : form.scopeError.toStdString());
         }
         if (auto status = number("spacing", form.spacing); !status) {
             return status.error();
@@ -465,8 +500,10 @@ RoadObjectDialog::RoadObjectDialog(RoadObjectDialogContext context, QWidget* par
     d.placeAlignment = named(new QRadioButton("Along an &alignment"), "roadObjectPlaceAlignment");
     d.placeLines = named(new QRadioButton("Along &lines in the drawing"), "roadObjectPlaceLines");
     d.placePoints = named(new QRadioButton("At points &typed"), "roadObjectPlacePoints");
+    // Not "&drawing": Add is A&dd, and two widgets with one mnemonic make the key
+    // go to neither - it cycles between them.
     d.placeDrawnPoints =
-        named(new QRadioButton("At points in the &drawing"), "roadObjectPlaceDrawnPoints");
+        named(new QRadioButton("At points in the dra&wing"), "roadObjectPlaceDrawnPoints");
     auto* places = new QButtonGroup(this);
     for (QRadioButton* button :
          {d.placeAlignment, d.placeLines, d.placePoints, d.placeDrawnPoints}) {
@@ -554,13 +591,30 @@ RoadObjectDialog::RoadObjectDialog(RoadObjectDialogContext context, QWidget* par
     buttons->addWidget(d.previewRun);
     buttons->addWidget(d.add);
     buttons->addWidget(close);
+    // The pages, the placement and the heights scroll; the line, Preview, Add and
+    // Close, and what they replied, stay below them in reach. Laid out in one
+    // piece the dialog was some 1,500 px tall (the scope and filter controls
+    // alone are taller than a tab), and Add was off a laptop's screen; the
+    // window's screen fit (screen_fit.hpp) would scroll the whole of it, Add
+    // with it.
+    auto* body = new QWidget;
+    auto* bodyLayout = new QVBoxLayout(body);
+    bodyLayout->setContentsMargins(0, 0, 0, 0);
+    bodyLayout->addLayout(top);
+    bodyLayout->addWidget(placement);
+    bodyLayout->addLayout(middle);
+    auto* scroll = named(new QScrollArea, "roadObjectBody");
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidget(body);
     auto* layout = new QVBoxLayout(this);
-    layout->addLayout(top);
-    layout->addWidget(placement);
-    layout->addLayout(middle);
+    layout->addWidget(scroll, 1);
     layout->addLayout(buttons);
     layout->addWidget(d.reply);
     layout->addWidget(d.status);
+    // A scroll area asks for little, so say what a person wants to see first;
+    // the screen fit holds it to the room there is.
+    resize(1000, 760);
 
     // ---- wiring: every edit makes the line again, never runs it ----
     d.refresh = [this] {
@@ -576,6 +630,13 @@ RoadObjectDialog::RoadObjectDialog(RoadObjectDialogContext context, QWidget* par
         self.spacing->setEnabled(shape == KindShape::Point &&
                                  place != RoadObjectForm::Place::Points &&
                                  place != RoadObjectForm::Place::DrawnPoints);
+        // The profile is carried out to an offset at the crossfall; an object that
+        // stands on a surface, or on the heights of a line, has none to carry.
+        const QString heightsWord = self.heights->currentData().toString();
+        self.crossfall->setEnabled(
+            onAlignment &&
+            (heightsWord == "profile" ||
+             (heightsWord.isEmpty() && self.surface->currentText().trimmed().isEmpty())));
         self.points->setEnabled(place == RoadObjectForm::Place::Points);
         self.scope->setEnabled(place == RoadObjectForm::Place::Lines ||
                                place == RoadObjectForm::Place::DrawnPoints);
@@ -643,9 +704,29 @@ RoadObjectDialog::RoadObjectDialog(RoadObjectDialogContext context, QWidget* par
         }
         const VerbOutcome outcome = self.context.run(*made);
         self.reply->setPlainText(outcome.ok ? outcome.reply : outcome.error);
-        self.status->setText(outcome.ok ? (asPreview ? "Previewed: nothing was changed."
-                                                     : "Added - one undo step.")
-                                        : "Refused: " + outcome.error);
+        if (!outcome.ok) {
+            self.status->setText("Refused: " + outcome.error);
+            return;
+        }
+        // Worded from the reply: a scope that takes nothing is not refused (the
+        // verb reports "added=0" and makes no undo step), and "Added - one undo
+        // step." over that would be false.
+        const QString lead = asPreview ? "preview id=" : "added id=";
+        int count = 0;
+        for (const QString& each : outcome.reply.split('\n')) {
+            count += each.startsWith(lead) ? 1 : 0;
+        }
+        if (count == 0) {
+            self.status->setText(asPreview ? "Previewed: the scope took nothing to place on."
+                                           : "Nothing added: the scope took nothing to place on.");
+        } else if (asPreview) {
+            self.status->setText(count == 1 ? QString("Previewed: nothing was changed.")
+                                            : QString("Previewed %1: nothing was changed.")
+                                                  .arg(count));
+        } else {
+            self.status->setText(count == 1 ? QString("Added - one undo step.")
+                                            : QString("Added %1 - one undo step.").arg(count));
+        }
     };
     connect(d.previewRun, &QPushButton::clicked, this, [run] { run(true); });
     connect(d.add, &QPushButton::clicked, this, [run] { run(false); });
@@ -701,11 +782,13 @@ RoadObjectForm RoadObjectDialog::form() const
         made.place == RoadObjectForm::Place::DrawnPoints) {
         if (const auto words = d.scope->verbWords()) {
             made.scope = *words;
+        } else {
+            made.scopeError = qs(words.error().message);
         }
     }
     made.heights = d.heights->currentData().toString();
     made.surface = d.surface->currentText().trimmed();
-    made.crossfall = d.crossfall->text();
+    made.crossfall = d.crossfall->isEnabled() ? d.crossfall->text() : QString();
     made.dz = d.dz->text();
     made.name = d.name->text();
     made.layer = d.layer->text();

@@ -22,9 +22,9 @@
 //                             from, to, offset, layer, quantities, problem
 //   roadObjectCount           how many objects, and how many problems
 //   roadObjectInfo            ROADOBJECT INFO of the current row (read-only)
-//   roadObjectKeys            key=value ... for Apply
+//   roadObjectKeys            key=value ... for Apply, and for Copy (cleared once run)
 //   roadObjectApply           ROADOBJECT SET <id> <keys>
-//   roadObjectCopy            ROADOBJECT COPY <id>
+//   roadObjectCopy            ROADOBJECT COPY <id> [the keys]
 //   roadObjectDelete          ROADOBJECT DELETE <ids> - the chosen rows
 //   roadObjectZoom            ZOOM WINDOW round the chosen objects
 //   roadObjectNew             the placing dialog, on the current row's kind

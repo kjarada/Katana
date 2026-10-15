@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
@@ -27,6 +28,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScrollArea>
 #include <QSet>
 #include <QStringList>
 #include <QTabWidget>
@@ -485,4 +487,255 @@ TEST(RoadObjectWorkbench, TheCommandReferenceHasTheRoadObjectVerbs)
     }
     EXPECT_FALSE(found->entries.empty());
     EXPECT_EQ(found->entries.front().title, "About");
+}
+
+// ---- the findings of the review of 2026-10-15 --------------------------------------------------
+
+TEST(RoadObjectDialog, AddingFromAScopeThatTakesNothingSaysNothingWasAddedAndMakesNoUndoStep)
+{
+    // The scope is the selection and nothing is selected: the verb reports
+    // added=0 and records no step. The status said "Added - one undo step."
+    Site site;
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    dialog.showKind(RoadObjectKind::Fence);
+    child<QRadioButton>(dialog, "roadObjectPlaceLines")->setChecked(true);
+    QApplication::processEvents();
+    EXPECT_TRUE(text(dialog, "roadObjectLine").contains("ALONG FROM"))
+        << text(dialog, "roadObjectLine").toStdString();
+    click(dialog, "roadObjectAdd");
+    EXPECT_TRUE(text(dialog, "roadObjectReply").contains("added=0"))
+        << text(dialog, "roadObjectReply").toStdString();
+    const QString status = text(dialog, "roadObjectStatus");
+    EXPECT_TRUE(status.startsWith("Nothing added")) << status.toStdString();
+    EXPECT_FALSE(status.contains("undo step")) << status.toStdString();
+    EXPECT_TRUE(site.document.roadObjects().objects.empty());
+    click(dialog, "roadObjectPreviewRun");
+    EXPECT_TRUE(text(dialog, "roadObjectStatus").startsWith("Previewed: the scope took nothing"))
+        << text(dialog, "roadObjectStatus").toStdString();
+}
+
+TEST(RoadObjectDialog, AddingFromAScopeThatTakesTwoLinesSaysHowManyWereAddedInOneUndoStep)
+{
+    Site site;
+    site.run("LINE 0,20 10,20");
+    site.run("LINE 0,30 10,30");
+    site.run("SELECT ALL");
+    site.run("PROP SET elevation 2.5");
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    dialog.showKind(RoadObjectKind::Fence);
+    child<QRadioButton>(dialog, "roadObjectPlaceLines")->setChecked(true);
+    child<QRadioButton>(dialog, "roadObjectSourceScopeDrawing")->setChecked(true);
+    QApplication::processEvents();
+    click(dialog, "roadObjectAdd");
+    EXPECT_EQ(site.document.roadObjects().objects.size(), 2u);
+    EXPECT_EQ(text(dialog, "roadObjectStatus"), "Added 2 - one undo step.");
+}
+
+TEST(RoadObjectDialog, TheScopesOwnRefusalIsShownInPlaceOfAGenericOne)
+{
+    // A filter colour that does not read: the scope widget says why, and the
+    // dialog said "say which part of the drawing" to a person who had.
+    Site site;
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    dialog.showKind(RoadObjectKind::Fence);
+    child<QRadioButton>(dialog, "roadObjectPlaceLines")->setChecked(true);
+    fill(dialog, "roadObjectSourceFilterColour", "red");
+    const QString status = text(dialog, "roadObjectStatus");
+    EXPECT_TRUE(status.contains("filter's colour")) << status.toStdString();
+    EXPECT_FALSE(status.contains("say which part")) << status.toStdString();
+    EXPECT_FALSE(child<QPushButton>(dialog, "roadObjectAdd")->isEnabled());
+    const auto line = katana::qt::roadObjectAddLine(dialog.form());
+    ASSERT_FALSE(line.ok());
+    EXPECT_TRUE(QString::fromStdString(line.error().message).contains("filter's colour"));
+    // With nothing the scope objects to and nothing said, the old words stand.
+    RoadObjectForm form;
+    form.kind = RoadObjectKind::Fence;
+    form.place = RoadObjectForm::Place::Lines;
+    EXPECT_TRUE(QString::fromStdString(katana::qt::roadObjectAddLine(form).error().message)
+                    .contains("say which part"));
+}
+
+TEST(RoadObjectDialog, EveryButtonOfTheDialogHasItsOwnMnemonic)
+{
+    // Alt+D was both "At points in the drawing" and "Add": two widgets with
+    // one key make it cycle between them and choose neither.
+    Site site;
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    QSet<QChar> letters;
+    for (const auto* button : dialog.findChildren<QAbstractButton*>()) {
+        const qsizetype at = button->text().indexOf('&');
+        if (at < 0 || at + 1 >= button->text().size()) {
+            continue;
+        }
+        const QChar letter = button->text()[at + 1].toLower();
+        EXPECT_FALSE(letters.contains(letter))
+            << "two buttons use Alt+" << letter.toLatin1() << ": " << button->text().toStdString();
+        letters.insert(letter);
+    }
+    EXPECT_TRUE(letters.contains(QChar('d'))) << "Add keeps Alt+D";
+}
+
+TEST(RoadObjectDialog, TheCrossfallIsOnlyOfferedWhereThereIsAProfileToCarryOut)
+{
+    Site site;
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    dialog.showKind(RoadObjectKind::Sign);
+    fill(dialog, "roadObjectStation", "50");
+    fill(dialog, "roadObjectCrossfall", "-3");
+    auto* crossfall = child<QLineEdit>(dialog, "roadObjectCrossfall");
+    EXPECT_TRUE(crossfall->isEnabled());
+    EXPECT_TRUE(text(dialog, "roadObjectLine").contains("crossfall=-3"));
+    // Along lines, or at points, there is no profile: not offered, not written.
+    child<QRadioButton>(dialog, "roadObjectPlacePoints")->setChecked(true);
+    fill(dialog, "roadObjectPoints", "5,5,1");
+    EXPECT_FALSE(crossfall->isEnabled());
+    EXPECT_FALSE(text(dialog, "roadObjectLine").contains("crossfall"))
+        << text(dialog, "roadObjectLine").toStdString();
+    click(dialog, "roadObjectAdd");
+    ASSERT_EQ(site.document.roadObjects().objects.size(), 1u);
+    // On the heights of a line, or a surface: the same.
+    child<QRadioButton>(dialog, "roadObjectPlaceAlignment")->setChecked(true);
+    auto* heights = child<QComboBox>(dialog, "roadObjectHeights");
+    heights->setCurrentIndex(heights->findData("surface"));
+    QApplication::processEvents();
+    EXPECT_FALSE(crossfall->isEnabled());
+    heights->setCurrentIndex(heights->findData("profile"));
+    QApplication::processEvents();
+    EXPECT_TRUE(crossfall->isEnabled());
+}
+
+TEST(RoadObjectDialog, TheCulvertPreviewShowsTheBarrelThroughItsHeadwalls)
+{
+    // Seen along the barrel each headwall is a slab as large as the barrel and
+    // more, in the barrel's colour; painted solid over it they hid it, and the
+    // preview was one plain rectangle whatever the shape and the cells. The
+    // headwalls are outlines now and the barrel is drawn over them: the pipe's
+    // hole is the background. Found by the culvert colour (158, 154, 146): its
+    // bounding box is the barrel's, and the middle of that is the hole.
+    Site site;
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    dialog.showKind(RoadObjectKind::Culvert);
+    auto* preview = child<QWidget>(dialog, "roadObjectPreview");
+    ASSERT_NE(preview, nullptr);
+    preview->resize(400, 300);
+    const QColor base = preview->palette().base().color();
+    for (const char* shape : {"circular", "box"}) {
+        auto* choice = child<QComboBox>(dialog, "roadObject_culvert_shape");
+        ASSERT_NE(choice, nullptr);
+        choice->setCurrentIndex(choice->findData(shape));
+        QApplication::processEvents();
+        const QImage image = preview->grab().toImage();
+        const QRgb fill = qRgb(158, 154, 146);
+        int x0 = image.width();
+        int x1 = -1;
+        int y0 = image.height();
+        int y1 = -1;
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                if (image.pixel(x, y) == fill) {
+                    x0 = std::min(x0, x);
+                    x1 = std::max(x1, x);
+                    y0 = std::min(y0, y);
+                    y1 = std::max(y1, y);
+                }
+            }
+        }
+        ASSERT_GT(x1, x0) << shape << ": no culvert colour painted";
+        ASSERT_GT(y1, y0) << shape;
+        EXPECT_EQ(QColor(image.pixel((x0 + x1) / 2, (y0 + y1) / 2)), base)
+            << shape << ": the middle of the barrel is not its hole";
+    }
+}
+
+TEST(RoadObjectDialog, ThePagesScrollSoPreviewAddAndCloseStayInReachOnALaptopScreen)
+{
+    // Laid out in one piece the dialog was some 1,500 px tall and Add was off
+    // the screen of a 1366 x 768 laptop (728 px under its task bar). The
+    // pages, placement and heights are in a scroll area; the buttons are not.
+    Site site;
+    RoadObjectDialogContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectDialog dialog(std::move(context));
+    auto* body = child<QScrollArea>(dialog, "roadObjectBody");
+    ASSERT_NE(body, nullptr);
+    for (const char* name : {"roadObjectAdd", "roadObjectPreviewRun", "roadObjectClose",
+                             "roadObjectLine", "roadObjectReply", "roadObjectStatus"}) {
+        EXPECT_EQ(body->findChild<QWidget*>(QString::fromLatin1(name)), nullptr)
+            << name << " scrolls with the pages";
+    }
+    for (const char* name : {"roadObjectKinds", "roadObjectPlacement", "roadObjectHeightsGroup",
+                             "roadObjectPreview"}) {
+        EXPECT_NE(body->findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
+    }
+    EXPECT_LE(dialog.minimumSizeHint().height(), 700);
+}
+
+// ---- the manager ----------------------------------------------------------------------------
+
+TEST(RoadObjectManager, ASetItCannotReadIsSaidAndNotShownAsZeroObjects)
+{
+    Site site;
+    auto metadata = site.document.metadata();
+    metadata.unknownKeys["road_objects"] =
+        R"({"format": "katana-road-objects", "version": 2, "next": 2, "objects": []})";
+    site.document.setMetadata(metadata);
+    RoadObjectManagerContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectManagerDialog manager(std::move(context));
+    const QString count = text(manager, "roadObjectCount");
+    EXPECT_FALSE(count.startsWith("0 road objects, 0 problems")) << count.toStdString();
+    EXPECT_TRUE(count.startsWith("0 road objects, 1 problems")) << count.toStdString();
+    EXPECT_TRUE(count.contains("cannot be read")) << count.toStdString();
+    EXPECT_TRUE(count.contains("newer version")) << count.toStdString();
+}
+
+TEST(RoadObjectManager, CopyTakesTheKeysFieldSoACopyAtPointsCanBeMovedFromTheWindow)
+{
+    // station=, dx= and dy= are what move a copy and nothing else in the window
+    // says them: Copy sent only the id, and the copy stood on its original.
+    Site site;
+    site.run("ROADOBJECT ADD sign AT 5,5,1");
+    RoadObjectManagerContext context;
+    context.document = &site.document;
+    context.run = site.runner();
+    RoadObjectManagerDialog manager(std::move(context));
+    ASSERT_TRUE(manager.selectObject("sign-1"));
+    QApplication::processEvents();
+    fill(manager, "roadObjectKeys", "dx=10 dy=-2");
+    click(manager, "roadObjectCopy");
+    EXPECT_EQ(site.lines.back(), "ROADOBJECT COPY sign-1 dx=10 dy=-2");
+    const auto* copy = site.document.roadObjects().find("sign-2");
+    ASSERT_NE(copy, nullptr);
+    ASSERT_EQ(copy->placement.vertices.size(), 1u);
+    EXPECT_EQ(copy->placement.vertices.front().position, katana::geometry::Point2(15, 3));
+    // The keys were for that copy: spent, not left to move the next.
+    EXPECT_EQ(text(manager, "roadObjectKeys"), "");
+    click(manager, "roadObjectCopy");
+    EXPECT_EQ(site.lines.back(), "ROADOBJECT COPY sign-1");
+    // A refused Apply keeps its keys, to be put right.
+    fill(manager, "roadObjectKeys", "nosuchkey=1");
+    click(manager, "roadObjectApply");
+    EXPECT_EQ(text(manager, "roadObjectKeys"), "nosuchkey=1");
+    EXPECT_TRUE(text(manager, "roadObjectManagerStatus").startsWith("Refused"))
+        << text(manager, "roadObjectManagerStatus").toStdString();
 }
