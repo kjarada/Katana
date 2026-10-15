@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/csv_table.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/road/corridor_model.hpp"
 #include "katana/cad/road/road_section.hpp"
@@ -220,21 +221,31 @@ std::string componentRecord(const RoadTemplate& roadTemplate, const Component& c
                " benchwidth=" + exact(component.benchWidth);
         break;
     case ComponentKind::Kerb:
-        out += " shape=" + std::string(toString(component.shape)) +
-               " width=" + exact(component.width) + " height=" + exact(component.height) +
-               " depth=" + exact(component.depth);
+        out += " shape=" + std::string(toString(component.shape));
+        // An edge strip is flush: no face to turn or to give a height, but a
+        // crossfall, which a superelevation table may set.
+        if (component.shape != KerbShape::EdgeStrip) {
+            out += " faces=" + std::string(toString(component.faces));
+        }
+        out += " width=" + exact(component.width);
+        if (component.shape != KerbShape::EdgeStrip) {
+            out += " height=" + exact(component.height);
+        }
+        out += " depth=" + exact(component.depth);
         if (component.shape == KerbShape::KerbAndGutter) {
             out += " gutter=" + exact(component.gutterWidth) +
                    " gutterfall=" + exact(component.gutterFall);
         }
         if (component.shape == KerbShape::EdgeStrip) {
-            out += " crossfall=" + exact(component.crossfall);
+            out += " crossfall=" + exact(component.crossfall) +
+                   " superelevated=" + yes(component.superelevated);
         }
         out +=
             " kerbwidth=" + fixed(kerbWidth(component)) + " material=" + text(component.material);
         break;
     case ComponentKind::Drain:
         out += " width=" + exact(component.width) + " crossfall=" + exact(component.crossfall) +
+               " superelevated=" + yes(component.superelevated) +
                " depth=" + exact(component.depth);
         break;
     default:
@@ -283,12 +294,32 @@ Result<std::vector<std::size_t>> componentsNamed(const RoadTemplate& roadTemplat
                          "template " + roadTemplate.name + " has no component " + std::string(ref) +
                              ": ROADTEMPLATE INFO " + roadTemplate.name + " lists them");
     }
+    // Ascending in `components`, not left side first: a side's first
+    // component is appended at the end of the vector (insertionPoint), so a
+    // template whose right side was made first stores its right components
+    // BEFORE its left ones. REMOVE walks these backwards and erases each, which
+    // only keeps every later index valid when the indices ascend.
+    std::ranges::sort(found);
     return found;
 }
 
 Status applyComponent(Component& component, const Option& option)
 {
-    const std::string& key = option.key;
+    // `color` is `colour` and `thickness` is `depth`.
+    const std::string key =
+        option.key == "color" ? "colour" : (option.key == "thickness" ? "depth" : option.key);
+    // A key the component's kind does not keep would change nothing - the JSON
+    // writes only what the kind uses - and be answered "updated", with no step
+    // made: refused instead, naming the keys it has.
+    const std::vector<std::string_view> keys = componentKeys(component.kind);
+    if (std::ranges::find(keys, std::string_view(key)) == keys.end()) {
+        std::string list;
+        for (const std::string_view each : keys) {
+            list += (list.empty() ? "" : " ") + std::string(each);
+        }
+        return usage("a " + std::string(toString(component.kind)) + " has no " + key +
+                     "=; its keys are " + list);
+    }
     const auto number = [&](double& field) -> Status {
         auto value = numberOf(option);
         if (!value) {
@@ -313,7 +344,7 @@ Status applyComponent(Component& component, const Option& option)
     if (key == "height") {
         return number(component.height);
     }
-    if (key == "depth" || key == "thickness") {
+    if (key == "depth") {
         return number(component.depth);
     }
     if (key == "gutter") {
@@ -352,7 +383,7 @@ Status applyComponent(Component& component, const Option& option)
         component.layer = option.value;
         return {};
     }
-    if (key == "colour" || key == "color") {
+    if (key == "colour") {
         auto colour = colourOf(option);
         if (!colour) {
             return colour.error();
@@ -369,14 +400,22 @@ Status applyComponent(Component& component, const Option& option)
         component.shape = *shape;
         return {};
     }
+    if (key == "faces") {
+        const auto facing = kerbFacingFrom(option.value);
+        if (!facing) {
+            return usage("faces= is inward (a kerb on the outer edge of a carriageway: it rises "
+                         "going outward) or outward (a median's or island's: it falls going "
+                         "outward), not \"" +
+                         option.value + "\"");
+        }
+        component.faces = *facing;
+        return {};
+    }
     if (key == "material") {
         component.material = option.value;
         return {};
     }
-    return usage("unknown component key " + key +
-                 "=; the keys are name width crossfall superelevated layer colour, a kerb's "
-                 "shape height depth gutter gutterfall material, a drain's depth, a batter's "
-                 "cut fill maxwidth benchheight benchwidth");
+    return usage("unknown component key " + key + "=");
 }
 
 Status applyCourse(PavementCourse& course, const Option& option)
@@ -592,6 +631,11 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
         return reply;
     }
     if (sub == "DELETE") {
+        // Corridors that cannot be read use the template for all we can tell:
+        // an empty set would say none does.
+        if (auto status = corridorsReadable(document); !status) {
+            return status.error();
+        }
         std::string by;
         if (templateUsed(document.corridors(), roadTemplate.name, &by)) {
             return makeError(ErrorCode::InvalidArgument,
@@ -759,21 +803,42 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
             }
             return commitTemplates(document, set, "ROADTEMPLATE_REMOVE", reply);
         }
-        auto options = optionsFrom(args, 3);
-        if (!options) {
-            return options.error();
-        }
-        if (options->empty()) {
-            return usage("ROADTEMPLATE SET <template> <component> needs key=value");
-        }
-        for (const std::size_t i : *indices) {
-            for (const Option& option : *options) {
-                if (auto status = applyComponent(edited.components[i], option); !status) {
-                    return status.error();
-                }
+        // SET takes any number of groups, <component> key=value ..., and
+        // applies them all to the one copy before committing it: a grid of
+        // edited rows (the Road Template Manager's Apply) is ONE undo step, and
+        // a value that any group is refused for changes nothing. Each group
+        // names its component in the copy as the groups before it left it, as
+        // the same lines typed one after the other would.
+        std::size_t at = 2;
+        while (at < args.size()) {
+            auto named = componentsNamed(edited, args[at]);
+            if (!named) {
+                return named.error();
             }
-            reply += (reply.empty() ? "" : "\n") + componentRecord(edited, edited.components[i]) +
-                     " updated";
+            std::size_t end = at + 1;
+            std::vector<Option> options;
+            while (end < args.size()) {
+                auto option = optionOf(args[end]);
+                if (!option) {
+                    break; // the next group's component
+                }
+                options.push_back(std::move(*option));
+                ++end;
+            }
+            if (options.empty()) {
+                return usage("ROADTEMPLATE SET <template> <component> needs key=value: " +
+                             args[at] + " has none");
+            }
+            for (const std::size_t i : *named) {
+                for (const Option& option : options) {
+                    if (auto status = applyComponent(edited.components[i], option); !status) {
+                        return status.error();
+                    }
+                }
+                reply += (reply.empty() ? "" : "\n") +
+                         componentRecord(edited, edited.components[i]) + " updated";
+            }
+            at = end;
         }
         return commitTemplates(document, set, "ROADTEMPLATE_SET", reply);
     }
@@ -787,6 +852,52 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
             return indices.error();
         }
         const std::string action = upper(args[3]);
+        if (action == "SET") {
+            // Any number of groups, <course> key=value ..., on the one copy:
+            // as ROADTEMPLATE SET <t> <component> ..., one undo step that a
+            // value refused anywhere leaves undone.
+            RoadTemplateSet set = current;
+            RoadTemplate& edited = set.templates[index];
+            std::string reply;
+            std::size_t at = 4;
+            while (at < args.size()) {
+                const std::string& setName = args[at];
+                std::size_t end = at + 1;
+                std::vector<Option> options;
+                while (end < args.size()) {
+                    auto option = optionOf(args[end]);
+                    if (!option) {
+                        break; // the next group's course
+                    }
+                    options.push_back(std::move(*option));
+                    ++end;
+                }
+                if (options.empty()) {
+                    return usage("ROADTEMPLATE COURSE ... SET <course> needs key=value: " +
+                                 setName + " has none");
+                }
+                for (const std::size_t i : *indices) {
+                    Component& component = edited.components[i];
+                    auto course = std::ranges::find_if(
+                        component.courses,
+                        [&](const PavementCourse& c) { return is(c.name, setName); });
+                    if (course == component.courses.end()) {
+                        return makeError(ErrorCode::NotFound,
+                                         std::string(toString(component.side)) + ":" +
+                                             component.name + " has no course " + setName);
+                    }
+                    for (const Option& option : options) {
+                        if (auto status = applyCourse(*course, option); !status) {
+                            return status.error();
+                        }
+                    }
+                    reply += (reply.empty() ? "" : "\n") + courseRecord(edited, component, *course) +
+                             " updated";
+                }
+                at = end;
+            }
+            return commitTemplates(document, set, "ROADTEMPLATE_COURSE", reply);
+        }
         const std::string& courseName = args[4];
         auto options = optionsFrom(args, 5);
         if (!options) {
@@ -850,19 +961,7 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
                 component.courses.erase(course);
                 continue;
             }
-            if (action != "SET") {
-                return usage("ROADTEMPLATE COURSE ... ADD, SET or REMOVE, not " + args[3]);
-            }
-            if (options->empty()) {
-                return usage("ROADTEMPLATE COURSE ... SET <course> needs key=value");
-            }
-            for (const Option& option : *options) {
-                if (auto status = applyCourse(*course, option); !status) {
-                    return status.error();
-                }
-            }
-            reply +=
-                (reply.empty() ? "" : "\n") + courseRecord(edited, component, *course) + " updated";
+            return usage("ROADTEMPLATE COURSE ... ADD, SET or REMOVE, not " + args[3]);
         }
         return commitTemplates(document, set, "ROADTEMPLATE_COURSE", reply);
     }
@@ -958,12 +1057,21 @@ Result<std::size_t> commitCorridors(Document& document, const CorridorSet& next,
 
 std::string builtRecord(const BuiltCorridor& built, std::size_t objects)
 {
-    return "built corridor=" + text(built.name) + " from=" + fixed(built.start) +
-           " to=" + fixed(built.end) + " runs=" + std::to_string(built.runs.size()) +
+    // Absent is not zero: a corridor that could not be built has no range (station
+    // 0 is a real station), and one with no target surface measured no cut or
+    // fill - the problems say why. The key is there and empty, as a
+    // corridor's own from= and to= are when it gives none.
+    const auto measured = [](bool present, double value) {
+        return present ? fixed(value) : std::string();
+    };
+    return "built corridor=" + text(built.name) + " from=" + measured(built.hasRange, built.start) +
+           " to=" + measured(built.hasRange, built.end) +
+           " runs=" + std::to_string(built.runs.size()) +
            " sections=" + std::to_string(built.sections) +
            " incomplete=" + std::to_string(built.incompleteSections) +
-           " objects=" + std::to_string(objects) + " cut=" + fixed(built.cut) +
-           " fill=" + fixed(built.fill) + " net=" + fixed(built.fill - built.cut) +
+           " objects=" + std::to_string(objects) + " cut=" + measured(built.hasEarthworks, built.cut) +
+           " fill=" + measured(built.hasEarthworks, built.fill) +
+           " net=" + measured(built.hasEarthworks, built.fill - built.cut) +
            " problems=" + std::to_string(built.problems.size());
 }
 
@@ -1013,6 +1121,13 @@ Status applyCorridor(Corridor& corridor, const Option& option)
         field = *value;
         return {};
     };
+    // A corridor needs an alignment and a template; the other keys can be
+    // emptied (surface, from, to) or have a default (interval, 10 m).
+    if ((option.key == "alignment" || option.key == "template") && option.value.empty()) {
+        return usage(option.key + "= needs a name: a corridor has " +
+                     (option.key == "alignment" ? "an alignment (ALIGN LIST names them)"
+                                                : "a road template (ROADTEMPLATE LIST names them)"));
+    }
     if (option.key == "alignment") {
         corridor.alignment = option.value;
         return {};
@@ -1052,6 +1167,24 @@ Result<double> stationWord(const std::string& word, const char* what)
     return *value;
 }
 
+// The strings in the drawing that CORRIDOR STRINGS made for `corridor`: the
+// entities marked with both properties, the corridor's name read as corridors
+// are found, ignoring case.
+std::vector<katana::entity::EntityId> stringsMadeFor(const Document& document,
+                                                     std::string_view corridor)
+{
+    std::vector<katana::entity::EntityId> ids;
+    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+        const auto found = entity.properties.find(kCorridorProperty);
+        if (found != entity.properties.end() && entity.properties.contains(kStringProperty) &&
+            std::holds_alternative<std::string>(found->second) &&
+            is(std::get<std::string>(found->second), corridor)) {
+            ids.push_back(entity.id);
+        }
+    });
+    return ids;
+}
+
 std::string quantityValue(const bim::BimObject& object, std::string_view name)
 {
     for (const bim::Quantity& quantity : object.quantities) {
@@ -1088,17 +1221,39 @@ bool belongsTo(const bim::BimObject& object, const std::string* corridor)
     return corridor == nullptr || is(object.facility, *corridor);
 }
 
+// A problem of the corridors, or of the definitions they are made from: not a
+// placed road object's (source "object <id>" or "road objects"), which
+// ROADMODEL PROBLEMS lists with them. With a corridor named, its own only.
+bool corridorProblem(const bim::BimProblem& problem, const std::string* corridor)
+{
+    if (corridor != nullptr) {
+        return is(problem.source, "corridor " + *corridor);
+    }
+    return is(problem.source, "road templates") || is(problem.source, "corridors") ||
+           problem.source.starts_with("corridor ");
+}
+
 Result<std::string> quantitiesVerb(Document& document, const Tokens& args)
 {
     if (args.size() < 2) {
-        return usage("CORRIDOR QUANTITIES <corridor>|ALL [csv=<file>]");
+        return usage("CORRIDOR QUANTITIES <corridor>|ALL [csv=<file> [OVERWRITE]]");
     }
     const bool all = is(args[1], "ALL");
     const Corridor* corridor = all ? nullptr : document.corridors().find(args[1]);
     if (!all && corridor == nullptr) {
         return noCorridor(args[1]);
     }
-    auto options = optionsFrom(args, 2);
+    // OVERWRITE is a word, as the other report verbs have it, not a key.
+    Tokens words(args.begin(), args.begin() + 2);
+    bool overwrite = false;
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        if (is(args[i], "OVERWRITE")) {
+            overwrite = true;
+        } else {
+            words.push_back(args[i]);
+        }
+    }
+    auto options = optionsFrom(words, 2);
     if (!options) {
         return options.error();
     }
@@ -1109,16 +1264,22 @@ Result<std::string> quantitiesVerb(Document& document, const Tokens& args)
         }
         csv = option.value;
     }
+    if (overwrite && !csv) {
+        return usage("OVERWRITE replaces the file csv=<file> names: CORRIDOR QUANTITIES "
+                     "<corridor>|ALL csv=<file> OVERWRITE");
+    }
     const auto model = bim::bimModel(document);
     const std::string* name = corridor != nullptr ? &corridor->name : nullptr;
     std::vector<bim::BimObject> objects;
     double cut = 0.0;
     double fill = 0.0;
+    // A total has a length, an area or a volume only if some object of its kind
+    // carries one: a kerb has no area, and a total of nothing is not 0.000.
     struct Total {
         std::size_t count = 0;
-        double length = 0.0;
-        double area = 0.0;
-        double volume = 0.0;
+        std::optional<double> length;
+        std::optional<double> area;
+        std::optional<double> volume;
     };
     std::map<std::pair<std::string, std::string>, Total> totals;
     for (const bim::BimObject& object : model->objects) {
@@ -1132,11 +1293,11 @@ Result<std::string> quantitiesVerb(Document& document, const Tokens& args)
         for (const bim::Quantity& quantity : object.quantities) {
             if (quantity.name == "GrossVolume") {
                 volume = quantity.value;
-                total.volume += quantity.value;
+                total.volume = total.volume.value_or(0.0) + quantity.value;
             } else if (quantity.name == "GrossArea") {
-                total.area += quantity.value;
+                total.area = total.area.value_or(0.0) + quantity.value;
             } else if (quantity.name == "Length") {
-                total.length += quantity.value;
+                total.length = total.length.value_or(0.0) + quantity.value;
             }
         }
         if (object.ifcClass == "IfcEarthworksCut") {
@@ -1145,35 +1306,45 @@ Result<std::string> quantitiesVerb(Document& document, const Tokens& args)
             fill += volume;
         }
     }
+    // Cut and fill are measured only against a target surface: a corridor with
+    // none, or whose alignment, profile or surface the drawing lacks, reports
+    // them absent (empty), not 0.000, which would read as a road with no cut.
+    bool measured = false;
+    for (const Corridor& each : document.corridors().corridors) {
+        if (name == nullptr || is(each.name, *name)) {
+            const CorridorInputs inputs = corridorInputs(document, each);
+            measured = measured || (inputs.alignment && inputs.profile && inputs.ground != nullptr);
+        }
+    }
+    const auto sum = [measured](double value) {
+        return measured ? fixed(value) : std::string();
+    };
+    const auto shown = [](const std::optional<double>& value) {
+        return value ? fixed(*value) : std::string();
+    };
     std::string reply = "quantities corridor=" + (all ? std::string("all") : text(*name)) +
-                        " objects=" + std::to_string(objects.size()) + " cut=" + fixed(cut) +
-                        " fill=" + fixed(fill) + " net=" + fixed(fill - cut);
+                        " objects=" + std::to_string(objects.size()) + " cut=" + sum(cut) +
+                        " fill=" + sum(fill) + " net=" + sum(fill - cut);
     for (const bim::BimObject& object : objects) {
         reply += "\n" + objectRecord(object);
     }
     for (const auto& [key, total] : totals) {
         reply += "\ntotal kind=" + key.first + " material=" + text(key.second) +
-                 " count=" + std::to_string(total.count) + " length=" + fixed(total.length) +
-                 " area=" + fixed(total.area) + " volume=" + fixed(total.volume);
+                 " count=" + std::to_string(total.count) + " length=" + shown(total.length) +
+                 " area=" + shown(total.area) + " volume=" + shown(total.volume);
     }
     for (const bim::BimProblem& problem : model->problems) {
-        if (all || is(problem.source, "corridor " + *name)) {
+        if (corridorProblem(problem, name)) {
             reply += "\nproblem source=" + text(problem.source) +
                      " message=" + katana::core::replyQuoted(problem.message);
         }
     }
     if (csv) {
-        const auto path = katana::core::pathFromUtf8(*csv);
-        std::ofstream out(path, std::ios::binary);
-        if (!out) {
-            return makeError(ErrorCode::FileExportFailure, "the file cannot be written", *csv);
+        auto written = writeCsvTable(quantitiesTable(objects), *csv, overwrite);
+        if (!written) {
+            return written.error();
         }
-        out << quantitiesCsv(objects);
-        out.close();
-        if (!out) {
-            return makeError(ErrorCode::FileExportFailure, "the file cannot be written", *csv);
-        }
-        reply += "\ncsv file=" + text(*csv) + " rows=" + std::to_string(objects.size());
+        reply += "\n" + *written;
     }
     return reply;
 }
@@ -1204,15 +1375,7 @@ Result<std::string> stringsVerb(Document& document, const Corridor& corridor, co
             "corridor " + corridor.name + " has no sections to string" +
                 (built.problems.empty() ? std::string() : ": " + built.problems.front()));
     }
-    std::vector<katana::entity::EntityId> previous;
-    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
-        const auto found = entity.properties.find(kCorridorProperty);
-        if (found != entity.properties.end() && entity.properties.contains(kStringProperty) &&
-            std::holds_alternative<std::string>(found->second) &&
-            std::get<std::string>(found->second) == corridor.name) {
-            previous.push_back(entity.id);
-        }
-    });
+    const std::vector<katana::entity::EntityId> previous = stringsMadeFor(document, corridor.name);
     std::size_t points = 0;
     std::vector<katana::entity::Entity> entities;
     for (const CorridorString& string : strings) {
@@ -1285,6 +1448,12 @@ Result<std::string> surfaceVerb(Document& document, const Corridor& corridor, co
                 (built.problems.empty() ? std::string() : ": " + built.problems.front()));
     }
     const std::vector<const RoadSection*> sections = corridorSections(built);
+    if (sections.size() < 2) {
+        return makeError(
+            ErrorCode::InvalidState,
+            "corridor " + corridor.name + " has fewer than two sections to make a surface of" +
+                (built.problems.empty() ? std::string() : ": " + built.problems.front()));
+    }
     auto finished = sectionsSurface(sections, *built.alignment, false, false);
     if (!finished) {
         return finished.error();
@@ -1347,18 +1516,18 @@ Result<std::string> corridorVerb(Document& document, const Tokens& args)
     }
     if (sub == "PROBLEMS") {
         const auto model = bim::bimModel(document);
-        std::string filter;
+        std::optional<std::string> named;
         if (args.size() > 1) {
             const Corridor* corridor = current.find(args[1]);
             if (corridor == nullptr) {
                 return noCorridor(args[1]);
             }
-            filter = "corridor " + corridor->name;
+            named = corridor->name;
         }
         std::string reply;
         std::size_t count = 0;
         for (const bim::BimProblem& problem : model->problems) {
-            if (!filter.empty() && !is(problem.source, filter)) {
+            if (!corridorProblem(problem, named ? &*named : nullptr)) {
                 continue;
             }
             ++count;
@@ -1371,6 +1540,11 @@ Result<std::string> corridorVerb(Document& document, const Tokens& args)
         return quantitiesVerb(document, args);
     }
     if (sub == "BUILD" && args.size() > 1 && is(args[1], "ALL")) {
+        // Corridors that cannot be read are not "none": the same refusal as
+        // CORRIDOR LIST, not a reply that says to make one.
+        if (auto status = corridorsReadable(document); !status) {
+            return status.error();
+        }
         if (current.corridors.empty()) {
             return std::string("corridors=0 (CORRIDOR NEW makes one)");
         }
@@ -1479,6 +1653,22 @@ Result<std::string> corridorVerb(Document& document, const Tokens& args)
                 "corridor " + corridor.name + " cannot be built" +
                     (inputs.problems.empty() ? std::string() : ": " + inputs.problems.front()));
         }
+        // The corridor has sections only over its range (from= to= held to the
+        // alignment and the profile): a section outside it would look built and
+        // be nothing the corridor has.
+        const CorridorRange range = corridorRange(corridor, *inputs.alignment, *inputs.profile);
+        if (!range.ok) {
+            return makeError(ErrorCode::InvalidState,
+                             "corridor " + corridor.name + " has no stations to section" +
+                                 (range.problems.empty() ? std::string()
+                                                         : ": " + range.problems.front()));
+        }
+        if (*station < range.start - tol::kGeometric || *station > range.end + tol::kGeometric) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "station " + exact(*station) + " is outside corridor " +
+                                 corridor.name + "'s stations " + exact(range.start) + " to " +
+                                 exact(range.end));
+        }
         const RoadTemplate* roadTemplate =
             document.roadTemplates().find(templateAt(corridor, *station));
         if (roadTemplate == nullptr) {
@@ -1532,12 +1722,32 @@ Result<std::string> corridorVerb(Document& document, const Tokens& args)
         if (const Corridor* other = current.find(args[2]); other != nullptr && other != found) {
             return makeError(ErrorCode::AlreadyExists, "there is a corridor called " + args[2]);
         }
+        // The strings it drew carry its name (road.corridor), which is how its
+        // next STRINGS finds them to replace: they follow it, in the same step,
+        // or the next STRINGS would leave them beside a second set, and a corridor
+        // later given the old name would delete them.
+        const std::vector<katana::entity::EntityId> strings =
+            stringsMadeFor(document, corridor.name);
         edited.name = args[2];
-        auto done = commitCorridors(document, set, nullptr, "CORRIDOR_RENAME");
-        if (!done) {
-            return done.error();
+        auto command = document.corridorsCommand(set, "CORRIDOR_RENAME");
+        if (!command) {
+            return command.error();
         }
-        return "corridor renamed from=" + text(corridor.name) + " to=" + text(args[2]);
+        auto transaction = std::make_unique<cmd::Transaction>("CORRIDOR_RENAME");
+        if (*command) {
+            transaction->add(std::move(*command));
+        }
+        if (!strings.empty()) {
+            transaction->add(cmd::setEntityProperty(strings, std::string(kCorridorProperty),
+                                                    katana::entity::PropertyValue(args[2])));
+        }
+        if (transaction->size() > 0) {
+            if (auto status = document.execute(std::move(transaction)); !status) {
+                return status.error();
+            }
+        }
+        return "corridor renamed from=" + text(corridor.name) + " to=" + text(args[2]) +
+               " strings=" + std::to_string(strings.size());
     }
     if (sub == "SET") {
         auto options = optionsFrom(args, 2);
@@ -1716,21 +1926,6 @@ Result<std::string> roadModelVerb(const Document& document, const Tokens& args)
     return usage("unknown ROADMODEL word " + args[0] + " (HELP ROADMODEL)");
 }
 
-std::string csvField(std::string_view value)
-{
-    if (value.find_first_of(",\"\r\n") == std::string_view::npos) {
-        return std::string(value);
-    }
-    std::string out = "\"";
-    for (const char c : value) {
-        out += c;
-        if (c == '"') {
-            out += '"';
-        }
-    }
-    return out + "\"";
-}
-
 } // namespace
 
 bool isRoadVerb(std::string_view verb)
@@ -1767,20 +1962,25 @@ ROADTEMPLATE SET <t> description=<text>
 ROADTEMPLATE ADD <t> left|right|both <kind> [name=<word>] [at=<n>] [key=value ...]
   kinds: lane shoulder kerb footpath verge median drain batter. A component goes before
   the side's batter, or at=<n> (from 1, outward); a second of a name is name2.
-ROADTEMPLATE SET <t> <component> key=value ...  |  REMOVE <t> <component>
-  <component> is side:name (left:lane) or name (both sides that have it). Keys:
+ROADTEMPLATE SET <t> <component> key=value ... [<component> key=value ...]  |  REMOVE <t> <component>
+  <component> is side:name (left:lane) or name (both sides that have it). Several groups are
+  one undo step, and one refused value changes none of them. Keys:
   name= width= crossfall= (percent, outward: -3 falls) superelevated=on|off layer= colour=
-  kerb: shape=barrier|mountable|kerbgutter|edgestrip height= depth= gutter= gutterfall=
-        material= (width= is its top)   drain: depth= (its invert below its inner edge)
+  kerb: shape=barrier|mountable|kerbgutter|edgestrip faces=inward|outward height= depth=
+        gutter= gutterfall= material= (width= is its top)   faces=outward is a median's
+        or island's kerb, which falls going outward   drain: depth= (its invert below its
+        inner edge)
   batter: cut= fill= (run per rise: 2 is 1V:2H) maxwidth= benchheight= benchwidth=
 ROADTEMPLATE COURSE <t> <component> ADD <course> thickness=<m> [material=] [ifc=] [colour=]
-  [at=<n>]  |  SET <course> key=value ...  |  REMOVE <course>     courses are top down
+  [at=<n>]  |  SET <course> key=value ... [<course> key=value ...]  |  REMOVE <course>
+  courses are top down; SET of several courses is one undo step
   ifc=: ARMOUR BALLASTBED CORE FILTER PAVEMENT PROTECTION USERDEFINED NOTDEFINED
 
 CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
 CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=<s>] [interval=<m>] [from=<s>] [to=<s>]
   makes the layers its objects are on; road/earthworks/cut switched off
-CORRIDOR SET <c> alignment= template= surface= interval= from= to=   (empty clears)
+CORRIDOR SET <c> alignment= template= surface= interval= from= to=   (surface= from= to=
+  empty clear them; a corridor always has an alignment, a template and an interval)
 CORRIDOR DELETE <c> | RENAME <c> <new>
 CORRIDOR REGION <c> ADD <from> <to> <t> | REMOVE <from> | CLEAR    another template there
 CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR
@@ -1791,8 +1991,10 @@ CORRIDOR STRINGS <c> [layer=<layer>] [PREVIEW]   3D strings as polylines, replac
                                        corridor's earlier ones, one undo step
 CORRIDOR SURFACE <c> [finished=<name>] [subgrade=<name>] [PREVIEW]   both surfaces into
                                        the drawing's surfaces, one undo step
-CORRIDOR QUANTITIES <c>|ALL [csv=<file>]   each object's quantities, totals by kind and
-                                       material, the earthworks cut and fill
+CORRIDOR QUANTITIES <c>|ALL [csv=<file> [OVERWRITE]]   each object's quantities, totals by
+                                       kind and material, the earthworks cut and fill (empty
+                                       with no target surface); a file already there is only
+                                       replaced with OVERWRITE
 
 ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>   every 3D object of the road model)";
 }
@@ -1845,26 +2047,24 @@ std::string roadModelJson(const bim::BimModel& model)
     }
 }
 
-std::string quantitiesCsv(const std::vector<bim::BimObject>& objects)
+CsvTable quantitiesTable(const std::vector<bim::BimObject>& objects)
 {
     static constexpr std::array<std::string_view, 6> kQuantities{
         "Length", "Width", "Depth", "Height", "GrossArea", "GrossVolume"};
-    std::string out = "id,name,kind,facility,part,material";
+    CsvTable table;
+    table.header = {"id", "name", "kind", "facility", "part", "material"};
     for (const std::string_view name : kQuantities) {
-        out += ",";
-        out += name;
+        table.header.emplace_back(name);
     }
-    out += "\n";
     for (const bim::BimObject& object : objects) {
-        out += csvField(object.id) + "," + csvField(object.name) + "," + csvField(object.kind) +
-               "," + csvField(object.facility) + "," + csvField(object.part) + "," +
-               csvField(object.material);
+        std::vector<std::string> row{object.id,       object.name, object.kind,
+                                     object.facility, object.part, object.material};
         for (const std::string_view name : kQuantities) {
-            out += "," + quantityValue(object, name);
+            row.push_back(quantityValue(object, name));
         }
-        out += "\n";
+        table.rows.push_back(std::move(row));
     }
-    return out;
+    return table;
 }
 
 } // namespace katana::cad::road

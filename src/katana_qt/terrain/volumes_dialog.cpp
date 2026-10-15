@@ -29,6 +29,7 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include "customisation/document_watcher.hpp"
 #include "geo/geo_dialog_support.hpp"
 #include "icons.hpp"
 #include "katana/core/text.hpp"
@@ -319,10 +320,14 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
                     QStringLiteral("The first station; blank for the alignment's start"));
     to_ = textBox(sectionsPage, "volumesTo", QStringLiteral("the end"),
                   QStringLiteral("The last station; blank for the alignment's end"));
+    const QString reachTip = QStringLiteral(
+        "%1. Blank reaches across all the ground the surfaces share, which is right on a "
+        "straight run only: on a curve or a corner give a reach under the curve's radius, "
+        "because sections that cross one another count ground twice and the line is refused.");
     left_ = textBox(sectionsPage, "volumesLeft", QStringLiteral("across the common ground"),
-                    QStringLiteral("How far each section reaches left of the centreline"));
+                    reachTip.arg(QStringLiteral("How far each section reaches left of the centreline")));
     right_ = textBox(sectionsPage, "volumesRight", QStringLiteral("across the common ground"),
-                     QStringLiteral("How far each section reaches right of the centreline"));
+                     reachTip.arg(QStringLiteral("How far each section reaches right of the centreline")));
     sectionMethod_ = new QComboBox(sectionsPage);
     sectionMethod_->setObjectName(QStringLiteral("volumesSectionMethod"));
     sectionMethod_->addItem(QStringLiteral("Average end area"), QStringLiteral("endarea"));
@@ -457,7 +462,9 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     browse->setObjectName(QStringLiteral("volumesCsvBrowse"));
     auto* save = new QPushButton(QStringLiteral("Sa&ve CSV"), this);
     save->setObjectName(QStringLiteral("volumesSaveCsv"));
-    save->setToolTip(QStringLiteral("The line run again with csv= the file: the records as a table"));
+    save->setToolTip(QStringLiteral(
+        "The line run again with csv= the file: the quantities as a table, with the method and "
+        "its inputs on every row. Nothing is written when nothing is measured."));
     fileRow->addWidget(copy);
     fileRow->addWidget(csvPath_, 1);
     fileRow->addWidget(browse);
@@ -478,6 +485,30 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     mapRow->addWidget(mapName_, 1);
     mapRow->addWidget(map);
     layout->addLayout(mapRow);
+
+    auto* envelopeRow = new QHBoxLayout();
+    envelopeSide_ = new QComboBox(this);
+    envelopeSide_->setObjectName(QStringLiteral("volumesEnvelopeSide"));
+    envelopeSide_->addItem(QStringLiteral("The higher of the two"), QStringLiteral("MAX"));
+    envelopeSide_->addItem(QStringLiteral("The lower of the two"), QStringLiteral("MIN"));
+    envelopeSide_->setToolTip(QStringLiteral(
+        "Which of the two surfaces the envelope follows where they differ: the higher "
+        "(the finished ground over an as-built, say) or the lower"));
+    envelopeName_ = textBox(this, "volumesEnvelopeName", QStringLiteral("base-top-max"),
+                            QStringLiteral("The envelope's name; blank for base-top-max or "
+                                           "base-top-min"));
+    auto* envelope = new QPushButton(QStringLiteral("Make &Envelope"), this);
+    envelope->setObjectName(QStringLiteral("volumesEnvelope"));
+    envelope->setToolTip(QStringLiteral(
+        "The higher or lower of the base and the top as a new surface in the drawing's "
+        "default style (real levels, not a difference): SURFACE ENVELOPE"));
+    auto* envelopeLabel = new QLabel(QStringLiteral("Envelope &name:"), this);
+    envelopeLabel->setBuddy(envelopeName_);
+    envelopeRow->addWidget(envelopeSide_);
+    envelopeRow->addWidget(envelopeLabel);
+    envelopeRow->addWidget(envelopeName_, 1);
+    envelopeRow->addWidget(envelope);
+    layout->addLayout(envelopeRow);
 
     status_ = new QLabel(this);
     status_->setObjectName(QStringLiteral("volumesStatus"));
@@ -501,6 +532,7 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
             [this] { QGuiApplication::clipboard()->setText(resultsText()); });
     connect(save, &QPushButton::clicked, this, [this] { (void)saveCsv(); });
     connect(map, &QPushButton::clicked, this, [this] { (void)makeCutFillMap(); });
+    connect(envelope, &QPushButton::clicked, this, [this] { (void)makeEnvelope(); });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     connect(browse, &QPushButton::clicked, this, [this] {
         if (context_.headless && context_.headless()) {
@@ -550,7 +582,17 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
 
     resize(760, 860);
     reload();
+    if (context_.document != nullptr) {
+        watcher_ = std::make_unique<DocumentWatcher>(*context_.document,
+                                                     [this](const DocumentChanges& changes) {
+                                                         if (changes.model) {
+                                                             reload();
+                                                         }
+                                                     });
+    }
 }
+
+VolumesDialog::~VolumesDialog() = default;
 
 void VolumesDialog::reload()
 {
@@ -732,7 +774,7 @@ Result<QString> VolumesDialog::line() const
     return words.join(' ') + factorWords();
 }
 
-Result<QString> VolumesDialog::cutFillMapLine() const
+Result<std::pair<QString, QString>> VolumesDialog::surfacePair() const
 {
     const QComboBox* base = base_;
     const QComboBox* top = top_;
@@ -750,9 +792,36 @@ Result<QString> VolumesDialog::cutFillMapLine() const
     if (!baseWord || !topWord) {
         return baseWord ? topWord.error() : baseWord.error();
     }
-    QString text = QStringLiteral("SURFACE DIFFERENCE ") + *baseWord + ' ' + *topWord;
+    return std::make_pair(*baseWord, *topWord);
+}
+
+Result<QString> VolumesDialog::cutFillMapLine() const
+{
+    auto pair = surfacePair();
+    if (!pair) {
+        return pair.error();
+    }
+    QString text = QStringLiteral("SURFACE DIFFERENCE ") + pair->first + ' ' + pair->second;
     if (!mapName_->text().trimmed().isEmpty()) {
         auto name = lineWord(mapName_->text().trimmed(), QStringLiteral("Map name"));
+        if (!name) {
+            return name.error();
+        }
+        text += QStringLiteral(" NAME ") + *name;
+    }
+    return text;
+}
+
+Result<QString> VolumesDialog::envelopeLine() const
+{
+    auto pair = surfacePair();
+    if (!pair) {
+        return pair.error();
+    }
+    QString text = QStringLiteral("SURFACE ENVELOPE ") + pair->first + ' ' + pair->second + ' ' +
+                   envelopeSide_->currentData().toString();
+    if (!envelopeName_->text().trimmed().isEmpty()) {
+        auto name = lineWord(envelopeName_->text().trimmed(), QStringLiteral("Envelope name"));
         if (!name) {
             return name.error();
         }
@@ -899,34 +968,66 @@ bool VolumesDialog::saveCsv()
     // Save replaces the file it names; the file dialog asked before choosing one.
     const VerbOutcome outcome = context_.run(*made + ' ' + *file + QStringLiteral(" OVERWRITE"));
     showReply(outcome);
-    if (outcome.ok) {
-        setStatus(QStringLiteral("Saved the table to %1.").arg(path), false);
+    if (!outcome.ok) {
+        return false;
     }
-    return outcome.ok;
+    // Saved only when the reply says it wrote the file (a `csv` record with its
+    // rows): a scope that takes no polygon runs nothing and writes nothing, so
+    // a file an earlier save left is as it was and must not be called saved.
+    const qsizetype rowsColumn = table_.columns.indexOf(QStringLiteral("rows"));
+    const bool wrote = rowsColumn > 0 &&
+                       std::any_of(table_.rows.begin(), table_.rows.end(),
+                                   [rowsColumn](const QStringList& row) {
+                                       return row.front() == QStringLiteral("csv") &&
+                                              rowsColumn < row.size() &&
+                                              !row[rowsColumn].isEmpty();
+                                   });
+    if (wrote) {
+        setStatus(QStringLiteral("Saved the table to %1.").arg(path), false);
+    } else {
+        setStatus(QStringLiteral("Nothing was measured, so nothing was saved: %1 was not written.")
+                      .arg(path),
+                  false);
+    }
+    return wrote;
 }
 
-bool VolumesDialog::makeCutFillMap()
+bool VolumesDialog::runMaking(const Result<QString>& line, const QString& done)
 {
-    const auto made = cutFillMapLine();
-    if (!made) {
-        setStatus(QString::fromStdString(made.error().message), true);
+    if (!line) {
+        setStatus(QString::fromStdString(line.error().message), true);
         return false;
     }
     if (!context_.run) {
         setStatus(QStringLiteral("Nothing here can run a command."), true);
         return false;
     }
-    const VerbOutcome outcome = context_.run(*made);
+    const VerbOutcome outcome = context_.run(*line);
     reply_->setPlainText((outcome.ok ? outcome.reply : outcome.error).trimmed());
     if (!outcome.ok) {
         setStatus(outcome.error.trimmed(), true);
         return false;
     }
-    setStatus(QStringLiteral("Made the cut/fill map: a new surface in the Cut Fill style, "
-                             "fill above zero and cut below. UNDO removes it."),
-              false);
+    setStatus(done, false);
     reload();
     return true;
+}
+
+bool VolumesDialog::makeCutFillMap()
+{
+    return runMaking(cutFillMapLine(),
+                     QStringLiteral("Made the cut/fill map: a new surface in the Cut Fill style, "
+                                    "fill above zero and cut below. UNDO removes it."));
+}
+
+bool VolumesDialog::makeEnvelope()
+{
+    return runMaking(envelopeLine(),
+                     QStringLiteral("Made the envelope: a new surface following the %1 of the "
+                                    "base and the top, in the default style. UNDO removes it.")
+                         .arg(envelopeSide_->currentData().toString() == QStringLiteral("MAX")
+                                  ? QStringLiteral("higher")
+                                  : QStringLiteral("lower")));
 }
 
 QString VolumesDialog::resultsText() const

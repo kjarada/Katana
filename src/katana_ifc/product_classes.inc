@@ -62,7 +62,7 @@
 {"IFCDUCTFITTING", "IfcDuctFitting", ProductKind::Drawn},
 {"IFCDUCTSEGMENT", "IfcDuctSegment", ProductKind::Drawn},
 {"IFCDUCTSILENCER", "IfcDuctSilencer", ProductKind::Drawn},
-{"IFCEARTHWORKSCUT", "IfcEarthworksCut", ProductKind::NotDrawn},
+{"IFCEARTHWORKSCUT", "IfcEarthworksCut", ProductKind::Drawn},
 {"IFCEARTHWORKSELEMENT", "IfcEarthworksElement", ProductKind::Drawn},
 {"IFCEARTHWORKSFILL", "IfcEarthworksFill", ProductKind::Drawn},
 {"IFCEDGEFEATURE", "IfcEdgeFeature", ProductKind::NotDrawn},

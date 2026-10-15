@@ -271,6 +271,22 @@ PROJ version, the database it resolved and its search paths, and fails with
 `NotFound` when the database cannot be opened - as does every CRS factory
 except `localEngineering`, and every transformer.
 
+`PROJ_DATA` or `PROJ_LIB` in the environment replaces that search, and another
+GIS package (PostGIS, QGIS, OSGeo4W) leaves one machine-wide naming data of
+its own, often a database of an older PROJ's layout that this PROJ rejects.
+`ProjContext::create` keeps an explicit choice that opens, and when it does
+not retries on a fresh context with the data Katana carries beside its
+`libproj` (`core::bundledProjDataDirectory`); `projRuntimeInfo().databasePath`
+says which was used. The fallback is for the package: a distribution's PROJ,
+with no data beside its library, has nothing to fall back on, and then the
+error says what is wrong in the words that fit - "`PROJ_LIB` names X, which
+holds no proj.db this PROJ can open; unset it" - and not "install PROJ's data
+files". GDAL's contexts (and so PDAL's) are given the same fallback once, at
+start-up, when the variable is set (`docs/building.md`, "PROJ's data";
+`cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries`).
+`CRS SET` passes that `NotFound` through as it is, with the system asked for,
+instead of calling a valid code "not a coordinate system".
+
 ## Tests
 
 `tests/geodesy/` (`katana_geodesy_tests`): the CRS values, the transformer
@@ -295,7 +311,7 @@ Not tested: grid factors, geodesics and the site calibration (SUR-01, above).
 | Condition | Behaviour |
 |---|---|
 | Text that is not a CRS | `InvalidCRS` with PROJ's message |
-| `proj.db` not found | `NotFound` from `projRuntimeInfo`, every factory but `localEngineering`, and `create` |
+| `proj.db` not found, or not usable (a `PROJ_DATA` / `PROJ_LIB` naming a folder without one) and nothing beside `libproj` to fall back on | `NotFound` from `projRuntimeInfo`, every factory but `localEngineering`, and `create`; names the variable when one is set |
 | No operation, only a ballpark one, or only ones needing missing grids | `Unsupported`, the grids named in the context |
 | A local engineering system in a transformation | `Unsupported`: relate it with a site calibration |
 | A time-dependent operation and a coordinate without an epoch | refused |

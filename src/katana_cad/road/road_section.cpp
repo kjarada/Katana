@@ -115,6 +115,16 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
 {
     const double sign = side == Side::Left ? 1.0 : -1.0;
     const std::string sideWord(toString(side));
+    // A component's crossfall at this station: the corridor's superelevation
+    // table's for its side when it is superelevated and the table has an entry,
+    // else its own. Every component that has a crossfall reads it here - a lane,
+    // an edge strip between superelevated lanes and shoulders, a drain.
+    const auto crossfallOf = [&](const Component& component) {
+        if (component.superelevated && superelevation) {
+            return side == Side::Left ? superelevation->left : superelevation->right;
+        }
+        return component.crossfall;
+    };
     SideBuild out;
     out.top.push_back(OutPoint{"CL", 0.0, designLevel});
     double atOut = 0.0;
@@ -140,17 +150,27 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
         std::vector<ShapeColumn> surface;
         std::vector<std::string> codes;
         if (component.kind == ComponentKind::Kerb) {
-            for (const ShapeColumn& column : kerbShape(component)) {
+            // Only an edge strip has a crossfall (checkTemplate refuses a
+            // superelevated barrier, mountable or kerb-and-gutter kerb).
+            Component shaped = component;
+            shaped.crossfall = crossfallOf(component);
+            for (const ShapeColumn& column : kerbShape(shaped)) {
                 surface.push_back(
                     ShapeColumn{atOut + column.out, atLevel + column.top, atLevel + column.bottom});
             }
+            // The points after the first, which is where the previous component
+            // ended. A kerb facing outward is the other way round: its top
+            // first (the face's crest), then down the face to the lip.
+            const bool outward = component.faces == KerbFacing::Outward;
             switch (component.shape) {
             case KerbShape::Barrier:
             case KerbShape::Mountable:
-                codes = {"face", "back"};
+                codes = outward ? std::vector<std::string>{"face", "lip"}
+                                : std::vector<std::string>{"face", "back"};
                 break;
             case KerbShape::KerbAndGutter:
-                codes = {"invert", "face", "back"};
+                codes = outward ? std::vector<std::string>{"face", "invert", "lip"}
+                                : std::vector<std::string>{"invert", "face", "back"};
                 break;
             case KerbShape::EdgeStrip:
                 codes = {"outer"};
@@ -163,16 +183,12 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
                            ShapeColumn{atOut + component.width / 2.0, atLevel - component.depth,
                                        atLevel - component.depth},
                            ShapeColumn{atOut + component.width,
-                                       atLevel + component.width * component.crossfall / 100.0,
+                                       atLevel + component.width * crossfallOf(component) / 100.0,
                                        0.0}};
                 surface.back().bottom = surface.back().top;
                 codes = {"invert", "outer"};
             } else {
-                double crossfall = component.crossfall;
-                if (component.superelevated && superelevation) {
-                    crossfall = side == Side::Left ? superelevation->left : superelevation->right;
-                }
-                const double outer = atLevel + component.width * crossfall / 100.0;
+                const double outer = atLevel + component.width * crossfallOf(component) / 100.0;
                 surface = {ShapeColumn{atOut, atLevel, atLevel},
                            ShapeColumn{atOut + component.width, outer, outer}};
                 codes = {"outer"};
@@ -226,6 +242,15 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
             corner.out -= std::min(kFaceRun, previousWidth / 4.0);
             out.formation.push_back(hinge);
         }
+    } else {
+        // A side of a batter alone (a ramp's edge, an embankment of nothing
+        // but its slopes): nothing has put a point on the formation, and the
+        // batter would start at its first bench or its daylight, so the line
+        // would run straight from there to the other side's first point and
+        // lose the triangle under the batter. The hinge - here the centreline
+        // at the design level - is where it starts. buildSection joins it
+        // with the other side's first point at the centreline.
+        out.formation.push_back(OutPoint{batterPrefix + "/hinge", hinge.out, hinge.level});
     }
     if (!haveGround) {
         return out;
@@ -261,9 +286,12 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
     };
     std::optional<double> reach;
     double previous = 0.0;
-    // The steps summed may fall a hair short of the limit; the limit itself
-    // is still tried.
-    for (double d = kStep; d <= batter->maximumWidth + 1e-9; d += kStep) {
+    // Half-metre steps, each counted from the hinge (k x kStep: a sum of steps
+    // drifts), and the last one the limit itself: a limit that is not a
+    // multiple of a step, or is under one step, is tried at the limit, not
+    // given up on short of it.
+    for (std::size_t k = 1;; ++k) {
+        const double d = std::min(static_cast<double>(k) * kStep, batter->maximumWidth);
         const auto at = crossed(d);
         if (!at) {
             return out;
@@ -283,6 +311,9 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
             break;
         }
         previous = d;
+        if (d >= batter->maximumWidth) {
+            break;
+        }
     }
     if (!reach) {
         return out;
@@ -290,8 +321,11 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
     if (batter->benchHeight > 0.0 && batter->benchWidth > 0.0) {
         const double run = cut ? batter->cutSlope : batter->fillSlope;
         const double slope = batter->benchHeight * run;
-        int bench = 1;
-        for (double d = slope; d < *reach; d += slope + batter->benchWidth, ++bench) {
+        // checkTemplate refuses a batter with more than kMaximumBenches; the
+        // bound here is the loop's own, so no template can make it long.
+        std::size_t bench = 1;
+        for (double d = slope; d < *reach && bench <= kMaximumBenches;
+             d += slope + batter->benchWidth, ++bench) {
             addPoint(OutPoint{batterPrefix + "/bench" + std::to_string(bench) + "-in",
                               hinge.out + d, levelAt(d)});
             const double benchEnd = d + batter->benchWidth;
@@ -385,6 +419,72 @@ std::vector<SectionVertex> vertices(const std::vector<SectionPoint>& points)
         out.push_back(SectionVertex{point.offset, point.level});
     }
     return out;
+}
+
+// The stretches of one side - distances OUT from the centreline, ascending -
+// where the ground is above the formation (`cutting`) or below it, thick
+// somewhere by more than kCoordinate. `formationLevels[i]` is the formation's
+// level under `ground[i]`. The ground samples include every vertex of the
+// formation, so between two samples both lines are straight and their
+// difference crosses zero at one point, found exactly. A stretch whose
+// thickest point is under kCoordinate (0.1 mm, the TIN's duplicate tolerance)
+// is not earthworks: the daylight is bisected to about 1e-13 m, and lands on
+// either side of the ground by that much.
+std::vector<OutSpan> earthworkSpans(const std::vector<SectionVertex>& ground,
+                                    const std::vector<double>& formationLevels, Side side,
+                                    bool cutting)
+{
+    struct Sample {
+        double out;
+        double thickness;
+    };
+    const double sign = side == Side::Left ? 1.0 : -1.0;
+    std::vector<Sample> samples;
+    for (std::size_t i = 0; i < ground.size() && i < formationLevels.size(); ++i) {
+        const double out = sign * ground[i].offset;
+        if (out < -tol::kAbsolute) {
+            continue; // the other side of the centreline
+        }
+        const double thickness = cutting ? ground[i].elevation - formationLevels[i]
+                                         : formationLevels[i] - ground[i].elevation;
+        samples.push_back(Sample{std::max(out, 0.0), thickness});
+    }
+    std::sort(samples.begin(), samples.end(),
+              [](const Sample& a, const Sample& b) { return a.out < b.out; });
+    // Where the thickness is zero between two samples of opposite sign (or
+    // one of them zero).
+    const auto crossing = [](const Sample& a, const Sample& b) {
+        return a.out + (b.out - a.out) * (a.thickness / (a.thickness - b.thickness));
+    };
+    std::vector<OutSpan> spans;
+    // A plain flag and number rather than a std::optional<double>: GCC 16 at -O3
+    // cannot see that `close` runs only while a span is open and reports the
+    // optional's payload as maybe-uninitialised, which -Werror makes a failure.
+    bool open = false;
+    double start = 0.0;
+    double peak = 0.0;
+    const auto close = [&](double end) {
+        if (open && peak > tol::kCoordinate && end > start) {
+            spans.push_back(OutSpan{start, end});
+        }
+        open = false;
+    };
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        if (samples[i].thickness > 0.0) {
+            if (!open) {
+                start = i == 0 ? samples[i].out : crossing(samples[i - 1], samples[i]);
+                open = true;
+                peak = 0.0;
+            }
+            peak = std::max(peak, samples[i].thickness);
+        } else if (open) {
+            close(crossing(samples[i - 1], samples[i]));
+        }
+    }
+    if (open) {
+        close(samples.back().out);
+    }
+    return spans;
 }
 
 Result<RoadSection> buildSection(const RoadTemplate& roadTemplate, const SolvedAlignment& alignment,
@@ -515,6 +615,34 @@ Result<RoadSection> buildSection(const RoadTemplate& roadTemplate, const SolvedA
     section.leftFill = leftSplit.below;
     section.rightCut = rightSplit.above;
     section.rightFill = rightSplit.below;
+    // Where the earthworks have thickness; a side with none has no cut (or no
+    // fill) whatever sliver of area the daylight's last 1e-13 m left. This is
+    // the one place that decides it: the end areas, the quantities and the
+    // objects all follow.
+    std::vector<double> formationLevels;
+    formationLevels.reserve(section.ground.size());
+    for (const SectionVertex& sample : section.ground) {
+        formationLevels.push_back(levelOn(formation, sample.offset));
+    }
+    section.leftCutSpans = earthworkSpans(section.ground, formationLevels, Side::Left, true);
+    section.leftFillSpans = earthworkSpans(section.ground, formationLevels, Side::Left, false);
+    section.rightCutSpans = earthworkSpans(section.ground, formationLevels, Side::Right, true);
+    section.rightFillSpans = earthworkSpans(section.ground, formationLevels, Side::Right, false);
+    bool trimmed = false;
+    const auto settle = [&trimmed](const std::vector<OutSpan>& spans, double& area) {
+        if (spans.empty() && area != 0.0) {
+            area = 0.0;
+            trimmed = true;
+        }
+    };
+    settle(section.leftCutSpans, section.leftCut);
+    settle(section.leftFillSpans, section.leftFill);
+    settle(section.rightCutSpans, section.rightCut);
+    settle(section.rightFillSpans, section.rightFill);
+    if (trimmed) {
+        section.cutArea = section.leftCut + section.rightCut;
+        section.fillArea = section.leftFill + section.rightFill;
+    }
     return section;
 }
 
@@ -664,6 +792,45 @@ std::vector<double> sectionStations(double start, double end, double interval,
 
 // ---- a corridor -------------------------------------------------------------------------
 
+CorridorRange corridorRange(const Corridor& corridor, const SolvedAlignment& alignment,
+                            const SolvedProfile& profile)
+{
+    CorridorRange range;
+    if (auto status = checkCorridor(corridor); !status) {
+        range.problems.push_back(status.error().message);
+        return range;
+    }
+    const double low = std::max(alignment.startStation(), profile.startStation());
+    const double high = std::min(alignment.endStation(), profile.endStation());
+    if (!(high - low > tol::kCoordinate)) {
+        range.problems.push_back("the alignment " + corridor.alignment +
+                                 " and its design profile do not overlap in station");
+        return range;
+    }
+    double start = corridor.start.value_or(low);
+    double end = corridor.end.value_or(high);
+    if (start < low) {
+        range.problems.push_back("the corridor starts at " + number(start) +
+                                 ", before its alignment and profile begin: built from " +
+                                 number(low));
+        start = low;
+    }
+    if (end > high) {
+        range.problems.push_back("the corridor ends at " + number(end) +
+                                 ", after its alignment and profile end: built to " + number(high));
+        end = high;
+    }
+    if (!(end - start > tol::kCoordinate)) {
+        range.problems.push_back("the corridor's stations " + number(start) + " to " +
+                                 number(end) + " are not on its alignment and profile");
+        return range;
+    }
+    range.start = start;
+    range.end = end;
+    range.ok = true;
+    return range;
+}
+
 BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& templates,
                             const SolvedAlignment& alignment, const SolvedProfile& profile,
                             const katana::terrain::TinSurface* ground)
@@ -672,35 +839,13 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     built.name = corridor.name;
     built.surface = corridor.surface;
     built.alignment = alignment;
-    if (auto status = checkCorridor(corridor); !status) {
-        built.problems.push_back(status.error().message);
+    const CorridorRange range = corridorRange(corridor, alignment, profile);
+    built.problems.insert(built.problems.end(), range.problems.begin(), range.problems.end());
+    if (!range.ok) {
         return built;
     }
-    const double low = std::max(alignment.startStation(), profile.startStation());
-    const double high = std::min(alignment.endStation(), profile.endStation());
-    if (!(high - low > tol::kCoordinate)) {
-        built.problems.push_back("the alignment " + corridor.alignment +
-                                 " and its design profile do not overlap in station");
-        return built;
-    }
-    double start = corridor.start.value_or(low);
-    double end = corridor.end.value_or(high);
-    if (start < low) {
-        built.problems.push_back("the corridor starts at " + number(start) +
-                                 ", before its alignment and profile begin: built from " +
-                                 number(low));
-        start = low;
-    }
-    if (end > high) {
-        built.problems.push_back("the corridor ends at " + number(end) +
-                                 ", after its alignment and profile end: built to " + number(high));
-        end = high;
-    }
-    if (!(end - start > tol::kCoordinate)) {
-        built.problems.push_back("the corridor's stations " + number(start) + " to " + number(end) +
-                                 " are not on its alignment and profile");
-        return built;
-    }
+    const double start = range.start;
+    const double end = range.end;
     if ((end - start) / corridor.interval > static_cast<double>(kMaximumSections)) {
         built.problems.push_back("an interval of " + number(corridor.interval) + " over " +
                                  number(end - start) + " m is more than " +
@@ -709,6 +854,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     }
     built.start = start;
     built.end = end;
+    built.hasRange = true;
 
     // Every key station: where the geometry, the grade, the superelevation
     // or the template changes character, which a schedule must not step over.
@@ -796,6 +942,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
             if (!section->complete) {
                 ++run.incompleteSections;
             }
+            section->run = run.region;
             run.sections.push_back(std::move(*section));
         }
         // End areas between two complete sections; an interval touching an
@@ -840,6 +987,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
     }
     built.cut = cut.value();
     built.fill = fill.value();
+    built.hasEarthworks = ground != nullptr && !built.runs.empty();
     return built;
 }
 
@@ -875,6 +1023,7 @@ CorridorInputs corridorInputs(const Document& document, const Corridor& corridor
             inputs.problems.push_back("the surface " + corridor.surface + " is not in the drawing");
         } else {
             inputs.ground = named->surface.get();
+            inputs.surfaceName = named->name;
         }
     }
     return inputs;
@@ -892,6 +1041,11 @@ BuiltCorridor buildCorridor(const Document& document, const Corridor& corridor)
     BuiltCorridor built = buildCorridor(corridor, document.roadTemplates(), *inputs.alignment,
                                         *inputs.profile, inputs.ground);
     built.problems.insert(built.problems.begin(), inputs.problems.begin(), inputs.problems.end());
+    // The surface as the drawing spells it: the lookup ignores case, and the
+    // IFC export finds the cut's ground by this name, exactly.
+    if (!inputs.surfaceName.empty()) {
+        built.surface = inputs.surfaceName;
+    }
     return built;
 }
 
@@ -961,6 +1115,181 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
     }
     return mesh;
 }
+
+namespace {
+
+const std::vector<OutSpan>& spansOf(const RoadSection& section, Side side, bool cutting)
+{
+    if (side == Side::Left) {
+        return cutting ? section.leftCutSpans : section.leftFillSpans;
+    }
+    return cutting ? section.rightCutSpans : section.rightFillSpans;
+}
+
+double areaOf(const RoadSection& section, Side side, bool cutting)
+{
+    if (side == Side::Left) {
+        return cutting ? section.leftCut : section.leftFill;
+    }
+    return cutting ? section.rightCut : section.rightFill;
+}
+
+// The cut (or fill) of one side of one run, as a closed solid for each piece:
+// a stretch of stations over which the side has earthworks at all
+// (RoadSection::leftCutSpans ...), inside a stretch of complete sections. Each
+// piece runs over the sections that have earthworks and one beyond each end
+// where there is one (a section with none), because the end-area volume of
+// the interval between the two tapers to nothing there. Its columns run from
+// where its earthworks start across the section to where they end, so the
+// solid, its plan outline and its GrossArea are the earthworks and not the
+// whole half-section between the centreline and the daylight.
+void addEarthworks(bim::BimModel& model, const BuiltCorridor& built, const CorridorRun& run,
+                   Side side, bool cutting)
+{
+    const SolvedAlignment& alignment = *built.alignment;
+    const std::string source = "corridor " + built.name;
+    const std::string sideWord(toString(side));
+    const std::string region = std::to_string(run.region);
+    const std::string what = cutting ? "cut" : "fill";
+    const double sign = side == Side::Left ? 1.0 : -1.0;
+    const auto active = [&](std::size_t index) {
+        return !spansOf(run.sections[index], side, cutting).empty();
+    };
+    std::size_t emitted = 0;
+    std::size_t k = 0;
+    while (k < run.sections.size()) {
+        if (!run.sections[k].complete) {
+            ++k;
+            continue;
+        }
+        std::size_t last = k;
+        while (last + 1 < run.sections.size() && run.sections[last + 1].complete) {
+            ++last;
+        }
+        const std::size_t first = k;
+        k = last + 1;
+        if (last == first) {
+            continue;
+        }
+        // The runs of sections that have earthworks, inside [first, last].
+        for (std::size_t j = first; j <= last; ++j) {
+            if (!active(j)) {
+                continue;
+            }
+            std::size_t lastActive = j;
+            while (lastActive + 1 <= last && active(lastActive + 1)) {
+                ++lastActive;
+            }
+            const std::size_t firstActive = j;
+            j = lastActive;
+            const std::size_t from = firstActive > first ? firstActive - 1 : firstActive;
+            const std::size_t to = lastActive < last ? lastActive + 1 : lastActive;
+            if (from == to) {
+                continue;
+            }
+            katana::math::CompensatedSum endArea;
+            for (std::size_t m = from; m < to; ++m) {
+                const RoadSection& a = run.sections[m];
+                const RoadSection& b = run.sections[m + 1];
+                endArea.add(0.5 * (areaOf(a, side, cutting) + areaOf(b, side, cutting)) *
+                            (b.station - a.station));
+            }
+            if (!(endArea.value() > 0.0)) {
+                continue;
+            }
+            std::vector<double> stations;
+            std::vector<std::vector<SolidColumn>> columns;
+            std::vector<Point2> inner;
+            std::vector<Point2> outer;
+            for (std::size_t m = from; m <= to; ++m) {
+                const RoadSection& section = run.sections[m];
+                // A section with none takes the stretch of its neighbour that
+                // has some, with no thickness there; in plan it is a point
+                // at the middle of it, which makes the outline taper as the
+                // end-area volume does.
+                const bool has = active(m);
+                const std::size_t like = has ? m : (m == from ? m + 1 : m - 1);
+                const auto& spans = spansOf(run.sections[like], side, cutting);
+                const double outFrom = spans.front().from;
+                const double outTo = spans.back().to;
+                const std::vector<SectionVertex> formation = vertices(section.formation);
+                std::vector<SolidColumn> across;
+                for (std::size_t c = 0; c < kEarthworksColumns; ++c) {
+                    const double out = outFrom + (outTo - outFrom) * static_cast<double>(c) /
+                                                  static_cast<double>(kEarthworksColumns - 1);
+                    const double offset = sign * out;
+                    const double f = levelOn(formation, offset);
+                    const double g = levelOn(section.ground, offset);
+                    across.push_back(cutting ? SolidColumn{offset, std::max(g, f), f}
+                                             : SolidColumn{offset, f, std::min(g, f)});
+                }
+                stations.push_back(section.station);
+                columns.push_back(std::move(across));
+                const double lo = has ? outFrom : 0.5 * (outFrom + outTo);
+                const double hi = has ? outTo : lo;
+                if (const auto p = alignment.pointAtStationOffset(section.station, sign * lo)) {
+                    inner.push_back(*p);
+                }
+                if (const auto p = alignment.pointAtStationOffset(section.station, sign * hi)) {
+                    outer.push_back(*p);
+                }
+            }
+            auto mesh = loftSolid(alignment, stations, columns);
+            if (!mesh) {
+                model.problems.push_back(
+                    bim::BimProblem{source, "earthworks " + sideWord + ": " + mesh.error().message});
+                continue;
+            }
+            katana::geometry::Polyline2 outline;
+            outline.closed = true;
+            outline.vertices = inner;
+            for (auto it = outer.rbegin(); it != outer.rend(); ++it) {
+                // A tapered end is one point, not two.
+                if (outline.vertices.empty() || !(outline.vertices.back() == *it)) {
+                    outline.vertices.push_back(*it);
+                }
+            }
+            if (outline.vertices.size() > 2 && outline.vertices.back() == outline.vertices.front()) {
+                outline.vertices.pop_back(); // the outline is closed: no point twice
+            }
+            ++emitted;
+            bim::BimObject object;
+            object.id = "corridor/" + built.name + "/" + sideWord + "/earthworks/" + what + "/" +
+                        region + (emitted > 1 ? "-" + std::to_string(emitted) : "");
+            object.name = built.name + " " + sideWord + " earthworks " + what;
+            object.kind = "earthworks";
+            object.facility = built.name;
+            object.part = "ROADSEGMENT";
+            object.ifcClass = cutting ? "IfcEarthworksCut" : "IfcEarthworksFill";
+            object.predefinedType = cutting ? "CUT" : "EMBANKMENT";
+            object.material = cutting ? "excavated material" : "fill";
+            // As a cut and fill map colours them (the "Cut Fill" surface
+            // style): blue cut, red fill.
+            object.colour = cutting ? katana::entity::Color{74, 127, 193, 255}
+                                    : katana::entity::Color{193, 80, 74, 255};
+            object.layer = cutting ? "road/earthworks/cut" : "road/earthworks/fill";
+            object.plan.push_back(std::move(outline));
+            object.properties = {{"template", run.roadTemplate.name},
+                                 {"region", region},
+                                 {"from", number(stations.front())},
+                                 {"to", number(stations.back())},
+                                 {"side", sideWord},
+                                 {"method", "average end area"}};
+            // The surface a cut is taken from, which the IFC export reads by
+            // this name.
+            if (cutting) {
+                object.properties.emplace_back("Target Surface", built.surface);
+            }
+            object.quantities = {quantity("Length", stations.back() - stations.front(), "m"),
+                                 quantity("GrossArea", object.plan.front().area(), "m2"),
+                                 quantity("GrossVolume", endArea.value(), "m3")};
+            object.mesh = std::move(*mesh);
+            model.objects.push_back(std::move(object));
+        }
+    }
+}
+
+} // namespace
 
 bim::BimModel corridorSolids(const BuiltCorridor& built)
 {
@@ -1064,10 +1393,14 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
                 // IfcKerb's Mountable attribute.
                 object.properties.emplace_back(
                     "mountable", component.shape == KerbShape::Mountable ? "true" : "false");
+                // A kerb's Height is its face; an edge strip is flush and has none,
+                // so it reports how thick it is instead.
                 object.quantities = {
                     quantity("Length", planLength(alignment, stations, columns), "m"),
                     quantity("Width", kerbWidth(component), "m"),
-                    quantity("Height", component.height, "m"),
+                    component.shape == KerbShape::EdgeStrip
+                        ? quantity("Depth", component.depth, "m")
+                        : quantity("Height", component.height, "m"),
                     quantity("GrossVolume", volume, "m3")};
             }
             object.mesh = std::move(*mesh);
@@ -1076,99 +1409,8 @@ bim::BimModel corridorSolids(const BuiltCorridor& built)
 
         // ---- earthworks -----------------------------------------------------------------
         for (const Side side : {Side::Left, Side::Right}) {
-            const std::string sideWord(toString(side));
             for (const bool cutting : {true, false}) {
-                std::size_t piece = 0;
-                std::size_t k = 0;
-                while (k < run.sections.size()) {
-                    if (!run.sections[k].complete) {
-                        ++k;
-                        continue;
-                    }
-                    std::size_t last = k;
-                    while (last + 1 < run.sections.size() && run.sections[last + 1].complete) {
-                        ++last;
-                    }
-                    const std::size_t first = k;
-                    k = last + 1;
-                    if (last == first) {
-                        continue;
-                    }
-                    katana::math::CompensatedSum endArea;
-                    for (std::size_t j = first; j < last; ++j) {
-                        const RoadSection& a = run.sections[j];
-                        const RoadSection& b = run.sections[j + 1];
-                        const double areaA = side == Side::Left
-                                                 ? (cutting ? a.leftCut : a.leftFill)
-                                                 : (cutting ? a.rightCut : a.rightFill);
-                        const double areaB = side == Side::Left
-                                                 ? (cutting ? b.leftCut : b.leftFill)
-                                                 : (cutting ? b.rightCut : b.rightFill);
-                        endArea.add(0.5 * (areaA + areaB) * (b.station - a.station));
-                    }
-                    ++piece;
-                    if (!(endArea.value() > 0.0)) {
-                        continue; // no cut (or fill) on this side here: no solid of nothing
-                    }
-                    std::vector<double> pieceStations;
-                    std::vector<std::vector<SolidColumn>> columns;
-                    for (std::size_t j = first; j <= last; ++j) {
-                        const RoadSection& section = run.sections[j];
-                        const double outermost = side == Side::Left ? section.top.front().offset
-                                                                    : section.top.back().offset;
-                        const std::vector<SectionVertex> formation = vertices(section.formation);
-                        std::vector<SolidColumn> across;
-                        for (std::size_t c = 0; c < kEarthworksColumns; ++c) {
-                            const double offset = outermost * static_cast<double>(c) /
-                                                  static_cast<double>(kEarthworksColumns - 1);
-                            const double f = levelOn(formation, offset);
-                            const double g = levelOn(section.ground, offset);
-                            across.push_back(cutting ? SolidColumn{offset, std::max(g, f), f}
-                                                     : SolidColumn{offset, f, std::min(g, f)});
-                        }
-                        pieceStations.push_back(section.station);
-                        columns.push_back(std::move(across));
-                    }
-                    auto mesh = loftSolid(alignment, pieceStations, columns);
-                    if (!mesh) {
-                        fail("earthworks " + sideWord + ": " + mesh.error().message);
-                        continue;
-                    }
-                    bim::BimObject object;
-                    const std::string what = cutting ? "cut" : "fill";
-                    object.id = "corridor/" + built.name + "/" + sideWord + "/earthworks/" + what +
-                                "/" + region + (piece > 1 ? "-" + std::to_string(piece) : "");
-                    object.name = built.name + " " + sideWord + " earthworks " + what;
-                    object.kind = "earthworks";
-                    object.facility = built.name;
-                    object.part = "ROADSEGMENT";
-                    object.ifcClass = cutting ? "IfcEarthworksCut" : "IfcEarthworksFill";
-                    object.predefinedType = cutting ? "CUT" : "EMBANKMENT";
-                    object.material = cutting ? "excavated material" : "fill";
-                    // As a cut and fill map colours them (the "Cut Fill"
-                    // surface style): blue cut, red fill.
-                    object.colour = cutting ? katana::entity::Color{74, 127, 193, 255}
-                                            : katana::entity::Color{193, 80, 74, 255};
-                    object.layer = cutting ? "road/earthworks/cut" : "road/earthworks/fill";
-                    object.plan.push_back(outlineOf(alignment, pieceStations, columns));
-                    object.properties = {{"template", run.roadTemplate.name},
-                                         {"region", region},
-                                         {"from", number(pieceStations.front())},
-                                         {"to", number(pieceStations.back())},
-                                         {"side", sideWord},
-                                         {"method", "average end area"}};
-                    // The surface a cut is taken from, which the IFC export
-                    // reads by this name.
-                    if (cutting) {
-                        object.properties.emplace_back("Target Surface", built.surface);
-                    }
-                    object.quantities = {
-                        quantity("Length", pieceStations.back() - pieceStations.front(), "m"),
-                        quantity("GrossArea", object.plan.front().area(), "m2"),
-                        quantity("GrossVolume", endArea.value(), "m3")};
-                    object.mesh = std::move(*mesh);
-                    model.objects.push_back(std::move(object));
-                }
+                addEarthworks(model, built, run, side, cutting);
             }
         }
     }
@@ -1182,10 +1424,6 @@ std::vector<const RoadSection*> corridorSections(const BuiltCorridor& built)
     std::vector<const RoadSection*> out;
     for (const CorridorRun& run : built.runs) {
         for (const RoadSection& section : run.sections) {
-            if (!out.empty() &&
-                std::abs(out.back()->station - section.station) <= tol::kGeometric) {
-                continue;
-            }
             out.push_back(&section);
         }
     }
@@ -1194,10 +1432,42 @@ std::vector<const RoadSection*> corridorSections(const BuiltCorridor& built)
 
 namespace {
 
-// Strings by code over `sections`: a code missing from a section, or a
-// section not taken (`take` false), ends the strings through it.
+// A section and the station its points are laid at along the alignment.
+struct Placed {
+    const RoadSection* section;
+    double station;
+};
+
+// The sections where they stand, or - `step` - with the first section of each
+// run that meets the one before at one station laid kFaceRun further on (no
+// further than a quarter of the way to its run's next section). A surface
+// holds one level at a point: two runs' sections at one station would make the
+// TIN keep one of them, or blend them over the interval beside the join; a
+// millimetre apart (more than the TIN's duplicate tolerance) they make a
+// near-vertical face, the step a change of template is.
+std::vector<Placed> placedSections(const std::vector<const RoadSection*>& sections, bool step)
+{
+    std::vector<Placed> out;
+    out.reserve(sections.size());
+    for (std::size_t i = 0; i < sections.size(); ++i) {
+        double station = sections[i]->station;
+        if (step && i > 0 && sections[i]->run != sections[i - 1]->run &&
+            std::abs(station - sections[i - 1]->station) <= tol::kGeometric) {
+            double room = kFaceRun;
+            if (i + 1 < sections.size() && sections[i + 1]->run == sections[i]->run) {
+                room = std::min(room, 0.25 * (sections[i + 1]->station - station));
+            }
+            station = sections[i - 1]->station + room;
+        }
+        out.push_back(Placed{sections[i], station});
+    }
+    return out;
+}
+
+// Strings by code over `placed`: a code missing from a section, a section not
+// taken (`take` false) and the join of two runs end the strings through it.
 template <typename Take>
-std::vector<CorridorString> stringsOver(const std::vector<const RoadSection*>& sections,
+std::vector<CorridorString> stringsOver(const std::vector<Placed>& placed,
                                         const SolvedAlignment& alignment, bool formation, Take take)
 {
     std::vector<CorridorString> finished;
@@ -1207,18 +1477,24 @@ std::vector<CorridorString> stringsOver(const std::vector<const RoadSection*>& s
             finished.push_back(std::move(string));
         }
     };
-    for (const RoadSection* section : sections) {
-        if (!take(*section)) {
-            for (auto& entry : open) {
-                close(entry.second);
+    const RoadSection* before = nullptr;
+    for (const Placed& at : placed) {
+        const RoadSection* section = at.section;
+        const bool joined = before != nullptr && before->run != section->run;
+        before = section;
+        if (!take(*section) || joined) {
+            for (auto& each : open) {
+                close(each.second);
             }
             open.clear();
-            continue;
+            if (!take(*section)) {
+                continue;
+            }
         }
         const auto& line = formation ? section->formation : section->top;
         std::map<std::string, CorridorString> next;
         for (const SectionPoint& point : line) {
-            const auto plan = alignment.pointAtStationOffset(section->station, point.offset);
+            const auto plan = alignment.pointAtStationOffset(at.station, point.offset);
             if (!plan) {
                 continue;
             }
@@ -1250,7 +1526,7 @@ std::vector<CorridorString> corridorStrings(const BuiltCorridor& built, bool for
     if (!built.alignment) {
         return {};
     }
-    return stringsOver(corridorSections(built), *built.alignment, formation,
+    return stringsOver(placedSections(corridorSections(built), false), *built.alignment, formation,
                        [](const RoadSection& section) { return section.top.size() >= 2; });
 }
 
@@ -1268,36 +1544,79 @@ Result<SectionsSurface> sectionsSurface(const std::vector<const RoadSection*>& s
         const auto& line = formation ? section.formation : section.top;
         return (!completeOnly || section.complete) && line.size() >= 2;
     };
-    for (const RoadSection* section : sections) {
+    const std::vector<Placed> placed = placedSections(sections, true);
+    for (const Placed& entry : placed) {
+        const RoadSection* section = entry.section;
         if (!take(*section)) {
             ++result.leftOut;
             continue;
         }
         const auto& line = formation ? section->formation : section->top;
         for (const SectionPoint& point : line) {
-            if (const auto plan = alignment.pointAtStationOffset(section->station, point.offset)) {
+            if (const auto plan = alignment.pointAtStationOffset(entry.station, point.offset)) {
                 input.points.emplace_back(plan->x, plan->y, point.level);
             }
         }
-        if (const auto first =
-                alignment.pointAtStationOffset(section->station, line.front().offset)) {
+        if (const auto first = alignment.pointAtStationOffset(entry.station, line.front().offset)) {
             leftEdge.push_back(*first);
         }
-        if (const auto last =
-                alignment.pointAtStationOffset(section->station, line.back().offset)) {
+        if (const auto last = alignment.pointAtStationOffset(entry.station, line.back().offset)) {
             rightEdge.push_back(*last);
         }
         ++result.sections;
     }
     if (result.sections < 2) {
+        // Only a surface of complete sections leaves one out for not reaching
+        // the ground; otherwise it is the sections there are that are too few.
         return makeError(ErrorCode::InvalidGeometry,
-                         "fewer than two sections reach the ground: there is no surface to build",
-                         std::to_string(result.leftOut) + " incomplete");
+                         completeOnly
+                             ? "fewer than two sections reach the ground: there is no surface to "
+                               "build"
+                             : "fewer than two sections have a line to triangulate: there is no "
+                               "surface to build",
+                         std::to_string(result.leftOut) + (completeOnly ? " incomplete" : " left out"));
     }
-    for (const CorridorString& string : stringsOver(sections, alignment, formation, take)) {
+    for (const CorridorString& string : stringsOver(placed, alignment, formation, take)) {
         katana::terrain::Breakline breakline;
         breakline.vertices = string.points;
         input.breaklines.push_back(std::move(breakline));
+    }
+    // The two sections of a join are lines the triangulation must keep. The
+    // strings end at the join, and the only constraint left across it would be
+    // the Delaunay rule: the first section of the later run lies a millimetre
+    // on, its points inside the circles of the thin triangles between the
+    // earlier run's last two sections, so the TIN joined the last interval to
+    // the other template and blended the two over it (9.793 at 6 m out and
+    // 35 m on the rural-urban road, where the rural surface is 9.585). With
+    // each section a breakline the interval before the join is the earlier
+    // run's alone, the 1 mm beyond it the face, and the later run its own.
+    const auto crossLine = [&](const Placed& at) {
+        katana::terrain::Breakline breakline;
+        const auto& line = formation ? at.section->formation : at.section->top;
+        for (const SectionPoint& point : line) {
+            const auto plan = alignment.pointAtStationOffset(at.station, point.offset);
+            // A vertical face (two levels at one offset) is one place in plan.
+            if (plan && !(!breakline.vertices.empty() &&
+                          std::hypot(plan->x - breakline.vertices.back().x,
+                                     plan->y - breakline.vertices.back().y) <= tol::kGeometric)) {
+                breakline.vertices.emplace_back(plan->x, plan->y, point.level);
+            }
+        }
+        return breakline;
+    };
+    for (std::size_t i = 1; i < placed.size(); ++i) {
+        const RoadSection& before = *placed[i - 1].section;
+        const RoadSection& after = *placed[i].section;
+        if (before.run == after.run || std::abs(before.station - after.station) > tol::kGeometric ||
+            !take(before) || !take(after)) {
+            continue;
+        }
+        for (const Placed* at : {&placed[i - 1], &placed[i]}) {
+            katana::terrain::Breakline breakline = crossLine(*at);
+            if (breakline.vertices.size() >= 2) {
+                input.breaklines.push_back(std::move(breakline));
+            }
+        }
     }
     // A ring with gaps in it is not a ring: with sections left out the
     // surface is bounded by its hull instead (docs/cad.md).

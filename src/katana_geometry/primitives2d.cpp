@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace katana::geometry {
 
@@ -12,6 +13,24 @@ using katana::math::kHalfPi;
 using katana::math::kPi;
 using katana::math::kTwoPi;
 using katana::math::normalizeAngle;
+
+namespace {
+
+// One edge's vote in the crossing number of Polyline2::classify, with the
+// half-open edge rule: an edge counts when it straddles the horizontal through
+// p, the upper endpoint excluded, so that a ray through a vertex is counted
+// exactly once. Shared with PolygonClassifier so the two cannot come to
+// disagree about a polygon.
+bool edgeCrossesRay(const Point2& a, const Point2& b, const Point2& p)
+{
+    if ((a.y > p.y) == (b.y > p.y)) {
+        return false;
+    }
+    const double xAtY = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x);
+    return p.x < xAtY;
+}
+
+} // namespace
 
 // ---- Line2 -------------------------------------------------------------------
 
@@ -271,19 +290,88 @@ Containment Polyline2::classify(const Point2& p) const
     if (const auto distance = distanceTo(p); distance && *distance <= tol::kGeometric) {
         return Containment::OnBoundary;
     }
-    // Crossing number with half-open edge rule: an edge counts when it straddles
-    // the horizontal through p, with the upper endpoint excluded, so that a ray
-    // through a vertex is counted exactly once.
     bool inside = false;
     for (std::size_t i = 0; i < vertices.size(); ++i) {
-        const Point2& a = vertices[i];
-        const Point2& b = vertices[(i + 1) % vertices.size()];
-        if ((a.y > p.y) != (b.y > p.y)) {
-            const double xAtY = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x);
-            if (p.x < xAtY) {
-                inside = !inside;
-            }
+        inside = inside != edgeCrossesRay(vertices[i], vertices[(i + 1) % vertices.size()], p);
+    }
+    return inside ? Containment::Inside : Containment::Outside;
+}
+
+// ---- PolygonClassifier ---------------------------------------------------------
+
+PolygonClassifier::PolygonClassifier(const Polyline2& polygon) : vertices_(polygon.vertices)
+{
+    const std::size_t count = vertices_.size();
+    if (count < 3) {
+        vertices_.clear();
+        return;
+    }
+    for (const Point2& vertex : vertices_) {
+        bounds_.expand(vertex);
+    }
+    // About four edges a band; a thousand bands at most, so an edge that spans
+    // the polygon's whole height is entered a thousand times and not a
+    // hundred thousand.
+    constexpr std::size_t kMostBands = 1024;
+    bands_ = std::clamp<std::size_t>(count / 4, 1, kMostBands);
+    const double height = bounds_.height();
+    bandHeight_ = height > 0.0 ? height / static_cast<double>(bands_) : 1.0;
+
+    // Counting pass, then fill: the layout the surface locator uses.
+    const auto range = [this, count](std::size_t edge) {
+        const Point2& a = vertices_[edge];
+        const Point2& b = vertices_[(edge + 1) % count];
+        return std::pair{bandOf(std::min(a.y, b.y) - tol::kGeometric),
+                         bandOf(std::max(a.y, b.y) + tol::kGeometric)};
+    };
+    bandStart_.assign(bands_ + 1, 0);
+    for (std::size_t edge = 0; edge < count; ++edge) {
+        const auto [first, last] = range(edge);
+        for (std::size_t band = first; band <= last; ++band) {
+            ++bandStart_[band + 1];
         }
+    }
+    for (std::size_t band = 0; band < bands_; ++band) {
+        bandStart_[band + 1] += bandStart_[band];
+    }
+    edges_.resize(bandStart_.back());
+    std::vector<std::uint32_t> cursor(bandStart_.begin(), bandStart_.end() - 1);
+    for (std::size_t edge = 0; edge < count; ++edge) {
+        const auto [first, last] = range(edge);
+        for (std::size_t band = first; band <= last; ++band) {
+            edges_[cursor[band]++] = static_cast<std::uint32_t>(edge);
+        }
+    }
+}
+
+std::size_t PolygonClassifier::bandOf(double y) const
+{
+    const double band = std::floor((y - bounds_.min.y) / bandHeight_);
+    if (!(band > 0.0)) {
+        return 0; // also NaN
+    }
+    return band >= static_cast<double>(bands_) ? bands_ - 1 : static_cast<std::size_t>(band);
+}
+
+Containment PolygonClassifier::classify(const Point2& p) const
+{
+    const std::size_t count = vertices_.size();
+    if (count < 3 || !(p.y >= bounds_.min.y - tol::kGeometric &&
+                       p.y <= bounds_.max.y + tol::kGeometric)) {
+        return Containment::Outside;
+    }
+    const std::size_t band = bandOf(p.y);
+    bool inside = false;
+    for (std::uint32_t i = bandStart_[band]; i < bandStart_[band + 1]; ++i) {
+        const Point2& a = vertices_[edges_[i]];
+        const Point2& b = vertices_[(edges_[i] + 1) % count];
+        if (Segment2{a, b}.distanceTo(p) <= tol::kGeometric) {
+            return Containment::OnBoundary;
+        }
+    }
+    for (std::uint32_t i = bandStart_[band]; i < bandStart_[band + 1]; ++i) {
+        inside = inside != edgeCrossesRay(vertices_[edges_[i]],
+                                          vertices_[(edges_[i] + 1) % count], p);
     }
     return inside ? Containment::Inside : Containment::Outside;
 }

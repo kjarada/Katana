@@ -365,6 +365,15 @@ TEST(DrawingShapes, TypedCornersMakeAPolygonWithAndWithoutHeights)
     EXPECT_EQ(shapeOf(Corners{flat[0], flat[1], flat[0]}, ShapeKind::Polygon).why,
               NotAShape::TooFew);
     EXPECT_EQ(shapeOf(Corners{}, ShapeKind::Polygon).why, NotAShape::TooFew);
+    // What is TooFew counts the corners LEFT once the closing repeat is off - the
+    // number a refusal can quote without contradicting itself ("needs three
+    // corners [corners=3]"): 0,0 4,0 0,0 is two, and 5,5 three times is one.
+    EXPECT_EQ(shapeOf(Corners{flat[0], flat[1]}, ShapeKind::Polygon).corners, 2u);
+    EXPECT_EQ(shapeOf(Corners{flat[0], flat[1], flat[0]}, ShapeKind::Polygon).corners, 2u);
+    const TypedCorner five{Point2(5, 5), std::nullopt};
+    EXPECT_EQ(shapeOf(Corners{five, five, five}, ShapeKind::Polygon).corners, 1u);
+    EXPECT_EQ(shapeOf(Corners{}, ShapeKind::Polygon).corners, 0u);
+    EXPECT_EQ(shapeOf(Corners{five}, ShapeKind::Line).corners, 1u);
 
     // As a line: two vertices are one, open; one is none.
     const ShapeOf line = shapeOf(Corners{flat[0], flat[1]}, ShapeKind::Line);
@@ -537,7 +546,14 @@ TEST_F(DrawingShapesInADrawing, TypedCornersAreOneShapeOrRefusedAsTooFew)
     ASSERT_TRUE(two->refused.has_value());
     EXPECT_FALSE(two->refused->entity.has_value());
     EXPECT_EQ(two->refused->why, NotAShape::TooFew);
+    EXPECT_EQ(two->refused->corners, 2u);
     EXPECT_TRUE(two->shapes.empty());
+
+    // Typed back to the first corner of two: the refusal counts two, not three.
+    const auto closed = resolved("0,0 4,0 0,0", ShapeKind::Polygon);
+    ASSERT_TRUE(closed.ok());
+    ASSERT_TRUE(closed->refused.has_value());
+    EXPECT_EQ(closed->refused->corners, 2u);
 }
 
 TEST_F(DrawingShapesInADrawing, AScopeTakesTheShapesAndCountsWhatIsNoneByWhy)

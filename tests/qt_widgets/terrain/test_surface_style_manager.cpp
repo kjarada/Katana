@@ -16,6 +16,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStringList>
 
 #include <memory>
@@ -277,4 +278,122 @@ TEST(SurfaceStyleManager, ItsLinesChangeTheDrawingThroughTheInterpreter)
     // The dialog follows the drawing.
     QApplication::processEvents();
     EXPECT_EQ(child<QLineEdit>(dialog, "surfaceStyleInterval")->text(), "1");
+}
+
+TEST(SurfaceStyleManager, ADescriptionWithBackslashesArrivesAsItWasWrittenInTheBox)
+{
+    // The verb reads a description as a typed text, in which two backslashes are
+    // one and a backslash before an n is a line break, so the box's own backslashes
+    // are doubled on the way to the line. The cases: a path, two backslashes then an
+    // n (which would read as a backslash and an n if doubled once too few), a text
+    // that ends in a backslash, a blank and plain text.
+    Document document;
+    katana::cad::CommandInterpreter interpreter(document);
+    ASSERT_TRUE(interpreter.run("SURFACESTYLE NEW x").ok());
+    SurfaceDisplayStyle from = *document.surfaceStyles().find("x");
+    for (const std::string description : {"C:\\dir", "a\\\\nb", "x\\", "two words", "plain"}) {
+        SurfaceDisplayStyle to = from;
+        to.description = description;
+        const auto words = katana::qt::surfaceStyleSetWords(from, to);
+        ASSERT_TRUE(words.ok()) << description;
+        auto reply = interpreter.run("SURFACESTYLE SET x " + words->toStdString());
+        ASSERT_TRUE(reply.ok()) << description << ": " << reply.error().describe();
+        EXPECT_EQ(document.surfaceStyles().find("x")->description, description) << description;
+        from = *document.surfaceStyles().find("x");
+    }
+    // Words the box can hold that a line cannot carry are refused with a sentence.
+    SurfaceDisplayStyle to = from;
+    to.description = "a\nb";
+    EXPECT_FALSE(katana::qt::surfaceStyleSetWords(from, to).ok());
+}
+
+TEST(SurfaceStyleManager, AStyleHoldingMoreThanTheFormsBoxesShowIsLeftAloneUntilTheBoxIsMoved)
+{
+    // The drawing's own: "Big" holds a major every 2 000 000 intervals (past
+    // the box's 1 000 000, which clamps) and faces3d=none, which a project can
+    // hold and the 3D list has no word for (it shows flat). Nothing was edited,
+    // and the form said it had: major=1000000 faces3d=flat - and Apply wrote
+    // them over the style.
+    Document document;
+    prepare(document);
+    katana::cad::SurfaceStyleSet set = document.surfaceStyles();
+    SurfaceDisplayStyle big;
+    big.name = "Big";
+    big.contours.majorEvery = 2'000'000;
+    big.faces3d = SurfaceFaces::None;
+    set.styles.push_back(big);
+    ASSERT_TRUE(document.setSurfaceStyles(set).ok());
+    QStringList lines;
+    SurfaceStyleManagerContext context;
+    context.document = &document;
+    context.run = [&lines](const QString& line) {
+        lines << line;
+        return VerbOutcome{true, "done", {}};
+    };
+    SurfaceStyleManagerDialog dialog(std::move(context));
+    ASSERT_TRUE(dialog.selectStyle("Big"));
+    EXPECT_TRUE(dialog.applyLine().isEmpty()) << dialog.applyLine().toStdString();
+    EXPECT_FALSE(child<QPushButton>(dialog, "surfaceStyleApply")->isEnabled());
+    EXPECT_TRUE(child<QLabel>(dialog, "surfaceStyleLine")->text().contains("nothing to apply"));
+    // An edit of something else carries that alone.
+    child<QCheckBox>(dialog, "surfaceStyleTriangles")->setChecked(true);
+    EXPECT_EQ(dialog.applyLine(), "SURFACESTYLE SET Big triangles=on");
+    // Moving the box is an edit, and carries its value.
+    child<QCheckBox>(dialog, "surfaceStyleTriangles")->setChecked(false);
+    child<QComboBox>(dialog, "surfaceStyleFaces3d")->setCurrentText("slope");
+    EXPECT_EQ(dialog.applyLine(), "SURFACESTYLE SET Big faces3d=slope");
+}
+
+TEST(SurfaceStyleManager, ARefusedNameLeavesTheStyleBeingEditedChosenWithItsUnappliedEdits)
+{
+    // "Style A" with its interval edited to 0.25 and not applied; Rename,
+    // New and Copy to the name "Style B", which is taken. Each is refused -
+    // and the list jumped to the style that holds the name, whose values
+    // replaced the form's: the edit lost, and a following Apply would edit
+    // the other style.
+    Document document;
+    prepare(document);
+    katana::cad::CommandInterpreter interpreter(document);
+    SurfaceStyleManagerContext context;
+    context.document = &document;
+    context.run = [&interpreter](const QString& line) {
+        auto reply = interpreter.run(line.toStdString());
+        return reply ? VerbOutcome{true, QString::fromStdString(*reply), {}}
+                     : VerbOutcome{false, {}, QString::fromStdString(reply.error().describe())};
+    };
+    SurfaceStyleManagerDialog dialog(std::move(context));
+    for (const char* button : {"surfaceStyleRename", "surfaceStyleNew", "surfaceStyleCopy"}) {
+        ASSERT_TRUE(dialog.selectStyle("Style A"));
+        fill(dialog, "surfaceStyleInterval", "0.25");
+        fill(dialog, "surfaceStyleName", "Style B");
+        click(dialog, button);
+        EXPECT_TRUE(child<QLabel>(dialog, "surfaceStyleStatus")->text().contains("AlreadyExists")) << button;
+        EXPECT_EQ(dialog.currentStyle(), "Style A") << button;
+        EXPECT_EQ(child<QLineEdit>(dialog, "surfaceStyleInterval")->text(), "0.25") << button;
+        EXPECT_EQ(dialog.applyLine(), "SURFACESTYLE SET \"Style A\" interval=0.25") << button;
+    }
+    // An accepted one still chooses the style it made.
+    fill(dialog, "surfaceStyleName", "Style C");
+    click(dialog, "surfaceStyleCopy");
+    EXPECT_EQ(dialog.currentStyle(), "Style C");
+}
+
+TEST(SurfaceStyleManager, TheBandsBoxHoldsTheSameRangeAsTheStyleCheckSoNoTypedCountIsClamped)
+{
+    // The form's box, the SURFACESTYLE line and a project file hold one range
+    // (kMaximumSurfaceBands): the box was 2 to 100 while the check allowed a
+    // million, and a style the verb made with 500 bands was written back as
+    // 100 by an Apply that changed only its description.
+    Recorded recorded;
+    auto* bands = child<QSpinBox>(*recorded.dialog, "surfaceStyleBands");
+    ASSERT_NE(bands, nullptr);
+    EXPECT_EQ(bands->minimum(), 2);
+    EXPECT_EQ(bands->maximum(), katana::cad::kMaximumSurfaceBands);
+    // A count past it is refused by the check, so the box never had to clamp.
+    SurfaceDisplayStyle many;
+    many.name = "Many";
+    many.bands = katana::cad::kMaximumSurfaceBands + 1;
+    EXPECT_FALSE(katana::cad::checkSurfaceStyle(many).ok());
+    many.bands = katana::cad::kMaximumSurfaceBands;
+    EXPECT_TRUE(katana::cad::checkSurfaceStyle(many).ok());
 }

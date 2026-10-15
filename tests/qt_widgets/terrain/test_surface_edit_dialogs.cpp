@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
@@ -141,6 +142,42 @@ TEST(SurfaceEditLines, WhatCannotBeWrittenIsRefusedNamingTheField)
               std::string::npos);
 }
 
+TEST(SurfaceEditLines, TheDataDialogsWriteTheirLinesFromTheScopeAndRefuseWithoutOne)
+{
+    // Delete points inside, delete triangles inside or outside, and add points
+    // are what the one-pick tools cannot say: any number of polygons, or the
+    // levelled points, from a scope. The scope is always asked.
+    SurfaceLevelsForm form;
+    form.surface = "ground";
+    form.inside = true;
+    form.scope = "LAYERS pads ONLY";
+    EXPECT_EQ(*katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeletePoints, form),
+              "SURFACE EDIT ground DELETE POINTS INSIDE FROM LAYERS pads ONLY");
+    EXPECT_EQ(*katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeleteTriangles, form),
+              "SURFACE EDIT ground DELETE TRIANGLES INSIDE FROM LAYERS pads ONLY");
+    form.outside = true;
+    EXPECT_EQ(*katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeleteTriangles, form),
+              "SURFACE EDIT ground DELETE TRIANGLES OUTSIDE FROM LAYERS pads ONLY");
+    form.surface = "my ground";
+    form.scope = "DRAWING WHERE TYPE=polyline";
+    EXPECT_EQ(*katana::qt::surfaceLevelsLine(SurfaceLevelsKind::AddPoints, form),
+              "SURFACE EDIT \"my ground\" ADD POINTS FROM DRAWING WHERE TYPE=polyline");
+
+    form.scope.clear();
+    EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeletePoints, form))
+                  .find("Polygons"),
+              std::string::npos);
+    EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::AddPoints, form)).find("Points"),
+              std::string::npos);
+    form.scopeError = "no layer is ticked";
+    EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::DeleteTriangles, form))
+                  .find("no layer is ticked"),
+              std::string::npos);
+    form.surface.clear();
+    EXPECT_NE(error(katana::qt::surfaceLevelsLine(SurfaceLevelsKind::AddPoints, form)).find("Surface"),
+              std::string::npos);
+}
+
 TEST(SurfaceEditLines, TheCombineFieldsWriteTheLine)
 {
     SurfaceCombineForm form;
@@ -239,6 +276,52 @@ TEST(SurfaceLevelsDialog, EveryKindHasItsNamedControlsAndRunRunsTheLineShown)
               "SURFACE EDIT ground DELETE THIN 10");
 }
 
+TEST(SurfaceLevelsDialog, TheDataDialogsAskTheScopeAlwaysAndRunTheLineShown)
+{
+    katana::cad::Document document;
+    addSurfaces(document, {"ground"});
+    Recorder recorder;
+    struct Case {
+        SurfaceLevelsKind kind;
+        const char* prefix;
+        const char* line;
+    };
+    for (const Case& test :
+         {Case{SurfaceLevelsKind::DeletePoints, "surfaceDeletePoints",
+               "SURFACE EDIT ground DELETE POINTS INSIDE FROM DRAWING"},
+          Case{SurfaceLevelsKind::DeleteTriangles, "surfaceDeleteTriangles",
+               "SURFACE EDIT ground DELETE TRIANGLES INSIDE FROM DRAWING"},
+          Case{SurfaceLevelsKind::AddPoints, "surfaceAddPoints",
+               "SURFACE EDIT ground ADD POINTS FROM DRAWING"}}) {
+        SCOPED_TRACE(test.prefix);
+        SurfaceLevelsDialog dialog(test.kind, recorder.context(&document));
+        const QString p = test.prefix;
+        EXPECT_EQ(dialog.objectName(), p + "Dialog");
+        for (const char* suffix : {"Surface", "Scope", "Command", "Preview", "Run", "Reply"}) {
+            EXPECT_NE(dialog.findChild<QWidget*>(p + suffix), nullptr) << suffix;
+        }
+        // No tick box in front of the scope: it is what the dialog is about.
+        EXPECT_EQ(dialog.findChild<QCheckBox*>(p + "Inside"), nullptr);
+        EXPECT_TRUE(dialog.findChild<QWidget*>(p + "Scope")->isEnabled());
+        dialog.findChild<QWidget*>(p + "ScopeDrawing")->setProperty("checked", true);
+        EXPECT_EQ(dialog.findChild<QLineEdit*>(p + "Command")->text(), test.line);
+        recorder.lines.clear();
+        dialog.findChild<QPushButton*>(p + "Run")->click();
+        ASSERT_EQ(recorder.lines.size(), 1);
+        EXPECT_EQ(recorder.lines.front(), test.line);
+        dialog.findChild<QPushButton*>(p + "Preview")->click();
+        EXPECT_EQ(recorder.lines.back(), QString(test.line) + " PREVIEW");
+    }
+    // Delete triangles: Outside keeps the union of the polygons.
+    SurfaceLevelsDialog triangles(SurfaceLevelsKind::DeleteTriangles, recorder.context(&document));
+    auto* side = triangles.findChild<QComboBox*>("surfaceDeleteTrianglesSide");
+    ASSERT_NE(side, nullptr);
+    side->setCurrentIndex(1);
+    triangles.findChild<QWidget*>("surfaceDeleteTrianglesScopeDrawing")->setProperty("checked", true);
+    EXPECT_EQ(triangles.findChild<QLineEdit*>("surfaceDeleteTrianglesCommand")->text(),
+              "SURFACE EDIT ground DELETE TRIANGLES OUTSIDE FROM DRAWING");
+}
+
 TEST(SurfaceLevelsDialog, WithNoSurfaceRunIsOffAndTheCommandSaysWhy)
 {
     katana::cad::Document document;
@@ -297,6 +380,67 @@ TEST(SurfaceCombineDialog, EachModeWritesItsLineAndRunRunsIt)
     EXPECT_EQ(recorder.lines.back(), "SURFACE OFFSET ground -0.5 NAME subgrade PREVIEW");
 }
 
+TEST(SurfaceLevelsDialog, TheSurfaceListFollowsTheDrawingWhileTheDialogStaysOpen)
+{
+    // The dialog is non-modal and kept. An UNDO that removes the surface it
+    // offers used to leave it offering it, with Run enabled on a line that
+    // the verb refused (NotFound); a surface made while it was open could not
+    // be chosen until it was closed and shown again.
+    katana::cad::Document document;
+    addSurfaces(document, {"ground"});
+    Recorder recorder;
+    SurfaceLevelsDialog dialog(SurfaceLevelsKind::Heights, recorder.context(&document));
+    auto* surface = dialog.findChild<QComboBox*>("surfaceHeightsSurface");
+    auto* command = dialog.findChild<QLineEdit*>("surfaceHeightsCommand");
+    auto* run = dialog.findChild<QPushButton*>("surfaceHeightsRun");
+    ASSERT_NE(surface, nullptr);
+    EXPECT_EQ(command->text(), "SURFACE EDIT ground RAISE 1");
+
+    ASSERT_TRUE(document.undo().ok());
+    QCoreApplication::processEvents();
+    EXPECT_EQ(surface->count(), 0);
+    EXPECT_FALSE(run->isEnabled());
+    EXPECT_TRUE(command->text().isEmpty());
+
+    addSurfaces(document, {"design"});
+    QCoreApplication::processEvents();
+    ASSERT_EQ(surface->count(), 1);
+    EXPECT_EQ(surface->itemText(0), "design");
+    EXPECT_EQ(command->text(), "SURFACE EDIT design RAISE 1");
+    EXPECT_TRUE(run->isEnabled());
+
+    // A surface added beside the chosen one is offered and the choice stays.
+    addSurfaces(document, {"pad"});
+    QCoreApplication::processEvents();
+    EXPECT_EQ(surface->count(), 2);
+    EXPECT_EQ(surface->currentText(), "design");
+    EXPECT_TRUE(recorder.lines.isEmpty()); // following the drawing runs nothing
+}
+
+TEST(SurfaceCombineDialog, TheListsFollowTheDrawingWhileTheDialogStaysOpen)
+{
+    katana::cad::Document document;
+    addSurfaces(document, {"ground", "pad"});
+    Recorder recorder;
+    SurfaceCombineDialog dialog(recorder.context(&document));
+    auto* merge = dialog.findChild<QListWidget*>("surfaceCombineMergeList");
+    auto* top = dialog.findChild<QComboBox*>("surfaceCombineTop");
+    ASSERT_NE(merge, nullptr);
+    EXPECT_EQ(merge->count(), 2);
+    EXPECT_EQ(top->count(), 2);
+
+    ASSERT_TRUE(document.undo().ok());
+    QCoreApplication::processEvents();
+    EXPECT_EQ(merge->count(), 0);
+    EXPECT_EQ(top->count(), 0);
+
+    addSurfaces(document, {"design", "road"});
+    QCoreApplication::processEvents();
+    EXPECT_EQ(merge->count(), 2);
+    EXPECT_GE(top->findText("road"), 0);
+    EXPECT_TRUE(recorder.lines.isEmpty());
+}
+
 TEST(SurfaceEditUi, TheSubmenuToolbarAndDialogItemsAreNamedAndTheToolsFillThem)
 {
     katana::cad::Document document;
@@ -344,8 +488,18 @@ TEST(SurfaceEditUi, TheSubmenuToolbarAndDialogItemsAreNamedAndTheToolsFillThem)
          {"terrain.edit.deletetriangle", "terrain.edit.flip", "terrain.edit.addpoint",
           "terrain.edit.deletepoint", "terrain.edit.deleteinside", "terrain.edit.breakline",
           "terrain.edit.boundary", "terrain.edit.hole", "terrainSurfaceHeights",
-          "terrainSurfaceSmooth", "terrainSurfaceThin", "terrainSurfaceDeleteLong"}) {
+          "terrainSurfaceSmooth", "terrainSurfaceThin", "terrainSurfaceDeleteLong",
+          "terrainSurfaceDeletePoints", "terrainSurfaceDeleteTriangles",
+          "terrainSurfaceAddPoints"}) {
         EXPECT_TRUE(names.contains(name)) << name;
+    }
+    for (const char* name : {"terrainSurfaceDeletePoints", "terrainSurfaceDeleteTriangles",
+                             "terrainSurfaceAddPoints"}) {
+        auto* action = window.findChild<QAction*>(name);
+        ASSERT_NE(action, nullptr) << name;
+        EXPECT_FALSE(action->statusTip().isEmpty()) << name;
+        EXPECT_FALSE(action->icon().isNull()) << name;
+        EXPECT_TRUE(action->data().toString().endsWith("Dialog")) << name;
     }
     auto* heights = window.findChild<QAction*>("terrainSurfaceHeights");
     ASSERT_NE(heights, nullptr);
@@ -363,5 +517,17 @@ TEST(SurfaceEditUi, TheSubmenuToolbarAndDialogItemsAreNamedAndTheToolsFillThem)
     emit active->activated(1);
     EXPECT_EQ(katana::cad::surfaceEditTarget(), "pad");
     EXPECT_EQ(*katana::cad::activeEditSurface(document), "pad");
+
+    // A tool's own [Surface] option sets the target and the list follows it:
+    // the toolbar kept naming the old surface while every tool edited the new one.
+    katana::cad::setSurfaceEditTarget("ground");
+    EXPECT_EQ(active->currentText(), "ground");
+    katana::cad::setSurfaceEditTarget("pad");
+    EXPECT_EQ(active->currentText(), "pad");
+    EXPECT_EQ(katana::cad::surfaceEditTarget(), "pad") << "following the target does not set it again";
+    // And a choice made by the program, as the headless driver's fill makes
+    // it (setCurrentIndex, no activated), points the tools too.
+    active->setCurrentIndex(0);
+    EXPECT_EQ(katana::cad::surfaceEditTarget(), "ground");
     katana::cad::setSurfaceEditTarget("");
 }

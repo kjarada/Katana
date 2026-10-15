@@ -26,9 +26,15 @@
 // The keys are those every object takes - name, layer, colour, material,
 // facility, station, to, offset, spacing, heights=profile|surface|line,
 // surface, crossfall, dz - and the kind's own (KINDS <kind> lists them with
-// their units, ranges and defaults). <scope> is the shared scope and filter
-// grammar (cad/scope_verbs.hpp); after its WHERE every word with '=' is a
-// condition, so an object's own keys stand before ALONG or AT there.
+// their units, ranges and defaults). spacing= is for the point kinds (guide
+// posts, signs, light poles) along an alignment or a line - a barrier's and a
+// fence's posts take postspacing= - and crossfall= for an object that stands
+// on the profile; each is refused where nothing would read it. <scope> is the
+// shared scope and filter grammar (cad/scope_verbs.hpp); after its WHERE every
+// word with '=' is a condition, so an object's own keys stand before ALONG or
+// AT there. LIST, QUANTITIES and DELETE act on ids, or on all, and take no
+// scope: a road object is a definition, not a drawn entity (a scope word is
+// refused by name).
 //
 // Words are case-insensitive. Every edit is ONE undo step and a refused one
 // changes nothing; an ADD of several lines is all or nothing. PREVIEW says
@@ -63,7 +69,8 @@ runRoadObjectVerb(Document& document, const std::vector<std::string>& tokens,
 // The drawing's road objects for an agent, as JSON: each definition as the
 // drawing keeps it, with the 3D objects made from it - id, IFC class and
 // predefined type, layer, triangles, quantities - and the problems. What
-// katana_mcp's katana_road_objects tool and katana://road-objects return.
+// katana_mcp's katana_road_objects tool returns (a tool, not a resource:
+// docs/mcp.md).
 [[nodiscard]] std::string roadObjectsReport(const Document& document);
 
 } // namespace katana::cad::road

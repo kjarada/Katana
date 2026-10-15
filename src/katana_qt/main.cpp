@@ -334,6 +334,11 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
                         .arg(stats.surfacePixelsCovered)
                         .arg(stats.surfaceLegends);
         }
+        // Why part of a surface's style was not drawn, one problem="..." each
+        // (its text is what the window logged).
+        for (const std::string& problem : plan->lastPaintStats().surfaceProblems) {
+            text += QString(" problem=\"%1\"").arg(QString::fromStdString(problem));
+        }
     } else {
         std::fprintf(stderr,
                      "--report: there is no label, field, text, list, button, view, action or menu %s\n",

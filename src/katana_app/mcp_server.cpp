@@ -3,11 +3,12 @@
 // Every tool is a thin shape over Session::run: a tool builds command lines,
 // runs them, and hands back what the session printed. So there is one
 // implementation of every verb, the one katana_cli and its tests exercise, and
-// a tool can never do something the command line cannot. (Three tools run no
-// line and change nothing: katana_status and katana_customisation read the
-// Document through cad, for what no reply holds as structure, and
-// katana_check_update runs the UPDATE verbs' own CHECK and STATUS for an
-// agent's surface - the session refuses every UPDATE line here.)
+// a tool can never do something the command line cannot. (Five tools run no
+// line and change nothing: katana_status, katana_customisation,
+// katana_road_objects and katana_leaders read the Document through cad, for
+// what no reply holds as structure, and katana_check_update runs the UPDATE
+// verbs' own CHECK and STATUS for an agent's surface - the session refuses
+// every UPDATE line here.)
 
 #include "mcp_server.hpp"
 #include "mcp_tools.hpp"
@@ -38,6 +39,7 @@
 #include "katana/cad/bim/bim_object.hpp" // road model
 #include "katana/cad/road/road_verbs.hpp" // road model
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
 #include "update_verbs.hpp"
@@ -655,18 +657,21 @@ const std::vector<Tool>& tools()
                 {"path"}),
             hints(false, true, false), [](Session& session, const Json& arguments) {
                 const std::string path = requiredString(arguments, "path");
-                std::ifstream script(path);
+                // Read as a text file is everywhere (Session::readScript): the
+                // path is UTF-8 from the JSON and was opened as an ANSI name, so a
+                // folder with an accented letter was another folder, and the
+                // bytes of a script saved in the ANSI code page reached the
+                // verbs as they were.
+                auto script = Session::readScript(path);
                 if (!script) {
-                    throw ToolRefusal{"cannot read the script " + path};
+                    throw ToolRefusal{"cannot read the script " + path + ": " +
+                                      script.error().describe()};
                 }
-                std::vector<std::string> lines;
-                for (std::string line; std::getline(script, line);) {
-                    if (lines.size() == kMostLines) {
-                        throw ToolRefusal{"the script has more than " + std::to_string(kMostLines) +
-                                          " lines"};
-                    }
-                    lines.push_back(std::move(line));
+                if (script->size() > kMostLines) {
+                    throw ToolRefusal{"the script has more than " + std::to_string(kMostLines) +
+                                      " lines"};
                 }
+                const std::vector<std::string>& lines = *script;
                 return batchReply(session, lines,
                                   {.stopOnError = optionalBool(arguments, "stop_on_error", true),
                                    .discardUnsavedChanges =
@@ -1648,8 +1653,10 @@ std::optional<std::string> Server::handle(std::string_view message)
                 text = katana::cad::customisationJson(session_.document());
                 mimeType = "application/json";
             } else if (uri == "katana://surface-styles") {
-                // The Document's own form, as SURFACESTYLE LIST JSON gives it.
-                text = katana::cad::surfaceStylesToJson(session_.document().surfaceStyles());
+                // SURFACESTYLE LIST JSON's own form, standing_in note and all
+                // (cad/terrain/surface_verbs.hpp): a project whose styles could
+                // not be read shows the built-ins as the stand-ins they are.
+                text = katana::cad::surfaceStylesReport(session_.document());
                 mimeType = "application/json";
             } else if (uri == "katana://road-model") {
                 // ROADMODEL JSON, read from the Document as the status is:

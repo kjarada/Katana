@@ -951,8 +951,9 @@ buttons follow; they are settings, not drawing edits, so not undo steps.
 Only an `OPEN` of a project replaces the drawing. Which one a line is,
 `CommandInterpreter::replacesDocument` says, and every front end asks it:
 the window before its "discard the drawing?" question and its reset of the
-backdrop and views, the session before its missing-customisation check,
-`katana_mcp` before its unsaved-changes guard. Before the merge each of them
+backdrop and views, the session before its missing-customisation check and
+its reset of the reference layers, `katana_mcp` before its unsaved-changes
+guard. Before the merge each of them
 took any `OPEN` for a project's, so `OPEN #12` in the window asked to
 discard the drawing and then zoomed to its extents, and through `katana_mcp`
 it was refused for unsaved changes.

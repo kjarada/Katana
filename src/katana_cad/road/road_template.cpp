@@ -43,6 +43,11 @@ constexpr std::array<std::pair<KerbShape, std::string_view>, 4> kShapes{{
     {KerbShape::EdgeStrip, "edgestrip"},
 }};
 
+constexpr std::array<std::pair<KerbFacing, std::string_view>, 2> kFacings{{
+    {KerbFacing::Inward, "inward"},
+    {KerbFacing::Outward, "outward"},
+}};
+
 constexpr Color rgb(std::uint8_t r, std::uint8_t g, std::uint8_t b)
 {
     return Color{r, g, b, 255};
@@ -104,6 +109,26 @@ std::string_view toString(KerbShape shape)
 std::optional<KerbShape> kerbShapeFrom(std::string_view text)
 {
     for (const auto& [value, word] : kShapes) {
+        if (katana::core::equalsIgnoringCase(word, text)) {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string_view toString(KerbFacing facing)
+{
+    for (const auto& [value, word] : kFacings) {
+        if (value == facing) {
+            return word;
+        }
+    }
+    return "inward";
+}
+
+std::optional<KerbFacing> kerbFacingFrom(std::string_view text)
+{
+    for (const auto& [value, word] : kFacings) {
         if (katana::core::equalsIgnoringCase(word, text)) {
             return value;
         }
@@ -346,17 +371,21 @@ std::vector<RoadTemplate> standardTemplates()
              defaultComponent(ComponentKind::Batter, Side::Left)}));
     }
     {
+        // A raised median: the kerb is highest against the median, whose top
+        // is the profile, and falls to its lip at the carriageway, so the lanes
+        // start 100 mm under the profile and the face looks out to the traffic.
         Component kerb = defaultComponent(ComponentKind::Kerb, Side::Left);
         kerb.shape = KerbShape::Mountable;
         kerb.height = 0.100;
+        kerb.faces = KerbFacing::Outward;
         Component inner = named(defaultComponent(ComponentKind::Lane, Side::Left), "lane1");
         Component outer = named(defaultComponent(ComponentKind::Lane, Side::Left), "lane2");
         Component shoulder = defaultComponent(ComponentKind::Shoulder, Side::Left);
         shoulder.width = 2.5;
         made.push_back(mirrored(
             "divided road",
-            "A 4 m median with mountable kerbs, two 3.5 m lanes each way, 2.5 m shoulders and "
-            "batters",
+            "A 4 m median (the profile is its top) with mountable kerbs, two 3.5 m lanes each way, "
+            "2.5 m shoulders and batters",
             {defaultComponent(ComponentKind::Median, Side::Left), kerb, inner, outer, shoulder,
              defaultComponent(ComponentKind::Batter, Side::Left)}));
     }
@@ -425,6 +454,10 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
         return makeError(ErrorCode::InvalidArgument, "template " + roadTemplate.name + ", " +
                                                          sideName(component) + ": " + what);
     };
+    const auto tooLong = [](const std::string& what) {
+        return what + " is at most " + katana::core::formatExactReal(kMaximumComponentLength) +
+               " m";
+    };
     for (const Side side : {Side::Left, Side::Right}) {
         std::set<std::string> names;
         bool batterSeen = false;
@@ -432,6 +465,15 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
             const Component& component = *each;
             if (auto status = checkWord("a component", component.name); !status) {
                 return refuse(component, status.error().message);
+            }
+            // The corridor's earthworks objects are corridor/<c>/<side>/earthworks/
+            // cut|fill/<run>: a component of that name with a course called cut or
+            // fill would make the same id, and the IFC export keeps the first
+            // element of an id and skips the later one.
+            if (katana::core::equalsIgnoringCase(component.name, "earthworks")) {
+                return refuse(component,
+                              "earthworks is the name of the corridor's cut and fill solids; a "
+                              "component cannot take it");
             }
             if (!names.insert(katana::core::lowered(component.name)).second) {
                 return refuse(component, "a second component of that name on this side");
@@ -462,18 +504,59 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                 if (!(component.maximumWidth > 0.0)) {
                     return refuse(component, "the maximum batter width must be positive");
                 }
+                if (component.maximumWidth > kMaximumComponentLength) {
+                    return refuse(component, tooLong("the maximum batter width"));
+                }
                 if (component.benchHeight < 0.0 || component.benchWidth < 0.0 ||
                     ((component.benchHeight > 0.0) != (component.benchWidth > 0.0))) {
                     return refuse(component,
                                   "a bench needs both its height and its width, or neither");
+                }
+                if (component.benchHeight > 0.0) {
+                    // The most benches the batter can make: one every period,
+                    // the run being the flatter slope's (the most benches).
+                    // An overflow to infinity is over the limit as well.
+                    const double period =
+                        component.benchHeight * std::min(component.cutSlope, component.fillSlope) +
+                        component.benchWidth;
+                    if (!(component.maximumWidth / period <=
+                          static_cast<double>(kMaximumBenches))) {
+                        return refuse(component,
+                                      "a bench of " + katana::core::formatExactReal(
+                                                          component.benchWidth) +
+                                          " m every " +
+                                          katana::core::formatExactReal(component.benchHeight) +
+                                          " m of rise would make more than " +
+                                          std::to_string(kMaximumBenches) +
+                                          " benches across the batter's maximum width of " +
+                                          katana::core::formatExactReal(component.maximumWidth) +
+                                          " m: give a bench height and width nearer a real "
+                                          "batter's");
+                    }
                 }
                 break;
             case ComponentKind::Kerb:
                 if (!(component.width > 0.0) || !(component.depth > 0.0)) {
                     return refuse(component, "a kerb's width and depth must be positive");
                 }
+                if (component.width > kMaximumComponentLength ||
+                    component.height > kMaximumComponentLength ||
+                    component.depth > kMaximumComponentLength ||
+                    component.gutterWidth > kMaximumComponentLength) {
+                    return refuse(component, tooLong("a kerb's width, height, depth and gutter"));
+                }
                 if (component.shape != KerbShape::EdgeStrip && !(component.height > 0.0)) {
                     return refuse(component, "a kerb's face height must be positive");
+                }
+                if (component.shape == KerbShape::EdgeStrip &&
+                    component.faces != KerbFacing::Inward) {
+                    return refuse(component,
+                                  "an edge strip is flush: it has no face to turn outward");
+                }
+                if (component.superelevated && component.shape != KerbShape::EdgeStrip) {
+                    return refuse(component, "a " + std::string(toString(component.shape)) +
+                                                 " kerb has its own shape and no crossfall to "
+                                                 "superelevate; only an edge strip has");
                 }
                 if (component.shape == KerbShape::KerbAndGutter &&
                     (!(component.gutterWidth > 0.0) || std::abs(component.gutterFall) > 100.0)) {
@@ -487,10 +570,17 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                     return refuse(component,
                                   "a drain's width must be positive and its depth not negative");
                 }
+                if (component.width > kMaximumComponentLength ||
+                    component.depth > kMaximumComponentLength) {
+                    return refuse(component, tooLong("a drain's width and depth"));
+                }
                 break;
             default:
                 if (!(component.width > 0.0)) {
                     return refuse(component, "the width must be positive");
+                }
+                if (component.width > kMaximumComponentLength) {
+                    return refuse(component, tooLong("the width"));
                 }
                 break;
             }
@@ -511,27 +601,78 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                     return refuse(component,
                                   "course " + course.name + ": the thickness must be positive");
                 }
+                if (course.thickness > kMaximumComponentLength) {
+                    return refuse(component,
+                                  "course " + course.name + ": " + tooLong("the thickness"));
+                }
             }
         }
     }
     return {};
 }
 
+// ---- the keys ------------------------------------------------------------------------------
+
+std::vector<std::string_view> componentKeys(ComponentKind kind)
+{
+    std::vector<std::string_view> keys{"name", "layer", "colour"};
+    if (kind != ComponentKind::Batter) {
+        keys.insert(keys.end(), {"width", "crossfall", "superelevated"});
+    }
+    switch (kind) {
+    case ComponentKind::Kerb:
+        keys.insert(keys.end(),
+                    {"shape", "faces", "height", "depth", "gutter", "gutterfall", "material"});
+        break;
+    case ComponentKind::Drain:
+        keys.push_back("depth");
+        break;
+    case ComponentKind::Batter:
+        keys.insert(keys.end(), {"cut", "fill", "maxwidth", "benchheight", "benchwidth"});
+        break;
+    default:
+        break;
+    }
+    return keys;
+}
+
 // ---- the kerb's shape --------------------------------------------------------------------
+
+namespace {
+
+// The kerb as seen from its other end: the columns in reverse, `out` measured
+// from the far end and every level from the far end's top, so a kerb that rose
+// going outward falls going outward, from its back to its lip.
+std::vector<ShapeColumn> reversedKerb(const std::vector<ShapeColumn>& columns)
+{
+    std::vector<ShapeColumn> out;
+    out.reserve(columns.size());
+    const double width = columns.back().out;
+    const double top = columns.back().top;
+    for (auto it = columns.rbegin(); it != columns.rend(); ++it) {
+        out.push_back(ShapeColumn{width - it->out, it->top - top, it->bottom - top});
+    }
+    return out;
+}
+
+} // namespace
 
 std::vector<ShapeColumn> kerbShape(const Component& kerb)
 {
     const double base = -kerb.depth;
+    std::vector<ShapeColumn> inward;
     switch (kerb.shape) {
     case KerbShape::Barrier: {
         const double face = kerb.height * kBarrierFaceBatter;
-        return {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
-                ShapeColumn{face + kerb.width, kerb.height, base}};
+        inward = {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
+                  ShapeColumn{face + kerb.width, kerb.height, base}};
+        break;
     }
     case KerbShape::Mountable: {
         const double face = kerb.height * kMountableFaceRun;
-        return {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
-                ShapeColumn{face + kerb.width, kerb.height, base}};
+        inward = {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
+                  ShapeColumn{face + kerb.width, kerb.height, base}};
+        break;
     }
     case KerbShape::KerbAndGutter: {
         // The channel falls outward to the face, where the water runs; its
@@ -539,17 +680,22 @@ std::vector<ShapeColumn> kerbShape(const Component& kerb)
         const double invert = -kerb.gutterWidth * kerb.gutterFall / 100.0;
         const double face = kerb.height * kBarrierFaceBatter;
         const double bottom = invert - kerb.depth;
-        return {ShapeColumn{0.0, 0.0, -kerb.depth}, ShapeColumn{kerb.gutterWidth, invert, bottom},
-                ShapeColumn{kerb.gutterWidth + face, invert + kerb.height, bottom},
-                ShapeColumn{kerb.gutterWidth + face + kerb.width, invert + kerb.height, bottom}};
+        inward = {ShapeColumn{0.0, 0.0, -kerb.depth}, ShapeColumn{kerb.gutterWidth, invert, bottom},
+                  ShapeColumn{kerb.gutterWidth + face, invert + kerb.height, bottom},
+                  ShapeColumn{kerb.gutterWidth + face + kerb.width, invert + kerb.height, bottom}};
+        break;
     }
     case KerbShape::EdgeStrip: {
+        // Flush, with no face to turn.
         const double rise = kerb.width * kerb.crossfall / 100.0;
         return {ShapeColumn{0.0, 0.0, -kerb.depth},
                 ShapeColumn{kerb.width, rise, rise - kerb.depth}};
     }
     }
-    return {};
+    if (inward.empty()) {
+        return {};
+    }
+    return kerb.faces == KerbFacing::Outward ? reversedKerb(inward) : inward;
 }
 
 double kerbWidth(const Component& kerb)
@@ -617,6 +763,7 @@ Json componentJson(const Component& component)
     }
     if (component.kind == ComponentKind::Kerb) {
         out["shape"] = std::string(toString(component.shape));
+        out["faces"] = std::string(toString(component.faces));
         out["height"] = component.height;
         out["depth"] = component.depth;
         out["gutterWidth"] = component.gutterWidth;
@@ -673,6 +820,14 @@ Component componentFrom(const Json& value)
             throw BadValue{"unknown kerb shape \"" + shapeText + "\""};
         }
         component.shape = *shape;
+    }
+    if (value.contains("faces")) {
+        const std::string facesText = value.at("faces").get<std::string>();
+        const auto facing = kerbFacingFrom(facesText);
+        if (!facing) {
+            throw BadValue{"a kerb faces inward or outward: \"" + facesText + "\""};
+        }
+        component.faces = *facing;
     }
     component.height = value.value("height", component.height);
     component.depth = value.value("depth", component.depth);

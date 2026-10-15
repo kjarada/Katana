@@ -21,7 +21,7 @@ using katana::geometry::Point2;
 
 namespace {
 
-ShapeOf none(NotAShape why) { return ShapeOf{std::nullopt, why}; }
+ShapeOf none(NotAShape why, std::size_t corners = 0) { return ShapeOf{std::nullopt, why, corners}; }
 
 ShapeOf some(DrawingShape shape)
 {
@@ -52,7 +52,7 @@ ShapeOf asPolygon(DrawingShape shape)
     shape.outline.closed = true;
     dropClosingRepeat(shape);
     if (shape.outline.vertices.size() < 3) {
-        return none(NotAShape::TooFew);
+        return none(NotAShape::TooFew, shape.outline.vertices.size());
     }
     return some(std::move(shape));
 }
@@ -63,7 +63,7 @@ ShapeOf asLine(DrawingShape shape)
         dropClosingRepeat(shape);
     }
     if (shape.outline.vertices.size() < 2) {
-        return none(NotAShape::TooFew);
+        return none(NotAShape::TooFew, shape.outline.vertices.size());
     }
     return some(std::move(shape));
 }
@@ -269,7 +269,7 @@ Result<DrawingShapes> resolveShapes(const Document& document, const ShapeWords& 
     if (!words.scope && words.ids.empty()) {
         ShapeOf typed = shapeOf(words.corners, kind);
         if (!typed.shape) {
-            taken.refused = ShapeRefusal{std::nullopt, typed.why};
+            taken.refused = ShapeRefusal{std::nullopt, typed.why, typed.corners};
             return taken;
         }
         taken.shapes.push_back(std::move(*typed.shape));

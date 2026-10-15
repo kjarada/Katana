@@ -157,8 +157,19 @@ Katana therefore looks for PROJ's data beside the loaded `libproj`
 (`include/katana/core/library_data.hpp`), as it already looks for GDAL's
 beside the GDAL DLL on Windows, and hands it to each PROJ user's own search
 path: its own contexts, and GDAL's (so PDAL's). An explicit `PROJ_DATA` still
-wins, and a distribution's PROJ, whose compiled-in path is right, is left to
-it.
+wins when it works, and a distribution's PROJ, whose compiled-in path is
+right, is left to it. **When it does not work** - a machine-wide `PROJ_LIB`
+left by PostGIS, QGIS or OSGeo4W, naming a folder with no `proj.db` or one of
+another PROJ's layout, which PROJ rejects - both fall back on the data Katana
+carries beside its `libproj` (`bundledProjDataDirectory`): the geodesy contexts
+retry on a fresh context (`ProjContext::create`) and GDAL is asked once at
+start-up, only when the variable is set, whether it can read EPSG:4326
+(`pointGdalAtProjData`). Before, such a variable made every CRS verb fail with
+"not a coordinate system: give an EPSG code" for a valid code, and GDAL lose a
+file's EPSG code without a word. If neither opens, the error names the
+variable and its value and says to unset it, not to install PROJ
+(`cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries`
+and its `PROJ_DATA` twin, Windows).
 
 **The GPU renderer** is built on Linux too, on Vulkan, its shaders baked at
 build time by the prefix's `qsb` (`docs/gpu.md`). The 3D view uses it on the
@@ -712,6 +723,10 @@ toolchain's bundle there too. Until it did, every online request from
 `bin/katana.exe` failed with "error adding trust anchors from file" while the
 tests passed - they load libcurl from the toolchain, beside its own bundle.
 `runtime_has_the_certificates_https_is_checked_against` checks it is there.
+libcurl finds that path through the ANSI code page, which a folder named
+outside it (a profile "Łukasz") breaks, so `locateCertificates` also hands
+GDAL the real path in UTF-8 on Windows (`docs/release.md`, the table of
+libraries' data).
 
 The bundle is about 504 MB without the update helper. Measured on 2026-10-13
 in a Release build tree, whose `bin/` and `share/` are what the bundle is

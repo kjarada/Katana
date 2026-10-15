@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -497,4 +498,156 @@ TEST(SurfacePlanImageGrid, AGridOverItsCapIsCoarsenedEvenlyUnderIt)
     EXPECT_LE(pixels, 1'000'000u);
     EXPECT_GT(pixels, 900'000u);
     EXPECT_NEAR(static_cast<double>(grid.width), static_cast<double>(grid.height), 1.0);
+}
+
+namespace {
+
+// A fan of four triangles about the centre (4, 4), in the square from
+// (0.25, 0.25) to (7.75, 7.75): every coordinate exact in binary, so the
+// centre lands exactly on a pixel centre. `number` says which vertex index
+// each point has: [0] the centre, then [1..4] the rim's south-west,
+// south-east, north-east and north-west corners. The triangles are (centre,
+// A, B) (centre, B, C) (centre, C, D) (centre, D, A), counter-clockwise.
+std::shared_ptr<const TinSurface> fan(const std::array<std::uint32_t, 5>& number)
+{
+    std::vector<Point3> vertices(5);
+    vertices[number[0]] = {4.0, 4.0, 12.0};
+    vertices[number[1]] = {0.25, 0.25, 10.0};
+    vertices[number[2]] = {7.75, 0.25, 10.0};
+    vertices[number[3]] = {7.75, 7.75, 14.0};
+    vertices[number[4]] = {0.25, 7.75, 14.0};
+    const auto triangle = [&number](int a, int b) {
+        return katana::terrain::TinTriangle{number[0], number[static_cast<std::size_t>(a)],
+                                            number[static_cast<std::size_t>(b)]};
+    };
+    auto tin = TinSurface::create(std::move(vertices),
+                                  {triangle(1, 2), triangle(2, 3), triangle(3, 4), triangle(4, 1)});
+    EXPECT_TRUE(tin.ok());
+    return std::make_shared<const TinSurface>(std::move(*tin));
+}
+
+} // namespace
+
+TEST(SurfacePlanFaces, AVertexOnAPixelCentreIsOneTrianglesWhateverTheVertexNumbersAre)
+{
+    // Looking at -0.5 .. 7.5 a unit a pixel, the pixel centres are the whole
+    // numbers 0 to 7 each way, and the fan's centre (4, 4) is exactly one -
+    // as are the centres on the four lines from it to the rim's corners
+    // ((3, 3), (5, 3), (5, 5) ...), which each go to one of the two triangles
+    // sharing the line. The rim, 0.25 to 7.75, takes the centres 1 to 7 each
+    // way: 7 x 7 = 49, each covered once.
+    //
+    // The rule that decided a tie by vertex numbers gave a centre on a
+    // vertex to a triangle only if the vertex was numbered between its two
+    // neighbours there: with the centre numbered first (0) or last (4) every
+    // neighbour is above, or below, it, and no triangle had the pixel - 48
+    // covered, a pinhole; with the rim numbered 0, 3, 1, 4 about a centre
+    // numbered 2 the neighbours alternate and two triangles had it - 50 writes
+    // for 49 pixels. (Worked out by running the old rule over these four
+    // numberings by hand: 48, 48, 50 writes (49 pixels), 49.)
+    const Box2 looking(Point2(-0.5, -0.5), Point2(7.5, 7.5));
+    const std::array<std::array<std::uint32_t, 5>, 4> numberings{{
+        {0, 1, 2, 3, 4}, // the centre below every neighbour
+        {4, 0, 1, 2, 3}, // the centre above every neighbour
+        {2, 0, 3, 1, 4}, // neighbours 0, 3, 1, 4 about it: above, below, above, below
+        {2, 0, 1, 3, 4}, // neighbours 0, 1, 3, 4: one run below, one above (the old rule's good case)
+    }};
+    for (const auto& number : numberings) {
+        const auto tin = fan(number);
+        SurfacePlanCache cache;
+        SurfaceDisplayStyle style = bare();
+        style.planFaces = SurfaceFaces::Flat;
+        const SurfacePlan plan = katana::cad::surfacePlan({"fan", tin, "test"}, style,
+                                                          viewOf(looking, 1.0, tin->bounds()), cache);
+        ASSERT_EQ(plan.image.width, 8);
+        ASSERT_EQ(plan.image.height, 8);
+        EXPECT_EQ(plan.stats.pixelsCovered, 49u) << "centre numbered " << number[0];
+        // Pixel (i, j) has its centre at x = i, y = 7 - j.
+        for (int j = 0; j < 8; ++j) {
+            for (int i = 0; i < 8; ++i) {
+                const bool inside = i >= 1 && j <= 6;
+                EXPECT_EQ(pixelAt(plan, i, j) != 0u, inside)
+                    << "pixel " << i << "," << j << " centre numbered " << number[0];
+            }
+        }
+    }
+}
+
+TEST(SurfacePlanCache, MoreSurfacesInViewThanAnyCapAreKeptNotRebuiltOnEveryPaint)
+{
+    // A paint asks for every visible surface, in the same order, each time.
+    // A cache of the 32 most recently used evicted, for a 33rd surface, the
+    // very one the next paint asked for first: every paint built every cull
+    // grid and traced every contour again (61-69 ms a repaint with 33
+    // surfaces against 3-7 ms with 32, measured in the window).
+    constexpr int kSurfaces = 33;
+    std::vector<std::shared_ptr<const TinSurface>> surfaces;
+    for (int i = 0; i < kSurfaces; ++i) {
+        surfaces.push_back(grid(3, 3, 3.0)); // a new surface, at its own address
+    }
+    SurfacePlanCache cache;
+    SurfaceDisplayStyle style = bare();
+    style.contours.show = true;
+    style.contours.interval = 0.5;
+    const SurfacePlanView view = viewOf(Box2(Point2(0, 0), Point2(9, 9)), 0.05, surfaces.front()->bounds());
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int i = 0; i < kSurfaces; ++i) {
+            (void)katana::cad::surfacePlan({"s" + std::to_string(i), surfaces[static_cast<std::size_t>(i)], "test"},
+                                           style, view, cache);
+        }
+        // One grid and one tracing a surface, the first time only.
+        EXPECT_EQ(cache.gridsBuilt(), 33u) << "after paint " << pass + 1;
+        EXPECT_EQ(cache.contourTracings(), 33u) << "after paint " << pass + 1;
+        EXPECT_EQ(cache.surfaceCount(), 33u);
+    }
+    // The caller bounds the cache: retain() lets go of all but those named.
+    std::vector<const TinSurface*> alive;
+    for (int i = 0; i < 10; ++i) {
+        alive.push_back(surfaces[static_cast<std::size_t>(i)].get());
+    }
+    cache.retain(alive);
+    EXPECT_EQ(cache.surfaceCount(), 10u);
+}
+
+TEST(SurfacePlanFaces, ARangeAboveTheWholeSurfaceColoursEveryFaceTheFirstBandNotTheMiddleOne)
+{
+    // The square z = x is 0 to 10; min=40 puts the range's low end at 40 and
+    // its top (the surface's 10) below it, a range given back to front: the
+    // point 40. Every height is below the point - the first band, the ramp's
+    // start (40, 70, 140) - and the middle band (235, 220, 130) drew all of it.
+    const auto tin = square();
+    SurfacePlanCache cache;
+    SurfaceDisplayStyle style = bare();
+    style.planFaces = SurfaceFaces::Elevation;
+    style.planOpacity = 1.0;
+    style.banded = true;
+    style.bands = 5;
+    style.rangeMin = 40.0;
+    const SurfacePlan plan = katana::cad::surfacePlan({"ground", tin, "test"}, style,
+                                                      viewOf(kSquareBox, 0.125, tin->bounds()), cache);
+    ASSERT_EQ(plan.image.width, 80);
+    EXPECT_EQ(pixelAt(plan, 4, 40), opaque(40, 70, 140));
+    EXPECT_EQ(pixelAt(plan, 76, 10), opaque(40, 70, 140));
+}
+
+TEST(SurfacePlanFaces, ALevelSurfaceColouredBySlopeIsTheRampsStartNotItsMiddle)
+{
+    // Slope's range is 0 to the steepest face, and the steepest face of a
+    // level pad is 0: a point. A face with no steepness is the start of the
+    // slope ramp, green (0, 255, 38), as the 3D view drew it before styles -
+    // not the ramp's middle, yellow (255, 255, 38), which reads as half way
+    // to the steep end.
+    auto level = TinSurface::create({{0.0, 0.0, 5.0}, {10.0, 0.0, 5.0}, {10.0, 10.0, 5.0}, {0.0, 10.0, 5.0}},
+                                    {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(level.ok());
+    const auto tin = std::make_shared<const TinSurface>(std::move(*level));
+    SurfacePlanCache cache;
+    SurfaceDisplayStyle style = bare();
+    style.planFaces = SurfaceFaces::Slope;
+    style.planOpacity = 1.0;
+    style.ramp = "slope";
+    const SurfacePlan plan = katana::cad::surfacePlan({"pad", tin, "test"}, style,
+                                                      viewOf(kSquareBox, 0.125, tin->bounds()), cache);
+    ASSERT_EQ(plan.image.width, 80);
+    EXPECT_EQ(pixelAt(plan, 40, 40), opaque(0, 255, 38));
 }

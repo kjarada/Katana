@@ -23,6 +23,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "katana/cad/document.hpp"
 #include "katana/update/apply.hpp"
@@ -74,7 +76,30 @@ class Session {
 
     // Runs one line. False when it failed; either way what happened has been
     // written to std::cout and std::cerr. '#' comments and empty lines succeed.
+    //
+    // The ONE door for the text of a line in the programs with no window. Text
+    // in the model is UTF-8 (core/text_encoding.hpp) and a line from outside
+    // need not be: a pipe from a program that writes the console's code page, a
+    // script line (readScript decodes the file, so only a line given some other
+    // way gets here). ON WINDOWS a line that is not UTF-8 is read as Windows-1252
+    // (core::utf8OrWindows1252) and the session says so on std::cerr, once - the
+    // alternative, the bytes reaching a name, ended the process when a JSON
+    // writer met them. Elsewhere the bytes stay what they are, as a path in
+    // them is the narrow name core::pathFromUtf8 takes it for, and a name that
+    // is not UTF-8 is refused by its table's door with a sentence. An exception
+    // that still escapes a verb is reported as `error: Internal: ...` and the
+    // line fails; it does not end the session, which in katana_cli is the
+    // person's unsaved drawing.
     bool run(const std::string& line);
+
+    // The lines of the script file at `path` (UTF-8 text; the path is made of
+    // it with core::pathFromUtf8, so a folder with an accented letter in it is
+    // found). The file is decoded as every text format is (core::decodeText):
+    // a byte order mark, UTF-16 and the Windows-1252 an ANSI editor writes read
+    // as the text they are, and a guess is said on std::cerr. NotFound when the
+    // file cannot be opened, ParseFailure for UTF-16 that is not well formed.
+    [[nodiscard]] static katana::core::Result<std::vector<std::string>>
+    readScript(std::string_view path);
 
     [[nodiscard]] katana::cad::Document& document();
     [[nodiscard]] const katana::cad::Document& document() const;

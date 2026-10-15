@@ -17,6 +17,7 @@
 
 #include <utility>
 
+#include "customisation/document_watcher.hpp"
 #include "geo/terrain_dialog_support.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
@@ -95,6 +96,12 @@ QString surfaceLevelsPrefix(SurfaceLevelsKind kind)
         return "surfaceThin";
     case SurfaceLevelsKind::DeleteLong:
         return "surfaceDeleteLong";
+    case SurfaceLevelsKind::DeletePoints:
+        return "surfaceDeletePoints";
+    case SurfaceLevelsKind::DeleteTriangles:
+        return "surfaceDeleteTriangles";
+    case SurfaceLevelsKind::AddPoints:
+        return "surfaceAddPoints";
     }
     return "surfaceEdit";
 }
@@ -150,6 +157,30 @@ Result<QString> surfaceLevelsLine(SurfaceLevelsKind kind, const SurfaceLevelsFor
                                             "below 180");
         }
         return line + (form.longSides ? " DELETE LONG " : " DELETE THIN ") + form.value.trimmed();
+    case SurfaceLevelsKind::DeletePoints:
+    case SurfaceLevelsKind::DeleteTriangles:
+    case SurfaceLevelsKind::AddPoints: {
+        // The data is always the scope's: a click on one entity is the tool's.
+        const QString what = kind == SurfaceLevelsKind::AddPoints ? "Points" : "Polygons";
+        if (!form.scopeError.isEmpty()) {
+            return invalid(what + ": " + form.scopeError);
+        }
+        if (form.scope.trimmed().isEmpty()) {
+            return invalid(what + ": say which " +
+                           (kind == SurfaceLevelsKind::AddPoints ? "points to add"
+                                                                 : "polygons to use"));
+        }
+        const QString from = " FROM " + form.scope.trimmed();
+        switch (kind) {
+        case SurfaceLevelsKind::DeletePoints:
+            return line + " DELETE POINTS INSIDE" + from;
+        case SurfaceLevelsKind::DeleteTriangles:
+            return line + (form.outside ? " DELETE TRIANGLES OUTSIDE" : " DELETE TRIANGLES INSIDE") +
+                   from;
+        default:
+            return line + " ADD POINTS" + from;
+        }
+    }
     }
     if (form.inside) {
         if (!form.scopeError.isEmpty()) {
@@ -272,6 +303,15 @@ SurfaceLevelsDialog::SurfaceLevelsDialog(SurfaceLevelsKind kind, SurfaceEditDial
     case SurfaceLevelsKind::DeleteLong:
         setWindowTitle("Delete Long or Thin Triangles");
         break;
+    case SurfaceLevelsKind::DeletePoints:
+        setWindowTitle("Delete Points Inside Polygons");
+        break;
+    case SurfaceLevelsKind::DeleteTriangles:
+        setWindowTitle("Delete Triangles Inside or Outside Polygons");
+        break;
+    case SurfaceLevelsKind::AddPoints:
+        setWindowTitle("Add Points from the Drawing");
+        break;
     }
     auto* layout = new QVBoxLayout(this);
     auto* fields = new QFormLayout();
@@ -323,8 +363,29 @@ SurfaceLevelsDialog::SurfaceLevelsDialog(SurfaceLevelsKind kind, SurfaceEditDial
         value_->setText("50");
         fields->addRow("Value:", value_);
         break;
+    case SurfaceLevelsKind::DeleteTriangles:
+        side_ = new QComboBox(this);
+        side_->setObjectName(p + "Side");
+        side_->addItems({"Inside the polygons", "Outside the polygons (keep what is inside)"});
+        side_->setToolTip("Several polygons are their union: outside deletes what none of them "
+                          "covers");
+        fields->addRow("Delete triangles:", side_);
+        value_->hide();
+        break;
+    case SurfaceLevelsKind::DeletePoints:
+    case SurfaceLevelsKind::AddPoints:
+        value_->hide();
+        break;
     }
     layout->addLayout(fields);
+    if (kind == SurfaceLevelsKind::DeletePoints || kind == SurfaceLevelsKind::DeleteTriangles ||
+        kind == SurfaceLevelsKind::AddPoints) {
+        // The scope is what these are about, so it is not behind a tick box.
+        scope_ = new ScopeFilterWidget(p, this);
+        scope_->views = context_.views;
+        layout->addWidget(scope_);
+        scope_->onChanged = [this] { refreshCommand(); };
+    }
     if (kind == SurfaceLevelsKind::Heights || kind == SurfaceLevelsKind::Smooth) {
         inside_ = new QCheckBox("Only inside a polygon of the drawing", this);
         inside_->setObjectName(p + "Inside");
@@ -376,10 +437,25 @@ SurfaceLevelsDialog::SurfaceLevelsDialog(SurfaceLevelsKind kind, SurfaceEditDial
     if (measure_ != nullptr) {
         connect(measure_, &QComboBox::currentIndexChanged, this, changed);
     }
+    if (side_ != nullptr) {
+        connect(side_, &QComboBox::currentIndexChanged, this, changed);
+    }
     connect(preview, &QPushButton::clicked, this, [this] { runLine(true); });
     connect(run, &QPushButton::clicked, this, [this] { runLine(false); });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     reload();
+    if (context_.document != nullptr) {
+        // The dialog is non-modal and kept, so the drawing changes under it: an
+        // undo that removes the surface it offers, a typed SURFACE line, New,
+        // Open. A DocumentWatcher says so from the event loop, and the lists
+        // are read again with what is chosen kept where it is still there.
+        watcher_ = std::make_unique<DocumentWatcher>(*context_.document,
+                                                     [this](const DocumentChanges& changes) {
+                                                         if (changes.model) {
+                                                             reload();
+                                                         }
+                                                     });
+    }
 }
 
 SurfaceLevelsDialog::~SurfaceLevelsDialog() = default;
@@ -409,7 +485,11 @@ SurfaceLevelsForm SurfaceLevelsDialog::form() const
     if (measure_ != nullptr) {
         form.longSides = measure_->currentIndex() == 0;
     }
-    if (inside_ != nullptr && inside_->isChecked()) {
+    if (side_ != nullptr) {
+        form.outside = side_->currentIndex() == 1;
+    }
+    // A scope behind a tick box is asked when ticked; one with none always.
+    if (scope_ != nullptr && (inside_ == nullptr || inside_->isChecked())) {
         form.inside = true;
         const auto words = scope_->verbWords();
         if (words) {
@@ -564,6 +644,15 @@ SurfaceCombineDialog::SurfaceCombineDialog(SurfaceEditDialogContext context, QWi
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     setMode(SurfaceCombineMode::Merge);
     reload();
+    if (context_.document != nullptr) {
+        // As SurfaceLevelsDialog's: the lists follow the drawing.
+        watcher_ = std::make_unique<DocumentWatcher>(*context_.document,
+                                                     [this](const DocumentChanges& changes) {
+                                                         if (changes.model) {
+                                                             reload();
+                                                         }
+                                                     });
+    }
 }
 
 SurfaceCombineDialog::~SurfaceCombineDialog() = default;
@@ -578,6 +667,16 @@ void SurfaceCombineDialog::setMode(SurfaceCombineMode mode)
     pages_->setCurrentIndex(mode == SurfaceCombineMode::Merge   ? 0
                             : mode == SurfaceCombineMode::Paste ? 1
                                                                 : 2);
+    // The stack is as tall as the page shown, not as the tallest: a stacked
+    // layout keeps room for every page unless it is Ignored (as Volumes' method
+    // tabs are), and Clip's page carries the scope controls, which left Merge a
+    // list some 600 px tall.
+    for (int page = 0; page < pages_->count(); ++page) {
+        pages_->widget(page)->setSizePolicy(
+            QSizePolicy::Preferred,
+            page == pages_->currentIndex() ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+    }
+    pages_->updateGeometry();
     dz_->setEnabled(mode == SurfaceCombineMode::Offset);
     scope_->setEnabled(mode == SurfaceCombineMode::Clip);
     name_->setPlaceholderText(mode == SurfaceCombineMode::Paste

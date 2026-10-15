@@ -207,3 +207,65 @@ TEST(TinEditCombine, AMergeOfFewerThanTwoSurfacesOrAnEmptyOneIsRefused)
     EXPECT_EQ(katana::terrain::mergeSurfaces({&ground, &empty}).error().code,
               ErrorCode::InvalidArgument);
 }
+
+TEST(TinEditCombine, APasteCountsEachNewVertexOnceCentroidFansIncluded)
+{
+    // Ground: [0,4]^2 at 0 in unit cells, 25 vertices all used. Top: the
+    // triangle (0.5,0.5) (3.5,0.7) (2,3.3) at 5, whose three sides each cross
+    // grid lines (the first x = 1, 2, 3; the others y = 1, 2, 3), so the paste
+    // fans it from its centroid, (2, 1.5) at 5 - a vertex the result has and
+    // the ground did not. points_added said one more than the vertices there
+    // are for every such fan: the vertices the result uses beyond the ground's
+    // are what was added, and the ground's that it no longer uses what was
+    // removed, whatever made them.
+    const TinSurface ground = grid(0, 0, 4, 4, 1, 1, 0.0);
+    auto made = TinSurface::create({Point3(0.5, 0.5, 5), Point3(3.5, 0.7, 5), Point3(2.0, 3.3, 5)},
+                                   {TinTriangle{0, 1, 2}});
+    ASSERT_TRUE(made.ok());
+    const auto pasted = katana::terrain::pasteSurface(ground, *made);
+    ASSERT_TRUE(pasted.ok()) << pasted.error().describe();
+    const auto& report = pasted->report;
+    EXPECT_EQ(report.verticesBefore, 25u);
+    EXPECT_EQ(report.verticesAfter + report.pointsRemoved, report.verticesBefore + report.pointsAdded);
+
+    bool hasCentre = false;
+    for (const Point3& v : pasted->surface.vertices()) {
+        hasCentre = hasCentre || (std::abs(v.x - 2.0) < 1e-9 && std::abs(v.y - 1.5) < 1e-9 &&
+                                  std::abs(v.z - 5.0) < 1e-9);
+    }
+    EXPECT_TRUE(hasCentre) << "the fan's centre is a vertex of the result";
+    EXPECT_NEAR(pasted->surface.planArea(), 16.0, 1e-9);
+}
+
+TEST(TinEditCombine, TwoClipsOfOneSurfaceThatAbutMergeIntoAllOfIt)
+{
+    // A [0,10]^2 surface at 3 in unit cells clipped at x = 5 (along grid lines)
+    // and at x = 4.3 (across the triangles, the seam's vertices computed): the
+    // two halves share a seam and neither covers any of the other. The merge
+    // is both whole - their triangles, the area 100 - where it dropped the
+    // row of the lower half's triangles along the seam.
+    const TinSurface ground = grid(0, 0, 10, 10, 1, 1, 3.0);
+    const auto box = [](double x0, double x1) {
+        Polyline2 ring;
+        ring.vertices = {Point2(x0, -1), Point2(x1, -1), Point2(x1, 11), Point2(x0, 11)};
+        ring.closed = true;
+        return ring;
+    };
+    for (const double seam : {5.0, 4.3}) {
+        SCOPED_TRACE(testing::Message() << "seam at x = " << seam);
+        const auto west = katana::terrain::clipToBoundary(ground, box(-1, seam));
+        const auto east = katana::terrain::clipToBoundary(ground, box(seam, 11));
+        ASSERT_TRUE(west.ok() && east.ok());
+        EXPECT_NEAR(west->surface.planArea() + east->surface.planArea(), 100.0, 1e-9);
+        for (const auto& members : {std::vector<const TinSurface*>{&west->surface, &east->surface},
+                                    std::vector<const TinSurface*>{&east->surface, &west->surface}}) {
+            const auto merged = katana::terrain::mergeSurfaces(members);
+            ASSERT_TRUE(merged.ok()) << merged.error().describe();
+            EXPECT_EQ(merged->surface.triangleCount(),
+                      west->surface.triangleCount() + east->surface.triangleCount());
+            EXPECT_NEAR(merged->surface.planArea(), 100.0, 1e-9);
+            EXPECT_DOUBLE_EQ(*merged->surface.elevationAt(2, 5), 3.0);
+            EXPECT_DOUBLE_EQ(*merged->surface.elevationAt(8, 5), 3.0);
+        }
+    }
+}

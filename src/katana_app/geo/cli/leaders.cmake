@@ -26,11 +26,17 @@ set_tests_properties(cli.a_surface_leader_says_how_far_a_point_is_above_the_grou
     FAIL_REGULAR_EXPRESSION "error")
 
 # A preset reading a surface the drawing has not is refused, and the script
-# fails rather than leave a leader saying nothing.
+# fails rather than leave a leader saying nothing. The refusal is named: a bare
+# WILL_FAIL passed on ANY failure - an earlier line of the script refused, or
+# katana_cli crashing (cmake -E env turns a crash in its child into an
+# ordinary exit 1) - so the test asks for the earlier line's success and the
+# LEADER line's own refusal, in either order (the two streams are not ordered
+# by the pipe). It does not use WILL_FAIL beside the pattern: ctest would
+# invert the pattern's result.
 add_test(NAME cli.a_surface_leader_on_no_surface_fails_the_script
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli>
             -c "POINT 25.75,24.25" -c "SELECT 1" -c "PROP SET elevation 30"
             -c "LEADER #1 30,30 preset=surface surface=ground")
 set_tests_properties(cli.a_surface_leader_on_no_surface_fails_the_script PROPERTIES
-    WILL_FAIL TRUE)
+    PASS_REGULAR_EXPRESSION "property elevation set on 1.*error: NotFound: the drawing has no surface of that name|error: NotFound: the drawing has no surface of that name.*property elevation set on 1")

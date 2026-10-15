@@ -22,7 +22,10 @@ namespace katana::cad {
 // each kept on what it is made from, because they are made from different
 // things: the corridors from the templates, the corridors, the alignments and
 // the surfaces - so a line drawn does not make them again - and the placed
-// objects, which may stand on a drawn line, from every step (modelRevision).
+// objects from every step (modelRevision). That is wider than they need: an
+// object copies the line it is placed along and reads only its key, the
+// alignments and the surfaces (road_objects.cpp, placementContext), so it is
+// a conservative key, not a dependency - docs/road_objects.md, "Not done".
 // A half made again that equals what it replaced keeps the old one, so the
 // model a view holds stays the same object until something in it changes.
 struct Document::BimCache {
@@ -94,10 +97,18 @@ class BimCacheAccess {
                          cache.corridorSurfaces == document.surfacesGeneration();
         bool changed = false;
         if (!corridorsFresh) {
-            cache.corridors = std::make_shared<const BimModel>(corridorObjects(document));
+            // Made again, but kept as the old one when it came out the same:
+            // the alignments' revision and the surfaces' generation move for a
+            // new alignment or a hidden surface that no corridor uses, and a
+            // view that is handed a different object for an unchanged model
+            // makes every 3D view build its terrain again (RoadWorkbench).
+            BimModel made = corridorObjects(document);
+            if (cache.corridors == nullptr || !(*cache.corridors == made)) {
+                cache.corridors = std::make_shared<const BimModel>(std::move(made));
+                changed = true;
+            }
             cache.alignments = document.model().alignments.revision();
             cache.corridorSurfaces = document.surfacesGeneration();
-            changed = true;
         }
 
         bool placedFresh = cache.placed != nullptr;
@@ -167,6 +178,7 @@ std::vector<SceneMesh> sceneMeshes(const BimModel& objects, const katana::entity
         mesh.style = SurfaceStyle::Shaded;
         mesh.flatColor = katana::render::rgba(object.colour.r, object.colour.g, object.colour.b);
         mesh.planFootprint = false;
+        mesh.layer = object.layer;
         meshes.push_back(std::move(mesh));
     }
     return meshes;

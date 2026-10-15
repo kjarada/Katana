@@ -20,6 +20,7 @@
 #include <QFont>
 #include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <QString>
 
 #include "katana/cad/plot.hpp"
@@ -116,11 +117,18 @@ void paintSurfacePlan(QPainter& painter, const katana::cad::SurfacePlan& plan,
 
 // A legend in a panel whose top-right corner is `topRight`, in the painter's
 // units: the caption (the surface and its style), the title, then a swatch a
-// band, stop or sector with its label - or, for a smooth ramp, one bar from
-// the lowest value at the foot to the highest at the head. At most
+// band, stop or sector with its label - or, for a smooth ramp or smooth
+// stops, one bar from the lowest value at the foot to the highest at the
+// head, each stop at its own value along it and the ends always labelled (an
+// inner label where it clears the one above it by a line). At most
 // kLegendRows rows; past that the last says how many more. Returns the
 // panel's rectangle.
 inline constexpr int kLegendRows = 16;
+// The size that panel will be, without drawing it: what a caller stacking
+// legends asks to see whether the next fits. Empty for a legend with no
+// entries.
+[[nodiscard]] QSizeF measureSurfaceLegend(const katana::cad::SurfaceLegend& legend,
+                                          const QString& caption, const QFont& font);
 QRectF paintSurfaceLegend(QPainter& painter, const katana::cad::SurfaceLegend& legend,
                           const QString& caption, const QPointF& topRight, const QFont& font,
                           const QColor& text, const QColor& backing);

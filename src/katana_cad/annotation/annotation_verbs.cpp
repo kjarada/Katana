@@ -571,11 +571,11 @@ Leader    LEADER p p [p...] [text= | template= | labelstyle=] [arrow=closed|open
           a SMART leader's tip is on an entity (#id...) and its note is read off it every
           time it is drawn: template="IL {prop.invert:.3f}\n{length:.2f} m" (the label
           template language), or labelstyle=name (that style's template); a line naming a
-          value the entity lacks is dropped. A tip inside an outline (#id.inside) ends in a dot
-          also the drawing's surfaces and alignments at the tip: {surface.NAME} the level,
-          {dsurface.NAME} the target's z above it, {cut.NAME} {fill.NAME} (one is present),
-          {station.NAME} {offset.NAME} (left +), {profile.NAME} {dprofile.NAME}; NAME as the
-          drawing has it, blanks and all; +.Nf writes a + before a value above nothing
+          value the entity lacks is dropped. A tip inside an outline (#id.inside) ends in a dot.
+          A note may also read the drawing's surfaces and alignments at the tip: {surface.NAME}
+          the level, {dsurface.NAME} the target's z above it, {cut.NAME} {fill.NAME} (one is
+          present), {station.NAME} {offset.NAME} (left +), {profile.NAME} {dprofile.NAME}; NAME
+          as the drawing has it, blanks and all; +.Nf writes a + before a value above nothing
           preset=level|surface|cutfill|name|code|details|station [surface=name|alignment=name]
           a ready template (LEADER PRESETS lists them); with none named, the first visible
           surface or the first alignment, said as chosen= in the reply
@@ -1986,8 +1986,9 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             return parsed.error();
         }
         if (parsed->positional.empty() || parsed->options.empty()) {
-            return usageOf("LEADER SET id [id...] | SELECTION [text= template= labelstyle= arrow= "
-                           "callout= style= paper= arrowsize= landing= tip=p at=p]");
+            return usageOf("LEADER SET id [id...] | SELECTION [text= template= labelstyle= "
+                           "preset= surface=name alignment=name arrow= callout= style= paper= "
+                           "arrowsize= landing= tip=p at=p]");
         }
         auto ids = idsOf(parsed->positional, document_, true);
         if (!ids) {

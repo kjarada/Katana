@@ -16,6 +16,7 @@
 #include <QPainterPath>
 #include <QPen>
 #include <QPolygonF>
+#include <QSizeF>
 #include <QTransform>
 
 #include "plotting/plot_style.hpp"
@@ -272,6 +273,120 @@ SurfacePaintStats paintSurfacesInPlan(QPainter& painter, const katana::terrain::
     return stats;
 }
 
+namespace {
+
+// What a legend's panel is made of, laid out once so that the size the plan
+// painter measures before it draws (measureSurfaceLegend) and the picture
+// paintSurfaceLegend makes are the one calculation.
+struct LegendLayout {
+    // A swatch legend's rows: an entry each up to the cap, the last saying
+    // how many are left out.
+    struct Row {
+        QColor colour;
+        QString label;
+        bool more = false;
+    };
+    std::vector<Row> rows;
+    // A gradient: each entry's place along the bar, 0 at the foot to 1 at the
+    // head, by its value; and the label written beside it, if it has one.
+    struct Stop {
+        double at = 0.0;
+        QColor colour;
+        QString label;
+    };
+    std::vector<Stop> stops;
+    QString title;
+    double line = 0.0;
+    double pad = 6.0;
+    double swatch = 10.0;
+    double barHeight = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
+
+// Where along the bar each entry of a gradient lies. By value when every entry
+// has one and they rise: the built-in Cut Fill style has stops at -2, -1,
+// -0.5, 0, 0.5, 1 and 2, which are not evenly spaced, and a colour placed by
+// its index reads as the wrong depth against the labelled ends. A ramp's nine
+// samples are evenly spaced, so by value is by index for them; entries without
+// values fall back to by index.
+std::vector<double> gradientPositions(const cad::SurfaceLegend& legend)
+{
+    const std::size_t count = legend.entries.size();
+    std::vector<double> at(count, 0.0);
+    if (count < 2) {
+        return at;
+    }
+    const bool valued =
+        std::ranges::all_of(legend.entries,
+                            [](const cad::SurfaceLegendEntry& entry) {
+                                return entry.from.has_value() && std::isfinite(*entry.from);
+                            }) &&
+        *legend.entries.back().from > *legend.entries.front().from;
+    for (std::size_t i = 0; i < count; ++i) {
+        at[i] = valued ? (*legend.entries[i].from - *legend.entries.front().from) /
+                             (*legend.entries.back().from - *legend.entries.front().from)
+                       : static_cast<double>(i) / static_cast<double>(count - 1);
+        at[i] = std::clamp(at[i], 0.0, 1.0);
+    }
+    return at;
+}
+
+LegendLayout layoutLegend(const cad::SurfaceLegend& legend, const QString& caption, const QFont& font)
+{
+    LegendLayout layout;
+    const QFontMetricsF metrics(font);
+    layout.line = metrics.height();
+    layout.swatch = std::max(10.0, layout.line * 0.8);
+    layout.title = QString::fromStdString(legend.title);
+    double labelWidth =
+        std::max(metrics.horizontalAdvance(caption), metrics.horizontalAdvance(layout.title));
+    if (legend.gradient) {
+        const std::vector<double> at = gradientPositions(legend);
+        for (std::size_t i = 0; i < legend.entries.size(); ++i) {
+            const cad::SurfaceLegendEntry& entry = legend.entries[i];
+            layout.stops.push_back({at[i], toQColor(entry.colour), QString::fromStdString(entry.label)});
+            labelWidth = std::max(labelWidth, layout.swatch + layout.pad +
+                                                  metrics.horizontalAdvance(layout.stops.back().label));
+        }
+        layout.barHeight = 6.0 * layout.line;
+    } else {
+        const std::size_t shown = legend.entries.size() > static_cast<std::size_t>(kLegendRows)
+                                      ? static_cast<std::size_t>(kLegendRows) - 1
+                                      : legend.entries.size();
+        // Highest first, as a map key reads: high ground at the top.
+        for (std::size_t i = 0; i < shown; ++i) {
+            const cad::SurfaceLegendEntry& entry = legend.entries[legend.entries.size() - 1 - i];
+            layout.rows.push_back({toQColor(entry.colour), QString::fromStdString(entry.label)});
+        }
+        if (shown < legend.entries.size()) {
+            layout.rows.push_back(
+                {QColor(), QString("+ %1 more").arg(legend.entries.size() - shown), true});
+        }
+        for (const LegendLayout::Row& row : layout.rows) {
+            labelWidth =
+                std::max(labelWidth, layout.swatch + layout.pad + metrics.horizontalAdvance(row.label));
+        }
+    }
+    const double bodyHeight = legend.gradient
+                                  ? layout.barHeight
+                                  : static_cast<double>(layout.rows.size()) * (layout.swatch + 2.0);
+    layout.width = labelWidth + 2.0 * layout.pad;
+    layout.height = 2.0 * layout.line + bodyHeight + 2.0 * layout.pad + 4.0;
+    return layout;
+}
+
+} // namespace
+
+QSizeF measureSurfaceLegend(const cad::SurfaceLegend& legend, const QString& caption, const QFont& font)
+{
+    if (legend.entries.empty()) {
+        return {};
+    }
+    const LegendLayout layout = layoutLegend(legend, caption, font);
+    return QSizeF(layout.width, layout.height);
+}
+
 QRectF paintSurfaceLegend(QPainter& painter, const cad::SurfaceLegend& legend, const QString& caption,
                           const QPointF& topRight, const QFont& font, const QColor& text,
                           const QColor& backing)
@@ -280,47 +395,11 @@ QRectF paintSurfaceLegend(QPainter& painter, const cad::SurfaceLegend& legend, c
         return {};
     }
     const QFontMetricsF metrics(font);
-    const double line = metrics.height();
-    const double pad = 6.0;
-    const double swatch = std::max(10.0, line * 0.8);
-    const bool gradient = legend.gradient;
-    // The rows: a gradient's two ends, or an entry each up to the cap, the
-    // last saying how many are left out.
-    struct Row {
-        QColor colour;
-        QString label;
-        bool more = false;
-    };
-    std::vector<Row> rows;
-    if (!gradient) {
-        const std::size_t shown = legend.entries.size() > static_cast<std::size_t>(kLegendRows)
-                                      ? static_cast<std::size_t>(kLegendRows) - 1
-                                      : legend.entries.size();
-        // Highest first, as a map key reads: high ground at the top.
-        for (std::size_t i = 0; i < shown; ++i) {
-            const cad::SurfaceLegendEntry& entry = legend.entries[legend.entries.size() - 1 - i];
-            rows.push_back({toQColor(entry.colour), QString::fromStdString(entry.label)});
-        }
-        if (shown < legend.entries.size()) {
-            rows.push_back({QColor(), QString("+ %1 more").arg(legend.entries.size() - shown), true});
-        }
-    }
-    const QString title = QString::fromStdString(legend.title);
-    const QString high = gradient ? QString::fromStdString(legend.entries.back().label) : QString();
-    const QString low = gradient ? QString::fromStdString(legend.entries.front().label) : QString();
-    double labelWidth = std::max(metrics.horizontalAdvance(caption), metrics.horizontalAdvance(title));
-    for (const Row& row : rows) {
-        labelWidth = std::max(labelWidth, swatch + pad + metrics.horizontalAdvance(row.label));
-    }
-    const double barHeight = 6.0 * line;
-    if (gradient) {
-        labelWidth = std::max({labelWidth, swatch + pad + metrics.horizontalAdvance(high),
-                               swatch + pad + metrics.horizontalAdvance(low)});
-    }
-    const double bodyHeight = gradient ? barHeight : static_cast<double>(rows.size()) * (swatch + 2.0);
-    const double width = labelWidth + 2.0 * pad;
-    const double height = 2.0 * line + bodyHeight + 2.0 * pad + 4.0;
-    const QRectF panel(topRight.x() - width, topRight.y(), width, height);
+    const LegendLayout layout = layoutLegend(legend, caption, font);
+    const double pad = layout.pad;
+    const double line = layout.line;
+    const double swatch = layout.swatch;
+    const QRectF panel(topRight.x() - layout.width, topRight.y(), layout.width, layout.height);
 
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -332,24 +411,56 @@ QRectF paintSurfaceLegend(QPainter& painter, const cad::SurfaceLegend& legend, c
     double y = panel.top() + pad;
     painter.drawText(QPointF(panel.left() + pad, y + metrics.ascent()), caption);
     y += line;
-    painter.drawText(QPointF(panel.left() + pad, y + metrics.ascent()), title);
+    painter.drawText(QPointF(panel.left() + pad, y + metrics.ascent()), layout.title);
     y += line + 4.0;
-    if (gradient) {
-        const QRectF bar(panel.left() + pad, y, swatch, barHeight);
+    if (legend.gradient) {
+        const QRectF bar(panel.left() + pad, y, swatch, layout.barHeight);
         QLinearGradient ramp(bar.bottomLeft(), bar.topLeft());
-        const std::size_t count = legend.entries.size();
-        for (std::size_t i = 0; i < count; ++i) {
-            const double t = count > 1 ? static_cast<double>(i) / static_cast<double>(count - 1) : 0.0;
-            ramp.setColorAt(t, toQColor(legend.entries[i].colour));
+        for (const LegendLayout::Stop& stop : layout.stops) {
+            ramp.setColorAt(stop.at, stop.colour);
         }
         painter.setPen(Qt::NoPen);
         painter.setBrush(ramp);
         painter.drawRect(bar);
         painter.setPen(text);
-        painter.drawText(QPointF(bar.right() + pad, bar.top() + metrics.ascent()), high);
-        painter.drawText(QPointF(bar.right() + pad, bar.bottom()), low);
+        // The labelled stops beside the bar at their values: the two ends
+        // always (the head against the bar's top, the foot against its
+        // bottom), an inner one only where it clears the label above it and
+        // the foot's by a line.
+        const auto centreOf = [&](double at) {
+            return std::clamp(bar.bottom() - at * bar.height(), bar.top() + 0.5 * line,
+                              bar.bottom() - 0.5 * line);
+        };
+        const auto write = [&](const LegendLayout::Stop& stop) {
+            painter.drawText(QPointF(bar.right() + pad,
+                                     centreOf(stop.at) + 0.5 * (metrics.ascent() - metrics.descent())),
+                             stop.label);
+        };
+        std::vector<const LegendLayout::Stop*> labelled;
+        for (const LegendLayout::Stop& stop : layout.stops) {
+            if (!stop.label.isEmpty()) {
+                labelled.push_back(&stop);
+            }
+        }
+        if (!labelled.empty()) {
+            // Highest first: the stops rise, so the last is the head.
+            std::ranges::reverse(labelled);
+            write(*labelled.front());
+            if (labelled.size() > 1) {
+                const double foot = centreOf(labelled.back()->at);
+                double above = centreOf(labelled.front()->at);
+                for (std::size_t i = 1; i + 1 < labelled.size(); ++i) {
+                    const double here = centreOf(labelled[i]->at);
+                    if (here - above >= line && foot - here >= line) {
+                        write(*labelled[i]);
+                        above = here;
+                    }
+                }
+                write(*labelled.back());
+            }
+        }
     } else {
-        for (const Row& row : rows) {
+        for (const LegendLayout::Row& row : layout.rows) {
             if (!row.more) {
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(row.colour);

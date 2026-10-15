@@ -45,15 +45,26 @@ namespace katana::cad::road {
 
 enum class ComponentKind { Lane, Shoulder, Kerb, Footpath, Verge, Median, Drain, Batter };
 enum class KerbShape { Barrier, Mountable, KerbAndGutter, EdgeStrip };
+// Which way a kerb's face looks. INWARD, the default, is a kerb on the outer
+// edge of a carriageway: its lip is on the carriageway side, nearer the
+// centreline, and it rises going outward to its top - the face looks in, to
+// the traffic. OUTWARD is a kerb on the inner edge of a carriageway, a median's
+// or an island's: the kerb is highest where it starts, against the median, and
+// falls going outward to its lip, so the carriageway beyond it is lower and
+// the face looks out, to the traffic on that side.
+enum class KerbFacing { Inward, Outward };
 enum class Side { Left, Right };
 
 // The words the verbs and the JSON use: "lane", "shoulder", "kerb",
 // "footpath", "verge", "median", "drain", "batter"; "barrier", "mountable",
-// "kerbgutter", "edgestrip"; "left", "right". Read in any case.
+// "kerbgutter", "edgestrip"; "inward", "outward"; "left", "right". Read in any
+// case.
 [[nodiscard]] std::string_view toString(ComponentKind kind);
 [[nodiscard]] std::optional<ComponentKind> componentKindFrom(std::string_view text);
 [[nodiscard]] std::string_view toString(KerbShape shape);
 [[nodiscard]] std::optional<KerbShape> kerbShapeFrom(std::string_view text);
+[[nodiscard]] std::string_view toString(KerbFacing facing);
+[[nodiscard]] std::optional<KerbFacing> kerbFacingFrom(std::string_view text);
 [[nodiscard]] std::string_view toString(Side side);
 [[nodiscard]] std::optional<Side> sideFrom(std::string_view text);
 
@@ -98,6 +109,9 @@ struct Component {
 
     // ---- a kerb ---------------------------------------------------------------
     KerbShape shape = KerbShape::Barrier;
+    // Which way the face looks (KerbFacing). An edge strip has no face and
+    // takes only the default.
+    KerbFacing faces = KerbFacing::Inward;
     // The face's height above the lip (the pavement edge), metres. An edge
     // strip is flush and has none.
     double height = 0.150;
@@ -174,6 +188,25 @@ struct RoadTemplateSet {
 // its formation is its finished surface, as the assembly's was.
 [[nodiscard]] RoadTemplate templateFromAssembly(const cad::Assembly& assembly);
 
+// ---- limits -----------------------------------------------------------------------------
+
+// The most a template's length may be - a width, a kerb's or drain's depth, a
+// course's thickness, a batter's maximum width - in metres. A sanity bound,
+// not a design rule, with no standard behind the number: the road a template
+// describes is metres to tens of metres across, and a section is sampled every
+// half metre across its whole span, so a width typed in the wrong unit would
+// cost time linear in it and, past about 4.5e15 m (where adding 0.5 no longer
+// moves a double), never end. 1 km is far beyond any real component and a few
+// thousand samples at most.
+inline constexpr double kMaximumComponentLength = 1000.0;
+// The most benches a batter may make across its maximum width. A batter with a
+// bench every 6 to 10 m of rise has a handful; each bench is two named points
+// a section, and the cut and fill areas cost more than linearly in a
+// section's points, so a bench every millimetre - a typo - is refused instead
+// of taking the session with it (the same reason as kMaximumSections, a
+// corridor's most sections, road_section.cpp).
+inline constexpr std::size_t kMaximumBenches = 100;
+
 // ---- checks ---------------------------------------------------------------------------
 
 // A template name, a corridor name: not empty, no '/', '"' or control
@@ -185,12 +218,23 @@ struct RoadTemplateSet {
 // Everything a section needs to be built: its name; component names words,
 // unique on each side; finite widths and crossfalls - a width positive, a
 // crossfall within +-100 % - kerb dimensions positive (a flush edge strip's
-// height excepted), a drain's depth not negative; at most one batter a side
-// and nothing outside it; batter slopes and its maximum width positive,
-// benches both given or neither; course names words unique in their
-// component, thicknesses positive, and no courses on a kerb or a batter.
+// height excepted), a drain's depth not negative; every length at most
+// kMaximumComponentLength; at most one batter a side and nothing outside it;
+// batter slopes and its maximum width positive, benches both given or neither
+// and no more than kMaximumBenches across the maximum width; course names
+// words unique in their component, thicknesses positive, and no courses on a
+// kerb or a batter.
 // InvalidArgument naming the component (left:lane) and what is wrong.
 [[nodiscard]] katana::core::Status checkTemplate(const RoadTemplate& roadTemplate);
+
+// The keys ROADTEMPLATE ADD and SET take for a component of `kind`: what its
+// JSON keeps (name, layer, colour for all; width, crossfall and superelevated
+// for all but a batter; a kerb's shape, faces, height, depth, gutter,
+// gutterfall and material; a drain's depth; a batter's cut, fill, maxwidth,
+// benchheight and benchwidth). `color` and `thickness` are read as `colour`
+// and `depth` and not listed. A key a kind does not keep changes nothing, so
+// the verbs refuse it rather than reply "updated".
+[[nodiscard]] std::vector<std::string_view> componentKeys(ComponentKind kind);
 
 // ---- a kerb's shape ------------------------------------------------------------------
 
@@ -204,17 +248,23 @@ struct ShapeColumn {
     friend bool operator==(const ShapeColumn&, const ShapeColumn&) = default;
 };
 
-// The kerb's cross-section from its lip (out 0, level 0) outward, a column
-// at each change of its top: the lip, the gutter's invert, the top of the
-// face, the back. Its base is level, `depth` below the lip (an edge strip:
-// below its top). The last column is the back of the kerb, where the next
-// component starts.
+// The kerb's cross-section from where the previous component ends (out 0,
+// level 0) outward, a column at each change of its top. For a kerb facing
+// INWARD that is its lip (the pavement's edge): the lip, the gutter's invert,
+// the top of the face, the back. For one facing OUTWARD it is the same kerb
+// mirrored: the back, the top of the face, the gutter's invert, the lip - its
+// levels measured from the back, so the kerb falls to its lip. The base is
+// `depth` below the lip (an edge strip: below its top), level under a barrier
+// or a mountable kerb and following the channel under a gutter. The last
+// column is where the next component starts: the back of the kerb, or its
+// lip.
 //
 //   barrier      face `height` high, battered 1 in 6, then `width` of top
 //   mountable    face rising `height` over 1.5 x height out, then `width`
 //   kerbgutter   the gutter, `gutterWidth` falling `gutterFall` %, then a
 //                barrier face and top
-//   edgestrip    flush: `width` at the component's crossfall, `depth` thick
+//   edgestrip    flush: `width` at the component's crossfall, `depth` thick;
+//                it has no face and takes no facing
 //
 // The face is never vertical: a vertical face gives the finished surface two
 // levels at one point, which a TIN cannot hold.

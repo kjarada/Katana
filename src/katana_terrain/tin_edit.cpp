@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -11,6 +12,7 @@
 #include "katana/geometry/polygon.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/terrain/super_surface.hpp"
+#include "point_merge.hpp"
 #include "tin_patch.hpp"
 #include "tin_surface_factory.hpp"
 
@@ -50,7 +52,7 @@ std::vector<std::uint8_t> referencedVertices(const TinSurface& surface)
 }
 
 // One flag per vertex: an end of a constrained edge.
-std::vector<std::uint8_t> onConstrainedEdge(const TinSurface& surface)
+std::vector<std::uint8_t> constrainedVertices(const TinSurface& surface)
 {
     std::vector<std::uint8_t> flags(surface.vertexCount(), 0);
     for (std::uint32_t t = 0; t < surface.triangleCount(); ++t) {
@@ -64,9 +66,54 @@ std::vector<std::uint8_t> onConstrainedEdge(const TinSurface& surface)
     return flags;
 }
 
-// A polygon as the edits take it: every coordinate finite, repeated vertices
-// (within kGeometric) and a repeated closing vertex dropped, at least three
-// distinct vertices with an area, closed, counter-clockwise.
+// Whether two closed segments meet, decided exactly (the kernel's predicate).
+bool segmentsMeet(const Point2& a, const Point2& b, const Point2& c, const Point2& d)
+{
+    const int o1 = detail::orientation(a, b, c);
+    const int o2 = detail::orientation(a, b, d);
+    const int o3 = detail::orientation(c, d, a);
+    const int o4 = detail::orientation(c, d, b);
+    if (o1 * o2 < 0 && o3 * o4 < 0) {
+        return true;
+    }
+    // A point on the line of the other segment meets it when it lies within it.
+    const auto within = [](const Point2& p, const Point2& s, const Point2& e) {
+        return p.x >= std::min(s.x, e.x) && p.x <= std::max(s.x, e.x) &&
+               p.y >= std::min(s.y, e.y) && p.y <= std::max(s.y, e.y);
+    };
+    return (o1 == 0 && within(c, a, b)) || (o2 == 0 && within(d, a, b)) ||
+           (o3 == 0 && within(a, c, d)) || (o4 == 0 && within(b, c, d));
+}
+
+// Whether two edges of the closed ring that share no corner meet: a bow-tie,
+// or a corner on another edge. Only asked of a ring with no signed area (a
+// figure of eight whose lobes cancel), to say why, so it is not worth
+// anything faster than every pair - and is not asked of a ring too long for
+// that to be a moment's work.
+bool ringTouchesItself(const std::vector<Point2>& ring)
+{
+    constexpr std::size_t kMostCorners = 2000;
+    const std::size_t n = ring.size();
+    if (n > kMostCorners) {
+        return false;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = i + 2; j < n; ++j) {
+            if (i == 0 && j + 1 == n) {
+                continue; // joined by the closing edge
+            }
+            if (segmentsMeet(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// A polygon as the edits take it: every coordinate finite and within
+// kMostMagnitude, repeated vertices (within kGeometric) and a repeated
+// closing vertex dropped, at least three distinct vertices with an area,
+// closed, counter-clockwise.
 Result<Polyline2> cleanPolygon(const Polyline2& polygon, const std::string& what)
 {
     Polyline2 ring;
@@ -74,6 +121,9 @@ Result<Polyline2> cleanPolygon(const Polyline2& polygon, const std::string& what
     for (const Point2& vertex : polygon.vertices) {
         if (!vertex.isFinite()) {
             return makeError(ErrorCode::InvalidArgument, what + " has a non-finite coordinate");
+        }
+        if (!detail::withinMagnitude(vertex.x) || !detail::withinMagnitude(vertex.y)) {
+            return detail::tooLarge(describePosition(vertex));
         }
         if (ring.vertices.empty() || ring.vertices.back().distanceTo(vertex) > tol::kGeometric) {
             ring.vertices.push_back(vertex);
@@ -90,7 +140,11 @@ Result<Polyline2> cleanPolygon(const Polyline2& polygon, const std::string& what
     }
     const auto turn = katana::geometry::orientation(ring);
     if (turn == katana::geometry::Orientation::Degenerate) {
-        return makeError(ErrorCode::InvalidGeometry, what + " has no area");
+        // A figure of eight whose lobes cancel has no signed area either, and
+        // "no area" would send a person looking for a flat polygon.
+        return makeError(ErrorCode::InvalidGeometry,
+                         ringTouchesItself(ring.vertices) ? what + " touches or crosses itself"
+                                                          : what + " has no area");
     }
     if (turn == katana::geometry::Orientation::Clockwise) {
         std::reverse(ring.vertices.begin(), ring.vertices.end());
@@ -152,14 +206,6 @@ Result<TinSurface> withLevels(const TinSurface& surface, std::vector<Point3> ver
                                                surface.neighbors(), surface.constrainedEdges());
 }
 
-TinEditResult unchanged(const TinSurface& surface)
-{
-    TinEditResult result;
-    result.surface = surface;
-    result.report = detail::reportOf(surface, surface);
-    return result;
-}
-
 } // namespace
 
 // ---- finders ------------------------------------------------------------------------------
@@ -197,29 +243,64 @@ std::optional<std::uint32_t> vertexAt(const TinSurface& surface, const Point2& p
                                       std::optional<double> reach)
 {
     const auto triangle = triangleAt(surface, position);
-    if (!triangle) {
-        return std::nullopt;
-    }
     std::uint32_t nearest = kNoVertex;
     double best = std::numeric_limits<double>::infinity();
-    for (const std::uint32_t v : surface.triangles()[*triangle]) {
+    if (triangle) {
+        for (const std::uint32_t v : surface.triangles()[*triangle]) {
+            const double distance = planOf(surface.vertices()[v]).distanceTo(position);
+            if (distance < best) {
+                best = distance;
+                nearest = v;
+            }
+        }
+        if (!reach || best <= *reach) {
+            return nearest;
+        }
+    } else if (!reach) {
+        return std::nullopt;
+    }
+    // Off the surface, or in a triangle none of whose corners is within reach:
+    // the aperture is a disc round the position, and a vertex in it need not
+    // be a corner of the triangle under its centre. One click's worth of
+    // scanning, only on this path (a corner of the triangle under the
+    // position is the common answer and costs nothing).
+    best = std::numeric_limits<double>::infinity();
+    nearest = kNoVertex;
+    const std::vector<std::uint8_t> used = referencedVertices(surface);
+    for (std::uint32_t v = 0; v < surface.vertexCount(); ++v) {
+        if (used[v] == 0) {
+            continue;
+        }
         const double distance = planOf(surface.vertices()[v]).distanceTo(position);
-        if (distance < best) {
+        if (distance <= *reach && distance < best) {
             best = distance;
             nearest = v;
         }
     }
-    if (reach && best > *reach) {
+    if (nearest == kNoVertex) {
         return std::nullopt;
     }
     return nearest;
 }
 
+bool onConstrainedEdge(const TinSurface& surface, std::uint32_t vertex)
+{
+    for (std::uint32_t t = 0; t < surface.triangleCount(); ++t) {
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            if (surface.isEdgeConstrained(t, k) &&
+                (surface.triangles()[t][k] == vertex ||
+                 surface.triangles()[t][(k + 1) % 3] == vertex)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 std::vector<std::uint32_t> trianglesByPolygon(const TinSurface& surface, const Polyline2& polygon,
                                               bool inside)
 {
-    Polyline2 ring = polygon;
-    ring.closed = true;
+    const katana::geometry::PolygonClassifier ring(polygon);
     std::vector<std::uint32_t> found;
     for (std::uint32_t t = 0; t < surface.triangleCount(); ++t) {
         const bool in = ring.classify(surface.planTriangle(t).centroid()) != Containment::Outside;
@@ -267,8 +348,7 @@ std::vector<std::uint32_t> trianglesThinnerThan(const TinSurface& surface, doubl
 
 std::vector<std::uint32_t> verticesInside(const TinSurface& surface, const Polyline2& polygon)
 {
-    Polyline2 ring = polygon;
-    ring.closed = true;
+    const katana::geometry::PolygonClassifier ring(polygon);
     const std::vector<std::uint8_t> used = referencedVertices(surface);
     std::vector<std::uint32_t> found;
     for (std::uint32_t v = 0; v < surface.vertexCount(); ++v) {
@@ -282,7 +362,7 @@ std::vector<std::uint32_t> verticesInside(const TinSurface& surface, const Polyl
 
 std::vector<std::uint8_t> heldVertices(const TinSurface& surface)
 {
-    std::vector<std::uint8_t> held = onConstrainedEdge(surface);
+    std::vector<std::uint8_t> held = constrainedVertices(surface);
     for (std::uint32_t t = 0; t < surface.triangleCount(); ++t) {
         for (std::uint32_t k = 0; k < 3; ++k) {
             if (surface.neighbors()[t][k] == kNoTriangle) {
@@ -336,7 +416,7 @@ Result<TinEditResult> deletePoints(const TinSurface& surface,
     if (vertices.empty()) {
         return makeError(ErrorCode::InvalidArgument, "no point to delete was given");
     }
-    const std::vector<std::uint8_t> constrained = onConstrainedEdge(surface);
+    const std::vector<std::uint8_t> constrained = constrainedVertices(surface);
     const std::vector<std::uint8_t> used = referencedVertices(surface);
     detail::PatchRequest request;
     request.removed.assign(surface.vertexCount(), 0);
@@ -365,7 +445,7 @@ Result<TinEditResult> deletePoints(const TinSurface& surface,
         }
     }
     if (removing == 0) {
-        TinEditResult result = unchanged(surface);
+        TinEditResult result = detail::unchanged(surface);
         result.report.pointsHeld = heldCount;
         return result;
     }
@@ -460,6 +540,10 @@ Result<TinEditResult> addPoints(const TinSurface& surface, std::span<const Point
         if (!point.isFinite()) {
             return makeError(ErrorCode::InvalidArgument, "a point has a non-finite coordinate",
                              "at " + describePosition(planOf(point)));
+        }
+        if (!detail::withinMagnitude(point.x) || !detail::withinMagnitude(point.y) ||
+            !detail::withinMagnitude(point.z)) {
+            return detail::tooLarge(describePosition(planOf(point)));
         }
     }
 
@@ -556,49 +640,109 @@ Result<TinEditResult> addPoints(const TinSurface& surface, std::span<const Point
 Result<TinEditResult> addBreakline(const TinSurface& surface,
                                    std::span<const BreaklineVertex> vertices, bool closed)
 {
+    const BreaklineInput line{std::vector<BreaklineVertex>(vertices.begin(), vertices.end()), closed};
+    return addBreaklines(surface, std::span<const BreaklineInput>(&line, 1));
+}
+
+Result<TinEditResult> addBreaklines(const TinSurface& surface, std::span<const BreaklineInput> lines)
+{
     if (const Status status = requireSurface(surface); !status) {
         return status.error();
     }
-    if (vertices.size() < 2) {
-        return makeError(ErrorCode::InvalidArgument, "a breakline needs at least two vertices",
-                         "vertices=" + std::to_string(vertices.size()));
+    if (lines.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no breakline was given");
     }
     const detail::VertexStars stars(surface);
     detail::PatchRequest request;
     request.region.assign(surface.triangleCount(), 0);
-    bool hasLength = false;
-    for (std::size_t i = 0; i < vertices.size(); ++i) {
-        const BreaklineVertex& vertex = vertices[i];
-        if (!vertex.position.isFinite() || (vertex.z && !std::isfinite(*vertex.z))) {
-            return makeError(ErrorCode::InvalidArgument,
-                             "a breakline vertex has a non-finite coordinate",
-                             "vertex=" + std::to_string(i));
+    // Which line a refusal is about, when there are several.
+    const auto where = [&lines](std::size_t line, std::size_t vertex) {
+        return (lines.size() > 1 ? "line=" + std::to_string(line) + " " : std::string{}) +
+               "vertex=" + std::to_string(vertex);
+    };
+    for (std::size_t l = 0; l < lines.size(); ++l) {
+        // The levels given to a position this line visits more than once are
+        // one: each visit takes the level either gives it, and the segments
+        // are judged draped or not by the levels they then have (a line that
+        // comes back to a point and gives its level on the second visit is
+        // straight 3D to it from the first, as the same line written the
+        // other way round is).
+        std::vector<BreaklineVertex> vertices = lines[l].vertices;
+        if (vertices.size() < 2) {
+            return makeError(ErrorCode::InvalidArgument, "a breakline needs at least two vertices",
+                             "vertices=" + std::to_string(vertices.size()) +
+                                 (lines.size() > 1 ? " line=" + std::to_string(l) : std::string{}));
         }
-        const detail::Place place = detail::placeOf(surface, stars, vertex.position);
-        if (place.kind == detail::Place::Kind::Outside) {
-            return makeError(ErrorCode::InvalidGeometry, "a breakline vertex lies off the surface",
-                             "vertex=" + std::to_string(i) + " at " +
-                                 describePosition(vertex.position));
+        detail::PointMerger merger(vertices.size(), tol::kGeometric);
+        std::vector<std::uint32_t> position(vertices.size());
+        std::vector<std::optional<double>> levelAt;
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            const BreaklineVertex& vertex = vertices[i];
+            if (!vertex.position.isFinite() || (vertex.z && !std::isfinite(*vertex.z))) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "a breakline vertex has a non-finite coordinate", where(l, i));
+            }
+            if (!detail::withinMagnitude(vertex.position.x) ||
+                !detail::withinMagnitude(vertex.position.y) ||
+                (vertex.z && !detail::withinMagnitude(*vertex.z))) {
+                return detail::tooLarge(describePosition(vertex.position));
+            }
+            const auto entry = merger.add(vertex.position);
+            position[i] = entry.index;
+            if (entry.inserted) {
+                levelAt.emplace_back();
+            }
+            if (vertex.z) {
+                auto& level = levelAt[entry.index];
+                if (level && std::abs(*level - *vertex.z) > tol::kCoordinate) {
+                    return makeError(ErrorCode::InvalidGeometry,
+                                     "two points at one position with different levels",
+                                     "at " + describePosition(vertex.position) + ": " +
+                                         katana::core::formatExactReal(*level) + " and " +
+                                         katana::core::formatExactReal(*vertex.z));
+                }
+                if (!level) {
+                    level = vertex.z;
+                }
+            }
         }
-        // A draped vertex goes in without a level: the patch gives it the
-        // surface's, and one at an existing vertex is that vertex, untouched.
-        request.points.push_back({vertex.position, vertex.z, true});
-        hasLength = hasLength ||
-                    vertex.position.distanceTo(vertices.front().position) > tol::kGeometric;
-    }
-    if (!hasLength) {
-        return makeError(ErrorCode::InvalidGeometry,
-                         "the breakline has no length: its vertices coincide");
-    }
-    const std::size_t segments = closed && vertices.size() > 2 ? vertices.size()
-                                                               : vertices.size() - 1;
-    for (std::size_t s = 0; s < segments; ++s) {
-        const std::size_t from = s;
-        const std::size_t to = (s + 1) % vertices.size();
-        const bool draped = !vertices[from].z && !vertices[to].z;
-        request.lines.push_back(
-            {static_cast<std::uint32_t>(from), static_cast<std::uint32_t>(to), draped});
-        request.keepShape = request.keepShape || draped;
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            if (!vertices[i].z) {
+                vertices[i].z = levelAt[position[i]];
+            }
+        }
+
+        const std::uint32_t base = static_cast<std::uint32_t>(request.points.size());
+        bool hasLength = false;
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            const BreaklineVertex& vertex = vertices[i];
+            const detail::Place place = detail::placeOf(surface, stars, vertex.position);
+            if (place.kind == detail::Place::Kind::Outside) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "a breakline vertex lies off the surface",
+                                 where(l, i) + " at " + describePosition(vertex.position));
+            }
+            // A draped vertex goes in without a level: the patch gives it the
+            // surface's, and one at an existing vertex is that vertex, untouched.
+            request.points.push_back({vertex.position, vertex.z, true});
+            hasLength = hasLength ||
+                        vertex.position.distanceTo(vertices.front().position) > tol::kGeometric;
+        }
+        if (!hasLength) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "the breakline has no length: its vertices coincide",
+                             lines.size() > 1 ? "line=" + std::to_string(l) : std::string{});
+        }
+        const std::size_t segments =
+            lines[l].closed && vertices.size() > 2 ? vertices.size() : vertices.size() - 1;
+        for (std::size_t s = 0; s < segments; ++s) {
+            const std::size_t from = s;
+            const std::size_t to = (s + 1) % vertices.size();
+            const bool draped = !vertices[from].z && !vertices[to].z;
+            request.lines.push_back({base + static_cast<std::uint32_t>(from),
+                                     base + static_cast<std::uint32_t>(to), draped});
+            request.keepShape = request.keepShape || draped;
+        }
     }
     auto output = detail::rebuildPatch(surface, stars, std::move(request));
     if (!output) {
@@ -624,9 +768,10 @@ Result<TinEditResult> cutBy(const TinSurface& surface, const Polyline2& polygon,
     request.region.assign(surface.triangleCount(), 0);
     request.keepShape = true;
     request.keepInsideCut = keepInside;
-    const Polyline2 shape = *ring;
+    request.simpleCut = true;
+    const auto shape = std::make_shared<const katana::geometry::PolygonClassifier>(*ring);
     request.insideCut = [shape](const Point2& p) {
-        return shape.classify(p) != Containment::Outside;
+        return shape->classify(p) != Containment::Outside;
     };
     const std::size_t count = ring->vertices.size();
     for (std::size_t i = 0; i < count; ++i) {
@@ -646,7 +791,7 @@ Result<TinEditResult> cutBy(const TinSurface& surface, const Polyline2& polygon,
     // Nothing rebuilt and nothing dropped - the polygon is round the whole
     // surface, or beside it: the surface as it was, not a reordered copy.
     if (output->triangles == surface.triangles()) {
-        return unchanged(surface);
+        return detail::unchanged(surface);
     }
     return finishPatch(surface, std::move(*output));
 }
@@ -674,13 +819,17 @@ Result<TinEditResult> changeHeights(const TinSurface& surface, const HeightChang
     if (!std::isfinite(change.value) || (change.base && !std::isfinite(*change.base))) {
         return makeError(ErrorCode::InvalidArgument, "a level change must be a finite number");
     }
-    std::optional<Polyline2> ring;
+    if (!detail::withinMagnitude(change.value) ||
+        (change.base && !detail::withinMagnitude(*change.base))) {
+        return detail::tooLarge("the level change " + katana::core::formatExactReal(change.value));
+    }
+    std::optional<katana::geometry::PolygonClassifier> ring;
     if (inside) {
         auto cleaned = cleanPolygon(*inside, "the polygon");
         if (!cleaned) {
             return cleaned.error();
         }
-        ring = std::move(*cleaned);
+        ring.emplace(*cleaned);
     }
     const std::vector<std::uint8_t> used = referencedVertices(surface);
     std::vector<std::uint32_t> affected;
@@ -724,6 +873,10 @@ Result<TinEditResult> changeHeights(const TinSurface& surface, const HeightChang
             return makeError(ErrorCode::InvalidArgument, "the change makes a level non-finite",
                              "vertex=" + std::to_string(v));
         }
+        if (!detail::withinMagnitude(next)) {
+            return detail::tooLarge("vertex=" + std::to_string(v) + " would be at level " +
+                                    katana::core::formatExactReal(next));
+        }
         if (next != z) {
             ++report.pointsMoved;
             report.largestChange = std::max(report.largestChange, std::abs(next - z));
@@ -762,13 +915,13 @@ Result<TinEditResult> smoothSurface(const TinSurface& surface, const SmoothOptio
         return makeError(ErrorCode::InvalidArgument, "weight must be above 0 and at most 1",
                          "weight=" + katana::core::formatExactReal(options.weight));
     }
-    std::optional<Polyline2> ring;
+    std::optional<katana::geometry::PolygonClassifier> ring;
     if (inside) {
         auto cleaned = cleanPolygon(*inside, "the polygon");
         if (!cleaned) {
             return cleaned.error();
         }
-        ring = std::move(*cleaned);
+        ring.emplace(*cleaned);
     }
 
     // Each vertex's neighbours along an edge, once each (two flat arrays).
@@ -809,6 +962,12 @@ Result<TinEditResult> smoothSurface(const TinSurface& surface, const SmoothOptio
         ++freeCount;
     }
     if (freeCount == 0 && ring) {
+        // The same words changeHeights uses for a polygon with no vertex in
+        // it: "every one is held" is a claim about vertices that exist.
+        if (report.pointsHeld == 0) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "no vertex of the surface lies inside the polygon");
+        }
         return makeError(ErrorCode::InvalidArgument,
                          "no vertex inside the polygon is free to move: every one is on the rim "
                          "or a breakline",
@@ -920,7 +1079,6 @@ Result<TinEditResult> pasteSurface(const TinSurface& base, const TinSurface& top
         }
         return resultOf[v];
     };
-    std::size_t centres = 0;
     for (std::uint32_t t = 0; t < top.triangleCount(); ++t) {
         const TinTriangle& tri = topTriangles[t];
         const std::uint8_t mask = top.constrainedEdges()[t];
@@ -969,7 +1127,6 @@ Result<TinEditResult> pasteSurface(const TinSurface& base, const TinSurface& top
             const auto centre = static_cast<std::uint32_t>(output.vertices.size());
             output.vertices.emplace_back((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0,
                                          (a.z + b.z + c.z) / 3.0);
-            ++centres;
             for (std::uint32_t k = 0; k < 3; ++k) {
                 for (std::size_t i = 0; i + 1 < sides[k].size(); ++i) {
                     output.triangles.push_back({sides[k][i], sides[k][i + 1], centre});
@@ -979,12 +1136,11 @@ Result<TinEditResult> pasteSurface(const TinSurface& base, const TinSurface& top
         }
     }
     // The seam is constrained on the base's side (its cut edges); finishSurface
-    // carries the flag across to the top's.
-    auto result = finishPatch(base, std::move(output));
-    if (result) {
-        result->report.pointsAdded += centres;
-    }
-    return result;
+    // carries the flag across to the top's. A centroid is a vertex the fans
+    // use, so finishPatch counts it as added with the others: counting it
+    // again here made vertices_after - vertices_before + points_removed differ
+    // from points_added by one for each fan.
+    return finishPatch(base, std::move(output));
 }
 
 Result<TinEditResult> offsetSurface(const TinSurface& surface, double dz)

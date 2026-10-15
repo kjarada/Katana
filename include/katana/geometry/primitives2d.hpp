@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -218,6 +219,35 @@ struct Polyline2 {
     [[nodiscard]] Polyline2 withoutDuplicateVertices() const;
 
     friend bool operator==(const Polyline2&, const Polyline2&) = default;
+};
+
+// Polyline2::classify of one polygon asked many times - every triangle of a
+// surface against a 5000-vertex outline is 2e9 edge tests asked one by one.
+// The same answer, edge for edge the same arithmetic, from the few edges whose
+// height reaches the query's: the edges are kept in horizontal bands, and only
+// an edge within kGeometric of the query's height can decide either part of
+// the rule (the distance to the boundary, the crossing number). The polygon is
+// taken as closed; fewer than 3 vertices classify everything Outside, as an
+// open or degenerate Polyline2 does.
+class PolygonClassifier {
+  public:
+    explicit PolygonClassifier(const Polyline2& polygon);
+
+    [[nodiscard]] Containment classify(const Point2& p) const;
+    [[nodiscard]] bool contains(const Point2& p) const
+    {
+        return classify(p) != Containment::Outside;
+    }
+
+  private:
+    [[nodiscard]] std::size_t bandOf(double y) const;
+
+    std::vector<Point2> vertices_;
+    Box2 bounds_;
+    double bandHeight_ = 1.0;
+    std::size_t bands_ = 1;
+    std::vector<std::uint32_t> bandStart_; // bands_ + 1 offsets into edges_
+    std::vector<std::uint32_t> edges_;     // edge i joins vertex i and (i + 1) % n
 };
 
 // Axis-aligned rectangle: `origin` is the minimum corner; width, height >= 0.

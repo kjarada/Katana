@@ -334,6 +334,14 @@ Result<TinEditResult> thinSurface(const TinSurface& surface, double tolerance,
         ++removed;
     }
 
+    // Nothing removed: the surface as it was. Rebuilding it would sort its
+    // triangles, and a surface that is not in that order (an archive's, an
+    // overlay's) would come back different - a change in the reply, and an
+    // undo step for an edit that did nothing.
+    if (removed == 0) {
+        return detail::unchanged(surface);
+    }
+
     std::vector<TinTriangle> kept;
     std::vector<std::uint8_t> keptMasks;
     double largest = 0.0;

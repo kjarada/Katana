@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -21,6 +22,10 @@
 #include <QTabWidget>
 #include <QGuiApplication>
 
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
@@ -224,6 +229,130 @@ TEST(VolumesDialog, MakeCutFillMapAddsTheDifferenceAndOffersItAtOnce)
     EXPECT_GE(child<QComboBox>(dialog, "volumesBase")->findText("cut fill"), 0);
 }
 
+TEST(VolumesDialog, MakeEnvelopeRunsSurfaceEnvelopeOfThePagesTwoSurfacesAndOffersTheResultAtOnce)
+{
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    auto* side = child<QComboBox>(dialog, "volumesEnvelopeSide");
+    auto* name = child<QLineEdit>(dialog, "volumesEnvelopeName");
+    auto* button = child<QPushButton>(dialog, "volumesEnvelope");
+    ASSERT_NE(side, nullptr);
+
+    // The line the fields make: the page's two surfaces, MAX by default.
+    dialog.setMethod(VolumeMethod::Surfaces);
+    const auto upper = dialog.envelopeLine();
+    ASSERT_TRUE(upper.ok()) << upper.error().describe();
+    EXPECT_EQ(*upper, "SURFACE ENVELOPE ground design MAX");
+    side->setCurrentIndex(side->findData(QStringLiteral("MIN")));
+    name->setText("lower level");
+    const auto lower = dialog.envelopeLine();
+    ASSERT_TRUE(lower.ok());
+    EXPECT_EQ(*lower, "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    // The other pages use their own two surfaces, as the cut/fill map does.
+    dialog.setMethod(VolumeMethod::Grid);
+    EXPECT_EQ(*dialog.envelopeLine(), "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    dialog.setMethod(VolumeMethod::Sections);
+    EXPECT_EQ(*dialog.envelopeLine(), "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    dialog.setMethod(VolumeMethod::Surfaces);
+    EXPECT_TRUE(runner.lines.isEmpty()); // building a line runs nothing
+
+    // The button hands exactly that line to the executor; the surface is in the
+    // drawing in the default style and the lists offer it at once.
+    button->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_EQ(runner.lines.front(), "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    const katana::terrain::NamedSurface* made = document.surfaces().find("lower level");
+    ASSERT_NE(made, nullptr);
+    EXPECT_TRUE(made->style.empty());
+    EXPECT_GE(child<QComboBox>(dialog, "volumesBase")->findText("lower level"), 0);
+    EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("Made the envelope"));
+    EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("lower"));
+
+    // Without a name the verb's own: ground-design-max.
+    side->setCurrentIndex(side->findData(QStringLiteral("MAX")));
+    name->clear();
+    button->click();
+    ASSERT_EQ(runner.lines.size(), 2);
+    EXPECT_EQ(runner.lines.back(), "SURFACE ENVELOPE ground design MAX");
+    EXPECT_NE(document.surfaces().find("ground-design-max"), nullptr);
+}
+
+TEST(VolumesDialog, MakeEnvelopeWithNoSurfaceOrARefusedNameSaysWhyAndChangesNothing)
+{
+    // No surfaces: a line cannot be made, naming what is missing, and nothing runs.
+    {
+        Document document;
+        CommandInterpreter interpreter(document);
+        Runner runner{document, interpreter, {}};
+        VolumesDialog dialog(runner.context());
+        const auto none = dialog.envelopeLine();
+        ASSERT_FALSE(none.ok());
+        EXPECT_NE(none.error().message.find("no surface"), std::string::npos);
+        child<QPushButton>(dialog, "volumesEnvelope")->click();
+        EXPECT_TRUE(runner.lines.isEmpty());
+        EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("no surface"));
+    }
+    // The verb's refusal reaches the status and the drawing is as it was: a name
+    // the drawing already has.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    child<QLineEdit>(dialog, "volumesEnvelopeName")->setText("ground");
+    child<QPushButton>(dialog, "volumesEnvelope")->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("already has"));
+    EXPECT_EQ(document.surfaces().all().size(), 2u);
+}
+
+TEST(VolumesDialog, TheListsFollowTheDrawingWhileTheDialogStaysOpen)
+{
+    // The dialog is non-modal and kept. A surface made by a typed line, or one
+    // an UNDO removes, used to be missed until the dialog was shown again: the
+    // line it built named a surface the drawing no longer had (NotFound), and
+    // one made meanwhile could not be chosen. Its own status said "UNDO removes
+    // it" and the removed map was still offered.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    auto* base = child<QComboBox>(dialog, "volumesBase");
+    auto* top = child<QComboBox>(dialog, "volumesTop");
+    auto* alignment = child<QComboBox>(dialog, "volumesAlignment");
+    auto* command = child<QLineEdit>(dialog, "volumesCommand");
+    EXPECT_EQ(command->text(), "VOLUME SURFACES ground design");
+    EXPECT_EQ(alignment->count(), 1);
+
+    // A surface made by a typed line is offered after a turn of the event loop.
+    ASSERT_TRUE(interpreter.run("SURFACE DIFFERENCE ground design NAME raised").ok());
+    QCoreApplication::processEvents();
+    EXPECT_GE(top->findText("raised"), 0);
+    EXPECT_GE(base->findText("raised"), 0);
+    top->setCurrentIndex(top->findText("raised"));
+    EXPECT_EQ(command->text(), "VOLUME SURFACES ground raised");
+
+    // UNDO removes it: not offered, and the line no longer names it.
+    ASSERT_TRUE(document.undo().ok());
+    QCoreApplication::processEvents();
+    EXPECT_LT(top->findText("raised"), 0);
+    EXPECT_FALSE(command->text().contains("raised"));
+
+    // The alignment, and the surface the page had chosen, go the same way.
+    ASSERT_TRUE(document.undo().ok()); // ALIGN NEW cl
+    QCoreApplication::processEvents();
+    EXPECT_EQ(alignment->count(), 0);
+    ASSERT_TRUE(document.undo().ok()); // the design
+    QCoreApplication::processEvents();
+    EXPECT_LT(top->findText("design"), 0);
+    EXPECT_FALSE(command->text().contains("design"));
+    EXPECT_TRUE(runner.lines.isEmpty()); // following the drawing runs nothing
+}
+
 TEST(VolumesDialog, SaveCsvRunsTheSameLineWritingTheFileItNames)
 {
     Document document;
@@ -246,6 +375,59 @@ TEST(VolumesDialog, SaveCsvRunsTheSameLineWritingTheFileItNames)
     child<QPushButton>(dialog, "volumesSaveCsv")->click();
     ASSERT_EQ(lines.size(), 1);
     EXPECT_EQ(lines.front(), "VOLUME SURFACES ground design csv=C:/site/volumes.csv OVERWRITE");
+}
+
+TEST(VolumesDialog, SaveCsvOfAScopeThatTakesNoPolygonSaysNothingWasSavedAndLeavesTheFile)
+{
+    // "The polygons below" on the default scope (the selection) with nothing
+    // selected: the verb runs nothing and writes nothing, and the status used to
+    // say "Saved the table to ..." over a file that still held what an earlier
+    // save left there.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    dialog.setMethod(VolumeMethod::Surfaces);
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() /
+        ("katana_volumes_dialog_" +
+         std::to_string(reinterpret_cast<std::uintptr_t>(&dialog)) + ".csv");
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << "OLD TABLE FROM AN EARLIER RUN\r\n";
+    }
+    const QString path = QString::fromStdString(file.generic_string());
+    child<QLineEdit>(dialog, "volumesCsvPath")->setText(path);
+    child<QRadioButton>(dialog, "volumesBoundaryScope")->click();
+    auto* status = child<QLabel>(dialog, "volumesStatus");
+
+    child<QPushButton>(dialog, "volumesSaveCsv")->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_FALSE(status->text().contains("Saved the table")) << status->text().toStdString();
+    EXPECT_TRUE(status->text().contains("was not written")) << status->text().toStdString();
+    EXPECT_TRUE(dialog.resultsText().contains("written")); // the csv record is in the table
+    {
+        std::ifstream in(file, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "OLD TABLE FROM AN EARLIER RUN\r\n");
+    }
+
+    // The same save over typed corners that measure something writes the file
+    // and says so.
+    child<QRadioButton>(dialog, "volumesBoundaryCorners")->click();
+    child<QLineEdit>(dialog, "volumesCorners")->setText("10,0 50,0 50,4");
+    child<QPushButton>(dialog, "volumesSaveCsv")->click();
+    ASSERT_EQ(runner.lines.size(), 2);
+    EXPECT_TRUE(status->text().contains("Saved the table to")) << status->text().toStdString();
+    {
+        std::ifstream in(file, std::ios::binary);
+        std::string first;
+        std::getline(in, first);
+        EXPECT_EQ(first.rfind("record,polygon,entity,polygon_area,area,cut,fill,net", 0), 0u)
+            << first;
+    }
+    std::filesystem::remove(file);
 }
 
 TEST(VolumeResultTable, EveryRecordIsARowAndEveryKeyAColumnInTheOrderFirstMet)

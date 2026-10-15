@@ -100,6 +100,12 @@ struct SceneMesh {
     // the curve - and which the window puts in the 3D views' list with the
     // imported meshes (docs/road_design.md, "In the views").
     bool planFootprint = true;
+    // The drawing layer it is shown on (a road model object's, "road/kerb");
+    // empty for an imported mesh, which no layer governs. The drawing's own
+    // hidden layers are applied where the list is made (bim::sceneMeshes); a
+    // view's OWN hidden layers (cad::ViewState::layers) are applied by the view
+    // that draws it, which is why the layer travels with the mesh.
+    std::string layer;
 };
 
 // Where drawing geometry is put in z.

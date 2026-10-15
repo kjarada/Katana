@@ -234,6 +234,15 @@ File had seventeen top-level items and has fifteen.
   archives and IFC as well as the GIS vector formats, which "Export Vector"
   did not say, and its tip says what it takes. Tests, scripts and
   `--trigger` find an item by its object name, which is why none moved.
+- **Save As offers a folder the person owns.** `MainWindow::saveDocumentAs`
+  proposed the bare name `untitled.katana`, which Qt resolves against the
+  working directory: for a Start menu shortcut or a double-click, the
+  program's own folder, `bin/` of the install - read-only in a per-machine
+  install, and no place for a project. It now proposes the name beside the
+  project already open, else in the person's Documents. Not tested: the
+  dialog is a native modal one, which a headless run refuses
+  (`refuseFileDialog`), so the folder it opens in has no seam to be read
+  from.
 - **No toolbar changed**, so `kLayoutVersion` stays 1 and a saved layout
   still fits: File's toolbar keeps New, Open, Save, Import Any File, Export
   Drawing, Plot and Sheets.
@@ -248,6 +257,18 @@ File had seventeen top-level items and has fifteen.
   File's own items do (`MainWindow::refuseFileDialog`), each naming the words
   of `IMPORT` that are its kind of data's, and `INFO <file>`
   (`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`).
+- **Open Project and Save As never start in the working folder.** Qt does when
+  it is given no folder or a bare name, and the working folder is the
+  program's own `bin\` for a zip copy (Explorer starts a double-clicked exe in
+  its folder) and the install folder, hidden under `%LOCALAPPDATA%`, for the
+  installed one: the first project was proposed as `bin\untitled.katana`, and
+  removing a zip copy, which is deleting its folder, deleted the project with
+  it. The dialogs start in the folder the open project is in,
+  else the one the last project was opened or saved in (the `files/projectFolder`
+  setting, written by a window a person used and never by a headless run), else
+  Documents, else the home folder (`katana::qt::projectDialogFolder`,
+  `ProjectFolder.TheOpenProjectsFolderComesFirstThenTheLastOneThenDocuments`);
+  Plot to PDF and the Sheet Set menu already started in Documents.
 
 `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`
 reads the three menus whole, item by item in this order, with Survey's last
@@ -644,9 +665,12 @@ makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
 the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain, BIM and GIS have a second row of
-their own (`addToolBarBreak`), because in one row they were squeezed to a button
-each behind overflow arrows. Draw and Annotate run down the LEFT edge, where
+Format run along the top; Survey, Terrain, Surface Edit, BIM and GIS have a
+second row of their own (`addToolBarBreak`), because in one row they were
+squeezed to a button each behind overflow arrows - and with the Surface Edit
+and BIM bars in it the second row is itself wider than 1360 pixels, so BIM and
+GIS show only their handle and arrow there ("Fitting the screen", Not done).
+Draw and Annotate run down the LEFT edge, where
 every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a
 row above it; Modify runs down the RIGHT edge, as in the classic CAD layout,
@@ -4552,6 +4576,23 @@ they are easiest to break:
   Format workbench, "The Format menu" above; the Survey workbench's dialogs),
   so it stays open beside the drawing and a buffer of unapplied edits
   survives hiding it.
+- **A buffer is kept only while what it was filled from is as it was.** A
+  reload that left the stored thing (a template, a corridor, the component's
+  courses) equal to the copy the fields were filled from keeps what was typed;
+  one that found it changed - an undo, a redo, a typed line, New, Open - shows
+  what the drawing holds, and the choice of another thing drops the edits made
+  to the last. Comparing a REFERENCE to the thing (`left:lane`, which every
+  template with a lane has) is not comparing the thing. The Road Template
+  Manager's grids and the Corridors dialog's fields are the models
+  (`docs/road_design.md`, "What a dialog shows"). A listing that is the
+  reply of a read (Corridor Quantities) is cleared, not left to show a
+  drawing that has gone, when the model it read is no longer the drawing's.
+- **One Apply is one line, so one undo step.** A grid of edited rows is
+  applied as ONE verb line with a group for each row, never a line a row: the
+  verb makes all of it or none, and a value it refuses leaves the drawing as it
+  was with the edits still in the grid (`ROADTEMPLATE SET <t> <c> key=value
+  <c> key=value`). A verb that takes one thing at a time is given a form that
+  takes several rather than being run in a loop by the dialog.
 - **A headless session never opens a modal box**, and every action, menu,
   field, button and tab has an object name, so tests and the headless driver
   can find it.

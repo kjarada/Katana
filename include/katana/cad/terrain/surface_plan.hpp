@@ -205,6 +205,10 @@ struct SurfacePlan {
 // surface itself - shared and immutable, so an edited surface is a new one -
 // and kept alive while kept. One per view or plotting thread, never shared
 // between threads; a copy starts empty and works out again what it needs.
+// Every surface asked about is kept until retain() lets it go, however many:
+// the caller bounds the cache, to the drawing's surfaces (a paint calls
+// retain with them). A cap on the count would make a paint of one surface
+// more than the cap rebuild every surface every time, so there is none.
 class SurfacePlanCache {
   public:
     SurfacePlanCache();

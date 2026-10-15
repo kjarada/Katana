@@ -193,8 +193,11 @@ Result<Prepared> list(Context& context, const Tokens& tokens, std::size_t at)
         for (const katana::interop::RasterOverlay& raster : context.reference.rasters()) {
             rasters.push_back(rasterJson(raster));
         }
+        // A reply: U+FFFD for a byte that is not UTF-8, never nlohmann's
+        // default exception, which ended katana_cli and the window.
         return answeredWith("SURFACE LIST",
-                            nlohmann::json{{"surfaces", surfaces}, {"rasters", rasters}}.dump());
+                            nlohmann::json{{"surfaces", surfaces}, {"rasters", rasters}}.dump(
+                                -1, ' ', false, nlohmann::json::error_handler_t::replace));
     }
     std::vector<std::string> records;
     for (const katana::terrain::NamedSurface& named : context.surfaces.all()) {
@@ -289,6 +292,12 @@ Result<FromWords> fromWords(const Tokens& tokens, std::size_t at)
         if (tokens.is(at, "NAME")) {
             if (at + 1 >= tokens.size() || tokens[at + 1].empty()) {
                 return refusal("NAME needs the surface's name");
+            }
+            // Refused now, by the store's own rule, and not after the surface
+            // has been built: a name that is not UTF-8, or that holds a quote
+            // a line cannot carry, would otherwise fail at the end of the work.
+            if (auto status = katana::terrain::SurfaceStore::checkName(tokens[at + 1]); !status) {
+                return status.error();
             }
             words.name = tokens[at + 1];
             at += 2;
@@ -477,6 +486,13 @@ Result<Prepared> fromCloud(Context& context, const std::string& word, const From
                           " step=" + std::to_string(step) +
                           " points=" + std::to_string((points->points.size() + step - 1) / step));
     }
+    if ((points->points.size() + step - 1) / step < 3) {
+        // What the job would refuse after it started, said before it does -
+        // and by PREVIEW, which must not call valid a line whose run fails.
+        return makeError(ErrorCode::InvalidArgument,
+                         "fewer than three points with a height to triangulate: " +
+                             joinedRecords(records));
+    }
     if (words.preview) {
         records.push_back("preview valid=yes changed=no");
         return answeredWith("SURFACE FROM", joinedRecords(records));
@@ -531,16 +547,17 @@ Result<Prepared> fromDrawing(Context& context, const Source& source, const FromW
     if (!naming) {
         return naming.error();
     }
-    if (words.preview) {
-        records.push_back("preview valid=yes changed=no");
-        return answeredWith("SURFACE FROM", joinedRecords(records));
-    }
     if (input->input.points.size() < 3) {
         // Refused here, with what the scope took, rather than after a job:
-        // there is nothing to triangulate.
+        // there is nothing to triangulate. Before PREVIEW answers, which says
+        // a line is valid only if running it would not be refused for this.
         return makeError(ErrorCode::InvalidArgument,
                          "fewer than three points with a height to triangulate: " +
                              joinedRecords(records));
+    }
+    if (words.preview) {
+        records.push_back("preview valid=yes changed=no");
+        return answeredWith("SURFACE FROM", joinedRecords(records));
     }
     const std::string sourceText =
         "drawing (" + std::to_string(input->used) + " entities)";

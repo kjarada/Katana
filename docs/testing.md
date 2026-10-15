@@ -161,7 +161,13 @@ the check leaves in the build tree.
 reopen in a SECOND process and query, so a round trip through the project
 file is tested as a user would make it; `WILL_FAIL` cases show bad input
 fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
-steps and clean up. The survey-code cases write their own small Katana
+steps and clean up. A bare `WILL_FAIL` passes on ANY failure - an earlier line
+of the script refused, or `katana_cli` crashing (`cmake -E env` turns a crash
+in its child into an ordinary exit 1) - so where a refusal is the property, the
+case names it with `PASS_REGULAR_EXPRESSION` (the earlier line's success and
+the refusal's own words), never beside `WILL_FAIL`, which inverts the
+pattern's result
+(`cli.a_surface_leader_on_no_surface_fails_the_script`). The survey-code cases write their own small Katana
 customisation file rather than depend on the compiled-in one. The cases that
 pin what a session STARTS with say so on their own command line, through
 `cmake -E env`: `KATANA_BUILTIN_CUSTOMISATION` naming a committed fixture of

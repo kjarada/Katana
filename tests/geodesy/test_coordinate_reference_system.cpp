@@ -368,3 +368,28 @@ TEST(ProjData, TheDirectoryKatanaPointsProjAtHoldsItsDatabase)
     const auto crs = CoordinateReferenceSystem::fromEpsg(28356);
     ASSERT_OK(crs);
 }
+
+// The PROJ data Katana carries is named whatever the environment says - it is
+// what a context falls back on when PROJ_DATA or PROJ_LIB names data this PROJ
+// cannot open (ProjContext::create; the cli.proj_* tests set the variables
+// in a process of their own, since PROJ reads them at its first search).
+// Wherever it is given it must be a directory with the database in it, and one
+// PROJ really opens: the context made from it names a CRS by its code.
+TEST(ProjData, TheDataKatanaCarriesHoldsItsDatabaseWhateverTheEnvironmentSays)
+{
+    const auto& bundled = katana::core::bundledProjDataDirectory();
+    if (!bundled.has_value()) {
+        GTEST_SKIP() << "this PROJ is a distribution's, with no share/proj beside its library";
+    }
+    EXPECT_TRUE(std::filesystem::is_regular_file(*bundled / "proj.db")) << bundled->string();
+    // The environment's choice, when it works, is not the bundled data; when it
+    // is not set, PROJ finds this directory itself (Windows) or Katana points
+    // it there (Linux, macOS).
+    const auto info = projRuntimeInfo();
+    ASSERT_OK(info);
+    if (std::getenv("PROJ_DATA") == nullptr && std::getenv("PROJ_LIB") == nullptr) {
+        EXPECT_TRUE(std::filesystem::equivalent(std::filesystem::path(info->databasePath),
+                                                *bundled / "proj.db"))
+            << info->databasePath << " is not in " << bundled->string();
+    }
+}

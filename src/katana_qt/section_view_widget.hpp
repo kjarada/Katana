@@ -53,6 +53,16 @@ class SectionViewWidget final : public QWidget {
     {
         return state_.section;
     }
+    // True when the drawing's surfaces have changed since the section was cut
+    // - hidden, shown, edited, removed, undone - so what is drawn is of
+    // surfaces it no longer has. The section is cut again only when asked
+    // (Terrain > Cut Section), so the view says so, in its legend and in its
+    // status text, rather than showing the old picture as the drawing's.
+    [[nodiscard]] bool surfacesChanged() const
+    {
+        return state_.section.has_value() && document_ != nullptr &&
+               document_->surfacesGeneration() != state_.sectionSurfaces;
+    }
 
     // Vertical exaggeration. A profile at 1:1 over a kilometre is a flat line,
     // so 10 is the usual default for a long section.

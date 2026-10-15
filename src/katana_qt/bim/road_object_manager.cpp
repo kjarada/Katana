@@ -123,6 +123,8 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
     d.keys = new QLineEdit(this);
     d.keys->setObjectName("roadObjectKeys");
     d.keys->setPlaceholderText("key=value ...   e.g. offset=4.5 height=1.0 (ROADOBJECT KINDS)");
+    d.keys->setToolTip("Apply sets these on the chosen object; Copy makes a copy with them "
+                       "(station=, dx= and dy= move the copy, and any other key changes it)");
     const auto button = [this](const char* text, const char* name) {
         auto* made = new QPushButton(text, this);
         made->setObjectName(name);
@@ -155,15 +157,17 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
     layout->addLayout(buttons);
     layout->addWidget(d.status);
 
-    // Runs one line through the window's executor and says what it replied.
+    // Runs one line through the window's executor and says what it replied;
+    // true when the line was accepted.
     const auto run = [this](const QString& line) {
         Impl& self = *impl_;
         if (!self.context.run) {
             self.status->setText("There is no command line to run it on here.");
-            return;
+            return false;
         }
         const VerbOutcome outcome = self.context.run(line);
         self.status->setText(outcome.ok ? outcome.reply : "Refused: " + outcome.error);
+        return outcome.ok;
     };
     const auto showInfo = [this] {
         Impl& self = *impl_;
@@ -194,12 +198,21 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
             impl_->status->setText("Choose one object and give key=value to set.");
             return;
         }
-        run("ROADOBJECT SET " + ids.front() + " " + keys);
+        // The keys are spent once they are set; a refused line keeps them to
+        // be put right.
+        if (run("ROADOBJECT SET " + ids.front() + " " + keys)) {
+            impl_->keys->clear();
+        }
     });
     connect(d.copy, &QPushButton::clicked, this, [this, run] {
         const QStringList ids = selectedIds();
         if (ids.size() == 1) {
-            run("ROADOBJECT COPY " + ids.front());
+            // The keys field goes with the copy: station=, dx= and dy= are what
+            // move it, and no other control says them.
+            const QString keys = impl_->keys->text().simplified();
+            if (run("ROADOBJECT COPY " + ids.front() + (keys.isEmpty() ? QString() : " " + keys))) {
+                impl_->keys->clear();
+            }
         }
     });
     connect(d.remove, &QPushButton::clicked, this, [this, run] {
@@ -291,6 +304,14 @@ void RoadObjectManagerDialog::reload()
     const katana::cad::road::PlacementContext context =
         katana::cad::road::placementContext(document);
     std::size_t problems = 0;
+    // A set that cannot be read is empty to roadObjects(): without this the
+    // manager would say "0 road objects, 0 problems" over a record that is
+    // there and kept (a newer Katana's, or damaged).
+    QString unreadable;
+    if (const auto readable = document.roadObjectsStatus(); !readable) {
+        unreadable = qs(readable.error().describe());
+        ++problems;
+    }
     const auto& objects = document.roadObjects().objects;
     d.table->setRowCount(static_cast<int>(objects.size()));
     for (std::size_t i = 0; i < objects.size(); ++i) {
@@ -324,7 +345,12 @@ void RoadObjectManagerDialog::reload()
         }
     }
     d.table->resizeColumnsToContents();
-    d.count->setText(QString("%1 road objects, %2 problems").arg(objects.size()).arg(problems));
+    d.count->setText(QString("%1 road objects, %2 problems").arg(objects.size()).arg(problems) +
+                     (unreadable.isEmpty()
+                          ? QString()
+                          : QString(" - the drawing's road objects cannot be read, and are kept as "
+                                    "they are: %1")
+                                .arg(unreadable)));
     // What was chosen stays chosen, all of it: selectRow alone would keep
     // only the last.
     QItemSelectionModel* selection = d.table->selectionModel();

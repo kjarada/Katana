@@ -75,6 +75,9 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "2 entities.*Polyline.*layer=Survey.*area=600")
     set_tests_properties(cli.rejects_bad_input PROPERTIES WILL_FAIL TRUE)
 
+    # Names and paths outside ASCII, through the real programs (text_cli.cmake).
+    include("${CMAKE_CURRENT_SOURCE_DIR}/text_cli.cmake")
+
     # VERTEX INSERT with a point OF the polyline (docs/drawing.md, "What a
     # vertex tool acts on"): "#1@4,0.3" is the place on it nearest (4,0.3),
     # ON the line, as the window's Insert Vertex puts a click; "#1.s1" with
@@ -1217,7 +1220,11 @@ if(KATANA_BUILD_TESTS)
     # ifc: the road model (docs/ifc.md, "Road model") goes out with the drawing;
     # NOROADMODEL - File > Export IFC's "Road model" box - leaves it out, and is
     # refused given twice. The scenario has no corridor, so the reply has no
-    # road record and is the scenario's own.
+    # road record and is the scenario's own: this one shows that the word is
+    # TAKEN and does no harm. That it LEAVES THE ROAD OUT is road_cli.cmake's
+    # cli.ifc_noroadmodel_leaves_a_corridors_road_model_out, against
+    # cli.ifc_export_writes_a_corridors_road_model_by_default, which run a
+    # corridor.
     add_test(NAME cli.ifc_noroadmodel_is_a_word_of_the_export_line
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
@@ -1231,6 +1238,26 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli>
                 -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL NOROADMODEL")
     set_tests_properties(cli.ifc_noroadmodel_given_twice_is_refused PROPERTIES WILL_FAIL TRUE)
+    # A leader goes into the file as the note it says, not as its template
+    # (docs/ifc.md, "Drawing entities"): a point at RL 12 on a surface at RL 10,
+    # a preset=level leader ("RL {rl:.3f}" says "RL 12.000") and a preset=surface
+    # one ("{dsurface.ground:+.3f}" says 12 - 10 = "+2.000"), exported and read
+    # back - the IFC import turns an IfcTextLiteral into a Text. The template is
+    # in the reply that made the leader, so what must not appear is a TEXT that
+    # holds a brace.
+    add_test(NAME cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "PLINE3D 0,0,10 100,0,10 100,100,10 0,100,10 CLOSE"
+                -c "SURFACE FROM DRAWING NAME ground"
+                -c "POINT 50,50" -c "SELECT 2" -c "PROP SET elevation 12 real" -c "SELECT NONE"
+                -c "LEADER #2 60,60 preset=level" -c "LEADER #2 40,60 preset=surface"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli leaders.ifc\" NOSURFACES"
+                -c "NEW" -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli leaders.ifc\"" -c "LIST")
+    set_tests_properties(cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "Text  layer=0  \"RL 12\\.000\".*Text  layer=0  \"\\+2\\.000\""
+        FAIL_REGULAR_EXPRESSION "Text  layer=0  \"[^\"]*[{]")
 
     # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
     # EXPRESS rules, no proxy, and the alignment's geometry against its
@@ -1332,6 +1359,19 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
     set_tests_properties(cli.import_alongside_and_offset_place_the_data_and_say_the_move PROPERTIES
         PASS_REGULAR_EXPRESSION "bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500"
         FAIL_REGULAR_EXPRESSION "error")
+    # OPEN #1 and OPEN SELECTION open a polyline for editing: they share the
+    # verb with OPEN of a project but do not replace the drawing
+    # (CommandInterpreter::replacesDocument), so its reference layers - the
+    # DEM imported first - are still there, where they were cleared with a
+    # project's. The drawing has no project here, so REFS RESTORE does not run.
+    add_test(NAME cli.open_of_a_polyline_keeps_the_reference_layers
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "IMPORT ${_gis}/terrain.asc"
+                -c "PLINE 0,0 10,0 10,10 CLOSE" -c "OPEN #1" -c REFS
+                -c "SELECT #1" -c "OPEN SELECTION" -c REFS)
+    set_tests_properties(cli.open_of_a_polyline_keeps_the_reference_layers PROPERTIES
+        PASS_REGULAR_EXPRESSION "kind=polyline closed=no [^\r\n]*[\r\n]+(reference id=[^\r\n]*[\r\n]+)+references rasters=1 clouds=0 missing=0.*kind=polyline closed=no [^\r\n]*[\r\n]+(reference id=[^\r\n]*[\r\n]+)+references rasters=1 clouds=0 missing=0"
+        FAIL_REGULAR_EXPRESSION "error;references rasters=0")
 endif()
 
 # Labels by hand and their layout, as an agent types them (docs/annotation.md,
@@ -1740,6 +1780,47 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.crs_set_takes_a_wkt_with_its_quotes PROPERTIES
         PASS_REGULAR_EXPRESSION "crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\" kind=\"projected\" units=metre"
         FAIL_REGULAR_EXPRESSION "error")
+    # A machine-wide PROJ_LIB or PROJ_DATA (another GIS package leaves one,
+    # naming data of its own - usually a database of an older PROJ's layout)
+    # replaces the share/proj PROJ finds beside its DLL, and Katana, with no
+    # usable proj.db, could not name a coordinate system: CRS SET failed with
+    # "not a coordinate system: give an EPSG code" for a valid code, and INFO
+    # lost the EPSG code of a file's .prj. Here the variable names a folder
+    # with no database in it: a process of its own is the only way to set it,
+    # since PROJ reads it at its first search. Both the geodesy contexts
+    # (CRS SET) and GDAL's (INFO) fall back on the data Katana carries.
+    # The expectations are the registry's, not a run's: EPSG:28356 is "GDA94 /
+    # MGA zone 56", and tests/data/proj_fallback/mga56.prj is its ESRI WKT
+    # (GDA_1994_MGA_Zone_56, which only the database can turn into that code).
+    # Windows: the package carries share/proj there; the Linux and macOS
+    # toolchains of this project's builds may be a distribution's PROJ, which
+    # has no data beside its library to fall back on.
+    if(WIN32)
+        set(_empty_proj "${CMAKE_CURRENT_BINARY_DIR}/cli_empty_proj")
+        file(MAKE_DIRECTORY "${_empty_proj}")
+        # Two tests with their names written out (tools/check_docs.py reads
+        # the names a document cites from the add_test lines).
+        set(_proj_fallback_pass
+            "crs id=EPSG:28356 name=\"GDA94 / MGA zone 56\" kind=\"projected\" units=metre.*dataset file=[^ ]*/mga56\\.asc kind=raster driver=AAIGrid crs=\"GDA94 / MGA zone 56 \\(EPSG:28356\\)\"")
+        add_test(NAME cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "PROJ_LIB=${_empty_proj}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "CRS SET EPSG:28356"
+                    -c "INFO ${PROJECT_SOURCE_DIR}/tests/data/proj_fallback/mga56.asc")
+        set_tests_properties(cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            PROPERTIES PASS_REGULAR_EXPRESSION "${_proj_fallback_pass}"
+                       FAIL_REGULAR_EXPRESSION "error")
+        add_test(NAME cli.proj_data_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "PROJ_DATA=${_empty_proj}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "CRS SET EPSG:28356"
+                    -c "INFO ${PROJECT_SOURCE_DIR}/tests/data/proj_fallback/mga56.asc")
+        set_tests_properties(cli.proj_data_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            PROPERTIES PASS_REGULAR_EXPRESSION "${_proj_fallback_pass}"
+                       FAIL_REGULAR_EXPRESSION "error")
+    endif()
 endif()
 
 # SURVEY READ and SURVEY IMPORT on the hand-built Sokkia SDR33 file

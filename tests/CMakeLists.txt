@@ -1336,6 +1336,59 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # Editing a surface is not gaining one. The window decided that a surface
+    # was gained by the pointer of its TIN, and an edit - its undo and redo
+    # too - puts a new TIN under the same name: it opened a 3D view in the middle
+    # of the edit (the plan view, half as wide, with a tool waiting for clicks in
+    # it) and re-framed the camera of one the person had set. A project with one
+    # surface, made by katana_cli, is opened in the window with its plan view
+    # alone; an edit and its undo leave it alone (views=1 each time, never 2).
+    set(_surface_edit_project "${CMAKE_CURRENT_BINARY_DIR}/surface_edit_window_project")
+    add_test(NAME cli.surface_project_for_the_window_edit_check_is_cleared
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_surface_edit_project}")
+    add_test(NAME cli.surface_project_for_the_window_edit_check_is_made
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground"
+                -c "SAVE \"${_surface_edit_project}\"")
+    set_tests_properties(cli.surface_project_for_the_window_edit_check_is_cleared PROPERTIES
+        FIXTURES_SETUP surface_edit_window_cleared)
+    set_tests_properties(cli.surface_project_for_the_window_edit_check_is_made PROPERTIES
+        FIXTURES_REQUIRED surface_edit_window_cleared
+        FIXTURES_SETUP surface_edit_window_project)
+    add_test(NAME qt_editing_a_surface_and_undoing_it_open_no_3d_view_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${_surface_edit_project}"
+            "-DDRIVE=>VIEWS|>SURFACE EDIT ground RAISE 1|>VIEWS|>UNDO|>VIEWS"
+            "-DEXPECT=views=1 linked=0[\r\n]+.*operation=raise.*views=1 linked=0[\r\n]+.*1 undone.*views=1 linked=0"
+            "-DFORBID=views=2|kind=3d"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_edit_opens_no_3d_view_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_editing_a_surface_and_undoing_it_open_no_3d_view_headless PROPERTIES
+        FIXTURES_REQUIRED surface_edit_window_project
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # SURFACE PLAN <name> VIEW is what the plan view drew, at the view's own
+    # size and scale: the sample terrain in Triangles at ZOOM EXTENTS in a
+    # view a few hundred pixels across, where every triangle's edges are under
+    # four pixels - so the view reports edges=0 and every triangle tinted, and
+    # so must the verb. It was framed in 1600 x 1000 whatever the view was,
+    # and said all 31 981 edges stroked and none tinted. The pixels it names
+    # are the view's, three digits or fewer, not the default frame's four.
+    add_test(NAME qt_surface_plan_of_the_view_says_what_the_plan_view_drew_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_surface_view"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE STYLE ground Triangles|>ZOOM EXTENTS view=1|?PlanView1|>SURFACE PLAN ground VIEW"
+            "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=[1-9][0-9]* .*plan surface=\"ground\" style=\"Triangles\" visible=yes pixels=[0-9][0-9]?[0-9]?,[0-9][0-9]?[0-9]? unitsPerPixel=[0-9.e-]+ triangles=[1-9][0-9]* inView=[1-9][0-9]* edges=0 tinted=[1-9][0-9]* "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_plan_of_the_view_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_surface_plan_of_the_view_says_what_the_plan_view_drew_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Surface Styles, by its object names: a style's contour
     # interval edited and applied, then a copy of it made under a new name -
     # each the SURFACESTYLE line the dialog shows and runs through the
@@ -3168,6 +3221,25 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # The three edits that take the drawing's data by a scope, through the window
+    # (docs/surface_editing.md, "In the window"): Add Points from the Drawing
+    # takes the two vertices of a PLINE3D (20.3,20.3,50 and 25.3,25.3,50), Delete
+    # Points Inside Polygons the vertices inside the two closed polylines, and
+    # Delete Triangles by Polygons, Outside, keeps only the union of the two.
+    # Each dialog's line is run through the window's one executor.
+    add_test(NAME qt_the_surface_data_dialogs_edit_the_surface_by_a_scope_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>PLINE 10,10 60,10 60,40 10,40 CLOSE|>PLINE 100,20 140,20 140,60 100,60 CLOSE|>PLINE3D 20.3,20.3,50 25.3,25.3,50|@terrainSurfaceAddPoints|!surfaceAddPointsScopeDrawing|!surfaceAddPointsRun|?surfaceAddPointsReply|@terrainSurfaceDeletePoints|!surfaceDeletePointsScopeDrawing|!surfaceDeletePointsRun|?surfaceDeletePointsReply|@terrainSurfaceDeleteTriangles|!surfaceDeleteTrianglesScopeDrawing|surfaceDeleteTrianglesSide=Outside the polygons (keep what is inside)|!surfaceDeleteTrianglesRun|?surfaceDeleteTrianglesReply"
+            "-DEXPECT=operation=add_points .*points_added=2 .*changed=yes.*operation=delete_points_inside .*changed=yes.*operation=delete_triangles_outside .*changed=yes"
+            "-DFORBID=unknown command|does not take|has no choice|InvalidArgument|InvalidGeometry|ran=no"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_data_dialogs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_surface_data_dialogs_edit_the_surface_by_a_scope_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 240)
     # Every icon-only button with a menu on a toolbar or in a dock's title
     # bar draws the sign of its menu clear of its icon (--check-toolbars,
     # tools::menuSignClashes), each measured from its own rendering against
@@ -3406,19 +3478,45 @@ if(TARGET katana)
             "-DEXPECT=--dialog fileExportIfc opened fileExportIfcDialog \"Export IFC\"[\r\n].*> EXPORT \"preview\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\".*ifcExportClasses: [^\r\n]*layer Survey/Kerb \\| 1 \\| IfcKerb NOTDEFINED \\| \\| rule kerb[^\r\n]*service E1 \\| 3 \\| IfcCableCarrierSegment CONDUITSEGMENT \\| ELECTRICAL.*> EXPORT \"[^\"]*qt_ifc_dialog\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\"[\r\n]+ifc exported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+[\r\n]+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_dialog\\.ifc: [0-9]+ instances"
             "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # ifc: File > Export IFC's "Road model" box (docs/ifc.md, "Road model"),
-    # unticked: the line says NOROADMODEL, and the window runs it. The
-    # scenario has no corridor, so the box counts no objects.
+    # ifc: File > Export IFC's "Road model" box (docs/ifc.md, "Road model"). The
+    # drawing has a corridor, the one thing that gives the model objects: with
+    # none the reply has no road record whichever way the box goes, and the test
+    # could not tell the box honoured from the box ignored. Ticked (as it opens),
+    # Preview's reply holds the record - `road elements=N skipped=0 roads=1
+    # parts=P`, N and P above zero - and the box counts the objects; unticked,
+    # the line says NOROADMODEL, the window runs it, and its reply goes straight
+    # from `counts` to the classes (the alignment) with no road record. This is
+    # the window's own wiring (main_window_ifc.cpp's exportIfc), which
+    # katana_cli's tests do not reach.
     add_test(NAME qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
-            "-DDRIVE=${_ifc_scenario}@fileExportIfc|?ifcExportRoadModel|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
+            "-DDRIVE=>ALIGN NEW road 0,0 100,0|>ALIGN DESIGN road 0,10 100,10|>ROADTEMPLATE DEFAULTS|>CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"|@fileExportIfc|?ifcExportRoadModel|!ifcExportPreview|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless_headless.png"
-            "-DEXPECT=ifcExportRoadModel: Road model \\(0 objects\\).*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 .*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
-            "-DFORBID=IfcBuildingElementProxy|road elements="
+            "-DEXPECT=ifcExportRoadModel: Road model \\([1-9][0-9]* objects\\), checked.*> EXPORT \"preview\\.ifc\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\" [^\r\n]*[\r\n]+counts [^\r\n]*[\r\n]+road elements=[1-9][0-9]* skipped=0 roads=1 parts=[1-9][0-9]*.*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 [^\r\n]*[\r\n]+counts [^\r\n]*[\r\n]+class name=IfcAlignment.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
+            "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # A leader goes into the window's IFC file as the note it says, not as its
+    # template (docs/ifc.md, "Drawing entities"): the window hands the export
+    # the drawing's surfaces (app::setLeaderNotes). A point at RL 12 on a surface
+    # at RL 10; its preset=level leader says "RL 12.000", its preset=surface
+    # one 12 - 10 = "+2.000". Read back, a text is a Text.
+    set(_ifc_leaders "${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_leaders.ifc")
+    add_test(NAME qt_ifc_export_writes_a_leaders_note_not_its_template_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=>PLINE3D 0,0,10 100,0,10 100,100,10 0,100,10 CLOSE|>SURFACE FROM DRAWING NAME ground|>POINT 50,50|>SELECT 2|>PROP SET elevation 12 real|>SELECT NONE|>LEADER #2 60,60 preset=level|>LEADER #2 40,60 preset=surface|>EXPORT ${_ifc_leaders} NOSURFACES|>NEW|>IMPORT ${_ifc_leaders}|>LIST"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_leaders_headless.png"
+            "-DEXPECT=ifc exported file=\"qt_ifc_leaders\\.ifc\".*Text  layer=0  \"RL 12\\.000\".*Text  layer=0  \"\\+2\\.000\""
+            "-DFORBID=Text  layer=0  \"[^\"]*[{]"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_ifc_export_writes_a_leaders_note_not_its_template_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
@@ -3448,6 +3546,22 @@ if(TARGET katana)
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_headless.png"
             "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4.*surface name=\"TIN SOUTH WEST \\(2\\)\" triangles=8 points=9"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The two dialogs say what the surfaces are: the drawing's own, which the
+    # import keeps in its one undo step (so Undo takes the terrain back) and
+    # the project saves. They once called them "of this session", "not saved"
+    # and "not undone", which stopped being true when the surfaces moved into
+    # the drawing (cad::importSurfaces); the behaviour is pinned by
+    # qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless,
+    # these are the words.
+    add_test(NAME qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc max=500 NAME ground|@fileExportIfc|?ifcExportSurfaces|@fileImportIfc|ifcImportFile=${_ifc_dialog}|?ifcImportCheck"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_words_headless.png"
+            "-DEXPECT=ifcExportSurfaces: The drawing's surfaces \\(1\\), checked.*ifcImportCheck: Ready to import, as one step Undo takes back, surfaces included"
+            "-DFORBID=Surfaces of this session|surfaces are session data|not undone"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The File menu offers both - each in its submenu, File > Import and File
     # > Export, since every import and export went under those two (a menu's
@@ -3525,11 +3639,13 @@ if(TARGET katana)
                          qt_ifc_a_path_given_to_the_window_is_imported_headless
                          qt_ifc_a_file_far_from_the_drawings_alignment_is_questioned_headless
                          qt_ifc_dataset_information_describes_the_file_headless
+                         qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
         PROPERTIES FIXTURES_REQUIRED qt_ifc_dialog_file)
     set_tests_properties(qt_ifc_typed_export_and_import_are_the_command_lines_headless
                          qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless
                          qt_ifc_import_dialog_describes_imports_and_takes_the_files_system_headless
                          qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
+                         qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
                          qt_ifc_menu_items_and_the_verbs_refusals_headless
                          qt_ifc_import_options_are_the_import_dialog_headless
                          qt_ifc_a_path_given_to_the_window_is_imported_headless

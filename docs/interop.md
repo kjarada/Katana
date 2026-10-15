@@ -730,7 +730,13 @@ Decisions, and what was rejected:
   panel's selection first.
 * **Reference data goes with its drawing.** File > New, Open, and `NEW` or
   `OPEN` typed on the command line clear the rasters and clouds (QT-17): an
-  orthophoto of the last site no longer sits behind the next one.
+  orthophoto of the last site no longer sits behind the next one. Only an
+  `OPEN` of a project does: `OPEN #12` and `OPEN SELECTION` open a polyline
+  for editing and leave the drawing, and so its reference data, as it was
+  (`CommandInterpreter::replacesDocument`, which the session asks as the window
+  does; `Session.OpenOfAPolylineKeepsTheReferenceLayersAndNewTakesThemOff`,
+  `cli.open_of_a_polyline_keeps_the_reference_layers`). The session cleared
+  them for any `OPEN`, so `RASTER 1` was gone after editing a polyline.
 
 The interoperability verbs now exist in BOTH command lines, as the CLI's own
 comment always claimed: `IMPORT`, `EXPORT`, `INFO` and `REFS` in the desktop
@@ -1201,8 +1207,15 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
 - **A .dxf and a .12da take the scope too**, through a copy of the drawing
   that keeps only what the scope took: the native writers take a model, and
   the copy is already made for the worker. Rejected: threading the scope's
-  entity list through `writeDxfExport` and the archive writer, a second
-  selection mechanism beside the copy. An archive carries the session's
+  entity list through the archive writer, a second selection mechanism beside
+  the copy. A .dxf is the exception, and its copy is cut AFTER its annotation
+  is drawn from the whole of it (`writeDxfExport` with the scope): a smart
+  leader's note and a label's text are read off the entity they are on, which
+  a scope that took the leader and not that entity had already removed - the
+  callout was written as a bare arrow, `skipped=0`, no word
+  (`docs/annotation.md`, "Exchange"). A leader that still has no note is
+  said as a warning record, `leader #N is written without its note: ...`. An
+  archive draws no annotation, so it is cut first. An archive carries the session's
   surfaces with the whole drawing (no scope, or DRAWING with no filter) and
   not with a part of it, as the window's export always did. GDAL's options
   on a .dxf or a .12da are refused by name.
@@ -1793,9 +1806,11 @@ The mapping is documented in full at the head of
   of the list wins is NOT in the manual - this follows the sample archive's
   own comment, "base surface first, then the pads that substitute it over
   their footprints" - and a triangle of a lower member is dropped whole
-  where a higher one covers any of it, so the seam is ragged by up to one
-  triangle and no point ever has two answers. See docs/cad.md for why that
-  trade was made in that direction.
+  where a higher one covers any AREA of it, so the seam is ragged by up to one
+  triangle and no point ever has two answers. A member that only abuts a
+  triangle (an edge or a corner in common, or an overlap thinner than
+  `kGeometric`) covers none of it, and the triangle stays (docs/surface_editing.md,
+  "MERGE"). See docs/cad.md for why that trade was made in that direction.
 - **Point clouds** become reference layers. A `ref_data` cloud names a LAS
   file relative to a 12d project the archive has left behind; the file is
   looked for BESIDE the archive - where a 12da and its scans travel together

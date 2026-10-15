@@ -205,9 +205,25 @@ std::optional<std::vector<PlacedVertex>> lineOf(const katana::entity::Entity& en
             out.push_back({step.position, step.height});
         }
     } else if (const auto* arc = std::get_if<katana::geometry::Arc2>(&entity.geometry)) {
-        for (const katana::geometry::Point2& point :
-             katana::geometry::chordArc(*arc, katana::geometry::kCurveChordTolerance)) {
-            out.push_back({point, std::nullopt});
+        const std::vector<katana::geometry::Point2> chords =
+            katana::geometry::chordArc(*arc, katana::geometry::kCurveChordTolerance);
+        // An arc keeps a height at each end - two in `elevations`, or the one
+        // `elevation` both share - and one on a grade rises evenly by its
+        // sweep, as section annotation reads it. The chords stand at equal
+        // fractions of the sweep, so each takes that fraction of the rise.
+        // An end with no height leaves every chord with none, and the
+        // placement refuses it, naming surface=.
+        const auto ends = heightsOf(entity.properties, 2);
+        for (std::size_t i = 0; i < chords.size(); ++i) {
+            std::optional<double> height;
+            if (ends[0] && ends[1]) {
+                const double fraction =
+                    chords.size() > 1
+                        ? static_cast<double>(i) / static_cast<double>(chords.size() - 1)
+                        : 0.0;
+                height = *ends[0] + (*ends[1] - *ends[0]) * fraction;
+            }
+            out.push_back({chords[i], height});
         }
     } else {
         return std::nullopt;
@@ -257,7 +273,36 @@ Status checkBuilds(const PlacementContext& context, const RoadObject& object)
         }
         return makeError(ErrorCode::InvalidArgument, built.problems.front().message, where);
     }
+    // Every solid is closed (road_objects.hpp): the IFC export writes it as a
+    // closed face set and its volume is read off the triangles. Checked here,
+    // once per edit, rather than on every rebuild of the model.
+    for (const bim::BimObject& part : built.objects) {
+        if (!isClosedMesh(part.mesh)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::format("{} is not a closed solid; its placement or its "
+                                         "dimensions make a shape that does not close",
+                                         part.id),
+                             object.id);
+        }
+    }
     return {};
+}
+
+// A road object is a definition kept by id, not a drawn entity a scope can
+// take, so LIST, QUANTITIES and DELETE act on ids (or all of them), as the
+// corridor verbs act on names. A scope word is refused by name - never ignored
+// (LIST used to answer a LAYERS scope with every object) and never read as an
+// id that does not exist (docs/road_objects.md, "The verbs").
+Status refuseScope(std::string_view verb, const std::string& word)
+{
+    if (!isScopeWord(word)) {
+        return {};
+    }
+    return makeError(ErrorCode::InvalidArgument,
+                     std::format("ROADOBJECT {} acts on road objects by id and takes no scope or "
+                                 "filter: a road object is a definition, not a drawn entity",
+                                 verb),
+                     word);
 }
 
 // ---- the subcommands ------------------------------------------------------------------------
@@ -332,6 +377,14 @@ Result<std::string> kinds(const Words& args)
 
 Result<std::string> list(const Document& document, const Words& args)
 {
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        if (auto status = refuseScope("LIST", args[i]); !status) {
+            return status.error();
+        }
+        if (i > 2 || upper(args[i]) != "JSON") {
+            return usage("ROADOBJECT LIST [JSON]");
+        }
+    }
     if (args.size() > 2 && upper(args[2]) == "JSON") {
         if (const Status status = document.roadObjectsStatus(); !status) {
             return status.error();
@@ -358,6 +411,11 @@ Result<std::string> info(const Document& document, const Words& args)
 {
     if (args.size() < 3) {
         return usage("ROADOBJECT INFO id");
+    }
+    // A set that cannot be read is empty to find(); say why, not that the
+    // object is not there.
+    if (const Status status = document.roadObjectsStatus(); !status) {
+        return status.error();
     }
     const RoadObject* object = document.roadObjects().find(args[2]);
     if (object == nullptr) {
@@ -463,6 +521,14 @@ Result<AddRequest> readAdd(const Words& args)
                     const auto id = typedId(args[i]);
                     if (!id) {
                         break;
+                    }
+                    // One object along each line: a line named twice would be
+                    // two objects on the same ground, doubling its quantities.
+                    if (std::ranges::find(request.ids, *id) != request.ids.end()) {
+                        return makeError(ErrorCode::InvalidArgument,
+                                         "ALONG names that line twice; one object is made along "
+                                         "each line",
+                                         args[i]);
                     }
                     request.ids.push_back(*id);
                 } else {
@@ -703,6 +769,13 @@ Result<std::string> copy(Document& document, const Words& args)
     RoadObject made = *source;
     const std::string from = source->id;
     made.id = set->takeId(made.kind);
+    // A to= given is the copy's end whichever order the keys are typed in: only
+    // an end inherited from the source moves with the station.
+    bool endGiven = false;
+    for (std::size_t i = 3; i < args.size(); ++i) {
+        const auto pair = keyValue(args[i]);
+        endGiven = endGiven || (pair && lower(pair->first) == "to");
+    }
     bool preview = false;
     for (std::size_t i = 3; i < args.size(); ++i) {
         if (upper(args[i]) == "PREVIEW") {
@@ -722,7 +795,7 @@ Result<std::string> copy(Document& document, const Words& args)
                 return makeError(ErrorCode::ParseFailure, "station= must be a number",
                                  pair->second);
             }
-            if (placement.to) {
+            if (placement.to && !endGiven) {
                 *placement.to += *station - placement.station;
             }
             placement.station = *station;
@@ -784,6 +857,9 @@ Result<std::string> remove(Document& document, const Words& args)
         } else if (folded == "ALL") {
             all = true;
         } else {
+            if (auto status = refuseScope("DELETE", args[i]); !status) {
+                return status.error();
+            }
             const RoadObject* object = set->find(args[i]);
             if (object == nullptr) {
                 return makeError(ErrorCode::NotFound, "no road object has that id", args[i]);
@@ -826,11 +902,18 @@ Result<std::string> quantities(const Document& document, const Words& args)
     const RoadObjectSet& set = document.roadObjects();
     std::vector<const RoadObject*> chosen;
     for (std::size_t i = 2; i < args.size(); ++i) {
+        if (auto status = refuseScope("QUANTITIES", args[i]); !status) {
+            return status.error();
+        }
         const RoadObject* object = set.find(args[i]);
         if (object == nullptr) {
             return makeError(ErrorCode::NotFound, "no road object has that id", args[i]);
         }
-        chosen.push_back(object);
+        // An id named twice is one object, as DELETE reads it: counting it
+        // twice would double its length and its count in the totals.
+        if (std::ranges::find(chosen, object) == chosen.end()) {
+            chosen.push_back(object);
+        }
     }
     if (chosen.empty()) {
         for (const RoadObject& object : set.objects) {
@@ -947,8 +1030,10 @@ ROADOBJECT DELETE id [id ...] | ALL [PREVIEW]
 ROADOBJECT QUANTITIES [id ...]   per 3D object, then totals by kind
 ROADOBJECT PROBLEMS              what could not be made, and why
 Every object: name= layer= colour=#RRGGBB|name material= facility= (the road it is part of)
-  station= to= offset= (left positive) spacing= heights=profile|surface|line surface=name
-  crossfall=% (from the centreline out) dz= (raised from the ground)
+  station= to= offset= (left positive) spacing= (guide posts, signs, lights) heights=profile|surface|line
+  surface=name crossfall=% (from the centreline out, on the profile) dz= (raised from the ground)
+  (empty: offset= crossfall= dz= go back to 0; to= spacing= heights= surface= and the kind's keys clear)
+LIST, QUANTITIES and DELETE take ids (DELETE ALL), and no scope: a road object is a definition
 Kinds:)";
     for (const RoadObjectKind kind : roadObjectKinds()) {
         std::string keys;

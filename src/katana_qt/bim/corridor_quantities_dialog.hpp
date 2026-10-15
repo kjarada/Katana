@@ -10,6 +10,14 @@
 // disagree; Save CSV runs the same line with csv=<file>. A headless run
 // opens no file dialog: the path is typed into its field.
 //
+// THE LISTING IS CLEARED when the drawing changes under it: an edit, an undo,
+// a redo, a new or opened drawing that leaves the road model it was listed
+// from (bim::bimModel, what the verb reads) no longer the drawing's. The
+// status then says to press List Quantities again, and Copy hands out nothing.
+// It is not listed again by itself, which would put a CORRIDOR QUANTITIES line
+// in the command log after every edit; a change that left the road model as it
+// was (a line drawn) leaves the listing as it is.
+//
 // Object names:
 //   corridorQuantitiesDialog    the dialog (the action bimCorridorQuantities' data)
 //   corridorQuantitiesCorridor  All, then each corridor
@@ -18,7 +26,8 @@
 //   corridorQuantitiesTotals    the cut, fill and net, and the totals by kind and material
 //   corridorQuantitiesCsvPath   the file Save CSV writes
 //   corridorQuantitiesBrowse    a file dialog for it (none in a headless run)
-//   corridorQuantitiesSaveCsv   CORRIDOR QUANTITIES <corridor>|ALL csv="<file>"
+//   corridorQuantitiesSaveCsv   CORRIDOR QUANTITIES <corridor>|ALL csv="<file>" [OVERWRITE]
+//   corridorQuantitiesOverwrite replace a file already there (the line gets OVERWRITE)
 //   corridorQuantitiesCopy      the table to the clipboard, tab separated
 //   corridorQuantitiesStatus    what the last line replied, or why it was refused
 //   corridorQuantitiesClose

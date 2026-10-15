@@ -16,6 +16,7 @@
 #include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/bim/bim_view.hpp"
 #include "katana/cad/layer_overrides.hpp"
+#include "katana/cad/road/corridor_model.hpp"
 #include "plan_painter.hpp"
 
 namespace katana::qt {
@@ -68,7 +69,7 @@ RoadWorkbench::RoadWorkbench(QMainWindow& window, RoadServices services, QMenu& 
         });
     });
     QObject::connect(corridors_, &QAction::triggered, guard_.get(), [this] {
-        if (!haveProfiledAlignment()) {
+        if (!corridorDialogsMayOpen()) {
             return;
         }
         open(corridorDialog_, [this] {
@@ -79,7 +80,7 @@ RoadWorkbench::RoadWorkbench(QMainWindow& window, RoadServices services, QMenu& 
         });
     });
     QObject::connect(quantities_, &QAction::triggered, guard_.get(), [this] {
-        if (!haveProfiledAlignment()) {
+        if (!corridorDialogsMayOpen()) {
             return;
         }
         open(quantitiesDialog_, [this] {
@@ -137,6 +138,20 @@ void RoadWorkbench::open(QPointer<QDialog>& slot, const std::function<QDialog*()
     slot->show();
     slot->raise();
     slot->activateWindow();
+}
+
+bool RoadWorkbench::corridorDialogsMayOpen()
+{
+    // A corridor is made from an alignment with a design profile, so with
+    // none and no corridor there is nothing for the dialogs to do but say
+    // where one is made. A drawing that already has corridors has something to
+    // show whatever its alignments are: a corridor whose profile was cleared
+    // or whose alignment was deleted is exactly what the Corridors dialog's
+    // problems are there to name, and to rename, delete or re-point.
+    if (services_.document != nullptr && !services_.document->corridors().corridors.empty()) {
+        return true;
+    }
+    return haveProfiledAlignment();
 }
 
 bool RoadWorkbench::haveProfiledAlignment()

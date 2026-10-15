@@ -722,7 +722,9 @@ dialog or panel follows"):
 
 Cut Section Along Alignment... and the corridor commands, when there is no
 alignment (or none with a profile) to use, now name Terrain > Alignment
-Manager and open it - except in a headless run. The Terrain menu is in
+Manager and open it - except in a headless run. (The two corridor dialogs say
+it only while the drawing has no corridor either: with one they open, whatever
+became of its alignment, to show what is wrong with it.) The Terrain menu is in
 sections - Alignments, Surfaces, Sections, Corridors - and its section items
 carry object names (`terrainSectionAlongAlignment`,
 `terrainSectionAlongSelection`), so `--trigger` reaches them; its Corridors
@@ -1223,7 +1225,11 @@ widget so it is tested without one: no id is `ViewSet::mostRecent(Plan)`,
 the plan view Plot and the Standard Views act on; an id is that open view,
 of any kind, a view with no plan extent (3D, a section) answering its hidden
 layers alone. NotFound for an id no view has, InvalidState when no plan view
-is open, each naming `AREA`.
+is open, each naming `AREA`. A plan view's answer also carries its whole
+transform (`ScopeView::frame`, `ResolvedScope::frame`: its size in pixels and
+its scale), for a verb that says what the view DRAWS and not only where it
+looks - the same box is 400 pixels wide or 1 600, and what is stroked, tinted
+or hidden depends on which (`SURFACE PLAN <name> VIEW`, `docs/surface_display.md`).
 
 **`VIEW ... EXTENTS`** drops the area: what the view draws anywhere, as it
 would show it zoomed to its extents. Global Modify's View scope always had

@@ -30,6 +30,7 @@
 #include "plotting/sheet_checks.hpp"
 #include "plotting/sheet_tables.hpp"
 #include "project_crs_dialog.hpp"
+#include "project_folder.hpp"
 #include "survey_verbs.hpp" // katana_app: SURVEY READ and SURVEY IMPORT
 #include "property_panel.hpp"
 #include "render_view_widget.hpp"
@@ -240,6 +241,29 @@ QString fromPath(const std::filesystem::path& path)
 std::filesystem::path toPath(const QString& text)
 {
     return std::filesystem::path(text.toStdWString());
+}
+
+// Where File > Open and Save As start (project_folder.hpp): never the
+// working folder, which is the program's own folder for a zip copy.
+constexpr const char* kProjectFolderKey = "files/projectFolder";
+
+QString projectFolderForDialogs(const katana::cad::Document& document)
+{
+    QString parent;
+    if (const auto directory = document.projectDirectory()) {
+        parent = fromPath(directory->parent_path());
+    }
+    return katana::qt::projectDialogFolder(
+        parent, QSettings().value(kProjectFolderKey).toString(),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+}
+
+void rememberProjectFolder(const QString& project)
+{
+    const QString parent = QFileInfo(project).absolutePath();
+    if (!parent.isEmpty()) {
+        QSettings().setValue(kProjectFolderKey, parent);
+    }
 }
 
 // A colour as a rounded square, for a list's colour column.
@@ -1120,10 +1144,11 @@ void MainWindow::buildActions()
     QAction* volumes =
         makeAction(Icon::Volumes, "&Volumes...",
                    "Cut and fill between surfaces, to a level, of a stockpile, along an "
-                   "alignment or on a grid, inside polygons; and the cut/fill map",
+                   "alignment or on a grid, inside polygons; and the cut/fill map and the envelope",
                    {}, "terrainVolumes");
     // The dialog it shows, by object name: how --dialog finds it. It builds
-    // VOLUME and SURFACE DIFFERENCE lines and runs them through runVerbLine.
+    // VOLUME, SURFACE DIFFERENCE and SURFACE ENVELOPE lines and runs them through
+    // runVerbLine.
     volumes->setData(QString("volumesDialog"));
     connect(volumes, &QAction::triggered, this, [this] {
         VolumesDialogContext context;
@@ -2627,9 +2652,11 @@ void MainWindow::openDocument()
     if (!confirmDiscard() || refuseFileDialog("OPEN <directory>")) {
         return;
     }
-    const QString directory =
-        QFileDialog::getExistingDirectory(this, "Open Katana Project (select the .katana folder)");
+    const QString directory = QFileDialog::getExistingDirectory(
+        this, "Open Katana Project (select the .katana folder)",
+        projectFolderForDialogs(document_));
     if (!directory.isEmpty()) {
+        rememberProjectFolder(directory);
         openProject(directory);
     }
 }
@@ -2841,8 +2868,10 @@ bool MainWindow::saveDocumentAs()
     if (refuseFileDialog("SAVE <directory>")) {
         return false;
     }
-    QString target = QFileDialog::getSaveFileName(this, "Save Project As", "untitled.katana",
-                                                  "Katana project (*.katana)");
+    QString target = QFileDialog::getSaveFileName(
+        this, "Save Project As",
+        QDir(projectFolderForDialogs(document_)).filePath("untitled.katana"),
+        "Katana project (*.katana)");
     if (target.isEmpty()) {
         return false;
     }
@@ -2855,6 +2884,7 @@ bool MainWindow::saveDocumentAs()
         warnUser("Save Failed", QString::fromStdString(status.error().describe()));
         return false;
     }
+    rememberProjectFolder(target);
     logMessage("Saved to " + target);
     return true;
 }
@@ -5185,10 +5215,16 @@ void MainWindow::syncSceneSurfaces(bool showGained)
     }
     const katana::terrain::SurfaceStore& store = document_.surfaces();
     // Whether the drawing gained a shown surface the scene has not drawn:
-    // SURFACE FROM, TO SURFACE, an import and an undone removal alike.
+    // SURFACE FROM, TO SURFACE, an import and an undone removal alike. Neither
+    // its triangulation NOR its name is among the scene's: an edit, its undo and
+    // its redo put a different TinSurface under the same name, which is not a
+    // surface gained - counting it so opened a 3D view in the middle of a tool,
+    // raised it over the plan view the tool was waiting for clicks in, and
+    // re-framed a camera the person had set, on every click.
     const bool gained = std::ranges::any_of(store.all(), [&](const auto& named) {
         return named.visible && std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
-            return shown.surface == named.surface.get();
+            return shown.surface == named.surface.get() ||
+                   katana::core::equalsIgnoringCase(shown.name, named.name);
         });
     });
     std::vector<cad::SceneSurface> next;

@@ -1104,3 +1104,171 @@ TEST(IfcExport, ANameLongerThanIfcAllowsIsCutAndSaid)
     EXPECT_NE(out.text.find("'" + std::string(254, 'k') + "\\X2\\00E9\\X0\\'"), std::string::npos);
     EXPECT_TRUE(warned(out, "its name is longer than the 255 characters IFC allows"));
 }
+
+// ---- leaders ------------------------------------------------------------------------
+
+namespace {
+
+// A model holding one point at (30, 40) at RL 25, and the point's id.
+struct LeaderScene {
+    Model model;
+    katana::entity::EntityId point = 0;
+};
+
+LeaderScene pointWithLevel()
+{
+    LeaderScene scene;
+    Entity point;
+    point.geometry = katana::entity::PointGeometry{Point2{30.0, 40.0}};
+    point.layer = "Survey/Points";
+    point.properties["elevation"] = 25.0;
+    EXPECT_TRUE(scene.model.entities.add(std::move(point)).ok());
+    scene.point = scene.model.entities.ids().front();
+    return scene;
+}
+
+// A leader whose tip is on the scene's point.
+katana::entity::LeaderGeometry leaderOn(const LeaderScene& scene, std::string text, bool smart)
+{
+    katana::entity::LeaderGeometry leader;
+    leader.vertices = {Point2{30.0, 40.0}, Point2{35.0, 45.0}};
+    leader.tipRef = katana::entity::AnchorRef{scene.point, katana::entity::AnchorPoint::Position};
+    leader.text = std::move(text);
+    leader.fields = smart;
+    return leader;
+}
+
+void addLeader(LeaderScene& scene, katana::entity::LeaderGeometry shape)
+{
+    Entity leader;
+    leader.geometry = std::move(shape);
+    ASSERT_TRUE(scene.model.entities.add(std::move(leader)).ok());
+}
+
+// The drawing's ground as the cad suite's fake has it: z = 10 + 0.1 x + 0.2 y
+// over the square 0..100 x 0..100, and nothing outside it.
+katana::entity::LeaderContext groundContext()
+{
+    katana::entity::LeaderContext context;
+    context.surfaces = {"ground"};
+    context.surfaceLevel = [](std::string_view name,
+                              const Point2& at) -> std::optional<double> {
+        if (name != "ground" || at.x < 0.0 || at.x > 100.0 || at.y < 0.0 || at.y > 100.0) {
+            return std::nullopt;
+        }
+        return 10.0 + 0.1 * at.x + 0.2 * at.y;
+    };
+    return context;
+}
+
+std::size_t textLiteralsIn(const ifc::IfcExport& out)
+{
+    return instancesOf(out.text, "IFCTEXTLITERALWITHEXTENT").size();
+}
+
+} // namespace
+
+// A smart leader's `text` is its TEMPLATE; what it says is the note read off
+// its target (entity::leaderNote), which the plan, LIST and the DXF write. The
+// IFC annotation must say the same, not "RL {rl:.3f}".
+// By hand: the point is at RL 25, and `{rl:.3f}` writes 25 to three decimals,
+// "25.000".
+TEST(IfcExportLeaders, ASmartLeaderIsWrittenAsTheNoteItSaysNotItsTemplate)
+{
+    LeaderScene scene = pointWithLevel();
+    addLeader(scene, leaderOn(scene, "RL {rl:.3f}", true));
+    const auto out = exported({&scene.model, {}, {}}, {});
+    EXPECT_EQ(textLiteralsIn(out), 1u);
+    EXPECT_NE(out.text.find("IFCTEXTLITERALWITHEXTENT('RL 25.000',"), std::string::npos);
+    EXPECT_EQ(out.text.find("{rl"), std::string::npos) << "the template reached the file";
+}
+
+// The drawing's surface comes in with the front end's context. The ground at
+// (30, 40) is 10 + 0.1 * 30 + 0.2 * 40 = 21, and the point at RL 25 is 25 - 21
+// = 4 above it, which {dsurface.ground:+.3f} writes "+4.000" (the sign always
+// shown). The second line is a line break in the literal: ISO 10303-21 writes
+// U+000A as \X2\000A\X0\.
+// Given no context, the lines that name the surface are dropped (nothing is
+// made up), so the leader writes no text at all, and certainly not the
+// template.
+TEST(IfcExportLeaders, ALeaderThatReadsASurfaceSaysItWhenTheFrontEndHandsTheSurfaceOver)
+{
+    LeaderScene scene = pointWithLevel();
+    addLeader(scene, leaderOn(scene, "GL {surface.ground:.3f}\n{dsurface.ground:+.3f}", true));
+
+    ifc::ExportOptions with;
+    with.leaderContext = groundContext();
+    const auto said = exported({&scene.model, {}, {}}, with);
+    EXPECT_EQ(textLiteralsIn(said), 1u);
+    EXPECT_NE(said.text.find("IFCTEXTLITERALWITHEXTENT('GL 21.000\\X2\\000A\\X0\\+4.000',"),
+              std::string::npos);
+
+    const auto alone = exported({&scene.model, {}, {}}, {});
+    EXPECT_EQ(textLiteralsIn(alone), 0u);
+    EXPECT_EQ(alone.text.find("surface.ground"), std::string::npos)
+        << "the template reached the file";
+}
+
+// A tip off the surface leaves the value out, and with it the line: absent is
+// not zero. (150, 40) is outside the 0..100 square, so there is no ground
+// there and the note is empty.
+TEST(IfcExportLeaders, ALeaderWhoseTipIsOffTheSurfaceWritesNoNoteRatherThanAFigure)
+{
+    LeaderScene scene = pointWithLevel();
+    Entity far;
+    far.geometry = katana::entity::PointGeometry{Point2{150.0, 40.0}};
+    far.layer = "Survey/Points";
+    far.properties["elevation"] = 25.0;
+    ASSERT_TRUE(scene.model.entities.add(std::move(far)).ok());
+    auto shape = leaderOn(scene, "{dsurface.ground:+.3f}", true);
+    shape.vertices = {Point2{150.0, 40.0}, Point2{155.0, 45.0}};
+    shape.tipRef.entity = scene.model.entities.ids().back();
+    addLeader(scene, std::move(shape));
+    ifc::ExportOptions options;
+    options.leaderContext = groundContext();
+    const auto out = exported({&scene.model, {}, {}}, options);
+    EXPECT_EQ(textLiteralsIn(out), 0u);
+}
+
+// A leader made from a label style has no text of its own: its note is the
+// style's template, read live. It used to write no annotation text at all.
+// By hand: the style's `IL {prop.invert:.2f}` on a point whose invert is 10.25
+// is "IL 10.25".
+TEST(IfcExportLeaders, ALeaderMadeFromALabelStyleWritesTheStylesNote)
+{
+    LeaderScene scene;
+    Entity pit;
+    pit.geometry = katana::entity::PointGeometry{Point2{30.0, 40.0}};
+    pit.layer = "Stormwater/Pits";
+    pit.properties["invert"] = 10.25;
+    ASSERT_TRUE(scene.model.entities.add(std::move(pit)).ok());
+    scene.point = scene.model.entities.ids().front();
+    katana::entity::LabelStyle style;
+    style.name = "Invert";
+    style.kind = katana::entity::LabelKind::Point;
+    style.text = "IL {prop.invert:.2f}";
+    ASSERT_TRUE(scene.model.labelStyles.add(style).ok());
+    auto shape = leaderOn(scene, "", false);
+    shape.labelStyle = "Invert";
+    addLeader(scene, std::move(shape));
+    const auto out = exported({&scene.model, {}, {}}, {});
+    EXPECT_EQ(textLiteralsIn(out), 1u);
+    EXPECT_NE(out.text.find("IFCTEXTLITERALWITHEXTENT('IL 10.25',"), std::string::npos);
+}
+
+// A plain leader is its text, braces and all (leaderNote); an empty one is a
+// bare arrow with no annotation text; a smart one whose target is gone says
+// nothing, since its template is not what it says.
+TEST(IfcExportLeaders, APlainLeaderKeepsItsWordsAndASmartOneWhoseTargetIsGoneWritesNone)
+{
+    LeaderScene scene = pointWithLevel();
+    addLeader(scene, leaderOn(scene, "LOT {42}", false));
+    addLeader(scene, leaderOn(scene, "", false));
+    auto orphan = leaderOn(scene, "RL {rl:.3f}", true);
+    orphan.tipRef.entity = scene.point + 100; // no such entity
+    addLeader(scene, std::move(orphan));
+    const auto out = exported({&scene.model, {}, {}}, {});
+    EXPECT_EQ(textLiteralsIn(out), 1u);
+    EXPECT_NE(out.text.find("IFCTEXTLITERALWITHEXTENT('LOT {42}',"), std::string::npos);
+    EXPECT_EQ(out.text.find("{rl"), std::string::npos);
+}

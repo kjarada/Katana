@@ -148,6 +148,87 @@ TEST(CompareSurfaces, ASurfaceAgainstItselfIsExactlyZero)
     EXPECT_EQ(result.value().overlayTriangleCount, surface.triangleCount());
 }
 
+TEST(CompareSurfaces, OnePlaneTriangulatedTwoWaysHasNoCutAreaAndNoFillAreaInEitherOrder)
+{
+    // The plane z = 10 + 0.1 x + 0.05 y over [0, 100] x [0, 50], 5000 m2. The
+    // base is two triangles from its corners (10, 20, 22.5, 12.5); the top is
+    // the same plane in ten, with a ring of four more points on it, (30, 20)
+    // at 10 + 3 + 1 = 14, (70, 20) at 18, (70, 35) at 10 + 7 + 1.75 = 18.75 and
+    // (30, 35) at 14.75. Where the two overlay is not a vertex of either
+    // triangle, so the heights come from weights that sum to 1 only to a few
+    // ulps, and the difference there is +/- 1e-15, not 0. The surfaces coincide:
+    // nothing is cut or filled, and no area is either (it was 750 m2 of cut and
+    // 9 of fill one way and 100 of cut the other).
+    const std::vector<Point3> corners = {Point3(0, 0, 10), Point3(100, 0, 20),
+                                         Point3(100, 50, 22.5), Point3(0, 50, 12.5)};
+    std::vector<Point3> withRing = corners;
+    for (const Point3& point : {Point3(30, 20, 14), Point3(70, 20, 18), Point3(70, 35, 18.75),
+                                Point3(30, 35, 14.75)}) {
+        withRing.push_back(point);
+    }
+    const TinSurface base = buildFromPoints(corners);
+    const TinSurface top = buildFromPoints(withRing);
+    ASSERT_EQ(base.triangleCount(), 2u);
+    ASSERT_EQ(top.triangleCount(), 10u);
+    for (const bool topFirst : {false, true}) {
+        const auto result = topFirst ? compareSurfaces(top, base) : compareSurfaces(base, top);
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        EXPECT_NEAR(result->planArea, 5000.0, 1e-8) << topFirst;
+        EXPECT_NEAR(result->cut, 0.0, 1e-9) << topFirst;
+        EXPECT_NEAR(result->fill, 0.0, 1e-9) << topFirst;
+        EXPECT_EQ(result->cutArea, 0.0) << topFirst;
+        EXPECT_EQ(result->fillArea, 0.0) << topFirst;
+    }
+}
+
+TEST(CompareSurfaces, TwoIndependentTriangulationsOfOnePlaneHaveNoCutAreaAndNoFillArea)
+{
+    // Hundreds of overlay pieces, almost none with a corner at a vertex of both:
+    // the same plane, so every difference is the rounding of the two readings.
+    const Plane ground{0.1, -0.05, 10.0};
+    Random firstRandom(41);
+    Random secondRandom(42);
+    const TinSurface first = buildFromPoints(planePoints(ground, 100.0, 300, firstRandom));
+    const TinSurface second = buildFromPoints(planePoints(ground, 100.0, 350, secondRandom));
+    for (const bool secondFirst : {false, true}) {
+        const auto result =
+            secondFirst ? compareSurfaces(second, first) : compareSurfaces(first, second);
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        EXPECT_GT(result->overlayTriangleCount, 600u) << "the premise: a real overlay";
+        EXPECT_NEAR(result->planArea, 10000.0, 1e-7) << secondFirst;
+        EXPECT_EQ(result->cutArea, 0.0) << secondFirst;
+        EXPECT_EQ(result->fillArea, 0.0) << secondFirst;
+        EXPECT_NEAR(result->cut, 0.0, 1e-8) << secondFirst;
+        EXPECT_NEAR(result->fill, 0.0, 1e-8) << secondFirst;
+    }
+}
+
+TEST(CompareSurfaces, ADifferenceAboveTheGeometricToleranceIsAreaAndOneBelowIsNotButStaysInTheVolume)
+{
+    // Over 100 x 100 = 10000 m2 the top is 1 mm above the base: all of it fill
+    // area, 10 m3. At 5e-8 (under kGeometric, 1e-7, a tenth of a micrometre)
+    // the surfaces coincide for the areas, while the volume stays what it is,
+    // 5e-8 x 10000 = 5e-4 m3: the volumes are summed from the heights as
+    // they are, and only the sort of the plan area ignores rounding.
+    Random random(43);
+    const TinSurface base = buildFromPoints(planePoints(Plane{0, 0, 10}, 100.0, 50, random));
+    for (const double rise : {1e-3, 5e-8}) {
+        Random again(44);
+        const TinSurface top = buildFromPoints(planePoints(Plane{0, 0, 10 + rise}, 100.0, 60, again));
+        const auto result = compareSurfaces(base, top);
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        SCOPED_TRACE(rise);
+        EXPECT_NEAR(result->fill, rise * 10000.0, 1e-9);
+        EXPECT_EQ(result->cut, 0.0);
+        if (rise > 1e-6) {
+            EXPECT_NEAR(result->fillArea, 10000.0, 1e-7);
+        } else {
+            EXPECT_EQ(result->fillArea, 0.0);
+        }
+        EXPECT_EQ(result->cutArea, 0.0);
+    }
+}
+
 TEST(CompareSurfaces, ConstantRaiseIsAllFill)
 {
     // Two independently triangulated planes over the same square, the design 2 m

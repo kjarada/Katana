@@ -67,6 +67,9 @@ constexpr std::array<SurfaceFaces, 4> kFaces3d{SurfaceFaces::Flat, SurfaceFaces:
 constexpr std::array<SurfaceStyle, 5> kShadings{SurfaceStyle::Automatic, SurfaceStyle::Shaded,
                                                 SurfaceStyle::ShadedWithEdges, SurfaceStyle::Wireframe,
                                                 SurfaceStyle::Hidden};
+// The most the SURFACESTYLE verb takes for major= (surface_verbs.cpp, countOf):
+// the box offers every count the line does.
+constexpr int kMaximumMajorEvery = 1'000'000;
 
 QString shadingWord(SurfaceStyle shading)
 {
@@ -291,7 +294,13 @@ Result<QString> surfaceStyleSetWords(const SurfaceDisplayStyle& from, const Surf
     QStringList words;
     const auto add = [&words](const QString& key, const QString& value) { words << key + "=" + value; };
     if (from.description != to.description) {
-        auto word = commandWord(qs(to.description), "the description");
+        // The verb reads a description as a typed text (core::unescapeTyped):
+        // two backslashes are one and a backslash before an n is a line break.
+        // Each backslash is doubled so the text arrives as it was written in
+        // the box, and what SURFACESTYLE INFO prints reads back the same.
+        QString typed = qs(to.description);
+        typed.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+        auto word = commandWord(typed, "the description");
         if (!word) {
             return word.error();
         }
@@ -446,6 +455,12 @@ struct SurfaceStyleManagerDialog::Impl {
     bool filling = false;
     // What the opacity box showed when filled, rounded to its decimals.
     double shownOpacity = 0.0;
+    // What the counts and the 3D faces showed when filled. A box clamps what
+    // it is given (major to its range) and the faces list has no "none"; the
+    // style keeps what it holds unless the person moves the box.
+    int shownBands = 0;
+    int shownMajor = 0;
+    int shownFaces3d = 0;
     // The name to choose at the next reload (a style just made or renamed).
     QString pending;
 
@@ -594,7 +609,7 @@ struct SurfaceStyleManagerDialog::Impl {
         banded = checkBox("surfaceStyleBanded", "Banded");
         bands = new QSpinBox(colourPage);
         bands->setObjectName("surfaceStyleBands");
-        bands->setRange(2, 100);
+        bands->setRange(2, cad::kMaximumSurfaceBands);
         bands->setToolTip("How many bands of equal width the range is cut into");
         colours->addRow(row(banded, bands));
         stops = new QLineEdit(colourPage);
@@ -624,7 +639,7 @@ struct SurfaceStyleManagerDialog::Impl {
         contourForm->addRow("Interval", interval);
         major = new QSpinBox(contourPage);
         major->setObjectName("surfaceStyleMajor");
-        major->setRange(0, 100);
+        major->setRange(0, kMaximumMajorEvery);
         major->setToolTip("Every Nth contour is a major; 0 for none");
         contourForm->addRow("Major every", major);
         base = new QLineEdit(contourPage);
@@ -822,6 +837,7 @@ struct SurfaceStyleManagerDialog::Impl {
         choose(ramp, qs(style.ramp));
         banded->setChecked(style.banded);
         bands->setValue(style.bands);
+        shownBands = bands->value();
         stops->setText(stopsWord(style.stops));
         minimum->setText(style.rangeMin.has_value() ? exactNumber(*style.rangeMin) : QString());
         maximum->setText(style.rangeMax.has_value() ? exactNumber(*style.rangeMax) : QString());
@@ -829,6 +845,7 @@ struct SurfaceStyleManagerDialog::Impl {
         contours->setChecked(style.contours.show);
         interval->setText(exactNumber(style.contours.interval));
         major->setValue(style.contours.majorEvery);
+        shownMajor = major->value();
         base->setText(exactNumber(style.contours.base));
         minorColour->setText(colourWord(style.contours.minorColour));
         majorColour->setText(colourWord(style.contours.majorColour));
@@ -836,6 +853,7 @@ struct SurfaceStyleManagerDialog::Impl {
         choose(shading, shadingWord(style.shading));
         choose(faces3d, qs(cad::surfaceFacesWord(style.faces3d == SurfaceFaces::None ? SurfaceFaces::Flat
                                                                                      : style.faces3d)));
+        shownFaces3d = faces3d->currentIndex();
         loaded = style;
         filling = false;
         edited();
@@ -862,12 +880,20 @@ struct SurfaceStyleManagerDialog::Impl {
         }
         style.ramp = ramp->currentText().toStdString();
         style.banded = banded->isChecked();
-        style.bands = bands->value();
+        if (bands->value() != shownBands) {
+            style.bands = bands->value();
+        }
         style.contours.show = contours->isChecked();
-        style.contours.majorEvery = major->value();
+        if (major->value() != shownMajor) {
+            style.contours.majorEvery = major->value();
+        }
         style.contours.labelMajor = labels->isChecked();
         style.shading = kShadings[static_cast<std::size_t>(std::max(shading->currentIndex(), 0))];
-        style.faces3d = kFaces3d[static_cast<std::size_t>(std::max(faces3d->currentIndex(), 0))];
+        // A style read from a project can say faces3d=none, which the list
+        // shows as flat (the verb has no such word): untouched, it stays.
+        if (faces3d->currentIndex() != shownFaces3d) {
+            style.faces3d = kFaces3d[static_cast<std::size_t>(std::max(faces3d->currentIndex(), 0))];
+        }
         const std::pair<QLineEdit*, Color*> colours[] = {
             {triangleColour, &style.triangleColour},   {boundaryColour, &style.boundaryColour},
             {pointColour, &style.pointColour},         {breaklineColour, &style.breaklineColour},
@@ -964,8 +990,13 @@ struct SurfaceStyleManagerDialog::Impl {
         assign->setEnabled(styleChosen && surface->currentIndex() >= 0);
     }
 
+    // Runs `text`, then reloads. The row a New, Copy or Rename names
+    // (`pending`) is chosen only if the line was accepted: a refused name
+    // (one that is taken) must leave the style being edited chosen, with its
+    // unapplied edits, not jump to the style that holds the name.
     bool run(const QString& text)
     {
+        const QString wanted = std::exchange(pending, QString());
         if (!alive()) {
             setStatus("The drawing this dialog edited is gone.", true);
             return false;
@@ -977,6 +1008,7 @@ struct SurfaceStyleManagerDialog::Impl {
         const VerbOutcome outcome = context.run(text);
         if (outcome.ok) {
             setStatus(outcome.reply.isEmpty() ? text : outcome.reply, false);
+            pending = wanted;
         } else {
             setStatus(outcome.error.isEmpty() ? "Refused: " + text : outcome.error, true);
         }
@@ -1012,9 +1044,7 @@ struct SurfaceStyleManagerDialog::Impl {
             text += " FROM " + *fromWord;
         }
         pending = newName;
-        if (!run(text)) {
-            pending.clear();
-        }
+        run(text);
     }
 
     void renameStyle()
@@ -1027,9 +1057,7 @@ struct SurfaceStyleManagerDialog::Impl {
             return;
         }
         pending = newName;
-        if (!run("SURFACESTYLE RENAME " + *fromWord + " " + *toWord)) {
-            pending.clear();
-        }
+        run("SURFACESTYLE RENAME " + *fromWord + " " + *toWord);
     }
 
     void deleteStyle()

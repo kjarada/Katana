@@ -334,6 +334,11 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     metadataModified_ = false;
     surveyJobs_ = std::move(surveyJobs);
     ++surveyJobsGeneration_;
+    if (logger_ != nullptr) {
+        for (const std::string& note : surfaceState->notes) {
+            logger_->warning("storage", note);
+        }
+    }
     installSurfaceState(std::move(*surfaceState));
     (void)surfacePartsChanged(); // reported below, as part of the replaced drawing
     rebuildStack();
@@ -405,7 +410,9 @@ katana::core::Result<bool> Document::saveContents(katana::storage::ProjectStore&
         customisationRecordToSave(metadata_.customisation, customisation_.missingAtOpen, library_,
                                   customisation_.sources, customisationRenames());
     // The surfaces and their styles, likewise into what is saved.
-    writeSurfaceState(contents);
+    if (auto status = writeSurfaceState(contents); !status) {
+        return status.error();
+    }
     // LENT to the contents for the save and taken back after, rather than
     // copied: a job holds its field file whole, and copying tens of megabytes
     // on every save to hand it to a function that only reads it is waste.

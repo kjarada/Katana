@@ -587,6 +587,13 @@ class Document {
     // nothing.
     [[nodiscard]] katana::core::Status setRoadObjects(const road::RoadObjectSet& objects,
                                                       std::string stepName = "SET_ROAD_OBJECTS");
+    // The same change as a command, for a step that does more besides - a
+    // surface renamed with the corridors and objects that name it is ONE undo
+    // step. Null when `objects` equals the current set; the errors of
+    // setRoadObjects otherwise.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    roadObjectsCommand(const road::RoadObjectSet& objects,
+                       std::string stepName = "SET_ROAD_OBJECTS");
 
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
@@ -635,6 +642,9 @@ class Document {
         katana::terrain::SurfaceStore surfaces;
         SurfaceStyleSet styles = builtInSurfaceStyles();
         katana::core::Status stylesStatus{};
+        // What the read repaired, one sentence each (a surface name an earlier
+        // build wrote that this one's door refuses): logged by open().
+        std::vector<std::string> notes;
     };
     // Decodes the project's surface records and reads its styles' metadata
     // key, taking the key out of `metadata` when it was read (it is the
@@ -644,8 +654,10 @@ class Document {
     readSurfaceState(std::vector<katana::storage::SurfaceRecord>& records,
                      katana::storage::ProjectMetadata& metadata);
     void installSurfaceState(SurfaceState state);
-    // The surfaces and the styles into what a save writes.
-    void writeSurfaceState(katana::storage::ProjectContents& contents) const;
+    // The surfaces and the styles into what a save writes. A Status, for the
+    // save that carries it: the style set's JSON must never be what ends it.
+    [[nodiscard]] katana::core::Status
+    writeSurfaceState(katana::storage::ProjectContents& contents) const;
     // DocumentChange::Surfaces and SurfaceStyles for what moved since the
     // last call; the stack's listener adds them to a step's notification.
     [[nodiscard]] std::uint32_t surfacePartsChanged();

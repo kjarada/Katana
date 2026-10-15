@@ -30,13 +30,16 @@ namespace katana::terrain {
 // failure of the reader.
 //
 // A triangle of a lower-ranked member is kept or dropped WHOLE, by whether
-// a higher-ranked member can give a height at its centroid. The seam is
-// therefore ragged to within one triangle of the pad's edge, which is
-// stated rather than hidden: clipping each triangle against the higher
-// surface's boundary and re-triangulating the offcuts would be exact, and
-// would also mean re-running a constrained triangulation for every overlap -
-// paid on every import of every archive, to move a seam by less than the
-// triangle size of the data that drew it.
+// a higher-ranked member covers any AREA of it. The seam is therefore ragged
+// to within one triangle of the pad's edge, which is stated rather than
+// hidden: clipping each triangle against the higher surface's boundary and
+// re-triangulating the offcuts would be exact, and would also mean re-running
+// a constrained triangulation for every overlap - paid on every import of
+// every archive, to move a seam by less than the triangle size of the data
+// that drew it. A higher member that only abuts a triangle - shares an edge
+// or a corner, or overlaps it by less than tolerance::kGeometric - covers
+// none of it, and the triangle is kept: two tiles of one survey merge into
+// both, not into whichever was named last.
 [[nodiscard]] katana::core::Result<TinSurface>
 combineSurfaces(const std::vector<const TinSurface*>& membersInRankOrder);
 

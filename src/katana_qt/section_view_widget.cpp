@@ -91,6 +91,9 @@ void SectionViewWidget::setDocument(katana::cad::Document* document)
 void SectionViewWidget::setSection(katana::cad::Section section)
 {
     state_.section = std::move(section);
+    // Cut from the drawing's surfaces as they are now: MainWindow::cutSectionAlong
+    // reads them just before it hands the section over.
+    state_.sectionSurfaces = document_ != nullptr ? document_->surfacesGeneration() : 0;
     framed_ = false;
     update();
 }
@@ -466,6 +469,11 @@ void SectionViewWidget::drawLegend(QPainter& painter) const
                          QString::fromStdString(section->surfaces[s].name));
         y += 15;
     }
+    if (surfacesChanged()) {
+        painter.setPen(theme::error());
+        painter.drawText(QPointF(kLeftMargin + 8, y + 10),
+                         QStringLiteral("Surfaces changed since this was cut: cut it again"));
+    }
 }
 
 void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
@@ -507,6 +515,9 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
         }
         if (lastSelectedCrossings_ + lastGhostCrossings_ > 0) {
             text += QString(", %1 selected").arg(lastSelectedCrossings_ + lastGhostCrossings_);
+        }
+        if (surfacesChanged()) {
+            text += ", surfaces changed since the cut";
         }
         onFrameStats(text);
     }

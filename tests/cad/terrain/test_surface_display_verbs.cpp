@@ -10,7 +10,9 @@
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/scope_verbs.hpp"
 #include "katana/cad/terrain/surface_style.hpp"
+#include "katana/cad/view_transform.hpp"
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
@@ -175,4 +177,130 @@ TEST(SurfaceDisplayVerbs, HelpNamesBoth)
     const std::string help = CommandInterpreter::helpText();
     EXPECT_TRUE(has(help, "SURFACE LEGEND"));
     EXPECT_TRUE(has(help, "SURFACE PLAN"));
+}
+
+namespace {
+
+// The window's answer for VIEW: a plan view of `width` x `height` pixels at 8
+// pixels a unit about (5, 5), which has the id 7 - or one with no plan
+// extent at all, a 3D view's.
+katana::cad::ScopeViewProvider planViewOf(double width, double height, bool withFrame = true)
+{
+    return [=](std::optional<std::uint32_t>) -> katana::core::Result<katana::cad::ScopeView> {
+        katana::cad::ViewTransform transform;
+        transform.resize(width, height);
+        transform.scale = 8.0;
+        transform.center = katana::geometry::Point2(5.0, 5.0);
+        katana::cad::ScopeView view;
+        view.id = 7;
+        view.area = transform.visibleWorldBounds();
+        if (withFrame) {
+            view.frame = transform;
+        }
+        return view;
+    };
+}
+
+} // namespace
+
+TEST(SurfaceDisplayVerbs, PlanOfTheViewIsWhatTheViewDrawsAtItsOwnSizeAndScale)
+{
+    Drawing drawing;
+    // 200 x 80 pixels at 8 a unit about (5, 5) shows x from -7.5 to 17.5 and
+    // y from 0 to 10: the square, whole, with 7.5 empty units either side. The
+    // surface is judged at the view's 8 pixels a unit - unitsPerPixel 1/8 -
+    // as the view draws it: 80 x 80 image pixels, all covered (6 400), and the
+    // five edges, 80 and 113 px long, stroked. Reframed in the default 1600 x
+    // 1000 it was judged at 25 / 1600 = 0.015625 units a pixel, a 640 x 640
+    // image of 409 600 pixels - a different picture.
+    drawing.interpreter.setScopeContext(planViewOf(200.0, 80.0));
+    const std::string reply = drawing.run("SURFACE PLAN ground VIEW");
+    EXPECT_TRUE(has(reply, "pixels=200,80 unitsPerPixel=0.125 triangles=2 inView=2 edges=5 tinted=0 "
+                           "faces=elevation image=80x80 covered=6400"))
+        << reply;
+    EXPECT_TRUE(has(reply, "scope=view view=7 area=-7.5,0,17.5,10")) << reply;
+    // The same view in the plan verb's own default frame reads differently,
+    // which is what the old reply was.
+    const std::string fitted = drawing.run("SURFACE PLAN ground VIEW pixels=1600,1000");
+    EXPECT_TRUE(has(fitted, "pixels=1600,1000 unitsPerPixel=0.015625 ")) << fitted;
+    // pixels= still asks for another frame of the view's area: 25 x 10 units
+    // in 80 x 80 pixels is 25 / 80 = 0.3125 units a pixel.
+    const std::string asked = drawing.run("SURFACE PLAN ground VIEW pixels=80,80");
+    EXPECT_TRUE(has(asked, "pixels=80,80 unitsPerPixel=0.3125 ")) << asked;
+}
+
+TEST(SurfaceDisplayVerbs, PlanOfAViewWithNoTransformFitsItsAreaAsBeforeAndEXTENTSIsRefusedByName)
+{
+    Drawing drawing;
+    // A provider that gives the area and no transform: fitted to the default
+    // 1600 x 1000 as an AREA is - the 10 units over 1000 px.
+    drawing.interpreter.setScopeContext(planViewOf(80.0, 80.0, false));
+    EXPECT_TRUE(has(drawing.run("SURFACE PLAN ground VIEW"), "pixels=1600,1000 unitsPerPixel=0.01 "));
+    // VIEW EXTENTS has no area to look at: said so, not that the view has no
+    // plan area.
+    auto extents = drawing.interpreter.run("SURFACE PLAN ground VIEW EXTENTS");
+    ASSERT_FALSE(extents.ok());
+    EXPECT_EQ(extents.error().code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(has(extents.error().describe(), "EXTENTS")) << extents.error().describe();
+    EXPECT_FALSE(has(extents.error().describe(), "no plan area")) << extents.error().describe();
+    // A view with no plan extent (a 3D view's) is refused as it was.
+    drawing.interpreter.setScopeContext([](std::optional<std::uint32_t>) -> katana::core::Result<katana::cad::ScopeView> {
+        katana::cad::ScopeView view;
+        view.id = 9;
+        return view;
+    });
+    auto threeD = drawing.interpreter.run("SURFACE PLAN ground VIEW 9");
+    ASSERT_FALSE(threeD.ok());
+    EXPECT_TRUE(has(threeD.error().describe(), "no plan area")) << threeD.error().describe();
+}
+
+TEST(SurfaceDisplayVerbs, PlanOfAnAreaThatIsAPointIsRefusedNotAnsweredWithZeroCounts)
+{
+    Drawing drawing;
+    // The square covers (5, 5). A plan of a point is never worked out, and
+    // its reply - every count 0 - was that of a point the surface does not
+    // cover.
+    for (const char* line : {"SURFACE PLAN ground AREA 5,5,5,5", "SURFACE PLAN ground AREA 500,500,500,500"}) {
+        auto reply = drawing.interpreter.run(line);
+        ASSERT_FALSE(reply.ok()) << line;
+        EXPECT_EQ(reply.error().code, ErrorCode::InvalidArgument) << line;
+        EXPECT_TRUE(has(reply.error().describe(), "AREA has no width and no height")) << reply.error().describe();
+    }
+    // A line (no width, some height) has a frame.
+    EXPECT_TRUE(has(drawing.run("SURFACE PLAN ground AREA 5,5,5,6"), "inView="));
+}
+
+TEST(SurfaceDisplayVerbs, LegendOfAWireframeIn3DIsNoColoursForItsMeshIsOneGrey)
+{
+    Drawing drawing;
+    drawing.run("SURFACE STYLE ground Outline");
+    // Outline is faces3d=elevation drawn as a grey mesh: it colours no face,
+    // so it has no gradient to explain (it said nine entries).
+    const std::string reply = drawing.run("SURFACE LEGEND ground 3D");
+    EXPECT_TRUE(has(reply, "view=3d faces=none kind=none entries=0")) << reply;
+}
+
+TEST(SurfaceDisplayVerbs, LegendOfARangeTheSurfaceRunsPastOpensItsEndBands)
+{
+    Drawing drawing;
+    // z = x from 0 to 10; five bands over 3 to 7 are 0.8 wide: below 3.8 the
+    // first colour covers 0 to 3.8, above 6.2 the last covers 6.2 to 10.
+    drawing.run("SURFACESTYLE NEW Focus FROM \"Test Bands\" min=3 max=7");
+    drawing.run("SURFACE STYLE ground Focus");
+    const std::string reply = drawing.run("SURFACE LEGEND ground");
+    const std::size_t first = reply.find("entry index=1");
+    const std::size_t second = reply.find("entry index=2");
+    const std::size_t last = reply.find("entry index=5");
+    ASSERT_NE(first, std::string::npos) << reply;
+    ASSERT_NE(second, std::string::npos) << reply;
+    ASSERT_NE(last, std::string::npos) << reply;
+    const std::string firstLine = reply.substr(first, second - first);
+    EXPECT_TRUE(has(firstLine, "label=\"< 3.8\"")) << firstLine;
+    EXPECT_FALSE(has(firstLine, " from=")) << firstLine;
+    const std::string lastLine = reply.substr(last);
+    EXPECT_TRUE(has(lastLine, "label=\"6.2 +\"")) << lastLine;
+    EXPECT_FALSE(has(lastLine, " to=")) << lastLine;
+    const std::string json = drawing.run("SURFACE LEGEND ground JSON");
+    EXPECT_TRUE(has(json, "\"from\":null")) << json;
+    EXPECT_TRUE(has(json, "\"to\":null")) << json;
 }

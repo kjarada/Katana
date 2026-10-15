@@ -29,6 +29,7 @@ add_library(katana_cad STATIC
     view_link.cpp
     view_verbs.cpp
     scope_verbs.cpp
+    csv_table.cpp
     property_outline.cpp
 )
 # The interactive tools (include/katana/cad/interactive_tool.hpp) are globbed:

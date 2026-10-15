@@ -11,6 +11,7 @@
 
 #include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/entity/text_block.hpp"
@@ -58,17 +59,6 @@ constexpr std::array kPresets = {
 };
 
 constexpr std::string_view kName = "NAME";
-
-std::string lowerCase(std::string_view text)
-{
-    std::string lower(text);
-    for (char& c : lower) {
-        if (c >= 'A' && c <= 'Z') {
-            c = static_cast<char>(c - 'A' + 'a');
-        }
-    }
-    return lower;
-}
 
 // `pattern` with each NAME replaced by `name`.
 std::string instantiate(std::string_view pattern, std::string_view name)
@@ -202,7 +192,7 @@ const LeaderPresetInfo& presetInfo(LeaderPreset preset)
 
 Result<LeaderPreset> leaderPresetNamed(std::string_view word)
 {
-    const std::string lower = lowerCase(word);
+    const std::string lower = katana::core::lowered(word);
     std::string words;
     for (const LeaderPresetInfo& info : kPresets) {
         if (info.word == lower) {
@@ -394,7 +384,14 @@ std::string leadersJson(const Document& document, const std::vector<EntityId>& o
     result["presets"] = std::move(presets);
     result["surfaces"] = context.surfaces;
     result["alignments"] = context.alignments;
-    return result.dump(2);
+    // A reply, not a stored value, so U+FFFD for a byte that is not UTF-8
+    // (docs/cad.md: a name that is not UTF-8 is written so, not thrown).
+    // nlohmann's default throws, and nothing up the call chain of a verb
+    // catches: katana_cli and the window ended on a surface name typed in the
+    // ANSI code page. The stores now refuse such a name (SurfaceStore::
+    // checkName); this keeps a name that reached the drawing another way from
+    // taking LEADER LIST down with it.
+    return result.dump(2, ' ', false, Json::error_handler_t::replace);
 }
 
 } // namespace katana::cad::annotation

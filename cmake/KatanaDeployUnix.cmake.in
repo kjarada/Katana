@@ -184,11 +184,20 @@ endif()
 foreach(_set proj gdal)
     if(IS_DIRECTORY "${_toolchain}/share/${_set}")
         file(COPY "${_toolchain}/share/${_set}" DESTINATION "${_data}/share")
+    elseif(_set STREQUAL "proj")
+        # A bundle without proj.db cannot name a coordinate system, and the smoke
+        # test of INFO on a UTM raster would not notice (docs/release.md).
+        message(FATAL_ERROR "Katana deploy: ${_toolchain}/share/proj was not found; "
+                            "a bundle without PROJ's database cannot be made")
     else()
         message(WARNING "Katana deploy: ${_toolchain}/share/${_set} was not found; "
                         "the bundle will lack it")
     endif()
 endforeach()
+if(NOT EXISTS "${_data}/share/proj/proj.db")
+    message(FATAL_ERROR "Katana deploy: ${_data}/share/proj/proj.db is not in the bundle; "
+                        "the toolchain's share/proj holds no proj.db")
+endif()
 if(EXISTS "${_toolchain}/ssl/cacert.pem")
     file(COPY_FILE "${_toolchain}/ssl/cacert.pem" "${_data}/ssl/cacert.pem")
 else()

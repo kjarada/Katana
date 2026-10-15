@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -20,6 +21,7 @@
 #include "katana/ifc/classification.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/ifc/front_end.hpp"
+#include "katana/ifc/import.hpp"
 #include "katana/ifc/step.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
@@ -421,6 +423,109 @@ TEST(IfcExportRoad, EachFacilityIsAnIfcRoadInTheSiteAndEachPartAnIfcRoadPartInIt
     EXPECT_EQ(out.classes.at("IfcRoadPart"), 2u);
 }
 
+// A facility is a corridor's name and Katana finds a corridor ignoring case
+// (CorridorSet::find), so facility=main beside the corridor Main is on Main:
+// one IfcRoad, not two, and a line marking of it finds the course of its road
+// under it. The same for a part ("roadside" and "ROADSIDE" are one part). The
+// road and the parts are written under the first spelling the model has: Main,
+// and ROADSIDE from the fill, which comes before the rail's "roadside".
+// By hand: 4 elements (a course, a fill, a marking, a rail) in 1 road and 2
+// parts (CARRIAGEWAY, ROADSIDE); the marking, a feature, is contained nowhere
+// and adheres to the course (its first face's centre is in the course's plan:
+// the marking box is x 1..9, y 1..1.1, the course 0..10 x 0..3.5); the rail is
+// in the ROADSIDE part. A sign with a part but no facility is the site's and
+// must not throw.
+TEST(IfcExportRoad, AFacilityAndPartMatchIgnoringCaseAsACorridorsNameDoes)
+{
+    ifc::ExportInput input;
+    input.road.elements.push_back(element("course", "pavement", {"IfcCourse", "PAVEMENT", {}},
+                                          "Main", "CARRIAGEWAY", box(0.0, 0.0, 0.0, 10.0, 3.5, 0.05)));
+    input.road.elements.push_back(element("fill", "batter",
+                                          {"IfcEarthworksFill", "SLOPEFILL", {}}, "Main",
+                                          "ROADSIDE", box(0.0, 5.1, 0.0, 10.0, 6.0, 0.5)));
+    input.road.elements.push_back(element("mark", "marking",
+                                          {"IfcSurfaceFeature", "LINEMARKING", {}}, "main",
+                                          "carriageway", box(1.0, 1.0, 0.05, 9.0, 1.1, 0.053)));
+    input.road.elements.push_back(element("rail", "barrier", {"IfcRailing", "GUARDRAIL", {}},
+                                          "MAIN", "roadside", box(0.0, 5.0, 0.0, 10.0, 5.1, 1.0)));
+    input.road.elements.push_back(element("sign", "sign", {"IfcSign", "PICTORAL", {}}, "",
+                                          "ROADSIDE", box(20.0, 0.0, 0.0, 20.5, 0.05, 2.0)));
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_EQ(out.roadElements, 5u);
+    EXPECT_EQ(out.roadElementsSkipped, 0u) << "the marking has a course under it, ignoring case";
+    EXPECT_EQ(out.roads, 1u);
+    EXPECT_EQ(out.roadParts, 2u);
+    ASSERT_EQ(ofType(all, "IFCROAD").size(), 1u);
+    const int road = ofType(all, "IFCROAD").front();
+    EXPECT_EQ(all.at(road).args[2], "'Main'");
+    std::map<std::string, int> parts;
+    for (const int part : ofType(all, "IFCROADPART")) {
+        parts.emplace(all.at(part).args[2], part);
+    }
+    ASSERT_EQ(parts.size(), 2u);
+    ASSERT_TRUE(parts.contains("'Main CARRIAGEWAY'") && parts.contains("'Main ROADSIDE'"));
+    EXPECT_EQ(containerOf(all, byTag(all, "rail")), parts.at("'Main ROADSIDE'"));
+    EXPECT_EQ(containerOf(all, byTag(all, "fill")), parts.at("'Main ROADSIDE'"));
+    EXPECT_EQ(containerOf(all, byTag(all, "sign")), ofType(all, "IFCSITE").front());
+    // The marking adheres to the course, and is contained in nothing.
+    ASSERT_EQ(ofType(all, "IFCRELADHERESTOELEMENT").size(), 1u);
+    EXPECT_EQ(refOf(all.at(ofType(all, "IFCRELADHERESTOELEMENT").front()).args[4]),
+              byTag(all, "course"));
+    EXPECT_EQ(containerOf(all, byTag(all, "mark")), 0);
+    // Not a second road in the account either: one source, "road Main".
+    for (const ifc::ClassTally& row : out.tally) {
+        EXPECT_NE(row.source, "road main");
+        EXPECT_NE(row.source, "road MAIN");
+    }
+}
+
+// Two facilities that differ by more than case stay two roads.
+TEST(IfcExportRoad, FacilitiesThatDifferByMoreThanCaseAreTwoRoads)
+{
+    ifc::ExportInput input;
+    for (const char* facility : {"Main", "MAINS", "main"}) {
+        input.road.elements.push_back(element(std::string("k-") + facility, "kerb",
+                                              {"IfcKerb", "NOTDEFINED", {}}, facility, "",
+                                              box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)));
+    }
+    const auto out = exported(input);
+    EXPECT_EQ(out.roads, 2u); // Main (twice, as "main") and MAINS
+    EXPECT_EQ(out.classes.at("IfcKerb"), 3u);
+}
+
+// Every product the report counts is in the account once (the same property
+// IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce holds for a
+// drawing): the road and each part of it too, so that File > Export IFC's
+// table, which is filled from the account, lists them. By hand, roadInput() is
+// one corridor, Main, with two parts: CARRIAGEWAY (the courses, the marking's
+// host) and ROADSIDE (the fill and the wall); the kerb is in the road itself.
+TEST(IfcExportRoad, EveryRoadAndPartTheReportCountsIsInTheAccountOnce)
+{
+    const auto out = exported(roadInput());
+    std::map<std::string, std::size_t> tallied;
+    for (const ifc::ClassTally& row : out.tally) {
+        if (!row.entity.empty()) {
+            tallied[row.entity] += row.count;
+        }
+    }
+    EXPECT_EQ(tallied, out.classes);
+    EXPECT_EQ(tallied.at("IfcRoad"), 1u);
+    EXPECT_EQ(tallied.at("IfcRoadPart"), 2u);
+    std::map<std::string, std::size_t> parts;
+    for (const ifc::ClassTally& row : out.tally) {
+        if (row.entity == "IfcRoad") {
+            EXPECT_EQ(row.source, "road Main");
+        }
+        if (row.entity == "IfcRoadPart") {
+            EXPECT_EQ(row.source, "road Main");
+            EXPECT_EQ(row.why, "a part of road Main");
+            parts[row.predefinedType] += row.count;
+        }
+    }
+    EXPECT_EQ(parts, (std::map<std::string, std::size_t>{{"CARRIAGEWAY", 1}, {"ROADSIDE", 1}}));
+}
+
 // Each element in its part, in its road when it names no part, in the site
 // when it names no road; each placed relative to its container, the part to
 // its road and the road to the site (IfcLocalPlacement, 8.7.3.14).
@@ -644,13 +749,87 @@ TEST(IfcExportRoad, QuantitiesTheTemplateNamesAreBaseQuantitiesAndTheRestKatanas
     EXPECT_EQ(quantitiesOf(all, sign.at("'Qto_SignBaseQuantities'")),
               (std::set<std::string>{"IFCQUANTITYLENGTH('Height',$,$,0.9,$)",
                                      "IFCQUANTITYLENGTH('Width',$,$,0.6,$)"}));
+    // A count is an INTEGER, "1" and not "1.": CountValue is an IfcCountMeasure,
+    // and IFC 4.3.2.0 (IFC4X3_ADD2) declares `TYPE IfcCountMeasure = INTEGER`
+    // (IFC4 declared a NUMBER, which is why the REAL was written).
     EXPECT_EQ(quantitiesOf(all, sign.at("'Katana_Quantities'")),
-              std::set<std::string>{"IFCQUANTITYCOUNT('Count',$,$,1.,$)"});
+              std::set<std::string>{"IFCQUANTITYCOUNT('Count',$,$,1,$)"});
 
     // The fill's compacted volume is its template's (6.6.5.4); the wall,
     // whose class has no template here, has no quantity set at all.
     EXPECT_TRUE(setsOf(all, byTag(all, kFill)).contains("'Qto_EarthworksFillBaseQuantities'"));
     EXPECT_FALSE(setsOf(all, byTag(all, kWall)).contains("'Katana_Quantities'"));
+}
+
+// The road model names a solid's volume GrossVolume whatever the solid is, and a
+// course's thickness Depth (cad/road/road_section.cpp); each class's base
+// quantity set names its own. The model's name is written as the set's where the
+// set gives it that type: a cut's volume is its UndisturbedVolume, a fill's its
+// CompactedVolume, a kerb's its Volume, a course's Depth its Thickness - and
+// what the set has no name for stays in Katana_Quantities. An element that
+// already has the set's own name is left as it is.
+TEST(IfcExportRoad, TheRoadModelsQuantityNamesAreWrittenAsTheirClassesBaseQuantitiesNameThem)
+{
+    ifc::ExportInput input;
+    auto course = element("course", "pavement", {"IfcCourse", "PAVEMENT", {}}, "Main",
+                          "CARRIAGEWAY", box(0.0, 0.0, 0.0, 100.0, 3.5, 0.05));
+    course.quantities = {{"Length", 100.0, "m"},    {"Width", 3.5, "m"},
+                         {"Depth", 0.05, "m"},      {"GrossArea", 350.0, "m2"},
+                         {"GrossVolume", 17.5, "m3"}};
+    auto kerb = element("kerb", "kerb", {"IfcKerb", "NOTDEFINED", {}}, "Main", "ROADSIDE",
+                        box(0.0, 3.5, 0.0, 100.0, 3.65, 0.15));
+    kerb.quantities = {{"Length", 100.0, "m"},
+                       {"Width", 0.15, "m"},
+                       {"Height", 0.15, "m"},
+                       {"GrossVolume", 2.25, "m3"}};
+    auto cut = element("cut", "earthworks", {"IfcEarthworksCut", "CUT", {}}, "Main", "ROADSEGMENT",
+                       box(0.0, 3.65, -2.0, 100.0, 9.0, 0.0));
+    cut.quantities = {{"Length", 100.0, "m"}, {"GrossArea", 600.0, "m2"}, {"GrossVolume", 1000.0, "m3"}};
+    auto fill = element("fill", "earthworks", {"IfcEarthworksFill", "EMBANKMENT", {}}, "Main",
+                        "ROADSEGMENT", box(0.0, -9.0, -2.0, 100.0, 0.0, 0.0));
+    fill.quantities = {{"Length", 100.0, "m"}, {"GrossArea", 600.0, "m2"}, {"GrossVolume", 850.0, "m3"}};
+    // A cut that already has the set's own name keeps both, as they are.
+    auto both = element("both", "earthworks", {"IfcEarthworksCut", "CUT", {}}, "Main",
+                        "ROADSEGMENT", box(0.0, 10.0, -2.0, 100.0, 12.0, 0.0));
+    both.quantities = {{"GrossVolume", 7.0, "m3"}, {"UndisturbedVolume", 5.0, "m3"}};
+    input.road.elements = {course, kerb, cut, fill, both};
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+
+    const auto courseSets = setsOf(all, byTag(all, "course"));
+    EXPECT_EQ(quantitiesOf(all, courseSets.at("'Qto_CourseBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYLENGTH('Width',$,$,3.5,$)",
+                                     "IFCQUANTITYLENGTH('Thickness',$,$,0.05,$)",
+                                     "IFCQUANTITYVOLUME('GrossVolume',$,$,17.5,$)"}));
+    EXPECT_EQ(quantitiesOf(all, courseSets.at("'Katana_Quantities'")),
+              std::set<std::string>{"IFCQUANTITYAREA('GrossArea',$,$,350.,$)"});
+
+    const auto kerbSets = setsOf(all, byTag(all, "kerb"));
+    EXPECT_EQ(quantitiesOf(all, kerbSets.at("'Qto_KerbBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYLENGTH('Width',$,$,0.15,$)",
+                                     "IFCQUANTITYLENGTH('Height',$,$,0.15,$)",
+                                     "IFCQUANTITYVOLUME('Volume',$,$,2.25,$)"}));
+    EXPECT_FALSE(kerbSets.contains("'Katana_Quantities'")) << "nothing of the kerb's is left over";
+
+    const auto cutSets = setsOf(all, byTag(all, "cut"));
+    EXPECT_EQ(quantitiesOf(all, cutSets.at("'Qto_EarthworksCutBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYVOLUME('UndisturbedVolume',$,$,1000.,$)"}));
+    EXPECT_EQ(quantitiesOf(all, cutSets.at("'Katana_Quantities'")),
+              std::set<std::string>{"IFCQUANTITYAREA('GrossArea',$,$,600.,$)"});
+
+    const auto fillSets = setsOf(all, byTag(all, "fill"));
+    EXPECT_EQ(quantitiesOf(all, fillSets.at("'Qto_EarthworksFillBaseQuantities'")),
+              (std::set<std::string>{"IFCQUANTITYLENGTH('Length',$,$,100.,$)",
+                                     "IFCQUANTITYVOLUME('CompactedVolume',$,$,850.,$)"}));
+
+    const auto bothSets = setsOf(all, byTag(all, "both"));
+    EXPECT_EQ(quantitiesOf(all, bothSets.at("'Qto_EarthworksCutBaseQuantities'")),
+              std::set<std::string>{"IFCQUANTITYVOLUME('UndisturbedVolume',$,$,5.,$)"});
+    EXPECT_EQ(quantitiesOf(all, bothSets.at("'Katana_Quantities'")),
+              std::set<std::string>{"IFCQUANTITYVOLUME('GrossVolume',$,$,7.,$)"});
 }
 
 // A quantity in a unit IFC's simple quantities do not take, a negative one
@@ -674,6 +853,64 @@ TEST(IfcExportRoad, AQuantityTheSchemaWouldRefuseIsLeftOutAndSaid)
     EXPECT_TRUE(warned(out, "quantities in \"ft\" are left out"));
     EXPECT_TRUE(warned(out, "1 road element quantities are negative"));
     EXPECT_TRUE(warned(out, "repeat a name on their element"));
+}
+
+// IfcQuantityCount's CountValue is an IfcCountMeasure: an INTEGER in IFC4X3_ADD2
+// (`TYPE IfcCountMeasure = INTEGER`), so a count is written as one. A count
+// with no integer spelling is left out, said: a half (2.5), and one past the
+// largest 32-bit signed integer, 2147483647 - IfcOpenShell 0.8.5 reads a larger
+// STEP INTEGER as 2147483647, silently. By hand, for each:
+//   Posts    28            -> 28
+//   None     0             -> 0 (a count may be none; not negative)
+//   Nearly   12 - 4e-10    -> 12 (4e-10 from a whole number, inside the 1e-9 a
+//                             few roundings of a count stay within)
+//   Largest  2147483647    -> 2147483647 (the bound itself is written)
+//   Half     2.5, Past 2147483648, Huge 3000000000 -> left out, 3 said
+// and a left-out count does not take its name: a second "Half" that is whole
+// is written.
+TEST(IfcExportRoad, ACountIsAnIntegerAndOneThatCannotBeIsLeftOutAndSaid)
+{
+    ifc::ExportInput input;
+    auto posts = element("p", "sign", {"IfcSign", "PICTORAL", {}}, "", "",
+                         box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0));
+    posts.quantities = {{"Posts", 28.0, ""},
+                        {"None", 0.0, ""},
+                        {"Nearly", 12.0 - 4e-10, ""},
+                        {"Largest", 2147483647.0, ""},
+                        {"Half", 2.5, ""},
+                        {"Past", 2147483648.0, ""},
+                        {"Huge", 3000000000.0, ""},
+                        {"Half", 3.0, ""}};
+    input.road.elements.push_back(posts);
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_EQ(quantitiesOf(all, setsOf(all, byTag(all, "p")).at("'Katana_Quantities'")),
+              (std::set<std::string>{"IFCQUANTITYCOUNT('Posts',$,$,28,$)",
+                                     "IFCQUANTITYCOUNT('None',$,$,0,$)",
+                                     "IFCQUANTITYCOUNT('Nearly',$,$,12,$)",
+                                     "IFCQUANTITYCOUNT('Largest',$,$,2147483647,$)",
+                                     "IFCQUANTITYCOUNT('Half',$,$,3,$)"}));
+    EXPECT_TRUE(warned(out, "3 road element counts are not whole numbers"));
+    // No REAL is ever written for a count, whatever its value.
+    EXPECT_EQ(out.text.find("IFCQUANTITYCOUNT('Posts',$,$,28.,"), std::string::npos);
+}
+
+// A count that is not finite or is negative is the same refusal as any other
+// quantity's (the schema's WR), said with those, not as a fractional count.
+TEST(IfcExportRoad, ACountThatIsNegativeOrNotFiniteIsLeftOutWithTheOtherInvalidQuantities)
+{
+    ifc::ExportInput input;
+    auto posts = element("p", "sign", {"IfcSign", "PICTORAL", {}}, "", "",
+                         box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0));
+    posts.quantities = {{"Negative", -1.0, ""},
+                        {"Infinite", std::numeric_limits<double>::infinity(), ""},
+                        {"Missing", std::numeric_limits<double>::quiet_NaN(), ""}};
+    input.road.elements.push_back(posts);
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_FALSE(setsOf(all, byTag(all, "p")).contains("'Katana_Quantities'"));
+    EXPECT_TRUE(warned(out, "3 road element quantities are negative, not finite or unnamed"));
+    EXPECT_FALSE(warned(out, "counts are not whole numbers"));
 }
 
 // What Katana knows of the element (Katana_RoadElement) and the element's own
@@ -808,6 +1045,100 @@ TEST(IfcExportRoad, AMarkingWithNothingUnderItIsNotWrittenAndSaid)
     ASSERT_NE(byTag(all, "named"), 0);
     EXPECT_EQ(refOf(all.at(ofType(all, "IFCRELADHERESTOELEMENT").front()).args[4]),
               byTag(all, "slab"));
+}
+
+// A road object has a road only when one is given (facility=), so the marking
+// a person places with no road is the site's: it adheres to the course of
+// whichever road is under it, as a marking of a road adheres to that road's,
+// and is not dropped for want of a road it was never told.
+TEST(IfcExportRoad, AMarkingThatNamesNoRoadAdheresToTheCourseUnderIt)
+{
+    ifc::ExportInput input = roadInput();
+    for (auto& each : input.road.elements) {
+        if (each.id == kMarking) {
+            each.facility.clear();
+            each.part.clear();
+        }
+    }
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    const int marking = byTag(all, kMarking);
+    ASSERT_NE(marking, 0) << "the marking was dropped";
+    EXPECT_EQ(out.roadElementsSkipped, 0u);
+    ASSERT_EQ(ofType(all, "IFCRELADHERESTOELEMENT").size(), 1u);
+    const Instance& adheres = all.at(ofType(all, "IFCRELADHERESTOELEMENT").front());
+    EXPECT_EQ(refOf(adheres.args[4]), byTag(all, kWearing));
+    EXPECT_EQ(refsOf(adheres.args[5]), std::vector<int>{marking});
+}
+
+// With nothing under it the reason given is the true one: it names no road AND
+// no course of any road lies under it.
+TEST(IfcExportRoad, AMarkingThatNamesNoRoadAndHasNoCourseUnderItSaysSo)
+{
+    ifc::ExportInput input;
+    input.road.elements.push_back(element("lonely", "marking",
+                                          {"IfcSurfaceFeature", "LINEMARKING", {}}, "", "",
+                                          box(0.0, 0.0, 0.0, 10.0, 0.1, 0.003)));
+    input.road.elements.push_back(element("slab", "pavement", {"IfcSlab", "PAVING", {}}, "Main",
+                                          "", box(100.0, 100.0, 0.0, 110.0, 110.0, 0.2)));
+    const auto out = exported(input);
+    EXPECT_EQ(out.roadElementsSkipped, 1u);
+    EXPECT_TRUE(warned(out, "road element \"lonely\" is not written: a surface feature adheres to "
+                            "an element, and it names no road (facility=)"));
+}
+
+// Two closed boxes that touch - the cells of a box culvert side by side, with
+// no gap between their walls - share positions without sharing an edge. Each
+// is closed by its own indices, so the face set is closed: merging them by
+// position would make four faces of the shared edges and write a closed solid
+// as an open face set with a warning.
+TEST(IfcExportRoad, ClosedShellsThatTouchAreOneClosedFaceSetNotAnOpenOne)
+{
+    const TriangleMesh left = box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+    const TriangleMesh right = box(1.0, 0.0, 0.0, 2.0, 1.0, 1.0);
+    TriangleMesh both = left;
+    const auto offset = static_cast<std::uint32_t>(both.vertices.size());
+    both.vertices.insert(both.vertices.end(), right.vertices.begin(), right.vertices.end());
+    for (const auto& face : right.faces) {
+        both.faces.push_back({face[0] + offset, face[1] + offset, face[2] + offset});
+    }
+    ifc::ExportInput input;
+    input.road.elements.push_back(
+        element("cells", "culvert", {"IfcPipeSegment", "CULVERT", {}}, "", "", both));
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    const FaceSet body = bodyOf(all, byTag(all, "cells"));
+    EXPECT_TRUE(body.closed);
+    // The positions are not merged: 2 x 8 points and 2 x 12 triangles.
+    EXPECT_EQ(body.points.size(), 16u);
+    EXPECT_EQ(body.triangles.size(), 24u);
+    // Two unit cubes.
+    EXPECT_NEAR(volumeOf(body), 2.0, 1e-12);
+    EXPECT_FALSE(warned(out, "not closed solids"));
+}
+
+// What is not closed by its indices is still judged as it always was: merged by
+// position, and open when an edge is left over. A pair of touching boxes with a
+// face missing is open.
+TEST(IfcExportRoad, TouchingShellsWithAFaceMissingAreStillWrittenOpenAndSaid)
+{
+    const TriangleMesh left = box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+    const TriangleMesh right = box(1.0, 0.0, 0.0, 2.0, 1.0, 1.0);
+    TriangleMesh both = left;
+    const auto offset = static_cast<std::uint32_t>(both.vertices.size());
+    both.vertices.insert(both.vertices.end(), right.vertices.begin(), right.vertices.end());
+    // The second box without its last two triangles (its +x face).
+    for (std::size_t i = 0; i + 2 < right.faces.size(); ++i) {
+        const auto& face = right.faces[i];
+        both.faces.push_back({face[0] + offset, face[1] + offset, face[2] + offset});
+    }
+    ifc::ExportInput input;
+    input.road.elements.push_back(
+        element("cells", "culvert", {"IfcPipeSegment", "CULVERT", {}}, "", "", both));
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_FALSE(bodyOf(all, byTag(all, "cells")).closed);
+    EXPECT_TRUE(warned(out, "1 road elements are not closed solids"));
 }
 
 // ---- what is refused -----------------------------------------------------------------------
@@ -955,10 +1286,96 @@ TEST(IfcExportRoad, TheModelsProblemsAreWarningsAndTheReplyCountsTheRoadModel)
         << reply;
     EXPECT_NE(reply.find("\nobject from=\"road model\" count=1 class=\"IfcSign\""),
               std::string::npos);
+    // The road and its parts are objects of the reply too: the window's
+    // preview table is filled from these records.
+    EXPECT_NE(reply.find("\nobject from=\"road Main\" count=1 class=\"IfcRoad\" "
+                         "predefined=\"NOTDEFINED\" object_type=\"\" system=\"\" "
+                         "why=\"a corridor, the road its parts and elements are in\""),
+              std::string::npos)
+        << reply;
+    EXPECT_NE(reply.find("\nobject from=\"road Main\" count=1 class=\"IfcRoadPart\" "
+                         "predefined=\"CARRIAGEWAY\""),
+              std::string::npos)
+        << reply;
 
     const auto without = exported(ifc::ExportInput{});
     EXPECT_EQ(ifc::formatExportReply(without, "x.ifc", false).find("road elements="),
               std::string::npos);
+}
+
+// What the export writes of a cut, the import reads back: an IfcEarthworksCut
+// is an IfcFeatureElementSubtraction, and the generated class table called every
+// such feature "not drawn" (an opening is what a wall is cut by, not an
+// object), so the largest solids of a road model vanished on a round trip, with
+// no count and no warning. A cut is drawn now, as its FootPrint outline like the
+// fill beside it. By hand, the cut batter of roadModel() is the box
+// [1000, 1100] x [1997, 2000] x [9.75, 10.5], so its plan hull is the rectangle
+// x 1000..1100, y 1997..2000, and the file (not georeferenced, so written at the
+// project's own coordinates) gives that outline back. The fill is read too, and
+// an opening is still not: a feature of another kind is not an object.
+TEST(IfcExportRoad, ACutBatterIsReadBackFromItsFileAsItsFootPrintOutline)
+{
+    const auto surface = ground();
+    const auto out = exported(roadInput(&surface));
+    const auto back = ifc::readIfc(out.text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_EQ(back->classes.at("IfcEarthworksCut"), 1u);
+    EXPECT_EQ(back->classes.at("IfcEarthworksFill"), 1u);
+    const katana::entity::Entity* cut = nullptr;
+    for (const katana::entity::Entity& entity : back->entities) {
+        const auto cls = entity.metadata.find("ifc.class");
+        if (cls != entity.metadata.end() && std::get<std::string>(cls->second) == "IfcEarthworksCut") {
+            cut = &entity;
+        }
+    }
+    ASSERT_NE(cut, nullptr) << "the cut was not read back";
+    EXPECT_EQ(std::get<std::string>(cut->metadata.at("ifc.predefinedType")), "CUT");
+    EXPECT_EQ(std::get<std::string>(cut->metadata.at("ifc.tag")), kCut);
+    EXPECT_EQ(cut->layer, "Road/batter");
+    const auto* outline = std::get_if<Polyline2>(&cut->geometry);
+    ASSERT_NE(outline, nullptr);
+    double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
+    for (const auto& vertex : outline->vertices) {
+        minX = std::min(minX, vertex.x);
+        maxX = std::max(maxX, vertex.x);
+        minY = std::min(minY, vertex.y);
+        maxY = std::max(maxY, vertex.y);
+    }
+    EXPECT_NEAR(minX, 1000.0, 1e-6);
+    EXPECT_NEAR(maxX, 1100.0, 1e-6);
+    EXPECT_NEAR(minY, 1997.0, 1e-6);
+    EXPECT_NEAR(maxY, 2000.0, 1e-6);
+}
+
+// A feature of another kind is still not an object of its own: an opening in
+// a file is read past, not drawn. And the stand-in ground a cut voids when its
+// surface is not in the file has no shape at all (no Representation): it
+// comes in as a point at its placement, counted, and the warning says no shape
+// rather than "solids", which it is not.
+TEST(IfcExportRoad, TheStandInGroundHasNoShapeAndTheImportSaysSoNotThatItIsASolid)
+{
+    const auto out = exported(roadInput()); // the cut names "ground"; no surface is given
+    const auto back = ifc::readIfc(out.text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_GE(back->productsAsPoints, 1u); // the TERRAIN stand-in at least
+    bool said = false;
+    for (const std::string& warning : back->warnings) {
+        EXPECT_EQ(warning.find("are solids"), std::string::npos) << warning;
+        said = said || warning.find("objects have no shape Katana can draw") != std::string::npos;
+    }
+    EXPECT_TRUE(said);
+
+    // An opening, read past: the same file with its cut renamed to an
+    // IfcOpeningElement (also an IfcFeatureElementSubtraction) loses the cut
+    // from the objects read, and the class table counts it nowhere.
+    std::string opening = out.text;
+    const std::size_t at = opening.find("IFCEARTHWORKSCUT(");
+    ASSERT_NE(at, std::string::npos);
+    opening.replace(at, std::string("IFCEARTHWORKSCUT(").size(), "IFCOPENINGELEMENT(");
+    const auto read = ifc::readIfc(opening);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_FALSE(read->classes.contains("IfcEarthworksCut"));
+    EXPECT_FALSE(read->classes.contains("IfcOpeningElement"));
 }
 
 // The local origin is the south-west corner of everything written, the road

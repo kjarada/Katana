@@ -72,4 +72,12 @@ namespace katana::app {
 [[nodiscard]] katana::ifc::RoadModelInput
 roadModelInput(const katana::cad::bim::BimModel& model);
 
+// What a smart leader's note is read from: the document's surfaces and
+// alignments (cad::annotation::leaderContext) and the places survey coding is
+// looked for (cad::codePropertyCandidates), set in `options` so that the file
+// holds the note each leader SAYS, as the plan, LIST and the DXF do, not its
+// template. Both front ends call it, so a leader reads the same in either's
+// file (docs/ifc.md, "Leaders").
+void setLeaderNotes(katana::ifc::ExportOptions& options, const katana::cad::Document& document);
+
 } // namespace katana::app

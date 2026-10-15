@@ -1,6 +1,9 @@
-// THE ramp table: every colour ramp a surface style may name, which the plan
-// view, the 3D scene (its elevation and slope colours, scene.cpp) and the
-// legends all colour through (docs/surface_display.md, "The ramps").
+// The surface styles' ramp table: every colour ramp a style may name, which
+// the plan view, the 3D scene (its elevation and slope colours, scene.cpp) and
+// the legends all colour through (docs/surface_display.md, "The ramps").
+// RASTER SHADE and RASTER SLOPE keep a table of their own
+// (interop/geo/colour_ramps.cpp) whose terrain, diverging, slope and grey are
+// other colours; the doc says why the two are not one.
 
 #include <algorithm>
 #include <array>

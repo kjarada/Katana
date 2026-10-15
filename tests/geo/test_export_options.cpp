@@ -337,6 +337,90 @@ TEST_F(ExportOptions, AScopedDxfExportWritesOnlyTheScope)
     EXPECT_EQ(read->entities.size(), 2u);
 }
 
+namespace {
+
+// The texts a DXF holds, read back through the importer.
+std::vector<std::string> textsOf(const std::string& path)
+{
+    std::vector<std::string> found;
+    auto read = katana::app::readDxfImport(path);
+    EXPECT_TRUE(read.ok()) << path;
+    if (read.ok()) {
+        for (const katana::entity::Entity& entity : read->entities) {
+            if (const auto* text = std::get_if<katana::entity::TextGeometry>(&entity.geometry)) {
+                found.push_back(text->text);
+            }
+        }
+    }
+    return found;
+}
+
+} // namespace
+
+TEST_F(ExportOptions, AScopedDxfExportKeepsTheNoteOfALeaderWhoseTargetTheScopeLeftOut)
+{
+    // A point at RL 30 on layer pegs, and on layer notes a smart leader whose
+    // tip is on it and whose note reads its level: "RL 30.000". Exporting
+    // LAYERS notes takes the leader and not the point; the writer was handed
+    // a copy of the drawing with the point already removed, and the leader,
+    // reading nothing, was written as a bare arrow - callout text silently
+    // missing, skipped=0, no warning. A note is read off the whole drawing.
+    katana::entity::PropertyMap level;
+    level["elevation"] = 30.0;
+    const auto peg = add(katana::entity::PointGeometry{{10.0, 60.0}}, "pegs", level);
+    katana::entity::LeaderGeometry leader;
+    leader.vertices = {{10.0, 60.0}, {30.0, 70.0}};
+    leader.tipRef = katana::entity::AnchorRef{peg, katana::entity::AnchorPoint::Position};
+    leader.text = "RL {rl:.3f}";
+    leader.fields = true;
+    add(leader, "notes");
+
+    const std::string whole = file("whole.dxf");
+    ok("EXPORT " + quoted(whole));
+    const std::vector<std::string> expected{"RL 30.000"};
+    EXPECT_EQ(textsOf(whole), expected) << "the control: the whole drawing says it";
+
+    const std::string scoped = file("notes.dxf");
+    const std::string reply = ok("EXPORT " + quoted(scoped) + " LAYERS notes");
+    EXPECT_NE(reply.find("entities=1"), std::string::npos) << reply;
+    EXPECT_EQ(reply.find("without its note"), std::string::npos) << reply;
+    EXPECT_EQ(textsOf(scoped), expected);
+
+    // A selection of the leader alone is the same scope in another word.
+    ASSERT_TRUE(interpreter.run("SELECT " + std::to_string(on("notes").front().id)).ok());
+    const std::string selected = file("selection.dxf");
+    ok("EXPORT " + quoted(selected) + " SELECTION");
+    EXPECT_EQ(textsOf(selected), expected);
+}
+
+TEST_F(ExportOptions, ALeaderWhoseNoteCannotBeReadIsWrittenAndTheExportSaysItHasNoNote)
+{
+    // The entity its tip is on has no level, which the note reads: nothing to
+    // read, a bare arrow in the file - and the reply says which leader, rather
+    // than leave the callout silently blank. (A target that is not in the
+    // drawing at all cannot be built here: a smart leader goes with its target.)
+    const auto bare = add(katana::entity::PointGeometry{{10.0, 60.0}}, "pegs");
+    katana::entity::LeaderGeometry leader;
+    leader.vertices = {{10.0, 60.0}, {30.0, 70.0}};
+    leader.tipRef = katana::entity::AnchorRef{bare, katana::entity::AnchorPoint::Position};
+    leader.text = "RL {rl:.3f}";
+    leader.fields = true;
+    const auto note = add(leader, "notes");
+    const std::string reply = ok("EXPORT " + quoted(file("blank.dxf")));
+    EXPECT_NE(reply.find("leader #" + std::to_string(note) + " is written without its note"),
+              std::string::npos)
+        << reply;
+    EXPECT_TRUE(textsOf(file("blank.dxf")).empty());
+    // A plain leader's text is its own, and says nothing of the kind.
+    katana::entity::LeaderGeometry plain;
+    plain.vertices = {{10.0, 60.0}, {30.0, 70.0}};
+    plain.text = "plain";
+    add(plain, "plain");
+    const std::string again = ok("EXPORT " + quoted(file("plain.dxf")) + " LAYERS plain");
+    EXPECT_EQ(again.find("without its note"), std::string::npos) << again;
+    EXPECT_EQ(textsOf(file("plain.dxf")), std::vector<std::string>{"plain"});
+}
+
 TEST_F(ExportOptions, GdalOptionsForADxfAreRefusedByName)
 {
     drawSite();

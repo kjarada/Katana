@@ -9,10 +9,15 @@
 // would type and hands it to the window's one executor (command_runner.hpp),
 // so it is echoed, kept in the history and one undo step; an agent types the
 // same line. The two grids are buffers, as the Alignment Manager's are: their
-// cells are edited in place and applied by Apply, one SET line per edited row,
-// and never by a table's own signal. What the dialog shows is read from
+// cells are edited in place and applied by Apply as ONE line for the grid (a
+// group of key=value for each edited row), so an Apply is one undo step and a
+// value the verb refuses leaves the template as it was, with the edits still in
+// the grid; never by a table's own signal. What the dialog shows is read from
 // Document::roadTemplates, and the preview is cad's own section of it
 // (road::templateSection), so the drawing and ROADTEMPLATE SECTION agree.
+// Edits survive a reload that changed nothing the grid shows, and nothing else:
+// not the choice of another template, not an undo or a typed line that changed
+// the component.
 //
 // NON-MODAL, kept by the window between uses; it hears the Document through a
 // DocumentWatcher, so a line typed on the command line, an undo or an opened
@@ -29,8 +34,8 @@
 //   roadTemplateDefaults        ROADTEMPLATE DEFAULTS
 //   roadTemplateComponents      side, name, kind, width, crossfall, layer, and what
 //                               else it is; width, crossfall and layer edited in place
-//   roadTemplateApplyComponents ROADTEMPLATE SET <t> side:name width= crossfall= layer=,
-//                               one line for each row edited
+//   roadTemplateApplyComponents ROADTEMPLATE SET <t> side:name width= crossfall= layer=
+//                               [side:name ...], one line for every row edited
 //   roadTemplateRevertComponents  the grid as the drawing holds it again
 //   roadTemplateAddSide         left, right or both
 //   roadTemplateAddKind         lane, shoulder, kerb, footpath, verge, median, drain, batter
@@ -40,8 +45,8 @@
 //   roadTemplateSetKeys         ROADTEMPLATE SET <t> side:name <the keys>
 //   roadTemplateCourses         the chosen component's courses, top down: name,
 //                               thickness, material, IFC type - the last three edited
-//   roadTemplateApplyCourses    ROADTEMPLATE COURSE <t> side:name SET <course> ..., a line
-//                               for each row edited
+//   roadTemplateApplyCourses    ROADTEMPLATE COURSE <t> side:name SET <course> ... [<course>
+//                               ...], one line for every row edited
 //   roadTemplateCourseName, roadTemplateCourseThickness, roadTemplateCourseMaterial
 //   roadTemplateCourseAdd       ROADTEMPLATE COURSE <t> side:name ADD <course> thickness=
 //                               material=

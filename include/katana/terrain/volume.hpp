@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "katana/core/error.hpp"
@@ -65,7 +66,11 @@ struct SurfaceComparison {
     double net = 0.0;  // fill - cut = integral of (zDesign - zExisting)
     double planArea = 0.0; // common area that was compared
     double cutArea = 0.0;
-    double fillArea = 0.0; // planArea - cutArea - fillArea is where the surfaces coincide
+    // planArea - cutArea - fillArea is where the surfaces coincide: every
+    // corner of a piece within kGeometric of the other surface's height is on
+    // it, so rounding (+/- 1e-15 where two readings of one plane differ in the
+    // last bit) is not booked as cut or fill. The volumes are not rounded.
+    double fillArea = 0.0;
     std::size_t overlayTriangleCount = 0; // triangles of the overlay inside the common area
 };
 
@@ -149,6 +154,14 @@ stockpileVolume(const TinSurface& surface, const katana::geometry::Polyline2& bo
 // difference at its centre (the midpoint rule). Converges on the exact
 // answer as the cell shrinks; on a surface whose ridges run through cells it
 // is out by a known amount (docs/volumes.md, "The grid method").
+//
+// A centre on a polygon's edge is inside it (OverlayRegion::contains), so a
+// cell centred on an edge two polygons share belongs to both: lots measured
+// one at a time and summed would count that line of cells twice (+432 m3 of
+// cut on a site of four quadrants). Measuring several polygons, each is given
+// the polygons before it as `claimed`, and a cell any of them holds is left
+// to the first that did: the cells counted, summed over the polygons, are the
+// cells of their union, each once.
 struct GridVolume {
     double cut = 0.0;  // existing above design, as SurfaceComparison
     double fill = 0.0;
@@ -167,8 +180,13 @@ inline constexpr std::uint64_t kMaxGridVolumeCells = 25'000'000;
 // positive, or a grid of more than kMaxGridVolumeCells. Surfaces with no
 // ground in common count no cells. The same bits at any thread count: rows of
 // cells are summed in fixed blocks combined in order.
+//
+// `claimed`: regions whose cells are already counted (the polygons measured
+// before this one). A cell whose centre any of them holds, the boundary
+// included, is not counted again. Empty: none.
 [[nodiscard]] katana::core::Result<GridVolume>
 gridVolume(const TinSurface& existing, const TinSurface& design, double cell,
-           const OverlayRegion* region = nullptr, katana::core::TaskPool* pool = nullptr);
+           const OverlayRegion* region = nullptr, katana::core::TaskPool* pool = nullptr,
+           std::span<const OverlayRegion> claimed = {});
 
 } // namespace katana::terrain

@@ -84,7 +84,9 @@ class TemplatePreview final : public QWidget {
     explicit TemplatePreview(QWidget* parent) : QWidget(parent)
     {
         setObjectName("roadTemplatePreview");
-        setMinimumHeight(150);
+        // A drawing of a typical section reads at this height; the grids
+        // above it are the dialog's purpose and get the room (kGridRows).
+        setMinimumHeight(110);
     }
 
     void setTemplate(std::optional<road::RoadTemplate> roadTemplate)
@@ -193,6 +195,25 @@ class TemplatePreview final : public QWidget {
 enum ComponentColumn { CSide, CName, CKind, CWidth, CCrossfall, CLayer, CDetail };
 enum CourseColumn { KName, KThickness, KMaterial, KIfc };
 
+// The height a grid needs to show `rows` rows under its header, and half a
+// row more: the header's height once the style has polished it may differ a
+// little from the hint it has now, and a part-row at the foot says that the
+// grid scrolls. Left to the layout, a template's twelve components and a
+// lane's three courses were each shown through a single row at the dialog's
+// opening size: the template list, the preview (at its own minimum) and six
+// rows of controls took the room.
+int heightForRows(const QTableWidget& grid, int rows)
+{
+    const int row = grid.verticalHeader()->defaultSectionSize();
+    return grid.horizontalHeader()->sizeHint().height() + rows * row + row / 2 +
+           2 * grid.frameWidth();
+}
+
+// Rows of each grid the dialog always leaves room for. A dialog taller than
+// the screen is fitted to it by the application (screen_fit.hpp), which scrolls
+// what does not fit, so asking for this is safe on a laptop.
+constexpr int kGridRows = 4;
+
 } // namespace
 
 struct RoadTemplateManagerDialog::Impl {
@@ -224,7 +245,17 @@ struct RoadTemplateManagerDialog::Impl {
     std::set<int> editedComponents;
     std::set<int> editedCourses;
     std::optional<road::RoadTemplate> filledFrom;
-    QString filledComponent;
+    // What the courses grid shows: of which template, of which component of
+    // it, and those courses as the drawing held them. The component's
+    // reference alone (left:lane) is the same in every template that has
+    // one, so it cannot tell a grid filled from another template's from one
+    // that is still current.
+    struct FilledCourses {
+        std::string templateName;
+        QString ref;
+        std::vector<road::PavementCourse> courses;
+    };
+    std::optional<FilledCourses> filledCourses;
 
     [[nodiscard]] bool alive() const { return watcher != nullptr && watcher->documentAlive(); }
 
@@ -347,6 +378,7 @@ void RoadTemplateManagerDialog::Impl::build()
     components->setEditTriggers(QAbstractItemView::DoubleClicked |
                                 QAbstractItemView::EditKeyPressed |
                                 QAbstractItemView::AnyKeyPressed);
+    components->setMinimumHeight(heightForRows(*components, kGridRows));
     upperLayout->addWidget(components, 1);
     auto* componentRow = new QHBoxLayout;
     auto* applyComponentsButton = road_ui::button(
@@ -381,9 +413,9 @@ void RoadTemplateManagerDialog::Impl::build()
     auto* keysRow = new QHBoxLayout;
     keys = road_ui::field(
         "roadTemplateComponentKeys", "shape=kerbgutter height=0.15  |  cut=2 fill=4 benchheight=",
-        "key=value for the chosen component: a kerb's shape height depth gutter gutterfall "
-        "material, a drain's depth, a batter's cut fill maxwidth benchheight benchwidth, "
-        "colour=, superelevated=on|off, name=",
+        "key=value for the chosen component: a kerb's shape faces (inward, or outward for a "
+        "median's kerb) height depth gutter gutterfall material, a drain's depth, a batter's "
+        "cut fill maxwidth benchheight benchwidth, colour=, superelevated=on|off, name=",
         upper);
     auto* setKeysButton =
         road_ui::button("Set", "roadTemplateSetKeys", "ROADTEMPLATE SET with these keys", upper);
@@ -399,6 +431,7 @@ void RoadTemplateManagerDialog::Impl::build()
                              {"Course", "Thickness (m)", "Material", "IFC type"}, upper);
     courses->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed |
                              QAbstractItemView::AnyKeyPressed);
+    courses->setMinimumHeight(heightForRows(*courses, kGridRows));
     upperLayout->addWidget(courses, 1);
     auto* courseRow = new QHBoxLayout;
     auto* applyCoursesButton =
@@ -445,7 +478,10 @@ void RoadTemplateManagerDialog::Impl::build()
     // ---- what each does ---------------------------------------------------------------
     connect(list, &QTableWidget::itemSelectionChanged, [this] {
         if (!loading) {
+            // Another template: the edits made to the last one's grids are
+            // not edits of this one.
             editedComponents.clear();
+            editedCourses.clear();
             fillComponents(true);
         }
     });
@@ -582,16 +618,20 @@ void RoadTemplateManagerDialog::Impl::applyComponents()
         road_ui::setStatus(status, "Nothing is edited to apply.", false);
         return;
     }
-    // Every row checked before any line runs, so a cell that is not one
-    // number refuses the whole Apply rather than half of it.
-    QStringList lines;
+    // ONE line for every edited row, a group each (ROADTEMPLATE SET <t> <c>
+    // key=value ... <c> key=value ...): one undo step, and a value the verb
+    // refuses - a width of 0 - changes none of the rows, where a line a row
+    // left the rows before it applied. A cell that is not one number is
+    // refused here, before the line is built, naming it.
+    QString line = "ROADTEMPLATE SET " + *word;
+    bool any = false;
     for (const int row : editedComponents) {
         if (components->item(row, CSide) == nullptr) {
             continue;
         }
         const QString ref =
             components->item(row, CSide)->text() + ":" + components->item(row, CName)->text();
-        QString line = "ROADTEMPLATE SET " + *word + " " + ref;
+        QString group = ref;
         for (const auto& [column, key] :
              {std::pair{CWidth, QString("width")}, std::pair{CCrossfall, QString("crossfall")}}) {
             const QTableWidgetItem* item = components->item(row, column);
@@ -605,21 +645,25 @@ void RoadTemplateManagerDialog::Impl::applyComponents()
                                    true);
                 return;
             }
-            line += " " + key + "=" + item->text().trimmed();
+            group += " " + key + "=" + item->text().trimmed();
         }
         const auto layer =
             road_ui::option(status, "layer", components->item(row, CLayer)->text().trimmed());
         if (!layer) {
             return;
         }
-        line += " " + *layer;
-        lines << line;
+        line += " " + group + " " + *layer;
+        any = true;
     }
-    for (const QString& line : lines) {
-        if (!road_ui::run(context.run, status, line)) {
-            reload();
-            return;
-        }
+    if (!any) {
+        road_ui::setStatus(status, "Nothing is edited to apply.", false);
+        return;
+    }
+    // Refused: the template is as it was, so the reload keeps the edits for
+    // the person to correct.
+    if (!road_ui::run(context.run, status, line)) {
+        reload();
+        return;
     }
     editedComponents.clear();
     reload();
@@ -636,7 +680,10 @@ void RoadTemplateManagerDialog::Impl::applyCourses()
         road_ui::setStatus(status, "Nothing is edited to apply.", false);
         return;
     }
-    QStringList lines;
+    // One line for every edited course, as applyComponents does: ROADTEMPLATE
+    // COURSE <t> <c> SET <course> key=value ... <course> key=value ...
+    QString line = "ROADTEMPLATE COURSE " + *word + " " + ref + " SET";
+    bool any = false;
     for (const int row : editedCourses) {
         if (courses->item(row, KName) == nullptr) {
             continue;
@@ -655,15 +702,17 @@ void RoadTemplateManagerDialog::Impl::applyCourses()
         if (!material || !ifc) {
             return;
         }
-        lines << "ROADTEMPLATE COURSE " + *word + " " + ref + " SET " +
-                     courses->item(row, KName)->text() + " thickness=" + thickness + " " +
-                     *material + " " + *ifc;
+        line += " " + courses->item(row, KName)->text() + " thickness=" + thickness + " " +
+                *material + " " + *ifc;
+        any = true;
     }
-    for (const QString& line : lines) {
-        if (!road_ui::run(context.run, status, line)) {
-            reload();
-            return;
-        }
+    if (!any) {
+        road_ui::setStatus(status, "Nothing is edited to apply.", false);
+        return;
+    }
+    if (!road_ui::run(context.run, status, line)) {
+        reload(); // refused, so nothing changed: the edits stay for the person to correct
+        return;
     }
     editedCourses.clear();
     reload();
@@ -762,14 +811,21 @@ void RoadTemplateManagerDialog::Impl::fillCourses()
     const QString ref = chosenComponent();
     const road::Component* chosen =
         roadTemplate != nullptr ? component(*roadTemplate, ref) : nullptr;
-    if (!editedCourses.empty() && ref == filledComponent && chosen != nullptr) {
+    // Unapplied edits survive only a reload that changed nothing the grid
+    // shows: the same template, the same component and the same courses. An
+    // undo, a typed line or an opened project that changed them shows what
+    // the drawing holds, as the components grid does (fillComponents).
+    if (!editedCourses.empty() && chosen != nullptr && filledCourses &&
+        filledCourses->templateName == roadTemplate->name && filledCourses->ref == ref &&
+        filledCourses->courses == chosen->courses) {
         return;
     }
     loading = true;
     courses->setRowCount(0);
     editedCourses.clear();
-    filledComponent = ref;
+    filledCourses.reset();
     if (chosen != nullptr) {
+        filledCourses = FilledCourses{roadTemplate->name, ref, chosen->courses};
         for (const road::PavementCourse& course : chosen->courses) {
             const int row = courses->rowCount();
             courses->insertRow(row);

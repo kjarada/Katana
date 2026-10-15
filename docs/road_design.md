@@ -54,19 +54,65 @@ superelevated lane being the common cases; outward percent is the one sign
 for all of them.
 
 **A kerb is a shape, not a width** (`road::kerbShape`). Its columns run out
-from the lip - the pavement's edge - at each change of its top, with a level
-base `depth` under the lip:
+from the lip - the pavement's edge - at each change of its top, with a base
+`depth` under the lip: level under a barrier or a mountable kerb, following
+the channel under a kerb and gutter (`depth` below the lip at the lip, then
+`depth` below the invert from the invert on), and `depth` below the top, at
+its crossfall, under an edge strip:
 
 | Shape | Profile | Defaults |
 |---|---|---|
 | barrier | the face `height` high, battered 1 in 6, then `width` of top | 150 mm face, 150 mm top, 150 mm deep |
 | mountable | the face rising `height` over 1.5 x height, then `width` | 100 mm face in the divided road |
 | kerbgutter | the gutter `gutter` wide falling `gutterfall` %, then a barrier face | 300 mm gutter at 6 % |
-| edgestrip | flush: `width` at the component's crossfall, `depth` thick | 300 mm by 150 mm |
+| edgestrip | flush: `width` at the component's crossfall, `depth` thick | 150 mm by 150 mm |
 
 The face is never vertical: a vertical face gives the finished surface two
 levels at one point, which a TIN cannot hold, and the 1 in 6 batter reads as
-upright at any scale a road is drawn at.
+upright at any scale a road is drawn at. (The edge strip's default was written
+as 300 mm wide; the code has always made it 150 mm, one default width for
+every shape, and a shape given after a width cannot change it without the
+verb knowing the order of its keys - the document was wrong, not the code.)
+
+**A kerb faces one way** (`Component::faces`, `faces=inward|outward`, inward
+by default). The shapes above are a kerb on the outer edge of a carriageway:
+the lip is on the carriageway's side and the kerb rises going outward, so its
+face looks in, at the traffic. A median's or an island's kerb is the other
+way round - highest against the median, falling going outward to its lip at
+the carriageway - and is the same shape seen from its other end
+(`faces=outward`): its columns run from the back, its levels are measured
+from the back's top, and its base stays `depth` under the lip. The divided
+road's median kerb faces outward, so its lanes start 100 mm under the median's
+top and the profile is the top of the median. (Facing the way a roadside kerb
+does, the lanes started 100 mm ABOVE the profile and the kerb's face looked
+into a depressed median; the solid, the IfcKerb and every level outside the
+median were wrong with it. The offsets and levels, worked by hand, are
+`RoadSection.TheDividedRoadsLanesSitUnderTheMedianAndItsKerbFacesTheTraffic`.)
+An outward kerb's points are `<side>/<kerb>/face` (the crest of the face), `invert` for a
+kerb and gutter, and `lip`, where an inward kerb's are `face`, `invert` and
+`back`. An edge strip has no face and is refused with `faces=outward`.
+*Rejected:* lifting the median by the kerb's height so the lanes sit on the
+profile - a component cannot start above the design level its side starts at;
+and a negative `height` for a falling kerb - one number for two things, and
+the base would need its own sign rule.
+
+**Limits.** `road::checkTemplate` refuses what would make a section cost the
+session: a width, depth, thickness or maximum batter width over 1 000 m
+(`road::kMaximumComponentLength`), and a batter that would make more than 100
+benches across its maximum width (`road::kMaximumBenches`: the reach divided
+by the bench period, a bench height of the flatter slope's run plus the flat).
+The first is a sanity bound with no standard behind it: a section is sampled
+every half metre across its whole span, so a width typed in the wrong unit
+cost time linear in it and, past 4.5e15 m where adding 0.5 no longer moves a
+double, never ended. The second keeps a bench every millimetre (a typo) from
+hanging the build: each bench is two named points a section and the cut and
+fill areas cost more than linearly in a section's points. *Rejected:* a floor
+on the bench's size (say 10 mm) - the cost is the number of benches, which
+depends on the reach too, and a 0.1 m reach with a 50 mm bench is a few
+points; and a linear merge-walk in `areaBetween` instead - the bound already
+keeps a section to a few hundred points. The refusal reaches every route a
+template takes into the drawing: the verbs, the JSON read back with a project,
+and a section or corridor being built.
 
 ### Defaults, and where they come from
 
@@ -94,8 +140,8 @@ edits them. Each is of the order the guide named gives, not a design:
 each side the mirror of the other: **rural two-lane** (3.5 m lane, 2 m sealed
 shoulder, table drain, batter), **urban street** (3.3 m lane, 2.3 m parking
 lane, kerb and gutter, 1.5 m footpath, 1 m verge, batter) and **divided road**
-(2 m median each side, mountable kerb, two 3.5 m lanes, 2.5 m shoulder,
-batter).
+(2 m median each side, mountable kerb facing outward, two 3.5 m lanes, 2.5 m
+shoulder, batter; its profile is the median's top).
 
 ## Corridors
 
@@ -106,7 +152,11 @@ at (10 m by default), REGIONS where another template applies, and the
 SUPERELEVATION table.
 
 **Superelevation** is a table of stations, each with the crossfall of the
-superelevated components (lanes and shoulders by default) on each side,
+superelevated components (lanes and shoulders by default; any component that
+has a crossfall - a footpath, a verge, a median, a table drain, an edge strip
+between superelevated lanes and shoulders - may be set `superelevated=on`; a
+barrier, mountable or kerb-and-gutter kerb has its own shape and no crossfall,
+and a template that marks one is refused) on each side,
 outward percent: (+6, -6) is full superelevation falling to the right, for a
 curve to the right. Between two entries it is linear; outside the table each
 component keeps its template crossfall. A table is entered as a
@@ -145,10 +195,14 @@ columns.
 **The batter** starts at the hinge, the last finished point, and is marched
 out to the target surface exactly as the old corridor's daylight was:
 half-metre steps until the batter and the ground change order, then forty
-bisections (`docs/cad.md`, "Corridor quantities"). Benches are flats of their
-width every bench height of rise or fall. A batter that meets no ground
-within its maximum width - or meets no surface at all - leaves its side NOT
-REACHED and the section incomplete; its pavement is still built.
+bisections (`docs/cad.md`, "Corridor quantities"). The last step is the
+maximum width itself, so a limit that is not a multiple of half a metre - or
+is under half a metre - still finds a daylight inside it
+(`RoadSection.ABatterLimitThatIsNotAMultipleOfAStepStillFindsADaylightInsideIt`).
+Benches are flats of their width every bench height of rise or fall. A batter
+that meets no ground within its maximum width - or meets no surface at all -
+leaves its side NOT REACHED and the section incomplete; its pavement is still
+built.
 
 **The formation** - the subgrade - is the bottom of each component's courses,
 a kerb's base, the top of what has no courses, and then the batter. Where two
@@ -165,6 +219,18 @@ metre-deep pavement, and the tests work it in by hand
 the subgrade surface then lies below the shallower courses for the whole of
 its width.
 
+A side that is nothing but its batter (a ramp's open edge, an embankment of
+two slopes) has no component to put a point on the line, so its formation
+starts at the hinge - the centreline at the design level, coded
+`<side>/batter/hinge` - and meets the other side's first point at the
+centreline as two components meet: one point when the levels agree, else the
+shallower corner stepped 1 mm. Before this the line ran straight from that
+side's daylight to the other side's first point and the triangle under the
+batter was left out of the cut and fill, the earthworks solids and the
+subgrade
+(`RoadSection.ASideOfABatterAloneStartsItsFormationAtTheHingeAndMeasuresTheTriangleUnderIt`,
+`CorridorObjects.AnEmbankmentOfBattersAloneIsTheTrianglesUnderTheirSlopesAndItsSubgradeRises`).
+
 **Earthworks** are between the formation and the ground across the section:
 CUT where the ground is above it - the pavement box is cut - and FILL where
 it is below, each side's split at the centreline. Along the run they are
@@ -172,6 +238,45 @@ measured by the AVERAGE END AREA between two complete sections, as
 `corridorQuantities` always measured them, and for the reason it gives: it is
 the method specifications and measurement standards name. An interval
 touching an incomplete section adds nothing, and the count is a problem.
+
+A side has cut (or fill) at a section only where the ground and the formation
+are more than 0.1 mm apart (`math::tolerance::kCoordinate`, the TIN's
+duplicate tolerance) at some point of the stretch: `RoadSection::leftCutSpans`
+and its three kin hold those stretches, out from the centreline, found
+exactly where the two lines cross between the ground samples. A side with none
+has an area of exactly zero. The daylight is bisected to about 1e-13 m, so it
+lands on either side of the ground by that much, and the other kind of
+earthworks was a sliver of 1e-26 m2 that "area > 0" took for a solid: a
+full-length cut object beside a road in fill. *Rejected:* a volume
+threshold on the object (1e-6 m3 or so) - the area is the thing wrong, and
+`built.cut` and `CORRIDOR SECTION` would still carry it. The price: a sheet
+of earthworks thinner than 0.1 mm over a wide road is left out (0.05 mm over
+a 30 m width and 100 m is 0.15 m3).
+
+**Where two runs meet** - a region's start or end - each run has a section of
+its own at the station, built with its own template (`RoadSection::run` tells
+them apart). The solids are lofted per run, so they step there. The strings
+and the surfaces do the same: `road::corridorSections` lists both sections,
+every string breaks at the join and runs over its own run's stations (a code
+only the region has is one string from the region's start to its end, not
+from one interval after), and a surface lays the later run's section 1 mm on
+(`kFaceRun`, the formation's device across an offset) so that the TIN, which
+holds one level at a point, has a near-vertical face there and each template's
+own surface either side of it. The strings end at the join, so nothing but the
+Delaunay rule would keep the TIN from joining the earlier run's last interval to
+the points a millimetre on - and it did, blending the two over that interval (9.793
+at 6 m out, 35 m along the rural-urban test road, where the rural surface is
+9.585) - so the two sections of a join are breaklines as well
+(`sectionsSurface`; a section across the road, its vertices the strings' own).
+Before, the later run's section at the join was
+dropped for the earlier run's: a region's own codes lost their first interval,
+a region one interval long lost its strings altogether, a code both templates
+have was joined across the change, and the surface blended the two templates
+over the interval beside each join, so it disagreed with the solids and the
+region (0.17 m low on a kerb inside a region, 0.21 m high on a drain just after
+it). *Rejected:* one section standing for the station, taken from the run
+that is longer or the later one - either way the other template's last
+interval is drawn with the wrong section.
 
 **One engine.** `cad::corridorSection`, `corridorQuantities` and
 `corridorSurface` (`include/katana/cad/corridor.hpp`) are this engine run on
@@ -181,6 +286,13 @@ first in their old words. Their tests (`tests/cad/test_corridor.cpp`) are
 unchanged and are the check that the engine is the old one where the two
 meet. The only difference: their stations now include the alignment's key
 stations as well as the profile's.
+
+**The target surface is named as the drawing spells it.** A corridor typed with
+`surface=GROUND` over a surface `ground` builds against it (the lookup ignores
+case), and its cut's `Target Surface` is `ground`, the name the IFC export
+finds the ground by, exactly: otherwise it did not find it and wrote a second,
+empty TERRAIN element, voided by the cuts, beside the real one
+(`RoadVerbs.ACorridorsEarthworksNameTheSurfaceAsTheDrawingSpellsItWhateverWasTyped`).
 
 **What it cannot build it says.** `road::BuiltCorridor::problems` lists,
 a sentence each: an alignment, a design profile, a template or a surface the
@@ -196,8 +308,10 @@ its objects (`include/katana/cad/bim/bim_object.hpp`):
 
 - a closed solid per COURSE of each component, per side, per run;
 - one per KERB per side per run;
-- the earthworks CUT and FILL of each side of each run, over each stretch of
-  complete sections; none where there is none.
+- the earthworks CUT and FILL of each side of each run: a closed solid for
+  each PIECE - a stretch of stations where that side has any (see above),
+  inside a stretch of complete sections, with the one section beyond each end
+  where its end area tapers to nothing. None where there is none.
 
 **A closed solid** (`road::loftSolid`): the solid's columns at each station
 give a top and a bottom face, the first and last column an inner and an
@@ -208,7 +322,12 @@ consistently turned. Which way that turns depends on the side (offsets grow
 to the left, so the right side's solids are mirror images): it is turned
 outward by the sign of the volume it encloses. An earthworks solid has
 `road::kEarthworksColumns` (41) columns a side - its look, not its quantity -
-and where it has no thickness its faces have no area, which leaves it closed.
+spread from where its earthworks start across each section to where they end,
+not from the centreline to the daylight: a fill beside a road in cut is no
+sheet laid over the whole half-section. Where a section's earthworks have a
+gap in them (cut, fill, cut across one section) the columns span the gap with
+no thickness, and its faces there have no area, which leaves the solid
+closed.
 
 **Object ids** are stable - the IFC export derives each GlobalId from one,
 and a model handed over twice must name the same things the same way:
@@ -217,7 +336,18 @@ and a model handed over twice must name the same things the same way:
     corridor/<corridor>/<side>/<component>/<run>                  a kerb
     corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]
 
-`<piece>` only from the second stretch of complete sections in a run.
+No component can be named `earthworks`, in any case (`checkTemplate`): the
+earthworks' ids are `corridor/<c>/<side>/earthworks/cut|fill/<run>`, and a
+component of that name with a course called `cut` or `fill` made the same id,
+which the IFC export answers by keeping the first element and skipping the
+later (the cut itself). Every other id differs in length or in a word no name
+can be (a run number, a `-<piece>`).
+
+`<piece>` only from the second piece of that kind and side in a run, counted
+in station order over the pieces made: a fill that ends along the road and
+begins again is `fill/1` and `fill/1-2`. A piece is a stretch of stations
+over which that side has cut (or fill), inside a stretch of complete sections
+(`CorridorObjects.EarthworksSplitWhereTheirThicknessEndsAndTheSecondPieceCarriesItsNumber`).
 
 **IFC classes**, as the IFC export reads them (`docs/ifc.md`): a pavement,
 verge, median or drain course is an IfcCourse of its course's type (PAVEMENT
@@ -229,17 +359,34 @@ IfcEarthworksCut CUT or an IfcEarthworksFill EMBANKMENT, the cut carrying the
 `Target Surface` property the export reads. The facility is the corridor; the
 part is an IfcRoadPartTypeEnum word.
 
-**Quantities**, named as IFC's base quantities are, units m, m2, m3:
+**Quantities**, units m, m2, m3, named by one scheme for every object (Length, Width, Depth, Height,
+GrossArea, GrossVolume). The IFC export (`docs/ifc.md`) writes each under the
+name its class's base quantity set gives it where that differs: a course's
+Depth is its Thickness, a kerb's GrossVolume its Volume, an earthworks cut's
+its UndisturbedVolume and a fill's its CompactedVolume (the in-place volume
+the end areas measure); what the set has no name for - an earthworks object's
+GrossArea - stays in `Katana_Quantities`. Renaming at the builder instead would
+have changed CORRIDOR QUANTITIES, its CSV and ROADMODEL JSON, which total by
+these names (`IfcExportRoad.TheRoadModelsQuantityNamesAreWrittenAsTheirClassesBaseQuantitiesNameThem`).
 
 | Object | Length | Width | Depth / Height | GrossArea | GrossVolume |
 |---|---|---|---|---|---|
 | course | the run's stations | the component's | Depth: its thickness | its plan outline | the solid's own volume |
-| kerb | its lip line in plan | the shape's | Height: its face | - | the solid's own volume |
-| earthworks | the stretch's stations | - | - | its plan outline | end area |
+| kerb | its lip line in plan | the shape's | Height: its face (an edge strip is flush and has none: Depth, its thickness) | - | the solid's own volume |
+| earthworks | the piece's stations | - | - | its footprint's plan area | end area |
+
+An earthworks object's GrossArea is the plan area of its footprint: its plan
+outline runs from where the earthworks start to where they end across each
+section, narrowing to a point over the last interval where the end area
+tapers to nothing (as the average-end-area volume does), so on a straight a
+side's cut and fill add up to the side's footprint
+(`CorridorObjects.ASideWithCutAndFillGivesEachItsOwnFootprintAndTheTwoAddUpToTheSide`).
+A section with the earthworks in two separate stretches draws and measures
+their hull.
 
 A course's volume is the SOLID'S, so the model and its quantity agree and a
 course on the outside of a curve - longer than the centreline - is measured
-as the longer thing it is. The earthworks' is the END AREA, the measurement
+as the longer thing it is (to the chords between its sections: Not done). The earthworks' is the END AREA, the measurement
 standard, as above; the solid drawn for them differs from it by the corners
 its 41 columns cut, which the tests work out by hand
 (`CorridorObjects.TheEarthworksAreTheEndAreasTheOldAssemblyMeasured`).
@@ -255,10 +402,17 @@ as the Cut Fill surface style draws them.
 path the drawing has decides, so "road" switched off hides everything under
 it even before "road/pavement" is made, and a path the drawing has none of
 is drawn - an object is not an entity and is drawn in its own colour. A view
-that hides a layer of its own hides its objects there. `CORRIDOR NEW` makes
-the layers its objects are on in the same undo step, `road/earthworks/cut`
-switched OFF: a cut is the ground taken away, and drawn solid it would bury
-the road it was taken away for.
+that hides a layer of its own hides its objects there: a plan view through
+`isShown` with its overrides, a 3D view through `SceneMesh::layer`, which
+`bim::sceneMeshes` fills and `RenderViewWidget::shownMeshes` tests against the
+view's own hidden layers. The window makes ONE list of meshes for every 3D
+view, with the drawing's layers only. *Rejected:* a list for each view, a copy
+of every mesh a view for the sake of a layer hidden in one; a view that hides
+none of the meshes uses the window's list as it is, and copies nothing
+(`RoadWorkbench.AThreeDViewThatHidesALayerOfItsOwnDoesNotDrawTheRoadObjectsOnIt`).
+`CORRIDOR NEW` makes the layers its objects are on in the same undo step,
+`road/earthworks/cut` switched OFF: a cut is the ground taken away, and drawn
+solid it would bury the road it was taken away for.
 
 ## Kept with the project
 
@@ -288,11 +442,19 @@ costs nothing (below).
 once per change of what it is made from, in two halves: the corridors' on the
 two keys' text, the alignments' revision and the surfaces' generation - so a
 line drawn does not rebuild them - and the placed objects' on their key and
-every step, since an object may stand on a drawn line. A half made again that
-equals what it replaced keeps the old one, so the model a view holds is the
-same object until something in it changes
-(`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`).
-The views call it every paint; the comparison is a few kilobytes of text.
+every step. (That is wider than they need: they read only their key, the
+alignments and the surfaces, and a line is copied into an object, never
+followed - `road_objects.md`, "Not done".) A half made again that equals what
+it replaced keeps the old one - BOTH halves, the corridors' too: the
+alignments' revision and the surfaces' generation move for an alignment or a
+surface no corridor uses, and a model handed to the views as a different
+object made every 3D view build its terrain again - so the model a view holds
+is the same object until something in it changes
+(`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`,
+`RoadVerbs.TheRoadModelIsTheSameObjectAfterAnEditThatLeftItAsItWas`). The
+views call it every paint; while nothing it is made from moved that is a few
+counters and two texts, and a half made again is compared with the old one
+(vertex for vertex) only after a key moved.
 
 ## The verbs
 
@@ -302,9 +464,9 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     ROADTEMPLATE [LIST] [JSON] | INFO <t> | DEFAULTS | SECTION <t>
     ROADTEMPLATE NEW <t> [FROM <t>] [description=] | DELETE <t> | RENAME <t> <new>
     ROADTEMPLATE ADD <t> left|right|both <kind> [name=] [at=<n>] [key=value ...]
-    ROADTEMPLATE SET <t> <component> key=value ... | REMOVE <t> <component>
+    ROADTEMPLATE SET <t> <component> key=value ... [<component> key=value ...] | REMOVE <t> <component>
     ROADTEMPLATE COURSE <t> <component> ADD <course> thickness= [material=] [ifc=] [colour=] [at=]
-    ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... | REMOVE <course>
+    ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... [<course> key=value ...] | REMOVE <course>
     CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
     CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=]
     CORRIDOR SET <c> key=value ... | DELETE <c> | RENAME <c> <new>
@@ -312,12 +474,27 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR
     CORRIDOR BUILD <c>|ALL | SECTION <c> <station>
     CORRIDOR STRINGS <c> [layer=] [PREVIEW] | SURFACE <c> [finished=] [subgrade=] [PREVIEW]
-    CORRIDOR QUANTITIES <c>|ALL [csv=<file>]
+    CORRIDOR QUANTITIES <c>|ALL [csv=<file> [OVERWRITE]]
     ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>
 
 A `<component>` is `side:name` or `name`, every side that has one. A
 component goes before its side's batter, or at `at=`; a second of a name is
 `name2`. Words are case-insensitive, names found ignoring case.
+
+**SET takes any number of groups.** `ROADTEMPLATE SET <t> left:lane width=3.25
+right:lane width=3.75` and `ROADTEMPLATE COURSE <t> left:lane SET AC14
+thickness=0.06 base thickness=0.3` apply every group to ONE copy of the
+template and commit it once: one undo step, and a value the template refuses -
+a width of 0, a thickness of 0 - in any group, an unknown component or course,
+or a group with no `key=value`, refuses the whole line and changes nothing. A
+word that is not `key=value` starts the next group, and names its component
+(or course) as the groups before it left it, as the same lines typed one
+after another would. This is what the Road
+Template Manager's Apply sends for a grid of edited rows. *Rejected:* one line
+a row, as the first version did - N undo steps for one user edit, and a
+template half applied when a later row was refused (the earlier rows had
+committed); and a verb of its own for the grid, a second way to do what SET
+does.
 
 **Replies** are records, key=value, one a line. A definition's numbers are
 written exactly (`core::formatExactReal`), so a value a reply prints can be
@@ -331,14 +508,56 @@ read, `InvalidArgument` for a template or corridor that cannot be built
 use, `InvalidState` for definitions that cannot be read. A template a
 corridor uses is not deleted from under it.
 
+**Absent is not zero.** A reply writes a quantity it did not measure empty, as a
+corridor's own `from=` and `to=` are when it gives none: `BUILD` and
+`QUANTITIES` leave `from= to=` empty for a corridor that could not be built
+(no alignment, a range off it - station 0 is a real station) and `cut= fill=
+net=` empty for one with no target surface, or whose alignment, profile or
+surface the drawing lacks (a road measured to have no cut says `cut=0.000`);
+a `total` leaves `length=`, `area=` or `volume=` empty when no object of its
+kind carries one (a kerb has no area). The dialog says "not measured".
+(`BuiltCorridor::hasRange` and `hasEarthworks` carry it.)
+
+**A key a component does not keep is refused.** `ROADTEMPLATE ADD` and `SET`
+take the keys the component's kind keeps (`road::componentKeys`, what its
+JSON writes): a lane has no `material=`, a batter no `width=`. Before, the
+key was read, the JSON came out as it was, no step was made, and the reply
+said "updated". The refusal is a `ParseFailure` naming the kind's keys.
+
+**`CORRIDOR SECTION` is refused outside the corridor's stations** (its
+`from=` to `to=` held to the alignment and the profile, `road::corridorRange`,
+the range `BUILD` uses): a section at 90 on a corridor of 20 to 60 looked
+built and was not part of anything.
+
+**`CORRIDOR PROBLEMS` and the problems of `QUANTITIES ALL` are the corridors'**
+(and the road templates' and corridors' own read problems): a placed road
+object's ("object <id>") are in `ROADMODEL PROBLEMS` with them. **`ROADTEMPLATE
+DELETE` and `CORRIDOR BUILD ALL` refuse when the corridors cannot be read**,
+as `RENAME` and `LIST` do: an empty set would say that none uses the template.
+
+**`QUANTITIES csv=`** writes through the one CSV writer of the report verbs
+(`cad::writeCsvTable`, shared with VOLUME): RFC 4180, records ending in CRLF,
+and a file already there is only replaced with the word `OVERWRITE` (the
+dialog has a box for it). Before, it was a copy that replaced silently and
+ended records in LF.
+
 **STRINGS** draws each code's points along the corridor as a 3D polyline
 (`entity::setHeights`) on `road/strings`, marked `road.corridor` and
 `road.string`, replacing in the same step the strings that corridor made
-before and nothing else. **SURFACE** puts the finished surface and the
+before and nothing else - found by its name read ignoring case, as corridors
+are found. `CORRIDOR RENAME` retags the strings with the new name in its own
+undo step (`strings=<n>` in the reply), or the next STRINGS would leave them
+beside a second set and a corridor later given the old name would delete
+them. `CORRIDOR DELETE` leaves its strings in the drawing: they are
+entities a person may have kept; a corridor later made with the same name
+replaces them on its next STRINGS. **SURFACE** puts the finished surface and the
 formation into the drawing's surfaces (`Document::setSurfaces`), as `<c>
 finished` and `<c> subgrade` unless named, replacing surfaces of those names
-in place: every section's points, each code's string as a breakline, the
-outermost points as the boundary. Both have PREVIEW.
+in place: every section's points (the reply's `sections=` counts them, both of
+a join's), each code's string as a breakline, the outermost points as the
+boundary. Both have PREVIEW. A corridor with fewer than two sections (its
+range off its alignment) is refused with its own first problem, as STRINGS
+refuses it, and not blamed on "the ground".
 
 **Scope.** The corridor verbs act on named definitions, not on drawing
 entities, so they take no scope or filter (the scope and filter words are for
@@ -362,14 +581,60 @@ its line and running it through the window's one executor:
 The road objects' items follow, in a section of their own (the road
 objects document, docs/road_objects.md). The dialogs' widgets and what each runs are listed
 in their headers: `src/katana_qt/bim/road_template_manager.hpp` (the templates;
-the components and courses in two grids that are buffers, applied by one SET
-line per edited row, as the Alignment Manager's are; a drawing of the
+the components and courses in two grids that are buffers, each applied by ONE
+line - a group of `key=value` for every edited row - so an Apply is one undo
+step and a refused value leaves the template as it was; a drawing of the
 template across a level road - `road::templateSection` - its courses
 coloured and its vertical exaggerated so a 50 mm course can be seen),
 `src/katana_qt/bim/corridor_dialog.hpp` (the corridors, their regions and
 superelevation, Build, Build Strings, Build Surfaces, and the problems) and
 `src/katana_qt/bim/corridor_quantities_dialog.hpp` (the records of CORRIDOR
-QUANTITIES as a table, Copy and Save CSV; no file dialog in a headless run).
+QUANTITIES as a table, Copy and Save CSV with its Replace box, which adds
+OVERWRITE; no file dialog in a headless run).
+
+**What a dialog shows, and when its buffer is kept.** The dialogs show the
+DOCUMENT's state after an edit, an undo, a redo, New and Open, and keep a
+person's unapplied edits only while what they were made on is as it was:
+
+- *Template Manager.* The components grid keeps its edits across a reload that
+  left the template as it was (`filledFrom`). The courses grid does the same on
+  what it was filled from - the template, the component and the component's
+  courses as the drawing held them - not on the component's reference alone
+  (`left:lane` is in every template that has a lane, so a grid filled from
+  another template's was kept under this one's components and its Apply wrote
+  the stale thickness, material and IFC type to the template chosen second).
+  Choosing another template drops both grids' edits. At its opening size each
+  grid shows four rows and the start of the next (the preview takes less),
+  where it was left with one; a dialog taller than the screen is fitted to it
+  by the application, so no scroll area of its own.
+- *Corridors.* The definition fields (name, alignment, template, surface,
+  interval, from, to) are a buffer, refilled from the corridor when it is
+  chosen and when its stored definition changes, and kept across any other
+  reload: a typed interval survives a line drawn. New and Rename read the name
+  BEFORE the line runs (the reload refilled the field from the corridor still
+  chosen, so New chose the old corridor again and Build, Delete and the rest
+  acted on that one). The combos show the name the corridor holds - found
+  ignoring case, as the verbs find it - or, where the drawing has none (a
+  surface since removed, an alignment that lost its profile), an extra item
+  with that name. `QComboBox::setCurrentText` does neither on a combo that is
+  not editable, and Apply, which writes every key, then re-pointed the corridor
+  to whatever item was showing; Apply now also writes a name in the case the
+  corridor already holds it.
+  `CorridorDialog.ApplyKeepsTheTemplateAndSurfaceACorridorNamesInAnotherCase` and
+  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`.
+- *Corridor Quantities.* The table and the totals are the records of the
+  last line it ran, so when the road model that line read (`bim::bimModel`'s
+  object) is no longer the drawing's - an edit, an undo, a redo, New, Open -
+  they are cleared, the status says to press List Quantities again, and Copy
+  hands out nothing. *Rejected:* running the line again by itself - a CORRIDOR
+  QUANTITIES line in the command log after every edit - and clearing on any
+  change at all, which wiped the listing when a line was drawn.
+- *Opening.* Corridors... and Corridor Quantities... say where an alignment
+  with a design profile is made only when the drawing has no corridor and no
+  such alignment; with a corridor they open whatever became of its alignment,
+  as its problems ("the alignment road has no design profile") are what the
+  Corridors dialog is there to show
+  (`RoadWorkbench.TheCorridorDialogsOpenForCorridorsWhoseAlignmentLostItsProfile`).
 
 **Where the old corridor commands went.** Terrain > Corridor Quantities... and
 Corridor Surface... asked for an alignment, a surface and an assembly in a
@@ -378,7 +643,7 @@ kept, nothing to undo, nothing an agent could reach. They are gone; Terrain's
 Corridors section now shows the BIM menu's Corridors... and Corridor
 Quantities... - the same QAction objects, as File shows the other menus'
 imports - and both still say where an alignment with a design profile is made
-when there is none
+when there is none and no corridor to show
 (`qt_terrain_commands_point_to_the_alignment_manager_headless`). A
 one-carriageway corridor is a template like any other now. The Terrain
 toolbar lost the two buttons, which are the BIM toolbar's.
@@ -417,43 +682,74 @@ class, layer, quantities and properties, and every problem
   exact.
 - `tests/cad/road/test_road_section.cpp`: a street set out at hand-worked
   offsets and levels, its solids, the formation's steps, superelevation at
-  the middle of its transition, batters daylighting on a plane in cut, fill
-  and on sidelong ground, the pavement box cut, benches, refusals.
+  the middle of its transition (and of an edge strip and a drain), batters
+  daylighting on a plane in cut, fill and on sidelong ground, a side of a
+  batter alone, a limit that is not a multiple of a step, the pavement box
+  cut, benches, the divided road's kerb, refusals.
 - `tests/cad/road/test_corridor_objects.cpp`: course volumes on a straight as
   width x thickness x length, every solid closed and turned outward, stable
   ids and IFC classes, a kerb's length and volume, the earthworks against the
-  old assembly's end areas, regions, problems, strings and surfaces.
+  old assembly's end areas and their footprints (a side with cut and fill, a
+  fill that ends along the road, pieces and their ids, no sliver of the other
+  kind), regions, problems, strings and surfaces.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
-  layers, renames, quantities and the CSV, strings, surfaces, the cache, the
-  RoadModel change, the JSON the project keeps.
+  layers, renames, quantities and the CSV, strings, surfaces, the cache (the
+  same object after an edit that left the model as it was), the RoadModel
+  change, the JSON the project keeps; several components or courses set by one
+  line, one step, and a refused value in any group changing none.
 - `tests/cad/test_corridor.cpp`: the old functions, unchanged, on the new engine.
 - `tests/qt_widgets/bim/test_road_dialogs.cpp`: each dialog's lines and the
-  workbench's menu and meshes.
+  workbench's menu and meshes; the dialogs' state across New, Rename, an
+  unrelated command, an undo and a changed drawing (the Corridors dialog's
+  fields and combos, the Template Manager's two grids, the listing of the
+  Quantities dialog); an Apply of several rows as one line; the 3D view's own
+  hidden layers.
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
   window.
-- `src/katana_app/road_cli.cmake`: `katana_cli` end to end, and a road model
+- `src/katana_app/road_cli.cmake`: `katana_cli` end to end, a road model
   saved and read back by another process
-  (`cli.a_saved_road_model_is_read_back_by_another_process`).
+  (`cli.a_saved_road_model_is_read_back_by_another_process`); several
+  components or courses set by one line and taken back by one UNDO, and a
+  refused value stopping the script; and the refusals and replies the review
+  found wrong (a name removed from both sides, a bench too small, a renamed
+  corridor's strings, a section outside the corridor, a CSV replaced only with
+  OVERWRITE).
 - `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`.
 
 ## Not done
 
-- **An earthworks solid with no thickness along a stretch goes to IFC open.**
-  Where cut gives way to fill, or the formation meets the ground, the
-  solid's faces there have no area: the mesh is closed, but the IFC writer
-  drops a face of no area (docs/ifc.md, "Road model"), which leaves its
-  neighbours' edges used once, and it writes the solid as an open face set
-  with a warning. On the sample terrain (`samples/gis/terrain.asc`, the
-  rural two-lane template along a 150 m alignment) that was all four
-  earthworks solids of sixteen objects; every course was closed. The solid
-  should be split where its thickness is zero, into closed pieces.
+- **An earthworks solid still has faces of no area where it tapers to
+  nothing.** The solids are split along the road where a side has none and
+  drawn over the stretch across the section where it has some, but the end
+  section of a piece (the one with none) and a gap inside one section have
+  no thickness: the mesh is closed on its own indices, and the IFC writer
+  judges closure there first and writes it as it is (docs/ifc.md, "Road
+  model"), so the solid goes out Closed with its triangles of no area in it
+  (seen on the rural two-lane tour: every earthworks solid Closed, and
+  `tools/check_ifc.py` with no finding); a viewer that refuses a degenerate
+  triangle would still object. Every course is closed. The piece should end in
+  a real closed taper (a wedge welded to a line), and a section with a gap
+  should be two stretches across.
+- **Course areas and volumes and kerb lengths on a curve are chord
+  approximations.** A course is lofted between sections with flat quads and a
+  kerb's Length sums the chords between sections, so on an arc of radius R a
+  step of arc angle theta (the interval over R) makes areas and volumes short
+  by about theta^2 / 6 and a kerb's length by about theta^2 / 24: 0.65 % and
+  0.16 % for a 10 m interval on R = 50 m (a 90 degree curve, left lane AC14
+  12.450 m3 against 12.531 exact; the interval of 1 m gives 12.531), 0.04 % on
+  R = 200 m. The error is always low and falls with the interval, which the
+  person shortens on a curve as for the volumes (`docs/volumes.md`); the
+  sections could be added inside curves to a stated tolerance
+  (R x sqrt(6 x tolerance)) but that adds earthworks sections too, which the
+  existing station-count tests would have to be reviewed for.
 - Superelevation by design speed and radius: the table is entered by hand.
 - Shoulder rollover on the high side of a superelevated section: a
   superelevated shoulder takes the lane's crossfall.
 - A template that changes width along a run (lane widening, tapers) other
   than by a region of another template, and transitions between regions: a
-  region's ends are steps.
+  region's ends are steps (the solids step, the strings break, the surface
+  has a face 1 mm wide).
 - Daylight to a surface other than the corridor's target per side, and cut
   and fill batters with different benches.
 - Courses under a kerb (its bedding) and a lined table drain's lining as a
@@ -468,7 +764,15 @@ class, layer, quantities and properties, and every problem
   in a window verb): an agent hides the objects by their layers.
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
+- The Road Template Manager's grid has no column for a kerb's facing; the
+  keys field takes `faces=inward|outward`.
 - `ROADTEMPLATE` has no import or export to a file of its own; a project's
   templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
 - The window's Command Reference shows the road verbs in its Commands
   section from the general help, not a section of their own.
+- The corridors are sectioned again when ANY surface changes (the road
+  model's corridor half is keyed on the surfaces' whole generation), though
+  the model comes out the same object when nothing in it moved; keying the
+  half on the surfaces a corridor targets would skip the work as well.
+- Corridor Quantities clears its listing when the road model changes and does
+  not list again by itself: pressing List Quantities is the person's act.

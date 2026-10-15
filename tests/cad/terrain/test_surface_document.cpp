@@ -388,3 +388,122 @@ TEST(SurfaceDocument, AnImportOfEntitiesAndSurfacesIsOneStepThroughTheCommand)
     EXPECT_TRUE(document.surfaces().empty());
     EXPECT_EQ(document.model().entities.size(), 0u);
 }
+
+// ---- text that is not UTF-8, and a style set that is not the form -------------------------
+
+namespace {
+
+// The text of the metadata row `surface_styles` as a saved project holds it.
+std::string storedStyles(const fs::path& project)
+{
+    auto raw = katana::storage::SqliteDatabase::open(project / "project.db");
+    EXPECT_TRUE(raw.ok());
+    auto select = raw->prepare("SELECT value FROM metadata WHERE key = 'surface_styles'");
+    EXPECT_TRUE(select.ok());
+    EXPECT_TRUE(select->step().valueOr(false));
+    return select->columnText(0);
+}
+
+} // namespace
+
+TEST(SurfaceDocument, AStyleSetWhoseTextIsNotUtf8IsRefusedSoASaveNeverMeetsIt)
+{
+    // katana_cli on Windows hands the verbs the ANSI code page: "Pente" with a
+    // degree sign arrives as 0xB0, and "cafe" with an accent as 0xE9. Neither is
+    // UTF-8, and the set is written to the project as JSON, whose writer threw
+    // out of Document::save (a process exit with the session's work lost).
+    const ScratchDirectory scratch("ansi-styles");
+    Document document;
+    ASSERT_TRUE(document.setSurfaces(with({}, "ground", tiltedSquare(0.0))).ok());
+
+    const Status badName = document.setSurfaceStyles(withStyle("Pente\xB0"));
+    ASSERT_FALSE(badName.ok());
+    EXPECT_EQ(badName.error().code, ErrorCode::InvalidArgument);
+
+    SurfaceStyleSet badDescription = withStyle("Fine");
+    badDescription.styles.back().description = "caf\xE9";
+    const Status described = document.setSurfaceStyles(badDescription);
+    ASSERT_FALSE(described.ok());
+    EXPECT_EQ(described.error().code, ErrorCode::InvalidArgument);
+
+    EXPECT_TRUE(document.surfaceStyles() == builtInSurfaceStyles()) << "nothing changed";
+    EXPECT_EQ(document.history().undoCount(), 1u) << "and no step was recorded for it";
+    // The save is therefore still a Status, not an exception.
+    EXPECT_NO_THROW({
+        const Status saved = document.saveAs(scratch.path / "p.katana");
+        EXPECT_TRUE(saved.ok()) << saved.error().describe();
+    });
+}
+
+TEST(SurfaceDocument, ASurfaceNameAnEarlierBuildStoredAsAnsiBytesOrWithAQuoteIsRepairedOnOpen)
+{
+    // Projects the build before this one could write: a name typed at a
+    // katana_cli on Windows (0xE9 for e-acute) and one with a double quote that
+    // an importer let through. Opening must not fail for them - the person could
+    // not rename what a line cannot name - and must not leave a name the JSON
+    // writers throw on.
+    const ScratchDirectory scratch("repair-names");
+    const fs::path project = scratch.path / "old.katana";
+    {
+        Document document;
+        SurfaceStore store = with({}, "ground", tiltedSquare(0.0));
+        store = with(std::move(store), "other", tiltedSquare(1.0));
+        store = with(std::move(store), "clean", tiltedSquare(2.0));
+        ASSERT_TRUE(document.setSurfaces(std::move(store)).ok());
+        ASSERT_TRUE(document.saveAs(project).ok());
+    }
+    {
+        auto raw = katana::storage::SqliteDatabase::open(project / "project.db");
+        ASSERT_TRUE(raw.ok());
+        // X'636166E9' is the four bytes of "caf" and 0xE9, stored as text exactly as
+        // SQLite is given them (it does not check).
+        ASSERT_TRUE(raw->execute("UPDATE surfaces SET name = CAST(X'636166E9' AS TEXT) "
+                                 "WHERE name = 'ground'")
+                        .ok());
+        ASSERT_TRUE(raw->execute("UPDATE surfaces SET name = 'PAD \"A\"' WHERE name = 'other'").ok());
+    }
+    Document document;
+    ASSERT_TRUE(document.open(project).ok());
+    // 0xE9 read as Windows-1252 is U+00E9, UTF-8 C3 A9; the quote an apostrophe.
+    EXPECT_EQ(names(document), (std::vector<std::string>{"caf\xC3\xA9", "PAD 'A'", "clean"}));
+    // And the repaired project is stable: saved and opened again, nothing moves.
+    ASSERT_TRUE(document.save().ok());
+    Document again;
+    ASSERT_TRUE(again.open(project).ok());
+    EXPECT_EQ(names(again), names(document));
+}
+
+TEST(SurfaceDocument, AStyleSetWhoseFormatIsNotAStringLeavesTheBuiltInsInPlaceAndTheTextKept)
+{
+    // A "format" of a number, null, an object or an array made nlohmann's value()
+    // throw type_error.302 out of Document::open (a process exit in katana_cli
+    // and in the window). The documented outcome is the built-ins standing in
+    // with a ParseFailure status and the damaged text kept as it was.
+    const ScratchDirectory scratch("format-type");
+    const fs::path project = scratch.path / "damaged.katana";
+    {
+        Document document;
+        ASSERT_TRUE(document.saveAs(project).ok());
+    }
+    for (const std::string damaged :
+         {R"({"format":5,"version":1,"styles":[]})", R"({"format":null,"version":1,"styles":[]})",
+          R"({"format":{},"version":1,"styles":[]})", R"({"format":["katana-surface-styles"],"version":1})",
+          R"({"format":true,"version":1})", R"([1,2,3])", R"("katana-surface-styles")"}) {
+        {
+            auto raw = katana::storage::SqliteDatabase::open(project / "project.db");
+            ASSERT_TRUE(raw.ok());
+            ASSERT_TRUE(raw->execute("UPDATE metadata SET value = '" + damaged +
+                                     "' WHERE key = 'surface_styles'")
+                            .ok());
+        }
+        Document document;
+        Status opened;
+        EXPECT_NO_THROW(opened = document.open(project)) << damaged;
+        ASSERT_TRUE(opened.ok()) << damaged << ": " << opened.error().describe();
+        ASSERT_FALSE(document.surfaceStylesStatus().ok()) << damaged;
+        EXPECT_EQ(document.surfaceStylesStatus().error().code, ErrorCode::ParseFailure) << damaged;
+        EXPECT_TRUE(document.surfaceStyles() == builtInSurfaceStyles()) << damaged;
+        ASSERT_TRUE(document.save().ok());
+        EXPECT_EQ(storedStyles(project), damaged) << "a set that cannot be read is written back as it was";
+    }
+}

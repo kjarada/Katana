@@ -10,7 +10,9 @@
 #include <string_view>
 #include <utility>
 
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/project_crs.hpp"
+#include "katana/cad/survey_coding.hpp"
 #include "katana/core/text.hpp"
 #include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/ifc/export.hpp"
@@ -118,6 +120,7 @@ bool exportIfc(const katana::cad::Document& document, const katana::ifc::ExportA
     }
     options.exportEntities = arguments.entities;
     options.exportAlignments = arguments.alignments;
+    setLeaderNotes(options, document);
     if (arguments.selected) {
         options.entities = document.selection().ids();
         // An empty list is every entity (ExportOptions::entities): nothing
@@ -282,6 +285,12 @@ katana::ifc::RoadModelInput roadModelInput(const katana::cad::bim::BimModel& mod
                                                       : problem.source + ": " + problem.message);
     }
     return out;
+}
+
+void setLeaderNotes(katana::ifc::ExportOptions& options, const katana::cad::Document& document)
+{
+    options.leaderContext = katana::cad::annotation::leaderContext(document);
+    options.codeProperties = katana::cad::codePropertyCandidates();
 }
 
 std::optional<bool> runIfcVerb(katana::cad::Document& document, std::string_view verb,

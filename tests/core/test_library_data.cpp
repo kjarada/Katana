@@ -32,9 +32,18 @@ TEST(LibraryData, ALoadedLibraryIsFoundByTheStartOfItsFileName)
     const auto system = loadedLibraryPath("libSystem.");
     ASSERT_TRUE(system.has_value());
     EXPECT_TRUE(system->filename().string().starts_with("libSystem."));
+#elif defined(_WIN32)
+    // KERNEL32.DLL is mapped into every Windows process, under an upper-case
+    // name: found by a lower-case or an upper-case prefix alike, as Windows
+    // file names are compared, and not by the program that imports it (the
+    // import-thunk trap library_data.cpp describes).
+    const auto kernel = loadedLibraryPath("kernel32");
+    ASSERT_TRUE(kernel.has_value());
+    EXPECT_TRUE(std::filesystem::exists(*kernel)) << kernel->string();
+    EXPECT_TRUE(loadedLibraryPath("KERNEL32") == kernel);
+    EXPECT_FALSE(loadedLibraryPath("kernel33")); // a prefix of nothing loaded
 #else
-    GTEST_SKIP() << "found by name on Linux and macOS only; Windows finds its DLLs where it needs "
-                    "them";
+    GTEST_SKIP() << "found by name on Linux, macOS and Windows only";
 #endif
 }
 
@@ -52,8 +61,19 @@ TEST(LibraryData, DataBesideALibraryIsTheLibrarysGrandparentJoinedToThePathAsked
     EXPECT_TRUE(std::filesystem::equivalent(*found, real)) << found->string();
 
     EXPECT_FALSE(katana::core::dataBesideLibrary("libc.so", "katana_no_such_directory/x"));
+#elif defined(_WIN32)
+    // The same on Windows, with the one library every process has.
+    const auto kernel = loadedLibraryPath("kernel32");
+    ASSERT_TRUE(kernel.has_value());
+    const std::filesystem::path real = std::filesystem::weakly_canonical(*kernel);
+    const std::filesystem::path relative = real.parent_path().filename() / real.filename();
+    const auto found = katana::core::dataBesideLibrary("kernel32", relative);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_TRUE(std::filesystem::equivalent(*found, real)) << found->string();
+
+    EXPECT_FALSE(katana::core::dataBesideLibrary("kernel32", "katana_no_such_directory/x"));
 #else
-    GTEST_SKIP() << "the C library is found by name on Linux only";
+    GTEST_SKIP() << "the C library is found by name on Linux and Windows only";
 #endif
 }
 

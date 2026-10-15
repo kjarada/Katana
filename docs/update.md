@@ -1612,7 +1612,14 @@ And the engineering decisions, each with what was rejected:
   *Rejected: letting the HTTP library follow them*: it re-sends the
   request's headers wherever it is sent, and GDAL's fetch has no switch to
   stop it. So the project's HTTP layer gained one request that follows
-  nothing (`gis::httpExchange`), on the same libcurl GDAL loads.
+  nothing (`gis::httpExchange`), on the same libcurl GDAL loads. It is set
+  up by GDAL too (`CPLHTTPSetOptions`), so it trusts what GDAL's requests
+  trust: the package's bundle and, on Windows, the certificate store a company
+  proxy's root is in (`docs/gis_online.md`, "Which certificates are trusted").
+  Without that, an update on a network that inspects `https://` would fail
+  with "unable to get local issuer certificate" as Online Data did: traced
+  through the shared code path, not reproduced, since the network it was
+  checked on passes GitHub's hosts through uninspected.
 - **The reserved names are four literal names.** The design's pattern
   `installed*.json` was narrowed: the helper writes exactly those four, and
   `installed.json.bak` is a file like any other.

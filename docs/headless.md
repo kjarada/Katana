@@ -50,6 +50,78 @@ offscreen (`qt_modify_view_takes_what_the_plan_view_shows_headless`).
 The same session is served to Claude over the Model Context Protocol by
 `katana_mcp` (`docs/mcp.md`).
 
+### Text and names
+
+Text in the model is UTF-8 (`core/text_encoding.hpp`), and two things follow
+from that for `katana_cli` and `katana_mcp`, which on Windows are handed a
+command line, a script and a pipe in the ANSI code page unless they ask for
+more. Until this change they did not: an accented letter in a path ended the
+program in a `filesystem_error` with the unsaved drawing, a letter outside the
+code page was a `?` that "was not found", and a name typed with an accent
+(`SURFACESTYLE NEW Pente°`, a surface renamed `terrainé`) was stored as the
+one byte the code page gave it, and was an exception the first time a JSON
+writer met it (`SAVE`, `SURFACE LIST JSON`, `LEADER LIST JSON`, `SURFACE
+LEGEND JSON`). One rule now, applied where text arrives:
+
+- **Arguments are read wide.** `katana_cli` and `katana_mcp` take their
+  command line from `GetCommandLineW` and convert it to UTF-8
+  (`update::utf8Arguments`, the one reader the update helper uses too), so
+  `katana_cli -c "OPEN C:/Users/Łukasz/site"` and `katana_mcp --project
+  C:/Users/José/site` name the folder that was typed. Elsewhere `argv` is
+  taken as given.
+- **A script is a text file** (`Session::readScript`): it is decoded as every
+  other text format is (`core::decodeText`), so a byte order mark, UTF-16 and
+  the Windows-1252 an ANSI editor writes read as the text they are, and a
+  guess is said on stderr (`note: the script ... read as Windows-1252`). Its
+  path is made with `core::pathFromUtf8`. `katana_run_script` reads the same
+  way.
+- **A console is read wide.** Standard input that is a console is read with
+  `ReadConsoleW` (the "é" typed at an OEM-850 prompt was the byte 0x82, which
+  is no text in either code page), and the console's output code page is set
+  to UTF-8 for the run and put back after, so a reply that names `Grüße`
+  shows it. A pipe or a file is bytes and is left alone.
+- **On Windows a line that is still not UTF-8 is read as Windows-1252** by
+  `Session::run` - the one door for a line in the programs with no window -
+  which says so on stderr once per session. The alternative was to refuse it,
+  as a layer's name with a stray byte used to be; that turns away a person
+  whose pipe comes from a tool that writes the ANSI page. Windows-1252 is the
+  page `decodeText` falls back on. Only on Windows: elsewhere a line's bytes
+  are the terminal's and the file system's, `core::pathFromUtf8` takes a path
+  that is not UTF-8 as the narrow name it is (a file named in Latin-1 stays
+  reachable), and a name that is not UTF-8 is refused by its table's door.
+  An exception that still escapes a verb is reported as `error: Internal:
+  ...` and fails the line; it no longer ends the process.
+- **Whatever reaches the model is UTF-8, and each kind of text is checked at
+  one door** with `core::isValidUtf8`: a surface's name, source and style at
+  `SurfaceStore::add`, `rename` and `setStyle`; a surface style's name and
+  description at `checkSurfaceStyle` (every route to a style ends there); a
+  layer's and an alignment's in their own tables. The refusal is
+  `InvalidArgument` and does not echo the bytes. The window's strings are
+  UTF-8 from Qt and MCP's are UTF-8 from JSON, so for them the door is a
+  backstop.
+- **A JSON reply never throws.** The replies that write names (`SURFACE LIST
+  JSON`, `SURFACE LEGEND ... JSON`, `LEADER LIST JSON`, `SURFACESTYLE LIST
+  JSON`, the `katana://surface-styles` resource) dump with nlohmann's
+  `replace` handler, so a byte that got past the doors is U+FFFD in the reply
+  and not an exception that ends the process. The style set that a SAVE
+  writes is the other case: a stored value is not to be rewritten silently, so
+  `Document::writeSurfaceState` refuses the save with the style named
+  (`checkSurfaceStyleSet`) rather than write a U+FFFD into the user's project.
+  A project written by an earlier build that holds a surface name the door
+  now refuses (ANSI bytes, a double quote an importer let through) opens, with
+  the name repaired (`SurfaceStore::nameable`) and a warning in the log.
+
+What is tested without a console: `tests/core/test_text_encoding.cpp` (the
+Windows-1252 reading), `tests/update/test_contract.cpp` (UTF-16 to UTF-8, the
+conversion every wide argument goes through), the door tests in
+`tests/geo/test_surface_store.cpp`, `tests/cad/terrain/test_surface_style.cpp`
+and `tests/cad/terrain/test_surface_verbs.cpp`, and the `cli.non_ascii_*` /
+`cli.ansi_lines_*` / `cli.mcp_opens_a_non_ascii_*` tests
+(`src/katana_app/text_cli.cmake`), which start the real programs from a
+folder named with an accented letter, a letter in no Western code page and a
+Han character. The one part not driven is the console's own line read
+(`ReadConsoleW` in `main.cpp`): ctest has no console.
+
 ## katana with --screenshot and --plot
 
 ```sh
@@ -320,7 +392,7 @@ every action, field, button and tab gets one. In a test they are one
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
-| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it - its OWN items: a submenu is one item, by its title, and is asked by its own object name (`?fileImportMenu`, `?fileExportMenu`, the two of File; `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`), and the section titles between items are not listed; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`); when it drew one of the drawing's surfaces it goes on with what of them - `surfaces=N triangles=N edges=N tinted=N contours=N labels=N covered=N legends=N`, the surfaces drawn, their triangles in view, edges stroked and triangles tinted, contour runs, labels, the pixels their faces cover and the legends (`docs/surface_display.md`, `qt_a_surface_is_drawn_in_plan_in_its_style_headless`) A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person |
+| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it - its OWN items: a submenu is one item, by its title, and is asked by its own object name (`?fileImportMenu`, `?fileExportMenu`, the two of File; `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`), and the section titles between items are not listed; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`); when it drew one of the drawing's surfaces it goes on with what of them - `surfaces=N triangles=N edges=N tinted=N contours=N labels=N covered=N legends=N`, the surfaces drawn, their triangles in view, edges stroked and triangles tinted, contour runs, labels, the pixels their faces cover and the legends (`docs/surface_display.md`, `qt_a_surface_is_drawn_in_plan_in_its_style_headless`) and, for each part of a style it could not draw, a trailing ` problem="ground: contours: an interval of 0.000500 crosses this surface's triangles more than 4000000 times; not drawn - set a larger interval"` (`PlanPaintStats::surfaceProblems`; the window's log says the same once) A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 | `--export-options FILE` | `^FILE` | opens the dialog of File > Export > Export Drawing for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
 | `--wheel "NAME X,Y N"` | `~NAME X,Y N` | turns the mouse wheel N notches - positive away from the person, which zooms in; negative, out - over widget NAME at X,Y in its logical pixels, NAME found as `--report` finds one. Each notch is a wheel event of its own, sent to the widget under that point (a 3D view's GPU child, where it has one) with the event loop run after it, as a person's wheel reaches the view; so a 3D view's zoom is driven in the real window, `~RenderView2 160,330 10|?RenderView2` (`qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless`). A step that is not three words, no such widget, a point outside it or no notches ends the run |
@@ -703,3 +775,10 @@ A modal box in a headless run is a hang until the test's timeout. So
   run reaches the same export through the filter's layer field
   (`vectorExportFilterLayer=other`) or types the `LAYERS` line with
   `--run-line`. A `ROW=on` form of `--fill` for checkable rows would close it.
+- A script or a pipe in a non-Western ANSI code page (Shift-JIS, Windows-1251)
+  is read as Windows-1252, which is wrong for it: the `note:` says so, and the
+  fix is to save the script as UTF-8. Reading it in the machine's own code
+  page (`GetACP`) would be right on Windows and wrong for a script moved from
+  another machine, so it was not guessed.
+- `katana_customisation_convert`'s own wide reader (`src/katana_archive12d/legacy/
+  convert_main.cpp`) is a second copy of what `update::utf8Arguments` does.

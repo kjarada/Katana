@@ -19,10 +19,10 @@ It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a
 client instead of typed. Every tool that changes anything is a shape over the
 command line's verbs, so there is one implementation of each, pinned by the
 `cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
-not. Every change is one undoable command, as it is when typed. (Four tools
-run no line and change nothing: `katana_status`, `katana_customisation` and
-`katana_road_objects` read the Document for what no reply holds as structure,
-and
+not. Every change is one undoable command, as it is when typed. (Five tools
+run no line and change nothing: `katana_status`, `katana_customisation`,
+`katana_road_objects` and `katana_leaders` read the Document for what no reply
+holds as structure, and
 `katana_check_update` asks whether a newer Katana has been released -
 "Updates", below.)
 
@@ -71,7 +71,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | Tool | What it does | Runs |
 |---|---|---|
 | `katana_run_commands` | a list of commands, in order; stops at the first failure unless `stop_on_error` is false | each line |
-| `katana_run_script` | a `.kcs` script file, as `katana_cli script.kcs` runs it | each line of the file |
+| `katana_run_script` | a `.kcs` script file, as `katana_cli script.kcs` runs it: the path is UTF-8 from the JSON, and the file is decoded as a text file is (a byte order mark, UTF-16 or Windows-1252 read as the text they are; `docs/headless.md`, "Text and names") | each line of the file |
 | `katana_help` | the command reference | `HELP` and the session's own verbs |
 | `katana_status` | project, unsaved changes, entity, layer and alignment counts, current layer and style, selection, undo depth | nothing: read from the Document by `cad::documentStatus`, as `STATUS` and `STATUS JSON` read it |
 | `katana_new_project` | a new, empty drawing | `NEW` |
@@ -79,7 +79,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids` and `target` narrow it (`docs/annotation.md`, "Presets") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJson`) |
+| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids` and `target` narrow it, and nothing else does - no scope or filter yet (`docs/annotation.md`, "Presets" and "Not yet") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJson`) |
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the drawing's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
@@ -238,7 +238,11 @@ drawing's surface display styles (`katana://surface-styles`) are the fourth:
 `SURFACESTYLE LIST JSON`, read from the Document as the customisation is, so
 reading them leaves no line in the session's history - every style, what it
 shows in plan and in 3D, its colours, contours, ramp, bands and stops, and
-which is the default (`docs/terrain.md`, "Surfaces in the drawing"); an agent
+which is the default (`docs/terrain.md`, "Surfaces in the drawing"). When the
+project's own styles could not be read - a newer Katana wrote them, or they
+are damaged - the built-ins only stand in, and the resource says so with
+`"standing_in": {"code", "message"}` and `"editable"` (`cad::surfaceStylesReport`,
+as `SURFACESTYLE LIST JSON` does); an agent
 changes them with SURFACESTYLE lines through `katana_run_commands`
 (`McpServer.TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem`). With
 the GIS module, `katana://formats` is the fifth: `FORMATS JSON`, every format
@@ -985,7 +989,8 @@ elements - goes out with the drawing, and `NOROADMODEL` leaves it out, as the
 export dialog's "Road model" box does; a reply that carried one has a `road
 elements= skipped= roads= parts=` record, and what the model could not build
 is among its warnings (`docs/ifc.md`, "Road model";
-`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord`). No tool of
+`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord`, which
+previews a corridor both ways). No tool of
 its own: the line is the whole of it, and the road model's own data is the
 road verbs' to report.
 

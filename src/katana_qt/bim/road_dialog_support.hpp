@@ -66,7 +66,7 @@ inline QTableWidget* table(const QString& objectName, const QStringList& headers
     return made;
 }
 
-// A cell, editable or not: a grid is a buffer, applied by one line per row.
+// A cell, editable or not: a grid is a buffer, applied by one line for the grid.
 inline QTableWidgetItem* cell(const QString& text, bool editable = false)
 {
     auto* item = new QTableWidgetItem(text);

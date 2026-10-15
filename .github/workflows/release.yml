@@ -372,6 +372,12 @@ jobs:
           test -f smoke/rect.katana/project.db
           "$root/bin/katana_cli.exe" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
           grep -q "EPSG:32630" smoke/info.txt
+          # PROJ's database. The INFO above does not need it: GDAL recognises a WGS 84 UTM zone
+          # from its parameters (AutoIdentifyEPSG), so it names EPSG:32630 with proj.db missing.
+          # CRS SET reads the code from the database, and exits 1 without it. (CRS FIND is
+          # answered from a list built into the program and would pass on a broken package.)
+          "$root/bin/katana_cli.exe" -c "CRS SET EPSG:7856" | tee smoke/crs.txt
+          grep -q "crs id=EPSG:7856" smoke/crs.txt
           "$root/bin/katana_cli.exe" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
           "$root/bin/katana_updater.exe" --selftest > smoke/selftest.txt || { cat smoke/selftest.txt; exit 1; }
           cat smoke/selftest.txt
@@ -408,6 +414,12 @@ jobs:
           Write-Output $info
           if ($LASTEXITCODE -ne 0) { throw "the installed katana_cli exited with $LASTEXITCODE" }
           if ($info -notmatch "EPSG:32630") { throw "the installed katana_cli named no CRS" }
+          # PROJ's database, which the INFO above does not need (GDAL names a WGS 84 UTM zone from
+          # its parameters): CRS SET reads EPSG:7856 from proj.db and exits 1 without it.
+          $crs = & "$target\bin\katana_cli.exe" -c "CRS SET EPSG:7856" | Out-String
+          Write-Output $crs
+          if ($LASTEXITCODE -ne 0) { throw "CRS SET in the installed katana_cli exited with $LASTEXITCODE: proj.db is missing from the installation" }
+          if ($crs -notmatch "crs id=EPSG:7856") { throw "the installed katana_cli did not read EPSG:7856 from proj.db" }
           $status = & "$target\bin\katana_cli.exe" -c "UPDATE STATUS" | Out-String
           Write-Output $status
           if ($LASTEXITCODE -ne 0) { throw "UPDATE STATUS in the installed copy exited with $LASTEXITCODE" }
@@ -659,10 +671,16 @@ jobs:
           trap 'mv "$KATANA_TOOLCHAIN.away" "$KATANA_TOOLCHAIN"' EXIT
           "$bin/katana_cli" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
           test -f smoke/rect.katana/project.db
-          # GDAL, with PROJ's database found beside the bundled libproj: the
-          # coordinate system is named from proj.db, which nothing else has.
+          # GDAL reads the .prj. This alone does not prove PROJ's database is found: GDAL
+          # recognises a WGS 84 UTM zone from its parameters (AutoIdentifyEPSG) and names
+          # EPSG:32630 without proj.db.
           "$bin/katana_cli" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
           grep -q "EPSG:32630" smoke/info.txt
+          # PROJ's database, found beside the bundled libproj: CRS SET reads EPSG:7856 from
+          # proj.db and exits 1 without it (CRS FIND is answered from a list built into the
+          # program and would pass on a broken bundle).
+          "$bin/katana_cli" -c "CRS SET EPSG:7856" | tee smoke/crs.txt
+          grep -q "crs id=EPSG:7856" smoke/crs.txt
           # PDAL and GDAL's vector drivers.
           "$bin/katana_cli" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
           if [ "${{ matrix.archive }}" != dmg ]; then
