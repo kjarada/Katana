@@ -133,14 +133,18 @@ jobs:
       # never be updated. This is that refusal asked for in the first
       # minute, rather than after each toolchain is installed.
       #
-      # cmake/KatanaUpdateKeys.cmake is run as a script, but not bare. It is
-      # written for a configure, where the root CMakeLists.txt has set the
-      # policies of its minimum CMake before including it; a script starts
-      # with none set, and a CMake older than 4.0 - this runner's own is,
-      # the build jobs install a newer one - then does not know the file's
-      # `if(... IN_LIST ...)`. So a script of two lines states the minimum
-      # the root CMakeLists.txt states and includes the file (a relative
-      # path: a script's source directory is the one it is run from).
+      # cmake/KatanaUpdateKeys.cmake is run as a script, but through a
+      # script of two lines. The file is written for a configure, where the
+      # root CMakeLists.txt has set the policies of its minimum CMake before
+      # including it; a script starts with none set, and a CMake older than
+      # 4.0 - this runner's own is, the build jobs install a newer one - did
+      # not know the file's `if(... IN_LIST ...)`. The file now says the one
+      # policy that needs (CMP0057) itself, so it would run bare here too,
+      # but that was not tried under this runner's CMake and the two lines
+      # are what the run of 2026-10-14 passed through: they state the
+      # minimum the root CMakeLists.txt states and include the file (a
+      # relative path: a script's source directory is the one it is run
+      # from). Dropping them is for a run that can show it.
       #
       # Only a refusal the keys file itself states stops the run: CMake
       # reports those as `KatanaUpdateKeys.cmake:<line> (message)`. Anything

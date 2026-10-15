@@ -212,6 +212,29 @@ katana_add_update_keys_test(refuses_the_third_published_test_key OFF published_t
 set_tests_properties(update_keys_refuses_the_third_published_test_key PROPERTIES
     PASS_REGULAR_EXPRESSION "${_phrase}")
 
+# The file states the policy its IN_LIST needs, so that run as a script it needs nothing of the caller:
+# a CMake older than 4.0 (the release workflow's first job runs under 3.31.6) starts a script with no
+# policy set and stops at IN_LIST. The runs above cannot tell, since CMake 4 sets that policy itself; the
+# text can (tests/update/check_keys_policy.cmake), and each way of getting it wrong is shown refused.
+set(_katana_keys_policy_check "${CMAKE_CURRENT_SOURCE_DIR}/check_keys_policy.cmake")
+add_test(NAME update_keys_file_states_the_policy_its_in_list_needs
+    COMMAND ${CMAKE_COMMAND} "-DKEYS=${_katana_keys_script}" -P "${_katana_keys_policy_check}")
+set_tests_properties(update_keys_file_states_the_policy_its_in_list_needs PROPERTIES
+    PASS_REGULAR_EXPRESSION "states CMP0057 before its first IN_LIST"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+function(katana_add_keys_policy_mutation mutation phrase)
+    katana_phrase(_regex "${phrase}")
+    add_test(NAME update_keys_policy_check_catches_${mutation}
+        COMMAND ${CMAKE_COMMAND} "-DKEYS=${_katana_keys_script}" -DMUTATE=${mutation}
+                -P "${_katana_keys_policy_check}")
+    set_tests_properties(update_keys_policy_check_catches_${mutation} PROPERTIES
+        PASS_REGULAR_EXPRESSION "${_regex}")
+endfunction()
+katana_add_keys_policy_mutation(policy_removed "as an instruction: run as a script under a CMake older than")
+katana_add_keys_policy_mutation(policy_in_a_comment "as an instruction: run as a script under a CMake older than")
+katana_add_keys_policy_mutation(policy_after_the_use "after its first IN_LIST: the policy has to be set before")
+katana_add_keys_policy_mutation(policy_the_wrong_way "sets CMP0057 to OLD, which is the behaviour that stops at IN_LIST")
+
 # ---- the helper's imports (tests/update/check_updater_imports.cmake) -----------------------
 #
 # The check, on a listing of a static program and on one that imports the GCC runtime,

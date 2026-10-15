@@ -422,17 +422,22 @@ stop a good release ("Not done").
 The first job, before any toolchain is installed, asks the keys file the
 same question the configures will: it runs `cmake/KatanaUpdateKeys.cmake`
 as a script with `KATANA_REQUIRE_UPDATE_KEYS` on, so a tree with placeholder
-keys fails in the first minute and says what to do. The file is not run
-bare. It is written for a configure, where the root `CMakeLists.txt` has
-set the policies of its minimum CMake before including it; a script starts
-with none set, and the hosted runner's own CMake (3.31.6 on the image of
-2026-10-04; the build jobs install 4.x) then refuses the file's
-`if(... IN_LIST ...)`. So the step writes a script of two lines, the same
-`cmake_minimum_required` and an `include` of the file, and runs that. Only
-a refusal the keys file itself states stops the run. If CMake stops for
-another reason, the step says so in a warning and the run goes on: each
-job's configure makes the same check, and a check that could not run is not
-a reason to refuse a release.
+keys fails in the first minute and says what to do. The step does not run
+the file bare. It is written for a configure, where the root `CMakeLists.txt`
+has set the policies of its minimum CMake before including it; a script
+starts with none set, and the hosted runner's own CMake (3.31.6 on the image
+of 2026-10-04; the build jobs install 4.x) refused the file's
+`if(... IN_LIST ...)`. The file now sets the one policy that needs
+(`cmake_policy(SET CMP0057 NEW)`, held by `update_keys_file_states_the_policy_its_in_list_needs`
+and its `update_keys_policy_check_catches_*` tests, which read the text,
+because CMake 4 sets that policy itself and a run here cannot tell), but the
+step still writes a script of two lines, the same `cmake_minimum_required`
+and an `include` of the file, and runs that: it is what the run of
+2026-10-14 passed through, and the file run bare has not been tried under
+3.31.6. Only a refusal the keys file itself states stops the run. If CMake
+stops for another reason, the step says so in a warning and the run goes
+on: each job's configure makes the same check, and a check that could not
+run is not a reason to refuse a release.
 
 The ARM64 jobs build natively on GitHub's ARM runners, which private
 repositories have had since 2026-01-29, rather than cross-compiling: the
@@ -1402,11 +1407,13 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   prove `-DKATANA_UPDATE_REPO` only as far as the update library's compile
   line ("What each job does"). Were `UPDATE STATUS` to name the feed, the
   smoke test could prove it in the program a user runs.
-* **The keys file cannot be run bare by a CMake older than 4.0.**
-  `cmake -P cmake/KatanaUpdateKeys.cmake`, the use the file's own header
-  gives, stops there at `if(... IN_LIST ...)`, because a script has no
-  policy set (seen with CMake 3.31.6, 2026-10-13). The workflow goes round
-  it ("What each job does"); the file should state the policy itself.
+* **The keys file run bare has not been tried under CMake 3.31.6.** The file
+  states the policy its `IN_LIST` needs (`cmake_policy(SET CMP0057 NEW)`), but
+  the host that builds this project has CMake 4, which sets that policy
+  itself, so only the text of the file is held
+  (`update_keys_file_states_the_policy_its_in_list_needs`). The first job's
+  step still runs it through a script of two lines; it can run it bare once a
+  run under 3.31.6 has shown that it works.
 * **macOS is told about a release, not updated,** and the Linux packages are
   not yet updated in place either (`docs/update.md`); their manifests and
   update zips are published all the same.
