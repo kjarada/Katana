@@ -1273,7 +1273,10 @@ it skipped dimensions, and so does the archive exporter.
   thousands of labels.
 * **Zoom Extents** frames an annotation by its entity's box, which for a
   paper-sized note or leader does not include its text: a note beyond the
-  drawing can be cut off at the edge.
+  drawing can be cut off at the edge. The fix is in the plan painter's
+  `planDrawnBounds` (and the plot's fit), which would add each note's measured
+  box at the annotation scale - the painter's font metrics, not anything of
+  the annotation code - so it was left to the view code's owner.
 * **The Linear Dimension tool** still stores the aligned projection for an
   unsnapped horizontal or vertical dimension outside the origins' levels
   (`docs/tools.md`).
@@ -1283,7 +1286,9 @@ it skipped dimensions, and so does the archive exporter.
 * **Labels are not picked by their text**: a label is selected at its
   anchor, and moved off its placed position with Annotate > Edit Label
   (`LABEL SET id at=x,y`) rather than by dragging its text.
-* **PURGE** does not purge unused text or label styles.
+* **PURGE** does not purge unused text or label styles. It wants them in
+  `entity::tableUsage`, `commands::TableItems` (with the undo of a deleted
+  style) and `cad::planPurge` - the table commands, not the annotation code.
 * **No style is renamed.** No verb or command renames a text, label or
   dimension style, so the managers offer no Rename; New names a style as it
   is made instead.
