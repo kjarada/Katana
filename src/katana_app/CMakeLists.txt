@@ -1217,7 +1217,11 @@ if(KATANA_BUILD_TESTS)
     # ifc: the road model (docs/ifc.md, "Road model") goes out with the drawing;
     # NOROADMODEL - File > Export IFC's "Road model" box - leaves it out, and is
     # refused given twice. The scenario has no corridor, so the reply has no
-    # road record and is the scenario's own.
+    # road record and is the scenario's own: this one shows that the word is
+    # TAKEN and does no harm. That it LEAVES THE ROAD OUT is road_cli.cmake's
+    # cli.ifc_noroadmodel_leaves_a_corridors_road_model_out, against
+    # cli.ifc_export_writes_a_corridors_road_model_by_default, which run a
+    # corridor.
     add_test(NAME cli.ifc_noroadmodel_is_a_word_of_the_export_line
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"

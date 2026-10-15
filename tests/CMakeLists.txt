@@ -3406,17 +3406,24 @@ if(TARGET katana)
             "-DEXPECT=--dialog fileExportIfc opened fileExportIfcDialog \"Export IFC\"[\r\n].*> EXPORT \"preview\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\".*ifcExportClasses: [^\r\n]*layer Survey/Kerb \\| 1 \\| IfcKerb NOTDEFINED \\| \\| rule kerb[^\r\n]*service E1 \\| 3 \\| IfcCableCarrierSegment CONDUITSEGMENT \\| ELECTRICAL.*> EXPORT \"[^\"]*qt_ifc_dialog\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\"[\r\n]+ifc exported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+[\r\n]+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_dialog\\.ifc: [0-9]+ instances"
             "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # ifc: File > Export IFC's "Road model" box (docs/ifc.md, "Road model"),
-    # unticked: the line says NOROADMODEL, and the window runs it. The
-    # scenario has no corridor, so the box counts no objects.
+    # ifc: File > Export IFC's "Road model" box (docs/ifc.md, "Road model"). The
+    # drawing has a corridor, the one thing that gives the model objects: with
+    # none the reply has no road record whichever way the box goes, and the test
+    # could not tell the box honoured from the box ignored. Ticked (as it opens),
+    # Preview's reply holds the record - `road elements=N skipped=0 roads=1
+    # parts=P`, N and P above zero - and the box counts the objects; unticked,
+    # the line says NOROADMODEL, the window runs it, and its reply goes straight
+    # from `counts` to the classes (the alignment) with no road record. This is
+    # the window's own wiring (main_window_ifc.cpp's exportIfc), which
+    # katana_cli's tests do not reach.
     add_test(NAME qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
-            "-DDRIVE=${_ifc_scenario}@fileExportIfc|?ifcExportRoadModel|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
+            "-DDRIVE=>ALIGN NEW road 0,0 100,0|>ALIGN DESIGN road 0,10 100,10|>ROADTEMPLATE DEFAULTS|>CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"|@fileExportIfc|?ifcExportRoadModel|!ifcExportPreview|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless_headless.png"
-            "-DEXPECT=ifcExportRoadModel: Road model \\(0 objects\\).*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 .*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
-            "-DFORBID=IfcBuildingElementProxy|road elements="
+            "-DEXPECT=ifcExportRoadModel: Road model \\([1-9][0-9]* objects\\), checked.*> EXPORT \"preview\\.ifc\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\" [^\r\n]*[\r\n]+counts [^\r\n]*[\r\n]+road elements=[1-9][0-9]* skipped=0 roads=1 parts=[1-9][0-9]*.*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 [^\r\n]*[\r\n]+counts [^\r\n]*[\r\n]+class name=IfcAlignment.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
+            "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless PROPERTIES
         ENVIRONMENT_MODIFICATION

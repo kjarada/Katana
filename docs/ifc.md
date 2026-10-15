@@ -128,11 +128,19 @@ its warnings. `IfcFrontEnd.EveryChoiceOfTheDialogsIsAWordOfTheLine`,
 `IfcFrontEnd.TheLineADialogWritesReadsBackAsItsArguments` and
 `cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line` pin the grammar,
 `IfcFrontEnd.NoRoadModelIsAWordAndNoDrawingLeavesTheRoadModelOutToo`,
-`cli.ifc_noroadmodel_is_a_word_of_the_export_line` and
-`cli.ifc_noroadmodel_given_twice_is_refused` its road model word;
-`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` and
-`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord` are an agent
-doing it through `katana_mcp`.
+`cli.ifc_noroadmodel_is_a_word_of_the_export_line` (the word is taken, on a
+drawing with no corridor, so the reply has no road record either way) and
+`cli.ifc_noroadmodel_given_twice_is_refused` its road model word; what the word
+DOES is judged on a drawing with a corridor, against the default, since
+without one nothing could tell a word honoured from a word ignored:
+`cli.ifc_export_writes_a_corridors_road_model_by_default` and
+`cli.ifc_noroadmodel_leaves_a_corridors_road_model_out` for `katana_cli`,
+`qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless` for the
+window's own wiring, and
+`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord` for an agent
+doing it through `katana_mcp` (as is
+`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` for
+the rest of the grammar).
 
 ### In the window
 
