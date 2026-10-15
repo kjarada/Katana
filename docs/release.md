@@ -414,7 +414,7 @@ digits of a commit, with the tag that commit was read from as a comment on
 the same line:
 
 ```yaml
-- uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 ```
 
 Until 2026-10-14 every line named a tag (`@v4`). A tag is whatever its
@@ -427,12 +427,28 @@ the reader; GitHub runs the commit.
 
 | Action | Tag | The release at the commit | Read | Jobs |
 |---|---|---|---|---|
-| `actions/checkout` | `v4` | 4.4.0 | 2026-10-14 | every job |
+| `actions/checkout` | `v5` | 5.1.0 | 2026-10-15 | every job |
 | `msys2/setup-msys2` | `v2` | 2.33.0 | 2026-10-14 | the Windows jobs |
-| `actions/upload-artifact` | `v4` | 4.6.2 | 2026-10-14 | the Windows, Linux and macOS jobs |
-| `actions/setup-python` | `v5` | 5.6.0 | 2026-10-14 | the Linux and macOS jobs |
-| `actions/cache` | `v4` | 4.3.0 | 2026-10-14 | the Linux and macOS jobs |
-| `actions/download-artifact` | `v4` | 4.3.0 | 2026-10-14 | Publish |
+| `actions/upload-artifact` | `v6` | 6.0.0 | 2026-10-15 | the Windows, Linux and macOS jobs |
+| `actions/setup-python` | `v6` | 6.3.0 | 2026-10-15 | the Linux and macOS jobs |
+| `actions/cache` | `v5` | 5.1.0 | 2026-10-15 | the Linux and macOS jobs |
+| `actions/download-artifact` | `v7` | 7.0.0 | 2026-10-15 | Publish |
+
+**Moved off Node.js 20 on 2026-10-15.** GitHub deprecated Node.js 20 on its
+runners, and every job of run 38580778852 warned that `checkout`,
+`upload-artifact`, `download-artifact`, `cache` and `setup-python`, at the
+commits above, target it and were being forced onto Node.js 24. Each was moved
+to the FIRST major version whose `action.yml` says `using: node24` - checkout
+v5, upload-artifact v6, download-artifact v7, cache v5, setup-python v6 - by
+the steps below. Between the old commits and these, the releases' one
+breaking change besides the runtime and a runner of at least 2.327.1 (which
+GitHub's own runners are) is download-artifact v5's extraction path for a
+single artifact downloaded by id; the Publish job downloads by `pattern`
+with `merge-multiple`, which it leaves alone. *Rejected:* the newest majors
+(checkout v7, upload-artifact v7, download-artifact v8, cache v6,
+setup-python v7): nothing here needs what they add, and the two artifact
+actions' were eight days old when read. `msys2/setup-msys2` was not in the
+warning and stays where it was.
 
 The commits themselves are in the workflow and not repeated here. A row
 says which release its action's commit is, and the day that was read; it
