@@ -512,6 +512,25 @@ katana_add_nsis_mutation(uninstaller_runs_without_a_folder
 # An entry in Settings > Apps whose uninstaller was deleted by hand must not stop the install.
 katana_add_nsis_mutation(uninstaller_that_is_gone_stops_the_install
     "runs the uninstaller that the entry in Settings > Apps names without looking for it first")
+# The Desktop shortcut (cmake/KatanaPackaging.cmake, CPACK_NSIS_CREATE_ICONS_EXTRA and _DELETE_): one, to the
+# Start menu's program under its name and with its icon, starting in the install folder, made inside the
+# Start menu page's block (so that "Do not create shortcuts" leaves it out) and removed by name, and the
+# Desktop used for nothing else. The unbroken script passes in packaging_nsis_template_is_per_user above.
+katana_add_nsis_mutation(desktop_shortcut_not_made "the installer makes no shortcut on the Desktop")
+katana_add_nsis_mutation(desktop_shortcut_not_removed "the uninstaller does not remove the shortcut on the Desktop")
+katana_add_nsis_mutation(desktop_shortcut_to_another_program
+    "the Desktop shortcut goes to [$]INSTDIR.bin.katana_cli[.]exe, and must go to the program")
+katana_add_nsis_mutation(desktop_shortcut_with_an_icon_of_its_own
+    "a shortcut on the Desktop must name its file and the program and nothing after them")
+katana_add_nsis_mutation(desktop_shortcut_ignores_do_not_create_shortcuts
+    "the Desktop shortcut is not between the two macros of the Start menu page")
+katana_add_nsis_mutation(desktop_shortcut_starts_in_another_folder
+    "the Desktop shortcut does not start in the install folder")
+katana_add_nsis_mutation(desktop_shortcut_removed_by_wildcard
+    "the uninstaller takes from the Desktop what is not Katana's shortcut")
+katana_add_nsis_mutation(desktop_shortcut_under_another_name
+    "the Desktop shortcut and the Start menu one are not the same, Katana CAD[.]lnk")
+katana_add_nsis_mutation(desktop_is_used_for_something_else "the script names [$]DESKTOP 3 times")
 # The case no mutation can stand for: the template this one replaces, as CMake ships it. It is
 # the installer Katana had (administrator rights, HKLM, Program Files); the check must refuse it
 # on its own terms. Where CMake keeps it differs between versions, so it is only looked for.

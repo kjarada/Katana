@@ -25,6 +25,12 @@
 ;   * A copy that is already installed is uninstalled first (asked; a silent run does not ask).
 ;     An entry in Settings > Apps whose uninstaller is no longer there, because the folder was
 ;     deleted by hand, is no such copy, and the install goes ahead.
+;   * Shortcuts, all to bin\katana.exe and so all with its icon: one in the Start menu (CPack makes
+;     it, from CPACK_PACKAGE_EXECUTABLES) and one on the Desktop (cmake/KatanaPackaging.cmake
+;     supplies it through CPACK_NSIS_CREATE_ICONS_EXTRA and CPACK_NSIS_DELETE_ICONS_EXTRA). A person
+;     who does not want the Desktop one deletes it; no page of the wizard asks. An update replaces
+;     files inside the install folder and never a shortcut, so it neither makes the Desktop one
+;     again nor removes it, and the uninstaller removes it by its name.
 ;   * /S (silent) and /D=<folder> work as in any NSIS installer; README.md documents them. A silent
 ;     run never waits for an answer: every MessageBox has a /SD default.
 ;
@@ -334,7 +340,10 @@ Section "-Core installation"
 
   !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
 
-  ; The shortcuts, in the current user's Start menu.
+  ; The shortcuts, in the current user's Start menu, and the one on the current user's Desktop
+  ; (CPACK_NSIS_CREATE_ICONS_EXTRA, said in cmake/KatanaPackaging.cmake). All are made between
+  ; the two macros of the Start menu page, which skip what is between them when the person ticked
+  ; "Do not create shortcuts": a person who asked for none gets none, with no page of its own.
   CreateDirectory "$SMPROGRAMS\$STARTMENU_FOLDER"
 @CPACK_NSIS_CREATE_ICONS@
 @CPACK_NSIS_CREATE_ICONS_EXTRA@
@@ -569,9 +578,11 @@ Section "Uninstall"
   ; Folders, now that they can be empty. RMDir without /r removes an empty folder and no other.
 @CPACK_NSIS_DELETE_DIRECTORIES@
 
-  ; The shortcuts, in the folder the installer made. If it made none (the person chose not to
-  ; have any) there is no folder to name, and the clean-up below, which removes empty folders
-  ; from that one upwards, would start at the Start menu's own.
+  ; The shortcuts, in the folder the installer made, and the one on the Desktop
+  ; (CPACK_NSIS_DELETE_ICONS_EXTRA): that one by its name alone, which is Katana's own to take.
+  ; If it made none (the person chose not to have any) there is no folder to name, and the
+  ; clean-up below, which removes empty folders from that one upwards, would start at the Start
+  ; menu's own.
   StrCmp $MUI_TEMP "" startMenuDeleteLoopDone
   Delete "$SMPROGRAMS\$MUI_TEMP\Uninstall.lnk"
 @CPACK_NSIS_DELETE_ICONS@

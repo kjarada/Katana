@@ -566,8 +566,10 @@ you install it into, apart from your own projects and settings.
    your own profile) and finish. The installer is for your account only, so it
    needs no administrator rights and Windows does not ask to let it make
    changes to your device; any folder you can write to will do. Katana appears
-   in your Start menu. Uninstall it from **Settings > Apps**, where the
-   publisher is shown as Jarada.
+   in your Start menu and as a **Katana** shortcut on your Desktop. Tick **Do
+   not create shortcuts** on the Start menu page to have neither, or delete the
+   Desktop one if you would rather not keep it. Uninstall it from **Settings >
+   Apps**, where the publisher is shown as Jarada.
 
 To install it without questions, for example from a deployment script, run
 the installer with `/S`, and choose the folder with `/D=`, which must come
@@ -578,7 +580,9 @@ to:
 Start-Process .\Katana-X.Y.Z-win64.exe -ArgumentList '/S','/D=C:\Katana' -Wait
 ```
 
-Its uninstaller, `C:\Katana\Uninstall.exe`, takes `/S` too.
+Its uninstaller, `C:\Katana\Uninstall.exe`, takes `/S` too. A silent install
+makes the same Start menu and Desktop shortcuts as one with questions, and the
+uninstaller removes them.
 
 #### From the zip (x64 or ARM64)
 

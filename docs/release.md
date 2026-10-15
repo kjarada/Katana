@@ -69,8 +69,10 @@ that place for each package, because the installer's default folder is under `%L
 which Explorer hides, and nothing in the window points there. **Not done, and
 decided against for now:** a Help > Open Sample Project (a feature of its own,
 with all three surfaces, and it would have to copy the project first, since
-opening one updates it in place) and a Start menu shortcut to the folder
-(`CPACK_NSIS_CREATE_ICONS_EXTRA`, with its matching delete entry).
+opening one updates it in place) and a Start menu shortcut to the folder (a
+second use of `CPACK_NSIS_CREATE_ICONS_EXTRA`, with its matching delete entry;
+the first use makes the Desktop shortcut to the program, "The Windows
+installer").
 
 Each Windows and Linux archive holds `bin/katana`, `bin/katana_cli`,
 `bin/katana_mcp` and `bin/katana_updater` (the helper that swaps an install's
@@ -605,9 +607,14 @@ the bundle's seal before the programs in `Contents/MacOS` run.
 **The installers.** Each Windows installer is then run as a deployment script
 runs it, as the user the job runs as (the installer asks for no administrator
 rights): `/S /D=<folder>`, silently, into a folder of its own. The installed
-`katana_cli` must name `EPSG:32630` and read `EPSG:7856` as above, and the uninstaller
-(`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
-remove `bin\katana_cli.exe`.
+`katana_cli` must name `EPSG:32630` and read `EPSG:7856` as above, the Desktop
+shortcut `Katana.lnk` must be there, going to the installed `bin\katana.exe` and
+starting in the install folder (read back through `WScript.Shell` in a process
+of its own, because a shortcut opened through COM stays open until that process
+ends and the uninstaller could not then delete it; a runner with no Desktop
+folder gets a warning, since NSIS does not make one), and the
+uninstaller (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for
+it) must remove `bin\katana_cli.exe` and that shortcut.
 
 ## The Windows installer
 
@@ -631,6 +638,41 @@ per-machine installer.
   Jarada, `UninstallString`, `InstallLocation`, `DisplayIcon`, `EstimatedSize`,
   `NoModify`, `NoRepair`), which the updater rewrites after an update. The
   Start-menu folder and its shortcuts are the current user's.
+* **The Desktop shortcut.** Beside the Start menu entry the installer puts a
+  shortcut named `Katana` on the Desktop of the account that runs it
+  (`$DESKTOP`; the installer is per user and sets the current user's shell
+  context, so it is that user's and never the all-users Desktop). It goes to
+  `bin\katana.exe` and names no icon of its own, so Windows shows the
+  program's own icon, which is the one the Start menu entry shows; it starts
+  in the install folder (a shortcut starts in the installer's current output
+  folder, so the installer sets that first). `cmake/KatanaPackaging.cmake`
+  says the two NSIS lines - `CPACK_NSIS_CREATE_ICONS_EXTRA` and
+  `CPACK_NSIS_DELETE_ICONS_EXTRA`, CPack's hooks for them - and the template
+  puts them inside the Start menu page's own block. That is deliberate:
+  the page already asks "Do not create shortcuts", and a person who ticks it
+  gets no Desktop shortcut either, with **no page of the wizard added** (a
+  silent install makes it, as it makes the Start menu entry). A person who
+  does not want it deletes the file. Nothing makes it again but an installer
+  run: an update replaces files inside the install folder and never a
+  shortcut, which is no file of the package, so the manifest and
+  `UPDATE_EXCLUDE` (only `bin`, `share`, `etc` and `lib` beside `LICENSE`)
+  mean what they did. The uninstaller deletes `Katana.lnk` from the Desktop
+  by that name and takes nothing else from it; a shortcut the person renamed
+  stays, and one they made by the same name for another purpose goes (NSIS
+  has no stock way to read what a shortcut points at). *Rejected:* a check
+  box on a page of its own (the owner asked for none, and the Start menu
+  page's box is already the person's answer to "shortcuts?"); the all-users
+  Desktop (machine-wide, and this installer writes nothing machine-wide); a
+  `.lnk` among the package's files (it would be a file of the package, with
+  a path that only the installing machine knows); the explicit icon
+  argument of `CreateShortCut` (the Start menu entry names none, and a
+  second place that names the icon is a second place to differ from it).
+  The text is written with single quotes, which NSIS takes as it takes
+  double ones, because CPack writes the value into `CPackConfig.cmake` inside
+  double quotes; the backslashes are doubled for the second reading of that
+  file, as at `CPACK_NSIS_INSTALL_ROOT`. The release workflow's installer
+  smoke test reads the shortcut back after the silent install (its target
+  and its start-in folder) and checks that the uninstaller took it away.
 * **What the uninstaller removes.** The files the installer put down; every file
   the installed manifest lists (`share/katana/installed.manifest.json`: an update
   adds files that the uninstaller, built before them, has never heard of); the
@@ -725,9 +767,14 @@ per-machine installer.
   the folder and the registry values above, the folder tried before anything is
   cleared or written, what an install over a copy clears, an entry whose
   uninstaller is gone, what the uninstaller removes, in which order, and what it
-  keeps, and a default answer to every question. It reads text. What only a run
-  shows (the exit code of a refused folder, the size in **Settings > Apps**, the
-  shortcuts) it does not hold; a block comment and a condition it cannot
+  keeps, the one Desktop shortcut (to the Start menu entry's program and name,
+  with no icon of its own, starting in the install folder, made inside the
+  Start menu page's block, removed by name, and the Desktop used for nothing
+  else: the `packaging_nsis_check_catches_desktop_*` tests break each of
+  these), and a default answer to every question. It reads text. What only a
+  run shows (the exit code of a refused folder, the size in **Settings > Apps**,
+  whether the shortcuts are really there) it does not hold, apart from the
+  Desktop shortcut, which the workflow's smoke test reads back; a block comment and a condition it cannot
   evaluate it refuses, and what is inside a false condition it leaves out, as
   NSIS does; an instruction that is compiled and never reached it cannot see.
   Each `packaging_nsis_check_catches_*` test breaks one rule in that text and
@@ -751,7 +798,12 @@ per-machine installer.
   acceptance step**, and with it an install after the folder was deleted by
   hand, which needs the registry and so has no test that runs it; the release
   workflow's installer smoke test (above) covers the silent install and
-  uninstall only.
+  uninstall only. What to look at in the wizard for the Desktop shortcut: the
+  Start menu page's **Do not create shortcuts** box, ticked, leaves the Desktop
+  without a **Katana** icon and the Start menu without the folder; unticked,
+  the icon is on the Desktop after the install, wears the program's icon,
+  opens Katana, and its **Properties** show **Start in** the install folder;
+  and the uninstaller removes it.
 
 ## How the Linux and macOS packages are made self-contained
 

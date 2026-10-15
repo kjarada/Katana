@@ -418,7 +418,7 @@ jobs:
           # its parameters): CRS SET reads EPSG:7856 from proj.db and exits 1 without it.
           $crs = & "$target\bin\katana_cli.exe" -c "CRS SET EPSG:7856" | Out-String
           Write-Output $crs
-          if ($LASTEXITCODE -ne 0) { throw "CRS SET in the installed katana_cli exited with $LASTEXITCODE: proj.db is missing from the installation" }
+          if ($LASTEXITCODE -ne 0) { throw "CRS SET in the installed katana_cli exited with $($LASTEXITCODE): proj.db is missing from the installation" }
           if ($crs -notmatch "crs id=EPSG:7856") { throw "the installed katana_cli did not read EPSG:7856 from proj.db" }
           $status = & "$target\bin\katana_cli.exe" -c "UPDATE STATUS" | Out-String
           Write-Output $status
@@ -427,9 +427,31 @@ jobs:
           foreach ($word in "kind=installer", "target=${{ matrix.package }}") {
             if ($words -cnotcontains $word) { throw "the installed katana_cli does not say $word" }
           }
+          # The Desktop shortcut (docs/release.md, "The Windows installer"): on the Desktop of the
+          # account that ran the installer, to the installed bin\katana.exe, starting in the install
+          # folder; and gone again after the uninstaller. NSIS does not make a Desktop folder that
+          # is missing, so a runner without one is a warning here and not a failure of the package.
+          $desktop = [Environment]::GetFolderPath("Desktop")
+          $desktopChecked = (-not [string]::IsNullOrEmpty($desktop)) -and (Test-Path $desktop)
+          $desktopLink = if ($desktopChecked) { Join-Path $desktop "Katana.lnk" } else { "" }
+          if (-not $desktopChecked) {
+            Write-Warning "this runner has no Desktop folder ($desktop): the installer's Desktop shortcut is not checked"
+          } else {
+            if (-not (Test-Path $desktopLink)) { throw "the installer made no Katana shortcut on the Desktop ($desktopLink)" }
+            # Read in a process of its own: a shortcut opened through COM stays open until that
+            # process ends (seen on a Windows machine, 2026-10-15), and the uninstaller below
+            # could not delete a file this step was still holding.
+            $env:KATANA_DESKTOP_LINK = $desktopLink
+            $read = @(& pwsh -NoProfile -Command '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:KATANA_DESKTOP_LINK); $s.TargetPath; $s.WorkingDirectory')
+            if ($LASTEXITCODE -ne 0 -or $read.Count -ne 2) { throw "the Desktop shortcut could not be read back ($($read -join ' | '))" }
+            Write-Output "Desktop shortcut: goes to $($read[0]), starts in $($read[1])"
+            if ($read[0] -notlike "*\KatanaInstalled\bin\katana.exe") { throw "the Desktop shortcut goes to $($read[0]), not to the installed bin\katana.exe" }
+            if ($read[1] -notlike "*\KatanaInstalled") { throw "the Desktop shortcut starts in $($read[1]), not in the install folder" }
+          }
           $uninstall = Start-Process -FilePath "$target\Uninstall.exe" -ArgumentList "/S", "_?=$target" -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "the uninstaller exited with $($uninstall.ExitCode)" }
           if (Test-Path "$target\bin\katana_cli.exe") { throw "the uninstaller left bin\katana_cli.exe" }
+          if ($desktopChecked -and (Test-Path $desktopLink)) { throw "the uninstaller left the Desktop shortcut ($desktopLink)" }
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
