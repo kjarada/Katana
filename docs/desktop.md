@@ -136,7 +136,8 @@ size, the toolbar icon size and whether the toolbars show their names; they
 are written when the window closes and read before it is shown. With nothing
 saved - the first run - or a layout from another version (`kLayoutVersion`,
 raised when a change to the toolbars or panels would make an old layout put
-them wrong), the window fits the screen it is on (`MainWindow::fitToScreen`):
+them wrong; the one before the third toolbar row is carried over, "Fitting the
+screen"), the window fits the screen it is on (`MainWindow::fitToScreen`):
 85% of the free area, centred, or maximised on a screen smaller than
 1440 x 900, where the drawing needs every pixel. View > Reset Window Layout
 puts the panels and toolbars back as a new window has them and leaves the
@@ -243,8 +244,8 @@ File had seventeen top-level items and has fifteen.
   dialog is a native modal one, which a headless run refuses
   (`refuseFileDialog`), so the folder it opens in has no seam to be read
   from.
-- **No toolbar changed**, so `kLayoutVersion` stays 1 and a saved layout
-  still fits: File's toolbar keeps New, Open, Save, Import Any File, Export
+- **No toolbar changed**, so `kLayoutVersion` was not raised and a saved layout
+  still fitted: File's toolbar keeps New, Open, Save, Import Any File, Export
   Drawing, Plot and Sheets.
 - **Settings is above Quit.** The action is the Format workbench's, which
   owns the dialog ("Settings", below), and is put in when the menus are
@@ -521,12 +522,64 @@ screen is one more that a smaller screen proves wrong.
   fits, and nothing scrolls); a stylesheet's `menu-scrollable` (the style is
   where the combo popup's hint already is).
 
+**The toolbars along the top: three rows, measured.** A toolbar that has not
+the width for its buttons hides the last ones behind an extension arrow, so
+the arrangement is chosen by what each toolbar needs side by side, which is
+its `sizeHint().width()` (the width at which every action shows). Measured
+alone with the headless driver's grab, in px: Survey 565, Terrain 379, GIS
+312, Surface Edit 692 (13 buttons and the surface list), BIM 384; File to
+Format together, about 1,180. With a 12 px handle before each, the second row
+of Survey, Terrain and GIS needs about 1,290 px and the third, Surface Edit and
+BIM, about 1,100, against the 1,366 of a 1366 x 768 laptop: both fit. The five
+on one row need some 2,400, which no common screen has, so Surface Edit, BIM
+and GIS showed a handle and an arrow only.
+`MainWindow::toolBarFit` reads the result off the window (a shown toolbar
+along the top whose button is not visible is one behind its arrow) and
+`katana --check-toolbar-fit 1366x768,1632x918,1920x1080` fails a run that
+finds one, printing each row's size-hint sum beside the width it has:
+`qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless`.
+1632 x 918 is the 85% of a 1920 x 1080 screen that a first run opens at. The
+test is not a widget test, as the arrangement is `MainWindow`'s and the
+widget tests cannot build it (`docs/headless.md`); it is the same run as
+`--check-menus` and `--check-toolbars`.
+* **Decided: a third row.** A row costs a toolbar's height (about 45 px) of a
+  768 px laptop, where the drawing needs it, and the alternatives were each
+  weighed against that. *Rejected:* the bottom edge, beside the Drafting bar
+  (Ortho, Polar, Tracking ...), which has the room and costs no height, but
+  puts workflow tools among the drafting aids, away from the menus they
+  belong to; Surface Edit hidden until Terrain > Edit Surface asks for it, since
+  a toolbar that is not shown fails "every toolbar shows its actions" by
+  hiding, and the tool a person looks for is then not there; Terrain and
+  Surface Edit together on one row with Survey, BIM and GIS on the other
+  (1,100 and 1,300 px: it fits too, and it groups the surface tools, but it
+  is no narrower than the second row kept - 1,290 - and Survey, Terrain and GIS
+  there is what every saved layout of the older builds already has);
+  shrinking Surface Edit's buttons, which would not match its neighbours.
+* **A saved layout.** `kLayoutVersion` is 2 and `restoreLayout` is the one door
+  `restoreSession` takes. A layout of version 2 is restored as it is, a hidden
+  toolbar staying hidden. A layout of version 1 - every one saved before this
+  change, from builds with no Surface Edit and BIM, or with them squeezed on the
+  second row - is restored too, then `seatThirdToolBarRow` puts those two on a
+  third row (whether the person had hidden either is read first and kept), and
+  a toolbar the layout does not place at all is put along the top and shown:
+  what Qt's `restoreState` does with a toolbar its state never mentioned is not
+  documented, so the loop does not rely on either answer. *Rejected:* raising
+  the version with no carry-over, which would send every saved layout back to
+  the built one - the panels' places too - for the sake of two toolbars (the
+  reason the BIM toolbar did not raise it); keeping the version and testing for
+  overflow after the restore, which cannot tell a crowded row a person chose
+  from one the build made. Checked by the same run: a layout with the two bars
+  on the second row (it first proves that layout overflows, so the check can
+  fail), one saved before they existed, one of this version with BIM hidden,
+  and an older one with Surface Edit hidden. A layout saved by a build of
+  2026-10-15, with the bars on the second row, is repaired the same way.
+
 Not done: a dialog's own buttons (Close, Apply) scroll with the rest, where a
-button row kept below the scroll area would stay in sight; the toolbars still
-overflow behind their arrow on a 1366-pixel screen (the second row, with Survey,
-Terrain, Surface Edit, BIM and GIS, does at 1360 even with small icons and no
-names), and no setting chooses a density from the screen; a floating dock is not
-fitted.
+button row kept below the scroll area would stay in sight; a window narrower
+than about 1,290 px (a 1280-px laptop) still overflows the second row, and
+larger icons or text widen every toolbar (a button is 41 px at Large Icons
+against 33); no setting chooses a density from the screen; a floating dock is
+not fitted.
 
 ## Failure modes
 
@@ -665,11 +718,15 @@ makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
 the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain, Surface Edit, BIM and GIS have a
-second row of their own (`addToolBarBreak`), because in one row they were
-squeezed to a button each behind overflow arrows - and with the Surface Edit
-and BIM bars in it the second row is itself wider than 1360 pixels, so BIM and
-GIS show only their handle and arrow there ("Fitting the screen", Not done).
+Format run along the top; Survey, Terrain and GIS have a second row of their
+own (`addToolBarBreak`), because in one row they were squeezed to a button each
+behind overflow arrows, and Surface Edit and BIM a third (`seatThirdToolBarRow`):
+Surface Edit (692 px), BIM (384) and the second row's three (1,256) are some
+2,400 px of toolbars with their handles, and the 1,366 of a laptop's screen
+holds the second row (about 1,290) and the third (about 1,100) but not both in
+one. For a day (2026-10-15) the five shared the second row, and Surface Edit,
+BIM and GIS showed a handle and an arrow and none of their buttons. "Fitting
+the screen" has how it is checked and what was rejected.
 Draw and Annotate run down the LEFT edge, where
 every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a

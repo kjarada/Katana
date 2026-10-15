@@ -195,17 +195,21 @@ constexpr double kLeastExaggeration = 0.01;
 constexpr double kMostExaggeration = 1000.0;
 
 // Where the window keeps itself between sessions (restoreSession), in the
-// QSettings the recent scripts are kept in. kLayoutVersion is saveState's
-// version: raised when the toolbars or panels change so that an old layout
-// would put them wrong, which makes restoreState refuse it and the window
-// start as built.
+// QSettings the recent scripts are kept in. MainWindow::kLayoutVersion is
+// saveState's version: raised when the toolbars or panels change so that an
+// old layout would put them wrong, which makes restoreState refuse it and the
+// window start as built - unless restoreLayout knows how to carry the old
+// layout over, as it does for version 1.
+//   1  every layout saved until 2026-10-15: File to Format on the first top
+//      row, Survey, Terrain and GIS on the second, and later builds' Surface
+//      Edit and BIM beside them there, where they overflowed.
+//   2  Surface Edit and BIM on a third row of their own (seatThirdToolBarRow).
 constexpr const char* kGeometryKey = "window/geometry";
 constexpr const char* kLayoutKey = "window/layout";
 constexpr const char* kMinimisedKey = "window/minimised";
 constexpr const char* kTextSizeKey = "appearance/textSize";
 constexpr const char* kToolBarIconsKey = "appearance/toolBarIcons";
 constexpr const char* kToolBarNamesKey = "appearance/toolBarNames";
-constexpr int kLayoutVersion = 1;
 
 // View > Text Size's items by size: viewTextSizeSmall ... ExtraLarge.
 QString textSizeActionName(katana::qt::theme::TextSize size)
@@ -1136,9 +1140,9 @@ void MainWindow::buildActions()
     terrainBar->addAction(surfaceStyles); // surface display
     terrainBar->addSeparator();
     terrainBar->addActions({selectionSection, alignmentSection});
-    // The Surface Edit toolbar, made before the tools filled it, goes after
-    // Terrain on the second row (docs/surface_editing.md).
-    addToolBar(Qt::TopToolBarArea, surfaceEdit_->toolBar());
+    // The Surface Edit toolbar, made before the tools filled it, has the first
+    // row where it was made until seatThirdToolBarRow puts it, with BIM, on a
+    // row of their own (docs/surface_editing.md).
 
     // ---- volumes (docs/volumes.md): Terrain > Volumes and its toolbar button ----
     QAction* volumes =
@@ -1165,7 +1169,7 @@ void MainWindow::buildActions()
     terrainBar->addSeparator();
     terrainBar->addAction(volumes);
     // ---- end of volumes ----
-    // ---- road model: beside Terrain, on the second row ----
+    // ---- road model: its BIM toolbar, which seatThirdToolBarRow puts on the third row ----
     QToolBar* bimBar = makeToolBar("BIM", Qt::TopToolBarArea);
     road_->fillToolBar(*bimBar);
 
@@ -1188,6 +1192,9 @@ void MainWindow::buildActions()
     // from their one table (geo/menu_table.cpp).
     GeoMenus geoMenus(*gisMenu, *terrainMenu);
     buildGeoMenus(geoMenus, *geo_);
+    // Every toolbar of the second row exists now: Surface Edit and BIM move off
+    // it, to the third.
+    seatThirdToolBarRow();
 
     // ---- Help ------------------------------------------------------------------------
     // The reference and the shortcuts are dialogs of their own, non-modal and
@@ -1669,6 +1676,72 @@ QStringList MainWindow::menuGaps(int* items) const
         *items = counted;
     }
     return gaps;
+}
+
+QStringList MainWindow::toolBarFit(int* toolBars, int* rows, QStringList* widths) const
+{
+    QStringList hiding;
+    // The shown toolbars along the top, by the row they are on: a row's
+    // toolbars share the top edge of the line Qt lays them on.
+    std::map<int, std::vector<const QToolBar*>> byRow;
+    for (const auto& [toolbar, name] : toolBars_) {
+        if (!toolbar->isVisible() || toolBarArea(toolbar) != Qt::TopToolBarArea) {
+            continue;
+        }
+        byRow[toolbar->y()].push_back(toolbar);
+        // A toolbar that does not fit hides the actions it has no room for
+        // (QToolBarLayout::layoutActions hides their buttons) and shows an
+        // extension button for them.
+        int buttons = 0;
+        int behind = 0;
+        for (QAction* action : toolbar->actions()) {
+            if (action->isSeparator() || !action->isVisible()) {
+                continue;
+            }
+            ++buttons;
+            const QWidget* button = toolbar->widgetForAction(action);
+            if (button != nullptr && !button->isVisible()) {
+                ++behind;
+            }
+        }
+        if (behind != 0) {
+            hiding << QString("%1: %2 of %3 actions are behind its extension button")
+                          .arg(toolbar->objectName())
+                          .arg(behind)
+                          .arg(buttons);
+        }
+    }
+    int counted = 0;
+    int row = 0;
+    for (auto& [edge, bars] : byRow) {
+        ++row;
+        counted += static_cast<int>(bars.size());
+        if (widths == nullptr) {
+            continue;
+        }
+        std::ranges::sort(bars, [](const QToolBar* a, const QToolBar* b) { return a->x() < b->x(); });
+        QStringList parts;
+        int needed = 0;
+        for (const QToolBar* bar : bars) {
+            // The width at which every action shows: the layout's size hint,
+            // which leaves the extension button out.
+            const int wide = bar->sizeHint().width();
+            needed += wide;
+            parts << QString("%1 %2").arg(bar->objectName()).arg(wide);
+        }
+        *widths << QString("row %1: %2 = %3 of %4 px")
+                       .arg(row)
+                       .arg(parts.join(" + "))
+                       .arg(needed)
+                       .arg(width());
+    }
+    if (toolBars != nullptr) {
+        *toolBars = counted;
+    }
+    if (rows != nullptr) {
+        *rows = static_cast<int>(byRow.size());
+    }
+    return hiding;
 }
 
 QStringList MainWindow::shortcutClashes(int* sequences) const
@@ -3085,11 +3158,69 @@ void MainWindow::restoreSession()
         fitToScreen();
     }
     // A layout saved by another version, or none, leaves the window as built.
-    if (restoreState(settings.value(kLayoutKey).toByteArray(), kLayoutVersion)) {
+    if (restoreLayout(settings.value(kLayoutKey).toByteArray())) {
         const QStringList unknown =
             chrome_->minimiseNamed(settings.value(kMinimisedKey).toStringList());
         (void)unknown; // a view of the last session: views are not kept
-        refreshToolBarNames();
+    }
+}
+
+bool MainWindow::restoreLayout(const QByteArray& state)
+{
+    // restoreState leaves the window untouched when the version is not the
+    // one asked for, so trying the older version after the newer does no
+    // harm. Version 1 is carried over (below); a state of any other version,
+    // or no state, is refused and the window stays as built.
+    bool carriedOver = false;
+    if (!restoreState(state, kLayoutVersion)) {
+        if (!restoreState(state, kLayoutVersionBeforeThirdRow)) {
+            return false;
+        }
+        carriedOver = true;
+    }
+    // A toolbar the saved layout never heard of is in none of its rows, and a
+    // toolbar that is in no row is shown nowhere: a layout from a build that
+    // had fewer toolbars would otherwise hide the newer ones. Along the top,
+    // where every toolbar added since the layout was first saved has gone.
+    for (const auto& [toolbar, name] : toolBars_) {
+        if (toolBarArea(toolbar) == Qt::NoToolBarArea) {
+            addToolBar(Qt::TopToolBarArea, toolbar);
+            toolbar->show();
+        }
+    }
+    // Version 1's Surface Edit and BIM were not on a row of their own: not at
+    // all (a build from before them) or beside Survey, Terrain and GIS, which
+    // is 2,400 px of toolbars for a row of 1,366. The rows the person made
+    // otherwise are kept. Rejected: raising the version with no carry-over,
+    // which would send every saved layout - the panels' places too - back to
+    // the built one for the sake of two toolbars.
+    if (carriedOver) {
+        seatThirdToolBarRow();
+    }
+    refreshToolBarNames();
+    return true;
+}
+
+void MainWindow::seatThirdToolBarRow()
+{
+    QList<QToolBar*> bars;
+    for (QToolBar* bar : {surfaceEdit_ != nullptr ? surfaceEdit_->toolBar() : nullptr,
+                          findChild<QToolBar*>("BIMToolBar")}) {
+        if (bar != nullptr) {
+            bars << bar;
+        }
+    }
+    // removeToolBar hides the bar it takes out of the layout, so whether the
+    // person had it hidden is read first and given back after.
+    QList<bool> hidden;
+    for (QToolBar* bar : bars) {
+        hidden << bar->isHidden();
+        removeToolBar(bar);
+    }
+    addToolBarBreak(Qt::TopToolBarArea);
+    for (qsizetype i = 0; i < bars.size(); ++i) {
+        addToolBar(Qt::TopToolBarArea, bars.at(i));
+        bars.at(i)->setVisible(!hidden.at(i));
     }
 }
 

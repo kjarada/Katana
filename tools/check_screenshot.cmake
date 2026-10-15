@@ -221,6 +221,13 @@ endif()
 if(CHECK_TOOLBARS)
     list(APPEND extra --check-toolbars)
 endif()
+# -DCHECK_TOOLBAR_FIT=<W>x<H>[,<W>x<H>...] fails the run when a toolbar along
+# the top has an action behind its extension button at one of those window
+# sizes, or after a layout saved by an older build is restored
+# (--check-toolbar-fit).
+if(DEFINED CHECK_TOOLBAR_FIT)
+    list(APPEND extra --check-toolbar-fit "${CHECK_TOOLBAR_FIT}")
+endif()
 # -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
 # hold exactly the reference's text, line ends aside (git may check the
 # reference out with either). The written files are removed first, so one

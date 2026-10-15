@@ -567,8 +567,8 @@ what the same corridor made before. QUANTITIES takes a corridor or ALL.
 
 ## In the window
 
-The BIM menu (`bimMenu`), after Terrain, and the BIM toolbar beside Terrain's
-on the second row (`src/katana_qt/bim/road_workbench.hpp`), each item building
+The BIM menu (`bimMenu`), after Terrain, and the BIM toolbar, on the third row
+beside Surface Edit's (`src/katana_qt/bim/road_workbench.hpp`), each item building
 its line and running it through the window's one executor:
 
 | Section | Item | Object name | Dialog |
@@ -662,10 +662,12 @@ layers change, and handed over only when what is shown changed. Show Road
 Model (`setRoadModelShown`) takes them out of all of it for the session, as
 View > Thin screen lines is set; an agent hides them by their layers.
 
-**The layout.** The new toolbar does not bump `kLayoutVersion`: a layout saved
-before it has no BIM toolbar, which Qt then places at the end of the second
-row, after GIS - shown, not misplaced. Raising the version would have put
-every saved layout back to the default for that.
+**The layout.** The BIM toolbar did not bump `kLayoutVersion` when it was made;
+raising the version would have put every saved layout back to the default for
+it. With Surface Edit it now has a third row of its own (`docs/desktop.md`,
+"Fitting the screen"), and the version is 2: `MainWindow::restoreLayout`
+carries a layout of version 1 over, seating the two toolbars on that row,
+whether the layout had put them on the second row or never knew them.
 
 ## Through MCP
 

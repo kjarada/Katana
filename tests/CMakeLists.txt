@@ -3204,6 +3204,44 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every toolbar along the top shows all its actions at a laptop's width and
+    # at a desktop's (--check-toolbar-fit, MainWindow::toolBarFit): 1366 is a
+    # 1366 x 768 laptop's screen, which the window fills; 1632 the 85% of a
+    # 1920 x 1080 screen that a first run opens at (MainWindow::fitToScreen);
+    # 1920 that screen maximised. The widths a toolbar needs are its size hint's,
+    # measured alone with the headless driver's grab (docs/desktop.md,
+    # "Fitting the screen"): Survey 565, Terrain 379, GIS 312, Surface Edit 692
+    # and BIM 384 px of ink, a handle (about 12 px) before each.
+    #  - on one row the five need 565 + 379 + 312 + 692 + 384 = 2,332 px and
+    #    five handles, some 2,400 px: more than 1,366, so Surface Edit, BIM and
+    #    GIS showed a handle and an arrow, and none of their buttons;
+    #  - the second row of Survey, Terrain and GIS needs 1,256 px and three
+    #    handles, about 1,290: it fits 1,366, where there is 76 to spare;
+    #  - the third, Surface Edit and BIM, needs 1,076 px and two handles, about
+    #    1,100;
+    #  - the first (File, Edit, Properties, View, Format) is about 1,180 px.
+    # Three rows therefore fit at every width asked for; the run prints each
+    # row's sum from the size hints beside the width the window has. Then, at
+    # 1366, the layouts older builds saved are restored: with Surface Edit and
+    # BIM on the second row (the check first proves that layout overflows, so
+    # it can fail), with neither of them, with BIM hidden (a layout of this
+    # version: it stays hidden) and with Surface Edit hidden in an older one
+    # (carried over: it stays hidden). None of those loses a toolbar or leaves
+    # an action behind an arrow.
+    set(_toolbar_fit "[0-9]+ toolbars along the top in 3 rows, none with an action behind its extension button")
+    add_test(NAME qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCHECK_TOOLBAR_FIT=1366x768,1632x918,1920x1080"
+            "-DEXPECT=toolbar fit 1366x768: ${_toolbar_fit}.*toolbar fit 1632x918: ${_toolbar_fit}.*toolbar fit 1920x1080: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout with Surface Edit and BIM on the second row: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout saved before Surface Edit and BIM existed: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout of this version with BIM hidden: [0-9]+ toolbars along the top in 3 rows, none.*toolbar fit 1366x768 after restoring an older layout with Surface Edit hidden: [0-9]+ toolbars along the top in 3 rows, none"
+            "-DFORBID=toolbar fit clash"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_fit_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Edit Surface > Raise, Lower or Set Level through the window
     # (docs/surface_editing.md): the dialog opened by its action, its line run
     # through the window's one executor. samples/gis/terrain.asc as a surface

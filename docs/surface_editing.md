@@ -360,7 +360,7 @@ Preview and Run; the lines are made by `surfaceLevelsLine`, tested without a
 window.
 Terrain > **Combine Surfaces...** (`surfaceCombineDialog`) makes a merge, a
 paste, a clip or an offset. The **Surface Edit** toolbar (`SurfaceEditToolBar`,
-on the second row after Terrain) has them all, and at its head the active
+on the third row, with BIM: `docs/desktop.md`, "Fitting the screen") has them all, and at its head the active
 surface (`surfaceEditActive`).
 
 - **The tools are catalogue tools** (category Terrain, group Surface Edit,

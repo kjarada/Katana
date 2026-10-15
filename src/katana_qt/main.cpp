@@ -594,6 +594,168 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
     return window.runVerbLine(line).ok;
 }
 
+// --check-toolbar-fit SIZES (WIDTHxHEIGHT, a comma between): at each size in
+// turn the window shows every action of every toolbar along the top, none of
+// them behind an extension button (MainWindow::toolBarFit). Then, at the
+// narrowest size, so does it after a layout an older build saved is restored
+// (MainWindow::restoreLayout): one that has Surface Edit and BIM on the second
+// row, where they overflowed; one saved before those two toolbars existed; and
+// one in which a person had hidden a toolbar, which stays hidden. Every size
+// and every restore is reported on stderr. A toolbar with an action behind its
+// extension button, a toolbar lost by a restore, a layout refused, or a hidden
+// toolbar that came back fails the run. Whether all held.
+bool checkToolBarFit(katana::qt::MainWindow& window, const QString& sizes)
+{
+    using katana::qt::MainWindow;
+    bool ok = true;
+    const auto settle = [] {
+        QApplication::processEvents();
+        QApplication::processEvents();
+    };
+    // One line for the window as it is. `expected`, when not negative, is how
+    // many toolbars should lie along the top; `count` gets how many do.
+    const auto report = [&](const QString& what, int expected, int* count) {
+        int bars = 0;
+        int rows = 0;
+        QStringList widths;
+        const QStringList hiding = window.toolBarFit(&bars, &rows, &widths);
+        if (count != nullptr) {
+            *count = bars;
+        }
+        for (const QString& line : hiding) {
+            std::fprintf(stderr, "toolbar fit clash: %s: %s\n", qPrintable(what), qPrintable(line));
+        }
+        const bool counted = expected < 0 || bars == expected;
+        if (!counted) {
+            std::fprintf(stderr, "toolbar fit clash: %s: %d toolbars along the top, %d expected\n",
+                         qPrintable(what), bars, expected);
+        }
+        if (hiding.isEmpty() && counted) {
+            std::fprintf(stderr,
+                         "toolbar fit %s: %d toolbars along the top in %d rows, none with an "
+                         "action behind its extension button\n",
+                         qPrintable(what), bars, rows);
+        }
+        for (const QString& line : widths) {
+            std::fprintf(stderr, "  %s\n", qPrintable(line));
+        }
+        ok = ok && hiding.isEmpty() && counted;
+    };
+
+    QList<QSize> list;
+    for (const QString& text : sizes.split(',', Qt::SkipEmptyParts)) {
+        const QStringList parts = text.split('x');
+        bool wide = false;
+        bool tall = false;
+        const int width = parts.size() == 2 ? parts.at(0).toInt(&wide) : 0;
+        const int height = parts.size() == 2 ? parts.at(1).toInt(&tall) : 0;
+        if (!wide || !tall || width < 200 || height < 200) {
+            std::fprintf(stderr, "--check-toolbar-fit needs sizes like 1366x768, a comma between "
+                                 "(not '%s')\n",
+                         qPrintable(text));
+            return false;
+        }
+        list << QSize(width, height);
+    }
+    if (list.isEmpty()) {
+        std::fprintf(stderr, "--check-toolbar-fit needs sizes like 1366x768, a comma between\n");
+        return false;
+    }
+    int asBuilt = 0;
+    QSize narrow = list.first();
+    for (const QSize& size : list) {
+        window.resize(size);
+        settle();
+        report(QString("%1x%2").arg(size.width()).arg(size.height()), -1,
+               size == list.first() ? &asBuilt : nullptr);
+        if (size.width() < narrow.width()) {
+            narrow = size;
+        }
+    }
+
+    // The older layouts, at the narrowest size, where the second row cannot hold more than
+    // Survey, Terrain and GIS.
+    window.resize(narrow);
+    settle();
+    QToolBar* const surfaceEdit = window.findChild<QToolBar*>("SurfaceEditToolBar");
+    QToolBar* const bim = window.findChild<QToolBar*>("BIMToolBar");
+    QToolBar* const gis = window.findChild<QToolBar*>("GISToolBar");
+    if (surfaceEdit == nullptr || bim == nullptr || gis == nullptr) {
+        std::fprintf(stderr, "toolbar fit: the Surface Edit, BIM and GIS toolbars are not all "
+                             "there\n");
+        return false;
+    }
+    const QString at = QString("%1x%2").arg(narrow.width()).arg(narrow.height());
+    // The layout of the build that put Surface Edit and BIM beside GIS.
+    const auto crowd = [&] {
+        window.removeToolBar(surfaceEdit);
+        window.removeToolBar(bim);
+        window.insertToolBar(gis, surfaceEdit);
+        window.insertToolBar(gis, bim);
+        surfaceEdit->show();
+        bim->show();
+        settle();
+    };
+    // `blob` restored: refused is a failure, and the window is then reported.
+    const auto restore = [&](const QByteArray& blob, const QString& what, int expected) {
+        if (!window.restoreLayout(blob)) {
+            std::fprintf(stderr, "toolbar fit clash: %s: the saved layout was refused\n",
+                         qPrintable(what));
+            ok = false;
+            return;
+        }
+        settle();
+        report(what, expected, nullptr);
+    };
+
+    crowd();
+    if (window.toolBarFit().isEmpty()) {
+        // The check must be able to fail: the layout it restores really is crowded.
+        std::fprintf(stderr, "toolbar fit clash: the second-row layout of the older build "
+                             "fitted at %s, so restoring it proves nothing\n",
+                     qPrintable(at));
+        ok = false;
+    }
+    restore(window.saveState(MainWindow::kLayoutVersionBeforeThirdRow),
+            at + " after restoring a layout with Surface Edit and BIM on the second row",
+            asBuilt);
+
+    window.removeToolBar(surfaceEdit);
+    window.removeToolBar(bim);
+    settle();
+    restore(window.saveState(MainWindow::kLayoutVersionBeforeThirdRow),
+            at + " after restoring a layout saved before Surface Edit and BIM existed", asBuilt);
+
+    // A toolbar hidden in a layout of this version stays hidden.
+    bim->hide();
+    settle();
+    const QByteArray bimHidden = window.saveState(MainWindow::kLayoutVersion);
+    bim->show();
+    settle();
+    restore(bimHidden, at + " after restoring a layout of this version with BIM hidden",
+            asBuilt - 1);
+    if (bim->isVisible()) {
+        std::fprintf(stderr, "toolbar fit clash: BIM was hidden in the saved layout and came "
+                             "back shown\n");
+        ok = false;
+    }
+
+    // And in one of the older version, carried over: Surface Edit hidden there
+    // stays hidden, BIM is seated.
+    bim->show();
+    crowd();
+    surfaceEdit->hide();
+    settle();
+    restore(window.saveState(MainWindow::kLayoutVersionBeforeThirdRow),
+            at + " after restoring an older layout with Surface Edit hidden", asBuilt - 1);
+    if (surfaceEdit->isVisible()) {
+        std::fprintf(stderr, "toolbar fit clash: Surface Edit was hidden in the saved layout and "
+                             "came back shown\n");
+        ok = false;
+    }
+    return ok;
+}
+
 } // namespace
 
 // Usage:
@@ -627,6 +789,7 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 //   katana --check-shortcuts --screenshot out.png
 //   katana --check-menus --screenshot out.png
 //   katana --check-toolbars --screenshot out.png
+//   katana --check-toolbar-fit 1366x768,1920x1080 --screenshot out.png
 //   katana --update-health TX
 //
 // The first argument that names a directory is opened as a project; other
@@ -771,6 +934,16 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 // and the steps have run, so --trigger viewToolBarIconsLarge before it is
 // measured at 28 px.
 //
+// --check-toolbar-fit SIZES resizes the window to each size (WIDTHxHEIGHT, a
+// comma between) and fails the run when a toolbar along the top has an action
+// behind its extension button: the toolbars show everything at a laptop's
+// width as at a desktop's. It then restores, at the narrowest size, the
+// layouts older builds saved (a second row crowded with Surface Edit and BIM,
+// none of those toolbars at all, a toolbar the person had hidden) and holds
+// the window to the same. Each size and each restore is reported on stderr,
+// with the width each row of toolbars needs beside the width it has
+// (MainWindow::toolBarFit, checkToolBarFit above).
+//
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
 // --survey-dock ACTION shows the dock that action shows (the Point Manager,
@@ -865,6 +1038,8 @@ int main(int argc, char* argv[])
     bool checkShortcuts = false;
     bool checkMenus = false;
     bool checkToolBars = false;
+    // --check-toolbar-fit's sizes, as given.
+    QString toolBarFitSizes;
     // --update-health's transaction id, as the update helper gave it.
     std::optional<QString> updateHealth;
     long long attributeEntity = 0;
@@ -958,6 +1133,8 @@ int main(int argc, char* argv[])
             checkMenus = true;
         } else if (argument == "--check-toolbars") {
             checkToolBars = true;
+        } else if (argument == "--check-toolbar-fit") {
+            toolBarFitSizes = value();
         } else if (argument == "--update-health") {
             updateHealth = value();
         } else if (argument == "--attributes") {
@@ -1128,6 +1305,9 @@ int main(int argc, char* argv[])
                 return 1;
             }
             std::fprintf(stderr, "menus: %d items, each with an icon and a status tip\n", items);
+        }
+        if (!toolBarFitSizes.isEmpty() && !checkToolBarFit(window, toolBarFitSizes)) {
+            return 1;
         }
         // --check-toolbars measures the toolbars and the docks' title bars as
         // the actions and steps leave them, so a step can set up what it
