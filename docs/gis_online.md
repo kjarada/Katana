@@ -442,6 +442,51 @@ has not been run). Their request builders are tested against the
 specifications and their answers against fixtures of the services'
 published shapes.
 
+## Which certificates are trusted
+
+`https://` is checked against two things on Windows, set once in
+`gdal_adapter.cpp` (`locateCertificates`) and used by every request that goes
+through GDAL's HTTP code - Online Data, GDAL's own web drivers and the
+updater's exchanges (`gis::httpExchange` asks GDAL to set up its handle):
+
+- **The bundle the package carries**, `etc/ssl/certs/ca-bundle.crt` beside
+  `bin/`, named explicitly to GDAL (`CURL_CA_BUNDLE`) as a UTF-8 path.
+  MSYS2's libcurl finds the same file by itself, but works out where `bin/`
+  is with the ANSI API, so an install under a folder with a character outside
+  the ANSI code page (a Cyrillic or CJK user name) was told a mangled path and
+  every request failed with "error adding trust anchors from file". Shown on
+  a copy of the package under such a folder: without the setting
+  `INFO /vsicurl/https://...` fails so; with the bundle named in UTF-8
+  through a `gdalrc` (the nearest to what the program now does) it reads the
+  file. OpenSSL opens a UTF-8 path with the wide API. A bundle the person
+  names (`CURL_CA_BUNDLE`, `GDAL_CURL_CA_BUNDLE`, `SSL_CERT_FILE`) wins.
+- **The Windows certificate store**, on top of the bundle
+  (`GDAL_HTTP_USE_CAPI_STORE=YES`, which GDAL implements by adding the store's
+  ROOT and CA certificates to OpenSSL's, not by replacing the bundle). A
+  company proxy or an antivirus that inspects `https://` re-signs with a root
+  of its own and installs it in the store, which the person's browser trusts;
+  the bundle holds the public roots only, so a program that trusted only it
+  failed on every such network ("unable to get local issuer certificate"),
+  with no way for the person to fix it short of knowing GDAL's settings. The
+  person's own `GDAL_HTTP_USE_CAPI_STORE` (NO included) wins. Seen here: on a
+  network that re-signs overpass-api.de, `INFO /vsicurl/https://overpass-api.de/...`
+  failed with "unable to get local issuer certificate (20)" and, with the
+  store turned on, reached the server (which answered 502, not a certificate
+  error). The cost is the one a browser has: whoever can install a root in
+  the person's store can be trusted by Katana.
+  **Rejected:** `CURLSSLOPT_NATIVE_CA` on libcurl's handles. It does the same
+  for a handle Katana makes itself (the updater's exchange) and nothing for
+  the requests GDAL makes (Online Data, `/vsicurl/`), so the two would need
+  two mechanisms where GDAL's covers both.
+
+Linux and macOS check against the bundle the deploy puts at `ssl/cacert.pem`
+(`docs/release.md`) and have no store setting.
+
+Not done: the system proxy. libcurl reads `HTTPS_PROXY`, not Windows's own
+proxy settings (WinHTTP, a PAC script), so a network with an explicit proxy
+needs `GDAL_HTTP_PROXY` (or `HTTPS_PROXY`) set by hand. The transparent proxy
+of the network this was checked on needed nothing.
+
 ## Failure modes
 
 | Condition | Result |
@@ -455,7 +500,7 @@ published shapes.
 | CloudFront's own 403 "Request blocked" page | `FileImportFailure`: the service may answer only from its own country |
 | a proxy refuses the host | `FileImportFailure`: the host may be blocked where Katana runs |
 | the certificate bundle beside libcurl is missing (curl 77, "trust anchors") | `FileImportFailure` naming `etc/ssl/certs/ca-bundle.crt` |
-| the service's certificate does not verify (curl 60) | `FileImportFailure`: a proxy or antivirus inspecting `https://` may be in the way |
+| the service's certificate does not verify (curl 60) | `FileImportFailure`: a proxy or antivirus inspecting `https://` may be in the way, and its certificate is not trusted by this computer (see "Which certificates are trusted") |
 | no answer in time | retried, then `FileImportFailure` saying how long it waited |
 | cancelled | `InvalidState` "cancelled"; nothing applied |
 | a feature outside the project CRS's domain | `InvalidCRS` naming the feature |

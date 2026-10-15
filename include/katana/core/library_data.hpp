@@ -15,10 +15,18 @@
 // that starts Katana runs it.
 //
 // So the data is looked for RELATIVE TO THE LIBRARY, the rule
-// gdal_adapter.cpp already applies to GDAL's own data on Windows: libproj in
+// gdal_adapter.cpp applies to GDAL's own data on Windows too: libproj in
 // <prefix>/lib, its data in <prefix>/share/proj. A distribution's PROJ, whose
 // compiled path is right, has no share/proj beside its library directory
 // (Debian's is /usr/lib/<triplet>), so nothing is changed there.
+//
+// On Windows PROJ already finds <prefix>/share/proj beside its DLL, but a
+// PROJ_DATA or PROJ_LIB in the environment replaces that, and another GIS
+// package (PostGIS, QGIS, OSGeo4W) leaves one machine-wide, naming data of its
+// own and usually older: a database this PROJ rejects. Katana's package then
+// found no usable proj.db though it carries one. bundledProjDataDirectory()
+// names the data Katana carries whatever the environment says, for the users
+// of PROJ to fall back on when the environment's does not open.
 
 #include <filesystem>
 #include <optional>
@@ -27,9 +35,9 @@
 namespace katana::core {
 
 // The file a loaded shared library was mapped from, found by the start of its
-// file name ("libproj.so" matches libproj.so.25). Linux and macOS;
-// std::nullopt elsewhere - on Windows gdal_adapter.cpp finds DLLs by name
-// itself, and PROJ finds its data beside its own DLL.
+// file name ("libproj.so" matches libproj.so.25, "libproj" libproj-25.dll).
+// Windows compares without regard to ASCII case, as its file names are.
+// std::nullopt when no loaded library's name starts so.
 [[nodiscard]] std::optional<std::filesystem::path>
 loadedLibraryPath(std::string_view fileNamePrefix);
 
@@ -59,5 +67,16 @@ dataBesideLibraryFile(const std::filesystem::path& library, const std::filesyste
 // PROJ passes it to its own search path: proj_context_set_search_paths for a
 // PROJ context, OSRSetPROJSearchPaths for GDAL's (and so PDAL's).
 [[nodiscard]] const std::optional<std::filesystem::path>& projDataDirectory();
+
+// <prefix>/share/proj beside the loaded libproj when it holds proj.db, on every
+// platform and WHATEVER THE ENVIRONMENT SAYS: the PROJ data Katana carries
+// (the package's, or the toolchain's). It is not where PROJ is pointed - that
+// is projDataDirectory(), which yields to PROJ_DATA and PROJ_LIB, an explicit
+// choice - but what a user of PROJ falls back on when the choice does not open
+// (a machine-wide PROJ_LIB left by another GIS package, naming a database of
+// another PROJ's layout). std::nullopt when libproj is not loaded or carries
+// no data beside it (a distribution's PROJ). Worked out once per process; safe
+// from any thread.
+[[nodiscard]] const std::optional<std::filesystem::path>& bundledProjDataDirectory();
 
 } // namespace katana::core
