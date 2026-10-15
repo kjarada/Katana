@@ -130,6 +130,7 @@ add_test(NAME cli.several_template_courses_are_set_by_one_line_and_one_undo_step
 set_tests_properties(cli.several_template_courses_are_set_by_one_line_and_one_undo_step PROPERTIES
     PASS_REGULAR_EXPRESSION
     "component=left:lane name=AC14 thickness=0[.]06.*component=left:lane name=base thickness=0[.]3 .*1 undone.*component=left:lane name=AC14 thickness=0[.]05 .*component=left:lane name=base thickness=0[.]2 "
+    FAIL_REGULAR_EXPRESSION "error")
 
 # Removing a name that both sides have, from a template whose right side was made
 # first (stored right before left), takes both and does not crash: the indices
