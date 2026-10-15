@@ -1158,8 +1158,10 @@ tool to be able to act that way. Global Modify's scope and filter became the
 one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
 words, read by one parser and resolved by the one matcher,
 `cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
-and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them; the
-standing rule is that every verb that reads or changes drawing data
+and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them, and
+(since 2026-10-15) the leader verbs (`LEADER LIST`, `VALUES`, `SET`, `FREEZE`,
+`DETACH`, `PROP`, `ALIGN`, `FOR`, `BALLOON FOR`, `BALLOON RENUMBER`:
+`docs/annotation.md`, "Scope and filter"); the standing rule is that every verb that reads or changes drawing data
 is to take them too, and the others - `ERASE`, `CHLAYER`, `SELECT` and the
 rest - still act on the selection or their own arguments until they do.
 

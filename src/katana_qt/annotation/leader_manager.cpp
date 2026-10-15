@@ -1921,6 +1921,19 @@ const katana::entity::Entity* LeaderManagerDialog::forTarget() const
 void LeaderManagerDialog::updateForPreview()
 {
     forValues_->setRowCount(0);
+    // Controls that cannot be read - no layer ticked, a colour that is none -
+    // say why, instead of a scope that quietly takes nothing.
+    {
+        const auto scope = forScope_->scope();
+        const auto filter = forScope_->filter();
+        if (!scope || !filter) {
+            forSelection_->setText(QStringLiteral("Apply to cannot be read."));
+            forCheck_->setStyleSheet(QStringLiteral("color: #d9534f"));
+            forCheck_->setText(errorText(!scope ? scope.error() : filter.error()));
+            forPreview_->clear();
+            return;
+        }
+    }
     // What the controls take: the selected entities to begin with, said as
     // it always was; any other scope or a filter is said by its count.
     const std::vector<EntityId> taken = forTargets();
