@@ -148,7 +148,8 @@ shoulder, batter; its profile is the median's top).
 A corridor names its alignment (with a design profile), its road template
 and its TARGET SURFACE, and holds what is its own: a station range (each end
 absent is the alignment and profile's overlap), the interval it is sectioned
-at (10 m by default), REGIONS where another template applies, and the
+at (10 m by default), the CURVE TOLERANCE its quantities on a curve are held
+to (0.001 by default), REGIONS where another template applies, and the
 SUPERELEVATION table.
 
 **Superelevation** is a table of stations, each with the crossfall of the
@@ -182,6 +183,42 @@ ends - because the road changes character there and a schedule that stepped
 over them could not be checked (`road::sectionStations`). More than 100 000
 sections is refused before one is made, as ALIGN STATIONS refuses as many
 rows.
+
+**Sections inside a curve.** A solid is lofted from one section to the next with
+flat quads, so round a curve its plan area and volume are those of CHORDS: over a
+step of arc angle theta, `sin(theta)/theta` of an annulus sector's, short by
+about theta^2/6 (0.65 % for 10 m on R = 50 m), and a kerb's length, the sum of the
+chords of its lip line, short by about theta^2/24 (0.16 %). The corridor therefore
+adds sections inside a curve, and no step is left that turns through more than
+`sqrt(6 x curvetol)`: 0.0775 radians at the default of 0.001, 3.9 m on R = 50 m
+and 15.5 m on R = 200 m, where the interval's 10 m already does it
+(`road::sectionStations` with the alignment). A gap that turns through more is cut
+into the fewest EQUAL parts that do not, so every station of the plain list is
+still there, a straight gets none, and the same stations serve the strings, the
+surfaces, the solids, the quantities and the IFC export: this is the one engine.
+A spiral is held to the curvature at the sharper end of each gap, which errs the
+safe way. Round the 90 degree curve of R = 50 m the left lane's 50 mm AC14 (3.3 m
+wide, r = 46.7 to 50 m, 12.5314 m3 exact: pi/4 x (50^2 - 46.7^2) x 0.05) comes out
+12.4505 m3 with no sections added (`curvetol=0`: 0.65 % short) and 12.5224 m3 at
+the default (0.07 % short, inside the 0.1 % asked), at the cost of 16 sections
+more than the 20 the interval and the keys give over its 178.5 m
+(`StationsInsideACurveAreCutUntilNoStepTurnsThroughMoreThanTheTolerancesAngle`,
+`ACoursesVolumeRoundAQuarterCircleIsTheAnnulusSectorsToTheCurveTolerance`). The
+EARTHWORKS get those sections too, which can only bring
+their end-area volume nearer the true one. `curvetol=` is a relative error from 0
+(off, or the word `off`) to 0.1; one so small that the curve needs more than
+100 000 sections (4e-11 round a quarter turn) is refused as an interval that
+makes too many is, naming the tolerance. A corridor saved before it existed has
+none written and reads as the default, so its quantities on a curve change, for
+the better, the next time it is built. *Rejected:* correcting the quantities by the annulus sector's formula
+and leaving the sections where they were - the solid drawn and the number would
+then disagree, the model and its quantity agreeing being the point of measuring
+the solid, and spirals, superelevation and an offset kerb would each need a
+formula. *Rejected:* a smaller default interval - a straight would pay for the
+bend. *Rejected:* a tolerance in metres of sagitta, as a drawing's polyline is
+chorded (`SolvedAlignment::toPolyline`): what a quantity cares about is the
+angle a step turns through, and the same sagitta is a different relative error
+on every radius.
 
 **A section** (`road::roadSection`) sets each side's components out in turn
 from the centreline at the design level; a lane or shoulder at its crossfall
@@ -311,7 +348,8 @@ its objects (`include/katana/cad/bim/bim_object.hpp`):
 - the earthworks CUT and FILL of each side of each run: a closed solid for
   each PIECE - a stretch of stations where that side has any (see above),
   inside a stretch of complete sections, with the one section beyond each end
-  where its end area tapers to nothing. None where there is none.
+  where its end area tapers to nothing, in a line (below). None where there
+  is none.
 
 **A closed solid** (`road::loftSolid`): the solid's columns at each station
 give a top and a bottom face, the first and last column an inner and an
@@ -321,13 +359,47 @@ edge is shared by exactly two triangles and the solid is closed and
 consistently turned. Which way that turns depends on the side (offsets grow
 to the left, so the right side's solids are mirror images): it is turned
 outward by the sign of the volume it encloses. An earthworks solid has
-`road::kEarthworksColumns` (41) columns a side - its look, not its quantity -
-spread from where its earthworks start across each section to where they end,
-not from the centreline to the daylight: a fill beside a road in cut is no
-sheet laid over the whole half-section. Where a section's earthworks have a
-gap in them (cut, fill, cut across one section) the columns span the gap with
-no thickness, and its faces there have no area, which leaves the solid
-closed.
+`road::kEarthworksColumns` (41) columns across each STRETCH of a side - its
+look, not its quantity - spread from where that stretch of earthworks starts
+across a section to where it ends, not from the centreline to the daylight: a
+fill beside a road in cut is no sheet laid over the whole half-section.
+
+**A solid may taper, and then it has no face of no area.** A column whose top
+and bottom are the same (to the model's 0.1 mm, `math::tolerance::kCoordinate`,
+the thickness under which `earthworkSpans` finds no earthworks) is ONE vertex,
+and the faces between its two, which have no area, are not made: the solid ends
+in a line with a wedge welded to it, every edge still shared by two triangles
+(`loftSolid`'s `weldBelow`). That is done in the places a solid ends: a
+station's first and last column (where the ground meets the formation, the
+daylight, a stretch's edge) and every column of the first and last station (the
+section beyond a piece, which is a line along the formation). A cell with all
+four corners welded is two faces on one surface, with nothing inside it, and
+is left out. An interior column is never welded: a welded line with a body on
+each side is an edge four faces use, and the mesh would not be closed. Before,
+the end section of a piece and the edge of every stretch were columns with a top
+and a bottom at one level, and their faces - the cap of a tapering piece, the
+sliver at the daylight - were triangles of no area in a mesh that was closed
+on its indices (the IFC export judges closure there, and wrote them as they
+were).
+
+**A section with a gap in its earthworks** (cut, fill, cut across one
+half-section: `RoadSection::leftCutSpans` holds two stretches) makes the solid
+of cut one SHELL for each stretch counted from the centreline, the
+`k`-th stretch of each section lofted over the sections that have `k` of them
+and one beyond each end that is in the piece, where it is a line along the
+formation. They are one object (one id, one quantity: the end area, whose
+outline and GrossArea are the hull, as they were) with two closed shells in its
+mesh that touch nowhere, as an IfcTriangulatedFaceSet may hold. Before, one set
+of columns spanned the gap with no thickness, and its top and bottom lay on one
+surface there. *Rejected:* a solid for each stretch as an object of its own - a
+new id and a piece number for what the end-area quantity (which cannot be
+divided between stretches without a per-stretch area) counts as one;
+*rejected:* matching the stretches of one section to those of the next by
+overlap, and ending a shell where they do not match - the mesh is the look and
+not the quantity, so the `k`-th stretch of each is enough for it to be closed
+and a wrong match only skews a drawing, where an overlap rule changes which
+solids exist; *rejected:* welding any column whose thickness is under the bound
+- the pinch above.
 
 **Object ids** are stable - the IFC export derives each GlobalId from one,
 and a model handed over twice must name the same things the same way:
@@ -386,7 +458,8 @@ their hull.
 
 A course's volume is the SOLID'S, so the model and its quantity agree and a
 course on the outside of a curve - longer than the centreline - is measured
-as the longer thing it is (to the chords between its sections: Not done). The earthworks' is the END AREA, the measurement
+as the longer thing it is (to the chords between its sections, which the
+curve tolerance holds to a thousandth: "Sections inside a curve"). The earthworks' is the END AREA, the measurement
 standard, as above; the solid drawn for them differs from it by the corners
 its 41 columns cut, which the tests work out by hand
 (`CorridorObjects.TheEarthworksAreTheEndAreasTheOldAssemblyMeasured`).
@@ -439,22 +512,45 @@ it once more than it changed; what listens rebuilds from a cache, so that
 costs nothing (below).
 
 **The cache** (`bim::bimModel`, `src/katana_cad/bim/bim_object.cpp`). Made
-once per change of what it is made from, in two halves: the corridors' on the
-two keys' text, the alignments' revision and the surfaces' generation - so a
-line drawn does not rebuild them - and the placed objects' on their key and
-every step. (That is wider than they need: they read only their key, the
-alignments and the surfaces, and a line is copied into an object, never
-followed - `road_objects.md`, "Not done".) A half made again that equals what
-it replaced keeps the old one - BOTH halves, the corridors' too: the
-alignments' revision and the surfaces' generation move for an alignment or a
-surface no corridor uses, and a model handed to the views as a different
-object made every 3D view build its terrain again - so the model a view holds
-is the same object until something in it changes
+once per change of what it is made from, in two halves, each keyed on what it
+reads and nothing wider:
+
+| Half | Made again when |
+|---|---|
+| the corridors' | the road templates' or the corridors' text changes, the alignments' revision moves, or a surface a corridor TARGETS (its `surface=`; it reads no other) is another object |
+| the placed objects' | the `road_objects` text changes, the alignments' revision moves, or a surface an object NAMES (`surface=`) is another object |
+
+So a line drawn, a layer, a surface no corridor targets and no object names - an
+edit of it, a hide, a removal, a new one - make neither again, and a template
+edit leaves the placed objects alone, as a placed object leaves the corridors
+(`bim::bimBuildCounts` counts each half's makings, for the tests and the
+benchmark). Before, the corridors' half was keyed on the surfaces' whole
+generation and the placed objects' on every command, so any edit of any surface
+sectioned every corridor again for a model that came out the same. A surface is
+told apart by IDENTITY, not by its name: an edit replaces the object
+(`SurfaceStore::replace`), so the same object is the same ground, and an undo
+that puts back the old one is a change. The cache holds each as a `weak_ptr`,
+which keeps the identity alive after the surface is gone, so a new surface made
+at the same address is not taken for the old. *Rejected:* the surfaces'
+generation with the names compared - it moves for the surfaces nobody reads,
+which is the cost; and a content hash of the TIN - it would be read on every
+paint. A half made again that equals what it replaced
+keeps the old one - BOTH halves: an alignment no corridor uses moves the
+alignments' revision (both halves read the whole set, which is
+conservative), and a model handed to the views as a different object made
+every 3D view build its terrain again - so the model a view holds is the same
+object until something in it changes
 (`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`,
 `RoadVerbs.TheRoadModelIsTheSameObjectAfterAnEditThatLeftItAsItWas`). The
 views call it every paint; while nothing it is made from moved that is a few
-counters and two texts, and a half made again is compared with the old one
-(vertex for vertex) only after a key moved.
+counters, two texts and a lookup of each surface named, and a half made again
+is compared with the old one (vertex for vertex) only after a key moved. The
+one way a placed object reads a surface is `placement.surface`; a new way
+would need its name in that key (`placedGrounds`). What it costs is measured by
+`benchmarks/bench_road.cpp` (`BM_RoadModelUnchanged`,
+`BM_RoadModelAfterAnUnrelatedSurface` against `...AfterTheTargetedSurface`):
+not yet run - the corridors of a kilometre of the urban street are the work an
+unrelated surface edit no longer repeats.
 
 ## The verbs
 
@@ -467,8 +563,9 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     ROADTEMPLATE SET <t> <component> key=value ... [<component> key=value ...] | REMOVE <t> <component>
     ROADTEMPLATE COURSE <t> <component> ADD <course> thickness= [material=] [ifc=] [colour=] [at=]
     ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... [<course> key=value ...] | REMOVE <course>
+    ROADTEMPLATE EXPORT <t>|ALL <file.json> [OVERWRITE] | IMPORT <file.json> [OVERWRITE]
     CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
-    CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=]
+    CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=] [curvetol=]
     CORRIDOR SET <c> key=value ... | DELETE <c> | RENAME <c> <new>
     CORRIDOR REGION <c> ADD <from> <to> <t> | REMOVE <from> | CLEAR
     CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR
@@ -535,6 +632,36 @@ object's ("object <id>") are in `ROADMODEL PROBLEMS` with them. **`ROADTEMPLATE
 DELETE` and `CORRIDOR BUILD ALL` refuse when the corridors cannot be read**,
 as `RENAME` and `LIST` do: an empty set would say that none uses the template.
 
+**Template files.** `ROADTEMPLATE EXPORT <t>|ALL <file.json>` writes the
+template (or every one: the word ALL, in any case, is always every template, so
+a template of that name is exported by renaming it first) in the plain-data,
+versioned JSON that `ROADTEMPLATE JSON` prints and the project keeps
+(`road::roadTemplatesToJson`: format `katana-road-templates`, version 1, every
+number exact), and a newline. A file already there is only replaced with
+`OVERWRITE`, as every verb that writes one; a drawing with no templates has none
+to export. `ROADTEMPLATE IMPORT <file.json>` reads such a file back through the
+code the project reads its own with (`road::roadTemplatesFromJson`: the format,
+the version - a newer Katana's file is `Unsupported`, never read by guesswork -
+and `road::checkTemplate` of every template, the check `ROADTEMPLATE SET`
+makes, so a lane of no width or a name used twice is refused naming the
+component), after a byte order mark or UTF-16 an editor wrote has been read as
+text (`core::decodeText`). A file over 16 MiB (`kMaximumTemplateFileBytes`, a
+sanity bound with no standard behind it) is refused unread, and a file of no
+templates is refused as a mistake and not imported as nothing. The templates go
+in as ONE undo step, in the file's order after the drawing's own. A name the
+drawing already has - found ignoring case, as every verb finds one - refuses the
+whole file with nothing imported and names them; `OVERWRITE` replaces each
+where it stands (its place in the list kept, the file's spelling of its name)
+and the corridors that name it follow it, being made from it again. *Rejected:*
+importing the names that do not clash and refusing the rest - a file half
+imported is a file the person must work out the other half of; *rejected:*
+renaming a clash to `name (2)` - every corridor would still name the old one,
+and the person asked for that template. Both verbs act on named definitions and
+a file, not on drawing entities, so they take no scope or filter. `katana_mcp`
+reaches them through `katana_run_commands`, and an agent has no other door to
+the file (`AnAgentMovesRoadTemplatesThroughAFileByTheirLines`); a drawing's
+templates are copied between projects this way and no longer by hand.
+
 **`QUANTITIES csv=`** writes through the one CSV writer of the report verbs
 (`cad::writeCsvTable`, shared with VOLUME): RFC 4180, records ending in CRLF,
 and a file already there is only replaced with the word `OVERWRITE` (the
@@ -575,7 +702,7 @@ its line and running it through the window's one executor:
 |---|---|---|---|
 | Templates | Road Template Manager... | `bimRoadTemplates` | `roadTemplateManagerDialog` |
 | Corridors | Corridors... | `bimCorridors` | `corridorDialog` |
-| Model | Show Road Model | `bimShowRoadModel` | - |
+| Model | Show Road Model (`ROADMODEL SHOW`) | `bimShowRoadModel` | - |
 | Quantities | Corridor Quantities... (Ctrl+Shift+Q) | `bimCorridorQuantities` | `corridorQuantitiesDialog` |
 
 The road objects' items follow, in a section of their own (the road
@@ -583,7 +710,13 @@ objects document, docs/road_objects.md). The dialogs' widgets and what each runs
 in their headers: `src/katana_qt/bim/road_template_manager.hpp` (the templates;
 the components and courses in two grids that are buffers, each applied by ONE
 line - a group of `key=value` for every edited row - so an Apply is one undo
-step and a refused value leaves the template as it was; a drawing of the
+step and a refused value leaves the template as it was; the components' grid
+has a Faces column, a kerb's facing, inward or outward, edited in place - empty
+and fixed on anything that has no face, a flush edge strip included; a row of
+the dialog for a template file, a text box with a Browse button (no file dialog
+in a headless run, where the path is typed), Export, Export All and Import that
+build the `ROADTEMPLATE EXPORT` and `IMPORT` lines, and a Replace box that adds
+OVERWRITE to them; a drawing of the
 template across a level road - `road::templateSection` - its courses
 coloured and its vertical exaggerated so a 50 mm course can be seen),
 `src/katana_qt/bim/corridor_dialog.hpp` (the corridors, their regions and
@@ -608,7 +741,7 @@ person's unapplied edits only while what they were made on is as it was:
   where it was left with one; a dialog taller than the screen is fitted to it
   by the application, so no scroll area of its own.
 - *Corridors.* The definition fields (name, alignment, template, surface,
-  interval, from, to) are a buffer, refilled from the corridor when it is
+  interval, curve tolerance, from, to) are a buffer, refilled from the corridor when it is
   chosen and when its stored definition changes, and kept across any other
   reload: a typed interval survives a line drawn. New and Rename read the name
   BEFORE the line runs (the reload refilled the field from the corridor still
@@ -621,7 +754,10 @@ person's unapplied edits only while what they were made on is as it was:
   to whatever item was showing; Apply now also writes a name in the case the
   corridor already holds it.
   `CorridorDialog.ApplyKeepsTheTemplateAndSurfaceACorridorNamesInAnotherCase` and
-  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`.
+  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`. The curve
+  tolerance is in the line only when it is not what the corridor already has
+  (a new corridor has the default), so the lines stay as short as they were
+  (`TheCurveToleranceIsInTheLineOnlyWhenItIsNotWhatTheCorridorHolds`).
 - *Corridor Quantities.* The table and the totals are the records of the
   last line it ran, so when the road model that line read (`bim::bimModel`'s
   object) is no longer the drawing's - an edit, an undo, a redo, New, Open -
@@ -660,7 +796,28 @@ earthworks dashed; Zoom Extents counts them. The meshes are made again from
 the event loop when the road model, the surfaces, the alignments or the
 layers change, and handed over only when what is shown changed. Show Road
 Model (`setRoadModelShown`) takes them out of all of it for the session, as
-View > Thin screen lines is set; an agent hides them by their layers.
+View > Thin screen lines is set.
+
+**Show Road Model has a line**, `ROADMODEL SHOW [ON|OFF]` (alone, the other of
+the two), as View > Grid has `GRID`: it is the window's own, the session's
+display state, so the road workbench takes it (`RoadWorkbench::runLine`, from
+`MainWindow::runWorkbenchLine` where the online and update workbenches take
+theirs) before the interpreter ever sees it, switches the same action as the
+menu's item and replies `roadmodel=on` or `roadmodel=off`, once. An agent that
+drives the window (`katana --command`, a script, a dialog's line) no longer has
+to switch the road layers off to see the drawing without the model. In a
+session with no views - `katana_cli`, `katana_mcp` - the verb is refused by
+name, `Unsupported`, saying whose it is and to hide the objects by their layers
+there (`LAYER HIDE road`), as `GRID` is refused. *Rejected:* a flag in the
+Document, which is saved and undone and would make a view setting a project
+edit; and a hidden-layer shortcut, which changes the drawing's layers for a
+picture.
+
+**The Command Reference** (Help) lists the road verbs in a section of their own,
+Road model, read from `HELP CORRIDOR` (`road::roadVerbHelp`) as the Road objects
+section is from `HELP ROADOBJECT`, so a word added to the verbs' help is there at
+once; its Window section names `ROADMODEL SHOW`, the one of them that is the
+window's alone.
 
 **The layout.** The new toolbar does not bump `kLayoutVersion`: a layout saved
 before it has no BIM toolbar, which Qt then places at the end of the second
@@ -685,24 +842,43 @@ class, layer, quantities and properties, and every problem
   the middle of its transition (and of an edge strip and a drain), batters
   daylighting on a plane in cut, fill and on sidelong ground, a side of a
   batter alone, a limit that is not a multiple of a step, the pavement box
-  cut, benches, the divided road's kerb, refusals.
+  cut, benches, the divided road's kerb, refusals; the stations inside a
+  curve, measured from the alignment's directions and not from the curvature
+  they were cut by (an arc, a spiral, a straight, an unusable tolerance, one
+  that needs too many).
 - `tests/cad/road/test_corridor_objects.cpp`: course volumes on a straight as
   width x thickness x length, every solid closed and turned outward, stable
   ids and IFC classes, a kerb's length and volume, the earthworks against the
   old assembly's end areas and their footprints (a side with cut and fill, a
   fill that ends along the road, pieces and their ids, no sliver of the other
-  kind), regions, problems, strings and surfaces.
+  kind), regions, problems, strings and surfaces; a course and a kerb round a
+  quarter circle against the annulus sector's area and the arc's length, with
+  the curve tolerance on and off; the lofted solids that taper (a wedge, an edge
+  column of no thickness, a gap, an interior column that must not be welded)
+  with their vertex and triangle counts worked out by hand, closed on their
+  indices, and no triangle under `math::tolerance::kAbsolute` - also over every
+  earthworks solid of the three standard templates on three grounds (a tilt, a
+  sawtooth, two cuts across), where the cases that weld are counted so that the
+  property is not satisfied by luck.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache (the
-  same object after an edit that left the model as it was), the RoadModel
-  change, the JSON the project keeps; several components or courses set by one
-  line, one step, and a refused value in any group changing none.
+  same object after an edit that left the model as it was, and which half each
+  kind of edit makes again, counted: a surface nothing reads neither, the
+  corridors' ground the corridors, the object's the placed objects, an
+  alignment both), the RoadModel change, the JSON the project keeps; several
+  components or courses set by one line, one step, and a refused value in any
+  group changing none; the template files (written and read back exactly, a
+  file's names against the drawing's, the refusals, OVERWRITE for a file and
+  for a name).
 - `tests/cad/test_corridor.cpp`: the old functions, unchanged, on the new engine.
 - `tests/qt_widgets/bim/test_road_dialogs.cpp`: each dialog's lines and the
   workbench's menu and meshes; the dialogs' state across New, Rename, an
   unrelated command, an undo and a changed drawing (the Corridors dialog's
   fields and combos, the Template Manager's two grids, the listing of the
-  Quantities dialog); an Apply of several rows as one line; the 3D view's own
+  Quantities dialog); the template file row's lines, quoting and Replace box,
+  and the Faces column; Show Road Model's line and the Command Reference's
+  section of the road verbs (`TheCommandReferenceHasTheRoadVerbsInASectionOfTheirOwn`);
+  an Apply of several rows as one line; the 3D view's own
   hidden layers.
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
@@ -714,65 +890,57 @@ class, layer, quantities and properties, and every problem
   refused value stopping the script; and the refusals and replies the review
   found wrong (a name removed from both sides, a bench too small, a renamed
   corridor's strings, a section outside the corridor, a CSV replaced only with
-  OVERWRITE).
-- `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`.
+  OVERWRITE); a corridor round a curve with its sections and a kerb's length at
+  `curvetol=` and off (`cli.a_corridor_round_a_curve_has_sections_inside_it_until_curvetol_is_met`);
+  templates exported by one process and imported by another, a second export and
+  a second import refused, and OVERWRITE
+  (`cli.road_templates_exported_by_one_process_are_imported_by_another`).
+- `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt` and
+  `McpServer.AnAgentMovesRoadTemplatesThroughAFileByTheirLines`;
+  `cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so` for the
+  refusal where there are no views.
 
 ## Not done
 
-- **An earthworks solid still has faces of no area where it tapers to
-  nothing.** The solids are split along the road where a side has none and
-  drawn over the stretch across the section where it has some, but the end
-  section of a piece (the one with none) and a gap inside one section have
-  no thickness: the mesh is closed on its own indices, and the IFC writer
-  judges closure there first and writes it as it is (docs/ifc.md, "Road
-  model"), so the solid goes out Closed with its triangles of no area in it
-  (seen on the rural two-lane tour: every earthworks solid Closed, and
-  `tools/check_ifc.py` with no finding); a viewer that refuses a degenerate
-  triangle would still object. Every course is closed. The piece should end in
-  a real closed taper (a wedge welded to a line), and a section with a gap
-  should be two stretches across.
-- **Course areas and volumes and kerb lengths on a curve are chord
-  approximations.** A course is lofted between sections with flat quads and a
-  kerb's Length sums the chords between sections, so on an arc of radius R a
-  step of arc angle theta (the interval over R) makes areas and volumes short
-  by about theta^2 / 6 and a kerb's length by about theta^2 / 24: 0.65 % and
-  0.16 % for a 10 m interval on R = 50 m (a 90 degree curve, left lane AC14
-  12.450 m3 against 12.531 exact; the interval of 1 m gives 12.531), 0.04 % on
-  R = 200 m. The error is always low and falls with the interval, which the
-  person shortens on a curve as for the volumes (`docs/volumes.md`); the
-  sections could be added inside curves to a stated tolerance
-  (R x sqrt(6 x tolerance)) but that adds earthworks sections too, which the
-  existing station-count tests would have to be reviewed for.
 - Superelevation by design speed and radius: the table is entered by hand.
+  The rates, the side friction and the runoff lengths are a design standard's
+  tables, which differ between authorities, and no number is made up here.
 - Shoulder rollover on the high side of a superelevated section: a
-  superelevated shoulder takes the lane's crossfall.
+  superelevated shoulder takes the lane's crossfall. The limit on the
+  algebraic difference is a standard's, as above.
 - A template that changes width along a run (lane widening, tapers) other
   than by a region of another template, and transitions between regions: a
   region's ends are steps (the solids step, the strings break, the surface
-  has a face 1 mm wide).
+  has a face 1 mm wide). The taper lengths are a standard's table by speed; a
+  feature beyond this round.
 - Daylight to a surface other than the corridor's target per side, and cut
-  and fill batters with different benches.
+  and fill batters with different benches. A second target would be in the
+  corridor and in every reader of the one engine; beyond this round.
 - Courses under a kerb (its bedding) and a lined table drain's lining as a
-  solid apart from its courses.
+  solid apart from its courses. No standard thickness for either is quoted
+  here; beyond this round.
 - The earthworks' quantity by the prismoidal formula: end area only, as
-  corridorQuantities. The volumes work has a prismoidal method along an
-  alignment between two surfaces (the volumes document, docs/volumes.md).
-- Mass haul for a corridor.
+  corridorQuantities (the sections a curve adds bring it nearer the true
+  volume there). The volumes work has a prismoidal method along an alignment
+  between two surfaces (the volumes document, docs/volumes.md).
+- Mass haul for a corridor: it needs the haul distances and the free-haul and
+  overhaul limits of a contract, which the drawing does not hold.
 - Sections of a corridor in the section view, and sheets of cross sections
-  from a corridor (GENERATE sections draws the ground and the profile only).
-- A verb for Show Road Model (session display state, as the grid's toggle is
-  in a window verb): an agent hides the objects by their layers.
+  from a corridor (GENERATE sections draws the ground and the profile only); a
+  feature beyond this round.
+- The old assembly functions (cad::corridorQuantities, corridorSurface) have no
+  curve tolerance and keep the interval's stations, as their unchanged tests
+  require; only a corridor of the drawing is sectioned inside curves.
+- The shells of an earthworks piece are the k-th stretch of each section, not
+  matched by overlap: a stretch that appears or vanishes between two sections
+  is drawn skewed (the mesh is the look; the quantity is the end area, which
+  does not depend on it).
+- Both halves of the road model read the whole alignment set's revision, so an
+  alignment no corridor or object uses makes them again (the model comes out
+  the same object).
+- The cost of that cache (benchmarks/bench_road.cpp) and of the sections a
+  curve adds is not measured: the benchmark has not been run.
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
-- The Road Template Manager's grid has no column for a kerb's facing; the
-  keys field takes `faces=inward|outward`.
-- `ROADTEMPLATE` has no import or export to a file of its own; a project's
-  templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
-- The window's Command Reference shows the road verbs in its Commands
-  section from the general help, not a section of their own.
-- The corridors are sectioned again when ANY surface changes (the road
-  model's corridor half is keyed on the surfaces' whole generation), though
-  the model comes out the same object when nothing in it moved; keying the
-  half on the surfaces a corridor targets would skip the work as well.
 - Corridor Quantities clears its listing when the road model changes and does
   not list again by itself: pressing List Quantities is the person's act.

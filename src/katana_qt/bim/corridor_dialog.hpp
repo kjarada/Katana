@@ -25,16 +25,18 @@
 // Object names:
 //   corridorDialog          the dialog (the action bimCorridors' data)
 //   corridorList            Corridor, Alignment, Template, Surface, Interval, From, To,
-//                           Regions, Superelevation
+//                           Regions, Superelevation, Curve tolerance
 //   corridorName            the name New and Rename use
 //   corridorAlignment       the alignments with a design profile
 //   corridorTemplate        the road templates
 //   corridorSurface         (none) and the drawing's surfaces
 //   corridorInterval, corridorFrom, corridorTo   metres; From and To may be empty
+//   corridorCurveTolerance  the relative error of a course's area and volume on a curve (0.001;
+//                           0 adds no sections inside curves)
 //   corridorNew             CORRIDOR NEW "name" ALIGNMENT a TEMPLATE t [surface=] interval=
-//                           [from=] [to=]
+//                           [from=] [to=] [curvetol= when it is not the default]
 //   corridorApply           CORRIDOR SET <chosen> alignment= template= surface= interval=
-//                           from= to=
+//                           from= to= [curvetol= when it differs from the corridor's]
 //   corridorRename          CORRIDOR RENAME <chosen> "name"
 //   corridorDelete          CORRIDOR DELETE <chosen>
 //   corridorRegions         From, To, Template

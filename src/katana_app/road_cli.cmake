@@ -214,3 +214,79 @@ set_tests_properties(cli.quantities_csv_is_replaced_when_overwrite_is_given PROP
     FIXTURES_REQUIRED cli_road_csv_written
     PASS_REGULAR_EXPRESSION "csv file=[^\r\n]*cli-road-quantities[.]csv rows=20"
     FAIL_REGULAR_EXPRESSION "error")
+
+# Sections inside a curve (docs/road_design.md, "Building a corridor"): the
+# urban street round a quarter turn of R = 50 m (a 178.54 m alignment) has 36
+# sections, the 20 of the interval and the keys and two more in each of the
+# arc's eight gaps, and its left kerb - lip 5.6 m out, r = 44.4 m, 100 m of
+# tangent and pi/2 x 44.4 = 69.7434 m of arc, 169.7434 m exact - measures
+# 169.731 m. With curvetol=off the 20 alone and the chords: 169.631 m.
+add_test(NAME cli.a_corridor_round_a_curve_has_sections_inside_it_until_curvetol_is_met
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ALIGN NEW A 0,0 100,0 100,100" -c "ALIGN SET A 1 50"
+            -c "ALIGN DESIGN A 0,10 200,10" -c "ROADTEMPLATE DEFAULTS"
+            -c "CORRIDOR NEW Bend ALIGNMENT A TEMPLATE \"urban street\""
+            -c "CORRIDOR QUANTITIES Bend" -c "CORRIDOR SET Bend curvetol=off"
+            -c "CORRIDOR BUILD Bend" -c "CORRIDOR QUANTITIES Bend")
+set_tests_properties(cli.a_corridor_round_a_curve_has_sections_inside_it_until_curvetol_is_met
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "built corridor=Bend from=0[.]000 to=178[.]540 runs=1 sections=36 .*object id=corridor/Bend/left/kerb/1 kind=kerb name=\"Bend left kerb\" Length=169[.]731 .*curvetol=0 updated.*built corridor=Bend from=0[.]000 to=178[.]540 runs=1 sections=20 .*object id=corridor/Bend/left/kerb/1 kind=kerb name=\"Bend left kerb\" Length=169[.]631 "
+    FAIL_REGULAR_EXPRESSION "error")
+
+# Road template files (docs/road_design.md, "Template files"): ROADTEMPLATE EXPORT
+# writes the form ROADTEMPLATE JSON prints, a file already there is replaced only
+# with OVERWRITE (the second export is refused, and the script stops there), and
+# ROADTEMPLATE IMPORT reads it in another process as one step: the standard
+# urban street with its lane set to 3.6 m comes back with 3.6, all three, and a
+# second import of the same names is refused unless OVERWRITE replaces them.
+set(_road_templates "${CMAKE_CURRENT_BINARY_DIR}/cli-road-templates.json")
+add_test(NAME cli.road_templates_cleanup COMMAND ${CMAKE_COMMAND} -E rm -f "${_road_templates}")
+add_test(NAME cli.road_templates_are_exported_to_a_file_and_a_second_export_needs_overwrite
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE SET \"urban street\" lane width=3.6"
+            -c "ROADTEMPLATE EXPORT ALL \"${_road_templates}\""
+            -c "ROADTEMPLATE EXPORT ALL \"${_road_templates}\"")
+add_test(NAME cli.road_templates_exported_by_one_process_are_imported_by_another
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE IMPORT \"${_road_templates}\""
+            -c "ROADTEMPLATE INFO \"urban street\"")
+add_test(NAME cli.road_templates_imported_twice_are_refused_unless_overwrite_replaces_them
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE IMPORT \"${_road_templates}\""
+            -c "ROADTEMPLATE IMPORT \"${_road_templates}\"")
+add_test(NAME cli.road_templates_imported_over_the_standard_ones_replace_them_with_overwrite
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE IMPORT \"${_road_templates}\" OVERWRITE"
+            -c "ROADTEMPLATE INFO \"urban street\"" -c "UNDO"
+            -c "ROADTEMPLATE INFO \"urban street\"")
+set_tests_properties(cli.road_templates_cleanup PROPERTIES FIXTURES_SETUP cli_road_templates_clean)
+set_tests_properties(cli.road_templates_are_exported_to_a_file_and_a_second_export_needs_overwrite
+    PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_clean FIXTURES_SETUP cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "exported file=[^\r\n]*cli-road-templates[.]json\"? templates=3.*AlreadyExists: the file is already there")
+set_tests_properties(cli.road_templates_exported_by_one_process_are_imported_by_another PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "imported file=[^\r\n]*cli-road-templates[.]json\"? templates=3 added=3 replaced=0.*side=left name=lane kind=lane width=3[.]6 "
+    FAIL_REGULAR_EXPRESSION "error")
+set_tests_properties(cli.road_templates_imported_twice_are_refused_unless_overwrite_replaces_them
+    PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "templates=3 added=3 replaced=0.*AlreadyExists: the drawing has road templates called [^\r\n]*OVERWRITE replaces them")
+set_tests_properties(cli.road_templates_imported_over_the_standard_ones_replace_them_with_overwrite
+    PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "templates=3 added=0 replaced=3.*side=left name=lane kind=lane width=3[.]6 .*1 undone.*side=left name=lane kind=lane width=3[.]3 "
+    FAIL_REGULAR_EXPRESSION "error")
+
+# ROADMODEL SHOW is the desktop window's, as GRID is: katana_cli has no views, says
+# so by name, and the script stops there.
+add_test(NAME cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_setup} -c "ROADMODEL SHOW OFF"
+            -c "ROADMODEL NEVER REACHED")
+set_tests_properties(cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so PROPERTIES
+    PASS_REGULAR_EXPRESSION "Unsupported: ROADMODEL SHOW is the desktop window's"
+    FAIL_REGULAR_EXPRESSION "NEVER REACHED")

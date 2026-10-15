@@ -1167,3 +1167,492 @@ TEST(RoadVerbs, HelpListsEveryRoadVerb)
     }
     EXPECT_TRUE(contains(CommandInterpreter::helpText(), "ROADTEMPLATE"));
 }
+
+TEST(RoadVerbs, ACorridorsCurveToleranceIsKeptSetAndRefusedOutsideItsRange)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    const std::string made = session.ok(
+        "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" curvetol=0.002");
+    EXPECT_TRUE(contains(made, "interval=10 from= to= regions=0 superelevation=0 curvetol=0.002"))
+        << made;
+    EXPECT_EQ(session.document.corridors().corridors.front().curveTolerance, 0.002);
+    // A corridor that does not say has the default, written as it is.
+    session.ok("CORRIDOR NEW Plain ALIGNMENT road TEMPLATE \"urban street\"");
+    EXPECT_TRUE(contains(session.ok("CORRIDOR INFO Plain"), "curvetol=0.001"));
+    EXPECT_EQ(katana::cad::road::kDefaultCurveTolerance, 0.001);
+    // 0 and off are the same: no section is added in a curve.
+    const std::size_t steps = session.steps();
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Main curvetol=off"), "curvetol=0 "))
+        << "off is written as the 0 it is";
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Main curvetol=0.05"), "curvetol=0.05"));
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Main curvetol=0"), "curvetol=0"));
+    EXPECT_EQ(session.steps(), steps + 3) << "each a step of its own";
+    session.ok("CORRIDOR SET Main curvetol=0.1");
+    EXPECT_EQ(session.document.corridors().corridors.front().curveTolerance, 0.1);
+
+    // The range is 0 to a tenth; a word that is not a number is a parse error.
+    const std::size_t before = session.steps();
+    for (const char* line :
+         {"CORRIDOR SET Main curvetol=-0.001", "CORRIDOR SET Main curvetol=0.1001",
+          "CORRIDOR SET Main curvetol=1", "CORRIDOR NEW Bad ALIGNMENT road TEMPLATE \"urban street\" "
+                                          "curvetol=2"}) {
+        EXPECT_EQ(session.refused(line).code, ErrorCode::InvalidArgument) << line;
+    }
+    for (const char* line : {"CORRIDOR SET Main curvetol=abc", "CORRIDOR SET Main curvetol=",
+                             "CORRIDOR SET Main curvetol=nan", "CORRIDOR SET Main curvetol=inf"}) {
+        EXPECT_EQ(session.refused(line).code, ErrorCode::ParseFailure) << line;
+    }
+    EXPECT_EQ(session.steps(), before) << "a refused value changes nothing";
+    EXPECT_EQ(session.document.corridors().corridors.front().curveTolerance, 0.1);
+    EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "curvetol="));
+}
+
+TEST(RoadVerbs, ACorridorsCurveToleranceSurvivesTheProjectsJsonAndAnOldCorridorReadsAsTheDefault)
+{
+    using katana::cad::road::Corridor;
+    using katana::cad::road::CorridorSet;
+    CorridorSet set;
+    Corridor corridor;
+    corridor.name = "Main";
+    corridor.alignment = "road";
+    corridor.templateName = "t";
+    corridor.curveTolerance = 0.0023;
+    set.corridors = {corridor};
+    corridor.name = "Other";
+    corridor.curveTolerance = 0.0;
+    set.corridors.push_back(corridor);
+    const auto text = katana::cad::road::corridorsToJson(set);
+    ASSERT_TRUE(text.ok());
+    const auto back = katana::cad::road::corridorsFromJson(*text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_EQ(*back, set);
+    EXPECT_EQ(back->corridors[0].curveTolerance, 0.0023);
+    EXPECT_EQ(back->corridors[1].curveTolerance, 0.0) << "0 is kept, not read as absent";
+
+    // A corridor saved before the tolerance existed has no member: the default.
+    const auto old = katana::cad::road::corridorsFromJson(
+        R"({"format":"katana-corridors","version":1,"corridors":[)"
+        R"({"name":"Old","alignment":"road","template":"t","interval":10}]})");
+    ASSERT_TRUE(old.ok()) << old.error().describe();
+    EXPECT_EQ(old->corridors.front().curveTolerance, katana::cad::road::kDefaultCurveTolerance);
+    // A member that is not a sensible tolerance is refused as a corridor is.
+    const auto wrong = [](const char* member) {
+        return katana::cad::road::corridorsFromJson(
+            std::string(R"({"format":"katana-corridors","version":1,"corridors":[)"
+                        R"({"name":"Bad","alignment":"road","template":"t","interval":10,)") +
+            member + "}]}");
+    };
+    EXPECT_EQ(wrong(R"("curveTolerance":5)").error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(wrong(R"("curveTolerance":-1)").error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(wrong(R"("curveTolerance":"fine")").error().code, ErrorCode::ParseFailure);
+}
+
+TEST(RoadVerbs, ACurvedCorridorHasTheSectionsItsToleranceNeedsAndAStraightOneHasNoMore)
+{
+    // The quarter turn at 50 m (alignment A, 178.5398 m long): 20 stations of
+    // the interval and the keys, and two more in each of the arc's eight gaps
+    // (10 m is 0.2 radians, over the 0.0775 a tolerance of 0.001 allows, and
+    // three parts do), 36. Off, the 20 alone. The straight road is 11 either way.
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("ALIGN NEW A 0,0 100,0 100,100");
+    session.ok("ALIGN SET A 1 50");
+    session.ok("ALIGN DESIGN A 0,10 200,10");
+    const std::string curved =
+        session.ok("CORRIDOR NEW Bend ALIGNMENT A TEMPLATE \"urban street\"");
+    EXPECT_TRUE(contains(curved, "runs=1 sections=36 ")) << curved;
+    EXPECT_TRUE(contains(session.ok("CORRIDOR BUILD Bend"), "runs=1 sections=36 "));
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Bend curvetol=off"), "curvetol=0"));
+    EXPECT_TRUE(contains(session.ok("CORRIDOR BUILD Bend"), "runs=1 sections=20 "));
+    session.road();
+    int which = 0;
+    for (const char* tolerance : {"curvetol=0.001", "curvetol=0"}) {
+        const std::string line = "CORRIDOR NEW Road" + std::to_string(++which) +
+                                 " ALIGNMENT road TEMPLATE \"urban street\" " + tolerance;
+        EXPECT_TRUE(contains(session.ok(line), "runs=1 sections=11 ")) << tolerance;
+    }
+}
+
+// ---- the road model's cache keys (docs/road_design.md, "The cache") --------------------------
+
+namespace {
+
+// The surface `name` replaced by a different one, as an edit of a surface
+// replaces it (SurfaceStore::replace): the same name, another object.
+void replaceGround(Session& session, const std::string& name, double level)
+{
+    katana::terrain::SurfaceStore store = session.document.surfaces();
+    auto shared = std::make_shared<const katana::terrain::TinSurface>(
+        katana::cad::road::testing::planeGround(0.0, 0.0, level));
+    ASSERT_TRUE(store.replace(name, std::move(shared)).ok());
+    ASSERT_TRUE(session.document.setSurfaces(std::move(store), "TEST_SURFACE_EDIT").ok());
+}
+
+// How many times each half of the road model was made since `before`, after
+// asking for the model as a view does.
+katana::cad::bim::BimBuildCounts madeSince(Session& session,
+                                           const katana::cad::bim::BimBuildCounts& before)
+{
+    (void)katana::cad::bim::bimModel(session.document);
+    const auto now = katana::cad::bim::bimBuildCounts(session.document);
+    return {now.corridors - before.corridors, now.placed - before.placed};
+}
+
+// A road with a corridor targeting "ground" and a sign naming "dem", with
+// "other" in the drawing for no one; the model asked for once, so that its two
+// halves are made.
+struct CachedRoad : Session {
+    CachedRoad()
+    {
+        road();
+        ok("ROADTEMPLATE DEFAULTS");
+        for (const char* name : {"ground", "dem", "other"}) {
+            addGround(*this, name, 9.0);
+        }
+        ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" surface=ground");
+        ok("ROADOBJECT ADD sign ALIGNMENT road station=50 offset=4 surface=dem");
+        first = katana::cad::bim::bimModel(document);
+        counts = katana::cad::bim::bimBuildCounts(document);
+    }
+
+    std::shared_ptr<const katana::cad::bim::BimModel> first;
+    katana::cad::bim::BimBuildCounts counts;
+};
+
+} // namespace
+
+TEST(RoadVerbs, AnEditOfASurfaceNeitherACorridorTargetsNorAnObjectNamesMakesNeitherHalfAgain)
+{
+    CachedRoad s;
+    ASSERT_FALSE(s.first->objects.empty()) << "an empty model would not tell";
+    // "other" replaced by another surface (an edit of it), then hidden and
+    // removed, and a new one added: the surfaces' generation moves each time, and
+    // neither half reads any of them.
+    replaceGround(s, "other", 8.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 0}))
+        << "an edit of a surface nothing names";
+    katana::terrain::SurfaceStore store = s.document.surfaces();
+    ASSERT_TRUE(store.setVisible("other", false).ok());
+    ASSERT_TRUE(s.document.setSurfaces(store, "TEST").ok());
+    ASSERT_TRUE(store.remove("other"));
+    ASSERT_TRUE(s.document.setSurfaces(store, "TEST").ok());
+    addGround(s, "another", 7.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 0}))
+        << "hidden, removed and added";
+    // And nothing else in the drawing: a line, a layer, an undo of one.
+    s.ok("LINE 0,50 10,50");
+    s.ok("LAYER HIDE road/kerb");
+    s.ok("UNDO");
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 0}))
+        << "a line, a layer, an undo";
+    EXPECT_EQ(katana::cad::bim::bimModel(s.document), s.first);
+}
+
+TEST(RoadVerbs, AnEditOfTheSurfaceACorridorTargetsMakesTheCorridorsAgainAndNotThePlacedObjects)
+{
+    CachedRoad s;
+    replaceGround(s, "ground", 8.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    // The earthworks are the new ground's: the model is not the one it was.
+    EXPECT_NE(*katana::cad::bim::bimModel(s.document), *s.first);
+    // An undo puts the old surface object back, which is another change.
+    const auto counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("UNDO");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    EXPECT_EQ(*katana::cad::bim::bimModel(s.document), *s.first);
+    // Removed, the corridor loses its ground (and says so): the corridors again.
+    const auto beforeRemoval = katana::cad::bim::bimBuildCounts(s.document);
+    katana::terrain::SurfaceStore store = s.document.surfaces();
+    ASSERT_TRUE(store.remove("ground"));
+    ASSERT_TRUE(s.document.setSurfaces(std::move(store), "TEST").ok());
+    EXPECT_EQ(madeSince(s, beforeRemoval), (katana::cad::bim::BimBuildCounts{1, 0}));
+}
+
+TEST(RoadVerbs, AnEditOfTheSurfaceAPlacedObjectNamesMakesThePlacedObjectsAgainAndNotTheCorridors)
+{
+    CachedRoad s;
+    replaceGround(s, "dem", 8.0);
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{0, 1}));
+    // The sign stands on the new surface: its model is not the one it was.
+    EXPECT_NE(*katana::cad::bim::bimModel(s.document), *s.first);
+}
+
+TEST(RoadVerbs, EachDefinitionMakesOnlyTheHalfItIsPartOfAndAnAlignmentBoth)
+{
+    CachedRoad s;
+    // A template: the corridors', not the placed objects'.
+    s.ok("ROADTEMPLATE SET \"urban street\" lane width=3.6");
+    EXPECT_EQ(madeSince(s, s.counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    // A placed object: the placed objects', not the corridors'.
+    auto counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("ROADOBJECT ADD sign ALIGNMENT road station=60 offset=4");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{0, 1}));
+    // An alignment: both read the alignments, and it moves their revision.
+    counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("ALIGN NEW elsewhere 0,500 100,500");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{1, 1}));
+    // The corridor's own definition: the corridors'.
+    counts = katana::cad::bim::bimBuildCounts(s.document);
+    s.ok("CORRIDOR SET Main interval=20");
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{1, 0}));
+    // Asking again when nothing moved makes nothing.
+    counts = katana::cad::bim::bimBuildCounts(s.document);
+    EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{0, 0}));
+}
+
+// ---- template files: ROADTEMPLATE EXPORT and IMPORT -------------------------------------------
+
+namespace {
+
+// A path as a verb takes it: forward slashes, in quotes.
+std::string quoted(const std::filesystem::path& path)
+{
+    return "\"" + path.generic_string() + "\"";
+}
+
+std::filesystem::path scratchFile(const char* name)
+{
+    return std::filesystem::temp_directory_path() / (std::string("katana_road_") + name);
+}
+
+void writeBytes(const std::filesystem::path& file, const std::string& bytes)
+{
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << bytes;
+}
+
+std::string readBytes(const std::filesystem::path& file)
+{
+    std::ifstream in(file, std::ios::binary);
+    std::stringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+} // namespace
+
+TEST(RoadVerbs, TemplatesAreExportedToAFileTheFormROADTEMPLATEJSONPrintsAndImportedBackAsOneStep)
+{
+    const auto one = scratchFile("export_one.json");
+    const auto all = scratchFile("export_all.json");
+    std::filesystem::remove(one);
+    std::filesystem::remove(all);
+
+    Session source;
+    source.ok("ROADTEMPLATE DEFAULTS");
+    source.ok("ROADTEMPLATE SET \"urban street\" lane width=3.6");
+    const std::string exportedOne = source.ok("ROADTEMPLATE EXPORT \"urban street\" " + quoted(one));
+    EXPECT_TRUE(contains(exportedOne, "exported file=")) << exportedOne;
+    EXPECT_TRUE(contains(exportedOne, " templates=1\ntemplate name=\"urban street\" left=")) << exportedOne;
+    const std::string exportedAll = source.ok("ROADTEMPLATE EXPORT all " + quoted(all));
+    EXPECT_TRUE(contains(exportedAll, " templates=3\n")) << exportedAll;
+    EXPECT_EQ(source.steps(), 2u) << "writing a file changes nothing in the drawing";
+
+    // The file is the plain-data, versioned JSON ROADTEMPLATE JSON prints,
+    // and a newline.
+    EXPECT_EQ(readBytes(all), source.ok("ROADTEMPLATE JSON") + "\n");
+    EXPECT_TRUE(readBytes(one).starts_with(R"({"format":"katana-road-templates",)"));
+    EXPECT_TRUE(contains(readBytes(one), R"("version":1)"));
+
+    // One template into another drawing: one step, exactly as it was (every
+    // double written back as it was read), and an undo takes it away.
+    Session target;
+    const std::string imported = target.ok("ROADTEMPLATE IMPORT " + quoted(one));
+    EXPECT_TRUE(contains(imported, " templates=1 added=1 replaced=0\ntemplate name=\"urban street\""))
+        << imported;
+    EXPECT_EQ(target.steps(), 1u);
+    ASSERT_EQ(target.document.roadTemplates().templates.size(), 1u);
+    EXPECT_EQ(target.document.roadTemplates().templates.front(),
+              *source.document.roadTemplates().find("urban street"));
+    target.ok("UNDO");
+    EXPECT_TRUE(target.document.roadTemplates().templates.empty());
+    EXPECT_FALSE(target.document.metadata().unknownKeys.contains("road_templates"))
+        << "the first template's undo leaves the metadata as it was";
+
+    // All three, in the file's order, into a third.
+    Session third;
+    const std::string everything = third.ok("ROADTEMPLATE IMPORT " + quoted(all));
+    EXPECT_TRUE(contains(everything, " templates=3 added=3 replaced=0\n")) << everything;
+    EXPECT_EQ(third.document.roadTemplates(), source.document.roadTemplates());
+    EXPECT_EQ(third.steps(), 1u);
+
+    // And into a drawing that has the standard ones, as an update of them.
+    third.ok("ROADTEMPLATE SET \"urban street\" lane width=3.0");
+    EXPECT_EQ(third.refused("ROADTEMPLATE IMPORT " + quoted(all)).code, ErrorCode::AlreadyExists);
+    std::filesystem::remove(one);
+    std::filesystem::remove(all);
+}
+
+TEST(RoadVerbs, AnImportRefusesANameTheDrawingHasUnlessOverwriteReplacesItWhereItStands)
+{
+    const auto file = scratchFile("overwrite.json");
+    std::filesystem::remove(file);
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    // A second drawing with a new template and the urban street spelt in
+    // capitals - the same name, as every verb finds a template ignoring case.
+    Session other;
+    other.ok("ROADTEMPLATE DEFAULTS");
+    other.ok("ROADTEMPLATE RENAME \"urban street\" \"URBAN STREET\"");
+    other.ok("ROADTEMPLATE SET \"URBAN STREET\" lane width=3.0");
+    other.ok("ROADTEMPLATE NEW extra");
+    other.ok("ROADTEMPLATE EXPORT ALL " + quoted(file));
+
+    const std::size_t steps = session.steps();
+    const auto before = session.document.roadTemplates();
+    const auto refused = session.refused("ROADTEMPLATE IMPORT " + quoted(file));
+    EXPECT_EQ(refused.code, ErrorCode::AlreadyExists);
+    // All three names the file shares are said, and "extra", which does not
+    // clash, is not imported either: nothing is.
+    for (const char* name : {"rural two-lane", "URBAN STREET", "divided road"}) {
+        EXPECT_TRUE(contains(refused.message, name)) << refused.message;
+    }
+    EXPECT_TRUE(contains(refused.message, "OVERWRITE")) << refused.message;
+    EXPECT_EQ(session.steps(), steps);
+    EXPECT_EQ(session.document.roadTemplates(), before);
+
+    const std::string replaced = session.ok("ROADTEMPLATE IMPORT " + quoted(file) + " overwrite");
+    EXPECT_TRUE(contains(replaced, " templates=4 added=1 replaced=3\n")) << replaced;
+    EXPECT_TRUE(contains(replaced, "template name=extra left=0 right=0 courses=0 description=\"\" added"))
+        << replaced;
+    EXPECT_TRUE(contains(replaced, "template name=\"URBAN STREET\"")) << replaced;
+    EXPECT_EQ(session.steps(), steps + 1) << "one step for the whole file";
+    // The three stand where they were, the new one last, and the replaced one
+    // has the file's spelling and the file's lane.
+    const auto& set = session.document.roadTemplates().templates;
+    ASSERT_EQ(set.size(), 4u);
+    EXPECT_EQ(set[0].name, "rural two-lane");
+    EXPECT_EQ(set[1].name, "URBAN STREET");
+    EXPECT_EQ(set[2].name, "divided road");
+    EXPECT_EQ(set[3].name, "extra");
+    const auto& lane = set[1].components[*set[1].find(katana::cad::road::Side::Left, "lane")];
+    EXPECT_EQ(lane.width, 3.0);
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.roadTemplates(), before) << "an undo puts all four back as they were";
+    std::filesystem::remove(file);
+}
+
+TEST(RoadVerbs, ATemplateFileIsReadAndCheckedAsTheProjectReadsItsOwnAndAnythingElseIsRefused)
+{
+    const auto file = scratchFile("read.json");
+    std::filesystem::remove(file);
+    Session session;
+    const std::size_t steps = session.steps();
+    const auto refuse = [&](const std::string& bytes, ErrorCode code, const char* word) {
+        writeBytes(file, bytes);
+        const auto error = session.refused("ROADTEMPLATE IMPORT " + quoted(file));
+        EXPECT_EQ(error.code, code) << bytes;
+        EXPECT_TRUE(contains(error.message, word)) << bytes << "\n  -> " << error.message;
+        EXPECT_EQ(session.steps(), steps) << bytes;
+        EXPECT_TRUE(session.document.roadTemplates().templates.empty()) << bytes;
+    };
+    const std::string head = R"({"format":"katana-road-templates","version":1,"templates":[)";
+    const std::string lane =
+        R"({"name":"lane","kind":"lane","side":"left","layer":"road/pavement","colour":"#808080","width":)";
+    // A file that is not there, a folder, nothing, text, another sort of JSON.
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT " + quoted(scratchFile("nothing.json"))).code,
+              ErrorCode::NotFound);
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT " + quoted(std::filesystem::temp_directory_path())).code,
+              ErrorCode::NotFound);
+    refuse("", ErrorCode::ParseFailure, "road template file");
+    refuse("not json at all", ErrorCode::ParseFailure, "road template file");
+    refuse(R"({"format":"katana-corridors","version":1,"corridors":[]})", ErrorCode::ParseFailure,
+           "not a set of road templates");
+    // A newer Katana's file is not read by guesswork; a set of nothing says so.
+    refuse(R"({"format":"katana-road-templates","version":9,"templates":[]})",
+           ErrorCode::Unsupported, "newer version");
+    refuse(head + "]}", ErrorCode::InvalidArgument, "holds no road templates");
+    // The checks of ROADTEMPLATE SET, on every template: a lane of no width,
+    // a name twice (ignoring case).
+    refuse(head + R"({"name":"bad","description":"","components":[)" + lane + R"(0}]}]})",
+           ErrorCode::InvalidArgument, "left:lane");
+    const std::string good = R"({"name":"a","description":"","components":[)" + lane + R"(3.5}]})";
+    const std::string again = R"({"name":"A","description":"","components":[)" + lane + R"(3.5}]})";
+    refuse(head + good + "," + again + "]}", ErrorCode::ParseFailure, "two road templates have one name");
+
+    // A good one is read, with a byte order mark in front as an editor writes
+    // it; and a template of the same shape written by hand is the same as the
+    // one a verb makes.
+    writeBytes(file, "\xEF\xBB\xBF" + head + good + "]}");
+    const std::string read = session.ok("ROADTEMPLATE IMPORT " + quoted(file));
+    EXPECT_TRUE(contains(read, " templates=1 added=1 replaced=0\ntemplate name=a left=1 right=0 "))
+        << read;
+    EXPECT_EQ(session.steps(), steps + 1);
+    std::filesystem::remove(file);
+}
+
+TEST(RoadVerbs, AnExportWritesAFileOnlyWhereThereIsNoneOrOverwriteSaysSoAndRefusesWhatItCannotWrite)
+{
+    const auto file = scratchFile("write.json");
+    std::filesystem::remove(file);
+    Session session;
+    // Nothing to export from a drawing with no templates; nothing of a name it lacks.
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file)).code,
+              ErrorCode::InvalidState);
+    session.ok("ROADTEMPLATE DEFAULTS");
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT nowhere " + quoted(file)).code,
+              ErrorCode::NotFound);
+    EXPECT_FALSE(std::filesystem::exists(file)) << "a refusal writes nothing";
+    // The words: a template and a file, then OVERWRITE and nothing else.
+    for (const char* line : {"ROADTEMPLATE EXPORT", "ROADTEMPLATE EXPORT ALL"}) {
+        EXPECT_EQ(session.refused(line).code, ErrorCode::ParseFailure) << line;
+    }
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file) + " REPLACE").code,
+              ErrorCode::ParseFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file) + " OVERWRITE now").code,
+              ErrorCode::ParseFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT " + quoted(file) + " REPLACE").code,
+              ErrorCode::ParseFailure);
+
+    session.ok("ROADTEMPLATE EXPORT \"divided road\" " + quoted(file));
+    const std::string first = readBytes(file);
+    // A file already there is not replaced without OVERWRITE, and is untouched.
+    const auto refused = session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file));
+    EXPECT_EQ(refused.code, ErrorCode::AlreadyExists);
+    EXPECT_TRUE(contains(refused.message, "OVERWRITE")) << refused.message;
+    EXPECT_EQ(readBytes(file), first);
+    session.ok("ROADTEMPLATE EXPORT ALL " + quoted(file) + " OVERWRITE");
+    EXPECT_NE(readBytes(file), first);
+    EXPECT_EQ(readBytes(file), session.ok("ROADTEMPLATE JSON") + "\n");
+    // A place that cannot be written is a failure to export, not a crash.
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " +
+                              quoted(std::filesystem::temp_directory_path() / "katana_no_folder" /
+                                     "templates.json"))
+                  .code,
+              ErrorCode::FileExportFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " +
+                              quoted(std::filesystem::temp_directory_path()) + " OVERWRITE")
+                  .code,
+              ErrorCode::FileExportFailure);
+    EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "ROADTEMPLATE IMPORT <file.json> [OVERWRITE]"));
+    std::filesystem::remove(file);
+}
+
+TEST(RoadVerbs, ROADMODELSHOWIsTheWindowsAloneAndASessionWithNoViewsRefusesItByName)
+{
+    // Show Road Model's line is taken by the window before the interpreter
+    // (RoadWorkbench::runLine); here, with no views, it says whose it is and
+    // where to hide the objects instead - not "unknown word", which would read as
+    // a typing mistake.
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    const std::size_t steps = session.steps();
+    for (const char* line : {"ROADMODEL SHOW", "ROADMODEL SHOW OFF", "roadmodel show on"}) {
+        const auto error = session.refused(line);
+        EXPECT_EQ(error.code, ErrorCode::Unsupported) << line;
+        EXPECT_TRUE(contains(error.message, "ROADMODEL SHOW is the desktop window's"))
+            << error.message;
+        EXPECT_TRUE(contains(error.message, "LAYER HIDE road")) << error.message;
+    }
+    EXPECT_EQ(session.steps(), steps);
+    // The rest of the verb is as it was, and a word it does not know is still a
+    // mistake.
+    EXPECT_TRUE(contains(session.ok("ROADMODEL"), "road model objects="));
+    EXPECT_EQ(session.refused("ROADMODEL HIDE").code, ErrorCode::ParseFailure);
+    EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "ROADMODEL SHOW [ON|OFF]"));
+}

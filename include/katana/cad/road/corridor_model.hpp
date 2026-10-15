@@ -49,6 +49,23 @@ struct SuperelevationPoint {
     friend bool operator==(const SuperelevationPoint&, const SuperelevationPoint&) = default;
 };
 
+// The relative error a corridor allows in a course's plan area and volume on a
+// curve when it does not say: a thousandth, 0.1 %. A section is lofted to the
+// next with flat quads, so over a step that turns through theta radians the
+// area and the volume come out short by 1 - sin(theta) / theta, about
+// theta^2 / 6, and a kerb's length by 1 - sin(theta / 2) / (theta / 2), about
+// theta^2 / 24, a quarter as much. The corridor puts sections inside a curve
+// until no step turns through more than sqrt(6 x tolerance), which holds the
+// area and the volume to the tolerance (road::sectionStations). The number is a
+// choice and not a standard's: it makes the steps 3.9 m on R = 50 m and 15.5 m on
+// R = 200 m, so a tight curve is sectioned finer and a gentle one by its
+// interval.
+inline constexpr double kDefaultCurveTolerance = 0.001;
+// The largest a corridor may ask: a tenth. Beyond it the "tolerance" is no
+// longer a small error (the step would turn through 0.77 radians), and 1 would
+// allow steps of 2.4 radians, which a flat quad does not approximate at all.
+inline constexpr double kLargestCurveTolerance = 0.1;
+
 struct Corridor {
     std::string name;
     std::string alignment;    // an alignment of the drawing, with a design profile
@@ -61,6 +78,12 @@ struct Corridor {
     // stations, the regions' ends and the superelevation stations are
     // sectioned as well.
     double interval = 10.0;
+    // The relative error of a course's area and volume on a curve, at most:
+    // sections are added inside the curves until the chords between them are
+    // that close (kDefaultCurveTolerance says why a thousandth). 0 adds none,
+    // which is every section the interval and the key stations give and the
+    // chord error that leaves (road::sectionStations).
+    double curveTolerance = kDefaultCurveTolerance;
     // The station range; each absent is that end of the alignment and the
     // profile's overlap.
     std::optional<double> start;

@@ -3006,7 +3006,8 @@ own code keeps, so nothing is written twice:
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
   `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
   whose usage the Geoprocessing section gives - `PLOTSHEETS`, `PLOT`,
-  `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
+  `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ROADMODEL SHOW`
+  (`runWorkbenchLine`, the road workbench's), `ONLINE`, `UTILITY`,
   `UPDATE` - a row that names the family's lines and sends the reader to the
   Updates section for their usage - `QUIT`, and `HELP`, which adds this
   section to the interpreter's), and the rule for a bare tool

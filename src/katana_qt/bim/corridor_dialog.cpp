@@ -111,6 +111,7 @@ struct CorridorDialog::Impl {
     QComboBox* roadTemplate = nullptr;
     QComboBox* surface = nullptr;
     QLineEdit* interval = nullptr;
+    QLineEdit* curveTolerance = nullptr;
     QLineEdit* from = nullptr;
     QLineEdit* to = nullptr;
     QTableWidget* regions = nullptr;
@@ -188,7 +189,7 @@ struct CorridorDialog::Impl {
         return text;
     }
 
-    // alignment= template= surface= interval= from= to=, from the fields.
+    // alignment= template= surface= interval= from= to= [curvetol=], from the fields.
     // `stored` is the corridor being set, or null for a new one: a name the
     // combos show in another case than the corridor holds it is written as
     // the corridor holds it.
@@ -214,7 +215,8 @@ struct CorridorDialog::Impl {
         const auto step = numberField(interval, "interval", false);
         const auto start = numberField(from, "start station", true);
         const auto end = numberField(to, "end station", true);
-        if (!step || !start || !end) {
+        const auto tolerance = numberField(curveTolerance, "curve tolerance", false);
+        if (!step || !start || !end || !tolerance) {
             return std::nullopt;
         }
         const QString surfaceName =
@@ -239,8 +241,16 @@ struct CorridorDialog::Impl {
                 text += " to=" + *end;
             }
         } else {
-            // SET writes every key, an empty one clearing it.
+            // SET writes every key but the curve tolerance (below), an empty
+            // station clearing it.
             text += " " + *surfaceOption + " interval=" + *step + " from=" + *start + " to=" + *end;
+        }
+        // The curve tolerance only when it is not what the corridor has (a new
+        // one has the default): the field is refilled from the corridor, so an
+        // unedited one says nothing the line needs to, and the line stays short.
+        const double held = stored != nullptr ? stored->curveTolerance : road::kDefaultCurveTolerance;
+        if (road_ui::number(*tolerance) != held) {
+            text += " curvetol=" + *tolerance;
         }
         return text;
     }
@@ -273,7 +283,7 @@ void CorridorDialog::Impl::build()
     auto* layout = new QVBoxLayout(dialog);
     list = road_ui::table("corridorList",
                           {"Corridor", "Alignment", "Template", "Surface", "Interval", "From", "To",
-                           "Regions", "Superelevation"},
+                           "Regions", "Superelevation", "Curve tolerance"},
                           dialog);
     list->setMaximumHeight(140);
     layout->addWidget(list);
@@ -294,6 +304,13 @@ void CorridorDialog::Impl::build()
     surface->setToolTip("The surface the batters meet and the earthworks are measured to");
     interval = road_ui::field("corridorInterval", "10", "Metres between sections", definitionBox);
     interval->setText("10");
+    curveTolerance = road_ui::field(
+        "corridorCurveTolerance", "0.001",
+        "The most a course's area and volume on a curve may be out, as a fraction (0.001 is "
+        "0.1 %): sections are added inside a curve until the chords are that close. 0 adds "
+        "none",
+        definitionBox);
+    curveTolerance->setText(exactNumber(road::kDefaultCurveTolerance));
     from = road_ui::field("corridorFrom", "start", "The first station; empty: where it begins",
                           definitionBox);
     to = road_ui::field("corridorTo", "end", "The last station; empty: where it ends",
@@ -313,6 +330,8 @@ void CorridorDialog::Impl::build()
     range->addWidget(to);
     form->addWidget(new QLabel("Stations", definitionBox), 2, 2);
     form->addLayout(range, 2, 3);
+    form->addWidget(new QLabel("Curve tolerance", definitionBox), 3, 0);
+    form->addWidget(curveTolerance, 3, 1);
     auto* definitionButtons = new QHBoxLayout;
     auto* newButton = road_ui::button(
         "New", "corridorNew",
@@ -329,7 +348,7 @@ void CorridorDialog::Impl::build()
         definitionButtons->addWidget(each);
     }
     definitionButtons->addStretch(1);
-    form->addLayout(definitionButtons, 3, 0, 1, 4);
+    form->addLayout(definitionButtons, 4, 0, 1, 4);
     layout->addWidget(definitionBox);
 
     // ---- regions and superelevation, side by side ----------------------------------------
@@ -558,6 +577,7 @@ void CorridorDialog::Impl::reload()
         list->setItem(row, 6, road_ui::cell(stationText(each.end)));
         list->setItem(row, 7, road_ui::cell(QString::number(each.regions.size())));
         list->setItem(row, 8, road_ui::cell(QString::number(each.superelevation.size())));
+        list->setItem(row, 9, road_ui::cell(exactNumber(each.curveTolerance)));
     }
     if (!chosen.isEmpty()) {
         dialog->selectCorridor(chosen);
@@ -591,6 +611,7 @@ void CorridorDialog::Impl::fillChosen(bool force)
         showStored(roadTemplate, qs(corridor->templateName));
         showStored(surface, corridor->surface.empty() ? QString(kNoSurface) : qs(corridor->surface));
         interval->setText(exactNumber(corridor->interval));
+        curveTolerance->setText(exactNumber(corridor->curveTolerance));
         from->setText(stationText(corridor->start));
         to->setText(stationText(corridor->end));
         filledFrom = *corridor;

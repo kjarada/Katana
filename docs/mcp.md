@@ -990,7 +990,10 @@ watching the window:
   provider keys; a script is `katana_run_script`'s here; the grid and the
   exaggeration are how its views draw), and so do `VIEWS` and `ZOOM`, which
   act on its views (`docs/cad.md`, "The window's views: VIEWS and ZOOM") -
-  the interpreter refuses those two itself, having no views here. The
+  the interpreter refuses those two itself, having no views here, as it
+  refuses `ROADMODEL SHOW`, the one word of the road model's verb that is the
+  window's (it switches whether the window's views draw the model;
+  `docs/road_design.md`, "In the window"). The
   session answers each with `Unsupported: <VERB> is the desktop window's` and
   where to run it instead - in `katana_cli` too - where it once said "unknown
   command", which a model cannot tell from a typo (`GRID` and `EXAGGERATION`

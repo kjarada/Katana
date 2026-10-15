@@ -21,6 +21,7 @@
 #include "katana/cad/interactive_tool.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/road/road_object_verbs.hpp"
+#include "katana/cad/road/road_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
 // volumes: HELP VOLUME (docs/volumes.md).
 #include "katana/cad/terrain/volume_verbs.hpp"
@@ -188,6 +189,8 @@ Update    UPDATE CHECK | STATUS | DOWNLOAD CONFIRM | APPLY CONFIRM | SKIP | BLOC
           SET AUTO | TOKEN   a newer Katana: asked about, downloaded and installed (Help >
           Check for Updates, and File > Settings > Updates); the usage of each is
           under Updates (HELP UPDATE)
+Road      ROADMODEL SHOW [ON|OFF]   draw the road model in the views, or not (BIM > Show Road
+          Model); the rest of ROADMODEL is the interpreter's, and under Road model
 Quit      QUIT | EXIT   close the window; in a script, end the script
 Tools     a bare tool word typed here starts the tool: LINE, L, C, TR, or an id such as
           draw.circle.ttr; with arguments it is the interpreter's (LINE 0,0 10,0), and so
@@ -206,6 +209,8 @@ std::vector<ReferenceSection> commandReferenceSections()
                         referenceEntries(qs(katana::cad::utilities::utilityVerbHelp()))});
     // volumes: the VOLUME verbs and SURFACE DIFFERENCE and ENVELOPE (HELP VOLUME).
     sections.push_back({"Volumes", referenceEntries(qs(katana::cad::volumeVerbHelp()))});
+    // ---- the road model (docs/road_design.md): HELP CORRIDOR ----
+    sections.push_back({"Road model", referenceEntries(qs(katana::cad::road::roadVerbHelp()))});
     // ---- road objects (docs/road_objects.md): HELP ROADOBJECT ----
     sections.push_back(
         {"Road objects", referenceEntries(qs(katana::cad::road::roadObjectVerbHelp()))});

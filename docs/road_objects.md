@@ -32,9 +32,8 @@ kilobytes of triangles in every save. The definition is a few hundred bytes,
 and making it again costs well under a millisecond for an ordinary object;
 the road model's cache (`bim::bimModel`, `road_design.md`) keeps the model it
 made while what the objects are made from - their key, the alignments, the
-surfaces - is unchanged. (Its key for the objects is wider than that: it looks
-again after every command, and keeps the model it had when the result is
-equal; narrowing it to the three things they read is open, "Not done".)
+surfaces they name - is unchanged: a line drawn, a template edit or a surface
+no object names does not make them again.
 
 What cannot be made is never drawn at a guessed level. `ROADOBJECT ADD`,
 `SET` and `COPY` make the object before they commit it and refuse what does
@@ -684,11 +683,6 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
 - **No placing by clicking.** The dialog takes stations, the selection or a
   scope; a tool in the catalogue that places an object where a person clicks
   in the plan view is not written.
-- **The placed half of the model is looked at after every command**, though it
-  reads only the `road_objects` key, the alignments and the surfaces
-  (`bim_object.cpp`); the cache keeps the model it had when the result is
-  equal, so the cost is time. Keying it on those three is a measured change
-  not yet made.
 - **Built and run.** The first round of this work was built and run by the
   integration build (Release, clean, 9683 tests passed, every road-object test
   among them). The second round - the shared scope and filter, the one ear

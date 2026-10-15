@@ -15,6 +15,13 @@
 //   Corridors   Corridors...                      (bimCorridors)
 //   Model       Show Road Model                   (bimShowRoadModel, checkable)
 //   Quantities  Corridor Quantities...            (bimCorridorQuantities, Ctrl+Shift+Q)
+//
+// Show Road Model has a line, as View > Grid has GRID: ROADMODEL SHOW [ON|OFF],
+// ON or OFF, or alone the other of the two, replying roadmodel=on|off. It is the
+// window's own (the session's display state, like the grid's), taken here by
+// runLine before the interpreter, so an agent that drives the window need not
+// switch the road layers off; katana_cli and katana_mcp have no views and
+// refuse it by name (road::runRoadVerb).
 // Corridors... and Corridor Quantities... are shown in Terrain's Corridors
 // section too - the same QAction objects, as File shows the imports of the
 // other menus - where Corridor Quantities... and Corridor Surface... were
@@ -92,6 +99,10 @@ class RoadWorkbench {
     RoadWorkbench& operator=(const RoadWorkbench&) = delete;
 
     void fillToolBar(QToolBar& toolBar);
+    // ROADMODEL SHOW [ON|OFF]: true when `line` is that line, which it has then
+    // carried out and said what it did (a usage that is not, as an error).
+    // False for any other line, which is the interpreter's.
+    bool runLine(const QString& line);
     // For Terrain's Corridors section: the same actions.
     [[nodiscard]] QAction* corridorsAction() const { return corridors_; }
     [[nodiscard]] QAction* quantitiesAction() const { return quantities_; }
@@ -101,6 +112,8 @@ class RoadWorkbench {
 
   private:
     void open(QPointer<QDialog>& slot, const std::function<QDialog*()>& make);
+    // The road model drawn or not, in the views and the plan painter.
+    void setShown(bool on);
     // False, having said why and where an alignment is made, when no
     // alignment has a design profile.
     bool haveProfiledAlignment();
