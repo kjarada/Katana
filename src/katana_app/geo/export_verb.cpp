@@ -222,7 +222,8 @@ struct Snapshot {
     // A DXF of a scope: the entities it took. `model` stays whole until the
     // worker has drawn the annotation from it (writeDxfExport), because a
     // smart leader's note is read off the entity its tip is on, and the scope
-    // may have left that entity out. Empty: the whole drawing.
+    // may have left that entity out. Empty: the whole drawing. The worker cuts
+    // `model` to it in place (no second copy of a big drawing), and runs once.
     std::optional<std::set<katana::entity::EntityId>> only;
     std::vector<katana::terrain::NamedSurface> surfaces;
     // The project's coordinate system: it goes into the file, and is what a
