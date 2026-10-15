@@ -12,14 +12,19 @@
 //   terrainSurfaceSmooth     Smooth... (surfaceSmoothDialog)
 //   terrainSurfaceThin       Thin... (surfaceThinDialog)
 //   terrainSurfaceDeleteLong Delete Long Triangles... (surfaceDeleteLongDialog)
+//   terrainSurfaceDeletePoints    Delete Points Inside... (surfaceDeletePointsDialog)
+//   terrainSurfaceDeleteTriangles Delete Triangles by Polygons... (surfaceDeleteTrianglesDialog)
+//   terrainSurfaceAddPoints       Add Points... (surfaceAddPointsDialog)
 //   terrainCombineSurfaces   Terrain > Combine Surfaces... (surfaceCombineDialog)
 //   SurfaceEditToolBar     the tools again, the dialogs, and at its head
 //   surfaceEditActive      the surface the tools act on (cad::setSurfaceEditTarget):
-//                          how a person picks it, besides a tool's own [Surface]
+//                          how a person picks it, besides a tool's own [Surface],
+//                          which it follows (cad::addSurfaceEditTargetObserver)
 //
 // Each dialog's action names its dialog in its data, as --dialog finds one.
 
 #include <QKeySequence>
+#include <QPointer>
 #include <QString>
 
 #include <functional>
@@ -70,6 +75,9 @@ class SurfaceEditUi {
     void finish(QMenu& terrain);
     // Refills the toolbar's surface list from the drawing.
     void refreshSurfaces();
+    // Points the list at the surface the tools act on now, without choosing it
+    // again: a tool's own [Surface] option sets the target, not the list.
+    void syncActive();
 
   private:
     void showLevels(int kind);
@@ -78,10 +86,11 @@ class SurfaceEditUi {
     SurfaceEditServices services_;
     QMenu* menu_ = nullptr;
     QToolBar* toolBar_ = nullptr;
-    QComboBox* active_ = nullptr;
+    QPointer<QComboBox> active_;
     std::vector<QAction*> dialogActions_;
     QAction* combine_ = nullptr;
     katana::cad::Document::ListenerHandle listener_;
+    std::size_t targetObserver_ = 0;
 };
 
 } // namespace katana::qt

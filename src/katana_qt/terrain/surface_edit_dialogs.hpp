@@ -10,9 +10,10 @@
 // changes nothing. The lines are made by pure functions of the fields,
 // tested without a window. No moc, as the rest of the window.
 //
-// SurfaceLevelsDialog is four dialogs by its kind, each with the object
+// SurfaceLevelsDialog is seven dialogs by its kind, each with the object
 // names of its prefix p (surfaceHeights, surfaceSmooth, surfaceThin,
-// surfaceDeleteLong):
+// surfaceDeleteLong, surfaceDeletePoints, surfaceDeleteTriangles,
+// surfaceAddPoints):
 //   <p>Dialog      the dialog
 //   <p>Surface     the surface edited
 //   <p>Operation   Raise / Lower / Set Level / Scale (heights)
@@ -22,7 +23,10 @@
 //   <p>Passes, <p>Weight          (smooth)
 //   <p>Measure     Long sides / Thin angles (delete long)
 //   <p>Inside      only inside a polygon of the drawing (heights, smooth)
-//   <p>Scope       which polygon: the shared ScopeFilterWidget, its controls
+//   <p>Side        Inside the polygons / Outside them (delete triangles)
+//   <p>Scope       which polygon (the polygons of delete points and delete
+//                  triangles, the points of add points: always asked): the
+//                  shared ScopeFilterWidget, its controls
 //                  <p>ScopeSelection, <p>ScopeDrawing, <p>FilterLayer ...
 //   <p>Command     the exact line Run will run (read-only)
 //   <p>Preview     run it with PREVIEW
@@ -80,7 +84,18 @@ struct SurfaceEditDialogContext {
     std::function<std::vector<ScopeFilterView>()> views;
 };
 
-enum class SurfaceLevelsKind { Heights, Smooth, Thin, DeleteLong };
+enum class SurfaceLevelsKind {
+    Heights,
+    Smooth,
+    Thin,
+    DeleteLong,
+    // The three that take the drawing's data by a scope, as the shared scope
+    // widget gives it - the polygons of any number (a union), or the levelled
+    // points - and that a click on one entity cannot say.
+    DeletePoints,
+    DeleteTriangles,
+    AddPoints,
+};
 
 // The object name prefix of a kind: surfaceHeights, surfaceSmooth ...
 [[nodiscard]] QString surfaceLevelsPrefix(SurfaceLevelsKind kind);
@@ -95,6 +110,8 @@ struct SurfaceLevelsForm {
     QString weight = "0.5";
     // Delete long: sides longer than the value (true) or angles below it.
     bool longSides = true;
+    // Delete triangles: those outside the polygons (the union is kept).
+    bool outside = false;
     bool inside = false;
     // The scope words (ScopeFilterWidget::verbWords), or why there are none.
     QString scope;
@@ -105,6 +122,9 @@ struct SurfaceLevelsForm {
 //   SURFACE EDIT <s> SMOOTH passes=<n> weight=<w> [INSIDE FROM <scope>]
 //   SURFACE EDIT <s> THIN <tolerance>
 //   SURFACE EDIT <s> DELETE LONG <length> | DELETE THIN <degrees>
+//   SURFACE EDIT <s> DELETE POINTS INSIDE FROM <scope>
+//   SURFACE EDIT <s> DELETE TRIANGLES INSIDE|OUTSIDE FROM <scope>
+//   SURFACE EDIT <s> ADD POINTS FROM <scope>
 // InvalidArgument naming the field: no surface, a value that is not a number
 // (or not positive where it must be), a base that is not a number, a weight
 // outside (0, 1], a scope the controls cannot say.
@@ -162,6 +182,7 @@ class SurfaceLevelsDialog final : public QDialog {
     QSpinBox* passes_ = nullptr;
     QLineEdit* weight_ = nullptr;
     QComboBox* measure_ = nullptr;
+    QComboBox* side_ = nullptr;
     QCheckBox* inside_ = nullptr;
     ScopeFilterWidget* scope_ = nullptr;
     QLineEdit* command_ = nullptr;
