@@ -17,6 +17,7 @@
 #include <QRadioButton>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -446,7 +447,8 @@ TEST(VolumeResultTable, EveryRecordIsARowAndEveryKeyAColumnInTheOrderFirstMet)
 // The tallest dialog the window has: every page's fields, the scope and filter
 // controls, a table and a diagram, a thousand pixels and more once shown. A laptop's
 // screen has less room than that, so it scrolls (src/katana_qt/screen_fit.hpp) and its
-// Close button is still reached.
+// Close button is still reached: it is the dialog's footer, below the scroll area, so it
+// is on the dialog as it stands and does not move as the rest scrolls.
 TEST(VolumesDialog, IsNoTallerThanTheScreenAndStillReachesItsCloseButton)
 {
     Document document;
@@ -463,8 +465,22 @@ TEST(VolumesDialog, IsNoTallerThanTheScreenAndStillReachesItsCloseButton)
     auto* scroll = dialog.findChild<QScrollArea*>(katana::qt::kScreenFitScroll);
     ASSERT_NE(scroll, nullptr);
     auto* close = child<QPushButton>(dialog, "volumesClose");
-    scroll->ensureWidgetVisible(close, 0, 0);
+    ASSERT_NE(close, nullptr);
+    auto* footer = dialog.findChild<QWidget*>(katana::qt::kScreenFitFooter);
+    ASSERT_NE(footer, nullptr) << "the button box at the end of the layout is the footer";
+    EXPECT_TRUE(footer->isAncestorOf(close));
+    EXPECT_FALSE(scroll->isAncestorOf(close)) << "Close scrolls with the rest";
+    ASSERT_TRUE(close->isVisible());
+    const auto placed = [&] {
+        return QRect(close->mapTo(&dialog, QPoint(0, 0)), close->size());
+    };
+    const QRect resting = placed();
+    EXPECT_TRUE(dialog.rect().contains(resting)) << "Close is off the dialog without scrolling";
+    // The body scrolled right down, and back: Close has not moved.
+    scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
     QApplication::processEvents();
-    const QRect where(close->mapTo(scroll->viewport(), QPoint(0, 0)), close->size());
-    EXPECT_TRUE(scroll->viewport()->rect().contains(where)) << "Close cannot be scrolled into view";
+    EXPECT_EQ(placed(), resting);
+    scroll->verticalScrollBar()->setValue(0);
+    QApplication::processEvents();
+    EXPECT_EQ(placed(), resting);
 }

@@ -14,6 +14,14 @@
 //   * A dialog whose controls cannot be laid out in that room is given a scroll
 //     area for them, as it is shown, so that every control is reachable by
 //     scrolling and the window is as large as the screen lets it be.
+//   * The dialog's own buttons are not scrolled with the rest. Its footer - the
+//     last row of buttons in a vertical layout, and what is laid out after it - is
+//     kept below the scroll area. A row of buttons is a QDialogButtonBox, or a
+//     horizontal box layout holding buttons, spacing and read-only fields (the line
+//     the dialog will run); a single button laid into the layout, a row with an
+//     editable field or a label in it, a nested layout, and a dialog laid out in a
+//     grid, a form or a row have none. A footer that needs more than half the
+//     room is not kept out, and then everything scrolls.
 //   * A dialog that fits is left exactly as it was written.
 //
 // The menus have their half in the application's style (theme.cpp: a menu taller
@@ -33,6 +41,11 @@ namespace katana::qt {
 // The name of the scroll area a dialog that did not fit is given, found as a
 // child of the dialog by it.
 inline constexpr char kScreenFitScroll[] = "screenFitScroll";
+
+// The name of the widget that holds a scrolling dialog's footer - its button row and
+// what follows it - below the scroll area, so the buttons never scroll away. Found as
+// a child of the dialog by it; there is none when the dialog has no footer (below).
+inline constexpr char kScreenFitFooter[] = "screenFitFooter";
 
 // The rectangle, in screen coordinates, that a top-level window's FRAME may take on
 // the screen it is on: the screen's available area (what a task bar and a dock leave

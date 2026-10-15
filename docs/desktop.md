@@ -492,6 +492,22 @@ screen is one more that a smaller screen proves wrong.
     it lays out with it, so each control keeps its object name and stays a
     descendant of the dialog: whatever finds one by name finds it still. A
     scroll bar's width is left in the width when the height is cut;
+  * the dialog's own buttons are not scrolled with the rest. Its **footer**, a
+    widget called `screenFitFooter`, is kept below the scroll area, so Close,
+    Run and Add are on the dialog as it stands and do not move as the body
+    scrolls. The footer is the LAST row of buttons in a dialog laid out in a
+    vertical box, and every item laid out after it, because what the buttons
+    answered - a reply, a status line - is read under them and scrolling it
+    out of sight would look like the button had done nothing. A row of buttons
+    is a `QDialogButtonBox`, or a horizontal box layout that holds buttons,
+    spacing and read-only fields (the line the dialog will run, shown beside
+    Preview and Add) and nothing else. So a lone `QPushButton` laid into the
+    layout, a row with an editable field or a label in it (a path and its Browse
+    button), a row inside another layout, and a dialog laid out in a grid, a
+    form or a row have no footer and scroll as a whole, as before; of two rows
+    of buttons only the later one is the footer; and a footer that needs more
+    than half the room (a button row followed by a long list) is not lifted,
+    because it would leave too little to scroll;
   * a dialog that was moved by hand off the screen is brought back onto it;
     one that was not is centred by `QDialog` itself, inside the screen, with the
     size it now has;
@@ -507,7 +523,17 @@ screen is one more that a smaller screen proves wrong.
   has one scroll area; a dialog placed off the screen is brought back; a
   `QMessageBox` is not taken apart; and
   `VolumesDialog.IsNoTallerThanTheScreenAndStillReachesItsCloseButton` is the
-  real tallest dialog. The offscreen platform's screen is the machine's (2560
+  real tallest dialog, whose Close button is in the footer and does not move
+  as the body scrolls. The rule for a footer is held at its edges in the same
+  file: a button box, a row and the reply under it, a read-only line beside the
+  buttons, two rows of buttons (only the later is the footer), no row of
+  buttons, a row followed by a long list, a row with an editable field, a
+  grid, a dialog that fits (untouched), and one shown again (one footer).
+  `ScreenFitDialogs.*` (`tests/qt_widgets/test_screen_fit_dialogs.cpp`) gives
+  each real dialog a minimum height over the screen's, so that it scrolls
+  whatever its own layout needs, and holds its buttons and reply in the
+  footer, on the dialog and still as the body scrolls: Surface Edit's Heights
+  and Delete Points, Combine Surfaces, Volumes and Road Objects. The offscreen platform's screen is the machine's (2560
   x 1440 here under the headless driver, 800 x 800 under the widget tests), so
   a headless run of a dialog shows it as it was written unless the screen is
   made smaller: `QT_SCALE_FACTOR=2` in the environment of a
@@ -515,7 +541,15 @@ screen is one more that a smaller screen proves wrong.
   664 window with its scroll bar.
 * **Decided.** A scroll area for the whole dialog rather than a taller screen's
   worth of smaller pages: no dialog has to be redesigned, and a person with room
-  sees nothing different. *Rejected:* each dialog sizing itself (the sizes were
+  sees nothing different - and a footer found by a stated rule, not marked by
+  each dialog: the dialogs of the terrain and road work all end in a row of
+  buttons, and a rule that finds it needs no edit to a dialog, where an object
+  name or a property each dialog set would be one more thing the next dialog
+  forgets. *Rejected:* each dialog's buttons marked by name; the last layout
+  item only, which misses the Surface Edit dialogs (a reply box under their
+  buttons) and the Road Objects dialog (the line in its row); every button
+  found by class wherever it sits, which would lift a Browse button away from
+  its field. *Rejected:* each dialog sizing itself (the sizes were
   chosen for the developer's screen, and the next dialog would forget);
   `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that is
   too tall (it lets the window shrink and clips or overlaps what no longer
@@ -574,8 +608,7 @@ widget tests cannot build it (`docs/headless.md`); it is the same run as
   and an older one with Surface Edit hidden. A layout saved by a build of
   2026-10-15, with the bars on the second row, is repaired the same way.
 
-Not done: a dialog's own buttons (Close, Apply) scroll with the rest, where a
-button row kept below the scroll area would stay in sight; a window narrower
+Not done: a window narrower
 than about 1,290 px (a 1280-px laptop) still overflows the second row, and
 larger icons or text widen every toolbar (a button is 41 px at Large Icons
 against 33); no setting chooses a density from the screen; a floating dock is
