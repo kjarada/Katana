@@ -36,11 +36,16 @@ SurfaceEditUi::SurfaceEditUi(SurfaceEditServices services) : services_(std::move
                         "tool's own S option chooses it too.");
     toolBar_->addWidget(active_);
     toolBar_->addSeparator();
-    QObject::connect(active_, &QComboBox::activated, active_, [this](int index) {
+    // currentIndexChanged, not activated: a choice made by the program (the
+    // headless driver fills the list) must point the tools too, and a person's
+    // choice changes the index as well. refreshSurfaces and syncActive block
+    // the signal, so neither sets the target again.
+    QObject::connect(active_, &QComboBox::currentIndexChanged, active_, [this](int index) {
         if (index >= 0) {
             cad::setSurfaceEditTarget(active_->itemText(index).toStdString());
         }
     });
+    targetObserver_ = cad::addSurfaceEditTargetObserver([this] { syncActive(); });
 
     if (services_.document != nullptr) {
         listener_ = services_.document->addListener([this](const cad::DocumentChange& change) {
@@ -52,7 +57,7 @@ SurfaceEditUi::SurfaceEditUi(SurfaceEditServices services) : services_(std::move
     refreshSurfaces();
 }
 
-SurfaceEditUi::~SurfaceEditUi() = default;
+SurfaceEditUi::~SurfaceEditUi() { cad::removeSurfaceEditTargetObserver(targetObserver_); }
 
 void SurfaceEditUi::finish(QMenu& terrain)
 {
@@ -83,6 +88,24 @@ void SurfaceEditUi::finish(QMenu& terrain)
          "Delete the triangles with a side too long or an angle too thin",
          "terrainSurfaceDeleteLong", "surfaceDeleteLongDialog",
          static_cast<int>(SurfaceLevelsKind::DeleteLong)},
+        // The tools take one picked entity; these take any number, by a scope
+        // (the polygons of a layer, the selection, what a view shows) as every
+        // tool that reads the drawing does. No underlined letter: the tools
+        // above took the free ones, and --check-shortcuts counts each once.
+        {Icon::SurfaceEdit, "Delete Points Inside Polygons...",
+         "Delete the points of the surface inside the polygons a scope takes (breakline and rim "
+         "points are kept)",
+         "terrainSurfaceDeletePoints", "surfaceDeletePointsDialog",
+         static_cast<int>(SurfaceLevelsKind::DeletePoints)},
+        {Icon::SurfaceDeleteLong, "Delete Triangles by Polygons...",
+         "Delete the triangles inside, or outside, the union of the polygons a scope takes",
+         "terrainSurfaceDeleteTriangles", "surfaceDeleteTrianglesDialog",
+         static_cast<int>(SurfaceLevelsKind::DeleteTriangles)},
+        {Icon::SurfaceLevels, "Add Points from the Drawing...",
+         "Add the points and levelled vertices a scope takes to the surface; a point off it "
+         "extends it",
+         "terrainSurfaceAddPoints", "surfaceAddPointsDialog",
+         static_cast<int>(SurfaceLevelsKind::AddPoints)},
     };
     menu_->addSection("Levels and Triangles");
     toolBar_->addSeparator();
@@ -108,9 +131,26 @@ void SurfaceEditUi::finish(QMenu& terrain)
     terrain.addAction(combine_);
 }
 
+void SurfaceEditUi::syncActive()
+{
+    if (active_.isNull() || services_.document == nullptr) {
+        return;
+    }
+    const auto name = cad::activeEditSurface(*services_.document);
+    if (!name) {
+        return;
+    }
+    const int at = active_->findText(QString::fromStdString(*name));
+    if (at >= 0 && at != active_->currentIndex()) {
+        active_->blockSignals(true);
+        active_->setCurrentIndex(at);
+        active_->blockSignals(false);
+    }
+}
+
 void SurfaceEditUi::refreshSurfaces()
 {
-    if (active_ == nullptr) {
+    if (active_.isNull()) {
         return;
     }
     active_->blockSignals(true);

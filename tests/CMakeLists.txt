@@ -3221,6 +3221,25 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # The three edits that take the drawing's data by a scope, through the window
+    # (docs/surface_editing.md, "In the window"): Add Points from the Drawing
+    # takes the two vertices of a PLINE3D (20.3,20.3,50 and 25.3,25.3,50), Delete
+    # Points Inside Polygons the vertices inside the two closed polylines, and
+    # Delete Triangles by Polygons, Outside, keeps only the union of the two.
+    # Each dialog's line is run through the window's one executor.
+    add_test(NAME qt_the_surface_data_dialogs_edit_the_surface_by_a_scope_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>PLINE 10,10 60,10 60,40 10,40 CLOSE|>PLINE 100,20 140,20 140,60 100,60 CLOSE|>PLINE3D 20.3,20.3,50 25.3,25.3,50|@terrainSurfaceAddPoints|!surfaceAddPointsScopeDrawing|!surfaceAddPointsRun|?surfaceAddPointsReply|@terrainSurfaceDeletePoints|!surfaceDeletePointsScopeDrawing|!surfaceDeletePointsRun|?surfaceDeletePointsReply|@terrainSurfaceDeleteTriangles|!surfaceDeleteTrianglesScopeDrawing|surfaceDeleteTrianglesSide=Outside the polygons (keep what is inside)|!surfaceDeleteTrianglesRun|?surfaceDeleteTrianglesReply"
+            "-DEXPECT=operation=add_points .*points_added=2 .*changed=yes.*operation=delete_points_inside .*changed=yes.*operation=delete_triangles_outside .*changed=yes"
+            "-DFORBID=unknown command|does not take|has no choice|InvalidArgument|InvalidGeometry|ran=no"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_data_dialogs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_surface_data_dialogs_edit_the_surface_by_a_scope_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 240)
     # Every icon-only button with a menu on a toolbar or in a dock's title
     # bar draws the sign of its menu clear of its icon (--check-toolbars,
     # tools::menuSignClashes), each measured from its own rendering against

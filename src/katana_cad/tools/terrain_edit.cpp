@@ -12,8 +12,12 @@
 // The active surface is surfaceEditTarget() when the drawing has it (the
 // Surface Edit toolbar's choice), else the first visible surface. Every tool
 // takes [Surface] at its prompt: S, then the name, which also becomes the
-// toolbar's choice. Each restarts after an edit, as Point does, so a run of
-// flips or deletions is a run of clicks; Esc ends it.
+// toolbar's choice (setSurfaceEditTarget tells the toolbar). Each restarts
+// after an edit, as Point does, so a run of flips or deletions is a run of
+// clicks; Esc ends it. What a run keeps from one click to the next is held
+// by the catalogue entry that makes the tool, not by the tool, since the host
+// remakes the tool for each click: the surface, and Delete Triangles
+// Inside's Outside.
 
 #include <memory>
 #include <optional>
@@ -24,6 +28,7 @@
 #include <vector>
 
 #include "families.hpp"
+#include "katana/cad/terrain/drawing_shapes.hpp"
 #include "katana/cad/terrain/surface_edit_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/geometry/curves2d.hpp"
@@ -66,29 +71,18 @@ std::string coordinates(const Point2& at)
     return katana::core::formatExactReal(at.x) + "," + katana::core::formatExactReal(at.y);
 }
 
-// A closed shape a polygon is read from (surface_edit_verbs.cpp's polygonOf
-// takes the same kinds; this only decides whether a pick is one).
-bool isClosedShape(const katana::entity::Geometry& geometry)
+// Whether a pick is a polygon or a line is the verb's own reader's answer
+// (drawing_shapes.hpp), asked here: the tool and the line it writes cannot
+// come to disagree about an entity, as they did about a curve polyline drawn
+// back to its start without the closed flag.
+bool isPolygon(const katana::entity::Entity& entity)
 {
-    if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
-        return polyline->closed ||
-               (polyline->vertices.size() > 3 &&
-                polyline->vertices.front() == polyline->vertices.back());
-    }
-    if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&geometry)) {
-        return curve->closed;
-    }
-    if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&geometry)) {
-        return ellipse->isFull();
-    }
-    return std::holds_alternative<katana::geometry::Circle2>(geometry);
+    return katana::cad::shapeOf(entity, katana::cad::ShapeKind::Polygon).shape.has_value();
 }
 
-bool isLinework(const katana::entity::Geometry& geometry)
+bool isLine(const katana::entity::Entity& entity)
 {
-    return std::holds_alternative<Segment2>(geometry) ||
-           std::holds_alternative<Polyline2>(geometry) ||
-           std::holds_alternative<katana::geometry::CurvePolyline2>(geometry);
+    return katana::cad::shapeOf(entity, katana::cad::ShapeKind::Line).shape.has_value();
 }
 
 Polyline2 outline(const katana::geometry::Triangle2& triangle)
@@ -101,7 +95,12 @@ Polyline2 outline(const katana::geometry::Triangle2& triangle)
 
 class SurfaceEditTool final : public InteractiveTool {
   public:
-    SurfaceEditTool(const ToolContext& context, EditKind kind) : context_(context), kind_(kind) {}
+    // `outside` is the Outside choice of Delete Triangles Inside, held by the
+    // catalogue entry so that it survives the tool being remade after each edit.
+    SurfaceEditTool(const ToolContext& context, EditKind kind, std::shared_ptr<bool> outside)
+        : context_(context), kind_(kind), outside_(std::move(outside))
+    {
+    }
 
     [[nodiscard]] std::string prompt() const override
     {
@@ -133,7 +132,7 @@ class SurfaceEditTool final : public InteractiveTool {
             return "Click the vertex" + on + " to delete or [Surface]";
         case EditKind::DeleteInside:
             return std::string("Pick the closed polyline to delete the triangles") + on +
-                   (outside_ ? " OUTSIDE it" : " inside it") + " or [Outside/Surface]";
+                   (*outside_ ? " OUTSIDE it" : " inside it") + " or [Outside/Surface]";
         case EditKind::Breakline:
             return "Pick the line or polyline to add to " + *name +
                    " as a breakline or [Surface]";
@@ -209,16 +208,15 @@ class SurfaceEditTool final : public InteractiveTool {
         const std::string ref = "#" + std::to_string(id);
         switch (kind_) {
         case EditKind::Breakline:
-            if (!isLinework(picked->geometry)) {
-                return ToolStep::rejected("Pick a line, polyline or curve polyline.");
+            if (!isLine(*picked)) {
+                return ToolStep::rejected("Pick " + std::string(kLineKinds) + ".");
             }
             return run({"BREAKLINE", ref});
         case EditKind::DeleteInside:
         case EditKind::Boundary:
         case EditKind::Hole:
-            if (!isClosedShape(picked->geometry)) {
-                return ToolStep::rejected(
-                    "Pick a closed polyline, curve polyline, circle or ellipse.");
+            if (!isPolygon(*picked)) {
+                return ToolStep::rejected("Pick " + std::string(kPolygonKinds) + ".");
             }
             if (kind_ == EditKind::Boundary) {
                 return run({"BOUNDARY", ref});
@@ -226,7 +224,7 @@ class SurfaceEditTool final : public InteractiveTool {
             if (kind_ == EditKind::Hole) {
                 return run({"HOLE", ref});
             }
-            return run({"DELETE", "TRIANGLES", outside_ ? "OUTSIDE" : "INSIDE", ref});
+            return run({"DELETE", "TRIANGLES", *outside_ ? "OUTSIDE" : "INSIDE", ref});
         default:
             return InteractiveTool::entity(id, at);
         }
@@ -249,9 +247,9 @@ class SurfaceEditTool final : public InteractiveTool {
             return ToolStep::next();
         }
         if (kind_ == EditKind::DeleteInside && isOption(text, "Outside", "O")) {
-            outside_ = !outside_;
-            return ToolStep::next(outside_ ? "Deleting the triangles outside the polyline."
-                                           : "Deleting the triangles inside the polyline.");
+            *outside_ = !*outside_;
+            return ToolStep::next(*outside_ ? "Deleting the triangles outside the polyline."
+                                            : "Deleting the triangles inside the polyline.");
         }
         return InteractiveTool::value(text);
     }
@@ -332,6 +330,16 @@ class SurfaceEditTool final : public InteractiveTool {
                 return feedback;
             }
             const auto& p = surface->vertices()[*vertex];
+            // The rule the click is refused by (deletePoints keeps the vertex of a
+            // breakline or boundary edge), asked of the same function, so what
+            // the preview promises is what the click takes.
+            if (katana::terrain::onConstrainedEdge(*surface, *vertex)) {
+                feedback.marks.push_back({FeedbackRole::Target, PointGeometry{Point2(p.x, p.y)},
+                                          "z " + formatNumber(p.z)});
+                feedback.caption = "a breakline or boundary vertex is kept, not deleted";
+                feedback.refused = true;
+                return feedback;
+            }
             feedback.marks.push_back({FeedbackRole::Removed, PointGeometry{Point2(p.x, p.y)},
                                       "z " + formatNumber(p.z)});
             feedback.caption = "delete this vertex";
@@ -431,12 +439,10 @@ class SurfaceEditTool final : public InteractiveTool {
         if (!plan->surfaces) {
             return ToolStep::done(nullptr, line + "\n" + plan->reply, true);
         }
-        // surfacesCommand only builds the command, capturing the document it
-        // will change when the host executes it; the document a tool is given
-        // is const so that it cannot change it before then, and building the
-        // command does not.
-        auto command = const_cast<Document*>(context_.document)
-                           ->surfacesCommand(std::move(*plan->surfaces), plan->stepName);
+        // surfacesCommand is const: it only builds the command, which runs when
+        // the host executes it, so a tool holding a const Document can make one.
+        auto command =
+            context_.document->surfacesCommand(std::move(*plan->surfaces), plan->stepName);
         if (!command) {
             return ToolStep::rejected(asSentence(command.error().message));
         }
@@ -445,9 +451,9 @@ class SurfaceEditTool final : public InteractiveTool {
 
     ToolContext context_;
     EditKind kind_;
+    std::shared_ptr<bool> outside_;
     Step step_ = Step::Main;
     std::optional<Point2> placed_;
-    bool outside_ = false;
 };
 
 ToolInfo editTool(std::string id, std::string name, int order, std::vector<std::string> aliases,
@@ -461,8 +467,10 @@ ToolInfo editTool(std::string id, std::string name, int order, std::vector<std::
     info.order = order;
     info.aliases = std::move(aliases);
     info.tip = std::move(tip);
-    info.make = [kind](const ToolContext& context) -> std::unique_ptr<InteractiveTool> {
-        return std::make_unique<SurfaceEditTool>(context, kind);
+    // What the entry keeps from one remaking of the tool to the next.
+    info.make = [kind, outside = std::make_shared<bool>(false)](
+                    const ToolContext& context) -> std::unique_ptr<InteractiveTool> {
+        return std::make_unique<SurfaceEditTool>(context, kind, outside);
     };
     return info;
 }

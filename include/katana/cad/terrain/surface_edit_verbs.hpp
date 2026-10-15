@@ -38,13 +38,19 @@
 // Points are what a surface is built from (cad::geo::surfaceInput): points
 // and the vertices of levelled lines, a heightless one left out and counted.
 // BOUNDARY, CLIP and an INSIDE take one polygon; HOLE takes each it is given in turn;
-// DELETE ... INSIDE|OUTSIDE takes the union. The verb's own options come
-// before FROM, since everything after FROM is the scope's.
+// DELETE ... INSIDE|OUTSIDE takes the union; BREAKLINE puts all its lines in one
+// patch. The verb's own options come before FROM, since everything after FROM is
+// the scope's. A scope that takes nothing is an answer, not a refusal: the scope
+// record says what it took (polygons=0 skipped=2), the surface record says
+// changed=no ran=no reason="the scope took no polygon", and there is no undo
+// step (CLAUDE.md 1.1).
 //
 // Words are case-insensitive; a name with blanks is quoted. Every edit is ONE
 // undo step through Document::setSurfaces, named after it (SURFACE_EDIT_FLIP,
 // SURFACE_PASTE ...); an edit that changes nothing is no step. PREVIEW,
-// anywhere after the surface's name, works the edit out and changes nothing.
+// anywhere after the surface's name, works the edit out and changes nothing -
+// except where a VALUE stands: a surface or layer called "preview" is a name
+// after NAME, INTO, LAYERS or LAYER, and among a MERGE's members.
 // The reply is records, one a line:
 //
 //   scope=drawing matched=3 polygons=2 skipped=1      (only for FROM)
@@ -56,7 +62,9 @@
 // largest change of level; for THIN the bound on the distance from the
 // original). The terrain functions behind each are tin_edit.hpp's.
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -94,8 +102,8 @@ planSurfaceEdit(const Document& document, const std::vector<std::string>& tokens
 //   ParseFailure     a word the grammar does not take, naming it;
 //   NotFound         a surface or an entity (#id) the drawing has not;
 //   AlreadyExists    a NAME already in use;
-//   InvalidArgument  an entity of the wrong kind, a scope that took none,
-//                    a number out of range;
+//   InvalidArgument  an entity of the wrong kind, typed corners that are no
+//                    polygon or line, a number out of range;
 // and the terrain edit's own refusal (tin_edit.hpp), with what was asked.
 [[nodiscard]] katana::core::Result<std::string>
 runSurfaceEditVerb(Document& document, const std::vector<std::string>& tokens,
@@ -115,6 +123,13 @@ runSurfaceEditVerb(Document& document, const std::vector<std::string>& tokens,
 // The surface the tools are pointed at by name; empty: none chosen.
 [[nodiscard]] const std::string& surfaceEditTarget();
 void setSurfaceEditTarget(std::string name);
+
+// A function called (on the thread that sets it) whenever the target is set,
+// so the Surface Edit toolbar's list follows a tool's own [Surface] option
+// instead of keeping the old name until the drawing's surfaces next change.
+// The handle removes it again.
+[[nodiscard]] std::size_t addSurfaceEditTargetObserver(std::function<void()> observer);
+void removeSurfaceEditTargetObserver(std::size_t handle);
 
 // The surface a tool edits in `document`: the chosen one when the drawing
 // has it, else the first visible surface, else the first. NotFound when the

@@ -263,18 +263,186 @@ TEST_F(SurfaceEditVerbs, EveryRefusalSaysWhatWasWrongAndChangesNothing)
     EXPECT_EQ(document.surfacesGeneration(), generation);
 }
 
-TEST_F(SurfaceEditVerbs, AnEntityOfTheWrongKindAndAScopeOfNoPolygonAreRefused)
+TEST_F(SurfaceEditVerbs, AnEntityOfTheWrongKindIsRefused)
 {
     putSurface(document, "ground", squareSurface());
     ASSERT_TRUE(document.execute(cmd::createPoint(Point2(3, 3))).ok());
     const EntityId point = document.lastCreatedEntities().front();
     EXPECT_EQ(refusal("SURFACE EDIT ground HOLE #" + std::to_string(point)),
               ErrorCode::InvalidArgument);
-    EXPECT_EQ(refusal("SURFACE EDIT ground HOLE FROM DRAWING"), ErrorCode::InvalidArgument);
     // Two polygons where BOUNDARY takes one.
     polyline({Point2(1, 1), Point2(4, 1), Point2(4, 4)}, true);
     polyline({Point2(6, 6), Point2(9, 6), Point2(9, 9)}, true);
     EXPECT_EQ(refusal("SURFACE EDIT ground BOUNDARY FROM DRAWING"), ErrorCode::InvalidArgument);
+}
+
+TEST_F(SurfaceEditVerbs, AScopeThatTakesNothingIsReportedAndNoStepIsMade)
+{
+    // The drawing holds one POINT: no polygon, no line, no point with a level.
+    // CLAUDE.md 1.1: a scope that takes nothing is reported, not an error - the
+    // scope record says what it took, the surface record says changed=no and
+    // why nothing ran, and the session goes on. (OUTSIDE of no polygon is not
+    // the whole surface, and an INSIDE that took nothing is not "no INSIDE".)
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    ASSERT_TRUE(document.execute(cmd::createPoint(Point2(3, 3))).ok());
+    const auto generation = document.surfacesGeneration();
+    const TinSurface before = surfaceOf(document, "ground");
+    struct Case {
+        const char* line;
+        const char* why;
+    };
+    for (const Case& test : {Case{"DELETE TRIANGLES INSIDE FROM DRAWING", "the scope took no polygon"},
+                             Case{"DELETE TRIANGLES OUTSIDE FROM DRAWING", "the scope took no polygon"},
+                             Case{"DELETE POINTS INSIDE FROM DRAWING", "the scope took no polygon"},
+                             Case{"BREAKLINE FROM DRAWING", "the scope took no line"},
+                             Case{"BOUNDARY FROM DRAWING", "the scope took no polygon"},
+                             Case{"HOLE FROM DRAWING", "the scope took no polygon"},
+                             Case{"RAISE 1 INSIDE FROM DRAWING", "the scope took no polygon"},
+                             Case{"SMOOTH INSIDE FROM DRAWING", "the scope took no polygon"},
+                             Case{"ADD POINTS FROM DRAWING", "the scope took no point with a level"}}) {
+        SCOPED_TRACE(test.line);
+        const std::string text = reply(std::string("SURFACE EDIT ground ") + test.line);
+        EXPECT_TRUE(contains(text, "scope=drawing matched=1")) << text;
+        EXPECT_TRUE(contains(text, "changed=no ran=no reason=\"" + std::string(test.why) + "\"")) << text;
+        EXPECT_EQ(document.surfacesGeneration(), generation);
+        EXPECT_EQ(surfaceOf(document, "ground"), before);
+    }
+}
+
+TEST_F(SurfaceEditVerbs, AClipOfAScopeThatTakesNothingMakesNoSurfaceAndSaysSo)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    ASSERT_TRUE(document.execute(cmd::createPoint(Point2(3, 3))).ok());
+    const std::string text = reply("SURFACE CLIP ground FROM DRAWING NAME part");
+    EXPECT_TRUE(contains(text, "surface name=part operation=clip changed=no ran=no reason=\"the scope took no polygon\""))
+        << text;
+    EXPECT_EQ(document.surfaces().find("part"), nullptr);
+}
+
+TEST_F(SurfaceEditVerbs, SeveralBreaklinesCrossingAtDifferentLevelsAreRefusedInEitherOrder)
+{
+    // (5,5) is 12 on the first and 8 on the second. Added one after the other
+    // the first named won there and the second bent to it.
+    putSurface(document, "ground", squareSurface(10, 10, 10, 10));
+    reply("PLINE3D 1,5,12 9,5,12");
+    const EntityId along = document.lastCreatedEntities().front();
+    reply("PLINE3D 5,1,8 5,9,8");
+    const EntityId across = document.lastCreatedEntities().front();
+    const auto generation = document.surfacesGeneration();
+    const std::string a = "#" + std::to_string(along);
+    const std::string c = "#" + std::to_string(across);
+    EXPECT_EQ(refusal("SURFACE EDIT ground BREAKLINE " + a + " " + c), ErrorCode::InvalidGeometry);
+    EXPECT_EQ(refusal("SURFACE EDIT ground BREAKLINE " + c + " " + a), ErrorCode::InvalidGeometry);
+    EXPECT_EQ(refusal("SURFACE EDIT ground BREAKLINE FROM DRAWING"), ErrorCode::InvalidGeometry);
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+}
+
+TEST_F(SurfaceEditVerbs, SeveralBreaklinesThatAgreeWhereTheyCrossAreOneEdit)
+{
+    putSurface(document, "ground", squareSurface(10, 10, 10, 10));
+    reply("PLINE3D 1,5,12 9,5,12");
+    reply("PLINE3D 5,1,12 5,9,12");
+    const std::string text = reply("SURFACE EDIT ground BREAKLINE FROM DRAWING");
+    EXPECT_TRUE(contains(text, "scope=drawing matched=2 lines=2 skipped=0\n")) << text;
+    EXPECT_TRUE(contains(text, "crossings=1")) << text;
+    EXPECT_NEAR(*surfaceOf(document, "ground").elevationAt(5, 5), 12.0, 1e-9);
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground").triangleCount(), 2u) << "one undo step for both lines";
+}
+
+TEST_F(SurfaceEditVerbs, ASurfaceOrALayerCalledPreviewIsANameNotThePreviewFlag)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0, 4.0));
+    putSurface(document, "Preview", flatGridSurface(10, 1.0, 4.0));
+    // A surface called Preview as the source of an offset, a clip and a paste's
+    // top, as a member of a merge, and a new surface called preview.
+    reply("SURFACE OFFSET Preview 1 NAME up");
+    EXPECT_DOUBLE_EQ(*surfaceOf(document, "up").elevationAt(5, 5), 5.0);
+    reply("SURFACE CLIP Preview 1,1 5,1 5,5 1,5 NAME clipped");
+    EXPECT_NEAR(surfaceOf(document, "clipped").planArea(), 16.0, 1e-9);
+    reply("SURFACE MERGE ground Preview NAME merged");
+    EXPECT_NE(document.surfaces().find("merged"), nullptr);
+    reply("SURFACE OFFSET ground 3 NAME preview");
+    EXPECT_NE(document.surfaces().find("preview"), nullptr);
+    // A layer called preview in a FROM scope.
+    reply("LAYER NEW preview");
+    reply("LAYER SET preview");
+    polyline({Point2(3, 3), Point2(6, 3), Point2(6, 7), Point2(3, 7)}, true, "preview");
+    reply("SURFACE EDIT ground HOLE FROM LAYERS preview ONLY");
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 88.0, 1e-9);
+    // And a PREVIEW that is not a value still previews, wherever it stands.
+    const std::size_t count = document.surfaces().all().size();
+    const std::string text = reply("SURFACE OFFSET ground 1 NAME later PREVIEW");
+    EXPECT_TRUE(contains(text, "preview=yes")) << text;
+    EXPECT_EQ(document.surfaces().all().size(), count);
+    const std::string early = reply("SURFACE EDIT ground PREVIEW RAISE 1");
+    EXPECT_TRUE(contains(early, "preview=yes")) << early;
+}
+
+TEST_F(SurfaceEditVerbs, DeletePointJustOutsideTheRimTakesTheCornerWithinReach)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    // (-0.05,-0.05) is 0.07 from the corner (0,0) and off the surface.
+    const std::string text = reply("SURFACE EDIT ground DELETE POINT -0.05,-0.05 reach=0.2");
+    EXPECT_TRUE(contains(text, "triangles_before=32 triangles_after=31")) << text;
+    EXPECT_TRUE(contains(text, "points_removed=1")) << text;
+    // Far outside, nothing is within reach: off the surface, said as such.
+    auto far = interpreter.run("SURFACE EDIT ground DELETE POINT -5,-5 reach=0.2");
+    ASSERT_FALSE(far.ok());
+    EXPECT_EQ(far.error().code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(far.error().message, "off the surface")) << far.error().message;
+    // On the surface with no vertex within reach: said so.
+    auto bare = interpreter.run("SURFACE EDIT ground DELETE POINT 1.5,0.2 reach=0.01");
+    ASSERT_FALSE(bare.ok());
+    EXPECT_TRUE(contains(bare.error().message, "within reach")) << bare.error().message;
+    auto offNoReach = interpreter.run("SURFACE EDIT ground DELETE POINT -0.05,-0.05");
+    ASSERT_FALSE(offNoReach.ok());
+    EXPECT_EQ(offNoReach.error().message, "the point is off the surface");
+}
+
+TEST_F(SurfaceEditVerbs, ATypedPolygonThatClosesToTooFewCornersSaysHowManyItHas)
+{
+    putSurface(document, "ground", squareSurface());
+    // 0,0 10,0 0,0 is two corners and the first again: "needs three corners
+    // [corners=3]" contradicted itself.
+    for (const char* line : {"SURFACE EDIT ground BOUNDARY 0,0 10,0 0,0",
+                             "SURFACE EDIT ground HOLE 0,0 10,0 0,0 0,0"}) {
+        auto result = interpreter.run(line);
+        ASSERT_FALSE(result.ok()) << line;
+        EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+        EXPECT_TRUE(contains(result.error().message, "three distinct corners"))
+            << result.error().message;
+        EXPECT_TRUE(contains(result.error().context, "corners=2 typed=")) << result.error().context;
+    }
+    auto flat = interpreter.run("SURFACE EDIT ground DELETE TRIANGLES INSIDE 5,5 5,5 5,5");
+    ASSERT_FALSE(flat.ok());
+    EXPECT_TRUE(contains(flat.error().context, "corners=1 typed=3")) << flat.error().context;
+}
+
+TEST_F(SurfaceEditVerbs, AThinThatRemovesNothingFromASurfaceNotInCanonicalOrderIsNoStep)
+{
+    // The square's triangles written rotated, as an archive may give them: THIN
+    // rebuilt the arrays sorted, which differs, so "changed=yes" and an undo
+    // step for an edit that did nothing.
+    putSurface(document, "ground",
+               makeSurface({katana::geometry::Point3(0, 0, 0), katana::geometry::Point3(10, 0, 0),
+                            katana::geometry::Point3(10, 10, 0), katana::geometry::Point3(0, 10, 0)},
+                           {{1, 2, 0}, {3, 0, 2}}));
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground THIN 0");
+    EXPECT_TRUE(contains(text, "points_removed=0")) << text;
+    EXPECT_TRUE(contains(text, "changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+}
+
+TEST_F(SurfaceEditVerbs, ALevelBeyondTheMostAnEditAcceptsIsRefused)
+{
+    putSurface(document, "ground", squareSurface());
+    const auto generation = document.surfacesGeneration();
+    EXPECT_EQ(refusal("SURFACE EDIT ground ADD POINT 1e308,1,1"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground RAISE 1e308"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground SETLEVEL 1e70000"), ErrorCode::ParseFailure);
+    EXPECT_EQ(document.surfacesGeneration(), generation);
 }
 
 TEST_F(SurfaceEditVerbs, TheToolsActOnTheChosenSurfaceElseTheFirstVisible)

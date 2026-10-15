@@ -80,8 +80,10 @@ struct Place {
 };
 // Vertex when a vertex lies within tolerance::kGeometric (the nearest; the
 // rule buildTin merges by); else Inside or Edge of a triangle by the exact
-// orientation of the position against its edges; else Outside - which
-// includes a position within kGeometric of the rim but beyond it.
+// orientation of the position against its edges; else Edge of a rim edge
+// the position lies within kGeometric beyond (TinSurface::locate counts that
+// as on the surface, and there is one definition of "on the surface"); else
+// Outside.
 [[nodiscard]] Place placeOf(const TinSurface& surface, const VertexStars& stars,
                             const Point2& position);
 
@@ -137,6 +139,11 @@ struct PatchRequest {
     // The cut's own points' levels hold along it, over every other edge (a
     // paste's seam takes the top's levels); otherwise a cut is draped.
     bool cutHasLevels = false;
+    // The cuts make ONE simple ring (a boundary or a hole): refused when it
+    // visits a vertex twice, which a corner shared by two lobes does without
+    // any edge crossing another. A paste's seam is the top's rim, which may
+    // touch itself, so it leaves this off.
+    bool simpleCut = false;
     // An added point at an existing vertex moves it there too (a paste's
     // seam lies on the top's rim, not on the base's vertex beside it).
     bool pointsMoveVertices = false;
@@ -186,7 +193,18 @@ finishSurface(std::vector<Point3> vertices, std::vector<TinTriangle> triangles,
 // after.
 [[nodiscard]] TinEditReport reportOf(const TinSurface& before, const TinSurface& after);
 
+// The surface as it was with an empty report: what an edit that changes
+// nothing returns, not a reordered copy of it (finishSurface sorts, and a
+// surface imported from an archive is not in that order, so an edit that
+// removed nothing would otherwise look like a change and record an undo step).
+[[nodiscard]] TinEditResult unchanged(const TinSurface& surface);
+
 // A plan position as a message gives it: "(x, y)" with every digit.
 [[nodiscard]] std::string describePosition(const Point2& position);
+
+// Whether a coordinate or level is within kMostMagnitude (tin_edit.hpp), and
+// the refusal for one that is not, naming `where`.
+[[nodiscard]] bool withinMagnitude(double value);
+[[nodiscard]] katana::core::Error tooLarge(const std::string& where);
 
 } // namespace katana::terrain::detail

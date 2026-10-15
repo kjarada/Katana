@@ -200,6 +200,179 @@ bool allCollinear(std::span<const Point2> positions)
     return true;
 }
 
+// The constraints' bounding boxes, grown by `reach`, in a uniform grid: which
+// constraints may lie within `reach` of a point, without a pass over all of
+// them for each point. Only the constraints `eligible` marks are entered.
+class SegmentGrid {
+  public:
+    SegmentGrid(std::span<const Point2> positions, std::span<const CdtConstraint> constraints,
+                std::span<const std::uint8_t> eligible, double reach)
+    {
+        Box2 bounds;
+        std::size_t count = 0;
+        for (std::size_t c = 0; c < constraints.size(); ++c) {
+            if (eligible[c] != 0) {
+                bounds.expand(positions[constraints[c].from]);
+                bounds.expand(positions[constraints[c].to]);
+                ++count;
+            }
+        }
+        cellStart_.assign(2, 0);
+        if (count == 0) {
+            return;
+        }
+        origin_ = bounds.min;
+        const double width = bounds.width();
+        const double height = bounds.height();
+        const double targetCells = std::max(1.0, static_cast<double>(count) / 2.0);
+        if (width > 0.0 && height > 0.0) {
+            const double cell = std::sqrt(width * height / targetCells);
+            const double limit = 2.0 * targetCells; // an elongated extent must not explode one side
+            columns_ = static_cast<std::uint32_t>(std::clamp(std::ceil(width / cell), 1.0, limit));
+            rows_ = static_cast<std::uint32_t>(std::clamp(std::ceil(height / cell), 1.0, limit));
+        }
+        cellWidth_ = width > 0.0 ? width / columns_ : 1.0;
+        cellHeight_ = height > 0.0 ? height / rows_ : 1.0;
+
+        const std::size_t cellCount = static_cast<std::size_t>(columns_) * rows_;
+        const auto range = [&](std::size_t c) {
+            const Point2& a = positions[constraints[c].from];
+            const Point2& b = positions[constraints[c].to];
+            return std::array<std::uint32_t, 4>{
+                cellIndex(std::min(a.x, b.x) - reach, origin_.x, cellWidth_, columns_),
+                cellIndex(std::max(a.x, b.x) + reach, origin_.x, cellWidth_, columns_),
+                cellIndex(std::min(a.y, b.y) - reach, origin_.y, cellHeight_, rows_),
+                cellIndex(std::max(a.y, b.y) + reach, origin_.y, cellHeight_, rows_)};
+        };
+        std::vector<std::uint32_t> counts(cellCount + 1, 0);
+        for (std::size_t c = 0; c < constraints.size(); ++c) {
+            if (eligible[c] == 0) {
+                continue;
+            }
+            const auto r = range(c);
+            for (std::uint32_t row = r[2]; row <= r[3]; ++row) {
+                for (std::uint32_t column = r[0]; column <= r[1]; ++column) {
+                    ++counts[static_cast<std::size_t>(row) * columns_ + column + 1];
+                }
+            }
+        }
+        for (std::size_t cell = 0; cell < cellCount; ++cell) {
+            counts[cell + 1] += counts[cell];
+        }
+        cellStart_ = counts;
+        cellConstraints_.resize(counts[cellCount]);
+        std::vector<std::uint32_t> cursor(counts.begin(), counts.end() - 1);
+        for (std::size_t c = 0; c < constraints.size(); ++c) { // ascending within a cell
+            if (eligible[c] == 0) {
+                continue;
+            }
+            const auto r = range(c);
+            for (std::uint32_t row = r[2]; row <= r[3]; ++row) {
+                for (std::uint32_t column = r[0]; column <= r[1]; ++column) {
+                    cellConstraints_[cursor[static_cast<std::size_t>(row) * columns_ + column]++] =
+                        static_cast<std::uint32_t>(c);
+                }
+            }
+        }
+    }
+
+    // Calls visit(c) for each constraint whose grown box reaches the cell of
+    // `p`: a superset of those within `reach` of it, in ascending order.
+    template <typename Visit> void near(const Point2& p, Visit&& visit) const
+    {
+        if (cellConstraints_.empty()) {
+            return;
+        }
+        const std::size_t cell =
+            static_cast<std::size_t>(cellIndex(p.y, origin_.y, cellHeight_, rows_)) * columns_ +
+            cellIndex(p.x, origin_.x, cellWidth_, columns_);
+        for (std::uint32_t i = cellStart_[cell]; i < cellStart_[cell + 1]; ++i) {
+            visit(cellConstraints_[i]);
+        }
+    }
+
+  private:
+    Point2 origin_;
+    double cellWidth_ = 1.0;
+    double cellHeight_ = 1.0;
+    std::uint32_t columns_ = 1;
+    std::uint32_t rows_ = 1;
+    std::vector<std::uint32_t> cellStart_;
+    std::vector<std::uint32_t> cellConstraints_;
+};
+
+// The points of `queries` (indices into `positions`) that lie within
+// tolerance::kGeometric of a constraint they are not an end of, each at the
+// nearest such constraint. Coincidence is kGeometric, the rule buildTin merges
+// by, and a point decimal arithmetic puts on a line is a few ulps off it: the
+// kernel decides only exactly, so a point 1e-15 beside a long edge does not
+// split it, and the new edge that ends there crosses it a few ulps from its
+// end instead - where CGAL's Exact_predicates_tag snaps the crossing to the
+// nearer END of the crossed edge, which can be tens of metres away. A point
+// the constraint is bent through (cdt_backend sees a->p and p->b) is exactly on
+// it, whatever the rounding.
+//
+// Returned per constraint: the points to bend it through, in order along it.
+std::vector<std::vector<std::uint32_t>>
+pointsOnConstraints(std::span<const Point2> positions, std::span<const CdtConstraint> constraints,
+                    std::span<const std::uint8_t> eligible,
+                    std::span<const std::uint32_t> queries)
+{
+    std::vector<std::vector<std::uint32_t>> through(constraints.size());
+    if (queries.empty()) {
+        return through;
+    }
+    const SegmentGrid grid(positions, constraints, eligible, tol::kGeometric);
+    struct Hit {
+        std::uint32_t constraint = 0;
+        double along = 0.0;
+        std::uint32_t point = 0;
+    };
+    std::vector<Hit> hits;
+    for (const std::uint32_t q : queries) {
+        const Point2& p = positions[q];
+        std::optional<Hit> best;
+        double bestDistance = std::numeric_limits<double>::infinity();
+        grid.near(p, [&](std::uint32_t c) {
+            const CdtConstraint& k = constraints[c];
+            if (k.from == q || k.to == q) {
+                return;
+            }
+            const Point2& a = positions[k.from];
+            const Point2& b = positions[k.to];
+            const katana::geometry::Vec2 d = b - a;
+            const double lengthSquared = d.lengthSquared();
+            if (!(lengthSquared > 0.0)) {
+                return;
+            }
+            const double t = (p - a).dot(d) / lengthSquared;
+            // Beyond an end the nearest point of the constraint is the end,
+            // and a point within kGeometric of an end was merged into it.
+            if (!(t > 0.0 && t < 1.0)) {
+                return;
+            }
+            const double distance = p.distanceTo(a + d * t);
+            if (distance <= tol::kGeometric && distance < bestDistance) {
+                bestDistance = distance;
+                best = Hit{c, t, q};
+            }
+        });
+        if (best) {
+            hits.push_back(*best);
+        }
+    }
+    std::sort(hits.begin(), hits.end(), [](const Hit& x, const Hit& y) {
+        if (x.constraint != y.constraint) {
+            return x.constraint < y.constraint;
+        }
+        return x.along != y.along ? x.along < y.along : x.point < y.point;
+    });
+    for (const Hit& hit : hits) {
+        through[hit.constraint].push_back(hit.point);
+    }
+    return through;
+}
+
 struct Attempt {
     std::optional<PatchOutput> output;
     std::vector<std::uint32_t> grow;
@@ -302,6 +475,12 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
                                  katana::core::formatExactReal(*earlier.z) + " and " +
                                  katana::core::formatExactReal(*point.z));
         }
+        // The level any visit gives the position is the position's, as it is
+        // at a surface vertex above: a first visit with none must not drop
+        // the level a later one carries.
+        if (!earlier.z && point.z) {
+            pointOfSub[entry.index] = static_cast<std::uint32_t>(i);
+        }
     }
     const std::vector<Point2>& positions = merger.positions();
 
@@ -391,10 +570,46 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
     }
 
     // ---- the triangulation ------------------------------------------------------
+    // A new point within kGeometric of an edge it is not an end of is on it:
+    // the edge is bent through the point, so the kernel is given the pieces
+    // (a to p, p to b) and the junction is exact, whatever the last bit of the
+    // point's coordinates rounded to (pointsOnConstraints). The edges that
+    // hold a shape or a level stay what they were to within kGeometric. An
+    // unconstrained ring edge is left alone: a point beside it is in a region
+    // triangle or the neighbour (placed, so the neighbour is in the region),
+    // and a sliver there changes nothing; splitting it would only grow the
+    // region by a neighbour the edit does not need.
+    std::vector<std::vector<std::uint32_t>> through(constraints.size());
+    if (!regionTriangles.empty() && positions.size() >= 3 && !allCollinear(positions)) {
+        std::vector<std::uint8_t> eligible(constraints.size(), 0);
+        for (std::size_t c = 0; c < constraints.size(); ++c) {
+            eligible[c] = (infos[c].tag != kTagRegion || infos[c].rim) ? 1 : 0;
+        }
+        std::vector<std::uint32_t> queries;
+        for (std::size_t s = surfaceSubCount; s < positions.size(); ++s) {
+            queries.push_back(static_cast<std::uint32_t>(s));
+        }
+        through = pointsOnConstraints(positions, constraints, eligible, queries);
+    }
+    // What the kernel is given: each constraint as the run of pieces between
+    // the points it was bent through. kernelStart[c] is constraint c's first.
+    std::vector<CdtConstraint> kernelConstraints;
+    std::vector<std::size_t> kernelStart(constraints.size() + 1, 0);
+    for (std::size_t c = 0; c < constraints.size(); ++c) {
+        kernelStart[c] = kernelConstraints.size();
+        std::uint32_t previous = constraints[c].from;
+        for (const std::uint32_t via : through[c]) {
+            kernelConstraints.push_back({previous, via, constraints[c].tag});
+            previous = via;
+        }
+        kernelConstraints.push_back({previous, constraints[c].to, constraints[c].tag});
+    }
+    kernelStart[constraints.size()] = kernelConstraints.size();
+
     CdtOutput cdt;
     bool triangulated = false;
     if (!regionTriangles.empty() && positions.size() >= 3 && !allCollinear(positions)) {
-        auto result = triangulate({positions, constraints, true});
+        auto result = triangulate({positions, kernelConstraints, true});
         if (!result) {
             return result.error();
         }
@@ -412,19 +627,29 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
         if (!triangulated) {
             return {constraints[c].from, constraints[c].to};
         }
-        return {cdt.constraintVertices.begin() + cdt.constraintVertexOffsets[c],
-                cdt.constraintVertices.begin() + cdt.constraintVertexOffsets[c + 1]};
+        std::vector<std::uint32_t> list;
+        for (std::size_t k = kernelStart[c]; k < kernelStart[c + 1]; ++k) {
+            const auto first = cdt.constraintVertices.begin() + cdt.constraintVertexOffsets[k];
+            const auto last = cdt.constraintVertices.begin() + cdt.constraintVertexOffsets[k + 1];
+            // A piece starts where the one before it ended.
+            list.insert(list.end(), first + (k > kernelStart[c] && first != last ? 1 : 0), last);
+        }
+        return list;
     };
 
-    // Which constraints each made vertex lies on.
+    // Which constraints each made vertex lies on, and which input points lie
+    // on a constrained edge of the surface.
     std::vector<std::vector<std::uint32_t>> onConstraints(generatedCount);
     std::vector<std::uint32_t> cutAppearances(inputCount + generatedCount, 0);
+    std::vector<std::uint8_t> onKeptEdge(inputCount, 0);
     if (triangulated) {
         for (std::size_t c = 0; c < constraints.size(); ++c) {
             const auto list = along(c);
             for (const std::uint32_t x : list) {
                 if (x >= inputCount) {
                     onConstraints[x - inputCount].push_back(static_cast<std::uint32_t>(c));
+                } else if ((infos[c].tag & kTagKept) != 0) {
+                    onKeptEdge[x] = 1;
                 }
                 if ((infos[c].tag & kTagCut) != 0) {
                     ++cutAppearances[x];
@@ -475,6 +700,58 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
                 return makeError(ErrorCode::InvalidGeometry,
                                  "the polygon touches or crosses itself",
                                  "at " + describePosition(positionOf(list[i])));
+            }
+        }
+    }
+    // A ring that visits a vertex twice - a corner shared by two lobes, a
+    // corner on another edge - is not a polygon with an inside. The check
+    // above sees only vertices interior to an edge, and a corner visited
+    // twice is the end of four edges; buildTin's requireSimpleRing walks the
+    // ring the same way.
+    if (request.simpleCut && triangulated) {
+        std::vector<std::uint8_t> visited(inputCount + generatedCount, 0);
+        for (const std::size_t c : cutConstraint) {
+            if (c == kNoIndex) {
+                continue;
+            }
+            const auto list = along(c);
+            for (std::size_t i = 0; i + 1 < list.size(); ++i) {
+                if (visited[list[i]] != 0) {
+                    return makeError(ErrorCode::InvalidGeometry,
+                                     "the polygon touches or crosses itself",
+                                     "at " + describePosition(positionOf(list[i])));
+                }
+                visited[list[i]] = 1;
+            }
+        }
+    }
+    // The kernel's promise is that each constraint runs through the vertices it
+    // reports. Where a crossing falls within rounding of the end of the edge
+    // it crosses, CGAL's Exact_predicates_tag moves it to that END, which may
+    // be a long way off: the constraint is then routed through a vertex that
+    // is not on it. Points within kGeometric of an edge were bent onto it
+    // above; what is left is a vertex of the surface that close to a new edge,
+    // and an edit that would build on such a result is refused rather than
+    // trusted.
+    if (triangulated) {
+        for (std::size_t c = 0; c < constraints.size(); ++c) {
+            const auto list = along(c);
+            if (list.size() <= 2) {
+                continue;
+            }
+            const Segment2 segment{infos[c].from, infos[c].to};
+            for (std::size_t i = 1; i + 1 < list.size(); ++i) {
+                const Point2 at = positionOf(list[i]);
+                const double scale = std::max({std::abs(at.x), std::abs(at.y),
+                                               std::abs(segment.start.x), std::abs(segment.start.y),
+                                               std::abs(segment.end.x), std::abs(segment.end.y)});
+                if (segment.distanceTo(at) > roundingMargin(scale)) {
+                    return makeError(ErrorCode::InvalidGeometry,
+                                     "an edge of the edit passes so close to the end of another "
+                                     "that the kernel could not place the crossing on it: move "
+                                     "the end onto the edge or clear of it",
+                                     "near " + describePosition(at));
+                }
             }
         }
     }
@@ -653,12 +930,13 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
         }
         const double level = levelAlong(infos[*best], position);
         if (bestRank == 2) {
-            // Two new 3D lines crossing: they must agree there.
+            // Two new 3D lines crossing - one line crossing itself, or two of
+            // the lines of one edit - must agree there.
             for (const std::uint32_t c : onConstraints[g]) {
                 if (levelRank(infos[c], request.cutHasLevels) == 2 &&
                     std::abs(levelAlong(infos[c], position) - level) > tol::kCoordinate) {
                     return makeError(ErrorCode::InvalidGeometry,
-                                     "the breakline crosses itself at two different levels",
+                                     "breaklines cross at two different levels",
                                      "at " + describePosition(position) + ": " +
                                          katana::core::formatExactReal(level) + " and " +
                                          katana::core::formatExactReal(
@@ -669,9 +947,69 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
         generatedLevel[g] = level;
     }
 
+    // A vertex that was already there and lies exactly on a new 3D line takes
+    // the line's level: "straight in 3D" holds end to end, not only between
+    // the vertices the kernel happened to make, and the same line moved off
+    // the vertex by a hair must not give a different surface. Not a vertex on
+    // a breakline the surface already had (that keeps its level and the line
+    // bends there, as where they cross) and not one a point of the edit gave a
+    // level (a line through such a point at another level is two levels at one
+    // place, as two lines crossing are). Where several new lines pass through
+    // one vertex they must agree.
+    std::size_t onLines = 0;
+    std::vector<std::optional<double>> lineLevel(inputCount);
+    if (triangulated) {
+        for (std::size_t c = lineBegin; c < lineEnd; ++c) {
+            if (infos[c].draped) {
+                continue;
+            }
+            const auto list = along(c);
+            for (std::size_t i = 1; i + 1 < list.size(); ++i) {
+                const std::uint32_t s = list[i];
+                if (s >= inputCount || onKeptEdge[s] != 0) {
+                    continue;
+                }
+                const double level = levelAlong(infos[c], positions[s]);
+                std::optional<double> own;
+                if (vertexOfSub[s] != kNoVertex) {
+                    if (s < surfaceSubCount) {
+                        own = givenLevel[s];
+                    }
+                } else {
+                    own = request.points[pointOfSub[s]].z;
+                }
+                const std::optional<double>& other = own ? own : lineLevel[s];
+                if (other && std::abs(*other - level) > tol::kCoordinate) {
+                    return makeError(ErrorCode::InvalidGeometry,
+                                     "breaklines cross at two different levels",
+                                     "at " + describePosition(positions[s]) + ": " +
+                                         katana::core::formatExactReal(*other) + " and " +
+                                         katana::core::formatExactReal(level));
+                }
+                if (!own) {
+                    lineLevel[s] = level;
+                }
+            }
+        }
+        for (std::size_t s = 0; s < inputCount; ++s) {
+            if (!lineLevel[s]) {
+                continue;
+            }
+            if (vertexOfSub[s] != kNoVertex) {
+                double& z = vertices[vertexOfSub[s]].z;
+                if (z != *lineLevel[s]) {
+                    z = *lineLevel[s];
+                    ++onLines;
+                }
+            } else {
+                subLevel[s] = *lineLevel[s];
+            }
+        }
+    }
+
     // ---- the result -----------------------------------------------------------
     PatchOutput output;
-    output.relevelled = relevelled;
+    output.relevelled = relevelled + onLines;
     std::vector<std::uint32_t> resultOf(inputCount + generatedCount, kNoVertex);
     for (std::size_t s = 0; s < inputCount; ++s) {
         if (vertexOfSub[s] != kNoVertex) {
@@ -708,17 +1046,58 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
     }
 
     // The triangles outside the region stay as they were, those a cut drops
-    // apart: not crossed by the cut, each is wholly on one side of it.
-    for (std::uint32_t t = 0; t < triangles.size(); ++t) {
-        if (region[t] != 0) {
-            continue;
-        }
-        if (!request.cuts.empty()) {
-            const Point2 centroid = surface.planTriangle(t).centroid();
-            const bool inside = request.insideCut && request.insideCut(centroid);
-            if (inside != request.keepInsideCut) {
+    // apart: not crossed by the cut, each is wholly on one side of it, and so
+    // is every piece of them that shares edges (the cut lies only in region
+    // triangles; TriangleGrid::markAlong is conservative). So the question is
+    // asked once for a piece, at the centroid of its largest triangle as for
+    // the pieces of the region above, and not once for each triangle: a
+    // polygon of n corners costs n per question, and the triangles are many.
+    std::vector<std::uint8_t> keptOutside;
+    if (!request.cuts.empty()) {
+        keptOutside.assign(triangles.size(), 0);
+        std::vector<std::uint8_t> seen(triangles.size(), 0);
+        std::vector<std::uint32_t> piece;
+        std::vector<std::uint32_t> stack;
+        for (std::uint32_t seed = 0; seed < triangles.size(); ++seed) {
+            if (region[seed] != 0 || seen[seed] != 0) {
                 continue;
             }
+            piece.assign(1, seed);
+            stack.assign(1, seed);
+            seen[seed] = 1;
+            while (!stack.empty()) {
+                const std::uint32_t t = stack.back();
+                stack.pop_back();
+                for (std::uint32_t k = 0; k < 3; ++k) {
+                    const std::uint32_t next = neighbors[t][k];
+                    if (next != kNoTriangle && region[next] == 0 && seen[next] == 0) {
+                        seen[next] = 1;
+                        piece.push_back(next);
+                        stack.push_back(next);
+                    }
+                }
+            }
+            std::uint32_t largest = seed;
+            double largestArea = -1.0;
+            for (const std::uint32_t t : piece) {
+                const double area = surface.planTriangle(t).signedArea();
+                if (area > largestArea) {
+                    largestArea = area;
+                    largest = t;
+                }
+            }
+            const bool inside =
+                request.insideCut && request.insideCut(surface.planTriangle(largest).centroid());
+            if (inside == request.keepInsideCut) {
+                for (const std::uint32_t t : piece) {
+                    keptOutside[t] = 1;
+                }
+            }
+        }
+    }
+    for (std::uint32_t t = 0; t < triangles.size(); ++t) {
+        if (region[t] != 0 || (!request.cuts.empty() && keptOutside[t] == 0)) {
+            continue;
         }
         output.triangles.push_back(triangles[t]);
         output.masks.push_back(masks[t]);
@@ -791,6 +1170,16 @@ Result<Attempt> tryPatch(const TinSurface& surface, const PatchRequest& request,
 }
 
 } // namespace
+
+bool withinMagnitude(double value) { return std::abs(value) <= kMostMagnitude; }
+
+katana::core::Error tooLarge(const std::string& where)
+{
+    return makeError(ErrorCode::InvalidArgument,
+                     "a coordinate or level beyond " + katana::core::formatExactReal(kMostMagnitude) +
+                         " m is refused: areas and volumes of the surface would overflow",
+                     "at " + where);
+}
 
 std::string describePosition(const Point2& position)
 {
@@ -996,6 +1385,36 @@ Place placeOf(const TinSurface& surface, const VertexStars& stars, const Point2&
         place.vertex = tri[sides[0] == 0 && sides[1] == 0 ? 1 : (sides[1] == 0 ? 2 : 0)];
         return place;
     }
+
+    // Nothing holds it exactly, yet locate() found it: it lies within
+    // kGeometric of an edge, and beyond it by the exact orientation - so the
+    // edge has no triangle on the other side to take it, a rim edge. A rim
+    // point computed by an intersection or a snap lands there about as often
+    // as on the right side. It is on the surface (locate and elevationAt say
+    // so, and the rule is kGeometric), and an edit that took it for off the
+    // surface would refuse a breakline ending on a boundary just cut, or join
+    // it to the rim with a sliver of no width that rises to its level.
+    double nearestRim = std::numeric_limits<double>::infinity();
+    for (const std::uint32_t t : candidates) {
+        const TinTriangle& tri = surface.triangles()[t];
+        const Point2 corners[3] = {planOf(vertices[tri[0]]), planOf(vertices[tri[1]]),
+                                   planOf(vertices[tri[2]])};
+        if (orientation(corners[0], corners[1], corners[2]) <= 0) {
+            continue;
+        }
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            if (surface.neighbors()[t][k] != kNoTriangle) {
+                continue;
+            }
+            const double distance = Segment2{corners[k], corners[(k + 1) % 3]}.distanceTo(position);
+            if (distance <= tol::kGeometric && distance < nearestRim) {
+                nearestRim = distance;
+                place.kind = Place::Kind::Edge;
+                place.triangle = t;
+                place.edge = k;
+            }
+        }
+    }
     return place;
 }
 
@@ -1044,6 +1463,10 @@ Result<PatchOutput> rebuildPatch(const TinSurface& surface, const VertexStars& s
         if (!point.position.isFinite() || (point.z && !std::isfinite(*point.z))) {
             return makeError(ErrorCode::InvalidArgument, "a point has a non-finite coordinate",
                              "at " + describePosition(point.position));
+        }
+        if (!withinMagnitude(point.position.x) || !withinMagnitude(point.position.y) ||
+            (point.z && !withinMagnitude(*point.z))) {
+            return tooLarge(describePosition(point.position));
         }
     }
     for (const auto* segments : {&request.lines, &request.cuts}) {
@@ -1168,6 +1591,8 @@ Result<PatchOutput> extendSurface(const TinSurface& surface, std::span<const Poi
     const std::size_t rimCount = vertexOfSub.size();
     std::vector<std::uint32_t> pointSub(points.size());
     std::vector<double> pointLevel;
+    // The level a point of this call gave a rim vertex, to refuse two that disagree.
+    std::vector<std::optional<double>> rimGiven(rimCount);
     PatchOutput output;
     for (std::size_t i = 0; i < points.size(); ++i) {
         const Point2 position(points[i].x, points[i].y);
@@ -1180,6 +1605,15 @@ Result<PatchOutput> extendSurface(const TinSurface& surface, std::span<const Poi
         }
         if (entry.index < rimCount) {
             Point3& vertex = vertices[vertexOfSub[entry.index]];
+            if (rimGiven[entry.index] &&
+                std::abs(*rimGiven[entry.index] - points[i].z) > tol::kCoordinate) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "two points at one position with different levels",
+                                 "at " + describePosition(position) + ": " +
+                                     katana::core::formatExactReal(*rimGiven[entry.index]) +
+                                     " and " + katana::core::formatExactReal(points[i].z));
+            }
+            rimGiven[entry.index] = points[i].z;
             if (vertex.z != points[i].z) {
                 vertex.z = points[i].z;
                 ++output.relevelled;
@@ -1264,11 +1698,69 @@ Result<PatchOutput> extendSurface(const TinSurface& surface, std::span<const Poi
     }
     output.triangles = triangles;
     output.masks = masks;
+
+    // What is kept: the triangles outside the old footprint that have a new
+    // point as a corner - and the pockets those leave closed in. The kernel
+    // triangulates the convex hull, so outside the footprint there are also
+    // triangles of three rim vertices: the ears of a hole a point in it did
+    // not reach, the inside of a notch the new triangles bridge. Left out,
+    // a point in a square hole filled only a fan of it and a point beyond a
+    // notch walled off a hole that was not there. A piece of those that
+    // reaches the hull is open to the outside and is not filled (a concavity
+    // the point does not cover is left, as it always was); one that does not
+    // reach it, and borders a kept triangle, is shut in by the new triangles
+    // and is filled; one that borders none is a hole no point is in, and stays.
+    std::vector<std::uint8_t> kept(newCount, 0);
+    const auto rimOnly = [&](std::uint32_t t) {
+        const auto& tri = cdt->triangles[t];
+        return tri[0] < rimCount && tri[1] < rimCount && tri[2] < rimCount;
+    };
+    for (std::uint32_t t = 0; t < newCount; ++t) {
+        kept[t] = inside[t] == 0 && !rimOnly(t) ? 1 : 0;
+    }
+    {
+        std::vector<std::uint8_t> seen(newCount, 0);
+        std::vector<std::uint32_t> piece;
+        std::vector<std::uint32_t> stack;
+        for (std::uint32_t seed = 0; seed < newCount; ++seed) {
+            if (inside[seed] != 0 || kept[seed] != 0 || seen[seed] != 0) {
+                continue;
+            }
+            piece.assign(1, seed);
+            stack.assign(1, seed);
+            seen[seed] = 1;
+            bool open = false;
+            bool shutIn = false;
+            while (!stack.empty()) {
+                const std::uint32_t t = stack.back();
+                stack.pop_back();
+                for (std::size_t k = 0; k < 3; ++k) {
+                    const std::uint32_t next = cdt->neighbors[t][k];
+                    if (next == kNoIndex) {
+                        open = true;
+                    } else if ((cdt->edgeTags[t][k] & kTagRegion) != 0) {
+                        continue; // the old rim: the footprint's side of it is not a pocket
+                    } else if (kept[next] != 0) {
+                        shutIn = true;
+                    } else if (seen[next] == 0) {
+                        seen[next] = 1;
+                        piece.push_back(next);
+                        stack.push_back(next);
+                    }
+                }
+            }
+            if (!open && shutIn) {
+                for (const std::uint32_t t : piece) {
+                    kept[t] = 1;
+                }
+            }
+        }
+    }
+
     std::vector<std::uint8_t> joined(positions.size(), 0);
     for (std::uint32_t t = 0; t < newCount; ++t) {
         const auto& tri = cdt->triangles[t];
-        if (inside[t] != 0 ||
-            (tri[0] < rimCount && tri[1] < rimCount && tri[2] < rimCount)) {
+        if (kept[t] == 0) {
             continue;
         }
         std::uint8_t mask = 0;
@@ -1401,6 +1893,14 @@ TinEditReport reportOf(const TinSurface& before, const TinSurface& after)
     report.verticesBefore = before.vertexCount();
     report.verticesAfter = after.vertexCount();
     return report;
+}
+
+TinEditResult unchanged(const TinSurface& surface)
+{
+    TinEditResult result;
+    result.surface = surface;
+    result.report = reportOf(surface, surface);
+    return result;
 }
 
 } // namespace katana::terrain::detail

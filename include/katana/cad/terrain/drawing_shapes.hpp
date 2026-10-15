@@ -116,6 +116,10 @@ struct ShapeOf {
     std::optional<DrawingShape> shape{};
     // Why there is none; meaningless when there is one.
     NotAShape why = NotAShape::NoOutline;
+    // TooFew: the corners or vertices left once a polygon's closing repeat of
+    // its first corner was taken off - the count a refusal can honestly quote,
+    // where the words typed counted that repeat.
+    std::size_t corners = 0;
 };
 
 // The shape `entity` is as `kind`, by the rules above, its `entity` set.
@@ -181,6 +185,8 @@ struct ShapeRefusal {
     // The #id; empty for the typed corners.
     std::optional<katana::entity::EntityId> entity{};
     NotAShape why = NotAShape::NoOutline;
+    // TooFew: the distinct corners the typed words made (ShapeOf::corners).
+    std::size_t corners = 0;
 };
 
 struct DrawingShapes {
