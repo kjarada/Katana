@@ -212,3 +212,29 @@ TEST(TextEncoding, Utf8ValidityFollowsTheUnicodeTableOfWellFormedSequences)
     EXPECT_FALSE(katana::core::isValidUtf8("\xE2\x82"));         // truncated
     EXPECT_FALSE(katana::core::isValidUtf8("\x80"));             // lone continuation
 }
+
+TEST(TextEncoding, TextThatIsNotUtf8IsReadAsWindows1252AndTextThatIsIsLeftAlone)
+{
+    using katana::core::utf8OrWindows1252;
+    // Worked from the Unicode Consortium's CP1252 table (MAPPINGS/VENDORS/MICSFT/
+    // WINDOWS/CP1252.TXT): 0xE9 is U+00E9, 0xB0 is U+00B0, 0x80 is U+20AC and 0x96
+    // is U+2013; 0x81, which the table leaves undefined, is the C1 control U+0081.
+    // UTF-8 of those: C3 A9, C2 B0, E2 82 AC, E2 80 93, C2 81.
+    EXPECT_EQ(utf8OrWindows1252("Caf\xE9"), "Caf\xC3\xA9");
+    EXPECT_EQ(utf8OrWindows1252("Pente\xB0"), "Pente\xC2\xB0");
+    EXPECT_EQ(utf8OrWindows1252("\x80 \x96 \x81"), "\xE2\x82\xAC \xE2\x80\x93 \xC2\x81");
+    // Already UTF-8 - "Café" as C3 A9 - is not read a second time as two letters.
+    EXPECT_EQ(utf8OrWindows1252("Caf\xC3\xA9"), "Caf\xC3\xA9");
+    // The degenerate neighbours: nothing, plain ASCII, and a string that is UTF-8
+    // but for one stray byte, which is not UTF-8 as a whole and so is read whole
+    // as Windows-1252 (the C3 A9 pair becomes "Ã©").
+    EXPECT_EQ(utf8OrWindows1252(""), "");
+    EXPECT_EQ(utf8OrWindows1252("LAYER NEW ground"), "LAYER NEW ground");
+    EXPECT_EQ(utf8OrWindows1252("\xC3\xA9\xE9"), "\xC3\x83\xC2\xA9\xC3\xA9");
+    // Whatever it returns is UTF-8, for every byte there is.
+    std::string everyByte;
+    for (int byte = 0; byte < 256; ++byte) {
+        everyByte += static_cast<char>(byte);
+    }
+    EXPECT_TRUE(katana::core::isValidUtf8(utf8OrWindows1252(everyByte)));
+}

@@ -318,7 +318,12 @@ entities"), a scope other than AREA or VIEW, a bad AREA or pixels=.
 
 No MCP tool of its own: the legend as JSON (`SURFACE LEGEND name JSON`) is the
 structured form an agent wants, and it comes back through
-`katana_run_commands` already.
+`katana_run_commands` already. The JSON is written with nlohmann's `replace`
+handler, as the other JSON replies are, so a surface or style name with a byte
+that is not UTF-8 is U+FFFD in the reply and not an exception that ends
+katana_cli (`SurfaceStore::checkName` and `checkSurfaceStyle` refuse such a
+name where it enters; this is for one that got past; `docs/headless.md`, "Text
+and names").
 
 ## Speed
 

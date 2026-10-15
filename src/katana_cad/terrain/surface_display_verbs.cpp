@@ -112,7 +112,10 @@ katana::core::Result<std::string> legendVerb(const Document& document,
             item["label"] = entry.label;
             out["entries"].push_back(std::move(item));
         }
-        return out.dump();
+        // A reply: U+FFFD for a byte that is not UTF-8, as the other JSON
+        // replies do, never nlohmann's default exception (nothing up the call
+        // chain of a verb catches it).
+        return out.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
     }
 
     std::string reply = "legend surface=" + replyQuoted(named->name) +

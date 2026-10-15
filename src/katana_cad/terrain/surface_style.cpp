@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/core/text.hpp"
+#include "katana/core/text_encoding.hpp"
 
 namespace katana::cad {
 
@@ -168,11 +169,31 @@ Status checkSurfaceStyle(const SurfaceDisplayStyle& style)
     if (katana::core::trimmed(style.name).empty()) {
         return makeError(ErrorCode::InvalidArgument, "a surface style needs a name", "field=name");
     }
+    // Text that reaches the model is UTF-8 (core/text_encoding.hpp): the set is
+    // written to the project as JSON, whose writer throws on anything else - out
+    // of a save, which promises a Status. THE door for a style's text; every
+    // way to a style (SURFACESTYLE NEW/SET/RENAME, the dialog, a project's
+    // own JSON) ends in checkSurfaceStyleSet. Checked before anything echoes
+    // the name, and the message does not: it is the bytes that are wrong.
+    if (!katana::core::isValidUtf8(style.name)) {
+        return makeError(ErrorCode::InvalidArgument, "a surface style's name is not valid UTF-8",
+                         "field=name");
+    }
+    if (!katana::core::isValidUtf8(style.description)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a surface style's description is not valid UTF-8", "field=description");
+    }
     // A line names a style in quotes, and has no way to type a quote inside
     // them; a line break would end the line.
     if (style.name.find_first_of("\"\r\n") != std::string::npos) {
         return refuse(style, "name", "holds a double quote or a line break, which a command line "
                                      "cannot name");
+    }
+    // The same for a description: SURFACESTYLE INFO prints it for the person to
+    // type back, and the tokenizer reads a quote as the end of the word.
+    if (style.description.find_first_of("\"\r\n") != std::string::npos) {
+        return refuse(style, "description",
+                      "holds a double quote or a line break, which a command line cannot carry");
     }
     if (style.name != katana::core::trimmed(style.name)) {
         return refuse(style, "name", "begins or ends with a blank");
@@ -514,7 +535,13 @@ std::string surfaceStylesToJson(const SurfaceStyleSet& styles)
                        {"version", SurfaceStyleSet::kVersion},
                        {"default", styles.defaultStyle},
                        {"styles", std::move(list)}};
-    return root.dump();
+    // Never throws. The Document only ever holds a set checkSurfaceStyleSet
+    // accepted, whose text is UTF-8, so for it `replace` changes nothing; it
+    // is what keeps a set built by hand - a test's, a tool's - from throwing
+    // out of a reply or a save with nlohmann's type_error.316, and U+FFFD says
+    // where. The stored value is guarded apart, in Document::writeSurfaceState,
+    // which refuses to save such a set rather than rewrite a name in it.
+    return root.dump(-1, ' ', false, Ordered::error_handler_t::replace);
 }
 
 Result<SurfaceStyleSet> surfaceStylesFromJson(std::string_view text)
@@ -525,7 +552,13 @@ Result<SurfaceStyleSet> surfaceStylesFromJson(std::string_view text)
     } catch (const Json::exception&) {
         return makeError(ErrorCode::ParseFailure, "the surface styles are not JSON");
     }
-    if (!root.is_object() || root.value("format", std::string{}) != kFormat) {
+    // The type is checked before the value is read: nlohmann's value() THROWS
+    // type_error.302 on a "format" that is a number, an object or null, and this
+    // is called from Document::open, which promises the built-ins in place of
+    // text it cannot read - not an exception out of the open.
+    const Json* format = root.is_object() ? member(root, "format") : nullptr;
+    if (format == nullptr || !format->is_string() ||
+        format->get_ref<const std::string&>() != kFormat) {
         return makeError(ErrorCode::ParseFailure, "not a set of surface styles");
     }
     const Json* version = member(root, "version");

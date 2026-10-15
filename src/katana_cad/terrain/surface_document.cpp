@@ -14,6 +14,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/storage/project_store.hpp"
 #include "katana/terrain/tin_codec.hpp"
 
@@ -287,10 +288,24 @@ Document::readSurfaceState(std::vector<katana::storage::SurfaceRecord>& records,
         std::string().swap(record.data);
         NamedSurface named;
         named.name = std::move(record.name);
+        // A name this build's door (SurfaceStore::checkName) would refuse but an
+        // earlier build let through - the bytes of a katana_cli on Windows
+        // typed in the ANSI code page, or a double quote from an importer - is
+        // repaired rather than refusing the open: the person could not
+        // otherwise reach the project, nor rename the surface, because a line
+        // cannot name it. The repair is logged, and visible in SURFACE LIST.
+        if (!SurfaceStore::checkName(named.name)) {
+            std::string repaired = state.surfaces.uniqueName(named.name);
+            state.notes.push_back("surface name repaired on open: \"" + repaired + "\"");
+            named.name = std::move(repaired);
+        }
         named.surface =
             std::make_shared<const katana::terrain::TinSurface>(std::move(surface).value());
-        named.source = std::move(record.source);
-        named.style = std::move(record.style);
+        // Free text, not a key: read as the Windows-1252 it was when it is not
+        // UTF-8, so the project's own JSON replies and its next save cannot
+        // throw on it.
+        named.source = katana::core::utf8OrWindows1252(record.source);
+        named.style = katana::core::utf8OrWindows1252(record.style);
         named.visible = record.visible;
         if (auto added = state.surfaces.add(std::move(named)); !added) {
             return makeError(added.error().code,
@@ -328,7 +343,7 @@ void Document::installSurfaceState(SurfaceState state)
     ++surfaceStylesGeneration_;
 }
 
-void Document::writeSurfaceState(katana::storage::ProjectContents& contents) const
+Status Document::writeSurfaceState(katana::storage::ProjectContents& contents) const
 {
     contents.surfaces.reserve(surfaces_.all().size());
     for (const NamedSurface& named : surfaces_.all()) {
@@ -343,11 +358,21 @@ void Document::writeSurfaceState(katana::storage::ProjectContents& contents) con
     // Styles that could not be read are in the metadata still, and go back
     // as they came. Read ones are the Document's, written every time.
     if (surfaceStylesStatus_) {
+        // The set is one checkSurfaceStyleSet accepted on the way in, so this
+        // is a guard and not an expected refusal. It is here because a save
+        // promises a Status and the JSON writer must never be what ends it:
+        // text that is not UTF-8 is a refusal that names the style, rather than
+        // either an exception out of the save or a name silently rewritten
+        // with U+FFFD in the user's project.
+        if (auto status = checkSurfaceStyleSet(surfaceStyles_); !status) {
+            return status;
+        }
         contents.metadata.unknownKeys.insert_or_assign(
             std::string(kStylesKey),
             surfaceStyles_ == builtInSurfaceStyles() ? std::string()
                                                      : surfaceStylesToJson(surfaceStyles_));
     }
+    return {};
 }
 
 std::uint32_t Document::surfacePartsChanged()

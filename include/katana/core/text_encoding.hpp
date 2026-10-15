@@ -49,6 +49,18 @@ namespace katana::core {
 // reached from a path that returns Status and promises not to throw.
 [[nodiscard]] bool isValidUtf8(std::string_view text);
 
+// `text` as UTF-8: unchanged when it already is, otherwise read as Windows-1252
+// (every byte one character; the five it leaves undefined become the C1 control
+// of the same number, as in decodeText). For the text that reaches a program
+// from outside through a door that does not say what it holds - a line piped
+// into katana_cli, a script saved from an ANSI editor - where the other choices
+// are to refuse a line that was only typed on an ANSI keyboard or to let its
+// bytes reach a JSON writer that throws on them. Windows-1252 because it is
+// the code page of the Western-European and English Windows locales the
+// ANSI-saved files here come from, and the one decodeText falls back on; a
+// reader that is told the encoding uses decodeTextAs instead. Never fails.
+[[nodiscard]] std::string utf8OrWindows1252(std::string_view text);
+
 enum class TextEncoding { Utf8, Utf8WithBom, Utf16LittleEndian, Utf16BigEndian, Windows1252 };
 
 [[nodiscard]] const char* toString(TextEncoding encoding);
