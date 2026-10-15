@@ -928,7 +928,16 @@ Result<std::string> volumeSections(const Document& document, Words words)
     auto volumes = katana::terrain::volumesAlongAlignment(*base->surface, *top->surface, *solved,
                                                           sections);
     if (!volumes) {
-        return volumes.error();
+        const Error& refused = volumes.error();
+        if (refused.code == ErrorCode::InvalidGeometry) {
+            // Nothing to measure: which surfaces and which alignment, as the
+            // other forms name theirs.
+            return makeError(refused.code,
+                             "base " + base->name + ", top " + top->name + ", alignment " +
+                                 alignment->name + ": " + refused.message,
+                             refused.context);
+        }
+        return refused;
     }
 
     // The mass haul ordinate: cut taken as positive and fill as negative,
@@ -1248,7 +1257,8 @@ VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=
           its key stations, each area exact; average end area, or prismoidal with a middle
           section in each pair; one record per section with the running totals and the
           mass haul ordinate (cut positive); left= and right= default to across the common
-          ground
+          ground, which a curve or a corner refuses: sections that cross one another count
+          ground twice, so give a reach under the curve's radius
 VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
           the midpoint rule on cells at whole multiples of the cell: a cross-check
 SURFACE DIFFERENCE <base> <top> [NAME <new>] [PREVIEW]

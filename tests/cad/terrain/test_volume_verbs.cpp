@@ -402,6 +402,66 @@ TEST_F(VolumeVerbs, SectionsAlongAnAlignmentGiveTheEndAreaThePrismoidalAndTheMas
               ErrorCode::InvalidArgument);
 }
 
+TEST_F(VolumeVerbs, ASlabMeasuredNorthwardsIsAsWholeAsEastwardsWhereItsEndSectionsLieOnItsEdges)
+{
+    // 1 m over [0, 100]^2 is 10 000 m3. The sections at stations 0 and 100 of a
+    // north-going alignment lie on the slab's south and north edges, and the
+    // tilt of cos(pi/2) in their ends used to halve them: 9500.
+    addSurface("lo", gridSurface(0, 0, 100, 100, [](double, double) { return 10.0; }));
+    addSurface("hi", gridSurface(0, 0, 100, 100, [](double, double) { return 11.0; }));
+    ran("ALIGN NEW north 50,0 50,100");
+    ran("ALIGN NEW east 0,50 100,50");
+    for (const char* alignment : {"north", "east"}) {
+        const std::string reply =
+            ran(std::string("VOLUME SECTIONS lo hi ALIGNMENT ") + alignment + " interval=10");
+        const auto sections = records(reply, "section");
+        ASSERT_EQ(sections.size(), 11u) << alignment;
+        EXPECT_EQ(sections.front().value("width").value_or(""), "100.000") << alignment;
+        EXPECT_EQ(sections.back().value("width").value_or(""), "100.000") << alignment;
+        EXPECT_EQ(value(record(reply, "volume"), "fill"), "10000.000") << alignment;
+        EXPECT_EQ(value(record(reply, "volume"), "sections.empty"), "0") << alignment;
+    }
+}
+
+TEST_F(VolumeVerbs, SectionsRoundACurveAreRefusedUntilTheirReachIsShortOfItsRadius)
+{
+    // A 1 m slab over [0, 200]^2 is 40 000 m3 (VOLUME SURFACES). The alignment
+    // 20,20 to 180,20 to 180,180 with a curve of radius 40 is 240 + 20 pi long;
+    // with sections across all the common ground (the default, 283 m) the
+    // sections cross one another and the sum was 62 101, which is no volume
+    // there is. A band 15 m either side is 30 x (240 + 20 pi) = 9084.956,
+    // whatever the interval.
+    addSurface("lo", gridSurface(0, 0, 200, 200, [](double, double) { return 10.0; }));
+    addSurface("hi", gridSurface(0, 0, 200, 200, [](double, double) { return 11.0; }));
+    ran("ALIGN NEW cl 20,20 180,20 180,180");
+    ran("ALIGN SET cl 1 40");
+    EXPECT_EQ(value(record(ran("VOLUME SURFACES lo hi"), "volume"), "fill"), "40000.000");
+    EXPECT_EQ(refused("VOLUME SECTIONS lo hi ALIGNMENT cl"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused("VOLUME SECTIONS lo hi ALIGNMENT cl interval=1 left=100 right=100"),
+              ErrorCode::InvalidArgument);
+    for (const char* interval : {"10", "1", "0.1"}) {
+        const auto band = record(ran(std::string("VOLUME SECTIONS lo hi ALIGNMENT cl interval=") +
+                                     interval + " left=15 right=15"),
+                                 "volume");
+        EXPECT_EQ(value(band, "fill"), "9084.956") << interval;
+    }
+}
+
+TEST_F(VolumeVerbs, SectionsOfAnAlignmentThatRunsClearOfTheSurfacesAreRefusedNamingEverything)
+{
+    addParallelPlanes(); // [0, 100]^2
+    ran("ALIGN NEW away 500,500 600,500");
+    const auto reply = interpreter.run("VOLUME SECTIONS ground design ALIGNMENT away");
+    ASSERT_FALSE(reply.ok());
+    EXPECT_EQ(reply.error().code, ErrorCode::InvalidGeometry);
+    // Which surfaces and which alignment, and what the surfaces cover.
+    for (const char* named : {"base ground", "top design", "alignment away",
+                              "0.000,0.000,100.000,100.000"}) {
+        EXPECT_NE(reply.error().message.find(named), std::string::npos)
+            << named << " in: " << reply.error().message;
+    }
+}
+
 TEST_F(VolumeVerbs, TheGridOverstatesThePyramidByTwentyCellsSquared)
 {
     // terrain's GridVolume test works it: on 5 m cells the midpoint rule is

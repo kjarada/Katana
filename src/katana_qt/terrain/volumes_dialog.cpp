@@ -319,10 +319,14 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
                     QStringLiteral("The first station; blank for the alignment's start"));
     to_ = textBox(sectionsPage, "volumesTo", QStringLiteral("the end"),
                   QStringLiteral("The last station; blank for the alignment's end"));
+    const QString reachTip = QStringLiteral(
+        "%1. Blank reaches across all the ground the surfaces share, which is right on a "
+        "straight run only: on a curve or a corner give a reach under the curve's radius, "
+        "because sections that cross one another count ground twice and the line is refused.");
     left_ = textBox(sectionsPage, "volumesLeft", QStringLiteral("across the common ground"),
-                    QStringLiteral("How far each section reaches left of the centreline"));
+                    reachTip.arg(QStringLiteral("How far each section reaches left of the centreline")));
     right_ = textBox(sectionsPage, "volumesRight", QStringLiteral("across the common ground"),
-                     QStringLiteral("How far each section reaches right of the centreline"));
+                     reachTip.arg(QStringLiteral("How far each section reaches right of the centreline")));
     sectionMethod_ = new QComboBox(sectionsPage);
     sectionMethod_->setObjectName(QStringLiteral("volumesSectionMethod"));
     sectionMethod_->addItem(QStringLiteral("Average end area"), QStringLiteral("endarea"));

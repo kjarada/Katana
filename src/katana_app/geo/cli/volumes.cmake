@@ -47,6 +47,53 @@ set_tests_properties(cli.volume_sections_along_an_alignment_give_the_end_area_to
     PASS_REGULAR_EXPRESSION "section station=5\\.000 cut\\.area=0\\.000 fill\\.area=10\\.000 width=10\\.000.*volume method=endarea base=base top=top alignment=cl .*sections=3 .*cut=0\\.000 fill=100\\.000"
     FAIL_REGULAR_EXPRESSION "error")
 
+# A north-going alignment up the middle of the same slab, x = 5: its first and
+# last sections lie ON the slab's south and north edges. The tilt of cos(pi/2)
+# in a section's ends once left half of the first out of the sum, so the slab
+# measured short; whole, every section is 10 m wide and 10 m^2 and the slab is
+# 10 x 10 x 1 = 100.
+add_test(NAME cli.volume_sections_northwards_over_the_slab_are_whole_at_its_edges
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_surfaces}
+            -c "ALIGN NEW north 5,0 5,10"
+            -c "VOLUME SECTIONS base top ALIGNMENT north interval=5")
+set_tests_properties(cli.volume_sections_northwards_over_the_slab_are_whole_at_its_edges PROPERTIES
+    PASS_REGULAR_EXPRESSION "section station=0\.000 key=yes cut\.area=0\.000 fill\.area=10\.000 width=10\.000.*volume method=endarea base=base top=top alignment=north .*sections=3 sections\.empty=0 cut=0\.000 fill=100\.000"
+    FAIL_REGULAR_EXPRESSION "error")
+
+# Sections round a curve: a 1 m slab over [0, 200]^2 (40 000 m^3), the alignment
+# 20,20 - 180,20 - 180,180 with a curve of radius 40 at the corner, 240 + 20 pi
+# = 302.832 m long. With the reach across all the common ground the sections
+# cross one another and the old sum was 62 101 m^3; that is refused, naming the
+# radius; 15 m either side is a band 30 wide, 30 x 302.832 = 9084.956.
+set(_volume_curve
+    -c "LAYER NEW base" -c "LAYER SET base"
+    -c "PLINE3D 0,0,10 200,0,10 200,200,10 0,200,10 CLOSE"
+    -c "LAYER NEW top" -c "LAYER SET top"
+    -c "PLINE3D 0,0,11 200,0,11 200,200,11 0,200,11 CLOSE"
+    -c "SURFACE FROM LAYERS base ONLY NAME base"
+    -c "SURFACE FROM LAYERS top ONLY NAME top"
+    -c "ALIGN NEW cl 20,20 180,20 180,180"
+    -c "ALIGN SET cl 1 40")
+add_test(NAME cli.volume_sections_round_a_curve_give_the_band_when_the_reach_is_short_of_its_radius
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_curve}
+            -c "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=15 right=15")
+set_tests_properties(cli.volume_sections_round_a_curve_give_the_band_when_the_reach_is_short_of_its_radius
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "volume method=endarea base=base top=top alignment=cl .*left=15\.000 right=15\.000 .*cut=0\.000 fill=9084\.956"
+    FAIL_REGULAR_EXPRESSION "error")
+
+# The default reach is refused on the same curve (the exit code is not read
+# when a pass pattern is set, so the pattern is the refusal itself).
+add_test(NAME cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_curve}
+            -c "VOLUME SECTIONS base top ALIGNMENT cl interval=10")
+set_tests_properties(cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "error: InvalidArgument: the sections at stations [0-9.]+ and [0-9.]+ cross each other.*at most 40\.000 m")
+
 # The cut/fill map: the top less the base, 1 everywhere, kept as a surface
 # the session then lists beside the two.
 add_test(NAME cli.surface_difference_keeps_the_cut_fill_map_as_a_surface

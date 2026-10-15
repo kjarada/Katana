@@ -219,7 +219,46 @@ road job is measured and paid.
   `terrain::contours` puts on its levels.
 - **Reach:** `left=` and `right=` from the centreline; absent, the diagonal
   of the ground the two surfaces share, so a section reaches across all of
-  it wherever it is cut.
+  it wherever it is cut. That is right on a straight run and wrong anywhere
+  the alignment turns: see "Sections that cross" below, which refuses it.
+- **Sections that cross are refused.** The average end area takes the volume
+  of a panel from the areas of the two sections that bound it, and is right
+  only while the panels tile the ground. Where two sections cross - the
+  inside of a curve cut deeper than its radius, where they all pass through
+  its centre; the inside of a corner (a PI with no radius) deeper than the
+  interval over the sine of its deflection; two straight legs at an angle,
+  each swept by sections that reach across the other - the ground beyond the
+  crossing is swept by both and counted by both. A 1 m slab holding 40 000 m3
+  measured 62 101 m3 round a curve of radius 40 with the default reach, and
+  62 101 again at an interval of 0.1 m: a shorter interval does not help,
+  because the sections cross at the centre however close they are. The
+  verbs now refuse it (InvalidArgument), naming the first two stations that
+  cross and the longest reach at which none do - for a curve its radius -
+  and measure nothing. `left=15 right=15` over the same curve gives
+  30 x (240 + 20 pi) = 9084.956 m3, the band's width times its centreline's
+  length
+  (`VolumesAlongAlignment.SectionsAcrossACurveDeeperThanItsRadiusAreRefusedNotCountedTwice`).
+  Sections that only meet at their ends (a reach equal to the radius, which
+  ends every section of the curve on its centre) are not crossing; the test
+  is a proper crossing by more than `kGeometric` at both ends. In the window
+  the Left and Right fields are blank for "across the common ground", so a
+  person on a curve gets the refusal in the status line and types a reach.
+- **A section on a surface's boundary is whole.** A corridor's finished
+  surface ends on its first and last sections, and a person measuring it along
+  its own alignment cuts exactly there. The ends of a section are computed
+  from the bearing, so on a north-going alignment they are tilted by
+  cos(pi/2) = 6e-17 of the reach, 9e-15 m at 141 m, and an exact test keeps
+  whichever half of the segment the tilt leaves inside the edge. Both ends of a
+  segment within `kGeometric` (0.1 micrometre) of an edge's line put it ON the
+  edge: inside, as the exactly parallel case always was. A 1 m slab holding
+  10 000 m3 measured 9500 along north, south and west alignments (500 m3 gone
+  from a paid quantity, with nothing in the reply to say so) and 10 000 along
+  east, where sin 0 = 0 exactly
+  (`VolumesAlongAlignment.ASlabMeasuredAlongAnyCardinalAlignmentIsWholeWhereItsEndSectionsLieOnItsBoundary`,
+  and at every fifteenth degree with the slab's corners cut by the alignment
+  itself, as a corridor's are). Rejected: cutting the end sections a hair inside
+  the range, which fixes the ends only, to within that hair, and not a boundary
+  that runs along the range.
 - **The section areas are exact.** A section is a straight segment; each
   surface along it is the run of pieces where the segment crosses one of its
   triangles (`terrain::SegmentProfiler`, Cyrus-Beck clipping against each
@@ -230,6 +269,11 @@ road job is measured and paid.
   computed from the edge's own vertices, so neighbouring pieces meet at the
   same bits (`SegmentProfiler.APlaneReadAlongASegmentIsThePlaneOnEveryPieceAndThePiecesMeetExactly`).
   A section's `width=` is the length on which both surfaces had a height.
+  When no section of the range has any, the surfaces share no ground there
+  (their boxes may meet over triangles that do not) and the verb is refused
+  as every other form is, naming the alignment, both surfaces and what each
+  covers; some sections empty and some not is a measurement, with
+  `sections.empty=` saying how many.
 - **The volumes are the methods'.** Between stations L apart with areas A1
   and A2, the average end area is L (A1 + A2) / 2 and the prismoidal formula
   L (A1 + 4 Am + A2) / 6, Am the area of the section cut at the middle
@@ -332,7 +376,10 @@ records do not carry.
   100 m3; a tilted plane against a level inside a square; a prism under a
   non-convex polygon; the stockpile pyramid on level and sloping ground and
   against each base; the grid's 20 c^2; the wedge; parallel planes along a
-  curved alignment; every refusal; and the same bits at any thread count.
+  curved alignment; sections on a surface's boundary on every cardinal
+  bearing and at every fifteenth degree, and at survey coordinates; sections
+  that cross, on a curve, a corner and two legs, and the band that clears
+  them; every refusal; and the same bits at any thread count.
 - The verbs (`tests/cad/terrain/test_volume_verbs.cpp`, the `VolumeVerbs`
   suite): every form through `CommandInterpreter::run`, EACH per polygon with
   an open line skipped, an ellipse and a polyline drawn back to its start as
@@ -353,6 +400,9 @@ records do not carry.
   `cli.volume_between_two_surfaces_is_the_slab_whole_and_inside_a_square`,
   `cli.volume_to_a_level_reads_what_lies_below_it_as_fill`,
   `cli.volume_sections_along_an_alignment_give_the_end_area_total`,
+  `cli.volume_sections_northwards_over_the_slab_are_whole_at_its_edges`,
+  `cli.volume_sections_round_a_curve_give_the_band_when_the_reach_is_short_of_its_radius`,
+  `cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice`,
   `cli.surface_difference_keeps_the_cut_fill_map_as_a_surface`,
   `cli.volume_of_a_surface_that_is_not_there_is_refused`.
 - `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`.
@@ -376,6 +426,19 @@ records do not carry.
   bisection to `kGeometric` between interval samples: right for a drawing,
   but an area integrated from it is exact only to the bisection, and it is
   in `cad`, where the terrain layer cannot reach. The clipper is closed form.
+- **Sections that cross are refused, not cut short at the crossing.** Cutting
+  each section off at its nearest crossing would give a number, but a silent
+  one: the width measured is not the width asked for, and the ground beyond
+  the crossing on a curve's inside belongs to no panel. A refusal that names
+  the reach at which none cross costs a person one field retyped. Rejected too:
+  refusing the default reach on any alignment that has a curve, which would
+  also refuse an almost straight one whose sections cross nowhere within
+  reach; the test is the crossing itself, so it follows the geometry.
+- **A section on a boundary is on the surface within `kGeometric`.** The one
+  tolerance of the policy (`include/katana/math/numerics.hpp`) is used, not a
+  second one for sections; 0.1 micrometre is four orders above the rounding
+  of a bearing at survey coordinates (9e-15 m at a 141 m reach, 1e-9 at the
+  ulp of 6 000 000) and far below any ground that could be measured.
 - **Average end area is the default method.** It is the method measurement
   standards and road contracts pay on (`docs/cad.md`, "Corridor
   quantities"), so it is what a quantity from here is compared with;
@@ -396,10 +459,27 @@ records do not carry.
 ## Not done
 
 - **The curvature correction on curved alignments.** A section's centroid
-  travels a different distance than the centreline on a curve (Pappus), and
-  end areas along the centreline over- or understate by the eccentricity;
-  the correction is not made, and a person shortens the interval on curves,
-  as practice does.
+  travels a different distance than the centreline on a curve (Pappus): a
+  panel of constant section area A between two radial cuts holds A (R -/+ e)
+  theta, with e the centroid's offset from the centreline (inside minus),
+  and end areas along the centreline give A R theta, so each panel is off by
+  the fixed factor R / (R -/+ e) whatever its length. A shorter interval
+  does NOT shrink it (a quarter circle of radius 50 with a strip 10 m wide on
+  the inside measures 1785.398 m3 at intervals of 10, 1 and 0.1, against the
+  true 1706.858 = 500 + (pi/4)(50^2 - 40^2) + 500, 4.6% over; on the outside
+  the same 1785.398 against 1863.938, 4.2% under). It cancels for a section
+  symmetric about the centreline (left= equal to right=: 3570.796, exact).
+  The correction is not made; a person on a curve keeps the reach symmetric,
+  or applies the eccentricity correction A (1 -/+ e/R) to the panel. Practice
+  shortens the interval on curves for another reason, that the section changes
+  quickly there.
+- **Stretches of an alignment side by side.** Only crossing sections are
+  refused. Two parts of the alignment that run side by side nearer than twice
+  the reach, with no section of one crossing a section of the other, still
+  sweep the same ground twice. A curve cannot do it (the legs either side of a
+  curve of radius R are 2R apart, and a reach over R crosses at its centre), but
+  a U-turn made of corners can, and so can two roads laid side by side in one
+  alignment. The spacing of legs is not tested.
 - **Polygons with holes from the drawing.** The region takes holes
   (`OverlayRegion::fromPolygon`), but the verbs take each closed outline as a
   polygon of its own: a tagged hole joining its area, as the GIS conversion
