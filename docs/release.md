@@ -16,11 +16,11 @@ from what a user downloads and each installer silently, signs what it has
 keys for, makes the update assets an installed Katana reads to find and
 fetch the next version ("Update assets"), and publishes them.
 
-Once, before the first release, the owner makes the update keys and pins
-their public halves ("Update signing"). Every job configures with
-`-DKATANA_REQUIRE_UPDATE_KEYS=ON` and the tree holds placeholder keys until
-that is done, so until then every run stops in its first job, a run without
-a tag included.
+The owner made the update keys and pinned their public halves on 2026-10-14
+("Update signing"; `cmake/KatanaUpdateKeys.cmake` holds real keys since
+745606c4). Every job configures with `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, so
+should the tree ever hold placeholder keys again every run stops in its
+first job, a run without a tag included.
 
 1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION X.Y.Z)`,
    and merge it to `main`.
@@ -262,22 +262,25 @@ left without it.
 
 ### To verify on the first release
 
-Nothing in the workflow has run since the update assets were added ("Not
-done"), and several things can only be seen on GitHub. Before the run, the
-reads that end step 3 of "Update signing" must say that the environment
-`release` has its reviewers and takes the branch `main` and no other. In
-the run:
+The first release, v0.2.0, was made by run 38580778852 (2026-10-14, started
+by hand on `b99e6da3`): every job passed, the Publish job among them. What
+that run showed is under "What the first release's run showed", below; the
+list here is what to read in a run, and the next one is the first to use the
+commits of "Not done". Before a run with a tag, the reads that end step 3 of
+"Update signing" must say that the environment `release` has its reviewers
+and takes the branch `main` and no other (they did on 2026-10-15). In the
+run:
 
 * Every job's first step, "Set up job", lists the actions it fetched, each
   by the 40 digits the workflow names it with ("The actions the workflow
   runs"), and no job stops there for an action GitHub could not find.
-* The annotations on the run's summary page, read for Node 20. Five of
-  the six actions ask for it ("Not done"). A warning that names them says
-  either that they were run on Node 24 instead, or that they ran on Node
-  20 and the day it leaves the runner: either is the reason to move those
-  actions before the next release, and a step that fails inside one of
-  them is the reason to move it now. No such warning means only that
-  GitHub asked the runner for none.
+* The annotations on the run's summary page, read for Node 20. Run
+  38580778852 warned in every job that five actions target Node 20 and were
+  being forced onto Node 24; they were moved to majors that ask for Node 24
+  on 2026-10-15 ("The actions the workflow runs") and no run has used the
+  new commits yet, so the next run is the first that should show no such
+  warning. One that still names an action is the reason to move it; a step
+  that fails inside one is the reason to move it back.
 * The Version job's step "Update keys" ends `Update keys: pinned, active
   <key id>, spare <key id>`, with no warning: the key check ran under the
   runner's own CMake. The job's first step prints the run's sequence.
@@ -308,6 +311,31 @@ the run:
   members for each of the four packages it unpacks and ends
   `verified 5 manifest(s) in dist`, after a line `signature verified by key
   <key id> (active)` for each manifest.
+
+**What the first release's run showed.** Read from the run's page and log
+with `gh run view 38580778852 --log` on 2026-10-15, and from `gh release view
+v0.2.0`; nothing was changed by reading. The run started at 14:28 UTC on
+2026-10-14 and its Publish job at 20:39, after the environment's reviewer
+approved it.
+
+* Version: `Update keys: pinned, active 4b5436f13549eee7, spare
+  f5f20acdd524798a`, and the same line in every job's configure.
+* The five build jobs passed, with the signing steps skipped (no
+  certificate) and, on Windows x86-64, the NSIS step skipped by that name.
+  The Windows and Linux jobs' smoke tests printed `selftest=ok`, `keys=pinned`
+  and `kind=archive`, the Windows installers (x86-64 and ARM64) then
+  installed silently and said `kind=installer`, and on macOS the bundle was
+  "sealed again, ad hoc, with its install record" and
+  `codesign --verify --deep --strict` said "valid on disk".
+* Publish: the sequence 1791988099 was read from each package's install
+  record, and the recheck printed `signature verified by key 4b5436f13549eee7
+  (active)` for the five manifests and `verified 5 manifest(s) in dist`. The
+  release has the packages, five manifests with their `.sig`, four update
+  zips and `SHA256SUMS.txt`; not draft, marked Latest, made on `b99e6da3`.
+  The OpenPGP step was skipped (no key).
+
+Not seen: the byte-range read through GitHub's redirect, an installed copy
+being offered an update, and anything of the commits made after that run.
 
 On the release, from any machine (with `<repo>` and the version filled in):
 
@@ -602,7 +630,11 @@ user's machine. On Windows `PATH` is cut to the Windows directories.
 On macOS the disk image is mounted, its link to `/Applications` checked,
 and `Katana.app` copied out of it as a user drags it; `Info.plist` must parse,
 the icon must be there, and `codesign --verify --deep --strict` must accept
-the bundle's seal before the programs in `Contents/MacOS` run.
+the bundle's seal before the programs in `Contents/MacOS` run. CPack adds
+`share/katana/install.json` to the bundle after the install sealed it, so
+`cmake/KatanaSign.cmake` seals the bundle again, ad hoc, when no Developer ID
+is named (its stage `pre`): the macOS job of run 38580778852 printed `sealed
+again, ad hoc, with its install record` and then `valid on disk`.
 
 **The installers.** Each Windows installer is then run as a deployment script
 runs it, as the user the job runs as (the installer asks for no administrator
@@ -1207,11 +1239,14 @@ gives the same steps).
        # branch main, and no other line
    ```
 
-   None of the three could be run here when this was written: the
-   environment did not exist ("Not done"). They were run as they stand
-   on an environment of another public repository that has both settings
-   (`pypa/pip`, `PyPI`), where the first two printed the lines above and
-   the third one line for that environment's one rule.
+   When this was written none of the three could be run: the environment
+   did not exist. They were tried as they stand on an environment of
+   another public repository that has both settings (`pypa/pip`, `PyPI`),
+   and on 2026-10-15, against `kjarada/Katana`, they printed `branch_policy
+   required_reviewers`, `custom=true protected=false` and `branch main`:
+   the environment `release` exists with reviewers, takes `main` only, and
+   holds the secret `UPDATE_SIGNING_KEY` (`gh secret list --env release`;
+   the repository itself holds none).
 4. Publish a release and install it by hand ("The first release that carries
    the updater").
 
@@ -1291,66 +1326,38 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   the download ("Windows: why a download is warned about", above): a
   code-signing service has to be chosen and its secrets put in the workflow
   (the owner's), and the signing through a service written.
-* **The workflow has run once, and has not yet published a release.** The
-  first run, on 2026-10-14 for `v0.2.0`, passed the Version job (with the
-  update keys pinned that day) and the whole Windows x86-64 job: build, suite,
-  package, smoke test and installer test. The other four stopped before their
-  packages, and none on the workflow itself:
-  * Windows ARM64: MSYS2's package download timed out at a mirror, before any
-    of the project's code ran.
-  * macOS arm64: a test captured two constants in lambdas, which clang
-    rejects as unneeded (`-Wunused-lambda-capture` under `-Werror`).
-  * Linux x86-64 and ARM64: four headless window tests expected a count
-    grouped with a comma, which the runner's C locale does not group; and a
-    fake-feed tool test expected its records in the order the requests were
-    sent, which a threaded server does not keep.
-
-  The same day a local build with clang and libc++ (MSYS2 CLANG64, the
-  library of the Windows ARM64 build) found what that job would have met
-  next, all under libc++ on Windows only: `sha256FileHex` hashed the null
-  device as an empty file and returned the digest of a file's first part
-  when a read failed part way (libc++'s `std::filesystem::status` cannot
-  classify NUL, and its `ifstream` reports a failed read as the end of the
-  file), and the update library's path helper turned an empty path into the
-  current folder. All of these are fixed. What was done before the run,
-  for the record: the file was parsed by an independent YAML parser, every script
+* **The workflow has made one release; what changed since has not run on
+  GitHub.** Run 38580778852 (2026-10-14, on `b99e6da3`) was the fourth of
+  that day and the first to pass; "What the first release's run showed" says
+  what it did. The three before it failed. The first stopped, none of it
+  in the workflow, on a mirror timing out for MSYS2's Windows ARM64
+  packages, a test capturing two constants in lambdas that clang rejects as
+  unneeded (`-Wunused-lambda-capture` under `-Werror`), four headless window
+  tests expecting a count grouped with a comma that the Linux runners' C
+  locale does not group, and a fake-feed tool test expecting its records in
+  the order the requests were sent, which a threaded server does not keep;
+  a local build with clang and libc++ (MSYS2 CLANG64, the library of the
+  Windows ARM64 build) found the same day what that job would have met next:
+  `sha256FileHex` hashed the null device as an empty file and returned the
+  digest of a file's first part when a read failed part way, and the update
+  library's path helper turned an empty path into the current folder. All of
+  these are fixed; the logs of the other two are on their run pages. Before
+  the runs, the file was parsed by an independent YAML parser, every script
   in it passed `bash -n` or PowerShell's parser, every option it gives `gh`
   and the update tools was held to their own lists, and the scripts of the
   first job and of the Publish job (all but the OpenPGP step) were run as
-  they stand on made-up packages, with a throwaway key and a stand-in for
-  `gh`. The first job's key check was run under CMake 3.31.6, the version
-  the hosted image carries, and under 4.4; the check that ends each
-  Configure step was run on cache files CMake itself wrote, for projects
-  that do and do not declare the two options. Still not tried on a runner:
-  the Publish job - against the real `gh` and GitHub, and on a file system
-  that has execute bits (the Windows packages' part of "Update assets") -
-  and the smoke tests of the four packages other than Windows x86-64's. A
-  rehearsal - two versions published in a throwaway
-  repository, the second installed as an update of the first - is the
-  owner's acceptance step and the gate for the first real release ("To
-  verify on the first release").
-* **Nor has it run since its actions were named by commit** (2026-10-14,
-  "The actions the workflow runs"). The six commits were read from GitHub,
-  each two ways that agree, and every `uses:` line was held to them by a
-  script of that session; the edit is those lines and a comment. The first
-  run (2026-10-14) fetched five of the six by these digits, every job past
-  its "Set up job" step; `actions/download-artifact`, which only the Publish
-  job runs, has not been fetched yet.
-* **Nor since the packages were given the run's sequence** (2026-10-14,
-  "Update assets", "The package names its own build"). What was done
-  instead: the workflow's bash scripts passed `bash -n` again (the two
-  PowerShell steps did not change); the reading of the install record was
-  run on made-up records - one as the packaging writes it, one spread over
-  lines with white space, one with its members in another order, one
-  without a sequence, one whose sequence only begins with the run's, one of
-  another target and version, and none at all; and the cache check was run
-  on the cache CMake wrote for a project that declares
-  `KATANA_UPDATE_SEQUENCE` and for one that does not. The first run
-  (2026-10-14) built the Windows x86-64 package with the option, and that
-  job's smoke test found the run's target, version and sequence in the
-  package's install record; the other four packages, and the Publish job's
-  reading of the records, have not got that far yet ("To verify on the
-  first release").
+  they stand on made-up packages. The run fetched all six actions by their
+  commits (`actions/download-artifact` in the Publish job too) and gave every
+  package the run's sequence. What no run has used: the Node 24 majors of
+  five actions (7f32475e, 2026-10-15), the licence page and the notices
+  (78677e7b), the installer smoke test's check of `proj.db` (1228fa5d), and
+  the Desktop shortcut and its read-back ("The Windows installer"). That
+  step had a PowerShell parse error from 1228fa5d until 2026-10-15 - a
+  variable followed by a colon inside a string, `"$LASTEXITCODE: ..."` - found
+  by running PowerShell's parser over the step, so it had not run as
+  written. And the rehearsal, the owner's acceptance step, is still to do:
+  a second release installed as an update of the first. v0.2.0 is the only
+  release, so no installed copy has been updated.
 * **Nothing in the repository holds the workflow.** The checks above were
   made with scripts of the sessions that wrote and changed the workflow;
   they are not in the repository and not in ctest. So no test fails if a
@@ -1367,28 +1374,10 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   stays at its commit until it is moved by hand ("The actions the workflow
   runs"), and the repository has no `.github/dependabot.yml`, which would
   propose each move as a pull request.
-* **Five of the six actions are old major versions that ask for Node 20.**
-  At the commits the workflow names, the `action.yml` of
-  `actions/checkout`, `actions/upload-artifact`, `actions/setup-python`,
-  `actions/cache` and `actions/download-artifact` says `using: node20`
-  (`msys2/setup-msys2` says `node24`), and Node 20 reached its end of
-  life in April 2026. On 2026-10-14 their publishers' latest releases
-  were checkout 7.0.1, upload-artifact 7.0.2, setup-python 7.0.0, cache
-  6.1.0 and download-artifact 8.0.2, each `node24`. Naming commits did
-  not cause this: the tags `v4` and `v5` name these same commits, and
-  that change moved no version. The runner of that day (2.338.0;
-  `HandlerFactory.cs` and `JobExtension.cs` of its worker, in the
-  repository `actions/runner`) still carries Node 20 beside Node 24 and,
-  on the machines these jobs run on, refuses no action for asking for
-  it: it runs such an action on one or the other, as GitHub tells it for
-  the run, and can name it in a warning on the run's page. So the first run says where this stands
-  ("To verify on the first release"). Each of the five is moved as "The
-  actions the workflow runs" says, with the release notes of every major
-  version between read; none has been tried.
 * **`main` itself is not guarded.** The environment `release` takes runs
   of `main` only ("Update signing", step 3), and that is worth what
   decides what gets into `main`. On 2026-10-14 the right to push was all
-  that did:
+  that did, and the same reads on 2026-10-15 printed the same:
 
   ```sh
   gh api repos/kjarada/Katana/branches/main --jq .protected
@@ -1409,11 +1398,6 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   request it asks for is that account's own to open and to merge: a
   recorded step, not a second person. Until then the approval on the
   run's page is the guard there is.
-* **The update keys are placeholders** until the owner's key steps ("Update
-  signing"); until then the workflow stops in its first job. The
-  environment `release` of those steps, with its reviewers and its
-  restriction to `main`, did not exist on 2026-10-14 either: GitHub would
-  make one with neither the first time a run reached the Publish job.
 * **No program says which repository it asks for updates,** so the jobs
   prove `-DKATANA_UPDATE_REPO` only as far as the update library's compile
   line ("What each job does"). Were `UPDATE STATUS` to name the feed, the
@@ -1423,17 +1407,6 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   gives, stops there at `if(... IN_LIST ...)`, because a script has no
   policy set (seen with CMake 3.31.6, 2026-10-13). The workflow goes round
   it ("What each job does"); the file should state the policy itself.
-* **On macOS without a Developer ID the install record is added after the
-  bundle is sealed.** Found by reading, 2026-10-13, and not yet seen on a
-  Mac: `cmake --install` seals `Katana.app` ad hoc
-  (`cmake/KatanaDeployUnix.cmake.in`, its last step), and CPack then writes
-  `Contents/Resources/share/katana/install.json` into the staged bundle
-  (`cmake/KatanaPackaging.cmake`, "install.json"). With a Developer ID
-  `cmake/KatanaSign.cmake` signs everything again afterwards; without one
-  nothing does, so `codesign --verify --deep --strict` in the macOS smoke
-  test should refuse the bundle for a file added to it. The bundle has to be
-  sealed again after the record is written, in the packaging and not in the
-  workflow.
 * **macOS is told about a release, not updated,** and the Linux packages are
   not yet updated in place either (`docs/update.md`); their manifests and
   update zips are published all the same.

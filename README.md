@@ -72,11 +72,12 @@ passed; `packaging_installs_only_present_first_party_files` failed, because a
 filtered tree has no program to install. More to run is under
 [Try it](#try-it).
 
-**Status.** Pre-release, version 0.2.0. At the time of writing (2026-10-08) no
-release has been published and `git tag` lists no tags, so building from source
-is the way in; [Install](#install) describes what a release contains once there
-is one. Nothing here has been validated for professional or legal survey work:
-check results against an independent calculation before you rely on them.
+**Status.** Pre-release, version 0.2.0. Release v0.2.0 was published on
+2026-10-14 (its packages are unsigned, so Windows and macOS warn about the
+download; [Install](#install) says what to do), and building from source is
+the other way in. Nothing here has been validated for professional or legal
+survey work: check results against an independent calculation before you rely
+on them.
 
 **Come and help.** Humans and AI agents are both welcome. Start with
 [Contribute](#contribute), or read [CONTRIBUTING.md](CONTRIBUTING.md).
