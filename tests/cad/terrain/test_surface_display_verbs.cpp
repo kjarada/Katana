@@ -11,6 +11,8 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/terrain/surface_colouring.hpp"
+#include "katana/cad/terrain/surface_display_verbs.hpp"
 #include "katana/cad/terrain/surface_style.hpp"
 #include "katana/cad/view_transform.hpp"
 #include "katana/terrain/surface_store.hpp"
@@ -303,4 +305,64 @@ TEST(SurfaceDisplayVerbs, LegendOfARangeTheSurfaceRunsPastOpensItsEndBands)
     const std::string json = drawing.run("SURFACE LEGEND ground JSON");
     EXPECT_TRUE(has(json, "\"from\":null")) << json;
     EXPECT_TRUE(has(json, "\"to\":null")) << json;
+}
+
+// ---- the JSON reply, from plain data ------------------------------------------------------------
+//
+// No verb on a Document can reach the guard behind these: the surface store
+// refuses a name that is not UTF-8 (SurfaceStore::checkName), and a project
+// that holds one is repaired on opening. So the reply is built from the plain
+// data it is made of, and the test hands it what the door would refuse. A
+// mutation check of 2026-10-15 put nlohmann's strict dump() back and every
+// test of the verb still passed; these two fail on it.
+
+TEST(SurfaceDisplayVerbs, LegendJsonWritesABadByteOfANameOrLabelAsU_FFFDAndDoesNotThrow)
+{
+    using katana::cad::SurfaceLegendEntry;
+    using katana::cad::SurfaceLegendReply;
+    using katana::entity::Color;
+    // U+FFFD in UTF-8 is EF BF BD. The three bad strings are the three ways a
+    // byte string fails to be UTF-8: 0xFF is never a byte of UTF-8; 0xC3 is
+    // the first of a two-byte character with nothing after it (the string
+    // ends); 0x80 is a continuation byte with no character to continue. Each
+    // is replaced by ONE U+FFFD and the rest of the string is kept.
+    SurfaceLegendReply reply;
+    reply.surface = std::string("gro") + "\xFF" + "und";
+    reply.style = std::string("Bands") + "\xC3";
+    reply.faces = SurfaceFaces::Elevation;
+    reply.legend.faces = SurfaceFaces::Elevation;
+    reply.legend.title = "Elevation";
+    SurfaceLegendEntry entry;
+    entry.colour = Color{40, 70, 140, 255};
+    entry.label = std::string("a") + "\x80" + "z";
+    reply.legend.entries.push_back(entry);
+
+    std::string json;
+    EXPECT_NO_THROW(json = katana::cad::surfaceLegendJson(reply));
+    // The members in the order the reply writes them; colour is #28468C (40,
+    // 70, 140 in hex: 28, 46, 8C); an entry with neither end is open both ways.
+    const std::string replacement = "\xEF\xBF\xBD";
+    const std::string expected =
+        std::string("{\"surface\":\"gro") + replacement + "und\",\"style\":\"Bands" + replacement +
+        "\",\"view\":\"plan\",\"faces\":\"elevation\",\"kind\":\"bands\",\"title\":\"Elevation\","
+        "\"entries\":[{\"colour\":\"#28468C\",\"from\":null,\"to\":null,\"label\":\"a" +
+        replacement + "z\"}]}";
+    EXPECT_EQ(json, expected);
+}
+
+TEST(SurfaceDisplayVerbs, LegendJsonOfACleanNameIsUnchangedAndOfNoColoursHasNoEntries)
+{
+    using katana::cad::SurfaceLegendReply;
+    // The guard changes nothing it need not: a clean name is as given (a
+    // multi-byte character that IS UTF-8, e + acute accent, passes whole), and
+    // a surface whose faces are not coloured (a wireframe in 3D) has the
+    // faces word "none", the kind "none" and no entries - not a missing member.
+    SurfaceLegendReply reply;
+    reply.surface = "caf\xC3\xA9";
+    reply.style = "Outline";
+    reply.threeD = true;
+    const std::string json = katana::cad::surfaceLegendJson(reply);
+    EXPECT_EQ(json,
+              "{\"surface\":\"caf\xC3\xA9\",\"style\":\"Outline\",\"view\":\"3d\",\"faces\":\"none\","
+              "\"kind\":\"none\",\"title\":\"\",\"entries\":[]}");
 }

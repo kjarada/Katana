@@ -3,6 +3,7 @@
 #include "bim/road_object_manager.hpp"
 
 #include <QAbstractItemView>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
@@ -15,11 +16,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "customisation/document_watcher.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/road/road_object_scope.hpp"
 #include "katana/cad/road/road_object_verbs.hpp"
 #include "katana/core/text.hpp"
 
@@ -57,11 +60,10 @@ std::optional<katana::geometry::Box2> roadObjectsFrame(const katana::cad::Docume
         if (object == nullptr) {
             continue;
         }
-        for (const auto& made : katana::cad::road::buildRoadObject(context, *object).objects) {
-            for (const auto& vertex : made.mesh.vertices) {
-                box.expand(katana::geometry::Point2(vertex.x, vertex.y));
-                any = true;
-            }
+        // The same extent the scope's AREA and VIEW meet (road_object_scope.hpp).
+        if (const auto extent = katana::cad::road::planExtent(context, *object)) {
+            box.expand(*extent);
+            any = true;
         }
     }
     if (!any) {
@@ -87,6 +89,10 @@ struct RoadObjectManagerDialog::Impl {
     QPushButton* remove = nullptr;
     QPushButton* zoom = nullptr;
     QPushButton* place = nullptr;
+    ScopeFilterWidget* scope = nullptr;
+    QPushButton* selectMatching = nullptr;
+    QPushButton* quantities = nullptr;
+    QPushButton* deleteMatching = nullptr;
     QLabel* status = nullptr;
     // Last, so it goes first.
     std::unique_ptr<DocumentWatcher> watcher;
@@ -136,6 +142,50 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
     d.zoom = button("&Zoom To", "roadObjectZoom");
     d.place = button("&New...", "roadObjectNew");
     auto* close = button("&Close", "roadObjectManagerClose");
+    d.selectMatching = button("&Select Matching", "roadObjectSelectMatching");
+    d.quantities = button("&Quantities", "roadObjectQuantities");
+    d.deleteMatching = button("Delete Matchin&g", "roadObjectDeleteMatching");
+    d.selectMatching->setToolTip("Choose the rows of the objects the scope and the filter take "
+                                 "(ROADOBJECT LIST <scope>)");
+    d.quantities->setToolTip("The quantities of the objects the scope and the filter take, in "
+                             "the details (ROADOBJECT QUANTITIES <scope>)");
+    d.deleteMatching->setToolTip("Delete the objects the scope and the filter take, as one undo "
+                                 "step (ROADOBJECT DELETE <scope>)");
+    // The shared scope and filter. A road object is a definition on a layer
+    // with a plan extent, so the whole drawing is the natural start; the views
+    // are the window's. The controls that are about entities are greyed, with
+    // the reason: the verb would refuse them by name.
+    d.scope = new ScopeFilterWidget("roadObjectManager", this);
+    d.scope->views = d.context.views;
+    d.scope->setChoice(ScopeChoice::Drawing);
+    const QString noEntity = "A road object is not an entity: it has no type, style or text to "
+                             "match. Its kind is a property: key kind, value barrier";
+    for (QWidget* each : d.scope->findChildren<QWidget*>()) {
+        const QString name = each->objectName();
+        if (name.startsWith("roadObjectManagerType") || name == "roadObjectManagerFilterStyle" ||
+            name == "roadObjectManagerFilterText") {
+            each->setEnabled(false);
+            each->setToolTip(noEntity);
+        } else if (name == "roadObjectManagerScopeSelection") {
+            each->setToolTip("The objects placed along the selected lines; one placed along an "
+                             "alignment or at points has no line to select");
+        } else if (name == "roadObjectManagerScopeView") {
+            each->setToolTip("The objects on a layer the view shows, and (with only what is on "
+                             "screen) whose plan extent meets the view's area");
+        } else if (name == "roadObjectManagerFilterProperty") {
+            each->setToolTip("A key ROADOBJECT SET writes: kind, id, type, offset, station, "
+                             "layer ... - exactly, in any case");
+        }
+    }
+    auto* byScope = new QGroupBox("Road objects by scope", this);
+    byScope->setObjectName("roadObjectManagerByScope");
+    auto* byScopeLayout = new QVBoxLayout(byScope);
+    byScopeLayout->addWidget(d.scope, 1);
+    auto* scopeButtons = new QHBoxLayout;
+    scopeButtons->addWidget(d.selectMatching);
+    scopeButtons->addWidget(d.quantities);
+    scopeButtons->addWidget(d.deleteMatching);
+    byScopeLayout->addLayout(scopeButtons);
     d.status = new QLabel(this);
     d.status->setObjectName("roadObjectManagerStatus");
     d.status->setWordWrap(true);
@@ -149,25 +199,41 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
     }
     buttons->addStretch(1);
     buttons->addWidget(close);
-    auto* layout = new QVBoxLayout(this);
+    auto* layout = new QVBoxLayout;
     layout->addWidget(d.count);
     layout->addWidget(d.table, 3);
     layout->addWidget(d.info, 2);
     layout->addLayout(edit);
     layout->addLayout(buttons);
     layout->addWidget(d.status);
+    auto* columns = new QHBoxLayout(this);
+    columns->addLayout(layout, 3);
+    columns->addWidget(byScope, 0);
+    resize(1180, 680);
 
     // Runs one line through the window's executor and says what it replied;
-    // true when the line was accepted.
-    const auto run = [this](const QString& line) {
+    // the outcome when the line was accepted.
+    const auto execute = [this](const QString& line) -> std::optional<VerbOutcome> {
         Impl& self = *impl_;
         if (!self.context.run) {
             self.status->setText("There is no command line to run it on here.");
-            return false;
+            return std::nullopt;
         }
         const VerbOutcome outcome = self.context.run(line);
         self.status->setText(outcome.ok ? outcome.reply : "Refused: " + outcome.error);
-        return outcome.ok;
+        return outcome.ok ? std::optional<VerbOutcome>(outcome) : std::nullopt;
+    };
+    const auto run = [execute](const QString& line) { return execute(line).has_value(); };
+    // The scope the controls say, as the words a line takes; the reason when
+    // they say none (no layer ticked, a colour that does not read ...).
+    const auto scopeWords = [this]() -> std::optional<QString> {
+        Impl& self = *impl_;
+        const auto words = self.scope->verbWords();
+        if (!words) {
+            self.status->setText("Refused: " + QString::fromStdString(words.error().message));
+            return std::nullopt;
+        }
+        return *words;
     };
     const auto showInfo = [this] {
         Impl& self = *impl_;
@@ -237,6 +303,53 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
                      QString::fromStdString(katana::core::formatExactReal(frame->max.x)),
                      QString::fromStdString(katana::core::formatExactReal(frame->max.y))));
     });
+    connect(d.selectMatching, &QPushButton::clicked, this, [this, execute, scopeWords] {
+        const auto words = scopeWords();
+        if (!words) {
+            return;
+        }
+        const auto outcome = execute("ROADOBJECT LIST " + *words);
+        if (!outcome) {
+            return;
+        }
+        // The records say which: `object id=...`, after the scope's own.
+        QStringList ids;
+        QString record;
+        for (const QString& line : outcome->reply.split('\n')) {
+            if (line.startsWith("object id=")) {
+                ids << line.mid(10, line.indexOf(' ', 10) - 10);
+            } else if (line.startsWith("scope=")) {
+                record = line.trimmed();
+            }
+        }
+        QTableWidget* table = impl_->table;
+        table->clearSelection();
+        QItemSelectionModel* selection = table->selectionModel();
+        for (int row = 0; row < table->rowCount(); ++row) {
+            if (ids.contains(table->item(row, Column::Id)->text())) {
+                selection->select(table->model()->index(row, 0),
+                                  QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            }
+        }
+        impl_->status->setText(QString("%1 chosen - %2")
+                                   .arg(ids.size())
+                                   .arg(record.isEmpty() ? QString("no scope record") : record));
+    });
+    connect(d.quantities, &QPushButton::clicked, this, [this, execute, scopeWords] {
+        const auto words = scopeWords();
+        if (!words) {
+            return;
+        }
+        if (const auto outcome = execute("ROADOBJECT QUANTITIES " + *words)) {
+            impl_->info->setPlainText(outcome->reply);
+            impl_->status->setText(outcome->reply.section('\n', 0, 0));
+        }
+    });
+    connect(d.deleteMatching, &QPushButton::clicked, this, [this, run, scopeWords] {
+        if (const auto words = scopeWords()) {
+            run("ROADOBJECT DELETE " + *words);
+        }
+    });
     connect(d.place, &QPushButton::clicked, this, [this] {
         if (!impl_->context.place) {
             return;
@@ -298,9 +411,12 @@ void RoadObjectManagerDialog::reload()
     d.table->setRowCount(0);
     if (!d.documentAlive()) {
         d.count->setText("No drawing.");
+        d.scope->reloadViews();
         return;
     }
     const katana::cad::Document& document = *d.context.document;
+    // The layers and the views to choose from follow the drawing and the window.
+    d.scope->reload(document.model());
     const katana::cad::road::PlacementContext context =
         katana::cad::road::placementContext(document);
     std::size_t problems = 0;

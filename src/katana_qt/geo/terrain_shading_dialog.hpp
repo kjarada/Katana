@@ -18,8 +18,9 @@
 //   shadingAltitude   the light's height (hillshades)
 //   shadingZFactor    the vertical exaggeration (hillshades)
 //   shadingVariant    regular, combined, multidirectional, igor (hillshades)
-//   shadingRamp       terrain, diverging, slope, grey, or a colour-map file
-//                     typed in (coloured styles)
+//   shadingRamp       a ramp of the one table (terrain, earth, diverging,
+//                     slope, grey, spectral), or a colour-map file typed in
+//                     (coloured styles)
 //   shadingRangeMin, shadingRangeMax   the values the ramp spans; blank: the
 //                     data's
 //   shadingName       the reference raster's name; blank: the source's and

@@ -17,6 +17,7 @@
 #include <QRadioButton>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -168,6 +169,49 @@ TEST(VolumesDialog, EachPageSaysTheLineItsFieldsMake)
     child<QDoubleSpinBox>(dialog, "volumesCell")->setValue(2.0);
     EXPECT_EQ(command->text(), "VOLUME GRID ground design cell=2 INSIDE 0,0 10,0 10,10");
     EXPECT_TRUE(runner.lines.isEmpty()); // building a line runs nothing
+}
+
+TEST(VolumesDialog, TheCurvatureBoxIsOnByDefaultSaysNothingThenAndCurvatureOffWhenUnchecked)
+{
+    // The correction is the verb's default, so the line only names the plain
+    // figure; the box is on the Along Alignment page alone, and the line it makes
+    // is the one handed to the executor.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    auto* command = child<QLineEdit>(dialog, "volumesCommand");
+    auto* curvature = child<QCheckBox>(dialog, "volumesCurvature");
+    dialog.setMethod(VolumeMethod::Sections);
+    EXPECT_TRUE(curvature->isChecked());
+    EXPECT_EQ(command->text(), "VOLUME SECTIONS ground design ALIGNMENT cl interval=10");
+    curvature->setChecked(false);
+    EXPECT_EQ(command->text(), "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 curvature=off");
+    auto* method = child<QComboBox>(dialog, "volumesSectionMethod");
+    method->setCurrentIndex(method->findData(QStringLiteral("both")));
+    EXPECT_EQ(command->text(),
+              "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 method=both curvature=off");
+    method->setCurrentIndex(method->findData(QStringLiteral("endarea")));
+    // The other pages take no curvature=, and say nothing of it.
+    dialog.setMethod(VolumeMethod::Surfaces);
+    EXPECT_EQ(command->text(), "VOLUME SURFACES ground design");
+    dialog.setMethod(VolumeMethod::Sections);
+
+    // Measure runs the line as shown, and the reply's volume record says the
+    // figure is the plain one.
+    child<QLineEdit>(dialog, "volumesLeft")->setText("20");
+    child<QLineEdit>(dialog, "volumesRight")->setText("20");
+    child<QPushButton>(dialog, "volumesRun")->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_EQ(runner.lines.front(),
+              "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 left=20 right=20 "
+              "curvature=off");
+    EXPECT_TRUE(dialog.resultsText().contains(QStringLiteral("\toff\t")));
+    // Checked again, the word goes.
+    curvature->setChecked(true);
+    EXPECT_EQ(command->text(),
+              "VOLUME SECTIONS ground design ALIGNMENT cl interval=10 left=20 right=20");
 }
 
 TEST(VolumesDialog, AStockpileWithNoBoundaryIsRefusedNamingWhatIsMissingAndRunsNothing)
@@ -446,7 +490,8 @@ TEST(VolumeResultTable, EveryRecordIsARowAndEveryKeyAColumnInTheOrderFirstMet)
 // The tallest dialog the window has: every page's fields, the scope and filter
 // controls, a table and a diagram, a thousand pixels and more once shown. A laptop's
 // screen has less room than that, so it scrolls (src/katana_qt/screen_fit.hpp) and its
-// Close button is still reached.
+// Close button is still reached: it is the dialog's footer, below the scroll area, so it
+// is on the dialog as it stands and does not move as the rest scrolls.
 TEST(VolumesDialog, IsNoTallerThanTheScreenAndStillReachesItsCloseButton)
 {
     Document document;
@@ -463,8 +508,22 @@ TEST(VolumesDialog, IsNoTallerThanTheScreenAndStillReachesItsCloseButton)
     auto* scroll = dialog.findChild<QScrollArea*>(katana::qt::kScreenFitScroll);
     ASSERT_NE(scroll, nullptr);
     auto* close = child<QPushButton>(dialog, "volumesClose");
-    scroll->ensureWidgetVisible(close, 0, 0);
+    ASSERT_NE(close, nullptr);
+    auto* footer = dialog.findChild<QWidget*>(katana::qt::kScreenFitFooter);
+    ASSERT_NE(footer, nullptr) << "the button box at the end of the layout is the footer";
+    EXPECT_TRUE(footer->isAncestorOf(close));
+    EXPECT_FALSE(scroll->isAncestorOf(close)) << "Close scrolls with the rest";
+    ASSERT_TRUE(close->isVisible());
+    const auto placed = [&] {
+        return QRect(close->mapTo(&dialog, QPoint(0, 0)), close->size());
+    };
+    const QRect resting = placed();
+    EXPECT_TRUE(dialog.rect().contains(resting)) << "Close is off the dialog without scrolling";
+    // The body scrolled right down, and back: Close has not moved.
+    scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
     QApplication::processEvents();
-    const QRect where(close->mapTo(scroll->viewport(), QPoint(0, 0)), close->size());
-    EXPECT_TRUE(scroll->viewport()->rect().contains(where)) << "Close cannot be scrolled into view";
+    EXPECT_EQ(placed(), resting);
+    scroll->verticalScrollBar()->setValue(0);
+    QApplication::processEvents();
+    EXPECT_EQ(placed(), resting);
 }

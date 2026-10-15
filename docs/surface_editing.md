@@ -13,8 +13,8 @@ saved, undone, styled - are `docs/terrain.md`'s.
 |---|---|---|
 | terrain | `include/katana/terrain/tin_edit.hpp`, `src/katana_terrain/tin_edit.cpp`, `tin_patch.*`, `tin_thin.cpp` | pure functions: a surface in, a NEW surface or a refusal out |
 | cad | `include/katana/cad/terrain/surface_edit_verbs.hpp`, `src/katana_cad/terrain/surface_edit_verbs.cpp` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
-| cad | `src/katana_cad/tools/terrain_edit.cpp` | eight catalogue tools, category Terrain, each running the verb |
-| qt | `src/katana_qt/terrain/surface_edit_ui.*`, `surface_edit_dialogs.*`, `src/katana_qt/tools/icons_terrain.cpp` | Terrain > Edit Surface, the Surface Edit toolbar, five dialogs |
+| cad | `src/katana_cad/tools/terrain_edit.cpp` | nine catalogue tools, category Terrain, each running the verb |
+| qt | `src/katana_qt/terrain/surface_edit_ui.*`, `surface_edit_dialogs.*`, `src/katana_qt/tools/icons_terrain.cpp` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
 
 The verbs (`HELP SURFACE EDIT` prints them all):
 
@@ -22,6 +22,8 @@ The verbs (`HELP SURFACE EDIT` prints them all):
 SURFACE EDIT <name> DELETE TRIANGLE x,y | DELETE TRIANGLES INSIDE|OUTSIDE <polygon>
                     DELETE LONG <length> | DELETE THIN <degrees>
                     DELETE POINT x,y [reach=<m>] | DELETE POINTS INSIDE <polygon>
+                    DELETE BREAKLINE <line>
+                    MOVE POINT x,y TO x2,y2 [reach=<m>]
                     FLIP x,y
                     ADD POINT x,y,z [x,y,z ...] | ADD POINTS <points>
                     BREAKLINE <line>
@@ -227,7 +229,8 @@ triangles, they do not reshape them.
 ### What every edit keeps
 
 - **Constrained edges.** No edit removes a breakline or boundary edge it was
-  not asked to: DELETE POINT refuses a vertex on one
+  not asked to (DELETE BREAKLINE is asked to, along a line, and only interior
+  edges): DELETE POINT refuses a vertex on one
   (`HeldPointRule::Refuse`), DELETE POINTS INSIDE leaves such vertices and
   counts them (`held=`), SMOOTH and THIN hold them, FLIP refuses a
   constrained edge.
@@ -267,6 +270,59 @@ triangles, they do not reshape them.
   limit leaves areas and volumes (sums of products of three such numbers)
   finite. One gate in the edit core, so the window's dialogs and an agent's
   line meet it alike.
+- **DELETE BREAKLINE makes the breakline edges along a line ordinary edges**
+  (`terrain::deleteBreaklines`). It clears the constrained flag on both sides
+  of every edge that LIES ALONG the line - both its ends within
+  `tolerance::kGeometric` of one segment of it, the closing segment of a closed
+  line included - and nothing else: the vertices and the triangles are exactly
+  as they were, in the same order, so the edit is a flag per edge and no
+  re-triangulation, and it is one undo step like the others. A line over part
+  of a breakline clears the edges of that part; a line along none clears
+  nothing, which is `changed=no` and no step, not a refusal; the line's levels
+  are not asked, and its vertices need not be vertices of the surface. A vertex
+  whose every constrained edge was cleared is then an ordinary vertex and
+  DELETE POINT takes it (a vertex at the end of an edge that stays is refused as
+  before). The reply adds `edges_cleared=` and `edges_held=` to the record,
+  after `crossings=`. *Edges on the rim are never cleared*: a constrained rim
+  edge is the surface's boundary, which BOUNDARY, HOLE and CLIP make, not a
+  breakline, and `edges_held=` counts those along the line so that a line over a
+  boundary that cleared nothing says why. *Rejected:* clearing the rim as well
+  (the verb is named for breaklines, and a rim made unconstrained by a line
+  drawn along it would be a boundary lost without anyone asking for it);
+  matching an edge by its midpoint or by the nearest segment (a line that cuts
+  across the corner of a breakline is near both ends of nothing); merging
+  collinear segments of the line first (a TIN edge never spans a vertex of the
+  breakline it came from, since that vertex is a vertex of the surface); and a
+  catalogue tool that picks one polyline - the Terrain menu's dialog takes the
+  lines by the shared scope, which a click on one entity cannot say.
+- **MOVE POINT moves a vertex in plan as ONE patch** (`terrain::movePoint`).
+  `MOVE POINT x,y TO x2,y2` names the vertex as DELETE POINT does (the corner of
+  the triangle under `x,y` nearest it, or with `reach=` the nearest vertex within
+  it) and puts it at `x2,y2` at its own level: the target is `x,y` only, since a
+  level on it would be a change of level, which RAISE and ADD POINT make. The
+  triangles round the old position and round the new one are rebuilt together -
+  the vertex taken out of the patch's region and a point put in, by the same
+  kernel and inside the same ring of edges as every other edit - so there is no
+  triangle left to fold: a vertex taken across a neighbouring edge, or two cells
+  away, comes out as a valid surface of the same footprint, and the vertex
+  count, the triangle count (a polygon of n corners round k points has n + 2k - 2
+  triangles, whoever joins them) and every other vertex are as they were. It is
+  one undo step, not a DELETE POINT and an ADD POINT, which would be two. The
+  report counts the vertex made as one added and the one taken out as one
+  removed, and `moved=1`. *Refused*, each with its cause: a vertex at an end of a
+  constrained edge (a breakline or boundary: DELETE BREAKLINE first, or the
+  triangles round it deleted), a vertex on the rim or on the edge of a hole, a
+  target off the surface (ADD POINT extends it; a move does not), a target within
+  `tolerance::kGeometric` of another vertex. A move of less than that tolerance
+  is no move: the surface as it was, `changed=no`. The rim is refused before the
+  breakline, since a boundary or hole makes its rim edges constrained and
+  "clear the breakline" would send a person after an edge DELETE BREAKLINE never
+  clears. *Rejected:* moving a rim vertex (it reshapes the footprint, which
+  BOUNDARY and HOLE do on purpose and a drag should not, and the brief did not ask
+  for it); dragging the vertex and keeping its neighbours (a vertex taken
+  across the ring of its star folds the triangles round it, and the check for that
+  is a second implementation of what the kernel decides exactly); the target's
+  level from the surface there (the person moves a point, not its level).
 - **A point at an existing vertex gives it its level**, and no triangle
   changes (`relevelled=`). That is what a surveyor means by "the ground is
   here, at this level". Two points at one position with levels more than
@@ -331,6 +387,79 @@ triangles, they do not reshape them.
   import's combined surfaces use, fast, never refusing - and PASTE is the clean
   seam. The merged result is compacted (combineSurfaces keeps the vertices of
   dropped triangles).
+- **HOLE of several footprints is cut in as few patches as are correct**
+  (`terrain::cutHoles`; `HOLE FROM <scope>`, `HOLE #a #b ...`). A patch costs
+  the whole surface - the stars of its vertices, the copies, `finishSurface`'s
+  sort, `TinSurface::create`'s adjacency and locator, about a third of a second
+  on 400 000 triangles - and a hole is cut where a polygon is, not where the
+  surface is, so a hundred buildings cost a hundred rebuilds when cut one after
+  the other. The footprints are taken in the order given and gathered into a
+  batch while each one is **separate** from every one already in it - the
+  outlines nowhere within `tolerance::kGeometric` of each other (boxes first,
+  then only the edges that reach the other's box, decided with the exact
+  predicate the kernel uses), and neither inside the other - **and** reaches
+  no triangle one of them reaches (`detail::markReachedByPoint` and
+  `TriangleGrid::markAlong`, the rule `rebuildPatch` grows its region by). The
+  first footprint that is not, ends the batch: the batch is cut in one patch,
+  and the footprint begins the next one on the surface the batch left. So
+  overlapping, touching, nested and identical footprints, and two in one
+  triangle, are cut one patch each, in the order given, exactly as the loop of
+  `cutHole` cut them. Why both tests: separate outlines are what makes the cut
+  correct - a patch decides which side of the cut a piece is on from the cut
+  edges that bound it, and a piece between two footprints that overlap would be
+  taken for outside both - while a shared triangle is what makes it the loop's
+  surface: cut by two outlines at once, its pieces are triangulated together,
+  where the loop triangulated the first's pieces and then cut those. The result
+  is the loop's surface: the same triangles, vertices and constrained edges, in
+  a different numbering of the vertices the cut made (`HoleCutStats::patches`
+  counts the rebuilds; `TinEdit.HolesApartFromEachOtherAreCutInOnePatchAndGiveWhatCuttingThemOneByOneGives`
+  and its neighbours compare the two runs vertex for vertex and triangle for
+  triangle, the report field for field). A batch the kernel refuses is cut again one footprint at a time, so
+  the refusal is the loop's, with its words. *Rejected:* one patch for every
+  footprint whatever they are (wrong for the cases above); the union of the
+  polygons first (the module has no polygon clipper, and a second one beside
+  the kernel would come to disagree with it about the same polygons); cutting
+  the footprints' patches on the `TaskPool` (the cost is the global rebuild
+  each makes, not the footprint, and patches of one surface cannot be joined
+  without a rebuild of the whole). Nothing here runs in parallel, so the
+  result cannot depend on the thread count.
+- **A record prints any finite number, in full.** The edits refuse a level past
+  `kMostMagnitude`, but a project, an archive or a LandXML file may hold one,
+  and the SURFACE records that name the surface (`bounds=`, `zmin=`, `zmax=`)
+  printed `nan` for a FINITE level whose digits and three decimals filled more
+  than the 64 characters their formatter had (1e61, a level of 61 digits,
+  where 1e60 filled it to the last). The formatter was written twice, in
+  `src/katana_cad/terrain/surface_verbs.cpp` and in
+  `src/katana_app/geo/replies.cpp`; it is now one, `core::formatFixed`
+  (`include/katana/core/text.hpp`), whose buffer is the longest fixed text of
+  a double (DBL_MAX, 309 digits) and which the two `fixed3` call. The text of
+  an ordinary value is unchanged byte for byte; a value that rounds to nothing
+  has no sign ("-0.0004" is "0.000", as before; "-0.0005" is "-0.001": the
+  double nearest it is a hair above the tie, and the exact value decides,
+  which is also how `to_chars` rounds); non-finite values are what `to_chars`
+  writes, "nan", "inf", "-inf". *Rejected:* printing the value in general
+  notation when it is too large for a buffer (a record's `zmax=1e+61` would be
+  a number of another shape than every other, and a reader that parses fixed
+  text would take it for a bound it is not).
+- **PASTE says why when the top's rim cannot be kept apart.** The seam is the
+  top's rim, so its vertices are points of the patch, and the patch takes two
+  within `tolerance::kGeometric` for one (the rule buildTin merges by): a top
+  with two rim vertices that close - an imported surface's sliver - came out
+  with a triangle naming one vertex twice, which `TinSurface::create` refused
+  as "triangle names a vertex twice" with the number of a triangle of the
+  result. `pasteSurface` now looks at the top's triangles after the patch, where
+  two corners that are different vertices of the top have become one of the
+  result, and refuses with the cause: InvalidGeometry, "two vertices of the top
+  surface's rim land on one vertex of the result: they are closer to each other,
+  or to one vertex of the base, than the coincidence tolerance", the vertices
+  and where they are. The test is of the TRIANGLE and not of the pair: a top
+  whose rim touches itself at a vertex that is duplicated (two triangles meeting
+  at a point, each with a vertex of its own there) merges the pair into one
+  vertex of a valid surface, and is pasted as it always was
+  (`TinEditCombine.ATopWhoseRimTouchesItselfAtADuplicatedVertexIsStillPasted`).
+  *Rejected:* looking at the rim's vertices before the patch, which would
+  refuse that pasteable top as well, and merging the pair silently, which makes
+  a triangle of no area.
 - **CLIP is BOUNDARY on a copy, OFFSET is RAISE on a copy**: one function
   each, the verbs name them for the person making a new surface.
 - **The active surface is the program's, not the drawing's.** Which surface
@@ -342,17 +471,20 @@ triangles, they do not reshape them.
 
 ## In the window
 
-Terrain > **Edit Surface** (`terrainEditMenu`) holds the eight tools - Delete
-Triangle, Flip Edge, Add Point, Delete Point, Delete Triangles Inside, Add
-Breakline, Boundary, Hole - and below them Raise, Lower or Set Level...
+Terrain > **Edit Surface** (`terrainEditMenu`) holds the nine tools - Delete
+Triangle, Flip Edge, Add Point, Delete Point, Move Point, Delete Triangles
+Inside, Add Breakline, Boundary, Hole - and below them Raise, Lower or Set Level...
 (`surfaceHeightsDialog`), Smooth... (`surfaceSmoothDialog`), Thin...
 (`surfaceThinDialog`), Delete Long Triangles... (`surfaceDeleteLongDialog`),
-and the three that take the drawing's data by a scope, which a click on one
+and the four that take the drawing's data by a scope, which a click on one
 entity cannot say: Delete Points Inside Polygons... (`surfaceDeletePointsDialog`,
 `DELETE POINTS INSIDE FROM <scope>`), Delete Triangles by Polygons...
 (`surfaceDeleteTrianglesDialog`, `DELETE TRIANGLES INSIDE|OUTSIDE FROM <scope>`:
 the union of any number of polygons, which the one-pick tool cannot make
-- OUTSIDE of the first of two already deletes what the second would keep) and
+- OUTSIDE of the first of two already deletes what the second would keep),
+Delete Breaklines Along Lines... (`surfaceDeleteBreaklineDialog`, menu item
+`terrainSurfaceDeleteBreakline`, `DELETE BREAKLINE FROM <scope>`: the lines of
+a layer, the selection or a view, with the scope's filter) and
 Add Points from the Drawing... (`surfaceAddPointsDialog`, `ADD POINTS FROM
 <scope>`). Each has the shared scope widget with no tick box in front of it
 (the scope is what the dialog is about), the surface, the line it will run,
@@ -360,12 +492,13 @@ Preview and Run; the lines are made by `surfaceLevelsLine`, tested without a
 window.
 Terrain > **Combine Surfaces...** (`surfaceCombineDialog`) makes a merge, a
 paste, a clip or an offset. The **Surface Edit** toolbar (`SurfaceEditToolBar`,
-on the second row after Terrain) has them all, and at its head the active
+on the third row, with BIM: `docs/desktop.md`, "Fitting the screen") has them all, and at its head the active
 surface (`surfaceEditActive`).
 
 - **The tools are catalogue tools** (category Terrain, group Surface Edit,
-  aliases `TINDELTRI`, `TINFLIP`, `TINADDPT`, `TINDELPT`, `TINDELIN`,
-  `TINBRK`, `TINBOUNDARY`, `TINHOLE`), so the menu and toolbar are filled by
+  aliases `TINDELTRI`, `TINFLIP`, `TINADDPT`, `TINDELPT`, `TINMOVPT`,
+  `TINDELIN`, `TINBRK`, `TINBOUNDARY`, `TINHOLE`), so the menu and toolbar are
+  filled by
   `tools::fillToolMenus`, the window handing it this submenu and toolbar as
   the Terrain category's. Each turns what it was told into the SURFACE EDIT
   line a person would type, plans it with the verb's own `planSurfaceEdit`
@@ -393,6 +526,16 @@ surface (`surfaceEditActive`).
   click a hair outside a rim corner finds the corner (it was refused as "no
   vertex within reach" while one was 0.07 m away); a click off the surface with
   nothing within reach says it is off the surface. **Delete Triangles Inside** takes O for outside.
+  **Move Point** takes two clicks: the vertex (the same reach; one the verb
+  would refuse - a rim vertex, the end of a breakline or boundary edge - is
+  refused at this click, before a target is asked for) and then where it goes.
+  Between them the prompt says which vertex is held (`lastPoint`, for the
+  rubber band), the preview marks the vertex where it is (Removed) and where
+  the cursor would put it (Added), and says in red that a cursor off the surface
+  is refused; a target the verb refuses (off the surface, on another vertex)
+  leaves the vertex held for another click, and Undo or Enter lets it go. The
+  line is `SURFACE EDIT <s> MOVE POINT <vertex's own coordinates> TO x,y`, so no
+  reach decides which vertex it is on the second click.
 - **The previews** mark what a click would take - the triangle (Removed),
   the edge (Target), the vertex with its level - and say in red why a click
   would be refused: off the surface, an edge on the rim, a breakline. Delete
@@ -448,7 +591,11 @@ geoprocessing executor keeps SURFACE LIST, INFO, REMOVE, FROM and EXPORT and
 hands every other SURFACE line to the interpreter (`docs/terrain.md`). No MCP
 tool of its own: the replies are records, and what an agent needs to choose
 a surface is `katana_terrain_list`'s, which reads the edited surface
-(`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads`).
+(`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads`). DELETE
+BREAKLINE and MOVE POINT are lines like the rest and need no tool either: an
+agent clears a breakline and moves a vertex of it by `katana_run_commands` and
+reads `edges_cleared=` and `moved=` in the records
+(`McpServer.AnAgentClearsABreaklineAndMovesAVertexByTheSurfaceEditLines`).
 
 ## Tests
 
@@ -470,6 +617,22 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   polygon refused, a point in a square hole (area back to 400) and beyond an L's
   notch (500), two abutting squares merged (200) and a pyramid with a top that
   touches two faces at a point (400).
+- Breaklines: `TinEdit.DeletingABreaklineMakesItsEdgesOrdinaryAndChangesNoTriangleNorVertex`
+  (six lattice edges of a breakline along a row, cleared by a line that runs
+  past both ends, the triangles and vertices equal, the middle vertex refused
+  by DELETE POINT before and taken after), the same for a line over half of it
+  (three edges, and the vertex at the end of the half that stays still
+  refused), a line along nothing, across it, short of it and 2e-7 above it
+  (beyond the tolerance, 1e-7: nothing; 5e-8 above: all six), a closed line's
+  closing side, several lines, the constrained rim held and counted, and every
+  refusal.
+- Moving a vertex: `TinEdit.AMovedVertexKeepsItsLevelAndTheFootprintWhereverItIsTaken`
+  (the vertex (2,2) of a plane at 1.5 taken to six places - inside its own star,
+  across the ring of it onto a triangle beyond, onto the ring edge, onto the
+  diagonal it is an end of, two cells away, onto a corner cell's diagonal - each
+  leaving the area 16, the 25 vertices and 32 triangles, every other vertex where
+  it was and the moved one at 1.5 and not the plane's there), a vertex taken
+  across a breakline leaving it as long as it was, and every refusal.
 - `tests/cad/terrain/test_surface_edit_verbs.cpp`: the verbs through the
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
   refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`;
@@ -492,45 +655,75 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   level, a clip along a breakline, a breakline ending on a cut rim, a hole that
   crosses itself, a point that fills a hole, two abutting clips merged, a
   breakline through lattice vertices straight in 3D, crossing lines refused, a
-  scope that takes nothing reported with the session going on
+  scope that takes nothing reported with the session going on, a breakline of
+  the sample's lattice row cleared (66 edges) and its middle vertex deleted
+  (`cli.surface_edit_delete_breakline_clears_the_edges_and_the_vertex_can_go`),
+  a line along nothing reported, a vertex moved with the sample's 10 800 vertices
+  and its levels kept and a rim vertex refused
+  (`cli.surface_edit_move_point_keeps_the_vertex_count_and_the_levels`,
+  `cli.surface_edit_move_point_of_a_rim_vertex_is_refused`)
   (`src/katana_app/geo/cli/surface_edit.cmake`).
+
+## Measured performance
+
+The cases are in `benchmarks/bench_terrain.cpp` (`katana_benchmarks
+--benchmark_filter=BM_Edit`), on the surface the review measured: 447 x 447
+cells of 1 m, 399 618 triangles and 200 704 vertices, the most `SURFACE FROM`
+makes by default. One iteration each, since the slow ones take seconds. The
+polygons are regular, radius 150 m about the ground's middle; the footprints
+are 100 rectangles of 8 x 6 m, one in each 40 m cell of a 10 x 10 lattice.
+
+A polygon-scoped edit was not local in cost: every triangle or vertex was
+classified against the whole polygon, so it cost the surface times the
+polygon's corners, and HOLE FROM <scope> paid the whole-surface rebuild once
+per footprint. They are now asked once per connected piece of triangles
+outside the region (`rebuildPatch`) and through a banded polygon classifier
+(`geometry::PolygonClassifier`, the same crossing rule as
+`Polyline2::classify`, tested to agree with it point for point), and
+footprints that can be cut together are cut in one patch (above).
+
+| Case | Benchmark | Before: the review, wall time of a whole `katana_cli` run (the surface's load, 1.2 to 1.9 s, included) | Now: Release, `katana_benchmarks` |
+|---|---|---|---|
+| BOUNDARY, polygon of 8 / 500 / 5000 corners | `BM_EditBoundary` | 1.4 to 2.2 s / 4.5 s / 20.7 s | 101 / 106 / 127 ms |
+| DELETE TRIANGLES INSIDE, 8 / 500 / 5000 | `BM_EditDeleteTrianglesInside` | 1.2 to 1.8 s / 4.9 s / 22.2 s | 138 / 135 / 135 ms |
+| RAISE 1 INSIDE, 8 / 500 / 5000 | `BM_EditRaiseInside` | 2.3 s / - / 10.9 s | 61 / 62 / 66 ms |
+| HOLE of 100 footprints, one at a time | `BM_EditHolesOneByOne` (`patches` 100) | 33.4 s (1.6 s of it the load) | 24.5 s |
+| HOLE of the same 100 footprints | `BM_EditHolesTogether` (`patches` 1) | - | 270 ms |
+| THIN, tolerance 10 mm / 100 mm | `BM_EditThin` | "seconds", not measured | 1.55 s / 1.66 s |
+
+The last column was measured on 2026-10-16 by the integration build
+(Release, `katana_benchmarks --benchmark_filter=BM_Edit --benchmark_min_time=0.05s`,
+a 24-thread 2.5 GHz machine, one iteration each): the edit alone, with the
+surface already loaded, where the "before" column is the wall time of a whole
+`katana_cli` run that loads it first (1.2 to 1.9 s) - so the ratios of the three
+polygon edits (20.7 s to 127 ms for 5000 corners, 22.2 s to 135 ms, 10.9 s to
+66 ms) are not like for like, and the edits are now independent of the polygon's
+corners to within the noise of one iteration (8 to 5000: 101 to 127 ms). The
+two HOLE rows are like for like, on the same binary and run: 100 footprints in
+one patch cost 270 ms against 24.5 s one at a time, 91 times less, with the
+same surface (`patches` 1 against 100; the triangles are 395 818 in both).
+`BM_EditHolesOneByOne` is the loop `HOLE FROM <scope>` was, kept in the same
+binary so that the two cases are measured on one machine in one run. THIN on
+200 704 vertices takes 1.6 s and removes 131 039 / 163 383 of them; it runs
+on the GUI thread from the window (Not done).
 
 ## Not done
 
-- **Measured performance.** No benchmark yet, and the figures below are the
-  review's, not this change's (it was written without a build): THIN
-  triangulates each candidate's neighbour polygon twice (a few tens of
-  microseconds each) and runs on the GUI thread from the window: a
-  200 000-vertex surface is seconds. The polygon-scoped edits were not local in
-  cost - a 5000-vertex polygon on a 400 000-triangle surface cost 20 s for
-  BOUNDARY, 22 s for DELETE TRIANGLES INSIDE and 10 s for RAISE INSIDE, because
-  every triangle or vertex was classified against the whole polygon. They are
-  now asked once per connected piece of triangles outside the region
-  (`rebuildPatch`) and through a banded polygon classifier
-  (`geometry::PolygonClassifier`, the same crossing rule as
-  `Polyline2::classify`, tested to agree with it point for point). Still
-  open: `HOLE FROM <scope>` cuts one footprint at a time on the evolving
-  surface, so 100 small footprints still pay the whole-surface work (copies,
-  `finishSurface`, `TinSurface::create`, about a third of a second each on the
-  400 000-triangle surface) 100 times - one patch for several holes is only
-  correct for disjoint ones, and overlapping footprints are the case the
-  sequential cut handles. A `benchmarks/bench_terrain.cpp` case (400 000
-  triangles; polygons of 8, 500 and 5000 corners; 100 holes), the before and
-  after numbers, and a background job for THIN are the follow-up.
-- **A level too large for the surface record.** The edits refuse anything past
-  `kMostMagnitude`, but the SURFACE INFO record's number formatter (`fixed3`,
-  `surface_verbs.cpp`, and the copy in `src/katana_app/geo/replies.cpp` it came
-  from) still prints `nan` for a FINITE value its 64-byte buffer cannot hold
-  (about 1e60), so a surface read from a file with such a level is misreported;
-  those two files belong to the surfaces and geoprocessing areas, not this one.
-- **Deleting a breakline**, or a vertex on one: refused, by the rule that
-  constrained edges are kept. A DELETE BREAKLINE that unflags edges is the
-  natural addition.
-- **Moving a vertex in plan**, and editing a vertex's level by dragging in
-  the window: only ADD POINT at an existing vertex relevels it.
-- **PASTE with a top whose rim touches itself** (a hole touching the outer
-  rim) is handled, but a top with two rim vertices closer than
-  `tolerance::kGeometric` is refused by `TinSurface::create` with a message
-  that names the triangle, not the cause.
+- **THIN runs on the GUI thread** from the window, and a 200 000-vertex surface
+  is seconds (it triangulates each candidate's neighbour polygon twice, a few
+  tens of microseconds each, then orders the flattest first; the first
+  measurement runs on the `TaskPool`, the removal sequentially). It cannot be a
+  background job yet: the window runs `SURFACE EDIT` through the interpreter on
+  the GUI thread, and the jobs it already has - `SURFACE FROM`, the imports - are
+  the geoprocessing executor's verbs, which copy their inputs on the GUI thread
+  and land the result there. A cad verb as a job needs the same two halves for
+  one undo step (the surface handed to the job as the shared immutable pointer
+  it already is, and `Document::surfacesCommand` built where it lands), which
+  is a change of the window's executor and not of this area.
+- **Editing a vertex's level by dragging it in the window**: only ADD POINT at
+  an existing vertex relevels it. (Moving a vertex in plan is MOVE POINT.)
+- **Moving a rim vertex**, or the end of a breakline, is refused (above); a
+  person reshapes the footprint with BOUNDARY and HOLE and a breakline with
+  DELETE BREAKLINE and BREAKLINE.
 - **A DELETE LONG that works from the rim inwards**, as some packages trim a
   convex hull, is not offered; BOUNDARY does the same job exactly.

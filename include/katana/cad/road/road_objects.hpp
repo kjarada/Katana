@@ -281,6 +281,27 @@ struct PlacementContext {
 [[nodiscard]] bim::BimModel buildRoadObject(const PlacementContext& context,
                                             const RoadObject& object);
 
+// Why `parts` - the solids a maker gave for one object - are not an object, as
+// the sentence buildRoadObject lists it with; nullopt when there is at least one
+// part and every part has faces. No part at all is a placement that gives
+// nowhere to stand the object; a part with no faces is a section that did not
+// triangulate or a sweep of a single point, which would be counted and written
+// to IFC as an element with no shape. A function of plain data, so a test gives
+// it the empty part that no maker makes any more and sees the sentence.
+[[nodiscard]] std::optional<std::string> shapeProblem(std::span<const bim::BimObject> parts);
+
+// What an edit asks of `built`, buildRoadObject's answer for `object`, before it
+// stores the definition: a definition the model would only list as a problem is
+// never stored. InvalidArgument naming the first problem it was left with (and,
+// for an object placed along a line, the line: "barrier-3 (#12)"), or the part
+// that is not a closed solid (isClosedMesh, road_object_mesh.hpp) - the IFC
+// export writes each solid as a closed face set and its volume is read off the
+// triangles, so one that does not close is refused here, once per edit, and not
+// checked on every rebuild of the model. Also plain data in, so a test hands it
+// the open mesh no maker makes any more.
+[[nodiscard]] katana::core::Status checkBuilt(const RoadObject& object,
+                                              const bim::BimModel& built);
+
 // The quantities of `objects` together, by name in the order first met: the
 // volumes and weights summed, a height, width or depth the largest. A Length,
 // a Count and a GrossArea are those of the objects themselves, not of what

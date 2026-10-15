@@ -463,6 +463,99 @@ Result<TinEditResult> deletePoints(const TinSurface& surface,
 
 // ---- changing the triangulation -----------------------------------------------------------
 
+Result<TinEditResult> movePoint(const TinSurface& surface, std::uint32_t vertex,
+                                const Point2& target)
+{
+    if (const Status status = requireSurface(surface); !status) {
+        return status.error();
+    }
+    if (vertex >= surface.vertexCount()) {
+        return makeError(ErrorCode::InvalidArgument, "vertex index out of range",
+                         "vertex=" + std::to_string(vertex) +
+                             " vertices=" + std::to_string(surface.vertexCount()));
+    }
+    if (!target.isFinite()) {
+        return makeError(ErrorCode::InvalidArgument, "the target has a non-finite coordinate");
+    }
+    if (!detail::withinMagnitude(target.x) || !detail::withinMagnitude(target.y)) {
+        return detail::tooLarge(describePosition(target));
+    }
+    const detail::VertexStars stars(surface);
+    const auto around = stars.of(vertex);
+    if (around.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the vertex belongs to no triangle",
+                         "vertex=" + std::to_string(vertex));
+    }
+    const Point2 from = planOf(surface.vertices()[vertex]);
+    if (from.distanceTo(target) <= tol::kGeometric) {
+        return detail::unchanged(surface); // a move of less than the coincidence tolerance
+    }
+
+    // What the vertex holds: an end of a constrained edge, or the rim.
+    bool onBreakline = false;
+    bool onRim = false;
+    for (const std::uint32_t t : around) {
+        const TinTriangle& tri = surface.triangles()[t];
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            if (tri[k] != vertex && tri[(k + 1) % 3] != vertex) {
+                continue;
+            }
+            onBreakline = onBreakline || surface.isEdgeConstrained(t, k);
+            onRim = onRim || surface.neighbors()[t][k] == kNoTriangle;
+        }
+    }
+    const std::string where = "vertex=" + std::to_string(vertex) + " at " + describePosition(from);
+    // The rim first: its edges are constrained when a boundary or a hole made
+    // them, and "clear the breakline" would send a person after an edge
+    // DELETE BREAKLINE never clears.
+    if (onRim) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the point is on the rim of the surface or the edge of a hole: it is the "
+                         "footprint, which a vertex moved would reshape; BOUNDARY and HOLE do that",
+                         where);
+    }
+    if (onBreakline) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the point is on a breakline or boundary edge, which is kept; clear the "
+                         "breakline first (DELETE BREAKLINE) or delete the triangles around it "
+                         "instead",
+                         where);
+    }
+
+    const detail::Place place = detail::placeOf(surface, stars, target);
+    if (place.kind == detail::Place::Kind::Outside) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the target is off the surface: a point cannot be moved off it (ADD POINT "
+                         "extends the surface)",
+                         "target " + describePosition(target));
+    }
+    if (place.kind == detail::Place::Kind::Vertex) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "the target is closer than the coincidence tolerance to another vertex of "
+                         "the surface",
+                         "vertex=" + std::to_string(place.vertex) + " at " +
+                             describePosition(planOf(surface.vertices()[place.vertex])));
+    }
+
+    // ONE patch: the star of the vertex (rebuildPatch takes it for a removed
+    // vertex) and the cavity the new point makes, together.
+    detail::PatchRequest request;
+    request.region.assign(surface.triangleCount(), 0);
+    request.removed.assign(surface.vertexCount(), 0);
+    request.removed[vertex] = 1;
+    detail::markInsertionCavity(surface, place, target, request.region);
+    request.points.push_back({target, surface.vertices()[vertex].z, true});
+    auto output = detail::rebuildPatch(surface, stars, std::move(request));
+    if (!output) {
+        return output.error();
+    }
+    auto result = finishPatch(surface, std::move(*output));
+    if (result) {
+        result->report.pointsMoved = 1;
+    }
+    return result;
+}
+
 Result<TinEditResult> flipEdge(const TinSurface& surface, std::uint32_t triangle,
                                std::uint32_t edge)
 {
@@ -751,35 +844,174 @@ Result<TinEditResult> addBreaklines(const TinSurface& surface, std::span<const B
     return finishPatch(surface, std::move(*output));
 }
 
-namespace {
-
-Result<TinEditResult> cutBy(const TinSurface& surface, const Polyline2& polygon, bool keepInside)
+Result<TinEditResult> deleteBreaklines(const TinSurface& surface, std::span<const Polyline2> lines)
 {
     if (const Status status = requireSurface(surface); !status) {
         return status.error();
     }
-    const std::string what = keepInside ? "the boundary" : "the hole";
+    if (lines.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no line was given");
+    }
+    // The segments of the lines, each with its box grown by the tolerance.
+    struct Piece {
+        Segment2 segment;
+        katana::geometry::Box2 box;
+    };
+    std::vector<Piece> pieces;
+    for (std::size_t l = 0; l < lines.size(); ++l) {
+        const Polyline2& line = lines[l];
+        const std::string which = lines.size() > 1 ? " line=" + std::to_string(l) : std::string{};
+        if (line.vertices.size() < 2) {
+            return makeError(ErrorCode::InvalidArgument, "a line needs at least two vertices",
+                             "vertices=" + std::to_string(line.vertices.size()) + which);
+        }
+        for (const Point2& vertex : line.vertices) {
+            if (!vertex.isFinite()) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "a line has a non-finite coordinate", which);
+            }
+            if (!detail::withinMagnitude(vertex.x) || !detail::withinMagnitude(vertex.y)) {
+                return detail::tooLarge(describePosition(vertex));
+            }
+        }
+        const std::size_t count = line.closed && line.vertices.size() > 2 ? line.vertices.size()
+                                                                          : line.vertices.size() - 1;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Segment2 segment{line.vertices[i], line.vertices[(i + 1) % line.vertices.size()]};
+            if (segment.length() <= tol::kGeometric) {
+                continue; // a repeated vertex: no length, and along no edge
+            }
+            pieces.push_back({segment, segment.boundingBox().inflated(tol::kGeometric)});
+        }
+    }
+    if (pieces.empty()) {
+        return makeError(ErrorCode::InvalidGeometry, "the line has no length: its vertices coincide");
+    }
+    const auto lies = [&pieces](const Point2& a, const Point2& b) {
+        return std::ranges::any_of(pieces, [&a, &b](const Piece& piece) {
+            return piece.box.contains(a) && piece.box.contains(b) &&
+                   piece.segment.distanceTo(a) <= tol::kGeometric &&
+                   piece.segment.distanceTo(b) <= tol::kGeometric;
+        });
+    };
+
+    const auto& vertices = surface.vertices();
+    const auto& triangles = surface.triangles();
+    std::vector<std::uint8_t> masks = surface.constrainedEdges();
+    std::size_t cleared = 0;
+    std::size_t held = 0;
+    for (std::uint32_t t = 0; t < surface.triangleCount(); ++t) {
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            if (!surface.isEdgeConstrained(t, k)) {
+                continue;
+            }
+            const std::uint32_t across = surface.neighbors()[t][k];
+            // Each edge once: a rim edge is only ever seen from its one triangle,
+            // an interior one from the lower of its two.
+            if (across != kNoTriangle && across < t) {
+                continue;
+            }
+            const std::uint32_t a = triangles[t][k];
+            const std::uint32_t b = triangles[t][(k + 1) % 3];
+            if (!lies(planOf(vertices[a]), planOf(vertices[b]))) {
+                continue;
+            }
+            if (across == kNoTriangle) {
+                ++held;
+                continue;
+            }
+            std::uint32_t j = 0;
+            while (j < 3 && !(triangles[across][j] == b && triangles[across][(j + 1) % 3] == a)) {
+                ++j;
+            }
+            if (j == 3) {
+                return makeError(ErrorCode::Internal, "the triangle across the edge does not share it");
+            }
+            masks[t] = static_cast<std::uint8_t>(masks[t] & ~(1u << k));
+            masks[across] = static_cast<std::uint8_t>(masks[across] & ~(1u << j));
+            ++cleared;
+        }
+    }
+    if (cleared == 0) {
+        TinEditResult unchangedResult = detail::unchanged(surface);
+        unchangedResult.report.edgesHeld = held;
+        return unchangedResult;
+    }
+    auto cleaned = detail::TinSurfaceFactory::assemble(vertices, triangles, surface.neighbors(),
+                                                       std::move(masks));
+    if (!cleaned) {
+        return cleaned.error();
+    }
+    TinEditResult result;
+    result.report = detail::reportOf(surface, *cleaned);
+    result.report.edgesCleared = cleared;
+    result.report.edgesHeld = held;
+    result.surface = std::move(*cleaned);
+    return result;
+}
+
+namespace {
+
+// A polygon as a cut takes it: cleaned (cleanPolygon), with its box and its
+// point test made once.
+struct CutRing {
+    Polyline2 ring;
+    katana::geometry::Box2 box;
+    std::shared_ptr<const katana::geometry::PolygonClassifier> shape;
+};
+
+Result<CutRing> makeCutRing(const Polyline2& polygon, const std::string& what)
+{
     auto ring = cleanPolygon(polygon, what);
     if (!ring) {
         return ring.error();
     }
-    const detail::VertexStars stars(surface);
+    CutRing cut;
+    cut.box = ring->boundingBox();
+    cut.shape = std::make_shared<const katana::geometry::PolygonClassifier>(*ring);
+    cut.ring = std::move(*ring);
+    return cut;
+}
+
+// The surface cut along every ring in ONE patch: what lies inside any of them
+// is dropped (keepInside false: a hole), or what lies inside none is (a
+// boundary, which is only ever asked with one ring). The rings must not
+// overlap, touch or nest - two of them that did would be judged by the edges
+// of each alone, and the piece between them taken for outside both
+// (cutHoles decides which footprints may share a patch). `stars` and `grid`
+// are the surface's, when the caller has them already.
+Result<TinEditResult> cutRings(const TinSurface& surface, std::span<const CutRing> rings,
+                               bool keepInside, const detail::VertexStars* stars = nullptr,
+                               const detail::TriangleGrid* grid = nullptr)
+{
+    std::optional<detail::VertexStars> ownStars;
+    if (stars == nullptr) {
+        ownStars.emplace(surface);
+        stars = &*ownStars;
+    }
     detail::PatchRequest request;
     request.region.assign(surface.triangleCount(), 0);
     request.keepShape = true;
     request.keepInsideCut = keepInside;
     request.simpleCut = true;
-    const auto shape = std::make_shared<const katana::geometry::PolygonClassifier>(*ring);
-    request.insideCut = [shape](const Point2& p) {
-        return shape->classify(p) != Containment::Outside;
-    };
-    const std::size_t count = ring->vertices.size();
-    for (std::size_t i = 0; i < count; ++i) {
-        request.points.push_back({ring->vertices[i], std::nullopt, false});
-        request.cuts.push_back(
-            {static_cast<std::uint32_t>(i), static_cast<std::uint32_t>((i + 1) % count), false});
+    std::vector<std::shared_ptr<const katana::geometry::PolygonClassifier>> shapes;
+    shapes.reserve(rings.size());
+    for (const CutRing& cut : rings) {
+        shapes.push_back(cut.shape);
+        const auto first = static_cast<std::uint32_t>(request.points.size());
+        const auto count = static_cast<std::uint32_t>(cut.ring.vertices.size());
+        for (std::uint32_t i = 0; i < count; ++i) {
+            request.points.push_back({cut.ring.vertices[i], std::nullopt, false});
+            request.cuts.push_back({first + i, first + (i + 1) % count, false});
+        }
     }
-    auto output = detail::rebuildPatch(surface, stars, std::move(request));
+    // Inside any ring: the rings are apart, so the union is what each one says.
+    request.insideCut = [shapes = std::move(shapes)](const Point2& p) {
+        return std::ranges::any_of(shapes, [&p](const auto& shape) {
+            return shape->classify(p) != Containment::Outside;
+        });
+    };
+    auto output = detail::rebuildPatch(surface, *stars, std::move(request), grid);
     if (!output) {
         return output.error();
     }
@@ -796,6 +1028,110 @@ Result<TinEditResult> cutBy(const TinSurface& surface, const Polyline2& polygon,
     return finishPatch(surface, std::move(*output));
 }
 
+Result<TinEditResult> cutBy(const TinSurface& surface, const Polyline2& polygon, bool keepInside)
+{
+    if (const Status status = requireSurface(surface); !status) {
+        return status.error();
+    }
+    auto ring = makeCutRing(polygon, keepInside ? "the boundary" : "the hole");
+    if (!ring) {
+        return ring.error();
+    }
+    return cutRings(surface, std::span<const CutRing>(&*ring, 1), keepInside);
+}
+
+// What a run of cuts did, summed: the first's "before", the last's "after",
+// the counts of all (the verb's report of a run of edits, one place).
+void addReport(TinEditReport& total, const TinEditReport& step, bool first)
+{
+    if (first) {
+        total = step;
+        return;
+    }
+    total.trianglesAfter = step.trianglesAfter;
+    total.verticesAfter = step.verticesAfter;
+    total.pointsAdded += step.pointsAdded;
+    total.pointsRemoved += step.pointsRemoved;
+    total.pointsRelevelled += step.pointsRelevelled;
+    total.pointsMoved += step.pointsMoved;
+    total.pointsHeld += step.pointsHeld;
+    total.crossings += step.crossings;
+    total.largestChange = std::max(total.largestChange, step.largestChange);
+}
+
+// Whether two segments come within kGeometric of each other: they meet, or an
+// end of one is that close to the other (the nearest points of two segments
+// that do not meet include an end of one of them).
+bool segmentsClose(const Segment2& s, const Segment2& t)
+{
+    return segmentsMeet(s.start, s.end, t.start, t.end) ||
+           t.distanceTo(s.start) <= tol::kGeometric || t.distanceTo(s.end) <= tol::kGeometric ||
+           s.distanceTo(t.start) <= tol::kGeometric || s.distanceTo(t.end) <= tol::kGeometric;
+}
+
+// Whether the insides of two cut rings are apart: the outlines nowhere within
+// kGeometric of one another and neither ring inside the other. Boxes first;
+// then only the edges that reach the other ring's box are laid against each
+// other.
+bool ringsApart(const CutRing& a, const CutRing& b)
+{
+    const katana::geometry::Box2 boxA = a.box.inflated(tol::kGeometric);
+    const katana::geometry::Box2 boxB = b.box.inflated(tol::kGeometric);
+    if (!boxA.intersects(boxB)) {
+        return true;
+    }
+    struct Edge {
+        Segment2 segment;
+        katana::geometry::Box2 box;
+    };
+    const auto edgesReaching = [](const Polyline2& ring, const katana::geometry::Box2& box) {
+        std::vector<Edge> edges;
+        const std::size_t n = ring.vertices.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const Segment2 segment{ring.vertices[i], ring.vertices[(i + 1) % n]};
+            const katana::geometry::Box2 grown = segment.boundingBox().inflated(tol::kGeometric);
+            if (grown.intersects(box)) {
+                edges.push_back({segment, grown});
+            }
+        }
+        return edges;
+    };
+    const std::vector<Edge> mine = edgesReaching(a.ring, boxB);
+    const std::vector<Edge> theirs = edgesReaching(b.ring, boxA);
+    for (const Edge& s : mine) {
+        for (const Edge& t : theirs) {
+            if (s.box.intersects(t.box) && segmentsClose(s.segment, t.segment)) {
+                return false;
+            }
+        }
+    }
+    // The outlines are apart, so a ring is wholly inside the other or wholly
+    // outside it, and any one of its vertices says which.
+    return b.shape->classify(a.ring.vertices.front()) == Containment::Outside &&
+           a.shape->classify(b.ring.vertices.front()) == Containment::Outside;
+}
+
+// Cutting the rings one at a time, each on the surface the one before left:
+// what cutHole in a loop gives, and what cutHoles falls back to.
+Result<TinEditResult> cutRingsInTurn(const TinSurface& surface, std::span<const CutRing> rings,
+                                     std::size_t& patches)
+{
+    TinEditResult total;
+    total.surface = surface;
+    bool first = true;
+    for (const CutRing& cut : rings) {
+        ++patches;
+        auto step = cutRings(total.surface, std::span<const CutRing>(&cut, 1), false);
+        if (!step) {
+            return step.error();
+        }
+        addReport(total.report, step->report, first);
+        first = false;
+        total.surface = std::move(step->surface);
+    }
+    return total;
+}
+
 } // namespace
 
 Result<TinEditResult> clipToBoundary(const TinSurface& surface, const Polyline2& boundary)
@@ -806,6 +1142,126 @@ Result<TinEditResult> clipToBoundary(const TinSurface& surface, const Polyline2&
 Result<TinEditResult> cutHole(const TinSurface& surface, const Polyline2& hole)
 {
     return cutBy(surface, hole, false);
+}
+
+Result<TinEditResult> cutHoles(const TinSurface& surface, std::span<const Polyline2> holes,
+                               HoleCutStats* stats)
+{
+    if (const Status status = requireSurface(surface); !status) {
+        return status.error();
+    }
+    if (holes.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no hole was given");
+    }
+    if (holes.size() == 1) {
+        // Nothing to share a patch with: cutHole, without the bookkeeping.
+        auto only = cutBy(surface, holes.front(), false);
+        if (only && stats != nullptr) {
+            stats->patches = 1;
+        }
+        return only;
+    }
+
+    TinEditResult total;
+    total.surface = surface;
+    bool anyStep = false;
+    std::size_t patches = 0;
+
+    // The batch being gathered, and what is made once for the surface it
+    // starts from: where the triangles are (stars and grid, which also serve
+    // the patch itself), and which of them the batch's outlines reach.
+    std::vector<CutRing> batch;
+    std::optional<detail::VertexStars> stars;
+    std::optional<detail::TriangleGrid> grid;
+    std::vector<std::uint8_t> taken;
+    std::vector<std::uint8_t> scratch;
+
+    const auto startBatch = [&] {
+        stars.emplace(total.surface);
+        grid.emplace(total.surface);
+        taken.assign(total.surface.triangleCount(), 0);
+        scratch.assign(total.surface.triangleCount(), 0);
+    };
+    // The triangles a ring's outline reaches: the rule the patch grows its
+    // region by (markReachedByPoint, markAlong), so a footprint that shares
+    // none with the batch has a region of its own.
+    const auto reachOf = [&](const CutRing& cut) {
+        std::vector<std::uint32_t> reached;
+        const std::vector<Point2>& corners = cut.ring.vertices;
+        for (const Point2& corner : corners) {
+            detail::markReachedByPoint(total.surface, *stars, corner, scratch, &reached);
+        }
+        for (std::size_t i = 0; i < corners.size(); ++i) {
+            grid->markAlong(corners[i], corners[(i + 1) % corners.size()], scratch, &reached);
+        }
+        for (const std::uint32_t t : reached) {
+            scratch[t] = 0;
+        }
+        return reached;
+    };
+    const auto fits = [&](const CutRing& cut, const std::vector<std::uint32_t>& reached) {
+        if (std::ranges::any_of(reached, [&](std::uint32_t t) { return taken[t] != 0; })) {
+            return false;
+        }
+        return std::ranges::all_of(batch,
+                                   [&](const CutRing& member) { return ringsApart(member, cut); });
+    };
+    const auto flush = [&]() -> Status {
+        if (batch.empty()) {
+            return {};
+        }
+        ++patches;
+        auto result = cutRings(total.surface, batch, false, &*stars, &*grid);
+        if (!result && batch.size() > 1) {
+            // The refusal of a loop is the answer, not the batch's: cut the
+            // footprints one at a time to meet the first one that fails.
+            result = cutRingsInTurn(total.surface, batch, patches);
+        }
+        batch.clear();
+        stars.reset();
+        grid.reset();
+        if (!result) {
+            return result.error();
+        }
+        addReport(total.report, result->report, !anyStep);
+        anyStep = true;
+        total.surface = std::move(result->surface);
+        return {};
+    };
+
+    for (const Polyline2& polygon : holes) {
+        auto cut = makeCutRing(polygon, "the hole");
+        if (!cut) {
+            // The footprints before this one are cut first, as a loop would
+            // have: their refusal comes before this one's.
+            if (const Status status = flush(); !status) {
+                return status.error();
+            }
+            return cut.error();
+        }
+        if (batch.empty()) {
+            startBatch();
+        }
+        std::vector<std::uint32_t> reached = reachOf(*cut);
+        if (!batch.empty() && !fits(*cut, reached)) {
+            if (const Status status = flush(); !status) {
+                return status.error();
+            }
+            startBatch();
+            reached = reachOf(*cut);
+        }
+        for (const std::uint32_t t : reached) {
+            taken[t] = 1;
+        }
+        batch.push_back(std::move(*cut));
+    }
+    if (const Status status = flush(); !status) {
+        return status.error();
+    }
+    if (stats != nullptr) {
+        stats->patches = patches;
+    }
+    return total;
 }
 
 // ---- changing levels ------------------------------------------------------------------------
@@ -1070,6 +1526,31 @@ Result<TinEditResult> pasteSurface(const TinSurface& base, const TinSurface& top
     for (std::uint32_t v = 0; v < top.vertexCount(); ++v) {
         if (pointOfVertex[v] != kNoVertex) {
             resultOf[v] = output.pointVertex[pointOfVertex[v]];
+        }
+    }
+    // The patch takes two points within kGeometric for one, so two vertices of
+    // the top's rim that close to each other - or to one vertex of the base -
+    // come out as one vertex, and a top triangle between them names it twice:
+    // TinSurface::create refused that as "triangle names a vertex twice",
+    // naming the triangle and not the cause. Said here, with the vertices. (Two
+    // rim vertices that merge but share no triangle - a rim that touches itself
+    // at a duplicated vertex - are one vertex of a valid surface, and pass.)
+    for (std::uint32_t t = 0; t < top.triangleCount(); ++t) {
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            const std::uint32_t a = topTriangles[t][k];
+            const std::uint32_t b = topTriangles[t][(k + 1) % 3];
+            if (a != b && resultOf[a] != kNoVertex && resultOf[a] == resultOf[b]) {
+                return makeError(
+                    ErrorCode::InvalidGeometry,
+                    "two vertices of the top surface's rim land on one vertex of the result: they "
+                    "are closer to each other, or to one vertex of the base, than the coincidence "
+                    "tolerance (" + katana::core::formatExactReal(tol::kGeometric) +
+                        " m), and the top's triangle between them would have no area; delete one "
+                        "of them from the top first",
+                    "top vertices " + std::to_string(a) + " and " + std::to_string(b) + " at " +
+                        describePosition(planOf(topVertices[a])) + " and " +
+                        describePosition(planOf(topVertices[b])));
+            }
         }
     }
     const auto mapped = [&](std::uint32_t v) {

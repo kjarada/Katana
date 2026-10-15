@@ -789,27 +789,19 @@ void PlanPainter::drawSurfaceLegends()
     QColor backing = drawing::overlay::ground();
     backing.setAlpha(215);
     const QColor text = theme::text();
-    QPointF corner(view_.widthPixels - kMargin, kMargin);
-    for (std::size_t i = 0; i < surfaceLegends_.size() && i < kMaximumLegends; ++i) {
-        const PaintedLegend& legend = surfaceLegends_[i];
-        const QString caption = QString::fromStdString(legend.surface) + QStringLiteral(" - ") +
-                                QString::fromStdString(legend.style);
-        // Measured first: a key with its lowest rows cut off by the view's
-        // edge reads as a key that ends there. The first is drawn whatever
-        // its height (it is the only one, and a view too short for it clips
-        // it as it clips anything); a later one that does not fit below the
-        // others is left out, and not counted.
-        const QSizeF size = measureSurfaceLegend(legend.legend, caption, font);
-        if (size.isEmpty()) {
-            continue;
-        }
-        if (stats_.surfaceLegends > 0 && corner.y() + size.height() > view_.heightPixels - kMargin) {
-            break;
-        }
-        const QRectF drawn = paintSurfaceLegend(painter_, legend.legend, caption, corner, font, text, backing);
-        ++stats_.surfaceLegends;
-        corner.setY(drawn.bottom() + kMargin);
-    }
+    // The one stack both views draw their legends through
+    // (paintSurfaceLegendStack): measured before drawn, so a key with its
+    // lowest rows cut off by the view's edge never is; a later one that does
+    // not fit below the others is left out, and not counted.
+    LegendStack stack;
+    stack.topRight = QPointF(view_.widthPixels - kMargin, kMargin);
+    stack.bottom = view_.heightPixels - kMargin;
+    stack.gap = kMargin;
+    stack.maximum = kMaximumLegends;
+    stack.font = font;
+    stack.text = text;
+    stack.backing = backing;
+    stats_.surfaceLegends += paintSurfaceLegendStack(painter_, surfaceLegends_, stack).size();
 }
 
 void PlanPainter::drawRasters()
@@ -2653,7 +2645,8 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
                                    const PlanSource& source,
                                    const katana::cad::LayerOverrides& layers,
                                    const std::set<std::uint64_t>& hiddenReferences,
-                                   PlanPaintCache& cache, const QString& title)
+                                   PlanPaintCache& cache, const QString& title,
+                                   std::vector<katana::cad::SurfaceProblem>* problems)
 {
     auto frame = sheetFrame(settings);
     if (!frame) {
@@ -2687,7 +2680,10 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
     // Paper-sized annotation at the plot's own scale (docs/annotation.md).
     options.annotationScale = settings.scaleDenominator;
     painter.setRenderHint(QPainter::Antialiasing, true);
-    (void)paintPlan(painter, source, *frame, options, cache);
+    const PlanPaintStats drawn = paintPlan(painter, source, *frame, options, cache);
+    if (problems != nullptr) {
+        *problems = drawn.surfaceProblems;
+    }
     if (!painter.end()) {
         return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
                                        "could not finish the PDF", path.toStdString());

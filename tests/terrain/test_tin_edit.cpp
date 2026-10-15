@@ -4,16 +4,20 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
 #include "katana/terrain/tin_builder.hpp"
 #include "katana/terrain/tin_edit.hpp"
+#include "support/surface_geometry.hpp"
 
 using katana::core::ErrorCode;
 using katana::geometry::Point2;
@@ -1457,4 +1461,644 @@ TEST(TinEdit, ABoundaryOrAHoleRoundACircleCostsExactlyTheCirclesArea)
     const auto holed = katana::terrain::cutHole(ground, circle);
     ASSERT_TRUE(holed.ok()) << holed.error().describe();
     EXPECT_NEAR(holed->surface.planArea(), 400.0 - area, 1e-9);
+}
+
+// ---- several holes at once -------------------------------------------------------------------
+
+namespace {
+
+using katana::terrain::HoleCutStats;
+using katana::terrain::TinEditReport;
+using katana::terrain::TinEditResult;
+
+Polyline2 triangleRing(const Point2& a, const Point2& b, const Point2& c)
+{
+    Polyline2 ring;
+    ring.vertices = {a, b, c};
+    ring.closed = true;
+    return ring;
+}
+
+// What cutHole in a loop gives - each hole cut on the surface the one before
+// left, the reports summed as the verb summed them before cutHoles existed:
+// the first step's "before", the last's "after", the counts of all.
+TinEditResult cutInTurn(const TinSurface& surface, const std::vector<Polyline2>& holes)
+{
+    TinEditResult total;
+    total.surface = surface;
+    bool first = true;
+    for (const Polyline2& hole : holes) {
+        auto step = katana::terrain::cutHole(total.surface, hole);
+        EXPECT_TRUE(step.ok()) << (step.ok() ? "" : step.error().describe());
+        if (!step.ok()) {
+            return total;
+        }
+        const TinEditReport& r = step->report;
+        if (first) {
+            total.report = r;
+        } else {
+            total.report.trianglesAfter = r.trianglesAfter;
+            total.report.verticesAfter = r.verticesAfter;
+            total.report.pointsAdded += r.pointsAdded;
+            total.report.pointsRemoved += r.pointsRemoved;
+            total.report.pointsRelevelled += r.pointsRelevelled;
+            total.report.pointsMoved += r.pointsMoved;
+            total.report.pointsHeld += r.pointsHeld;
+            total.report.crossings += r.crossings;
+            total.report.largestChange = std::max(total.report.largestChange, r.largestChange);
+        }
+        first = false;
+        total.surface = std::move(step->surface);
+    }
+    return total;
+}
+
+void expectSameReport(const TinEditReport& a, const TinEditReport& b)
+{
+    EXPECT_EQ(a.trianglesBefore, b.trianglesBefore);
+    EXPECT_EQ(a.trianglesAfter, b.trianglesAfter);
+    EXPECT_EQ(a.verticesBefore, b.verticesBefore);
+    EXPECT_EQ(a.verticesAfter, b.verticesAfter);
+    EXPECT_EQ(a.pointsAdded, b.pointsAdded);
+    EXPECT_EQ(a.pointsRemoved, b.pointsRemoved);
+    EXPECT_EQ(a.pointsRelevelled, b.pointsRelevelled);
+    EXPECT_EQ(a.pointsMoved, b.pointsMoved);
+    EXPECT_EQ(a.pointsHeld, b.pointsHeld);
+    EXPECT_EQ(a.crossings, b.crossings);
+    EXPECT_NEAR(a.largestChange, b.largestChange, 1e-12);
+}
+
+// A 40 x 40 m ground of unit cells on the plane z = 0.5 x + 0.25 y.
+TinSurface planeGround40()
+{
+    return grid(40, 1.0, [](double x, double y) { return 0.5 * x + 0.25 * y; });
+}
+
+} // namespace
+
+TEST(TinEdit, HolesApartFromEachOtherAreCutInOnePatchAndGiveWhatCuttingThemOneByOneGives)
+{
+    const TinSurface ground = planeGround40();
+    // Four footprints in general position, none within a metre of another, in
+    // a ground of 1600 m2. Their areas, worked out here:
+    //   [3.3, 8.6]  x [4.7, 9.1]    5.3 x 4.4                       = 23.32
+    //   [15.2, 19.9] x [6.1, 12.8]  4.7 x 6.7                       = 31.49
+    //   (25.4,22.2) (33.1,24.7) (28.3,31.9): half of
+    //     |(33.1-25.4)(31.9-22.2) - (28.3-25.4)(24.7-22.2)|
+    //     = half of |7.7 x 9.7 - 2.9 x 2.5| = half of 67.44          = 33.72
+    //   [5.5, 11.7] x [30.3, 36.4]  6.2 x 6.1                       = 37.82
+    // 126.35 together, so 1473.65 of ground is left.
+    const std::vector<Polyline2> holes = {
+        rectangle(3.3, 4.7, 8.6, 9.1), rectangle(15.2, 6.1, 19.9, 12.8),
+        triangleRing(Point2(25.4, 22.2), Point2(33.1, 24.7), Point2(28.3, 31.9)),
+        rectangle(5.5, 30.3, 11.7, 36.4)};
+
+    HoleCutStats stats;
+    const auto together = katana::terrain::cutHoles(ground, holes, &stats);
+    ASSERT_TRUE(together.ok()) << together.error().describe();
+    // The point of it: four footprints, ONE rebuild of the whole surface.
+    EXPECT_EQ(stats.patches, 1u);
+    EXPECT_NEAR(together->surface.planArea(), 1600.0 - 126.35, 1e-9);
+    for (const Point2& inside : {Point2(6.0, 7.0), Point2(17.0, 9.0), Point2(28.9, 26.3),
+                                 Point2(8.0, 33.0)}) {
+        EXPECT_FALSE(together->surface.elevationAt(inside.x, inside.y).has_value())
+            << inside.x << ", " << inside.y;
+    }
+    EXPECT_NEAR(*together->surface.elevationAt(1.0, 1.0), 0.75, 1e-9);
+    EXPECT_NEAR(*together->surface.elevationAt(38.0, 38.0), 28.5, 1e-9);
+
+    // And the loop's surface and the loop's report.
+    const TinEditResult inTurn = cutInTurn(ground, holes);
+    EXPECT_TRUE(katana::test::sameSurfaceGeometry(together->surface, inTurn.surface));
+    expectSameReport(together->report, inTurn.report);
+    EXPECT_GT(together->report.pointsAdded, 0u) << "the cuts made vertices, so the sums mean something";
+}
+
+TEST(TinEdit, HolesThatOverlapTouchNestOrRepeatAreCutOneAfterTheOtherAsTheyAlwaysWere)
+{
+    const TinSurface ground = planeGround40();
+    const Polyline2 first = rectangle(3.3, 4.7, 8.6, 9.1); // 5.3 x 4.4 = 23.32
+    const auto check = [&ground](const std::vector<Polyline2>& holes, std::size_t patches,
+                                 double removed, const char* what) {
+        SCOPED_TRACE(what);
+        HoleCutStats stats;
+        const auto together = katana::terrain::cutHoles(ground, holes, &stats);
+        ASSERT_TRUE(together.ok()) << together.error().describe();
+        EXPECT_EQ(stats.patches, patches);
+        EXPECT_NEAR(together->surface.planArea(), 1600.0 - removed, 1e-9);
+        const TinEditResult inTurn = cutInTurn(ground, holes);
+        EXPECT_TRUE(katana::test::sameSurfaceGeometry(together->surface, inTurn.surface));
+        expectSameReport(together->report, inTurn.report);
+        if (patches == holes.size()) {
+            // One patch each: it IS the loop, bit for bit.
+            EXPECT_EQ(together->surface, inTurn.surface);
+        }
+    };
+
+    // [6, 12.2] x [7, 12] is 6.2 x 5 = 31 and meets the first in
+    // [6, 8.6] x [7, 9.1] = 2.6 x 2.1 = 5.46: the union is 23.32 + 31 - 5.46.
+    check({first, rectangle(6.0, 7.0, 12.2, 12.0)}, 2, 48.86, "overlapping");
+    // [3, 7] x [4, 9] and [7, 11] x [4, 9] share the edge x = 7: 4 x 5 = 20 each,
+    // 40 between them. On the lattice's lines, so that the vertices the first
+    // cut left on the shared edge are lattice vertices and not where the kernel
+    // computed a crossing: the second outline then runs through them exactly.
+    check({rectangle(3, 4, 7, 9), rectangle(7, 4, 11, 9)}, 2, 40.0, "touching along an edge");
+    // [3.3, 16.9] x [4.7, 19.3] is 13.6 x 14.6 = 198.56 and holds [6.1, 9.7] x
+    // [8.2, 12.4]; the inner one adds nothing, whichever is named first.
+    const Polyline2 outer = rectangle(3.3, 4.7, 16.9, 19.3);
+    const Polyline2 inner = rectangle(6.1, 8.2, 9.7, 12.4);
+    check({outer, inner}, 2, 198.56, "nested, the outer first");
+    check({inner, outer}, 2, 198.56, "nested, the inner first");
+    check({rectangle(3, 4, 7, 9), rectangle(3, 4, 7, 9)}, 2, 20.0, "the same footprint twice");
+    // Two squares of 0.1 m inside ONE triangle of the ground, the lower one of
+    // the cell (10,10) - (11,11) - 0.01 m2 each, apart from each other, but
+    // both in the triangle the patch rebuilds.
+    check({rectangle(10.60, 10.20, 10.70, 10.30), rectangle(10.80, 10.35, 10.90, 10.45)}, 2,
+          0.02, "two in one triangle");
+    // The second overlaps the first and the third is apart from both: the
+    // first is cut alone, the second and third together, 2 patches. The union
+    // of the first two is 48.86, and [5.5, 11.7] x [30.3, 36.4] adds 37.82.
+    check({first, rectangle(6.0, 7.0, 12.2, 12.0), rectangle(5.5, 30.3, 11.7, 36.4)}, 2, 86.68,
+          "a dependent pair, then an independent one");
+}
+
+TEST(TinEdit, ASweepOfSeparatedFootprintsWithOneTwinAmongThemIsTwoPatchesAndTheLoopsSurface)
+{
+    // One footprint in each 10 m cell of a 4 x 4 lattice over the ground,
+    // jittered by a fixed-seed generator (Numerical Recipes' constants, the
+    // benchmarks' own), 2.1 to 4.9 m on a side and at most 1 m off the cell's
+    // centre: they lie within [1.55, 8.45] of their cell, so the footprints of
+    // neighbouring cells are 3.1 m apart. After the sixth a twin: the sixth
+    // moved by (1.3, 0.9), overlapping it and still 1.8 m from the others -
+    // more than a triangle of the ground (1.42 m across) can span.
+    std::uint32_t state = 12345u;
+    const auto next = [&state](double low, double high) {
+        state = state * 1664525u + 1013904223u;
+        return low + (high - low) * (static_cast<double>(state) / 4294967296.0);
+    };
+    std::vector<Polyline2> holes;
+    double removed = 0.0;
+    for (int j = 0; j < 4; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            const double cx = 10.0 * i + 5.0 + next(-1.0, 1.0);
+            const double cy = 10.0 * j + 5.0 + next(-1.0, 1.0);
+            const double w = next(2.1, 4.9);
+            const double h = next(2.1, 4.9);
+            holes.push_back(rectangle(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2));
+            removed += w * h;
+            if (j * 4 + i == 5) {
+                holes.push_back(rectangle(cx - w / 2 + 1.3, cy - h / 2 + 0.9, cx + w / 2 + 1.3,
+                                          cy + h / 2 + 0.9));
+                // Two equal rectangles shifted by (1.3, 0.9) share (w - 1.3) x (h - 0.9).
+                removed += w * h - (w - 1.3) * (h - 0.9);
+            }
+        }
+    }
+    ASSERT_EQ(holes.size(), 17u);
+
+    const TinSurface ground = planeGround40();
+    HoleCutStats stats;
+    const auto together = katana::terrain::cutHoles(ground, holes, &stats);
+    ASSERT_TRUE(together.ok()) << together.error().describe();
+    // The first six together; the twin and the ten after it together.
+    EXPECT_EQ(stats.patches, 2u);
+    EXPECT_NEAR(together->surface.planArea(), 1600.0 - removed, 1e-8);
+    const TinEditResult inTurn = cutInTurn(ground, holes);
+    EXPECT_TRUE(katana::test::sameSurfaceGeometry(together->surface, inTurn.surface));
+    expectSameReport(together->report, inTurn.report);
+}
+
+TEST(TinEdit, AHundredSmallHolesOnAHundredMetreGroundAreOnePatchAndTheLoopsSurface)
+{
+    // 100 footprints of 2.3 x 1.7 m, one in each 10 m cell of a 10 x 10
+    // lattice: 3.91 m2 each, 391 together, so 10000 - 391 = 9609 is left.
+    const TinSurface ground =
+        grid(100, 1.0, [](double x, double y) { return 0.5 * x + 0.25 * y; });
+    std::vector<Polyline2> holes;
+    for (int j = 0; j < 10; ++j) {
+        for (int i = 0; i < 10; ++i) {
+            const double x = 10.0 * i + 3.3;
+            const double y = 10.0 * j + 4.2;
+            holes.push_back(rectangle(x, y, x + 2.3, y + 1.7));
+        }
+    }
+    HoleCutStats stats;
+    const auto together = katana::terrain::cutHoles(ground, holes, &stats);
+    ASSERT_TRUE(together.ok()) << together.error().describe();
+    EXPECT_EQ(stats.patches, 1u);
+    EXPECT_NEAR(together->surface.planArea(), 9609.0, 1e-7);
+    const TinEditResult inTurn = cutInTurn(ground, holes);
+    EXPECT_TRUE(katana::test::sameSurfaceGeometry(together->surface, inTurn.surface));
+    expectSameReport(together->report, inTurn.report);
+}
+
+TEST(TinEdit, CuttingHolesRefusesWhatCuttingThemOneByOneRefusesAndSaysTheSame)
+{
+    const TinSurface ground = planeGround40();
+    const Polyline2 a = rectangle(3.3, 4.7, 8.6, 9.1);
+    const Polyline2 b = rectangle(15.2, 6.1, 19.9, 12.8);
+    const Polyline2 c = rectangle(5.5, 30.3, 11.7, 36.4);
+
+    // Nothing to cut, nothing to cut from.
+    EXPECT_EQ(katana::terrain::cutHoles(ground, std::vector<Polyline2>{}).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::cutHoles(TinSurface{}, std::vector<Polyline2>{a}).error().code,
+              ErrorCode::InvalidArgument);
+
+    // One footprint is cutHole itself, bit for bit, report and all.
+    HoleCutStats one;
+    const auto alone = katana::terrain::cutHoles(ground, std::vector<Polyline2>{a}, &one);
+    const auto single = katana::terrain::cutHole(ground, a);
+    ASSERT_TRUE(alone.ok() && single.ok());
+    EXPECT_EQ(one.patches, 1u);
+    EXPECT_EQ(alone->surface, single->surface);
+    expectSameReport(alone->report, single->report);
+
+    // A bow tie in the middle of three that are fine and apart: its edges
+    // BC (34,3)-(27,10) and DA (33,9)-(26,2) cross at (30.5, 6.5), its signed
+    // area is 14 / 2 = 7 so it is not refused as flat, and the kernel finds the
+    // crossing. The batch fails; the answer is the loop's - the same refusal.
+    Polyline2 bowTie;
+    bowTie.closed = true;
+    bowTie.vertices = {Point2(26, 2), Point2(34, 3), Point2(27, 10), Point2(33, 9)};
+    const auto batch = katana::terrain::cutHoles(ground, std::vector<Polyline2>{b, bowTie, c});
+    const auto alongside = katana::terrain::cutHole(ground, bowTie);
+    ASSERT_FALSE(batch.ok());
+    ASSERT_FALSE(alongside.ok());
+    EXPECT_EQ(batch.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_EQ(batch.error().code, alongside.error().code);
+    EXPECT_EQ(batch.error().message, alongside.error().message);
+    EXPECT_NE(batch.error().message.find("crosses itself"), std::string::npos)
+        << batch.error().message;
+
+    // A coordinate that is not finite, after one that is fine: the fine one is
+    // cut first, then the refusal is the polygon's, as in a loop.
+    Polyline2 broken = rectangle(20, 20, 24, 24);
+    broken.vertices[2].x = std::numeric_limits<double>::quiet_NaN();
+    const auto notFinite = katana::terrain::cutHoles(ground, std::vector<Polyline2>{a, broken});
+    ASSERT_FALSE(notFinite.ok());
+    EXPECT_EQ(notFinite.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(notFinite.error().message, katana::terrain::cutHole(ground, broken).error().message);
+
+    // A footprint round the whole ground, named after one inside it: the
+    // refusal is that nothing would be left, as cutHole's, and not a batch's.
+    const Polyline2 everything = rectangle(-5, -5, 45, 45);
+    const auto all = katana::terrain::cutHoles(ground, std::vector<Polyline2>{a, everything});
+    ASSERT_FALSE(all.ok());
+    EXPECT_EQ(all.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(all.error().message, katana::terrain::cutHole(ground, everything).error().message);
+
+    // A footprint beside the ground changes nothing, and is one patch.
+    HoleCutStats beside;
+    const auto apart = katana::terrain::cutHoles(
+        ground, std::vector<Polyline2>{rectangle(100, 100, 110, 110)}, &beside);
+    ASSERT_TRUE(apart.ok()) << apart.error().describe();
+    EXPECT_EQ(apart->surface, ground);
+    EXPECT_EQ(beside.patches, 1u);
+}
+
+// ---- deleting a breakline ----------------------------------------------------------------------
+
+namespace {
+
+// `ground` with a draped breakline along the straight run from `from` to `to`
+// (a row or a column of the unit lattice, so its edges are the lattice's).
+TinSurface withBreakline(const TinSurface& ground, const Point2& from, const Point2& to)
+{
+    const std::vector<BreaklineVertex> line = {{from, std::nullopt}, {to, std::nullopt}};
+    auto made = katana::terrain::addBreakline(ground, line, false);
+    EXPECT_TRUE(made.ok()) << (made.ok() ? "" : made.error().describe());
+    return made.ok() ? made->surface : ground;
+}
+
+Polyline2 openLine(std::vector<Point2> vertices)
+{
+    Polyline2 line;
+    line.vertices = std::move(vertices);
+    return line;
+}
+
+} // namespace
+
+TEST(TinEdit, DeletingABreaklineMakesItsEdgesOrdinaryAndChangesNoTriangleNorVertex)
+{
+    // The row y = 4 from x = 1 to 7 of a 10 x 10 unit grid: six lattice edges.
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    ASSERT_NEAR(constrainedLength(before), 6.0, 1e-9) << "the setup: six edges of one metre";
+    // The line may run past the breakline at either end and need not pass
+    // through the surface's vertices to lie along its edges.
+    const auto cleared = katana::terrain::deleteBreaklines(
+        before, std::vector<Polyline2>{openLine({Point2(0.5, 4), Point2(7.5, 4)})});
+    ASSERT_TRUE(cleared.ok()) << cleared.error().describe();
+    EXPECT_EQ(cleared->report.edgesCleared, 6u);
+    EXPECT_EQ(cleared->report.edgesHeld, 0u);
+    EXPECT_NEAR(constrainedLength(cleared->surface), 0.0, 1e-12);
+    // Nothing else changed: the same vertices, the same triangles in the same
+    // order, the same area.
+    EXPECT_EQ(cleared->surface.vertices(), before.vertices());
+    EXPECT_EQ(cleared->surface.triangles(), before.triangles());
+    EXPECT_EQ(cleared->report.trianglesBefore, cleared->report.trianglesAfter);
+    EXPECT_EQ(cleared->report.verticesBefore, cleared->report.verticesAfter);
+    EXPECT_EQ(cleared->report.pointsAdded, 0u);
+    EXPECT_EQ(cleared->report.pointsRemoved, 0u);
+    EXPECT_NEAR(cleared->surface.planArea(), 100.0, 1e-9);
+
+    // The vertex (4,4) was on a breakline, and DELETE POINT refused it; now it
+    // is an ordinary vertex of six triangles, and goes.
+    const int vertex = vertexIndex(before, 4, 4);
+    ASSERT_GE(vertex, 0);
+    const auto vertices = std::vector<std::uint32_t>{static_cast<std::uint32_t>(vertex)};
+    const auto refused = katana::terrain::deletePoints(before, vertices);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(katana::terrain::onConstrainedEdge(before, vertices.front()));
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, vertices.front()));
+    const auto deleted = katana::terrain::deletePoints(cleared->surface, vertices);
+    ASSERT_TRUE(deleted.ok()) << deleted.error().describe();
+    EXPECT_EQ(deleted->report.pointsRemoved, 1u);
+    EXPECT_NEAR(deleted->surface.planArea(), 100.0, 1e-9);
+}
+
+TEST(TinEdit, ALineOverPartOfABreaklineClearsTheEdgesOfThatPartAndNoOther)
+{
+    // The line from (1,4) to (4,4) lies along three of the six edges: (1..2),
+    // (2..3), (3..4). The other three, (4..5), (5..6), (6..7), stay.
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    const auto cleared = katana::terrain::deleteBreaklines(
+        before, std::vector<Polyline2>{openLine({Point2(1, 4), Point2(4, 4)})});
+    ASSERT_TRUE(cleared.ok()) << cleared.error().describe();
+    EXPECT_EQ(cleared->report.edgesCleared, 3u);
+    EXPECT_NEAR(constrainedLength(cleared->surface), 3.0, 1e-9);
+    const auto at = [&](double x) {
+        return static_cast<std::uint32_t>(vertexIndex(cleared->surface, x, 4));
+    };
+    // (1,4), (2,4) and (3,4) have only cleared edges; (4,4) is still the end of
+    // the edge to (5,4), which stays.
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, at(1)));
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, at(2)));
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, at(3)));
+    EXPECT_TRUE(katana::terrain::onConstrainedEdge(cleared->surface, at(4)));
+    EXPECT_TRUE(katana::terrain::onConstrainedEdge(cleared->surface, at(5)));
+    // And (4,4) is refused as before.
+    EXPECT_EQ(katana::terrain::deletePoints(cleared->surface, std::vector<std::uint32_t>{at(4)})
+                  .error().code,
+              ErrorCode::InvalidGeometry);
+}
+
+TEST(TinEdit, ALineAlongNoBreaklineChangesNothingAndSaysSo)
+{
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    // A row with no breakline, one across the breakline, one that stops short
+    // of the first edge's far end, and one 2e-7 above it - beyond the
+    // coincidence tolerance, 1e-7 - each lies along none of its edges.
+    for (const Polyline2& line : {openLine({Point2(1, 5), Point2(7, 5)}),
+                                  openLine({Point2(3, 3), Point2(5, 5)}),
+                                  openLine({Point2(1, 4), Point2(1.5, 4)}),
+                                  openLine({Point2(1, 4.0000002), Point2(7, 4.0000002)})}) {
+        const auto result = katana::terrain::deleteBreaklines(before, std::vector<Polyline2>{line});
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        EXPECT_EQ(result->report.edgesCleared, 0u);
+        EXPECT_EQ(result->surface, before) << "the surface as it was, not a copy rebuilt";
+    }
+    // 5e-8 above it is within the tolerance: the same six edges.
+    const auto within = katana::terrain::deleteBreaklines(
+        before, std::vector<Polyline2>{openLine({Point2(1, 4.00000005), Point2(7, 4.00000005)})});
+    ASSERT_TRUE(within.ok()) << within.error().describe();
+    EXPECT_EQ(within->report.edgesCleared, 6u);
+}
+
+TEST(TinEdit, AClosedLinesClosingSideLiesAlongEdgesAndAnOpenOnesDoesNot)
+{
+    // A breakline up the column x = 1 from y = 4 to 7: three edges. The ring
+    // (1,4) (5,4) (5,7) (1,7) comes back to (1,4) by the closing side (1,7)-(1,4),
+    // which is that column; opened, the same four vertices stop at (1,7).
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(1, 7));
+    ASSERT_NEAR(constrainedLength(before), 3.0, 1e-9);
+    Polyline2 ring = openLine({Point2(1, 4), Point2(5, 4), Point2(5, 7), Point2(1, 7)});
+    const auto opened = katana::terrain::deleteBreaklines(before, std::vector<Polyline2>{ring});
+    ASSERT_TRUE(opened.ok()) << opened.error().describe();
+    EXPECT_EQ(opened->report.edgesCleared, 0u);
+    ring.closed = true;
+    const auto closed = katana::terrain::deleteBreaklines(before, std::vector<Polyline2>{ring});
+    ASSERT_TRUE(closed.ok()) << closed.error().describe();
+    EXPECT_EQ(closed->report.edgesCleared, 3u);
+    EXPECT_NEAR(constrainedLength(closed->surface), 0.0, 1e-12);
+}
+
+TEST(TinEdit, SeveralLinesClearTheEdgesAlongAnyOfThem)
+{
+    // Two breaklines: the row y = 4 from 1 to 3 (two edges) and the column
+    // x = 6 from 2 to 5 (three). Two lines clear both, one clears its own.
+    TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(3, 4));
+    before = withBreakline(before, Point2(6, 2), Point2(6, 5));
+    ASSERT_NEAR(constrainedLength(before), 5.0, 1e-9);
+    const std::vector<Polyline2> both = {openLine({Point2(0, 4), Point2(4, 4)}),
+                                         openLine({Point2(6, 0), Point2(6, 9)})};
+    const auto all = katana::terrain::deleteBreaklines(before, both);
+    ASSERT_TRUE(all.ok()) << all.error().describe();
+    EXPECT_EQ(all->report.edgesCleared, 5u);
+    const auto one =
+        katana::terrain::deleteBreaklines(before, std::span<const Polyline2>(both.data(), 1));
+    ASSERT_TRUE(one.ok()) << one.error().describe();
+    EXPECT_EQ(one->report.edgesCleared, 2u);
+    EXPECT_NEAR(constrainedLength(one->surface), 3.0, 1e-9);
+}
+
+TEST(TinEdit, TheConstrainedRimIsTheBoundaryNotABreaklineAndIsHeld)
+{
+    // A boundary makes its rim edges constrained: [2.5, 7.5]^2 cut from a 10 x
+    // 10 grid has a rim of 4 x 5 = 20 m, all constrained. A line along its
+    // bottom side clears nothing and counts the edges it left.
+    const auto clipped =
+        katana::terrain::clipToBoundary(flatGrid(10, 1.0), rectangle(2.5, 2.5, 7.5, 7.5));
+    ASSERT_TRUE(clipped.ok()) << clipped.error().describe();
+    ASSERT_NEAR(constrainedLength(clipped->surface), 20.0, 1e-9);
+    const auto result = katana::terrain::deleteBreaklines(
+        clipped->surface, std::vector<Polyline2>{openLine({Point2(2.5, 2.5), Point2(7.5, 2.5)})});
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->report.edgesCleared, 0u);
+    EXPECT_GE(result->report.edgesHeld, 5u)
+        << "the side of 5 m is cut by the lattice's vertical lines at least five times";
+    EXPECT_EQ(result->surface, clipped->surface);
+}
+
+TEST(TinEdit, DeletingABreaklineNeedsALineWithLengthAndFiniteCoordinates)
+{
+    const TinSurface ground = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    const auto refused = [&ground](std::vector<Polyline2> lines) {
+        return katana::terrain::deleteBreaklines(ground, lines);
+    };
+    EXPECT_EQ(refused({}).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused({openLine({Point2(1, 4)})}).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(
+        refused({openLine({Point2(1, 4), Point2(std::numeric_limits<double>::quiet_NaN(), 4)})})
+            .error().code,
+        ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused({openLine({Point2(1, 4), Point2(1e12, 4)})}).error().code,
+              ErrorCode::InvalidArgument);
+    // Two vertices that coincide are no length at all.
+    EXPECT_EQ(refused({openLine({Point2(3, 4), Point2(3, 4)})}).error().code,
+              ErrorCode::InvalidGeometry);
+    EXPECT_EQ(katana::terrain::deleteBreaklines(
+                  TinSurface{}, std::vector<Polyline2>{openLine({Point2(1, 4), Point2(2, 4)})})
+                  .error().code,
+              ErrorCode::InvalidArgument);
+}
+
+// ---- moving a point ----------------------------------------------------------------------------
+
+namespace {
+
+// The plane z = 0.5 x + 0.25 y on a 4 x 4 grid of unit cells: (2,2) is at 1.5.
+TinSurface plane4()
+{
+    return grid(4, 1.0, [](double x, double y) { return 0.5 * x + 0.25 * y; });
+}
+
+} // namespace
+
+TEST(TinEdit, AMovedVertexKeepsItsLevelAndTheFootprintWhereverItIsTaken)
+{
+    // The vertex (2,2) of the plane, at 1.5, taken to six places: inside its own
+    // star (the hexagon (3,2) (3,3) (2,3) (1,2) (1,1) (2,1)), across the ring
+    // onto a triangle beyond it, onto the ring edge x = 3, onto the diagonal it
+    // is an end of, two cells away, and to the diagonal of a corner cell. In
+    // each the surface is still [0,4]^2 - the area 16, no triangle overlapping
+    // another or folded (TinSurface::create refuses a clockwise one, and the
+    // areas of triangles that overlapped would sum to more than 16) - with the
+    // same 25 vertices, the moved one at its old level (1.5), not the plane's
+    // there, and every other vertex where it was.
+    const TinSurface ground = plane4();
+    const int vertex = vertexIndex(ground, 2, 2);
+    ASSERT_GE(vertex, 0);
+    for (const Point2& target : {Point2(2.4, 1.7), Point2(3.5, 2.2), Point2(3.0, 2.5),
+                                 Point2(2.5, 2.5), Point2(0.5, 0.2), Point2(3.9, 3.9)}) {
+        SCOPED_TRACE(testing::Message() << "to (" << target.x << ", " << target.y << ")");
+        const auto moved = katana::terrain::movePoint(ground, static_cast<std::uint32_t>(vertex), target);
+        ASSERT_TRUE(moved.ok()) << moved.error().describe();
+        const TinSurface& after = moved->surface;
+        EXPECT_NEAR(after.planArea(), 16.0, 1e-9);
+        EXPECT_EQ(after.vertexCount(), ground.vertexCount());
+        EXPECT_EQ(after.triangleCount(), ground.triangleCount())
+            << "a polygon of n corners round k points has n + 2k - 2 triangles whoever joins them";
+        EXPECT_EQ(vertexIndex(after, 2, 2), -1);
+        const int at = vertexIndex(after, target.x, target.y);
+        ASSERT_GE(at, 0);
+        EXPECT_DOUBLE_EQ(after.vertices()[static_cast<std::size_t>(at)].z, 1.5);
+        EXPECT_NEAR(*after.elevationAt(target.x, target.y), 1.5, 1e-12);
+        for (std::size_t other = 0; other < ground.vertexCount(); ++other) {
+            if (other != static_cast<std::size_t>(vertex)) {
+                EXPECT_GE(vertexIndex(after, ground.vertices()[other].x, ground.vertices()[other].y), 0)
+                    << "vertex " << other;
+            }
+        }
+        // The report: one vertex made, one taken out, one moved.
+        EXPECT_EQ(moved->report.pointsAdded, 1u);
+        EXPECT_EQ(moved->report.pointsRemoved, 1u);
+        EXPECT_EQ(moved->report.pointsMoved, 1u);
+        EXPECT_EQ(moved->report.verticesBefore, moved->report.verticesAfter);
+    }
+}
+
+TEST(TinEdit, AVertexMovedAcrossABreaklineLeavesTheBreaklineWhereItWas)
+{
+    // The row y = 4 from x = 1 to 7 is a breakline of six edges. The vertex
+    // (4,5) above it is taken to (4.2, 3.6), below it: the breakline stays six
+    // edges of one metre, and the ground its 100 m2.
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    ASSERT_NEAR(constrainedLength(before), 6.0, 1e-9);
+    const int vertex = vertexIndex(before, 4, 5);
+    ASSERT_GE(vertex, 0);
+    const auto moved =
+        katana::terrain::movePoint(before, static_cast<std::uint32_t>(vertex), Point2(4.2, 3.6));
+    ASSERT_TRUE(moved.ok()) << moved.error().describe();
+    EXPECT_NEAR(constrainedLength(moved->surface), 6.0, 1e-9);
+    EXPECT_NEAR(moved->surface.planArea(), 100.0, 1e-9);
+    EXPECT_EQ(vertexIndex(moved->surface, 4, 5), -1);
+    EXPECT_GE(vertexIndex(moved->surface, 4.2, 3.6), 0);
+}
+
+TEST(TinEdit, AVertexCannotBeMovedFromABreaklineTheRimOrAHoleAndTheRefusalSaysWhich)
+{
+    const auto refusal = [](const TinSurface& surface, double x, double y, const Point2& target) {
+        const int vertex = vertexIndex(surface, x, y);
+        EXPECT_GE(vertex, 0);
+        return katana::terrain::movePoint(surface, static_cast<std::uint32_t>(vertex), target);
+    };
+    // On a breakline: the vertex (4,4) of the row y = 4; and once the line is
+    // deleted, it moves.
+    const TinSurface lined = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    const auto onLine = refusal(lined, 4, 4, Point2(4.2, 4.3));
+    ASSERT_FALSE(onLine.ok());
+    EXPECT_EQ(onLine.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(onLine.error().message.find("breakline"), std::string::npos) << onLine.error().message;
+    EXPECT_NE(onLine.error().message.find("DELETE BREAKLINE"), std::string::npos);
+    const auto cleared = katana::terrain::deleteBreaklines(
+        lined, std::vector<Polyline2>{openLine({Point2(0, 4), Point2(8, 4)})});
+    ASSERT_TRUE(cleared.ok());
+    EXPECT_TRUE(refusal(cleared->surface, 4, 4, Point2(4.2, 4.3)).ok());
+
+    // On the rim: the corner (0,0); and one between corners, (2,0).
+    const TinSurface ground = flatGrid(4, 1.0);
+    for (const Point2& rim : {Point2(0, 0), Point2(2, 0)}) {
+        const auto onRim = refusal(ground, rim.x, rim.y, Point2(1.2, 1.3));
+        ASSERT_FALSE(onRim.ok()) << rim.x << ", " << rim.y;
+        EXPECT_EQ(onRim.error().code, ErrorCode::InvalidGeometry);
+        EXPECT_NE(onRim.error().message.find("rim"), std::string::npos) << onRim.error().message;
+    }
+    // On the edge of a hole: (3,3), a corner of [3,6] x [3,7] cut from the grid.
+    const auto holed = katana::terrain::cutHole(flatGrid(10, 1.0), rectangle(3, 3, 6, 7));
+    ASSERT_TRUE(holed.ok());
+    const auto onHole = refusal(holed->surface, 3, 3, Point2(2.2, 2.3));
+    ASSERT_FALSE(onHole.ok());
+    EXPECT_EQ(onHole.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(onHole.error().message.find("hole"), std::string::npos) << onHole.error().message;
+}
+
+TEST(TinEdit, AVertexCannotBeMovedOffTheSurfaceOntoAnotherVertexOrWithoutAFiniteTarget)
+{
+    const TinSurface ground = plane4();
+    const auto vertex = static_cast<std::uint32_t>(vertexIndex(ground, 2, 2));
+    const auto off = katana::terrain::movePoint(ground, vertex, Point2(9, 9));
+    ASSERT_FALSE(off.ok());
+    EXPECT_EQ(off.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(off.error().message.find("off the surface"), std::string::npos) << off.error().message;
+    // Within the coincidence tolerance (1e-7) of the vertex (3,3): 5e-8 off it.
+    const auto onto = katana::terrain::movePoint(ground, vertex, Point2(3.0, 3.00000005));
+    ASSERT_FALSE(onto.ok());
+    EXPECT_EQ(onto.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(onto.error().message.find("another vertex"), std::string::npos) << onto.error().message;
+    // 2e-7 off it is clear of it.
+    EXPECT_TRUE(katana::terrain::movePoint(ground, vertex, Point2(3.0, 3.0000002)).ok());
+    EXPECT_EQ(katana::terrain::movePoint(ground, vertex,
+                                         Point2(std::numeric_limits<double>::quiet_NaN(), 2))
+                  .error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::movePoint(ground, vertex, Point2(1e12, 2)).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::movePoint(ground, 999, Point2(2.5, 2.5)).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(katana::terrain::movePoint(TinSurface{}, 0, Point2(2.5, 2.5)).error().code,
+              ErrorCode::InvalidArgument);
+    // A vertex no triangle uses is nothing to move.
+    const TinSurface loose = make({Point3(0, 0, 0), Point3(10, 0, 0), Point3(10, 10, 0),
+                                   Point3(0, 10, 0), Point3(5, 5, 7)},
+                                  {{0, 1, 2}, {0, 2, 3}});
+    const auto unused = katana::terrain::movePoint(loose, 4, Point2(6, 6));
+    ASSERT_FALSE(unused.ok());
+    EXPECT_EQ(unused.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TinEdit, AMoveOfLessThanTheCoincidenceToleranceIsNoMove)
+{
+    const TinSurface ground = plane4();
+    const auto vertex = static_cast<std::uint32_t>(vertexIndex(ground, 2, 2));
+    const auto stayed = katana::terrain::movePoint(ground, vertex, Point2(2.00000005, 2.0));
+    ASSERT_TRUE(stayed.ok()) << stayed.error().describe();
+    EXPECT_EQ(stayed->surface, ground) << "the surface as it was, not a copy rebuilt";
+    EXPECT_EQ(stayed->report.pointsMoved, 0u);
+    // And the same place exactly.
+    const auto same = katana::terrain::movePoint(ground, vertex, Point2(2.0, 2.0));
+    ASSERT_TRUE(same.ok());
+    EXPECT_EQ(same->surface, ground);
 }

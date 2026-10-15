@@ -17,6 +17,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QStringList>
+#include <QTemporaryDir>
 
 #include "gis_import_dialogs.hpp"
 
@@ -35,15 +36,22 @@ T* child(QWidget& parent, const char* name)
 // The placement group remembers the last choice in QSettings; each test
 // starts from Keep, in settings of its own.
 struct OwnSettings {
+    // ctest runs each test as a process of its own, in parallel: a registry key of a fixed name
+    // was one every one of them cleared at both ends, so one test wiped what another had just
+    // set. Settings in an .ini file in a folder of this process's own share nothing.
+    QTemporaryDir folder;
     OwnSettings()
     {
         QCoreApplication::setOrganizationName("KatanaWidgetTests");
         QCoreApplication::setApplicationName("ImportDialogs");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, folder.path());
         QSettings().clear();
     }
     ~OwnSettings()
     {
         QSettings().clear();
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
         QCoreApplication::setOrganizationName(QString());
         QCoreApplication::setApplicationName(QString());
     }

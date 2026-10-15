@@ -72,13 +72,20 @@ struct TinEditReport {
     // level to (ADD POINT on an existing vertex, a 3D breakline through one,
     // the seam of a paste).
     std::size_t pointsRelevelled = 0;
-    // Vertices whose level a height edit or smoothing changed.
+    // Vertices whose level a height edit or smoothing changed, or that
+    // movePoint moved in plan (the vertex it makes is a new one, so that edit
+    // also counts one added and one removed).
     std::size_t pointsMoved = 0;
     // Vertices an edit left alone on purpose: on a breakline or the rim
     // (smoothing, deleting points inside a polygon).
     std::size_t pointsHeld = 0;
     // Vertices made where a new line crossed an edge of the surface.
     std::size_t crossings = 0;
+    // deleteBreaklines: the breakline edges made ordinary edges, and the
+    // constrained edges along the line it left alone on the rim (the
+    // surface's boundary, not a breakline).
+    std::size_t edgesCleared = 0;
+    std::size_t edgesHeld = 0;
     // The largest change of level at any vertex (heights, smoothing), or the
     // bound on how far a thinned surface lies from the original (thinning).
     double largestChange = 0.0;
@@ -167,6 +174,29 @@ deletePoints(const TinSurface& surface, std::span<const std::uint32_t> vertices,
 
 // ---- changing the triangulation --------------------------------------------------------
 
+// The vertex moved in plan to `target`, keeping its level: the triangles round
+// the old position and round the new one are rebuilt as ONE patch (the vertex
+// taken out and a point put in, by the one constrained Delaunay kernel, inside
+// the ring of edges round both), so the result is a valid surface whatever the
+// distance moved - a vertex taken across a neighbouring edge is not dragged
+// through it, the triangles that would have folded are not there to fold - and
+// the rest of the surface is the same triangles. A target within
+// tolerance::kGeometric of the vertex's own position is no move: the surface as
+// it was. Fails with
+//   InvalidArgument  a vertex out of range or in no triangle, a target that is
+//                    not finite or is beyond kMostMagnitude;
+//   InvalidGeometry  the vertex is at an end of a constrained edge (a breakline
+//                    or boundary: DELETE BREAKLINE first), or on the rim or
+//                    the edge of a hole (the footprint is not moved by a vertex;
+//                    BOUNDARY and HOLE reshape it), the target is off the
+//                    surface (ADD POINT extends it) or within kGeometric of
+//                    another vertex;
+//   TriangulationFailure  from the kernel.
+// The report counts the vertex as moved (one) and, since the vertex made is a
+// new one, as one added and one removed.
+[[nodiscard]] katana::core::Result<TinEditResult>
+movePoint(const TinSurface& surface, std::uint32_t vertex, const Point2& target);
+
 // The edge swapped for the other diagonal of the quadrilateral its two
 // triangles make. Fails with
 //   InvalidArgument  a triangle or edge out of range;
@@ -224,6 +254,24 @@ struct BreaklineVertex {
 [[nodiscard]] katana::core::Result<TinEditResult>
 addBreakline(const TinSurface& surface, std::span<const BreaklineVertex> vertices, bool closed);
 
+// The constrained edges that lie along any of `lines` made ordinary edges, so
+// a breakline the surface was given (or a seam) is no longer one: the triangles
+// and the vertices are exactly as they were, only the flags go, on both sides
+// of each edge. An edge lies along a line when both its ends are within
+// tolerance::kGeometric of ONE segment of it (a line's closing segment
+// included when it is closed), so a line over part of a breakline clears the
+// edges of that part and no other, and a vertex of the line need not be a vertex
+// of the surface. The levels of the line are not asked. An edge on the rim is
+// never cleared - a constrained rim edge is the surface's boundary, which
+// BOUNDARY and HOLE make - and is counted in `edgesHeld`. A vertex whose every
+// constrained edge was cleared can then be deleted (deletePoints). No edge
+// along the lines is no change: the surface as it was. Fails with
+//   InvalidArgument  no line, a line of fewer than two vertices, a coordinate
+//                    that is not finite or is beyond kMostMagnitude;
+//   InvalidGeometry  lines whose vertices all coincide.
+[[nodiscard]] katana::core::Result<TinEditResult>
+deleteBreaklines(const TinSurface& surface, std::span<const Polyline2> lines);
+
 // One line of an edit that adds several (BreaklineVertex's rules).
 struct BreaklineInput {
     std::vector<BreaklineVertex> vertices;
@@ -254,6 +302,42 @@ addBreaklines(const TinSurface& surface, std::span<const BreaklineInput> lines);
                                                                  const Polyline2& boundary);
 [[nodiscard]] katana::core::Result<TinEditResult> cutHole(const TinSurface& surface,
                                                           const Polyline2& hole);
+
+// How cutHoles went about it: for a test and a benchmark to see that disjoint
+// footprints shared a patch, not for a front end.
+struct HoleCutStats {
+    // Whole-surface rebuilds made (copies, finishSurface, TinSurface::create):
+    // one for every batch of footprints that could be cut together.
+    std::size_t patches = 0;
+};
+
+// cutHole of each polygon in turn, each on the surface the one before left:
+// the surface, and a report that is the first step's "before", the last's
+// "after" and the counts of all summed (largestChange the greatest). The
+// same surface as that loop gives - the same triangles, the same vertices,
+// the same constrained edges, to within the numbering of the vertices the
+// edit made - but footprints that can be cut together are cut in ONE patch,
+// so 100 buildings cost one whole-surface rebuild (about a third of a second
+// on 400 000 triangles), not 100.
+//
+// Footprints share a patch when each is separate from every other in the
+// batch - further than tolerance::kGeometric from it everywhere, neither
+// inside the other - and no triangle of the surface is reached by two of
+// their edges. Anything else (overlapping, touching, nested, identical
+// footprints, two in one triangle) is cut in a patch of its own, in the
+// order the polygons are given, as it always was. A refusal is the loop's
+// refusal: when a batch fails it is cut again one polygon at a time and the
+// first refusal is the answer. Fails with
+//   InvalidArgument  no polygon, or a coordinate that is not finite or is
+//                    beyond kMostMagnitude;
+//   InvalidGeometry  a polygon with fewer than 3 distinct vertices, no area,
+//                    or that touches or crosses itself;
+//   InvalidState     everything of the surface would be cut away;
+//   TriangulationFailure  from the kernel.
+// A polygon that changes nothing leaves the surface as it was, as cutHole's.
+[[nodiscard]] katana::core::Result<TinEditResult>
+cutHoles(const TinSurface& surface, std::span<const Polyline2> holes,
+         HoleCutStats* stats = nullptr);
 
 // ---- changing levels --------------------------------------------------------------------
 

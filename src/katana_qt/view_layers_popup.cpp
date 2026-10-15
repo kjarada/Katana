@@ -18,6 +18,8 @@
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
+#include "command_word.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "theme.hpp"
@@ -87,6 +89,58 @@ QToolButton* textButton(QWidget* parent, const QString& text, const QString& tip
 }
 
 } // namespace
+
+katana::core::Result<QString> viewLayersLine(const std::string& action, ViewId view,
+                                             const std::vector<std::string>& layers)
+{
+    if (action != "HIDE" && action != "SHOW" && action != "ISOLATE") {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a view's layers are hidden, shown or isolated, not '" + action + "'",
+                         action);
+    }
+    if (layers.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no layer to " + katana::core::lowered(action),
+                         action);
+    }
+    if (action == "ISOLATE" && layers.size() != 1) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a view isolates one layer, not " + std::to_string(layers.size()), action);
+    }
+    QStringList words;
+    // Whether the verb's comma list can carry every name as it is.
+    bool plain = true;
+    for (const std::string& layer : layers) {
+        const QString name = QString::fromStdString(layer);
+        auto word = commandWord(name, QStringLiteral("layer name"));
+        if (!word) {
+            return word.error();
+        }
+        words << *word;
+        if (name.contains(',') || name.compare("ALL", Qt::CaseInsensitive) == 0 ||
+            name.compare("LAYER", Qt::CaseInsensitive) == 0 ||
+            name.compare("REFERENCE", Qt::CaseInsensitive) == 0) {
+            plain = false;
+        }
+    }
+    return QString("VIEWS %1 %2 %3%4")
+        .arg(QString::fromStdString(action))
+        .arg(view)
+        .arg(plain ? QString() : QStringLiteral("LAYER "))
+        .arg(words.join(' '));
+}
+
+QString viewReferencesLine(const std::string& action, ViewId view,
+                           const std::vector<std::uint64_t>& references)
+{
+    QStringList ids;
+    for (const std::uint64_t id : references) {
+        ids << QString::number(id);
+    }
+    return QString("VIEWS %1 %2 REFERENCE %3")
+        .arg(QString::fromStdString(action))
+        .arg(view)
+        .arg(ids.join(' '));
+}
 
 ViewLayersPopup::ViewLayersPopup(ViewWorkspace& workspace, ViewId view, QWidget* parent)
     : QFrame(parent, Qt::Popup), workspace_(workspace), view_(view)
@@ -362,23 +416,34 @@ void ViewLayersPopup::refreshStates()
     updating_ = was;
 }
 
-void ViewLayersPopup::changed() { workspace_.viewSettingsChanged(view_); }
+namespace {
+
+// What a refused line says, as the Status the popup's buttons answer with.
+Status refused(const VerbOutcome& outcome)
+{
+    return makeError(ErrorCode::CommandRejected,
+                     outcome.error.isEmpty() ? "the line was refused" : outcome.error.toStdString());
+}
+
+} // namespace
+
+// The boxes below only ASK: each hands the line it stands for to the workspace's
+// runner (VIEWS HIDE, SHOW, ISOLATE), which sets the view, repaints it and
+// updates its Layers button through the verb's own host. refreshStates then
+// reads every box from the view, so a line that was refused leaves its box
+// where the view really is, ticked or not, with the reason in the command log.
 
 void ViewLayersPopup::onLayerChanged(QTreeWidgetItem* item)
 {
     if (updating_ || item == nullptr) {
         return;
     }
-    ViewState* view = state();
-    if (view == nullptr) {
+    if (state() == nullptr) {
         close();
         return;
     }
-    const std::string path = pathOf(item);
-    const bool shown = item->checkState(0) == Qt::Checked;
-    if (shown ? view->layers.show(path) : view->layers.hide(path)) {
-        changed();
-    }
+    (void)workspace_.setViewLayersShown(view_, {pathOf(item)},
+                                        item->checkState(0) == Qt::Checked);
     refreshStates();
 }
 
@@ -387,78 +452,63 @@ void ViewLayersPopup::onReferenceChanged(QTreeWidgetItem* item)
     if (updating_ || item == nullptr) {
         return;
     }
-    ViewState* view = state();
-    if (view == nullptr) {
+    if (state() == nullptr) {
         close();
         return;
     }
     const auto id =
         static_cast<katana::interop::ReferenceId>(item->data(0, kReferenceRole).toULongLong());
-    const bool changedAny = item->checkState(0) == Qt::Checked
-                                ? view->hiddenReferences.erase(id) > 0
-                                : view->hiddenReferences.insert(id).second;
-    if (changedAny) {
-        changed();
-    }
+    (void)workspace_.setViewReferenceShown(view_, id, item->checkState(0) == Qt::Checked);
     refreshStates();
 }
 
 void ViewLayersPopup::showAll()
 {
-    ViewState* view = state();
+    const ViewState* view = state();
     if (view == nullptr) {
         return;
     }
+    // Nothing hidden: nothing to say, as before.
     if (!view->layers.empty() || !view->hiddenReferences.empty()) {
-        view->layers.clear();
-        view->hiddenReferences.clear();
-        changed();
+        (void)workspace_.showEverythingInView(view_);
     }
     refreshStates();
 }
 
 Status ViewLayersPopup::isolateSelected()
 {
-    ViewState* view = state();
     const QTreeWidgetItem* item = layers_->currentItem();
-    if (view == nullptr || item == nullptr) {
+    if (state() == nullptr || item == nullptr) {
         return makeError(ErrorCode::NotFound, "no layer is selected");
     }
-    if (auto status =
-            view->layers.isolate(pathOf(item), workspace_.document().model().layers.names());
-        !status) {
-        return status;
-    }
-    changed();
+    const VerbOutcome outcome = workspace_.isolateLayerInView(view_, pathOf(item));
     refreshStates();
-    return {};
+    return outcome.ok ? Status{} : refused(outcome);
 }
 
 Status ViewLayersPopup::hideOthers()
 {
-    ViewState* view = state();
+    const ViewState* view = state();
     const QTreeWidgetItem* item = layers_->currentItem();
     if (view == nullptr || item == nullptr) {
         return makeError(ErrorCode::NotFound, "no layer is selected");
     }
     const std::string path = pathOf(item);
-    // Strictly beneath: the selected layer itself is the one being kept.
+    // What the view already hides strictly beneath the selected layer, which
+    // isolating replaces and this puts back: the selected layer itself is the
+    // one being kept.
     std::vector<std::string> keep;
     for (const std::string& hidden : view->layers.hidden()) {
         if (hidden != path && katana::entity::isLayerUnder(hidden, path)) {
             keep.push_back(hidden);
         }
     }
-    if (auto status = view->layers.isolate(path, workspace_.document().model().layers.names());
-        !status) {
-        return status;
+    VerbOutcome outcome = workspace_.isolateLayerInView(view_, path);
+    if (outcome.ok && !keep.empty()) {
+        outcome = workspace_.setViewLayersShown(view_, keep, false);
     }
-    for (const std::string& hidden : keep) {
-        view->layers.hide(hidden);
-    }
-    changed();
     refreshStates();
-    return {};
+    return outcome.ok ? Status{} : refused(outcome);
 }
 
 void ViewLayersPopup::setFilter(const QString& text)

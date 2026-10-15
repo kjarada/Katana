@@ -29,6 +29,10 @@ add_library(katana_terrain STATIC
     tin_patch.cpp
     tin_edit.cpp
     tin_thin.cpp
+    # The named colour ramps, the one table that a surface's display style and
+    # RASTER SHADE / RASTER SLOPE both paint with (docs/surface_display.md,
+    # "The ramps").
+    colour_ramps.cpp
 )
 katana_target_defaults(katana_terrain)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)

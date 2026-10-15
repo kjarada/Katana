@@ -332,7 +332,11 @@ asked (`properties`).
   `source.part`), else the smallest, and of equals the one made nearest
   before it, so a file imported twice joins each hole to its own exterior
   (`DrawingDataset.ATaggedHoleJoinsItsExterior`: 10000 - 400 = 9600 m2). A
-  tagged hole inside no area stays an area of its own, and says so. GEOS's
+  tagged hole inside no area stays an area of its own, and says so. The rule
+  is `entity::HoleJoiner` (`include/katana/entity/ring_tags.hpp`, tested by
+  `HoleJoiner.OfEqualRingsTheHoleJoinsTheOneMadeNearestBeforeIt` and its
+  neighbours), shared with the volume verbs, which read a lot with a hole the
+  same way (`docs/volumes.md`, "A lot with a hole"). GEOS's
   organisePolygons was the design's choice for this; a point-in-polygon test
   of every vertex does it without GDAL in the interop layer, and it is what
   the part hint is checked against.
@@ -665,7 +669,9 @@ steps with no name use the bound input and the run's output.
 One record per line: a word saying what it is, then `key=value` fields in a
 fixed order. A value holding a blank, a quote or an `=` is quoted
 (`cad::recordValue`); an empty one is bare (`aliases=`). A measure to the
-millimetre (`geo::fixed3`) that rounds to nothing has no sign: a surface of
+millimetre (`geo::fixed3`, a call of `core::formatFixed`, which writes any
+finite value in full - a level of 1e61 was `nan` - and shares its text with
+the SURFACE records) that rounds to nothing has no sign: a surface of
 a raster less its own surface said `zmin=-0.000`
 (`GisRecords.AValueThatRoundsToZeroHasNoSign`). Errors go to stderr as
 `error: <Code>: <message>`.
@@ -1070,7 +1076,8 @@ Where it differs from the plan:
 ### T2: Terrain shading: hillshade, colour relief, slope shading
 
 Built: `RASTER SHADE` (`src/katana_app/geo/shade_verbs.cpp`), the ramps in
-`include/katana/interop/geo/colour_ramps.hpp`, and Terrain > Analysis >
+`include/katana/interop/geo/colour_ramps.hpp` (over the one table of
+`include/katana/terrain/colour_ramps.hpp`), and Terrain > Analysis >
 Terrain Shading (`terrainShading`, `terrainShadingDialog`,
 `src/katana_qt/geo/terrain_shading_dialog.hpp`). `docs/terrain.md`,
 "Shading", has the grammar, the records and the decisions. The picture is a

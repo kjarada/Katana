@@ -14,6 +14,7 @@
 #include <cmath>
 #include <memory>
 #include <numbers>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -1018,4 +1019,90 @@ TEST(RoadObjects, IdsAreNeverGivenTwiceEvenAfterAnUndoOrARedo)
     site.ok("REDO");
     EXPECT_NE(site.document.roadObjects().find("sign-4"), nullptr);
     EXPECT_EQ(site.document.roadObjects().nextNumber, 5u);
+}
+
+// ---- the refusals that nothing builds an input for any more ---------------------------------------
+//
+// buildRoadObject refuses a part with no faces, and an edit refuses a part that is
+// not a closed solid: two guards that every maker now satisfies, so no object
+// reaches them. A mutation check once disabled each of them and all the road tests
+// still passed; these hand each guard the input it exists for.
+
+TEST(RoadObjects, ObjectsMadeOfNothingOrOfAPartWithNoFacesAreNoObjectAndSayWhy)
+{
+    using katana::cad::road::shapeProblem;
+    BimObject bare;
+    bare.id = "object/barrier-1";
+    BimObject post;
+    post.id = "object/barrier-1/post";
+    katana::cad::road::addBox(post.mesh, Point3(0, 0, 0), katana::geometry::Vec2(1, 0), 1, 1, 1);
+    ASSERT_FALSE(post.mesh.faces.empty());
+
+    EXPECT_EQ(shapeProblem(std::span<const BimObject>{}).value_or("none"),
+              "its placement gives nowhere to stand it");
+    const std::vector<BimObject> shapeless{post, bare};
+    EXPECT_EQ(shapeProblem(shapeless).value_or("none"),
+              "object/barrier-1 could not be made into a solid: its placement or its dimensions "
+              "give it no shape");
+    // The first part with no faces is the one named, whichever place it is in.
+    const std::vector<BimObject> shapelessFirst{bare, post};
+    EXPECT_EQ(shapeProblem(shapelessFirst).value_or("none"),
+              "object/barrier-1 could not be made into a solid: its placement or its dimensions "
+              "give it no shape");
+    // Solids with faces are an object; one is enough.
+    EXPECT_FALSE(shapeProblem(std::vector<BimObject>{post}).has_value());
+    EXPECT_FALSE(shapeProblem(std::vector<BimObject>{post, post}).has_value());
+}
+
+TEST(RoadObjects, ABuiltObjectWithAnOpenPartOrAProblemIsRefusedBeforeItIsStored)
+{
+    using katana::cad::road::checkBuilt;
+    RoadObject object;
+    object.id = "barrier-1";
+    object.kind = RoadObjectKind::Barrier;
+    object.placement.kind = PlacementKind::Line;
+    object.placement.source = 12;
+
+    // One triangle: every edge used once, with nothing to close it.
+    BimObject open;
+    open.id = "object/barrier-1";
+    open.mesh.vertices = {Point3(0, 0, 0), Point3(1, 0, 0), Point3(0, 1, 0)};
+    open.mesh.faces = {{0, 1, 2}};
+    ASSERT_FALSE(isClosedMesh(open.mesh));
+    BimModel built;
+    built.objects = {open};
+    const auto refused = checkBuilt(object, built);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused.error().message,
+              "object/barrier-1 is not a closed solid; its placement or its dimensions make a "
+              "shape that does not close");
+    EXPECT_EQ(refused.error().context, "barrier-1");
+
+    // A closed box beside it does not excuse it: every part is checked.
+    BimObject box;
+    box.id = "object/barrier-1/post";
+    katana::cad::road::addBox(box.mesh, Point3(0, 0, 0), katana::geometry::Vec2(1, 0), 1, 1, 1);
+    ASSERT_TRUE(isClosedMesh(box.mesh));
+    BimModel mixed;
+    mixed.objects = {box, open};
+    const auto stillRefused = checkBuilt(object, mixed);
+    ASSERT_FALSE(stillRefused.ok());
+    EXPECT_NE(stillRefused.error().message.find("object/barrier-1 is not a closed solid"),
+              std::string::npos);
+
+    BimModel closed;
+    closed.objects = {box};
+    EXPECT_TRUE(checkBuilt(object, closed).ok());
+
+    // A problem the model was left with is refused first, naming the line the
+    // object was placed along.
+    BimModel failed;
+    failed.problems.push_back({"object barrier-1", "station 150 is off alignment Main (0 to 100)"});
+    const auto problem = checkBuilt(object, failed);
+    ASSERT_FALSE(problem.ok());
+    EXPECT_EQ(problem.error().message, "station 150 is off alignment Main (0 to 100)");
+    EXPECT_EQ(problem.error().context, "barrier-1 (#12)");
+    object.placement.source = katana::entity::kInvalidEntityId;
+    EXPECT_EQ(checkBuilt(object, failed).error().context, "barrier-1");
 }

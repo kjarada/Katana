@@ -47,6 +47,13 @@ class SectionViewWidget final : public QWidget {
     // Replaces what is shown. An empty section draws the "no section" message
     // rather than an empty grid, so it is obvious nothing has been cut yet.
     void setSection(katana::cad::Section section);
+    // Replaces the section with the same one cut again, from the drawing's
+    // surfaces as they are now (MainWindow::recutSections): what is drawn
+    // changes, and the pan and zoom a person made stay as they were - the
+    // station and elevation at the middle of the plot keep their place. A view
+    // not moved by hand is still fitted to all of its section, so it is framed
+    // afresh: a surface raised by ten metres moves the extent it fits.
+    void replaceSection(katana::cad::Section section);
     void clearSection();
     [[nodiscard]] bool hasSection() const { return state_.section.has_value(); }
     [[nodiscard]] const std::optional<katana::cad::Section>& section() const
@@ -55,9 +62,11 @@ class SectionViewWidget final : public QWidget {
     }
     // True when the drawing's surfaces have changed since the section was cut
     // - hidden, shown, edited, removed, undone - so what is drawn is of
-    // surfaces it no longer has. The section is cut again only when asked
-    // (Terrain > Cut Section), so the view says so, in its legend and in its
-    // status text, rather than showing the old picture as the drawing's.
+    // surfaces it no longer has. The window cuts an open section again as the
+    // surfaces change (MainWindow::recutSections, so this is false again at
+    // once), but cannot when no surface is left to cut or the cut is refused:
+    // then the view says so, in its legend and in its status text, rather than
+    // showing the old picture as the drawing's.
     [[nodiscard]] bool surfacesChanged() const
     {
         return state_.section.has_value() && document_ != nullptr &&

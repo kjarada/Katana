@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <set>
 #include <string>
 
@@ -29,8 +30,10 @@
 
 #include "katana/cad/plotting/frame.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/math/numerics.hpp"
+#include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "sheet_painter.hpp"
 
@@ -614,4 +617,115 @@ TEST(SheetPainter, TheWholeSetIsOneVectorPdfAPageASheet)
     ASSERT_TRUE(katana::qt::plotSheetsToPdf(path, set, second, source, 300.0, cache).ok());
     const std::size_t past[] = {3};
     EXPECT_FALSE(katana::qt::plotSheetsToPdf(path, set, past, source, 300.0, cache).ok());
+}
+
+// ---- a surface whose style cannot be drawn in whole ----------------------------------------------
+//
+// The plan painter refuses contours that would be traced more than four
+// million times and reports it in its statistics (PlanPaintStats::
+// surfaceProblems). A plot or a sheet paints the same plan, so the sheet's
+// problems carry it - a plan viewport drawn without a surface's contours is
+// paper wasted - where the editor shows it and every plot reports it
+// (docs/surface_display.md, "In plan"; docs/plotting.md, "The sheet painter").
+
+namespace {
+
+// The 10 x 10 square z = x as the surface "ground", drawn in the style named.
+// Each of its two triangles runs from 0 to 10, so contours every millionth of
+// a unit cross it ten million times a triangle (past the limit of four
+// million) and contours every unit cross it ten times.
+katana::terrain::SurfaceStore groundIn(const std::string& style, bool visible = true)
+{
+    auto tin = katana::terrain::TinSurface::create(
+        {{0.0, 0.0, 0.0}, {10.0, 0.0, 10.0}, {10.0, 10.0, 10.0}, {0.0, 10.0, 0.0}}, {{0, 1, 2}, {0, 2, 3}});
+    EXPECT_TRUE(tin.ok());
+    katana::terrain::SurfaceStore store;
+    EXPECT_TRUE(store
+                    .add(katana::terrain::NamedSurface{
+                        "ground", std::make_shared<const katana::terrain::TinSurface>(std::move(*tin)), "test",
+                        style, visible})
+                    .ok());
+    return store;
+}
+
+katana::cad::SurfaceStyleSet stylesWithFine()
+{
+    katana::cad::SurfaceStyleSet styles = katana::cad::builtInSurfaceStyles();
+    katana::cad::SurfaceDisplayStyle fine;
+    fine.name = "Fine";
+    fine.contours.show = true;
+    fine.contours.interval = 1.0e-6;
+    styles.styles.push_back(fine);
+    return styles;
+}
+
+// A sheet whose one plan, 1:1000 about `centre`, shows the surface when the
+// centre is (5, 5).
+plotting::SheetSet planOver(Point2 centre)
+{
+    plotting::SheetSet set;
+    set.sheets.push_back(a3());
+    set.sheets[0].viewports.push_back(planAt(box(100.0, 100.0, 300.0, 250.0), 1000.0, centre));
+    return set;
+}
+
+} // namespace
+
+TEST(SheetPainter, APlanDrawnWithoutASurfacesContoursSaysSoInTheSheetsProblemsAndStaysDrawn)
+{
+    Model model;
+    const katana::terrain::SurfaceStore store = groundIn("Fine");
+    const katana::cad::SurfaceStyleSet styles = stylesWithFine();
+    SheetSource source;
+    source.plan.model = &model;
+    source.plan.surfaces = &store;
+    source.plan.surfaceStyles = &styles;
+    SheetPaintStats stats;
+    painted(planOver(Point2(5.0, 5.0)), source, &stats);
+    ASSERT_EQ(stats.problems.size(), 1u);
+    // The viewport, the surface, its style and why - the words of the plan view's own log.
+    EXPECT_EQ(stats.problems[0],
+              "vp1: ground (style Fine): contours: an interval of 0.000001 crosses this surface's "
+              "triangles more than 4000000 times; not drawn - set a larger interval");
+    // Not a viewport that could not be drawn: the plan is drawn, without the contours.
+    EXPECT_EQ(stats.viewportsDrawn, 1u);
+}
+
+TEST(SheetPainter, ASurfaceThePlanCanDrawInWholeOrNeedNotDrawSaysNothing)
+{
+    Model model;
+    const katana::cad::SurfaceStyleSet styles = stylesWithFine();
+    SheetSource source;
+    source.plan.model = &model;
+    source.plan.surfaceStyles = &styles;
+    SheetPaintStats stats;
+
+    // The built-in Contours style: an interval of a unit, ten crossings a triangle.
+    const katana::terrain::SurfaceStore traceable = groundIn("Contours");
+    source.plan.surfaces = &traceable;
+    painted(planOver(Point2(5.0, 5.0)), source, &stats);
+    EXPECT_TRUE(stats.problems.empty()) << stats.problems.front();
+
+    // A style that shows no contours at all.
+    const katana::terrain::SurfaceStore outline = groundIn("Standard");
+    source.plan.surfaces = &outline;
+    painted(planOver(Point2(5.0, 5.0)), source, &stats);
+    EXPECT_TRUE(stats.problems.empty());
+
+    // A hidden surface is not drawn, so it has no contours to be without.
+    const katana::terrain::SurfaceStore hidden = groundIn("Fine", false);
+    source.plan.surfaces = &hidden;
+    painted(planOver(Point2(5.0, 5.0)), source, &stats);
+    EXPECT_TRUE(stats.problems.empty());
+
+    // A surface the plan's window does not reach is not drawn either.
+    const katana::terrain::SurfaceStore refused = groundIn("Fine");
+    source.plan.surfaces = &refused;
+    painted(planOver(Point2(5000.0, 5000.0)), source, &stats);
+    EXPECT_TRUE(stats.problems.empty());
+
+    // And a drawing with no surfaces at all.
+    source.plan.surfaces = nullptr;
+    painted(planOver(Point2(5.0, 5.0)), source, &stats);
+    EXPECT_TRUE(stats.problems.empty());
 }

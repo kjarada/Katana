@@ -82,7 +82,8 @@ void SectionViewWidget::setDocument(katana::cad::Document* document)
     if (document_ != nullptr) {
         // A selection change, and a layer shown or hidden in the drawing,
         // change which crossings are marked; the section itself is cut again
-        // only when asked (Terrain > Cut Section), so this only repaints.
+        // by the window when the surfaces change (MainWindow::recutSections),
+        // so this only repaints.
         documentListener_ = document_->addListener([this] { update(); });
     }
     update();
@@ -91,16 +92,33 @@ void SectionViewWidget::setDocument(katana::cad::Document* document)
 void SectionViewWidget::setSection(katana::cad::Section section)
 {
     state_.section = std::move(section);
-    // Cut from the drawing's surfaces as they are now: MainWindow::cutSectionAlong
+    // A new cut has no design until its caller says it has (ViewWorkspace::showSection):
+    // the last one's must not ride into it when it is cut again.
+    state_.sectionDesign.reset();
+    // Cut from the drawing's surfaces as they are now: MainWindow::cutSection
     // reads them just before it hands the section over.
     state_.sectionSurfaces = document_ != nullptr ? document_->surfacesGeneration() : 0;
     framed_ = false;
     update();
 }
 
+void SectionViewWidget::replaceSection(katana::cad::Section section)
+{
+    state_.section = std::move(section);
+    state_.sectionSurfaces = document_ != nullptr ? document_->surfacesGeneration() : 0;
+    // A view whose pan or zoom a person set keeps it (framed_ stays true, so
+    // the next paint does not frame it). One they have not touched fits the
+    // whole of its section, and the new section's extent is not the old one's.
+    if (!userMoved_) {
+        framed_ = false;
+    }
+    update();
+}
+
 void SectionViewWidget::clearSection()
 {
     state_.section.reset();
+    state_.sectionDesign.reset();
     framed_ = false;
     update();
 }
@@ -472,7 +490,7 @@ void SectionViewWidget::drawLegend(QPainter& painter) const
     if (surfacesChanged()) {
         painter.setPen(theme::error());
         painter.drawText(QPointF(kLeftMargin + 8, y + 10),
-                         QStringLiteral("Surfaces changed since this was cut: cut it again"));
+                         QStringLiteral("Surfaces changed since the cut: not cut again, see the log"));
     }
 }
 

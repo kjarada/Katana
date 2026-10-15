@@ -86,6 +86,21 @@ TEST_F(DrawingSurfaceVerbs, RenameKeepsTheSurfaceAndIsOneUndoStep)
     EXPECT_EQ(document.surfaces().find("Existing Ground"), nullptr);
 }
 
+TEST_F(DrawingSurfaceVerbs, ALevelOfSixtyOneDigitsIsPrintedInFullAndNotAsNan)
+{
+    // An edit refuses a level past 1e9, but a project, an archive or a LandXML
+    // file may hold one: the record that names the surface said zmin=nan for a
+    // FINITE level whose digits and decimals filled more than the 64 characters
+    // its formatter had. 1e61 is the double 9999999999999999493871352970740188669636450110134100730839040
+    // (Python's '%.3f' % 1e61): 61 digits, so 65 characters with the decimals.
+    auto store = with(document.surfaces(), "far", tiltedSquare(1e61));
+    ASSERT_TRUE(document.setSurfaces(std::move(store), "TEST").ok());
+    const std::string reply = ok("SURFACE COPY far twin");
+    const std::string level = "9999999999999999493871352970740188669636450110134100730839040.000";
+    EXPECT_TRUE(contains(reply, " zmin=" + level + " zmax=" + level + " ")) << reply;
+    EXPECT_FALSE(contains(reply, "nan")) << reply;
+}
+
 TEST_F(DrawingSurfaceVerbs, ARenameTheDrawingCannotTakeIsRefused)
 {
     refused("SURFACE RENAME nothing other", ErrorCode::NotFound);

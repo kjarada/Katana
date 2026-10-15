@@ -37,7 +37,7 @@ using Json = nlohmann::json;
 
 namespace {
 
-constexpr std::array<CheckDescription, 33> kChecks{{
+constexpr std::array<CheckDescription, 34> kChecks{{
     // The set's own: what every sheet shares.
     {"field.empty", Severity::Warning,
      "a value the frame prints that resolves to nothing: the organisation, a sign-off name, the "
@@ -69,6 +69,9 @@ constexpr std::array<CheckDescription, 33> kChecks{{
     {"plan.empty", Severity::Warning,
      "a plan whose window - at its scale, about its centre, turned by its rotation - holds nothing "
      "it draws"},
+    {"plan.surface-style", Severity::Warning,
+     "a plan whose window reaches a surface that its style cannot be drawn in whole: its contours are "
+     "too fine to trace, so they are missing from the plot"},
     {"text.too-small", Severity::Warning,
      "drawing text in a plan that prints smaller than the minimum at the plan's scale"},
     {"grid.invalid", Severity::Error,
@@ -732,6 +735,27 @@ void checkPlan(const SheetSet& set, const Viewport& viewport, std::size_t index,
             "Pan the drawing into it (Shift-drag), set its scale and centre to Auto, or show the layers "
             "it hides");
     }
+    // A surface in the window whose style the painter cannot draw in whole:
+    // it paints the plan without those contours and says so only in the
+    // sheet's problems, so the plot is warned about here, before the paper.
+    // The window's bounding box against the surface's, as the painter culls
+    // a surface to the box the frame shows (a surface the box misses draws,
+    // and says, nothing).
+    if (options.surfaceProblems) {
+        const Box2 reach = window.reach();
+        for (const SurfaceStyleProblem& found : *options.surfaceProblems) {
+            if (!found.bounds.intersects(reach)) {
+                continue;
+            }
+            add(Severity::Warning, "plan.surface-style", found.problem.surface,
+                std::format("{} shows the surface {} (style {}) without part of its style: {}", label,
+                            found.problem.surface, found.problem.style, found.problem.reason),
+                std::format("Make the style's contour interval larger (SURFACESTYLE SET \"{}\" "
+                            "interval=..., or Terrain > Surface Styles), or give the surface another "
+                            "style (SURFACE STYLE \"{}\" <style>)",
+                            found.problem.style, found.problem.surface));
+        }
+    }
     // The coordinate grid, worked out as the painter works it out at this
     // window (plan_grid.hpp).
     if (viewport.gridStyle != GridStyle::None) {
@@ -1275,6 +1299,9 @@ std::vector<Finding> checkDocumentSheets(const Document& document, PreflightOpti
         const auto path = logoPath(document);
         std::error_code error;
         options.logoReadable = path && std::filesystem::is_regular_file(*path, error);
+    }
+    if (!options.surfaceProblems) {
+        options.surfaceProblems = surfaceStyleProblems(document.surfaces(), document.surfaceStyles());
     }
     if (options.assets.empty()) {
         if (const auto directory = document.projectDirectory()) {

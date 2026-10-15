@@ -31,8 +31,25 @@
 // a section whose width and depth both change linearly along the job, whose
 // area is then quadratic, is measured exactly by it and overstated by the
 // average end area. The difference of the two is the prismoidal correction.
-// L is measured along the centreline; on a curve the centroid of a section
-// travels a different distance (Pappus), and that correction is not made.
+//
+// THE CURVATURE CORRECTION (Pappus). L is measured along the centreline, but
+// on a curve the ground at offset o (left positive) is swept along an arc of
+// (1 - k o) times the centreline's, k the signed curvature (positive turning
+// left): a point on the inside of a curve travels less than the centreline,
+// one on the outside more. A section of area A whose centroid stands e from
+// the centreline therefore carries A (1 - k e) = A - k M for every metre of
+// station, M = A e the first moment of the section about the centreline, and
+// the volume between two normals is the integral of A(s) - k(s) M(s) ds.
+// Both formulas above are applied to A - k M in the place of A, the cut and
+// the fill of each section on their own (each has its own centroid), with k
+// the curvature at the middle of the panel: exact on an arc, and on a spiral,
+// where k is linear in station, exact for a section that does not change
+// along the panel. On a straight k is 0 and the figures are the plain ones;
+// so they are for a section symmetric about the centreline on any curve.
+// Left off, a quarter circle of radius 50 with a strip 10 m wide on its
+// inside measures 4.6 % over, and one on its outside 4.2 % under: the error
+// is the fixed factor R / (R -/+ e) of every panel, and a shorter interval
+// does not shrink it (docs/volumes.md, "Along an alignment").
 
 #include <cstddef>
 #include <optional>
@@ -96,17 +113,39 @@ struct SignedArea {
 };
 [[nodiscard]] SignedArea signedTrapezoid(double d0, double d1, double width);
 
+// The first moments of the same two parts about a line in the plan of the
+// strip, in closed form: the integral of the depth times the offset from that
+// line. `offsetAtStart` is the offset of the strip's first side from the line,
+// and the offset falls by one for every unit of width across the strip, so
+// the strip runs from the line's positive side towards its negative. The
+// negative part's depth is taken as a magnitude, so each moment is signed by
+// the offset alone: a part on the line's positive side has a positive moment
+// whichever part it is. The parts are the ones signedTrapezoid splits, the
+// same way, and a moment divided by its area is the part's centroid offset.
+struct SignedMoment {
+    double positive = 0.0;
+    double negative = 0.0;
+};
+[[nodiscard]] SignedMoment signedTrapezoidMoments(double d0, double d1, double width,
+                                                  double offsetAtStart);
+
 // The area between two surfaces on one section, of plan length `length`:
 // fill where `design` is above `existing`, cut where it is below, as
 // compareSurfaces names them. `width` is the plan length on which both have a
-// height - what was measured.
+// height - what was measured. `cutMoment` and `fillMoment` are the areas'
+// first moments about a line on the section: the point `offsetAtStart` from
+// the line at its first end, the offset falling along the section
+// (signedTrapezoidMoments). 0 is the first end itself.
 struct SectionAreas {
     double cut = 0.0;
     double fill = 0.0;
     double width = 0.0;
+    double cutMoment = 0.0;
+    double fillMoment = 0.0;
 };
 [[nodiscard]] SectionAreas sectionAreas(const std::vector<SegmentPiece>& existing,
-                                        const std::vector<SegmentPiece>& design, double length);
+                                        const std::vector<SegmentPiece>& design, double length,
+                                        double offsetAtStart = 0.0);
 
 // The more sections than this is a unit mistake, not a wish: the cap
 // terrain::contours puts on its levels (docs/terrain.md, "Contours").
@@ -129,6 +168,11 @@ struct AlignmentVolumeOptions {
     // Also cut the section at the middle of each pair, for the prismoidal
     // formula.
     bool prismoidal = false;
+    // The curvature correction above. On by default: it is the standard
+    // method, and it changes nothing on a straight or for a section that is
+    // symmetric about the centreline. Off gives the plain figure, the areas
+    // along the centreline.
+    bool curvature = true;
 };
 
 // One cross section.
@@ -137,16 +181,29 @@ struct StationSection {
     Point2 centre{};
     double cutArea = 0.0;
     double fillArea = 0.0;
+    // The areas' first moments about the centreline, left positive: the cut
+    // area times its centroid's offset, and the fill area times its own.
+    double cutMoment = 0.0;
+    double fillMoment = 0.0;
     double width = 0.0; // plan length on which both surfaces have a height
     // An end of the range or a key station of the alignment (TS, SC, CS,
     // ST): where the geometry changes, so a section is always cut there.
     bool key = false;
 };
 
+// What the curvature correction added to a volume (negative: took away), cut
+// and fill separately: the volume as reported less the plain one, the areas
+// along the centreline.
+struct CurvatureShift {
+    double cut = 0.0;
+    double fill = 0.0;
+};
+
 // Between two consecutive sections.
 struct SectionPanel {
     double fromStation = 0.0;
     double toStation = 0.0;
+    // As reported: with the curvature correction when it is on.
     double endAreaCut = 0.0;
     double endAreaFill = 0.0;
     // With AlignmentVolumeOptions::prismoidal: the middle section and the
@@ -154,15 +211,25 @@ struct SectionPanel {
     std::optional<StationSection> middle{};
     double prismoidalCut = 0.0;
     double prismoidalFill = 0.0;
+    // The signed curvature at the middle of the panel, 1 / m, positive
+    // turning left; 0 on a straight and when the correction is off.
+    double curvature = 0.0;
+    CurvatureShift endAreaShift{};
+    CurvatureShift prismoidalShift{}; // with prismoidal
 };
 
 struct AlignmentVolumes {
     std::vector<StationSection> sections; // ascending station
     std::vector<SectionPanel> panels;     // sections.size() - 1 of them
+    // As reported: with the curvature correction when it is on.
     double endAreaCut = 0.0;
     double endAreaFill = 0.0;
     double prismoidalCut = 0.0;  // with prismoidal
     double prismoidalFill = 0.0;
+    // The panels' shifts, summed: what the correction did to each total.
+    CurvatureShift endAreaShift{};
+    CurvatureShift prismoidalShift{};
+    bool curvature = true; // the correction was made
     double fromStation = 0.0;
     double toStation = 0.0;
     double left = 0.0;
@@ -187,12 +254,21 @@ struct AlignmentVolumes {
 // 62 101 m3 round a curve of radius 40 with the default reach). That is
 // refused, naming the stations and the longest reach that clears every
 // crossing, rather than measured; sections that only touch at their ends (a
-// reach equal to the radius) are not crossing. Not seen: two stretches of the
-// alignment running side by side nearer than the reach, with no section of
-// one crossing a section of the other.
+// reach equal to the radius) are not crossing.
+//
+// Two stretches of the alignment running side by side nearer than the reach -
+// the legs of a U-turn made of corners, two roads laid in one alignment -
+// sweep the same ground twice with no section of one crossing a section of
+// the other (their sections are parallel). So the strip each panel sweeps,
+// the quadrilateral between the reach segments of its two sections, is also
+// tested against the strip of every panel but its neighbours (which share a
+// section); a pair that overlaps by more than kGeometric is refused
+// (InvalidArgument), naming the stations of the two stretches, and nothing is
+// measured. Strips that only touch are not overlapping.
 //
 // Sections are cut on `pool` (null: TaskPool::shared()), each on its own, and
-// summed in station order: the same bits at any thread count.
+// summed in station order: the same bits at any thread count, as the two
+// tests above find the same pair at any thread count.
 [[nodiscard]] katana::core::Result<AlignmentVolumes>
 volumesAlongAlignment(const TinSurface& existing, const TinSurface& design,
                       const katana::geometry::SolvedAlignment& alignment,

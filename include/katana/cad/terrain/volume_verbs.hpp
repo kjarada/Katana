@@ -10,13 +10,16 @@
 //   VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH]
 //          [bulk=] [shrink=] [csv=]
 //   VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=]
-//          [right=] [method=endarea|prismoidal|both] [bulk=] [shrink=] [csv=]
+//          [right=] [method=endarea|prismoidal|both] [curvature=on|off] [bulk=] [shrink=]
+//          [csv=]
 //   VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
 //   SURFACE DIFFERENCE <base> <top> [NAME <new>] [PREVIEW]
 //   SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
 //
 //   <polygon> := #id [#id ...] | x,y[,z] x,y[,z] x,y[,z] ... | FROM <scope> [WHERE k=v ...]
-//                (read as drawing_shapes.hpp reads it)
+//                (read as drawing_shapes.hpp reads it; a ring tagged as a hole joins the
+//                polygon it lies in, its area is taken out of it, and the polygons
+//                record says holes=<how many joined>)
 //
 // Words are case-insensitive; a surface or alignment name with a blank is
 // quoted. The key=value options are read wherever they stand - none of them

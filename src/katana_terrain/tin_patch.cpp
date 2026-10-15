@@ -1276,8 +1276,8 @@ TriangleGrid::TriangleGrid(const TinSurface& surface) : surface_(&surface)
     }
 }
 
-void TriangleGrid::markAlong(const Point2& a, const Point2& b,
-                             std::vector<std::uint8_t>& marks) const
+void TriangleGrid::markAlong(const Point2& a, const Point2& b, std::vector<std::uint8_t>& marks,
+                             std::vector<std::uint32_t>* newlyMarked) const
 {
     if (surface_ == nullptr || surface_->empty()) {
         return;
@@ -1309,6 +1309,9 @@ void TriangleGrid::markAlong(const Point2& a, const Point2& b,
                 const auto tri = surface_->planTriangle(t);
                 if (segmentNearTriangle(a, b, tri.a, tri.b, tri.c, margin)) {
                     marks[t] = 1;
+                    if (newlyMarked != nullptr) {
+                        newlyMarked->push_back(t);
+                    }
                 }
             }
         }
@@ -1450,10 +1453,44 @@ void markInsertionCavity(const TinSurface& surface, const Place& place, const Po
     }
 }
 
+void markReachedByPoint(const TinSurface& surface, const VertexStars& stars, const Point2& position,
+                        std::vector<std::uint8_t>& marks, std::vector<std::uint32_t>* newlyMarked)
+{
+    const auto mark = [&marks, newlyMarked](std::uint32_t t) {
+        if (marks[t] == 0) {
+            marks[t] = 1;
+            if (newlyMarked != nullptr) {
+                newlyMarked->push_back(t);
+            }
+        }
+    };
+    const Place place = placeOf(surface, stars, position);
+    switch (place.kind) {
+    case Place::Kind::Inside:
+        mark(place.triangle);
+        break;
+    case Place::Kind::Edge: {
+        mark(place.triangle);
+        const std::uint32_t across = surface.neighbors()[place.triangle][place.edge];
+        if (across != kNoTriangle) {
+            mark(across);
+        }
+        break;
+    }
+    case Place::Kind::Vertex:
+        for (const std::uint32_t t : stars.of(place.vertex)) {
+            mark(t);
+        }
+        break;
+    case Place::Kind::Outside:
+        break;
+    }
+}
+
 // ---- rebuildPatch -------------------------------------------------------------------------
 
 Result<PatchOutput> rebuildPatch(const TinSurface& surface, const VertexStars& stars,
-                                 PatchRequest request)
+                                 PatchRequest request, const TriangleGrid* grid)
 {
     const std::size_t triangleCount = surface.triangleCount();
     if (request.region.size() != triangleCount) {
@@ -1490,34 +1527,18 @@ Result<PatchOutput> rebuildPatch(const TinSurface& surface, const VertexStars& s
         }
     }
     for (const PatchPoint& point : request.points) {
-        const Place place = placeOf(surface, stars, point.position);
-        switch (place.kind) {
-        case Place::Kind::Inside:
-            region[place.triangle] = 1;
-            break;
-        case Place::Kind::Edge: {
-            region[place.triangle] = 1;
-            const std::uint32_t across = surface.neighbors()[place.triangle][place.edge];
-            if (across != kNoTriangle) {
-                region[across] = 1;
-            }
-            break;
-        }
-        case Place::Kind::Vertex:
-            for (const std::uint32_t t : stars.of(place.vertex)) {
-                region[t] = 1;
-            }
-            break;
-        case Place::Kind::Outside:
-            break;
-        }
+        markReachedByPoint(surface, stars, point.position, region);
     }
     if (!request.lines.empty() || !request.cuts.empty()) {
-        const TriangleGrid grid(surface);
+        std::optional<TriangleGrid> own;
+        if (grid == nullptr) {
+            own.emplace(surface);
+            grid = &*own;
+        }
         for (const auto* segments : {&request.lines, &request.cuts}) {
             for (const PatchSegment& segment : *segments) {
-                grid.markAlong(request.points[segment.from].position,
-                               request.points[segment.to].position, region);
+                grid->markAlong(request.points[segment.from].position,
+                                request.points[segment.to].position, region);
             }
         }
     }

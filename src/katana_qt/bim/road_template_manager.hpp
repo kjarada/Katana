@@ -32,10 +32,19 @@
 //   roadTemplateRename          ROADTEMPLATE RENAME <chosen> "name"
 //   roadTemplateDelete          ROADTEMPLATE DELETE <chosen>
 //   roadTemplateDefaults        ROADTEMPLATE DEFAULTS
-//   roadTemplateComponents      side, name, kind, width, crossfall, layer, and what
-//                               else it is; width, crossfall and layer edited in place
+//   roadTemplateFile            the file Export writes and Import reads (a text box: a
+//                               headless run has no file dialog)
+//   roadTemplateBrowse          a file dialog for it (none in a headless run)
+//   roadTemplateOverwrite       replace what is there: a file on Export, the templates of the
+//                               same name on Import (the line gets OVERWRITE)
+//   roadTemplateExport          ROADTEMPLATE EXPORT <chosen> "file" [OVERWRITE]
+//   roadTemplateExportAll       ROADTEMPLATE EXPORT ALL "file" [OVERWRITE]
+//   roadTemplateImport          ROADTEMPLATE IMPORT "file" [OVERWRITE]
+//   roadTemplateComponents      side, name, kind, width, crossfall, layer, faces (a kerb's:
+//                               inward or outward), and what else it is; width, crossfall,
+//                               layer and a kerb's faces edited in place
 //   roadTemplateApplyComponents ROADTEMPLATE SET <t> side:name width= crossfall= layer=
-//                               [side:name ...], one line for every row edited
+//                               [faces=] [side:name ...], one line for every row edited
 //   roadTemplateRevertComponents  the grid as the drawing holds it again
 //   roadTemplateAddSide         left, right or both
 //   roadTemplateAddKind         lane, shoulder, kerb, footpath, verge, median, drain, batter
@@ -75,6 +84,8 @@ struct RoadTemplateManagerContext {
     // The window's one executor. May be empty: the dialog then says it
     // cannot run the line.
     CommandRunner run{};
+    // True in a headless session, which opens no file dialog. May be empty.
+    std::function<bool()> headless{};
 };
 
 // No Q_OBJECT: it connects to lambdas, which keeps moc out of it.

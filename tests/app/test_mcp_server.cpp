@@ -656,6 +656,81 @@ TEST_F(McpServer, TheLeadersToolGivesWhatEachLeaderSaysAndThePresets)
     EXPECT_TRUE(call("katana_leaders", Json{{"ids", {"two"}}})["isError"].get<bool>());
 }
 
+// katana_leaders takes the one scope and filter grammar as parameters
+// (CLAUDE.md 1.1), reads the leaders the scope took, and says how many. By
+// hand: points 1 (0,0) and 2 (50,50); on layer notes the leaders 3 (0,0)-(5,5)
+// and 4 (50,50)-(55,55); on layer 0 the leader 5 (100,100)-(110,110).
+TEST_F(McpServer, TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"LAYER NEW notes", "POINT 0,0", "POINT 50,50", "LAYER SET notes",
+                                  "LEADER 0,0 5,5 text=A", "LEADER 50,50 55,55 text=B",
+                                  "LAYER SET 0", "LEADER 100,100 110,110 text=C"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::size_t steps = session.document().history().undoCount();
+    const auto idsOf = [](const Json& reply) {
+        std::vector<long long> ids;
+        for (const Json& leader : reply["structuredContent"]["leaders"]) {
+            ids.push_back(leader["id"].get<long long>());
+        }
+        return ids;
+    };
+
+    // A layer: the two on notes, and the scope says so.
+    const Json layers =
+        call("katana_leaders", Json{{"scope", "layers"}, {"scope_layers", {"notes"}}});
+    ASSERT_FALSE(layers["isError"].get<bool>()) << textOf(layers);
+    EXPECT_EQ(idsOf(layers), (std::vector<long long>{3, 4}));
+    EXPECT_EQ(layers["structuredContent"]["scope"]["matched"], 2);
+    EXPECT_EQ(layers["structuredContent"]["scope"]["record"],
+              "scope=layers layers=notes sublayers=yes matched=2");
+
+    // An area given alone is the scope: -1,-1,10,10 overlaps only leader 3.
+    const Json area = call("katana_leaders", Json{{"area", {-1, -1, 10, 10}}});
+    ASSERT_FALSE(area["isError"].get<bool>()) << textOf(area);
+    EXPECT_EQ(idsOf(area), (std::vector<long long>{3}));
+    EXPECT_EQ(area["structuredContent"]["scope"]["record"], "scope=area area=-1,-1,10,10 matched=1");
+
+    // The whole drawing, with a filter: the leaders on layer 0 are leader 5.
+    const Json where = call("katana_leaders", Json{{"scope", "drawing"},
+                                                   {"scope_where", {"LAYER=0"}}});
+    EXPECT_EQ(idsOf(where), (std::vector<long long>{5}));
+
+    // A scope that takes no leader gives none - not all of them.
+    const Json none = call("katana_leaders", Json{{"scope", "drawing"},
+                                                  {"scope_where", {"TYPE=point"}}});
+    ASSERT_FALSE(none["isError"].get<bool>()) << textOf(none);
+    EXPECT_TRUE(none["structuredContent"]["leaders"].empty()) << none.dump();
+    EXPECT_EQ(none["structuredContent"]["scope"]["matched"], 0);
+    // A filter alone filters the selection, which is empty.
+    const Json selection = call("katana_leaders", Json{{"scope_where", {"TYPE=point"}}});
+    EXPECT_TRUE(selection["structuredContent"]["leaders"].empty());
+    EXPECT_EQ(selection["structuredContent"]["scope"]["matched"], 0);
+
+    // No scope: all three, and no scope member.
+    const Json all = call("katana_leaders");
+    EXPECT_EQ(idsOf(all), (std::vector<long long>{3, 4, 5}));
+    EXPECT_FALSE(all["structuredContent"].contains("scope"));
+    // target narrows a scope too: none of these three is on an entity.
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "drawing"}, {"target", 1}})
+                    ["structuredContent"]["leaders"]
+                        .empty());
+
+    // The refusals: ids and a scope; a layer that is not there; VIEW, which is
+    // the window's; an area that is not four numbers.
+    EXPECT_TRUE(call("katana_leaders", Json{{"ids", {3}}, {"scope", "drawing"}})["isError"]
+                    .get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "layers"}, {"scope_layers", {"nowhere"}}})
+                    ["isError"]
+                        .get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "view"}})["isError"].get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "area"}, {"area", {1, 2}}})["isError"]
+                    .get<bool>());
+    EXPECT_EQ(session.document().history().undoCount(), steps) << "a read is no step";
+}
+
 TEST_F(McpServer, AScriptsIndentedNoteRunsNothing)
 {
     // A line whose first non-blank is '#' is a note, as File > Run Script
@@ -2532,6 +2607,36 @@ TEST_F(McpServer, ContoursOfASurfaceAreDrawnThroughTheCommandTool)
     EXPECT_NE(reply.find("layer=terrain/contours"), std::string::npos) << reply;
 }
 
+// A plot's preflight reaches an agent through the command tool: PLOT and
+// PLOTSHEETS are the window's (they paint), but SHEETS CHECK is a session line,
+// and it warns of a surface whose style's contours are too fine to trace - an
+// interval of 0.0005 over the terrain crosses its triangles more than four
+// million times, so a plot would print without them - naming the surface, the
+// style and why (docs/plotting.md, "Preflight checks"). The sheet's plan,
+// 1:1000 about (85, 62), shows the terrain, which covers -4.25 to 174.25 across
+// and -4.25 to 129.25 up.
+TEST_F(McpServer, TheSheetChecksWarnOfASurfaceWhoseContoursAreTooFineToPlot)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json checked = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+               "SURFACESTYLE NEW Fine FROM Contours interval=0.0005", "SURFACE STYLE ground Fine",
+               "SHEET NEW PLAN", "VIEW ADD 1 plan scale=1000 centre=85,62", "SHEETS CHECK"}}});
+    ASSERT_FALSE(checked["isError"].get<bool>()) << textOf(checked);
+    const Json& lines = checked["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 6U);
+    const std::string reply = lines[5]["output"].get<std::string>();
+    EXPECT_NE(reply.find("warning plan.surface-style 1 vp1 message=\""), std::string::npos) << reply;
+    EXPECT_NE(reply.find("the surface ground (style Fine) without part of its style: contours: an "
+                         "interval of 0.000500 crosses this surface's triangles more than 4000000 times"),
+              std::string::npos)
+        << reply;
+    EXPECT_NE(reply.find(" subject=\"ground\""), std::string::npos) << reply;
+}
+
 // T2: a shading is a derived reference raster, which katana_terrain_list
 // then lists with the line that made it.
 TEST_F(McpServer, AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster)
@@ -2634,6 +2739,38 @@ TEST_F(McpServer, ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads)
     EXPECT_NEAR(surfaces[0]["zmin"].get<double>(), 25.892, 1e-6);
     EXPECT_NEAR(surfaces[0]["zmax"].get<double>(), 39.819, 1e-6);
 }
+
+// DELETE BREAKLINE and MOVE POINT are lines like the other edits, so an agent
+// reaches them by katana_run_commands and reads their records
+// (docs/surface_editing.md): the row y = 51.25 of the sample's lattice from x =
+// 0.25 to 99.25 is 66 edges of a breakline, cleared by the same line; the
+// vertex (49.75, 51.25) in the middle of it, which MOVE POINT refused while the
+// breakline stood, then moves, its level kept (the vertex count is the sample's
+// 10 800 before and after).
+TEST_F(McpServer, AnAgentClearsABreaklineAndMovesAVertexByTheSurfaceEditLines)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json edited =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                    "SURFACE EDIT ground BREAKLINE 0.25,51.25 99.25,51.25",
+                    "SURFACE EDIT ground DELETE BREAKLINE 0.25,51.25 99.25,51.25",
+                    "SURFACE EDIT ground MOVE POINT 49.75,51.25 TO 49.9,51.4"}}});
+    ASSERT_FALSE(edited["isError"].get<bool>()) << textOf(edited);
+    const Json& commands = edited["structuredContent"]["commands"];
+    ASSERT_EQ(commands.size(), 4U) << commands.dump();
+    const std::string cleared = commands[2]["output"].get<std::string>();
+    EXPECT_NE(cleared.find("operation=delete_breakline"), std::string::npos) << cleared;
+    EXPECT_NE(cleared.find("edges_cleared=66 edges_held=0 changed=yes"), std::string::npos)
+        << cleared;
+    const std::string moved = commands[3]["output"].get<std::string>();
+    EXPECT_NE(moved.find("operation=move_point"), std::string::npos) << moved;
+    EXPECT_NE(moved.find("vertices_before=10800 vertices_after=10800"), std::string::npos) << moved;
+    EXPECT_NE(moved.find("moved=1"), std::string::npos) << moved;
+    EXPECT_NE(moved.find("changed=yes"), std::string::npos) << moved;
+}
 #endif
 
 // IFC through the one door an agent has: the lines File > Export IFC and
@@ -2732,6 +2869,43 @@ TEST_F(McpServer, AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord)
     EXPECT_FALSE(std::filesystem::exists(file));
 }
 
+// Road templates move between drawings through a file by their own lines
+// (docs/road_design.md, "Template files"): ROADTEMPLATE EXPORT writes the JSON
+// ROADTEMPLATE JSON prints, IMPORT reads it back as one step, refusing a name
+// the drawing has unless OVERWRITE replaces it. An agent has no other door to
+// the file than these lines.
+TEST_F(McpServer, AnAgentMovesRoadTemplatesThroughAFileByTheirLines)
+{
+    initialize();
+    const TempDir dir("road-templates");
+    const std::string file = dir.file("templates.json");
+    const Json written = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"ROADTEMPLATE DEFAULTS", "ROADTEMPLATE SET \"urban street\" lane width=3.6",
+               "ROADTEMPLATE EXPORT ALL \"" + file + "\""}}});
+    ASSERT_FALSE(written["isError"].get<bool>()) << textOf(written);
+    EXPECT_NE(textOf(written).find(" templates=3"), std::string::npos) << textOf(written);
+    ASSERT_TRUE(std::filesystem::exists(file));
+
+    // The drawing has all three: refused whole, and said how to replace.
+    const Json refused =
+        call("katana_run_commands", Json{{"commands", {"ROADTEMPLATE IMPORT \"" + file + "\""}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("OVERWRITE replaces them"), std::string::npos)
+        << textOf(refused);
+    // A second export is refused too, until OVERWRITE says so.
+    const Json again = call(
+        "katana_run_commands", Json{{"commands", {"ROADTEMPLATE EXPORT ALL \"" + file + "\""}}});
+    EXPECT_TRUE(again["isError"].get<bool>());
+    const Json replaced = call(
+        "katana_run_commands",
+        Json{{"commands", {"ROADTEMPLATE IMPORT \"" + file + "\" OVERWRITE"}}});
+    ASSERT_FALSE(replaced["isError"].get<bool>()) << textOf(replaced);
+    EXPECT_NE(textOf(replaced).find("templates=3 added=0 replaced=3"), std::string::npos)
+        << textOf(replaced);
+}
+
 #if defined(KATANA_TEST_WITH_INTEROP)
 // katana_export of an .ifc hands its records as objects under their whole
 // kind: "ifc exported", with a file field - read as the kind "ifc" and a
@@ -2776,6 +2950,38 @@ TEST_F(McpServer, AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool)
                          "cut=0.000 fill=16.000 net=16.000 area=16.000"),
               std::string::npos)
         << reply;
+}
+
+// Sections round a curve carry the Pappus correction, and the reply says so: a 1 m
+// slab over [0, 200]^2 and the alignment 20,20 - 180,20 - 180,180 with a curve of
+// radius 40, a strip 10 wide on its inside (the centre is on the left): the tangents
+// hold 120 x 10 = 1200 m^3 each and the curve (pi/4)(40^2 - 30^2) = 175 pi = 549.779,
+// 2949.779 in all, 25 pi = 78.540 less than the 3028.319 along the centreline, which
+// curvature=off gives.
+TEST_F(McpServer, SectionsRoundACurveSayWhetherTheyWereCorrectedForCurvatureAndByHowMuch)
+{
+    initialize();
+    const Json ran = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LAYER NEW base", "LAYER SET base",
+               "PLINE3D 0,0,10 200,0,10 200,200,10 0,200,10 CLOSE", "LAYER NEW top",
+               "LAYER SET top", "PLINE3D 0,0,11 200,0,11 200,200,11 0,200,11 CLOSE",
+               "SURFACE FROM LAYERS base ONLY NAME base", "SURFACE FROM LAYERS top ONLY NAME top",
+               "ALIGN NEW cl 20,20 180,20 180,180", "ALIGN SET cl 1 40",
+               "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=10 right=0",
+               "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=10 right=0 curvature=off"}}});
+    ASSERT_FALSE(ran["isError"].get<bool>()) << textOf(ran);
+    const Json& lines = ran["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 12U);
+    const std::string corrected = lines[10]["output"].get<std::string>();
+    EXPECT_NE(corrected.find("curvature=on"), std::string::npos) << corrected;
+    EXPECT_NE(corrected.find("fill=2949.779"), std::string::npos) << corrected;
+    EXPECT_NE(corrected.find("curvature.fill=-78.540"), std::string::npos) << corrected;
+    const std::string plain = lines[11]["output"].get<std::string>();
+    EXPECT_NE(plain.find("curvature=off"), std::string::npos) << plain;
+    EXPECT_NE(plain.find("fill=3028.319"), std::string::npos) << plain;
+    EXPECT_EQ(plain.find("curvature.fill"), std::string::npos) << plain;
 }
 #endif
 // ---- end of volumes ----
@@ -2825,5 +3031,78 @@ TEST_F(McpServer, TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProb
     ASSERT_EQ(after["problems"].size(), 1U);
     EXPECT_NE(after["problems"][0]["message"].get<std::string>().find("does not exist"),
               std::string::npos);
+}
+
+// The same tool, given the shared scope and filter: the barrier (20 m, offset 4,
+// layer road/objects/barrier) and the sign (station 50, offset 4, layer
+// road/objects/sign) on a straight alignment from (0,0) to (100,0). The sign
+// stands within a metre of (50, 4) and the barrier lies from x = 0 to 20, so the
+// box 45,0,55,10 takes the sign alone.
+TEST_F(McpServer, TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItTook)
+{
+    initialize();
+    const Json placed = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"ALIGN NEW Main 0,0 100,0", "ALIGN DESIGN Main 0,10 100,10",
+               "ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4",
+               "ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4"}}});
+    ASSERT_FALSE(placed["isError"].get<bool>()) << textOf(placed);
+    const auto ids = [](const Json& result) {
+        std::string out;
+        for (const Json& object : result["structuredContent"]["objects"]) {
+            out += (out.empty() ? "" : ",") + object["id"].get<std::string>();
+        }
+        return out;
+    };
+
+    // No scope: both, and no "scope" member.
+    const Json everything = call("katana_road_objects");
+    EXPECT_EQ(ids(everything), "barrier-1,sign-2");
+    EXPECT_FALSE(everything["structuredContent"].contains("scope"));
+
+    // Layers: the sign's, with the record a ROADOBJECT LIST would lead with.
+    const Json byLayer = call("katana_road_objects",
+                              Json{{"scope", "layers"}, {"layers", {"road/objects/sign"}}});
+    ASSERT_FALSE(byLayer["isError"].get<bool>()) << textOf(byLayer);
+    EXPECT_EQ(ids(byLayer), "sign-2");
+    EXPECT_EQ(byLayer["structuredContent"]["scope"]["record"],
+              "scope=layers layers=road/objects/sign sublayers=yes matched=1");
+    EXPECT_EQ(byLayer["structuredContent"]["scope"]["matched"], 1);
+    EXPECT_EQ(byLayer["structuredContent"]["scope"]["unmade"], 0);
+
+    // An area alone is the scope; its box takes the sign.
+    const Json byArea = call("katana_road_objects", Json{{"area", {45, 0, 55, 10}}});
+    ASSERT_FALSE(byArea["isError"].get<bool>()) << textOf(byArea);
+    EXPECT_EQ(ids(byArea), "sign-2");
+    EXPECT_EQ(byArea["structuredContent"]["scope"]["record"],
+              "scope=area area=45,0,55,10 matched=1");
+
+    // "where" with "scope": drawing filters the whole drawing; alone it filters
+    // the selection, which holds no road object.
+    const Json barriers = call("katana_road_objects", Json{{"scope", "drawing"},
+                                                           {"where", {"PROP=kind:barrier"}}});
+    ASSERT_FALSE(barriers["isError"].get<bool>()) << textOf(barriers);
+    EXPECT_EQ(ids(barriers), "barrier-1");
+    const Json selected = call("katana_road_objects", Json{{"where", {"PROP=kind:barrier"}}});
+    EXPECT_EQ(ids(selected), "");
+    EXPECT_EQ(selected["structuredContent"]["scope"]["record"],
+              "scope=selection where=\"PROP=kind:barrier\" matched=0");
+
+    // Taking nothing is a reply, not an error.
+    const Json nothing = call("katana_road_objects", Json{{"area", {200, 200, 300, 300}}});
+    ASSERT_FALSE(nothing["isError"].get<bool>()) << textOf(nothing);
+    EXPECT_TRUE(nothing["structuredContent"]["objects"].empty());
+
+    // What is wrong is refused, naming it.
+    const Json missing = call("katana_road_objects",
+                              Json{{"scope", "layers"}, {"layers", {"nosuch"}}});
+    EXPECT_TRUE(missing["isError"].get<bool>());
+    EXPECT_NE(textOf(missing).find("nosuch"), std::string::npos) << textOf(missing);
+    const Json entity = call("katana_road_objects", Json{{"scope", "drawing"},
+                                                         {"where", {"TYPE=point"}}});
+    EXPECT_TRUE(entity["isError"].get<bool>());
+    EXPECT_NE(textOf(entity).find("TYPE"), std::string::npos) << textOf(entity);
+    EXPECT_TRUE(call("katana_road_objects", Json{{"layers", {"road"}}})["isError"].get<bool>());
 }
 // ---- end road objects ----

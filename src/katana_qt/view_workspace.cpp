@@ -143,6 +143,24 @@ class ViewWorkspace::VerbHost final : public katana::cad::ViewVerbHost {
     }
     void changed(const std::vector<ViewId>& ids) override { workspace_.linkChanged(ids); }
     void settingsChanged(ViewId id) override { workspace_.viewSettingsChanged(id); }
+    bool hasReference(std::uint64_t id) override
+    {
+        const katana::interop::ReferenceData* reference = workspace_.referenceData();
+        if (reference == nullptr) {
+            return false;
+        }
+        for (const auto& raster : reference->rasters()) {
+            if (raster.id == id) {
+                return true;
+            }
+        }
+        for (const auto& cloud : reference->pointClouds()) {
+            if (cloud.id == id) {
+                return true;
+            }
+        }
+        return false;
+    }
 
   private:
     ViewWorkspace& workspace_;
@@ -944,7 +962,8 @@ void ViewWorkspace::setSceneOptions(const katana::cad::SceneOptions& options)
     }
 }
 
-bool ViewWorkspace::showSection(katana::cad::Section section)
+bool ViewWorkspace::showSection(katana::cad::Section section,
+                                std::optional<katana::cad::SectionDesign> design)
 {
     ViewState& state = ensureView(ViewKind::Section);
     SectionViewWidget* view = sectionView(state.id);
@@ -952,7 +971,37 @@ bool ViewWorkspace::showSection(katana::cad::Section section)
         return false;
     }
     view->setSection(std::move(section));
+    state.sectionDesign = std::move(design);
     return true;
+}
+
+ViewWorkspace::SectionRecut ViewWorkspace::recutSections(const SectionCutter& cutter)
+{
+    SectionRecut result;
+    const std::uint64_t generation = document_.surfacesGeneration();
+    for (ViewState* state : views_.views()) {
+        if (!state->section.has_value() || state->sectionSurfaces == generation) {
+            continue;
+        }
+        const katana::cad::SectionDesign* design =
+            state->sectionDesign.has_value() ? &*state->sectionDesign : nullptr;
+        // The alignment is read out of the section about to be replaced, so the
+        // cutter has finished with it before it is.
+        auto section = cutter(state->section->alignment, design);
+        if (!section) {
+            result.refused.emplace_back(state->id, section.error());
+            continue;
+        }
+        if (SectionViewWidget* widget = sectionView(state->id)) {
+            widget->replaceSection(std::move(*section));
+        } else {
+            // A section a view turned to another kind keeps, to show again.
+            state->section = std::move(*section);
+            state->sectionSurfaces = generation;
+        }
+        result.cut.push_back(state->id);
+    }
+    return result;
 }
 
 void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
@@ -1174,6 +1223,7 @@ void ViewWorkspace::drawingReplaced()
     // to show again when it turns back.
     for (ViewState* state : views_.views()) {
         state->section.reset();
+        state->sectionDesign.reset();
     }
     for (View& view : docks_) {
         if (view.render != nullptr) {
@@ -1680,6 +1730,41 @@ void ViewWorkspace::viewSettingsChanged(ViewId id)
 void ViewWorkspace::setSelectionGhosts(ViewId id, bool on)
 {
     runViewLine(QString("VIEWS SET %1 ghosts=%2").arg(id).arg(on ? "on" : "off"));
+}
+
+namespace {
+
+// A line that could not be made is a refusal like one the interpreter makes.
+VerbOutcome refusal(const katana::core::Error& error)
+{
+    VerbOutcome outcome;
+    outcome.error = QString::fromStdString(error.describe());
+    return outcome;
+}
+
+} // namespace
+
+VerbOutcome ViewWorkspace::setViewLayersShown(ViewId id, const std::vector<std::string>& layers,
+                                              bool shown)
+{
+    const auto line = viewLayersLine(shown ? "SHOW" : "HIDE", id, layers);
+    return line ? runner_(*line) : refusal(line.error());
+}
+
+VerbOutcome ViewWorkspace::showEverythingInView(ViewId id)
+{
+    return runner_(QString("VIEWS SHOW %1 ALL").arg(id));
+}
+
+VerbOutcome ViewWorkspace::isolateLayerInView(ViewId id, const std::string& layer)
+{
+    const auto line = viewLayersLine("ISOLATE", id, {layer});
+    return line ? runner_(*line) : refusal(line.error());
+}
+
+VerbOutcome ViewWorkspace::setViewReferenceShown(ViewId id, std::uint64_t reference, bool shown)
+{
+    return runner_(viewReferencesLine(shown ? "SHOW" : "HIDE", id, {reference}));
 }
 
 void ViewWorkspace::pruneViewLayers()

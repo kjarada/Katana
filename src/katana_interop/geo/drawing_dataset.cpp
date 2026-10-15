@@ -20,6 +20,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/layer_path.hpp"
+#include "katana/entity/ring_tags.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::interop::geo {
@@ -42,27 +43,6 @@ using katana::gis::VectorGeometry;
 constexpr std::array<const char*, 5> kBookkeeping{"katana_id", "layer", "style", "colour", "type"};
 
 // ---- entities to features ----------------------------------------------------------------
-
-// A property or a metadata value, as text: IMPORT writes source.ring into an
-// entity's metadata, a result writes gis.ring into its properties.
-std::optional<std::string> tagOf(const Entity& entity, const std::string& key)
-{
-    if (const auto found = entity.properties.find(key); found != entity.properties.end()) {
-        return katana::entity::toString(found->second);
-    }
-    if (const auto found = entity.metadata.find(key); found != entity.metadata.end()) {
-        return katana::entity::toString(found->second);
-    }
-    return std::nullopt;
-}
-
-bool taggedHole(const Entity& entity)
-{
-    const auto isHole = [](const std::optional<std::string>& tag) {
-        return tag && katana::core::lowered(*tag) == "hole";
-    };
-    return isHole(tagOf(entity, "gis.ring")) || isHole(tagOf(entity, "source.ring"));
-}
 
 // One entity's geometry as a ring or a string of points, before it is put in
 // a table.
@@ -257,7 +237,7 @@ std::variant<Shape, std::string> shapeOf(const Entity& entity, const DrawingData
     if (!shape.hasZ && std::ranges::any_of(heights, [](const auto& z) { return z.has_value(); })) {
         ++notes.partial;
     }
-    shape.isHole = shape.kind == GeometryKind::Polygon && taggedHole(entity);
+    shape.isHole = shape.kind == GeometryKind::Polygon && katana::entity::isTaggedHole(entity);
     return shape;
 }
 
@@ -271,71 +251,35 @@ katana::geometry::Polyline2 ringOf(const std::vector<GeoPoint>& points)
     return ring;
 }
 
-// Which polygon a ring came from: gis.part, which a result writes (the
-// exterior's id), or source.part, which IMPORT writes (the file's feature).
-std::optional<std::string> partOf(const Entity& entity)
-{
-    if (auto part = tagOf(entity, "gis.part")) {
-        return part;
-    }
-    return tagOf(entity, "source.part");
-}
-
-// Tagged holes join the area they lie in: the one whose part they share
-// when there is such an area around them, else the smallest around them, and
-// of equals the one made nearest before the hole - the same file imported
-// twice gives two exteriors equal in everything but their ids, and each hole
-// was made just after its own. A hole with no area around it stays an area
-// of its own, and says so.
+// Tagged holes join the area they lie in, by the one rule of entity/ring_tags.hpp
+// (the volume verbs read a lot with a hole the same way). A hole with no area
+// around it stays an area of its own, and says so.
 void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats,
                std::map<EntityId, std::vector<EntityId>>& joined)
 {
     std::vector<std::size_t> areas;
+    std::vector<katana::entity::ExteriorCandidate> exteriors;
     for (std::size_t i = 0; i < shapes.size(); ++i) {
         if (shapes[i].kind == GeometryKind::Polygon && !shapes[i].isHole) {
             areas.push_back(i);
+            exteriors.push_back({shapes[i].entity->id, katana::entity::ringPart(*shapes[i].entity),
+                                 ringOf(shapes[i].points)});
         }
     }
-    std::vector<katana::geometry::Polyline2> rings;
-    rings.reserve(areas.size());
-    for (const std::size_t index : areas) {
-        rings.push_back(ringOf(shapes[index].points));
-    }
+    const katana::entity::HoleJoiner joiner(std::move(exteriors));
     std::size_t lost = 0;
     for (Shape& hole : shapes) {
         if (!hole.isHole) {
             continue;
         }
-        const std::optional<std::string> part = partOf(*hole.entity);
         const EntityId holeId = hole.entity->id;
-        // Made before the hole, and how long before: the nearer the better.
-        const auto before = [holeId](EntityId id) {
-            return id < holeId ? holeId - id : std::numeric_limits<EntityId>::max();
-        };
-        std::optional<std::size_t> best;
-        bool bestSharesPart = false;
-        double bestArea = 0.0;
-        for (std::size_t a = 0; a < areas.size(); ++a) {
-            const bool inside = std::ranges::all_of(hole.points, [&](const GeoPoint& point) {
-                return rings[a].contains(Point2(point.x, point.y));
-            });
-            if (!inside) {
-                continue;
-            }
-            const bool sharesPart = part && partOf(*shapes[areas[a]].entity) == part;
-            const double area = rings[a].area();
-            const bool better =
-                !best || (sharesPart && !bestSharesPart) ||
-                (sharesPart == bestSharesPart &&
-                 (area < bestArea ||
-                  (area == bestArea && before(shapes[areas[a]].entity->id) <
-                                           before(shapes[areas[*best]].entity->id))));
-            if (better) {
-                best = a;
-                bestSharesPart = sharesPart;
-                bestArea = area;
-            }
+        std::vector<Point2> corners;
+        corners.reserve(hole.points.size());
+        for (const GeoPoint& point : hole.points) {
+            corners.emplace_back(point.x, point.y);
         }
+        const std::optional<std::size_t> best =
+            joiner.exteriorOf(corners, holeId, katana::entity::ringPart(*hole.entity));
         if (!best) {
             hole.isHole = false;
             ++lost;

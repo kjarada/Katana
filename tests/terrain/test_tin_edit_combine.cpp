@@ -269,3 +269,61 @@ TEST(TinEditCombine, TwoClipsOfOneSurfaceThatAbutMergeIntoAllOfIt)
         }
     }
 }
+
+TEST(TinEditCombine, APasteWhoseTopHasTwoRimVerticesCloserThanTheToleranceSaysSoNotWhichTriangle)
+{
+    // The top is the rectangle [2.3, 12.3] x [3.7, 13.7] fanned from its
+    // corner 0, and its upper side runs through two vertices 1e-9 m apart,
+    // (8.6, 13.7) and (8.600000001, 13.7) - closer than the coincidence
+    // tolerance, 1e-7 m, so the patch takes them for one point and the sliver
+    // between them, the triangle {0, 5, 4}, names it twice. TinSurface::create
+    // refused that as "triangle names a vertex twice", with the number of a
+    // triangle of the result: the triangle, not the cause. Counter-clockwise,
+    // worked out from corner 0:
+    // {0,2,5} turns by (10,10) x (6.300000001,10) = 37.0 > 0, {0,5,4} by
+    // (6.300000001,10) x (6.3,10) = 1e-8 > 0, {0,4,3} by (6.3,10) x (0,10) = 63.
+    const TinSurface ground = grid(0, 0, 20, 20, 1, 1, 0.0);
+    auto made = TinSurface::create({Point3(2.3, 3.7, 1), Point3(12.3, 3.7, 1), Point3(12.3, 13.7, 1),
+                                    Point3(2.3, 13.7, 1), Point3(8.6, 13.7, 1),
+                                    Point3(8.600000001, 13.7, 1)},
+                                   {TinTriangle{0, 1, 2}, TinTriangle{0, 2, 5}, TinTriangle{0, 5, 4},
+                                    TinTriangle{0, 4, 3}});
+    ASSERT_TRUE(made.ok()) << made.error().describe();
+    const auto pasted = katana::terrain::pasteSurface(ground, *made);
+    ASSERT_FALSE(pasted.ok());
+    EXPECT_EQ(pasted.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(pasted.error().message.find("rim"), std::string::npos) << pasted.error().message;
+    EXPECT_NE(pasted.error().message.find("coincidence tolerance"), std::string::npos)
+        << pasted.error().message;
+    EXPECT_EQ(pasted.error().message.find("names a vertex twice"), std::string::npos)
+        << pasted.error().message;
+    // And which vertices, where.
+    EXPECT_NE(pasted.error().context.find("(8.6, 13.7)"), std::string::npos)
+        << pasted.error().context;
+    EXPECT_NE(pasted.error().context.find("(8.600000001, 13.7)"), std::string::npos)
+        << pasted.error().context;
+}
+
+TEST(TinEditCombine, ATopWhoseRimTouchesItselfAtADuplicatedVertexIsStillPasted)
+{
+    // Two triangles meeting at a point that each give a vertex of their own,
+    // (7.3, 8.7) and (7.300000001, 8.7): they merge into one vertex of the
+    // result, but no top triangle has both, so nothing is degenerate and the
+    // paste is as good as any. Each triangle turns by 50 > 0: (5,5) x (0,10)
+    // and (5,-5) x (5,5). The ground [0,20]^2 is covered all the same: 400.
+    const TinSurface ground = grid(0, 0, 20, 20, 1, 1, 0.0);
+    auto made = TinSurface::create(
+        {Point3(2.3, 3.7, 1), Point3(7.3, 8.7, 1), Point3(2.3, 13.7, 1),
+         Point3(7.300000001, 8.7, 1), Point3(12.3, 3.7, 1), Point3(12.3, 13.7, 1)},
+        {TinTriangle{0, 1, 2}, TinTriangle{3, 4, 5}});
+    ASSERT_TRUE(made.ok()) << made.error().describe();
+    const auto pasted = katana::terrain::pasteSurface(ground, *made);
+    ASSERT_TRUE(pasted.ok()) << pasted.error().describe();
+    EXPECT_NEAR(pasted->surface.planArea(), 400.0, 1e-9);
+    int atThePinch = 0;
+    for (const Point3& v : pasted->surface.vertices()) {
+        atThePinch += (std::abs(v.x - 7.3) < 1e-6 && std::abs(v.y - 8.7) < 1e-6) ? 1 : 0;
+    }
+    EXPECT_EQ(atThePinch, 1) << "the two vertices are one";
+    EXPECT_NEAR(*pasted->surface.elevationAt(4.0, 8.7), 1.0, 1e-12);
+}

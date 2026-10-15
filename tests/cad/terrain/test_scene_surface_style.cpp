@@ -231,7 +231,7 @@ TEST(SceneSurfaceStyle, ASurfaceWithARangeOfItsOwnDoesNotStretchTheOneRamp)
     EXPECT_EQ(layers.rampHigh, 10.0);
 }
 
-TEST(SceneSurfaceStyle, TheLegendIsTheFirstStyledSurfacesColours)
+TEST(SceneSurfaceStyle, ASurfaceInAStyleHasALegendOfItsColoursAndOneWithNoStyleHasTheRampsBar)
 {
     const TinSurface tin = square([](double x, double) { return x; });
     SurfaceDisplayStyle style = styled(SurfaceFaces::Elevation);
@@ -241,17 +241,71 @@ TEST(SceneSurfaceStyle, TheLegendIsTheFirstStyledSurfacesColours)
     SceneBuilder builder;
     SceneLayers layers;
     builder.buildTerrain({itemOf(tin, style)}, {}, unlit(), layers);
-    ASSERT_TRUE(layers.legend.has_value());
-    EXPECT_EQ(layers.legend->title, "Elevation");
-    EXPECT_EQ(layers.legend->entries.size(), 4u);
-    EXPECT_EQ(layers.legendSurface, "ground");
-    EXPECT_EQ(layers.legendStyle, "Bands");
+    ASSERT_EQ(layers.legends.size(), 1u);
+    EXPECT_EQ(layers.legends[0].legend.title, "Elevation");
+    EXPECT_EQ(layers.legends[0].legend.entries.size(), 4u);
+    EXPECT_EQ(layers.legends[0].surface, "ground");
+    EXPECT_EQ(layers.legends[0].style, "Bands");
     // A surface with no style has the one ramp's legend, not this one.
     SceneSurface plain;
     plain.surface = &tin;
     builder.buildTerrain({plain}, {}, unlit(), layers);
-    EXPECT_FALSE(layers.legend.has_value());
+    EXPECT_TRUE(layers.legends.empty());
     EXPECT_TRUE(layers.hasRamp());
+}
+
+TEST(SceneSurfaceStyle, EveryVisibleSurfaceInAColouringStyleHasALegendInDrawingOrderAndNoOtherHasOne)
+{
+    // Five surfaces, in the order they are drawn:
+    //   "first"   elevation in 4 bands          - a legend, titled Elevation, 4 entries;
+    //   "hidden"  the same, but not visible     - not drawn, no legend;
+    //   "plain"   no display style              - the one ramp's bar, no legend;
+    //   "mesh"    a wireframe (its mesh is one grey) - no legend;
+    //   "third"   slope in 5 bands              - a legend, titled Slope %, 5 entries.
+    const TinSurface tin = square([](double x, double) { return x; });
+    SurfaceDisplayStyle bands = styled(SurfaceFaces::Elevation);
+    bands.name = "Bands";
+    bands.banded = true;
+    bands.bands = 4;
+    SurfaceDisplayStyle slope = styled(SurfaceFaces::Slope);
+    slope.name = "Steep";
+    slope.banded = true;
+    slope.bands = 5;
+    SurfaceDisplayStyle outline = styled(SurfaceFaces::Elevation);
+    outline.name = "Outline";
+    outline.shading = SurfaceStyle::Wireframe;
+
+    SceneSurface first = itemOf(tin, bands);
+    first.name = "first";
+    SceneSurface hidden = itemOf(tin, bands);
+    hidden.name = "hidden";
+    hidden.visible = false;
+    SceneSurface plain;
+    plain.name = "plain";
+    plain.surface = &tin;
+    SceneSurface mesh = itemOf(tin, outline);
+    mesh.name = "mesh";
+    SceneSurface third = itemOf(tin, slope);
+    third.name = "third";
+
+    SceneBuilder builder;
+    SceneLayers layers;
+    builder.buildTerrain({first, hidden, plain, mesh, third}, {}, unlit(), layers);
+    ASSERT_EQ(layers.legends.size(), 2u);
+    EXPECT_EQ(layers.legends[0].surface, "first");
+    EXPECT_EQ(layers.legends[0].style, "Bands");
+    EXPECT_EQ(layers.legends[0].legend.title, "Elevation");
+    EXPECT_EQ(layers.legends[0].legend.entries.size(), 4u);
+    EXPECT_EQ(layers.legends[1].surface, "third");
+    EXPECT_EQ(layers.legends[1].style, "Steep");
+    EXPECT_EQ(layers.legends[1].legend.title, "Slope %");
+    EXPECT_EQ(layers.legends[1].legend.entries.size(), 5u);
+
+    // A rebuild starts from nothing: the surfaces taken away, no legend stays.
+    builder.buildTerrain({plain}, {}, unlit(), layers);
+    EXPECT_TRUE(layers.legends.empty());
+    builder.buildTerrain({}, {}, unlit(), layers);
+    EXPECT_TRUE(layers.legends.empty());
 }
 
 TEST(SceneSurfaceStyle, ApplyingAStyleSetsTheShadingAndKeepsACopyOfTheStyle)
@@ -296,7 +350,7 @@ TEST(SceneSurfaceStyle, AWireframeColoursNothingSoItsHeightsStretchNoRampAndAlon
     // by elevation. (It was the old bar, 200 / 100, over a grey mesh.)
     builder.buildTerrain({itemOf(design, outline)}, {}, unlit(), layers);
     EXPECT_FALSE(layers.hasRamp());
-    EXPECT_FALSE(layers.legend.has_value());
+    EXPECT_TRUE(layers.legends.empty());
 
     // And a surface with no style, wireframe, in the scene's own rule from
     // before styles.

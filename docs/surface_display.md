@@ -18,12 +18,13 @@ document is what is DONE with a style.
 
 | Where | What |
 |---|---|
-| `src/katana_cad/terrain/surface_ramps.cpp` | the surface styles' ramp table: `surfaceRampNames`, `surfaceRampColour`, `surfaceRampStops` (RASTER SHADE keeps one of its own: "The ramps") |
+| `include/katana/terrain/colour_ramps.hpp` | THE ramp table, plain data with the source of each ramp's colours: `colourRamps`, `colourRampNames`, `findColourRamp` ("The ramps") |
+| `src/katana_cad/terrain/surface_ramps.cpp` | the surface styles' view of it, in the drawing's colours: `surfaceRampNames`, `surfaceRampStops`, and the lookup arithmetic the 3D kernels are held to (`surfaceRampColour`) |
 | `include/katana/cad/terrain/surface_colouring.hpp` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
 | `include/katana/cad/terrain/surface_plan.hpp` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surfacePlan`, `SurfacePlanCache`) |
 | `include/katana/cad/terrain/surface_display_verbs.hpp` | `SURFACE LEGEND` and `SURFACE PLAN` |
-| `include/katana/cad/scene.hpp` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `applySurfaceDisplay`, `SceneLayers::legend`) |
-| `src/katana_qt/terrain/surface_plan_painter.hpp` | the plan painter's surface layer, and the legend panel both views draw |
+| `include/katana/cad/scene.hpp` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `applySurfaceDisplay`, `SceneLayers::legends`) |
+| `src/katana_qt/terrain/surface_plan_painter.hpp` | the plan painter's surface layer, and the legend panel and the stack of them (`paintSurfaceLegendStack`) both views draw |
 | `src/katana_qt/plan_painter.hpp` | `PlanSource::surfaces`, `PlanPaintOptions::surfaces`, the statistics |
 | `src/katana_qt/terrain/surface_style_manager.hpp` | Terrain > Surface Styles... |
 | `src/katana_qt/terrain/main_window_surface_display.cpp` | the window's wiring: the action, the dialog, the 3D views restyled |
@@ -46,26 +47,63 @@ parameters are filled from the ramp the style names
 | grey | 32, 80, 128, 176, 224 | chosen here: equal steps, so order survives a monochrome plot |
 | spectral | #2b83ba #abdda4 #ffffbf #fdae61 #d7191c | ColorBrewer Spectral, five classes, reversed |
 
-**A second table, on purpose.** `RASTER SHADE` and `RASTER SLOPE` have a ramp
-table of their own (`src/katana_interop/geo/colour_ramps.cpp`, `docs/terrain.md`,
-"Shading") with four of the same names - terrain, diverging, slope and grey -
-and different colours: its terrain is the hypsometric green to white, (38, 115,
-0) to (255, 255, 255), where this one is the 3D scene's deep blue to white; its
-diverging and slope are ColorBrewer's eleven-class RdBu and RdYlGn, where these
-are five-class and the scene's green-yellow-red; its grey runs 0 to 255 where
-this runs 32 to 224. So `ramp=terrain` on a surface style and on `RASTER
-SHADE` are two maps (the legends each prints say which: `SURFACE LEGEND` and
-`RASTER SHADE`'s `legend value=` records), and `RASTER SHADE` takes a GDAL
-colour-map file where a style does not, and refuses `ramp=spectral` and
-`earth` where a style takes them. They are not merged: each table is held to
-its own colours by tests (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
-here, the legend records of `cli.raster_shade_*` and `ShadeVerb` there), and
-which look wins - the 3D view's colours or the shading's - is the owner's to
-say, because either choice moves pictures people have seen. Nothing but that
-choice stops it: both tables are data without GDAL, and the `terrain` layer is
-visible to `cad` and `interop` alike ("Not done"). An earlier version of this
-file and of `surface_ramps.cpp` called this "THE ramp table"; it is the
-surface styles'.
+**One table.** The ramps are rows of `katana::terrain::colourRamps()`
+(`include/katana/terrain/colour_ramps.hpp`, `src/katana_terrain/colour_ramps.cpp`):
+plain data, three bytes a colour, each row with the source of its colours (the
+Source column above is that field). It sits in the `terrain` layer because that
+is the lowest layer both users may see (`tools/check_layering.cmake`: `cad` may
+not see `interop`, and `interop` may not see `render` or `cad`; `core` could
+hold it, but a colour ramp is no concern of `core`). The surface styles read it through
+`cad::surfaceRampStops` (the drawing's `Color`, alpha 255) and `RASTER SHADE` /
+`RASTER SLOPE` through `interop::geo::builtInRamp` (which gives each stop its
+place along the range, 0, 1/4, 1/2, 3/4 and 1, the form GDAL's colour map
+reads); both find a ramp by name through the one lookup, `terrain::findColourRamp`
+(any case), and the style form, the shading dialog and the shading verb's
+refusals list the table's names, so a ramp added to the table is offered
+everywhere without a second edit
+(`ColourRamps.TheShadingsRampsAreTheSurfaceStylesRampsStopForStop`,
+`SurfaceRamps.EveryStyleRampIsTheOneTablesRampAtFullAlphaAndItsNamesAreTheTables`).
+
+Until 2026-10-15 `RASTER SHADE` and `RASTER SLOPE` had a table of their own
+(`src/katana_interop/geo/colour_ramps.cpp`) with four of the same names -
+terrain, diverging, slope and grey - and different colours, so `ramp=terrain`
+was two maps, and an earlier version of this file called the styles' table
+"THE ramp table" while the other existed. Its terrain was the hypsometric green
+to white, (38, 115, 0) to (255, 255, 255); its diverging and slope were
+ColorBrewer's eleven-class RdBu and RdYlGn at five stops; its grey ran 0 to 255
+in two stops; and it refused `ramp=spectral` and `earth`.
+
+**Decided (the owner had not chosen; this was taken to remove the second way of
+doing it, and is the one to reverse if the shading's look is wanted):** the
+surface styles' colours are the table. They are what the person sees in the
+window and in 3D, and the scene's terrain ramp is held to the bit by its
+kernels (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`).
+`RASTER SHADE` and `RASTER SLOPE` adopt them. The old names stay accepted: the
+four names the shading had are in the table, so `ramp=terrain`, `diverging`,
+`slope` and `grey` still work and mean the table's ramps; there is no alias to
+add. `earth` and `spectral` are accepted by the shading now, too. Rejected:
+
+* *The shading's colours win.* The 3D view's elevation colours would change,
+  and with them the scene kernels' constants and the tests that hold them to
+  the bit, for every picture of the window.
+* *Rename one set* (the shading's ramps under other names). It leaves two tables
+  and the second way of doing it, which was the defect.
+* *Keep both and say so,* which is what this section did before.
+
+What changes for a person, plainly: **a raster that `RASTER SHADE` or `RASTER
+SLOPE` wrote before keeps the colours it was written with (a derived reference
+raster is pixels); running the same line now paints it differently.** Terrain is
+deep blue, green, sand, brown and snow where it was green to white; diverging
+is the five-class RdBu (#0571b0 to #ca0020, through #f7f7f7) where it was
+(33, 102, 172) to (178, 24, 43); slope is green to red through yellow at full
+saturation where it was RdYlGn's softer greens and reds, so a class of
+`RASTER SLOPE classes=` takes the table's colour at its place among the classes;
+and grey runs 32 to 224 in five steps, so the darkest cell of a `style=plain`
+picture is a dark grey and not black. Nothing is migrated: a line run again
+restyles. The blending between stops is still each consumer's own: the scene's
+kernels' (`cad::surfaceRampColour`, to the bit) and GDAL's colour map (which
+rounds as GDAL does), so between two stops the two may differ by a level of 255;
+the stops, and the legends that list them, are the same.
 
 The scene's `elevationRampColor` is now the table's terrain ramp, operation
 for operation (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
@@ -291,23 +329,48 @@ Contours whose tracing would make more than four million points
 (`kPlanMaximumContourPoints`, estimated from the levels crossing each
 triangle) are refused for the plan, saying why (`SurfacePlan::problem`): an
 interval a hundredth of what the relief wants would fill memory and the view
-with ink. The reason reaches a person in every place a surface is drawn from:
-`SURFACE PLAN` prints `problem=`; the plan view tells its error hook - the
-command log - once, and again if it goes and returns
-(`PlanPaintStats::surfaceProblems`, `ViewportWidget::reportSurfaceProblems`);
-and its headless report ends with ` problem="ground: contours: an interval of
-... not drawn - set a larger interval"` for each. A plot or sheet paints the
-same stats, but nothing reads them there yet ("Not done"). The refusal used to
-be thrown away on the way from the painter to the view, and the contours
-vanished with no word.
+with ink. The refusal is one function, `cad::contourRefusal`, which the paint
+and the preflight check below both ask, so they cannot disagree. A paint
+reports it as a `cad::SurfaceProblem` - the surface, its style and the reason -
+in `PlanPaintStats::surfaceProblems`, and the reason reaches a person or an
+agent in every place a surface is drawn from:
+
+* `SURFACE PLAN` prints `problem=`;
+* the plan view tells its error hook - the command log - once, and again if
+  it goes and returns (`ViewportWidget::reportSurfaceProblems`), and its
+  headless report ends with ` problem="ground (style Fine): contours: an
+  interval of ... not drawn - set a larger interval"` for each;
+* a sheet viewport adds the same line, `vp1: ground (style Fine): contours:
+  ...`, to the sheet's problems (`SheetPaintStats::problems`): the editor
+  shows it in the viewport's panel, and every plot reports it
+  (`PlotReport::problems`: the Plot dialogs, the editor's message, the lines
+  `PLOTSHEETS` logs). The plan is drawn, only without the contours, and the
+  plot is not refused for it;
+* `PLOT` (File > Plot to PDF, `--plot`) logs a record for each, `warning
+  surface="ground" style="Fine" reason="contours: ..."`, between its sentence
+  and its `file=` record, and the dialog shows them (`plotDrawingWarnings`);
+* and before any paint the preflight finds it: `plan.surface-style` of
+  `SHEETS CHECK` (the editor's Checks dock and the check before Plot Sheet),
+  fed by `cad::surfaceStyleProblems`, which needs no painter - so
+  `katana_cli` and `katana_mcp`, which cannot plot, have the warning with the
+  surface as `subject=` (`docs/plotting.md`, "Preflight checks").
+
+The refusal used to be thrown away on the way from the painter to the view,
+and then, on a plot or a sheet, which paint the same stats and read nothing
+from them: the contours vanished with no word. Rejected: a structured list on
+`SheetPaintStats` beside its text lines - the problems already reach three
+consumers as text, and the structured form an agent reads is the preflight
+finding; and refusing the plot, which wastes no paper that the warning does
+not already save.
 
 ### The legend
 
 On screen, over everything in the view's top-right corner, the legend of each
 drawn surface whose style colours its faces - at most three, stacked
 (`PlanPaintOptions::surfaceLegends`). Each is measured before it is drawn
-(`measureSurfaceLegend`, the one layout `paintSurfaceLegend` draws): the first
-is drawn whatever its height, and a later one that would not fit above the
+(`measureSurfaceLegend`, the one layout `paintSurfaceLegend` draws, and
+`paintSurfaceLegendStack`, the stack the 3D view's legends go through too):
+the first is drawn whatever its height, and a later one that would not fit above the
 view's foot is left out and not counted - a key with its lowest rows cut off
 by the edge reads as a key that ends there (`SurfacePlanPainter.ALegendTooTallForTheViewBelowTheOnesAlreadyDrawnIsLeftOutNotCutOff`;
 three 10-band legends are about 500 px). It is drawn into the kept drawing,
@@ -365,10 +428,26 @@ along it (`SceneSurfaceStyle.AWireframeColoursNothingSoItsHeightsStretchNoRampAn
 
 A style on the terrain ramp draws exactly what the scene drew before
 (`SceneSurfaceStyle.AStyleOnTheTerrainRampColoursASurfaceAsTheSceneAlwaysDid`).
-`SceneLayers::legend` is the legend of the first drawable surface whose style
-colours its faces by value or aspect, as drawn; `RenderViewWidget` draws it
-with the plan view's legend panel, and the old elevation bar for surfaces with
-no style.
+`SceneLayers::legends` are the legends of the drawable surfaces whose styles
+colour their faces by value or aspect, in drawing order, each as drawn
+(`SurfaceLegendCard`: the surface, its style, the legend). A hidden surface, a
+wireframe and a surface with no style have none. `RenderViewWidget` stacks
+them down the top-right corner with the plan view's own stack
+(`paintSurfaceLegendStack`, one function for both views, so they measure, fit
+and leave out alike), each captioned "surface - style"; with none, the old
+elevation bar is drawn for surfaces with no style. It used to draw the first
+styled surface's legend only, so a second styled surface's colours could not
+be read. The plan view keeps its three, over the drawing a person is editing;
+the 3D view is limited by room alone: a later legend that would not fit above
+the foot of the view is left out whole and ends the stack
+(`SurfaceLegend3D.MoreLegendsThanTheViewHoldsAreLeftOutWholeNotCutOffOrOverlapped`),
+and the scene keeps them all (`SceneLayers::legends`). Rejected: the plan
+view's cap of three here too, which would leave a fourth styled surface
+unreadable in a view with the room for it. The headless report of a 3D view
+says what it stacked, after its camera: `legends=2 legend="ground - Elevation
+Bands" legend="second - Slope Bands"`, nothing when it drew none
+(`RenderViewWidget::drawnLegends`,
+`qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless`).
 
 The window styles its 3D surfaces from the drawing's styles
 (`MainWindow::styleSceneSurfaces`) when it rebuilds them
@@ -478,7 +557,14 @@ handler, as the other JSON replies are, so a surface or style name with a byte
 that is not UTF-8 is U+FFFD in the reply and not an exception that ends
 katana_cli (`SurfaceStore::checkName` and `checkSurfaceStyle` refuse such a
 name where it enters; this is for one that got past; `docs/headless.md`, "Text
-and names").
+and names"). The guard is reached through a seam: the reply is made of a
+plain-data `SurfaceLegendReply` and written by `cad::surfaceLegendJson`, so a
+test hands it the name the store would refuse and reads back U+FFFD and no
+exception (`SurfaceDisplayVerbs.LegendJsonWritesABadByteOfANameOrLabelAsU_FFFDAndDoesNotThrow`).
+A mutation check of 2026-10-15 had put the strict `dump` back and every test
+of the verb still passed, because no API puts such a name into a Document; the
+strict `dump` throws on these bytes (nlohmann's type_error 316), which the
+test's `EXPECT_NO_THROW` would report.
 
 ## Speed
 
@@ -579,6 +665,22 @@ another build with `tools/compare_benchmarks.py --alternate`.
   and the surfaced problem in `test_surface_plan_painter.cpp`; the form's
   boxes and a refused name in `test_surface_style_manager.cpp`; the empty hint
   and the reported problem in `test_plan_view.cpp`.
+* Added with the follow-up of the same day (what each proves is named where it
+  is described above): `SurfaceProblems.*` in `test_surface_plan.cpp` (the
+  refusal at either side of the limit, an interval that is no number, a level
+  surface, the plan's and the check's one answer, the line and the record, the
+  styles of a drawing's surfaces without painting); `SheetPainter.*` problems,
+  `PlanPainter.ASinglePagePlotHandsBack...` and `PlotDrawingDialog.TheWarningRecords...`
+  in the widget tests; `plan.surface-style` in `test_preflight.cpp` and
+  `test_sheet_agent_verbs.cpp`; `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`,
+  `qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`; the 3D
+  legends: `SceneSurfaceStyle.EveryVisibleSurfaceInAColouringStyleHasALegendInDrawingOrderAndNoOtherHasOne`
+  (two styled, one hidden, one unstyled, one wireframe), `SurfaceLegend3D.*`
+  (stacked in order and not overlapping; none styled keeps the bar; more than fit
+  are left out whole) and the headless report; the one ramp table:
+  `ColourRamps.*` in `tests/terrain/test_colour_ramps.cpp`,
+  `ColourRamps.TheShadingsRampsAreTheSurfaceStylesRampsStopForStop` and the
+  `ShadeVerb` tests that read the table's colours.
 * `qt_a_surface_is_drawn_in_plan_in_its_style_headless` - the sample terrain
   in the real window in Standard, Triangles and Elevation Bands, each paint's
   report read against the first; `qt_the_surface_style_manager_runs_its_lines_headless`.
@@ -621,21 +723,19 @@ another build with `tools/compare_benchmarks.py --alternate`.
 * **The rasteriser's tie rule is the top-left rule**, not vertex numbers.
 * **A range that is a point keeps a value's side of it** (and slope's point is
   the ramp's start), rather than the one middle colour for everything.
-* **Two ramp tables stay two** until the owner chooses whose colours win
-  ("The ramps", "Not done").
+* **One ramp table, in the `terrain` layer, with the surface styles' colours**
+  ("The ramps"). Rejected: letting the shading's colours win, renaming one set,
+  and keeping two.
 
 ## Not done
 
-* `SURFACE LEGEND JSON` (and `LEADER LIST JSON`, docs/annotation.md) write
-  U+FFFD for a byte of a name that is not UTF-8 instead of throwing, as a second
-  line behind `SurfaceStore::checkName` and the repair on open. No test reaches
-  that guard: nothing puts such a name into a Document any more. A mutation check
-  (2026-10-15) put the strict `dump` back in both and every test still passed, so
-  those two verbs are protected at the door only; a test needs a seam that skips
-  `SurfaceStore::add`.
 * A legend on a plot or sheet (a sheet's title-block legend), and a View
   menu switch to hide the screen legend (today: a style without faces has
-  none).
+  none). The pieces exist - `cad::SurfaceLegendCard` is plain data, and
+  `paintSurfaceLegendStack` takes any painter - but where a sheet keeps one is
+  undecided: a line of the smart legend (`computeLegend`), an option of the
+  plan viewport (a change to the sheet set's schema, on every surface at once),
+  or a block of the title block; a plot made by `PLOT` has no sheet to hold it.
 * The plan view's faces are not shaded (no hillshade in plan); a hillshade
   face colouring would be a fifth `SurfaceFaces` value and a contract change.
 * Smooth elevation in plan evaluates the ramp at every pixel; a lookup table
@@ -645,15 +745,13 @@ another build with `tools/compare_benchmarks.py --alternate`.
   slope of each face could be kept with the surface.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
   batters and flat pads they go from the flats when the batters crowd them.
-* The 3D view's legend shows the first styled surface only.
-* `RASTER SHADE` / `RASTER SLOPE` and the surface styles keep separate ramp
-  tables whose terrain, diverging, slope and grey differ in colour ("The
-  ramps"). One data table below both layers, with a decision about whose
-  colours stay, would remove the second way of doing it; it moves pictures
-  either way, so it is not done.
-* The contours refused for the plan are told to the plan view's log and its
-  headless report; a plot or a sheet viewport paints the same stats
-  (`PlanPaintStats::surfaceProblems`) and nothing there reads them, so a plot
-  of a style with too-fine contours is still silent.
+* `RASTER ASPECT` colours the eight compass directions with a constant of its
+  own (`src/katana_app/geo/slope_verbs.cpp`), which is neither the aspect wheel
+  a surface style uses (`aspectSectorColour`) nor a row of the ramp table: two
+  palettes for aspect.
+* `PLOTSHEETS` reports a surface style it could not draw as one of the
+  sheets' problem lines (`vp1: ground (style Fine): ...`), as every problem
+  of a sheet is, not as a `warning surface= style= reason=` record as `PLOT`
+  does; the record form of a sheet's problems is `SHEETS CHECK`'s finding.
 * Labels are not kept off each other or off the drawing's own labels (the
   label placer, `docs/annotation.md`, places entity labels only).

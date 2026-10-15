@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <vector>
 
@@ -26,7 +27,6 @@ using katana::cad::road::isClosedMesh;
 using katana::geometry::meshVolume;
 using katana::cad::road::PathPoint;
 using katana::cad::road::regularPolygon;
-using katana::cad::road::triangulatePolygon;
 using katana::geometry::Point2;
 using katana::geometry::Point3;
 using katana::geometry::TriangleMesh;
@@ -34,14 +34,6 @@ using katana::geometry::Vec2;
 using katana::geometry::Vec3;
 
 namespace {
-
-double triangleArea(const std::vector<Point2>& polygon, const std::array<std::uint32_t, 3>& face)
-{
-    const Point2& a = polygon[face[0]];
-    const Point2& b = polygon[face[1]];
-    const Point2& c = polygon[face[2]];
-    return (b - a).cross(c - a) / 2.0;
-}
 
 // Whether the mesh has a vertex at (x, y, z), to a picometre.
 bool hasVertex(const TriangleMesh& mesh, double x, double y, double z)
@@ -87,59 +79,90 @@ TEST(RoadObjectMesh, AVolumeFarFromTheOriginKeepsItsDigits)
     EXPECT_NEAR(meshVolume(mesh), 24.0, 1e-6);
 }
 
-TEST(RoadObjectMesh, AConcavePolygonTriangulatesIntoItsAreaWithTwoFewerTrianglesThanCorners)
+TEST(RoadObjectMesh, AConcavePolygonIsCappedIntoItsAreaWithTwoFewerTrianglesThanCorners)
 {
     // An inverted T - a retaining wall's stem on its footing: the footing
-    // 1.2 x 0.4 and the stem 0.25 x 2.0 make 0.48 + 0.5 = 0.98.
+    // 1.2 x 0.4 and the stem 0.25 x 2.0 make 0.48 + 0.5 = 0.98. A prism of it
+    // 2 high is 0.98 x 2 = 1.96 m3; each cap is 8 - 2 = 6 triangles and the
+    // eight sides two each, 2 x 6 + 8 x 2 = 28.
     const std::vector<Point2> tee{{-0.6, -0.4},  {0.6, -0.4},  {0.6, 0.0},    {0.125, 0.0},
                                   {0.125, 2.0},  {-0.125, 2.0}, {-0.125, 0.0}, {-0.6, 0.0}};
-    const auto faces = triangulatePolygon(tee);
-    ASSERT_EQ(faces.size(), tee.size() - 2);
-    double area = 0.0;
-    for (const auto& face : faces) {
-        EXPECT_GE(triangleArea(tee, face), 0.0) << "a triangle wound clockwise";
-        area += triangleArea(tee, face);
-    }
-    EXPECT_NEAR(area, 0.98, 1e-12);
+    TriangleMesh mesh;
+    addPrism(mesh, tee, 0.0, 2.0);
+    EXPECT_TRUE(isClosedMesh(mesh));
+    EXPECT_EQ(mesh.triangleCount(), 28u);
+    EXPECT_NEAR(meshVolume(mesh), 1.96, 1e-12);
 }
 
-TEST(RoadObjectMesh, AClockwisePolygonIsTriangulatedCounterClockwise)
+TEST(RoadObjectMesh, AClockwisePolygonIsCappedAsItsCounterClockwiseTwinIs)
 {
+    // The unit square, 3 high, is 3 m3 outward whichever way its corners run.
     const std::vector<Point2> clockwise{{0, 0}, {0, 1}, {1, 1}, {1, 0}};
-    const auto faces = triangulatePolygon(clockwise);
-    ASSERT_EQ(faces.size(), 2u);
-    for (const auto& face : faces) {
-        EXPECT_GT(triangleArea(clockwise, face), 0.0);
-    }
     const auto turned = counterClockwise(clockwise);
+    ASSERT_EQ(turned.size(), 4u);
     EXPECT_EQ(turned.front(), Point2(1, 0));
+    EXPECT_EQ(counterClockwise(turned).front(), Point2(1, 0)); // already counter-clockwise
+    for (const std::vector<Point2>& polygon : {clockwise, turned}) {
+        TriangleMesh mesh;
+        addPrism(mesh, polygon, 0.0, 3.0);
+        EXPECT_TRUE(isClosedMesh(mesh));
+        EXPECT_NEAR(meshVolume(mesh), 3.0, 1e-12);
+    }
 }
 
-TEST(RoadObjectMesh, APolygonWithNoAreaGivesNoTriangles)
+TEST(RoadObjectMesh, APolygonThatCannotBeCappedAddsNoSolidAtAll)
 {
-    // A bow-tie: its two halves cancel, and it is no outline to fill.
-    EXPECT_TRUE(triangulatePolygon(std::vector<Point2>{{0, 0}, {1, 1}, {1, 0}, {0, 1}}).empty());
-    EXPECT_TRUE(triangulatePolygon(std::vector<Point2>{{0, 0}, {1, 1}}).empty());
-    EXPECT_TRUE(triangulatePolygon(std::vector<Point2>{}).empty());
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    const std::vector<std::vector<Point2>> cannot{
+        {{0, 0}, {1, 1}, {1, 0}, {0, 1}}, // a bow-tie: its two halves cancel
+        {{0, 0}, {1, 1}},                 // two corners
+        {},                               // none
+        {{0, 0}, {1, 1}, {2, 2}},         // all on one line: no area
+        {{1, 1}, {1, 1}, {1, 1}},         // one point three times
+        {{0, 0}, {1, 0}, {nan, 1}},       // not finite
+        {{0, 0}, {1, 0}, {inf, 1}},
+    };
+    const std::vector<PathPoint> path{{Point2(0, 0), 0.0}, {Point2(5, 0), 0.0}};
+    for (std::size_t i = 0; i < cannot.size(); ++i) {
+        TriangleMesh prism;
+        addPrism(prism, cannot[i], 0.0, 1.0);
+        EXPECT_TRUE(prism.vertices.empty()) << "polygon " << i;
+        EXPECT_TRUE(prism.faces.empty()) << "polygon " << i;
+        TriangleMesh swept;
+        addSweep(swept, path, cannot[i]);
+        EXPECT_TRUE(swept.vertices.empty()) << "section " << i;
+        EXPECT_TRUE(swept.faces.empty()) << "section " << i;
+    }
 }
 
-TEST(RoadObjectMesh, AStraightRunInAPolygonStaysInTheTriangulation)
+TEST(RoadObjectMesh, AStraightRunInAPolygonStaysInTheCapSoThePrismCloses)
 {
     // (1,0) lies on the bottom edge, a corner of no turn. The edges
-    // (0,0)-(1,0) and (1,0)-(2,0) must both be in the triangulation for a
-    // cap to meet the sides of a prism: five corners, three triangles, and
-    // the prism closed.
+    // (0,0)-(1,0) and (1,0)-(2,0) must both be in the cap for it to meet the
+    // sides of a prism: five corners, three triangles a cap (two of them the
+    // ears at (0,0) and (1,0), (0,2),(0,0),(1,0) = 1 and (0,2),(1,0),(2,0) = 1,
+    // and (2,0),(2,2),(0,2) = 2 what is left), five sides of two triangles
+    // each: 2 x 3 + 5 x 2 = 16, closed, and 4 x 1 = 4 m3.
     const std::vector<Point2> square{{0, 0}, {1, 0}, {2, 0}, {2, 2}, {0, 2}};
-    const auto faces = triangulatePolygon(square);
-    ASSERT_EQ(faces.size(), 3u);
-    double area = 0.0;
-    for (const auto& face : faces) {
-        area += triangleArea(square, face);
-    }
-    EXPECT_NEAR(area, 4.0, 1e-12);
     TriangleMesh mesh;
     addPrism(mesh, square, 0.0, 1.0);
     EXPECT_TRUE(isClosedMesh(mesh));
+    EXPECT_EQ(mesh.triangleCount(), 16u);
+    EXPECT_NEAR(meshVolume(mesh), 4.0, 1e-12);
+}
+
+TEST(RoadObjectMesh, ARepeatedCornerStillClosesTheSolid)
+{
+    // (2,0) twice, as an edited section can have: a corner of no length. The
+    // cap keeps both copies - the side quads stand on the edge between them, of
+    // no width but still an edge - so the prism closes: 2 x (5 - 2) + 5 x 2 = 16
+    // triangles, 4 x 1 = 4 m3.
+    const std::vector<Point2> repeated{{0, 0}, {2, 0}, {2, 0}, {2, 2}, {0, 2}};
+    TriangleMesh mesh;
+    addPrism(mesh, repeated, 0.0, 1.0);
+    EXPECT_TRUE(isClosedMesh(mesh));
+    EXPECT_EQ(mesh.triangleCount(), 16u);
     EXPECT_NEAR(meshVolume(mesh), 4.0, 1e-12);
 }
 

@@ -15,6 +15,7 @@
 #include <string_view>
 
 #include "katana/core/error.hpp"
+#include "katana/entity/entity.hpp"
 
 namespace katana::cad::annotation {
 
@@ -28,6 +29,14 @@ namespace katana::cad::annotation {
 // as commandWord refuses, and for a backslash already followed by an n,
 // which the verb would read as a break the text does not have.
 [[nodiscard]] katana::core::Result<std::string> annotationTextWord(std::string_view text);
+
+// A place on an entity as the word the annotation verbs read it from
+// (LEADER ATTACH id <word>, LEADER SET id tip=<word>): #12.position, #12.start,
+// #12.end, #12.mid, #12.centre, #12.inside, #12.v3, #12.s1, and #12.along2:0.25
+// with the fraction written exactly (core::formatExactReal), so the verb
+// reads back the very place the dialog showed. The place of an entity that
+// is not associated (entity 0) has no word: "#0".
+[[nodiscard]] std::string anchorWord(const katana::entity::AnchorRef& ref);
 
 // The other direction: a value as a field of a key=value REPLY record, which
 // an agent reads rather than types - bare when it can be, else quoted with \",

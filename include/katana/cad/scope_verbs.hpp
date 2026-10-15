@@ -212,6 +212,10 @@ matchScope(const Document& document, const ScopeWords& words, const ScopeViewPro
 // part of the drawing "what I see" was.
 // A verb adds its own keys after it.
 [[nodiscard]] std::string scopeRecord(const ScopeMatch& match);
+// The same record for a resolver whose matches are not entities - the road
+// objects (cad::road::matchRoadObjects) - from the resolved scope and how many
+// it took.
+[[nodiscard]] std::string scopeRecord(const ResolvedScope& resolved, std::size_t matched);
 
 // A value in a reply record: as it is when it is one plain word, else in
 // double quotes with '"' and '\' escaped and a line break made a blank, so a

@@ -71,19 +71,10 @@ std::optional<std::string> lineWord(std::string_view text)
 
 std::string fixed3(double number)
 {
-    char buffer[64];
-    const auto [end, error] =
-        std::to_chars(buffer, buffer + sizeof(buffer), number, std::chars_format::fixed, 3);
-    if (error != std::errc()) {
-        return "nan";
-    }
-    std::string text(buffer, end);
-    // A value that rounds to nothing has no sign: a difference of -1e-7 m
-    // printed zmin=-0.000, a sign a reader of the record would take as meant.
-    if (text == "-0.000") {
-        text = "0.000";
-    }
-    return text;
+    // The one formatter (core::formatFixed): any finite double, and no sign
+    // on a value that rounds to nothing - a difference of -1e-7 m printed
+    // zmin=-0.000, a sign a reader of the record would take as meant.
+    return katana::core::formatFixed(number, 3);
 }
 
 std::string gdalRecord(const gp::AlgorithmInfo& info, double seconds)

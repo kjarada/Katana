@@ -10,10 +10,10 @@
 // changes nothing. The lines are made by pure functions of the fields,
 // tested without a window. No moc, as the rest of the window.
 //
-// SurfaceLevelsDialog is seven dialogs by its kind, each with the object
+// SurfaceLevelsDialog is eight dialogs by its kind, each with the object
 // names of its prefix p (surfaceHeights, surfaceSmooth, surfaceThin,
 // surfaceDeleteLong, surfaceDeletePoints, surfaceDeleteTriangles,
-// surfaceAddPoints):
+// surfaceDeleteBreakline, surfaceAddPoints):
 //   <p>Dialog      the dialog
 //   <p>Surface     the surface edited
 //   <p>Operation   Raise / Lower / Set Level / Scale (heights)
@@ -25,7 +25,8 @@
 //   <p>Inside      only inside a polygon of the drawing (heights, smooth)
 //   <p>Side        Inside the polygons / Outside them (delete triangles)
 //   <p>Scope       which polygon (the polygons of delete points and delete
-//                  triangles, the points of add points: always asked): the
+//                  triangles, the lines of delete breakline, the points of
+//                  add points: always asked): the
 //                  shared ScopeFilterWidget, its controls
 //                  <p>ScopeSelection, <p>ScopeDrawing, <p>FilterLayer ...
 //   <p>Command     the exact line Run will run (read-only)
@@ -92,12 +93,14 @@ enum class SurfaceLevelsKind {
     Smooth,
     Thin,
     DeleteLong,
-    // The three that take the drawing's data by a scope, as the shared scope
-    // widget gives it - the polygons of any number (a union), or the levelled
-    // points - and that a click on one entity cannot say.
+    // The four that take the drawing's data by a scope, as the shared scope
+    // widget gives it - the polygons of any number (a union), the lines, or the
+    // levelled points - and that a click on one entity cannot say.
     DeletePoints,
     DeleteTriangles,
     AddPoints,
+    // The lines whose breakline edges are made ordinary edges.
+    DeleteBreakline,
 };
 
 // The object name prefix of a kind: surfaceHeights, surfaceSmooth ...
@@ -127,6 +130,7 @@ struct SurfaceLevelsForm {
 //   SURFACE EDIT <s> DELETE LONG <length> | DELETE THIN <degrees>
 //   SURFACE EDIT <s> DELETE POINTS INSIDE FROM <scope>
 //   SURFACE EDIT <s> DELETE TRIANGLES INSIDE|OUTSIDE FROM <scope>
+//   SURFACE EDIT <s> DELETE BREAKLINE FROM <scope>
 //   SURFACE EDIT <s> ADD POINTS FROM <scope>
 // InvalidArgument naming the field: no surface, a value that is not a number
 // (or not positive where it must be), a base that is not a number, a weight

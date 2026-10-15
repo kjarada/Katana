@@ -1481,14 +1481,18 @@ bool ViewportWidget::drawingIsEmpty() const
            (meshes_ == nullptr || meshes_->empty());
 }
 
-void ViewportWidget::reportSurfaceProblems(const std::vector<std::string>& problems)
+void ViewportWidget::reportSurfaceProblems(const std::vector<katana::cad::SurfaceProblem>& problems)
 {
-    for (const std::string& problem : problems) {
-        if (onError && std::ranges::find(reportedSurfaceProblems_, problem) == reportedSurfaceProblems_.end()) {
-            onError(QString::fromStdString(problem));
+    std::vector<std::string> told;
+    told.reserve(problems.size());
+    for (const katana::cad::SurfaceProblem& problem : problems) {
+        told.push_back(problem.text());
+        if (onError &&
+            std::ranges::find(reportedSurfaceProblems_, told.back()) == reportedSurfaceProblems_.end()) {
+            onError(QString::fromStdString(told.back()));
         }
     }
-    reportedSurfaceProblems_ = problems;
+    reportedSurfaceProblems_ = std::move(told);
 }
 
 // A blank grid gives a new user nothing to go on, so an empty drawing says
@@ -1555,8 +1559,8 @@ void ViewportWidget::setMeshes(const std::vector<katana::cad::SceneMesh>* meshes
     update();
 }
 
-katana::core::Status ViewportWidget::plotToPdf(const QString& path,
-                                               const cad::PlotSettings& settings)
+katana::core::Status ViewportWidget::plotToPdf(const QString& path, const cad::PlotSettings& settings,
+                                               std::vector<cad::SurfaceProblem>* problems)
 {
     // Titled with the project's name when it has one, so a sheet opened on
     // its own says which drawing it came from.
@@ -1565,7 +1569,7 @@ katana::core::Status ViewportWidget::plotToPdf(const QString& path,
         title = QString::fromStdWString(directory->filename().wstring());
     }
     return plotPlanToPdf(path, settings, paintSource(), state_.layers, state_.hiddenReferences,
-                         plotCache_, title);
+                         plotCache_, title, problems);
 }
 
 QImage ViewportWidget::renderToImage(const QSize& size, const QColor& background,

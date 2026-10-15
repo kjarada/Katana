@@ -527,16 +527,21 @@ Result<ScopeMatch> matchScope(const Document& document, const ScopeWords& words,
 
 std::string scopeRecord(const ScopeMatch& match)
 {
-    const ScopeWords& words = match.resolved.words;
+    return scopeRecord(match.resolved, match.matched.size());
+}
+
+std::string scopeRecord(const ResolvedScope& resolved, std::size_t matched)
+{
+    const ScopeWords& words = resolved.words;
     std::string record = "scope=" + std::string(sourceWord(words.source));
     switch (words.source) {
     case ScopeSource::View:
-        if (match.resolved.view) {
-            record += " view=" + std::to_string(*match.resolved.view);
+        if (resolved.view) {
+            record += " view=" + std::to_string(*resolved.view);
         }
         // Where "what I see" was when the line ran: the view moves.
-        if (match.resolved.scope.area) {
-            record += " area=" + areaText(*match.resolved.scope.area);
+        if (resolved.scope.area) {
+            record += " area=" + areaText(*resolved.scope.area);
         }
         if (words.extents) {
             record += " extents=yes";
@@ -557,7 +562,7 @@ std::string scopeRecord(const ScopeMatch& match)
     if (const auto conditions = conditionWords(words.filter); conditions && !conditions->empty()) {
         record += " where=" + recordValue(joined(*conditions, " "));
     }
-    return record + " matched=" + std::to_string(match.matched.size());
+    return record + " matched=" + std::to_string(matched);
 }
 
 std::string recordValue(std::string_view value)

@@ -23,6 +23,7 @@ add_library(katana_entity STATIC
     label_values.cpp
     leader_values.cpp
     curve_pieces.cpp
+    ring_tags.cpp
 )
 katana_target_defaults(katana_entity)
 target_link_libraries(katana_entity

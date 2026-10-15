@@ -2,6 +2,7 @@
 
 #include "katana/cad/alignment_report.hpp"
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
+#include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
@@ -596,13 +597,15 @@ Volumes   VOLUME SURFACES|DATUM|STOCKPILE|SECTIONS|GRID ...   cut and fill betwe
           drawing's surfaces, to a level, of a stockpile, along an alignment or on a grid,
           inside polygons; SURFACE DIFFERENCE|ENVELOPE ... a cut/fill map or envelope as a
           new surface (HELP VOLUME)
-RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=value ...]
-          | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
-          barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
-          along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
-Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE ...  road
-          templates: lanes, shoulders, kerbs, footpaths, verges, medians, drains, batters and
-          their pavement courses; CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] | REGION |
+RoadObj   ROADOBJECT KINDS | LIST [JSON|scope] | INFO id | ADD kind <placement> [key=value ...]
+          | SET id key=value ... | COPY id | DELETE id ...|ALL|scope | QUANTITIES [id ...|scope]
+          | PROBLEMS   barriers, guide posts, signs, light poles, culverts, walls, fences, line
+          markings along an alignment, along lines or at points, one undo step; LIST, QUANTITIES
+          and DELETE take the shared scope and WHERE (HELP ROADOBJECT)
+Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE | EXPORT |
+          IMPORT ...  road templates: lanes, shoulders, kerbs, footpaths, verges, medians,
+          drains, batters and their pavement courses, kept in a file by EXPORT and IMPORT;
+          CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] [curvetol=e] | REGION |
           SUPERELEVATION | BUILD | SECTION | STRINGS | SURFACE | QUANTITIES [csv=]; ROADMODEL
           [LIST] | JSON | PROBLEMS | INFO id   the 3D road model (HELP CORRIDOR)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
@@ -618,6 +621,10 @@ Views     the desktop window's views (katana_cli and katana_mcp have none, and r
           VIEWS UNLINK id[,id...] | ALL
           VIEWS HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | ISOLATE id layer
           the layers that view hides of its own, as its Layers button sets them
+          VIEWS HIDE|SHOW|ISOLATE id LAYER name...   each word after LAYER is one layer, commas
+          and all (a layer's name may hold one)
+          VIEWS HIDE|SHOW id REFERENCE ref[,ref...]   the imported rasters and point clouds
+          that view hides of its own, by the id the Reference Data panel gives them
           VIEWS SET id ghosts=on|off   whether that view shows the selection faintly where it
           hides the layer (on when a view opens)
 Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTENTS (E, ALL,
@@ -2026,8 +2033,17 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
                           std::to_string(args.size() - 2) + " PIs");
     }
     if (action == "DELETE") {
+        // The leaders whose notes read it by name will read nothing: said, not
+        // refused (docs/annotation.md, "A surface or an alignment is read by
+        // name"); UNDO puts the alignment back with its readers.
+        const std::size_t readers =
+            ann::leadersReading(model, ann::ReadKind::Alignment, name);
         return finish(document_.execute(cmd::deleteAlignment(name)),
-                      "alignment " + name + " deleted");
+                      "alignment " + name + " deleted" +
+                          (readers > 0 ? "\nwarning leaders=" + std::to_string(readers) +
+                                             " read alignment " + name +
+                                             " and will read nothing now"
+                                       : std::string()));
     }
 
     const katana::entity::Alignment* existing = model.alignments.find(name);

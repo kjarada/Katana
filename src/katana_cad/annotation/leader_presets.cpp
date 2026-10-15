@@ -322,51 +322,109 @@ std::optional<RecognisedPreset> recognisePreset(std::string_view templateText)
     return std::nullopt;
 }
 
-std::string leadersJson(const Document& document, const std::vector<EntityId>& only,
-                        std::optional<EntityId> target)
+Result<katana::cad::ScopeMatch> matchLeaders(const Document& document,
+                                             const katana::cad::ScopeWords& words,
+                                             const katana::cad::ScopeViewProvider& views)
+{
+    auto match = katana::cad::matchScope(document, words, views);
+    if (!match) {
+        return match.error();
+    }
+    const auto& entities = document.model().entities;
+    std::erase_if(match->matched, [&](EntityId id) {
+        const katana::entity::Entity* entity = entities.find(id);
+        return entity == nullptr || !std::holds_alternative<LeaderGeometry>(entity->geometry);
+    });
+    return match;
+}
+
+LeadersReport leadersReport(const Document& document,
+                            const std::optional<std::vector<EntityId>>& only,
+                            std::optional<EntityId> target)
 {
     const auto& model = document.model();
     const LeaderContext context = leaderContext(document);
-    Json leaders = Json::array();
+    LeadersReport report;
     model.entities.forEach([&](const katana::entity::Entity& entity) {
         const auto* leader = std::get_if<LeaderGeometry>(&entity.geometry);
         if (leader == nullptr ||
-            (!only.empty() && std::find(only.begin(), only.end(), entity.id) == only.end()) ||
+            (only && std::find(only->begin(), only->end(), entity.id) == only->end()) ||
             (target && leader->tipRef.entity != *target)) {
             return;
         }
-        Json record;
-        record["id"] = entity.id;
-        record["layer"] = entity.layer;
-        record["tip"] = leader->vertices.empty()
-                            ? Json(nullptr)
-                            : Json::array({leader->vertices.front().x, leader->vertices.front().y});
-        record["vertices"] = leader->vertices.size();
-        const bool on = leader->tipRef.associated();
-        record["target"] = on ? Json(leader->tipRef.entity) : Json(nullptr);
-        record["anchor"] = on ? Json(katana::entity::describe(leader->tipRef)) : Json(nullptr);
-        record["smart"] = katana::entity::isSmart(*leader);
-        record["template"] = leader->fields ? Json(leader->text) : Json(nullptr);
-        record["labelstyle"] =
-            leader->labelStyle.empty() ? Json(nullptr) : Json(leader->labelStyle);
+        LeaderReport record;
+        record.id = entity.id;
+        record.layer = entity.layer;
+        if (!leader->vertices.empty()) {
+            record.tip = leader->vertices.front();
+        }
+        record.vertices = leader->vertices.size();
+        if (leader->tipRef.associated()) {
+            record.target = leader->tipRef.entity;
+            record.anchor = katana::entity::describe(leader->tipRef);
+        }
+        record.smart = katana::entity::isSmart(*leader);
+        if (leader->fields) {
+            record.templateText = leader->text;
+        }
+        if (!leader->labelStyle.empty()) {
+            record.labelStyle = leader->labelStyle;
+        }
         const auto recognised = leader->fields ? recognisePreset(leader->text) : std::nullopt;
-        record["preset"] = recognised ? Json(std::string(presetInfo(recognised->preset).word))
-                                      : Json(nullptr);
-        record["reads"] = recognised && !recognised->reads.empty() ? Json(recognised->reads)
-                                                                   : Json(nullptr);
-        record["arrow"] = std::string(katana::entity::toString(leader->arrow));
-        record["callout"] = std::string(katana::entity::toString(leader->callout));
-        const std::string says = leaderSays(model, *leader, context);
-        record["text"] = says;
-        Json lines = Json::array();
-        if (!says.empty()) {
-            for (const std::string_view line : katana::entity::textLines(says)) {
-                lines.push_back(std::string(line));
+        if (recognised) {
+            record.preset = std::string(presetInfo(recognised->preset).word);
+            if (!recognised->reads.empty()) {
+                record.reads = recognised->reads;
             }
         }
-        record["lines"] = std::move(lines);
-        leaders.push_back(std::move(record));
+        record.arrow = std::string(katana::entity::toString(leader->arrow));
+        record.callout = std::string(katana::entity::toString(leader->callout));
+        record.text = leaderSays(model, *leader, context);
+        if (!record.text.empty()) {
+            for (const std::string_view line : katana::entity::textLines(record.text)) {
+                record.lines.emplace_back(line);
+            }
+        }
+        report.leaders.push_back(std::move(record));
     });
+    report.surfaces = context.surfaces;
+    report.alignments = context.alignments;
+    return report;
+}
+
+std::string leadersJson(const Document& document, const std::vector<EntityId>& only,
+                        std::optional<EntityId> target)
+{
+    return leadersJsonOf(leadersReport(
+        document, only.empty() ? std::nullopt : std::optional<std::vector<EntityId>>(only),
+        target));
+}
+
+std::string leadersJsonOf(const LeadersReport& report)
+{
+    const auto optionalText = [](const std::optional<std::string>& text) {
+        return text ? Json(*text) : Json(nullptr);
+    };
+    Json leaders = Json::array();
+    for (const LeaderReport& leader : report.leaders) {
+        Json record;
+        record["id"] = leader.id;
+        record["layer"] = leader.layer;
+        record["tip"] = leader.tip ? Json::array({leader.tip->x, leader.tip->y}) : Json(nullptr);
+        record["vertices"] = leader.vertices;
+        record["target"] = leader.target ? Json(*leader.target) : Json(nullptr);
+        record["anchor"] = optionalText(leader.anchor);
+        record["smart"] = leader.smart;
+        record["template"] = optionalText(leader.templateText);
+        record["labelstyle"] = optionalText(leader.labelStyle);
+        record["preset"] = optionalText(leader.preset);
+        record["reads"] = optionalText(leader.reads);
+        record["arrow"] = leader.arrow;
+        record["callout"] = leader.callout;
+        record["text"] = leader.text;
+        record["lines"] = leader.lines;
+        leaders.push_back(std::move(record));
+    }
     Json presets = Json::array();
     for (const LeaderPresetInfo& info : kPresets) {
         presets.push_back(Json{
@@ -382,8 +440,11 @@ std::string leadersJson(const Document& document, const std::vector<EntityId>& o
     Json result;
     result["leaders"] = std::move(leaders);
     result["presets"] = std::move(presets);
-    result["surfaces"] = context.surfaces;
-    result["alignments"] = context.alignments;
+    result["surfaces"] = report.surfaces;
+    result["alignments"] = report.alignments;
+    if (report.scope) {
+        result["scope"] = Json{{"record", report.scope->record}, {"matched", report.scope->matched}};
+    }
     // A reply, not a stored value, so U+FFFD for a byte that is not UTF-8
     // (docs/cad.md: a name that is not UTF-8 is written so, not thrown).
     // nlohmann's default throws, and nothing up the call chain of a verb

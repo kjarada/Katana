@@ -198,6 +198,50 @@ struct SurfacePlan {
     std::string problem{};
 };
 
+// ---- why a style could not be drawn --------------------------------------------------------
+
+// Why part of one surface's style was not drawn, and whose it is: what a
+// paint reports (SurfacePaintStats, PlanPaintStats::surfaceProblems) so that
+// the plan view, a plot and a sheet viewport all say it, what a plot's reply
+// carries and what a preflight finding is made of.
+struct SurfaceProblem {
+    std::string surface; // the drawing's name for it
+    std::string style;   // the display style it is drawn in
+    std::string reason;  // "contours: an interval of 0.000500 crosses ... set a larger interval"
+
+    // One line for a person or a log: `ground (style Fine): contours: ...`.
+    [[nodiscard]] std::string text() const;
+    // One record for a script or an agent, as every reply is:
+    // `warning surface="ground" style="Fine" reason="contours: ..."`.
+    [[nodiscard]] std::string record() const;
+
+    friend bool operator==(const SurfaceProblem&, const SurfaceProblem&) = default;
+};
+
+// Why `contours` cannot be traced on `surface`, or empty when they can: an
+// interval that is not a finite number above zero, or one so fine that the
+// levels would cross the triangles more than kPlanMaximumContourPoints times.
+// The refusal a paint makes before tracing (SurfacePlan::problem) and the one
+// a preflight check reports before a plot are this one answer. What only
+// tracing can find - a failure inside the tracer - is not predicted.
+[[nodiscard]] std::string contourRefusal(const katana::terrain::TinSurface& surface,
+                                         const SurfaceContours& contours);
+
+// A visible surface whose style cannot be drawn in whole, with where it lies
+// in plan, so that the plans which show it can be told.
+struct SurfaceStyleProblem {
+    SurfaceProblem problem;
+    katana::geometry::Box2 bounds{};
+};
+
+// The problems the styles of `surfaces` have, one for each visible surface
+// that has triangles and whose style shows contours it cannot trace, in the
+// order the surfaces were added: what a paint of the whole drawing would
+// report, found without painting. A hidden or empty surface is not drawn and
+// has none.
+[[nodiscard]] std::vector<SurfaceStyleProblem>
+surfaceStyleProblems(const katana::terrain::SurfaceStore& surfaces, const SurfaceStyleSet& styles);
+
 // ---- what is kept between paints ---------------------------------------------------------
 
 // Per surface: its cull grid, its rim and breaklines joined into lines, its

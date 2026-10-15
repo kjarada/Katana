@@ -79,12 +79,12 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids` and `target` narrow it, and nothing else does - no scope or filter yet (`docs/annotation.md`, "Presets" and "Not yet") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJson`) |
+| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids`, or a `scope` (`selection`, `drawing`, `area` with `area`, `layers` with `scope_layers` and `only`) with `scope_where` conditions - the shared grammar, `matched` counting the leaders it took, a scope that takes none giving none - and `target` narrow it (`docs/annotation.md`, "Scope and filter") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJsonOf`), with a `scope` member `{record, matched}` when a scope chose the leaders |
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the drawing's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
-| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | nothing: read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
+| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | `scope` (`selection`, `drawing`, `area`, `layers`), `area`, `layers`, `only`, `where` - the shared scope and filter, as `katana_export` takes them; none: every object. Read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
 | `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`src/katana_app/update_verbs.hpp`), for the surface `UpdateSurface::Mcp` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -111,7 +111,10 @@ alignment=MC01` its station and offset - and read with `katana_leaders`, whose
 description lists the presets and the values a template may name, so an
 agent needs no `HELP` first. It reads the Document, as `katana_status` does:
 a read is no line in the session's history
-(`McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`).
+(`McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`). It takes the shared
+scope and filter under the names `katana_import` uses (`scope`, `area`,
+`scope_layers`, `only`, `scope_where`) and says how many leaders the scope took
+(`McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`).
 
 An entity's attributes are read a level at a time through
 `katana_run_commands` with `PROP TREE` (`docs/cad.md`, "Properties as a tree:
@@ -441,6 +444,24 @@ is told of it in the tool list it reads first.
 `McpServer.TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems`
 places a barrier, reads it, deletes its alignment and reads the problem.
 
+The tool takes the shared scope and filter (`docs/road_objects.md`, "Scope and
+filter"), written as `katana_export` writes them (`scopeArgumentWords`, the one
+reading of those arguments): `scope` is `selection`, `drawing`, `area` (with
+`area`, `[x0, y0, x1, y1]`) or `layers` (with `layers` and `only`), an `area`
+alone is the scope, and `where` is a list of conditions - `["PROP=kind:barrier",
+"LAYER=road/objects/*"]` - which alone filter the selection, as `WHERE` alone does
+on the command line. With any of them only the objects they take are reported,
+and the structured content gains `scope`: `record` (the scope's record, as
+`ROADOBJECT LIST <scope>` leads its reply with it), `matched`, and `unmade` (the
+objects the scope would take but for not being made, which have no plan extent).
+A scope that takes nothing is a reply with no objects. A layer the drawing lacks,
+a `TYPE`, `STYLE` or `TEXT` condition (an entity's, refused for a road object by
+name) and `layers` without `scope` are refused. `VIEW` is the window's and is not
+offered; `area` says the same without one.
+`McpServer.TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItTook`
+places a barrier and a sign and takes them by layer, by area, by filter on the
+drawing and by filter on the (empty) selection.
+
 ## Geoprocessing tools
 
 GDAL's algorithm framework (`docs/geoprocessing.md`) as tools, in
@@ -587,7 +608,13 @@ session lines (`docs/volumes.md`), so `katana_run_commands` runs them as the
 window's Terrain > Volumes does, and the replies are the records an agent
 reads - `volume method= cut= fill= net= area=` with the method's own keys,
 `polygon index= ...` per polygon with EACH, `section station= ... mass=` per
-section along an alignment. A tool would restate the verbs' options as a
+section along an alignment. Along an alignment the total says whether the
+curvature correction was made (`curvature=on|off`, the verb's `curvature=`) and,
+when it was, how far it moved each total (`curvature.cut= curvature.fill=`, signed);
+a section that ends a panel on a curve adds `radius= turn=left|right` and the same
+two keys for that panel. A reach that sweeps one stretch's ground twice, across a
+curve or beside another stretch, is an `InvalidArgument` error naming the stations.
+A tool would restate the verbs' options as a
 schema and add nothing the records do not carry. The surfaces to name are
 `katana_terrain_list`'s.
 `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool` pins it.
@@ -963,7 +990,10 @@ watching the window:
   provider keys; a script is `katana_run_script`'s here; the grid and the
   exaggeration are how its views draw), and so do `VIEWS` and `ZOOM`, which
   act on its views (`docs/cad.md`, "The window's views: VIEWS and ZOOM") -
-  the interpreter refuses those two itself, having no views here. The
+  the interpreter refuses those two itself, having no views here, as it
+  refuses `ROADMODEL SHOW`, the one word of the road model's verb that is the
+  window's (it switches whether the window's views draw the model;
+  `docs/road_design.md`, "In the window"). The
   session answers each with `Unsupported: <VERB> is the desktop window's` and
   where to run it instead - in `katana_cli` too - where it once said "unknown
   command", which a model cannot tell from a typo (`GRID` and `EXAGGERATION`

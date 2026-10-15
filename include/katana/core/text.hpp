@@ -89,6 +89,16 @@ namespace katana::core {
 // parseFiniteDouble refuses; an exporter should not be handed one.
 [[nodiscard]] std::string formatExactReal(double value);
 
+// `value` to `decimals` places (0 to 60) in fixed notation, locale-independent,
+// as a person reads a length or a level in a reply: "0.017", "1471.240". The
+// text is the double's exact value rounded, whatever its size - a level of
+// 1e60 is its 61 digits, never a failure - and a value that rounds to nothing
+// has no sign ("-0.0004" at 3 places is "0.000", not "-0.000"), since a sign
+// on zero reads as a quantity below it. Non-finite values are written as
+// to_chars would ("nan", "inf", "-inf"). The one formatter of the replies'
+// three-decimal numbers (cad's SURFACE records and the geoprocessing replies).
+[[nodiscard]] std::string formatFixed(double value, int decimals);
+
 // A text as typed on a command line, read back: "\n" is a line break - the
 // command line has no other way to put one in a note - and "\\" is a
 // backslash, so a text holding "\n" itself (a path, C:\new) can be typed as

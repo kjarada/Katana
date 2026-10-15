@@ -7,6 +7,16 @@
 // view can cull back faces, the IFC export can write the mesh as a closed
 // face set, and a volume is the divergence theorem over the triangles.
 //
+// The caps of a section or a plate are cut by geometry::triangulate with
+// CollinearVertices::Keep (geometry/polygon.hpp): ear clipping, which is
+// quadratic and meant for the few vertices of a cross-section or a sign's plate,
+// and which keeps every corner, so a cap meets the quads of the sides at each of
+// them. The polygon may be concave (an F-shape barrier's knee) and either way
+// round. A polygon that cannot be capped - fewer than three corners, no area, a
+// corner that is not finite, edges that give no ear - adds NOTHING, and the
+// object that asked is listed as one that could not be made into a solid
+// (shapeProblem, road_objects.hpp).
+//
 // A cross-section is given in (u, v): u across, positive to the LEFT of the
 // direction it is swept in, v up. It stays VERTICAL wherever it is swept -
 // a barrier or a wall stands upright on a grade, it does not lean with it -
@@ -37,15 +47,6 @@ struct PathPoint {
 
     friend bool operator==(const PathPoint&, const PathPoint&) = default;
 };
-
-// The triangles that fill a simple polygon, as index triples into it, each
-// counter-clockwise: ear clipping, which is quadratic and meant for the few
-// vertices of a cross-section or a sign's plate. The polygon may be concave
-// (an F-shape barrier's knee) and either way round;
-// collinear vertices are fine. Empty for fewer than three vertices, or for a
-// polygon no ear can be cut from (one that crosses itself).
-[[nodiscard]] std::vector<std::array<std::uint32_t, 3>>
-triangulatePolygon(std::span<const katana::geometry::Point2> polygon);
 
 // The polygon counter-clockwise: as given, or reversed when it was clockwise.
 [[nodiscard]] std::vector<katana::geometry::Point2>

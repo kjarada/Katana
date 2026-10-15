@@ -327,7 +327,7 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             ringHeights.pop_back();
         }
     }
-    auto region = OverlayRegion::fromPolygon(ring);
+    auto region = OverlayRegion::fromPolygon(ring, options.holes);
     if (!region) {
         return region.error();
     }
@@ -386,6 +386,35 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             }
             input.points.emplace_back(at.x, at.y, *height);
         }
+        // A hole is not part of the pile and has no heights of its own: its
+        // edge stands on the ground, and a vertex of it off the ground has no
+        // height to give the base (absent is not zero).
+        std::vector<Polyline2> holes;
+        for (std::size_t h = 0; h < options.holes.size(); ++h) {
+            Polyline2 hole = options.holes[h];
+            hole.closed = true;
+            while (hole.vertices.size() > 1 &&
+                   hole.vertices.front().distanceTo(hole.vertices.back()) <= tol::kGeometric) {
+                hole.vertices.pop_back();
+            }
+            for (std::size_t v = 0; v < hole.vertices.size(); ++v) {
+                const Point2& at = hole.vertices[v];
+                const std::optional<double> height = surface.elevationAt(at);
+                if (!height) {
+                    return makeError(ErrorCode::InvalidGeometry,
+                                     "vertex " + std::to_string(v + 1) + " of hole " +
+                                         std::to_string(h + 1) +
+                                         " is off the surface and has no height of its own, so "
+                                         "the base has no height there; use the lowest point or "
+                                         "a level",
+                                     "hole=" + std::to_string(h + 1) +
+                                         " vertex=" + std::to_string(v + 1));
+                }
+                input.points.emplace_back(at.x, at.y, *height);
+            }
+            holes.push_back(std::move(hole));
+        }
+        input.holes = std::move(holes);
         input.boundary = ring;
         // Two vertices of the ring at one place (a ring that doubles back
         // to touch itself is refused by the triangulator anyway) keep the
@@ -406,25 +435,38 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             // where an edge of the surface crosses it: the ends of the
             // pieces the profiler gives, which are exact.
             const SegmentProfiler profiler(surface);
-            std::optional<double> lowest;
-            const std::size_t count = ring.vertices.size();
-            for (std::size_t v = 0; v < count; ++v) {
-                const Point2& from = ring.vertices[v];
-                const Point2& to = ring.vertices[(v + 1) % count];
-                for (const SegmentPiece& piece : profiler.along(from, to)) {
-                    const double low = std::min(piece.z0, piece.z1);
-                    lowest = lowest ? std::min(*lowest, low) : low;
+            // A flag and a number, not an optional edited by a lambda: GCC at
+            // -O3 has raised -Wmaybe-uninitialized on that.
+            bool found = false;
+            double lowest = 0.0;
+            const auto lower = [&](double z) {
+                lowest = found ? std::min(lowest, z) : z;
+                found = true;
+            };
+            // The edge of a hole is a boundary of the pile as the outer ring is.
+            const auto along = [&](const Polyline2& edge) {
+                const std::size_t count = edge.vertices.size();
+                for (std::size_t v = 0; v < count; ++v) {
+                    const Point2& from = edge.vertices[v];
+                    const Point2& to = edge.vertices[(v + 1) % count];
+                    for (const SegmentPiece& piece : profiler.along(from, to)) {
+                        lower(std::min(piece.z0, piece.z1));
+                    }
+                    if (const auto at = surface.elevationAt(from)) {
+                        lower(*at);
+                    }
                 }
-                if (const auto at = surface.elevationAt(from)) {
-                    lowest = lowest ? std::min(*lowest, *at) : *at;
-                }
+            };
+            along(ring);
+            for (const Polyline2& hole : options.holes) {
+                along(hole);
             }
-            if (!lowest) {
+            if (!found) {
                 return makeError(ErrorCode::InvalidGeometry,
                                  "the boundary does not cross the surface anywhere, so it has no "
                                  "lowest point on it");
             }
-            level = *lowest;
+            level = lowest;
         }
         result.level = level;
         auto flat = region->atLevel(level);

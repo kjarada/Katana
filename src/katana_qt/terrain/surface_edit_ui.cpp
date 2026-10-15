@@ -72,13 +72,14 @@ void SurfaceEditUi::finish(QMenu& terrain)
     // The letters are each one item's in the submenu. The tools choose theirs
     // (tools::withMnemonic) after Combine Surfaces has B, so Add Breakline,
     // finding A and B taken, takes R: the levels item is V, not R, which
-    // --check-shortcuts found taken twice. These take V, M, N and L.
+    // --check-shortcuts found taken twice. These take V, S, N and L (Smooth had M until the
+    // Move Point tool came: a tool takes the initial of its name, and M is that of Move).
     static const Item kItems[] = {
         {Icon::SurfaceLevels, "Raise, Lower or Set Le&vel...",
          "Raise, lower, set or scale the levels of the surface, or of the part inside a polygon",
          "terrainSurfaceHeights", "surfaceHeightsDialog",
          static_cast<int>(SurfaceLevelsKind::Heights)},
-        {Icon::SurfaceSmooth, "S&mooth...",
+        {Icon::SurfaceSmooth, "&Smooth...",
          "Smooth the surface's levels, holding its rim and breaklines", "terrainSurfaceSmooth",
          "surfaceSmoothDialog", static_cast<int>(SurfaceLevelsKind::Smooth)},
         {Icon::SurfaceThin, "Thi&n...",
@@ -106,6 +107,11 @@ void SurfaceEditUi::finish(QMenu& terrain)
          "extends it",
          "terrainSurfaceAddPoints", "surfaceAddPointsDialog",
          static_cast<int>(SurfaceLevelsKind::AddPoints)},
+        {Icon::SurfaceEdit, "Delete Breaklines Along Lines...",
+         "Make the breakline edges that lie along the lines a scope takes ordinary edges "
+         "(the triangles stay; a point on one can then be deleted)",
+         "terrainSurfaceDeleteBreakline", "surfaceDeleteBreaklineDialog",
+         static_cast<int>(SurfaceLevelsKind::DeleteBreakline)},
     };
     menu_->addSection("Levels and Triangles");
     toolBar_->addSeparator();

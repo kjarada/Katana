@@ -8,6 +8,8 @@
 #include <numbers>
 #include <utility>
 
+#include "katana/geometry/polygon.hpp"
+
 namespace katana::cad::road {
 
 using katana::geometry::Point2;
@@ -34,31 +36,36 @@ constexpr double kSamePoint = 1e-3;
 // its far end to the narrowed one at the joint.
 constexpr double kMitreLimit = 4.0;
 
-double signedArea(std::span<const Point2> polygon)
-{
-    if (polygon.size() < 3) {
-        return 0.0;
-    }
-    // Relative to the first vertex, so a polygon far from the origin keeps
-    // its digits.
-    const Point2 origin = polygon.front();
-    double twice = 0.0;
-    for (std::size_t i = 1; i + 1 < polygon.size(); ++i) {
-        twice += (polygon[i] - origin).cross(polygon[i + 1] - origin);
-    }
-    return twice / 2.0;
-}
-
-// Inside or on the boundary of the counter-clockwise triangle a, b, c.
-bool inTriangle(const Point2& p, const Point2& a, const Point2& b, const Point2& c)
-{
-    return (b - a).cross(p - a) >= 0.0 && (c - b).cross(p - b) >= 0.0 &&
-           (a - c).cross(p - c) >= 0.0;
-}
-
 std::uint32_t index(std::size_t value)
 {
     return static_cast<std::uint32_t>(value);
+}
+
+// The triangles that cap a section or fill a plate, as indices into `polygon`
+// (counter-clockwise, and a clockwise polygon is triangulated the same): the
+// shared ear clipper, geometry::triangulate, with every corner kept - a corner
+// of no turn stays a vertex of its cap, so the cap meets the side quads that
+// use it, and the solid closes. Empty for a polygon that does not triangulate
+// (fewer than three corners, no area, a vertex that is not finite, or edges
+// that cross); the callers then add nothing, and the object is listed as one
+// that could not be made into a solid (shapeProblem).
+std::vector<Face> capTriangles(std::span<const Point2> polygon)
+{
+    const katana::geometry::Polyline2 outline{std::vector<Point2>(polygon.begin(), polygon.end()),
+                                              true};
+    const auto triangles =
+        katana::geometry::triangulate(outline, katana::geometry::CollinearVertices::Keep);
+    std::vector<Face> faces;
+    if (!triangles) {
+        return faces;
+    }
+    faces.reserve(triangles->size());
+    for (const katana::geometry::TriangleIndices& triangle : *triangles) {
+        faces.push_back({static_cast<std::uint32_t>(triangle[0]),
+                         static_cast<std::uint32_t>(triangle[1]),
+                         static_cast<std::uint32_t>(triangle[2])});
+    }
+    return faces;
 }
 
 // The cleaned path: points closer than kSamePoint in plan to the one before
@@ -206,83 +213,11 @@ void addSides(TriangleMesh& mesh, std::uint32_t first, std::size_t rings, std::s
 
 std::vector<Point2> counterClockwise(std::span<const Point2> polygon)
 {
-    std::vector<Point2> out(polygon.begin(), polygon.end());
-    if (signedArea(out) < 0.0) {
-        std::ranges::reverse(out);
+    katana::geometry::Polyline2 outline{std::vector<Point2>(polygon.begin(), polygon.end()), true};
+    if (outline.signedArea() < 0.0) {
+        std::ranges::reverse(outline.vertices);
     }
-    return out;
-}
-
-std::vector<Face> triangulatePolygon(std::span<const Point2> polygon)
-{
-    std::vector<Face> triangles;
-    if (polygon.size() < 3) {
-        return triangles;
-    }
-    const double area = signedArea(polygon);
-    if (area == 0.0 || !std::isfinite(area)) {
-        return triangles;
-    }
-    // Indices in counter-clockwise order, whichever way the polygon runs.
-    std::vector<std::uint32_t> ring(polygon.size());
-    for (std::size_t i = 0; i < ring.size(); ++i) {
-        ring[i] = index(i);
-    }
-    const bool reversed = area < 0.0;
-    if (reversed) {
-        std::ranges::reverse(ring);
-    }
-    // An ear is cut as the triangle the polygon's own order makes, which is
-    // counter-clockwise once the ring is.
-    while (ring.size() > 3) {
-        const std::size_t m = ring.size();
-        bool cut = false;
-        // A strictly convex ear first; only when there is none a straight
-        // one, whose triangle has no area but keeps the polygon's own edges
-        // in the triangulation - which a cap must, to meet the sides it caps.
-        for (const bool straightAllowed : {false, true}) {
-            for (std::size_t i = 0; i < m && !cut; ++i) {
-                const std::uint32_t a = ring[(i + m - 1) % m];
-                const std::uint32_t b = ring[i];
-                const std::uint32_t c = ring[(i + 1) % m];
-                const double turn = (polygon[b] - polygon[a]).cross(polygon[c] - polygon[b]);
-                if (turn < 0.0 || (turn == 0.0 && !straightAllowed)) {
-                    continue;
-                }
-                if (turn == 0.0 && (polygon[b] - polygon[a]).dot(polygon[c] - polygon[b]) < 0.0) {
-                    continue; // a spike back along itself, not a straight run
-                }
-                bool clear = true;
-                for (const std::uint32_t other : ring) {
-                    if (other == a || other == b || other == c) {
-                        continue;
-                    }
-                    const Point2& p = polygon[other];
-                    if (p == polygon[a] || p == polygon[b] || p == polygon[c]) {
-                        continue;
-                    }
-                    if (turn > 0.0 && inTriangle(p, polygon[a], polygon[b], polygon[c])) {
-                        clear = false;
-                        break;
-                    }
-                }
-                if (!clear) {
-                    continue;
-                }
-                triangles.push_back({a, b, c});
-                ring.erase(ring.begin() + static_cast<std::ptrdiff_t>(i));
-                cut = true;
-            }
-            if (cut) {
-                break;
-            }
-        }
-        if (!cut) {
-            return {}; // no ear: the polygon crosses itself
-        }
-    }
-    triangles.push_back({ring[0], ring[1], ring[2]});
-    return triangles;
+    return std::move(outline.vertices);
 }
 
 std::vector<Point2> regularPolygon(Point2 centre, double radius, int sides, double startRadians)
@@ -306,7 +241,7 @@ void addExtrusion(TriangleMesh& mesh, std::span<const Point2> polygon, const Poi
         return;
     }
     const std::vector<Point2> profile = counterClockwise(polygon);
-    const std::vector<Face> caps = triangulatePolygon(profile);
+    const std::vector<Face> caps = capTriangles(profile);
     if (caps.empty()) {
         return;
     }
@@ -356,7 +291,7 @@ void addSweep(TriangleMesh& mesh, std::span<const PathPoint> path, std::span<con
         return;
     }
     const std::vector<Point2> section = counterClockwise(profile);
-    const std::vector<Face> caps = triangulatePolygon(section);
+    const std::vector<Face> caps = capTriangles(section);
     if (caps.empty()) {
         return;
     }

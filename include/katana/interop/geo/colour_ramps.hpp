@@ -6,11 +6,18 @@
 // reads - so the colours a legend lists are, value for value, the ones the
 // picture was painted with.
 //
-//   terrain     green lowland through tan and brown to white peaks: relief
+// The built-in ramps are the one table a surface's display style names too
+// (katana/terrain/colour_ramps.hpp, docs/surface_display.md "The ramps"):
+// this file only gives each of its rows the place of every stop along the
+// range, which is what GDAL's colour map reads.
+//
+//   terrain     deep blue, green, sand, brown, snow: relief
+//   earth       pale yellow to dark brown
 //   diverging   blue, white in the middle, red: a difference, cut and fill
 //               (on design minus existing, cut is blue and fill red)
-//   slope       green, pale yellow, red: gentle to steep
-//   grey        black to white: a band drawn as it is ("plain")
+//   slope       green, yellow, red: gentle to steep
+//   grey        dark to light in equal steps: a band drawn as it is ("plain")
+//   spectral    blue through green and yellow to red
 
 #include <cstdint>
 #include <filesystem>
@@ -32,9 +39,10 @@ struct ColourRamp {
     std::vector<RampStop> stops; // positions ascending, the first 0 and the last 1
 };
 
-// The built-in ramp of that name (any case); nullptr for none.
+// The built-in ramp of that name (any case); nullptr for none. Every ramp has
+// the table's five stops, at 0, 1/4, 1/2, 3/4 and 1.
 [[nodiscard]] const ColourRamp* builtInRamp(std::string_view name);
-// Their names, in the order above.
+// Their names, in the table's order.
 [[nodiscard]] std::vector<std::string> builtInRampNames();
 
 // One colour at one value: what a legend lists.

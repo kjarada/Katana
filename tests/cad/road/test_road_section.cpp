@@ -6,6 +6,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -44,6 +47,32 @@ RoadTemplate street()
         made.components.insert(made.components.end(), {lane, shoulder, kerb, path});
     }
     return made;
+}
+
+// (0,0) to (100,0) to (100,100), the corner rounded at 50 m - with a spiral of
+// `spiral` metres into and out of the arc when it is given: a quarter turn to
+// the left, tangents of 100 m less the curve's own.
+katana::geometry::SolvedAlignment quarterTurn(double spiral = 0.0)
+{
+    katana::geometry::HorizontalAlignment definition;
+    definition.pis = {katana::geometry::AlignmentPI{katana::geometry::Point2(0, 0)},
+                      katana::geometry::AlignmentPI{katana::geometry::Point2(100, 0), 50.0, spiral,
+                                                    spiral},
+                      katana::geometry::AlignmentPI{katana::geometry::Point2(100, 100)}};
+    auto solved = katana::geometry::solveAlignment(definition);
+    EXPECT_TRUE(solved.ok()) << solved.error().describe();
+    return *solved;
+}
+
+// How far the alignment turns between two stations, radians: the difference of
+// its directions there, taken the short way round. Worked from the directions,
+// not from the curvature sectionStations reads, so it is an independent measure
+// of what a step does.
+double turnBetween(const katana::geometry::SolvedAlignment& alignment, double from, double to)
+{
+    const double difference =
+        *alignment.directionAtStation(to) - *alignment.directionAtStation(from);
+    return std::abs(std::atan2(std::sin(difference), std::cos(difference)));
 }
 
 const SectionPoint* pointCoded(const std::vector<SectionPoint>& line, const std::string& code)
@@ -596,4 +625,139 @@ TEST(RoadSection, StationsAreTheIntervalTheEndsAndTheKeysEachOnce)
     EXPECT_EQ(sectionStations(0.0, 20.0, 7.0, {}), (std::vector<double>{0.0, 7.0, 14.0, 20.0}));
     EXPECT_TRUE(sectionStations(0.0, 20.0, 0.0, {}).empty());
     EXPECT_TRUE(sectionStations(20.0, 0.0, 5.0, {}).empty());
+}
+
+TEST(RoadSection, StationsInsideACurveAreCutUntilNoStepTurnsThroughMoreThanTheTolerancesAngle)
+{
+    // The quarter turn at 50 m: the arc runs from station 50 to 50 + 25 pi =
+    // 128.5398 (50 x pi/2). Every 10 m with the keys 0, 50, 128.5398, 178.5398
+    // the plain stations are 0, 10, ..., 120, 128.5398, 130, ..., 170,
+    // 178.5398: 20. A tolerance of 0.001 allows a step to turn through
+    // sqrt(6 x 0.001) = 0.07746 radians, 3.873 m on R = 50 m. A 10 m gap turns
+    // through 10/50 = 0.2: 0.2/0.07746 = 2.58, three parts; the last gap on the
+    // arc, 8.5398 m, turns 0.1708: 2.2, three parts. The arc holds seven gaps
+    // of 10 m and that one: 8 x 2 = 16 stations more, 36.
+    const auto alignment = quarterTurn();
+    const std::vector<double> keys = alignment.keyStations();
+    const std::vector<double> plain = sectionStations(0.0, alignment.endStation(), 10.0, keys);
+    ASSERT_EQ(plain.size(), 20u);
+    const auto cut = sectionStations(0.0, alignment.endStation(), 10.0, keys, alignment, 0.001);
+    ASSERT_TRUE(cut.ok()) << cut.error().describe();
+    EXPECT_EQ(cut->size(), 36u);
+    // Every plain station is still there, ascending and each once.
+    for (const double station : plain) {
+        EXPECT_NE(std::ranges::find(*cut, station), cut->end()) << station;
+    }
+    EXPECT_TRUE(std::ranges::adjacent_find(*cut, std::greater_equal<>{}) == cut->end())
+        << "not strictly ascending";
+    // The first gap in thirds: 50, 50 + 10/3, 50 + 20/3, 60.
+    const auto first = std::ranges::find(*cut, 50.0);
+    ASSERT_NE(first, cut->end());
+    ASSERT_GE(cut->end() - first, 4);
+    EXPECT_NEAR(*(first + 1), 50.0 + 10.0 / 3.0, 1e-12);
+    EXPECT_NEAR(*(first + 2), 50.0 + 20.0 / 3.0, 1e-12);
+    EXPECT_EQ(*(first + 3), 60.0);
+    // The property, from the directions: no step turns through more than the
+    // angle - and the plain list does, which shows the cases are reached.
+    const double angle = std::sqrt(6.0 * 0.001);
+    double plainWorst = 0.0;
+    for (std::size_t i = 0; i + 1 < plain.size(); ++i) {
+        plainWorst = std::max(plainWorst, turnBetween(alignment, plain[i], plain[i + 1]));
+    }
+    EXPECT_GT(plainWorst, angle) << "the plain stations already satisfied it: nothing was tested";
+    for (std::size_t i = 0; i + 1 < cut->size(); ++i) {
+        EXPECT_LE(turnBetween(alignment, (*cut)[i], (*cut)[i + 1]), angle * (1.0 + 1e-9))
+            << (*cut)[i] << " to " << (*cut)[i + 1];
+    }
+}
+
+TEST(RoadSection, StationsOnASpiralAreHeldToTheSharperEndOfEachGap)
+{
+    // A spiral of 40 m into and out of the arc: its curvature rises from
+    // nothing to 1/50 linearly, so a gap on it turns through the mean of its
+    // ends' curvatures times its length, at most the sharper end's times it,
+    // which is what is held to the angle. Measured from the directions.
+    const auto alignment = quarterTurn(40.0);
+    const std::vector<double> keys = alignment.keyStations();
+    ASSERT_GE(keys.size(), 6u) << "a spiral in and out of an arc: TS SC CS ST";
+    const double angle = std::sqrt(6.0 * 0.001);
+    double worst = 0.0;
+    for (const double interval : {10.0, 3.0}) {
+        const std::vector<double> plain =
+            sectionStations(0.0, alignment.endStation(), interval, keys);
+        for (std::size_t i = 0; i + 1 < plain.size(); ++i) {
+            worst = std::max(worst, turnBetween(alignment, plain[i], plain[i + 1]));
+        }
+        const auto cut =
+            sectionStations(0.0, alignment.endStation(), interval, keys, alignment, 0.001);
+        ASSERT_TRUE(cut.ok()) << cut.error().describe();
+        // 3 m on the arc is 0.06 radians, under the 0.0775 allowed: nothing to
+        // add. 10 m is 0.2 on the arc, and the spirals' sharper ends are cut too.
+        if (interval == 3.0) {
+            EXPECT_EQ(*cut, plain);
+        } else {
+            EXPECT_GT(cut->size(), plain.size());
+        }
+        for (const double station : plain) {
+            EXPECT_NE(std::ranges::find(*cut, station), cut->end()) << station;
+        }
+        for (std::size_t i = 0; i + 1 < cut->size(); ++i) {
+            EXPECT_LE(turnBetween(alignment, (*cut)[i], (*cut)[i + 1]), angle * (1.0 + 1e-9))
+                << "interval " << interval << ": " << (*cut)[i] << " to " << (*cut)[i + 1];
+        }
+    }
+    // The plain list at 10 m has a step that turns too far, so the property
+    // above is not satisfied by luck.
+    EXPECT_GT(worst, angle);
+}
+
+TEST(RoadSection, ATangentAddsNoStationsAndNoToleranceOrAnUnusableOneAddsNone)
+{
+    // The straight, and a curve with the tolerance off (0), negative, not a
+    // number or infinite: the plain list, as sectionStations has always given.
+    const auto straightLine = straight(100.0);
+    const std::vector<double> plain = sectionStations(0.0, 100.0, 30.0, {45.0});
+    EXPECT_EQ(sectionStations(0.0, 100.0, 30.0, {45.0}, straightLine, 0.001).value(), plain);
+    const auto curve = quarterTurn();
+    const std::vector<double> curvePlain =
+        sectionStations(0.0, curve.endStation(), 10.0, curve.keyStations());
+    for (const double tolerance :
+         {0.0, -0.001, std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity()}) {
+        const auto same =
+            sectionStations(0.0, curve.endStation(), 10.0, curve.keyStations(), curve, tolerance);
+        ASSERT_TRUE(same.ok()) << tolerance;
+        EXPECT_EQ(*same, curvePlain) << tolerance;
+    }
+    // No length, and no interval: nothing to cut.
+    EXPECT_EQ(sectionStations(5.0, 5.0, 10.0, {}, curve, 0.001).value(),
+              (std::vector<double>{5.0}));
+    EXPECT_TRUE(sectionStations(5.0, 0.0, 10.0, {}, curve, 0.001).value().empty());
+    EXPECT_TRUE(sectionStations(0.0, 50.0, 0.0, {}, curve, 0.001).value().empty());
+    // An interval longer than the road: the two ends, and the gap between them
+    // cut where the alignment curves.
+    const auto wide = sectionStations(0.0, curve.endStation(), 1e9, {}, curve, 0.001);
+    ASSERT_TRUE(wide.ok());
+    EXPECT_EQ(wide->front(), 0.0);
+    EXPECT_EQ(wide->back(), curve.endStation());
+    EXPECT_GT(wide->size(), 2u);
+}
+
+TEST(RoadSection, ATolerancesStationsBeyondTheLimitAreRefusedBeforeOneIsMade)
+{
+    // 1e-12 allows a step of sqrt(6e-12) = 2.4e-6 radians, 1.2e-4 m on R = 50:
+    // 650 000 sections round the arc alone, over the 100 000 a corridor makes.
+    // And 1e-300, which asks for more parts than a size_t holds, is refused the
+    // same way and not wrapped round.
+    const auto curve = quarterTurn();
+    for (const double tolerance : {1e-12, 1e-300}) {
+        const auto refused = sectionStations(0.0, curve.endStation(), 10.0, curve.keyStations(),
+                                             curve, tolerance);
+        ASSERT_FALSE(refused.ok()) << tolerance;
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(refused.error().message.find("100000"), std::string::npos)
+            << refused.error().message;
+    }
+    // The straight has nothing to cut at any tolerance.
+    EXPECT_TRUE(sectionStations(0.0, 100.0, 10.0, {}, straight(100.0), 1e-300).ok());
 }

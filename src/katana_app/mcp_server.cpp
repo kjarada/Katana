@@ -440,23 +440,8 @@ std::string exportOptionWords(const Json& arguments)
             throw ToolRefusal{"\"cloud\" is a reference point cloud's id or name"};
         }
     }
-    const Json& scope = argument(arguments, "scope");
-    const Json& area = argument(arguments, "area");
-    if (!scope.is_null() || !area.is_null()) {
-        if (!scope.is_null() && !scope.is_string()) {
-            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
-        }
-        words += " " + scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
-                                    argument(arguments, "layers"),
-                                    optionalBool(arguments, "only", false),
-                                    argument(arguments, "where"));
-    } else if (!argument(arguments, "where").is_null() && argument(arguments, "layers").is_null()) {
-        // "where" alone filters the selection, as WHERE alone does on the
-        // command line (the one scope parser's rule, MODIFY's): written
-        // SELECTION WHERE ..., so the line says what it takes.
-        words += " " + scopeWordsOf("selection", area, Json(), false, argument(arguments, "where"));
-    } else if (!argument(arguments, "layers").is_null()) {
-        throw ToolRefusal{"\"layers\" says a scope: give \"scope\": \"layers\" with it"};
+    if (const auto given = scopeArgumentWords(arguments)) {
+        words += " " + *given;
     }
     if (const Json& name = argument(arguments, "layer_name"); !name.is_null()) {
         if (!name.is_string() || name.get<std::string>().empty()) {
@@ -770,16 +755,52 @@ const std::vector<Tool>& tools()
             "visible surface or the first alignment, said as chosen= in the reply. LEADER FOR "
             "<ids>|SELECTION preset=... makes one to each entity in one undo step. A template "
             "may name {surface.NAME} {dsurface.NAME} {cut.NAME} {fill.NAME} {station.NAME} "
-            "{offset.NAME} {profile.NAME} {dprofile.NAME} itself (katana_help, under Leader).",
+            "{offset.NAME} {profile.NAME} {dprofile.NAME} itself (katana_help, under Leader). "
+            "Which leaders: all of them; or \"ids\"; or the ones a scope and filter take - the "
+            "same grammar as Global Modify, MODIFY and the UTILITY verbs: \"scope\" selection, "
+            "drawing, area (with \"area\") or layers (with \"scope_layers\" and \"only\"), and "
+            "\"scope_where\" conditions - and then the reply also carries scope {record "
+            "(scope=layers layers=... matched=N), matched}, N counting the leaders the scope "
+            "took; a scope that takes none gives leaders [] and matched 0, not an error. "
+            "\"target\" narrows either.",
             objectSchema(
                 Json{{"ids",
                       {{"type", "array"},
                        {"items", {{"type", "integer"}, {"minimum", 1}}},
-                       {"description", "Only these leaders (by entity id); all when left out."}}},
+                       {"description", "Only these leaders (by entity id); all when left out. "
+                                       "Not with a scope."}}},
                      {"target",
                       {{"type", "integer"},
                        {"minimum", 1},
-                       {"description", "Only the leaders whose tip is on this entity."}}}}),
+                       {"description", "Only the leaders whose tip is on this entity."}}},
+                     {"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "Only the leaders this takes of the drawing (the shared scope grammar); "
+                        "area with \"area\", layers with \"scope_layers\" and \"only\". VIEW is "
+                        "the window's. \"scope_where\" alone filters the selection."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description",
+                        "[x0, y0, x1, y1] in the drawing's coordinates: scope area (given alone, "
+                        "it is the scope)."}}},
+                     {"scope_layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"scope_where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on what the scope takes: [\"LAYER=notes\", "
+                        "\"PROP=owner:Smith*\"]."}}}}),
             hints(true, false, true), [](Session& session, const Json& arguments) {
                 std::vector<katana::entity::EntityId> ids;
                 if (arguments.contains("ids")) {
@@ -803,10 +824,54 @@ const std::vector<Tool>& tools()
                     }
                     target = static_cast<katana::entity::EntityId>(id.get<long long>());
                 }
+                // Which leaders: the ids, or what the scope and filter take.
+                // The scope is read by the one reading of a scope in JSON
+                // (scopeWordsOf) and the one grammar (parseScopeWords), and
+                // resolved by the one matcher; VIEW is the window's, so none.
+                std::optional<std::vector<katana::entity::EntityId>> only;
+                std::optional<katana::cad::annotation::LeadersScopeReport> scopeReport;
+                const Json& scopeKind = argument(arguments, "scope");
+                const Json& area = argument(arguments, "area");
+                const Json& where = argument(arguments, "scope_where");
+                if (!scopeKind.is_null() || !area.is_null() || !where.is_null()) {
+                    if (!ids.empty()) {
+                        throw ToolRefusal{"give \"ids\" or a scope, not both"};
+                    }
+                    if (!scopeKind.is_null() && !scopeKind.is_string()) {
+                        throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+                    }
+                    const std::string kind = scopeKind.is_string() ? scopeKind.get<std::string>()
+                                             : !area.is_null()      ? "area"
+                                                                    : "selection";
+                    const std::string words =
+                        scopeWordsOf(kind, area, argument(arguments, "scope_layers"),
+                                     optionalBool(arguments, "only", false), where);
+                    const auto tokens = katana::cad::CommandInterpreter::tokenize(words);
+                    if (!tokens) {
+                        throw ToolRefusal{tokens.error().describe()};
+                    }
+                    std::size_t at = 0;
+                    const auto scope = katana::cad::parseScopeWords(*tokens, at);
+                    if (!scope) {
+                        throw ToolRefusal{scope.error().describe()};
+                    }
+                    const auto match =
+                        katana::cad::annotation::matchLeaders(session.document(), *scope, {});
+                    if (!match) {
+                        throw ToolRefusal{match.error().describe()};
+                    }
+                    only = match->matched;
+                    scopeReport = katana::cad::annotation::LeadersScopeReport{
+                        katana::cad::scopeRecord(*match), match->matched.size()};
+                } else if (!ids.empty()) {
+                    only = ids;
+                }
                 // From the Document, as katana_status is: a read leaves no
                 // line in the session's history.
-                const std::string json =
-                    katana::cad::annotation::leadersJson(session.document(), ids, target);
+                katana::cad::annotation::LeadersReport report =
+                    katana::cad::annotation::leadersReport(session.document(), only, target);
+                report.scope = scopeReport;
+                const std::string json = katana::cad::annotation::leadersJsonOf(report);
                 return ToolReply{json, Json::parse(json)};
             }});
 
@@ -1169,12 +1234,61 @@ const std::vector<Tool>& tools()
             "ALIGNMENT Main station=0 to=120 offset=4, ROADOBJECT ADD sign AT x,y,z code=R1-1, "
             "ROADOBJECT ADD fence ALONG FROM LAYERS boundary, ROADOBJECT SET id key=value, "
             "ROADOBJECT DELETE id; ROADOBJECT KINDS <kind> lists a kind's keys, units, ranges "
-            "and defaults (HELP ROADOBJECT).",
-            objectSchema(Json::object()), hints(true, false, true),
-            [](Session& session, const Json&) {
-                const std::string report =
-                    katana::cad::road::roadObjectsReport(session.document());
-                return ToolReply{report, Json::parse(report)};
+            "and defaults (HELP ROADOBJECT). With a scope it reports only the objects the scope "
+            "and filter take, as ROADOBJECT LIST <scope> does, and says what it took in "
+            "\"scope\": its record, how many it matched, and how many it would have taken but "
+            "for not being made (they have no plan extent, which an area asks for).",
+            objectSchema(
+                Json{{"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "Which road objects (the shared scope grammar); all of them when neither "
+                        "this nor \"area\" nor \"where\" is given. selection takes the objects "
+                        "placed along a selected line; area those whose plan extent meets the "
+                        "box; layers those on the layers (and beneath them unless \"only\")."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description", "[x0, y0, x1, y1]: scope area (given alone, the scope)."}}},
+                     {"layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on the objects the scope takes: [\"PROP=kind:barrier\", "
+                        "\"LAYER=road/objects/*\"]. PROP=key:pattern reads the keys SET writes "
+                        "(kind, id, type, offset, station ...); COLOUR=#RRGGBB the colour drawn; "
+                        "DRAWN a layer that is shown. TYPE, STYLE and TEXT are refused. Without "
+                        "\"scope\" they filter the selection, as WHERE alone does on the "
+                        "command line; \"scope\": \"drawing\" filters all."}}}}),
+            hints(true, false, true), [](Session& session, const Json& arguments) {
+                const auto given = scopeArgumentWords(arguments);
+                if (!given) {
+                    const std::string report =
+                        katana::cad::road::roadObjectsReport(session.document());
+                    return ToolReply{report, Json::parse(report)};
+                }
+                const auto tokens = katana::cad::CommandInterpreter::tokenize(*given);
+                std::size_t at = 0;
+                auto words = tokens ? katana::cad::parseScopeWords(*tokens, at)
+                                    : katana::core::Result<katana::cad::ScopeWords>(tokens.error());
+                if (!words) {
+                    throw ToolRefusal{words.error().describe()};
+                }
+                const auto report = katana::cad::road::roadObjectsReport(session.document(), *words);
+                if (!report) {
+                    throw ToolRefusal{report.error().describe()};
+                }
+                return ToolReply{*report, Json::parse(*report)};
             }});
         // ---- end road objects ----
 
@@ -1340,6 +1454,30 @@ std::string scopeWordsOf(const std::string& kind, const Json& area, const Json& 
         throw ToolRefusal{words.error().describe()};
     }
     return *words;
+}
+
+std::optional<std::string> scopeArgumentWords(const Json& arguments)
+{
+    const Json& scope = argument(arguments, "scope");
+    const Json& area = argument(arguments, "area");
+    if (!scope.is_null() || !area.is_null()) {
+        if (!scope.is_null() && !scope.is_string()) {
+            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+        }
+        return scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
+                            argument(arguments, "layers"), optionalBool(arguments, "only", false),
+                            argument(arguments, "where"));
+    }
+    if (!argument(arguments, "where").is_null() && argument(arguments, "layers").is_null()) {
+        // "where" alone filters the selection, as WHERE alone does on the
+        // command line (the one scope parser's rule, MODIFY's): written
+        // SELECTION WHERE ..., so the line says what it takes.
+        return scopeWordsOf("selection", area, Json(), false, argument(arguments, "where"));
+    }
+    if (!argument(arguments, "layers").is_null()) {
+        throw ToolRefusal{"\"layers\" says a scope: give \"scope\": \"layers\" with it"};
+    }
+    return std::nullopt;
 }
 
 // A path as the interpreter reads it: one quoted word. It has no escape, so a

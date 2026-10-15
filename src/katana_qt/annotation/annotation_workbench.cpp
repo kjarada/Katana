@@ -295,7 +295,14 @@ LabelStyleManagerDialog& AnnotationWorkbench::showLabelStyles()
 LeaderManagerDialog& AnnotationWorkbench::showLeaders(int tab)
 {
     if (leaders_.isNull()) {
-        leaders_ = new LeaderManagerDialog(document_, &window_);
+        // The lines it builds run through the window's one executor, and the
+        // views are asked for when its scope controls need them, not now.
+        LeaderManagerContext context;
+        context.run = lateRunner();
+        context.views = [this] {
+            return views_ ? views_() : std::vector<ScopeFilterView>{};
+        };
+        leaders_ = new LeaderManagerDialog(document_, std::move(context), &window_);
         leaders_->setModal(false);
     }
     leaders_->showTab(static_cast<LeaderManagerDialog::Tab>(std::clamp(tab, 0, 2)));

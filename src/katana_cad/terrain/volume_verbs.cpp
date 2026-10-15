@@ -87,8 +87,8 @@ constexpr std::string_view kStockpileUsage =
     "[bulk=<f>] [shrink=<f>] [csv=<file> [OVERWRITE]]";
 constexpr std::string_view kSectionsUsage =
     "VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=<s>] [to=<s>] "
-    "[left=<m>] [right=<m>] [method=endarea|prismoidal|both] [bulk=<f>] [shrink=<f>] "
-    "[csv=<file> [OVERWRITE]]";
+    "[left=<m>] [right=<m>] [method=endarea|prismoidal|both] [curvature=on|off] [bulk=<f>] "
+    "[shrink=<f>] [csv=<file> [OVERWRITE]]";
 constexpr std::string_view kGridUsage =
     "VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=<f>] [shrink=<f>] "
     "[csv=<file> [OVERWRITE]]";
@@ -100,9 +100,9 @@ constexpr std::string_view kEnvelopeUsage =
 
 // Every key any VOLUME form takes. None is a WHERE key (scope_verbs.hpp), so
 // one may stand after a scope's filter and still be the verb's.
-constexpr std::array<std::string_view, 12> kOptionKeys = {
+constexpr std::array<std::string_view, 13> kOptionKeys = {
     "bulk", "shrink", "csv", "base", "level", "interval", "from", "to", "left", "right",
-    "method", "cell"};
+    "method", "cell", "curvature"};
 
 struct Options {
     std::map<std::string, std::string, std::less<>> values;
@@ -454,10 +454,20 @@ Result<std::string> measureAreas(const Reading& reading,
         }
         // skipped.open= is what bounds no area: an open outline, and a
         // closed one of fewer than three corners.
+        // holes= is the rings tagged as holes that joined the polygon they lie
+        // in, so they are no polygon of their own and not in used=.
         lines.push_back("polygons used=" + std::to_string(polygons->shapes.size()) +
-                        " skipped.open=" +
+                        " holes=" + std::to_string(polygons->holesJoined) + " skipped.open=" +
                         std::to_string(polygons->skipped.open + polygons->skipped.tooFew) +
                         " skipped.other=" + std::to_string(polygons->skipped.noOutline));
+        if (polygons->holesAlone != 0) {
+            // As the feature-table conversion says it of the same rings.
+            lines.push_back(
+                "warning holes.alone=" + std::to_string(polygons->holesAlone) + " message=" +
+                recordValue(std::to_string(polygons->holesAlone) +
+                            " rings tagged as holes lie in no polygon of the scope and are "
+                            "measured as polygons of their own"));
+        }
         if (polygons->shapes.empty()) {
             // A scope that takes no closed outline is said, not refused.
             lines.push_back(reading.head + " ran=no reason=" +
@@ -479,7 +489,8 @@ Result<std::string> measureAreas(const Reading& reading,
         std::vector<OverlayRegion> regions;
         regions.reserve(polygons->shapes.size());
         for (std::size_t i = 0; i < polygons->shapes.size(); ++i) {
-            auto region = OverlayRegion::fromPolygon(polygons->shapes[i].outline);
+            auto region =
+                OverlayRegion::fromPolygon(polygons->shapes[i].outline, polygons->shapes[i].holes);
             if (!region) {
                 return makeError(region.error().code,
                                  polygonName(polygons->shapes[i], i) + ": " +
@@ -553,6 +564,9 @@ Result<std::string> measureAreas(const Reading& reading,
                     record += " entity=" + entity;
                 }
                 record += " polygon.area=" + fixed(regions[i].area());
+                if (!polygon.holes.empty()) {
+                    record += " holes=" + std::to_string(polygon.holes.size());
+                }
                 record += measureFields(reading, *measured, factors);
                 if (polygon.chorded) {
                     record += " chorded=yes";
@@ -839,6 +853,7 @@ Result<std::string> volumeStockpile(const Document& document, Words words,
                                  std::span<const OverlayRegion>) -> Result<Measure> {
         katana::terrain::StockpileOptions these = stockpile;
         these.boundaryHeights = polygon->heights;
+        these.holes = polygon->holes;
         auto volume = katana::terrain::stockpileVolume(ground, polygon->outline, these);
         if (!volume) {
             return volume.error();
@@ -931,8 +946,8 @@ Result<std::string> volumeGrid(const Document& document, Words words,
 
 Result<std::string> volumeSections(const Document& document, Words words)
 {
-    static constexpr std::array<std::string_view, 9> kAllowed = {
-        "interval", "from", "to", "left", "right", "method", "bulk", "shrink", "csv"};
+    static constexpr std::array<std::string_view, 10> kAllowed = {
+        "interval", "from", "to", "left", "right", "method", "curvature", "bulk", "shrink", "csv"};
     auto options = takeOptions(words, "VOLUME SECTIONS", kAllowed);
     if (!options) {
         return options.error();
@@ -997,6 +1012,15 @@ Result<std::string> volumeSections(const Document& document, Words words)
         }
     }
     sections.prismoidal = prismoidal;
+    if (const std::string* word = options->find("curvature")) {
+        const std::string setting = katana::core::lowered(katana::core::trimmed(*word));
+        if (setting == "off") {
+            sections.curvature = false;
+        } else if (setting != "on") {
+            return makeError(ErrorCode::InvalidArgument, "curvature= is on or off",
+                             "curvature=" + *word);
+        }
+    }
     const std::string methodWord =
         endArea ? (prismoidal ? "both" : "endarea") : "prismoidal";
     auto volumes = katana::terrain::volumesAlongAlignment(*base->surface, *top->surface, *solved,
@@ -1030,8 +1054,8 @@ Result<std::string> volumeSections(const Document& document, Words words)
     // from an end-area file, and the factors behind a factored mass column are
     // here too.
     const std::size_t quantityColumns = table.header.size();
-    table.header.insert(table.header.end(),
-                        {"method", "base", "top", "alignment", "interval", "left", "right"});
+    table.header.insert(table.header.end(), {"method", "curvature", "base", "top", "alignment",
+                                             "interval", "left", "right"});
     if (factors->given) {
         table.header.insert(table.header.end(), {"bulk", "shrink"});
     }
@@ -1070,6 +1094,17 @@ Result<std::string> volumeSections(const Document& document, Words words)
                 record += " middle.cut.area=" + fixed(panel.middle->cutArea) +
                           " middle.fill.area=" + fixed(panel.middle->fillArea);
             }
+            if (panel.curvature != 0.0) {
+                // On a curve: its radius at the middle of the panel and which
+                // way it turns, and what the correction did to this panel's
+                // volumes (the method of cut= and fill=).
+                const katana::terrain::CurvatureShift& shift =
+                    endArea ? panel.endAreaShift : panel.prismoidalShift;
+                record += " radius=" + fixed(1.0 / std::abs(panel.curvature)) +
+                          " turn=" + (panel.curvature > 0.0 ? "left" : "right") +
+                          " curvature.cut=" + fixed(shift.cut) +
+                          " curvature.fill=" + fixed(shift.fill);
+            }
             if (endArea && prismoidal) {
                 prismCutTotal.add(panel.prismoidalCut);
                 prismFillTotal.add(panel.prismoidalFill);
@@ -1085,9 +1120,9 @@ Result<std::string> volumeSections(const Document& document, Words words)
         } else {
             row.resize(quantityColumns);
         }
-        row.insert(row.end(), {methodWord, base->name, top->name, alignment->name,
-                               exact(sections.interval), fixed(volumes->left),
-                               fixed(volumes->right)});
+        row.insert(row.end(), {methodWord, sections.curvature ? "on" : "off", base->name,
+                               top->name, alignment->name, exact(sections.interval),
+                               fixed(volumes->left), fixed(volumes->right)});
         if (factors->given) {
             row.insert(row.end(), {exact(factors->bulk), exact(factors->shrink)});
         }
@@ -1101,19 +1136,29 @@ Result<std::string> volumeSections(const Document& document, Words words)
                               fixed(volumes->fromStation) + " to=" + fixed(volumes->toStation) +
                               " interval=" + exact(sections.interval) + " left=" +
                               fixed(volumes->left) + " right=" + fixed(volumes->right) +
+                              " curvature=" + (sections.curvature ? "on" : "off") +
                               " sections=" + std::to_string(volumes->sections.size()) +
                               " sections.empty=" + std::to_string(empty);
-    const auto totals = [&](const char* method, double cut, double fill) {
-        return std::string("volume method=") + method + range + " cut=" + fixed(cut) +
-               " fill=" + fixed(fill) + " net=" + fixed(fill - cut) +
-               factorFields(*factors, cut, fill);
+    // With the correction on, how much it moved the total (negative: took
+    // away), so a figure that differs from the plain end-area one says by
+    // how much.
+    const auto totals = [&](const char* method, double cut, double fill,
+                            const katana::terrain::CurvatureShift& shift) {
+        std::string record = std::string("volume method=") + method + range +
+                             " cut=" + fixed(cut) + " fill=" + fixed(fill) +
+                             " net=" + fixed(fill - cut) + factorFields(*factors, cut, fill);
+        if (sections.curvature) {
+            record += " curvature.cut=" + fixed(shift.cut) + " curvature.fill=" + fixed(shift.fill);
+        }
+        return record;
     };
     if (endArea) {
-        lines.push_back(totals("endarea", volumes->endAreaCut, volumes->endAreaFill));
+        lines.push_back(totals("endarea", volumes->endAreaCut, volumes->endAreaFill,
+                               volumes->endAreaShift));
     }
     if (prismoidal) {
-        std::string record =
-            totals("prismoidal", volumes->prismoidalCut, volumes->prismoidalFill);
+        std::string record = totals("prismoidal", volumes->prismoidalCut, volumes->prismoidalFill,
+                                    volumes->prismoidalShift);
         // The prismoidal correction: what the average end area overstates
         // (or understates) by.
         record += " correction.cut=" + fixed(volumes->endAreaCut - volumes->prismoidalCut) +
@@ -1342,13 +1387,18 @@ VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [
           from its boundary: the boundary's heights (its own at every vertex, else the
           surface's), the lowest point of the surface along it, or level=<z>
 VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=] [right=]
-          [method=endarea|prismoidal|both] [bulk=] [shrink=] [csv=]
+          [method=endarea|prismoidal|both] [curvature=on|off] [bulk=] [shrink=] [csv=]
           cross sections square to the alignment at whole multiples of the interval and at
           its key stations, each area exact; average end area, or prismoidal with a middle
           section in each pair; one record per section with the running totals and the
           mass haul ordinate (cut positive); left= and right= default to across the common
           ground, which a curve or a corner refuses: sections that cross one another count
-          ground twice, so give a reach under the curve's radius
+          ground twice, and so do two stretches that run side by side, so give a reach
+          under the curve's radius or under half the distance between the stretches;
+          on a curve the volume is corrected for the centroid of each section travelling
+          a different distance than the centreline (Pappus; curvature=off gives the plain
+          figure along the centreline, curvature.cut= and curvature.fill= say by how much
+          it moved the total)
 VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
           the midpoint rule on cells at whole multiples of the cell: a cross-check; inside
           several polygons each cell is counted once, in the first that holds its centre

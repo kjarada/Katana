@@ -327,9 +327,18 @@ Result<Polyline2> clipPolygon(const Polyline2& subject, const Polyline2& clipReg
     return Polyline2{std::move(output), true}.withoutDuplicateVertices();
 }
 
-Result<std::vector<TriangleIndices>> triangulate(const Polyline2& polygon)
+Result<std::vector<TriangleIndices>> triangulate(const Polyline2& polygon,
+                                                 CollinearVertices collinear)
 {
     const std::size_t n = polygon.vertices.size();
+    // A NaN makes every comparison below false, which reads as "convex and
+    // unblocked": triangles of nothing, reported as a triangulation.
+    if (!std::ranges::all_of(polygon.vertices, [](const Point2& vertex) {
+            return std::isfinite(vertex.x) && std::isfinite(vertex.y);
+        })) {
+        return makeError(ErrorCode::TriangulationFailure, "polygon has a vertex that is not finite",
+                         "vertices=" + std::to_string(n));
+    }
     const Orientation winding = orientation(polygon);
     if (winding == Orientation::Degenerate) {
         return makeError(ErrorCode::TriangulationFailure,
@@ -347,47 +356,66 @@ Result<std::vector<TriangleIndices>> triangulate(const Polyline2& polygon)
     std::vector<TriangleIndices> triangles;
     triangles.reserve(n - 2);
 
+    // Skip needs one pass over the ring. Keep makes a second only when the
+    // first found no strictly convex ear to cut: a straight corner is then cut
+    // as a triangle of no area, so the triangles that carry area are the ones
+    // a fill would cut and the straight corners are joined in last.
+    const int passes = collinear == CollinearVertices::Keep ? 2 : 1;
     while (ring.size() > 3) {
         bool clipped = false;
-        for (std::size_t i = 0; i < ring.size(); ++i) {
-            const std::size_t prev = ring[(i + ring.size() - 1) % ring.size()];
-            const std::size_t cur = ring[i];
-            const std::size_t next = ring[(i + 1) % ring.size()];
+        for (int pass = 0; pass < passes && !clipped; ++pass) {
+            for (std::size_t i = 0; i < ring.size(); ++i) {
+                const std::size_t prev = ring[(i + ring.size() - 1) % ring.size()];
+                const std::size_t cur = ring[i];
+                const std::size_t next = ring[(i + 1) % ring.size()];
 
-            const Vec2 incoming = v[cur] - v[prev];
-            const Vec2 outgoing = v[next] - v[cur];
-            const double turn = incoming.cross(outgoing);
-            const double turnScale = tol::kAngular * incoming.length() * outgoing.length();
-            if (std::abs(turn) <= turnScale) {
-                ring.erase(ring.begin() + static_cast<std::ptrdiff_t>(i)); // collinear: drop
+                const Vec2 incoming = v[cur] - v[prev];
+                const Vec2 outgoing = v[next] - v[cur];
+                const double turn = incoming.cross(outgoing);
+                const double turnScale = tol::kAngular * incoming.length() * outgoing.length();
+                if (std::abs(turn) <= turnScale) {
+                    if (collinear == CollinearVertices::Skip) {
+                        ring.erase(ring.begin() + static_cast<std::ptrdiff_t>(i)); // drop
+                        clipped = true;
+                        break;
+                    }
+                    // Keep: straight on is cut in the second pass; a vertex
+                    // where the boundary doubles back (a spike, or a repeated
+                    // vertex turned about) is not a run to join and is left.
+                    if (pass == 0 || incoming.dot(outgoing) < 0.0) {
+                        continue;
+                    }
+                    triangles.push_back({prev, cur, next});
+                    ring.erase(ring.begin() + static_cast<std::ptrdiff_t>(i));
+                    clipped = true;
+                    break;
+                }
+                if (turn < 0.0) {
+                    continue; // reflex vertex cannot be an ear
+                }
+
+                bool blocked = false;
+                for (const std::size_t other : ring) {
+                    if (other == prev || other == cur || other == next || v[other] == v[prev] ||
+                        v[other] == v[cur] || v[other] == v[next]) {
+                        continue;
+                    }
+                    const bool inside = (v[cur] - v[prev]).cross(v[other] - v[prev]) >= 0.0 &&
+                                        (v[next] - v[cur]).cross(v[other] - v[cur]) >= 0.0 &&
+                                        (v[prev] - v[next]).cross(v[other] - v[next]) >= 0.0;
+                    if (inside) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (blocked) {
+                    continue;
+                }
+                triangles.push_back({prev, cur, next});
+                ring.erase(ring.begin() + static_cast<std::ptrdiff_t>(i));
                 clipped = true;
                 break;
             }
-            if (turn < 0.0) {
-                continue; // reflex vertex cannot be an ear
-            }
-
-            bool blocked = false;
-            for (const std::size_t other : ring) {
-                if (other == prev || other == cur || other == next || v[other] == v[prev] ||
-                    v[other] == v[cur] || v[other] == v[next]) {
-                    continue;
-                }
-                const bool inside = (v[cur] - v[prev]).cross(v[other] - v[prev]) >= 0.0 &&
-                                    (v[next] - v[cur]).cross(v[other] - v[cur]) >= 0.0 &&
-                                    (v[prev] - v[next]).cross(v[other] - v[next]) >= 0.0;
-                if (inside) {
-                    blocked = true;
-                    break;
-                }
-            }
-            if (blocked) {
-                continue;
-            }
-            triangles.push_back({prev, cur, next});
-            ring.erase(ring.begin() + static_cast<std::ptrdiff_t>(i));
-            clipped = true;
-            break;
         }
         if (!clipped) {
             return makeError(ErrorCode::TriangulationFailure,
@@ -396,8 +424,10 @@ Result<std::vector<TriangleIndices>> triangulate(const Polyline2& polygon)
         }
     }
 
+    // Keep gives the last triangle whatever its area: it carries the edges
+    // left in the ring.
     const Triangle2 last{v[ring[0]], v[ring[1]], v[ring[2]]};
-    if (!last.isDegenerate()) {
+    if (collinear == CollinearVertices::Keep || !last.isDegenerate()) {
         triangles.push_back({ring[0], ring[1], ring[2]});
     }
     return triangles;

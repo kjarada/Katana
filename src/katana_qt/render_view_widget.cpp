@@ -755,21 +755,31 @@ void RenderViewWidget::paintOverlays(QPainter& painter)
 // A small bar of the one elevation ramp with its two ends, so a colour can be
 // read as a height. Only when a surface is coloured by elevation and the view
 // has room for it.
-void RenderViewWidget::drawLegend(QPainter& painter) const
+void RenderViewWidget::drawLegend(QPainter& painter)
 {
+    drawnLegends_.clear();
     if (height() < 160 || width() < 160) {
         return;
     }
-    // Surface display (docs/surface_display.md): a surface drawn in a display
-    // style is read off its style's legend - its ramp, bands, stops or
-    // aspect sectors - drawn as the plan view draws one.
-    if (layers_.legend.has_value()) {
+    // Surface display (docs/surface_display.md): each surface drawn in a
+    // display style is read off its style's legend - its ramp, bands, stops or
+    // aspect sectors - drawn as the plan view draws them, through the one
+    // stack: down the corner in drawing order, each captioned with its
+    // surface, none cut by the view's edge and none over another. Unlike the
+    // plan view, which keeps three over a drawing being edited, the stack here
+    // is limited only by the room: a surface whose key is missing is a surface
+    // nobody can read.
+    if (!layers_.legends.empty()) {
         QColor backing = kBackground;
         backing.setAlpha(200);
-        const QString caption = QString::fromStdString(layers_.legendSurface) + QStringLiteral(" - ") +
-                                QString::fromStdString(layers_.legendStyle);
-        (void)paintSurfaceLegend(painter, *layers_.legend, caption, QPointF(width() - 16.0, 16.0),
-                                 painter.font(), theme::textMuted(), backing);
+        LegendStack stack;
+        stack.topRight = QPointF(width() - 16.0, 16.0);
+        stack.bottom = height() - 16.0;
+        stack.maximum = layers_.legends.size();
+        stack.font = painter.font();
+        stack.text = theme::textMuted();
+        stack.backing = backing;
+        drawnLegends_ = paintSurfaceLegendStack(painter, layers_.legends, stack);
         return;
     }
     if (!layers_.hasRamp()) {

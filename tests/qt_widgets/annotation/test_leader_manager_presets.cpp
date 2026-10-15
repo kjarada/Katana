@@ -83,6 +83,23 @@ struct Drawing {
         return ann::leaderSays(document.model(), leader(id), ann::leaderContext(document));
     }
     [[nodiscard]] std::size_t steps() const { return document.history().undoCount(); }
+
+    // The window's executor, as the dialog sees it (test_leader_manager.cpp).
+    QStringList lines;
+    katana::qt::LeaderManagerContext context()
+    {
+        katana::qt::LeaderManagerContext made;
+        made.run = [this](const QString& line) {
+            lines << line;
+            const auto reply = interpreter.run(line.toStdString());
+            if (!reply) {
+                return katana::qt::VerbOutcome{false, {},
+                                               QString::fromStdString(reply.error().describe())};
+            }
+            return katana::qt::VerbOutcome{true, QString::fromStdString(*reply), {}};
+        };
+        return made;
+    }
 };
 
 template <typename Widget> Widget* child(QWidget& dialog, const char* name)
@@ -108,7 +125,7 @@ TEST(LeaderManagerPresets, AChosenPresetWritesItsTemplateAndApplyStoresItInOneSt
     Drawing d;
     const EntityId pit = d.point("30,40", "25");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 40,50 text=PIT");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* preset = child<QComboBox>(dialog, "leaderPreset");
     auto* reads = child<QComboBox>(dialog, "leaderPresetReads");
@@ -140,7 +157,7 @@ TEST(LeaderManagerPresets, ChoosePresetReadsTheNamedSurfaceAndRefusesWhatTheDraw
     Drawing d;
     const EntityId pit = d.point("30,40", "18");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 40,50 text=PIT");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     // 18 under ground 21: a cut of 3.
     ASSERT_TRUE(dialog.choosePreset(QStringLiteral("cutfill"), QStringLiteral("ground")));
@@ -164,7 +181,7 @@ TEST(LeaderManagerPresets, ALeaderShownSaysWhichPresetItIsUntilItsNoteIsTypedAwa
     const EntityId pit = d.point("30,40", "25");
     const EntityId leader =
         d.run("LEADER #" + std::to_string(pit) + " 40,50 preset=cutfill surface=ground");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* preset = child<QComboBox>(dialog, "leaderPreset");
     auto* reads = child<QComboBox>(dialog, "leaderPresetReads");
@@ -185,7 +202,7 @@ TEST(LeaderManagerPresets, ForSelectionMakesAPresetLeaderToEachSelectedInOneStep
     const EntityId a = d.point("30,40", "25");
     const EntityId b = d.point("60,20", "30");
     d.run("SELECT " + std::to_string(a) + " " + std::to_string(b));
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
     processEvents();
     ASSERT_TRUE(dialog.chooseForPreset(QStringLiteral("surface")));
@@ -206,7 +223,7 @@ TEST(LeaderManagerPresets, TheValuesOfferTheSurfacesValuesAtTheTip)
     Drawing d;
     const EntityId pit = d.point("30,40", "25");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 40,50 preset=level");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* table = child<QTableWidget>(dialog, "leaderValues");
     QStringList rows;

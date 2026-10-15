@@ -28,10 +28,15 @@
 #     is not known; outside the folder it clears the updater's state folder and no other,
 #     keeps the person's choices about updating, and removes the helper's RunOnce value under
 #     the name the helper gives it (REGISTRY_HEADER, when given, is where that name is read);
+#   * the Desktop shortcut (cmake/KatanaPackaging.cmake, CPACK_NSIS_CREATE_ICONS_EXTRA): one, to
+#     the program and under the name of the Start menu's, with no icon of its own (the program's
+#     is the Start menu's), starting in the install folder, made between the two macros of the
+#     Start menu page so that a person who ticked "Do not create shortcuts" gets none, and removed
+#     by the uninstaller, which takes nothing else from the Desktop;
 #   * a silent run never waits for an answer; the text is Unicode.
 #
 # That list is all this check holds the text to. What only a run can show (the exit code of a
-# refused folder, the size in Settings > Apps, the shortcuts) is not in it.
+# refused folder, the size in Settings > Apps, whether the shortcuts are there) is not in it.
 #
 # The check reads text, and NSIS does not compile all of its text. Two things take an
 # instruction away from NSIS, and each is dealt with before a rule looks at anything:
@@ -82,6 +87,11 @@ if(TEMPLATE)
     set(CPACK_NSIS_FULL_INSTALL [=[File /r "${INST_DIR}\*.*"]=])
     set(CPACK_NSIS_CREATE_ICONS [=[CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Katana.lnk" "$INSTDIR\bin\katana.exe"]=])
     set(CPACK_NSIS_DELETE_ICONS [=[Delete "$SMPROGRAMS\$MUI_TEMP\Katana.lnk"]=])
+    # The Desktop shortcut, as cmake/KatanaPackaging.cmake says it and CPack hands it to the
+    # template once CPackConfig.cmake has been read again (single quotes, single backslashes).
+    set(CPACK_NSIS_CREATE_ICONS_EXTRA [=[  SetOutPath '$INSTDIR'
+  CreateShortCut '$DESKTOP\Katana.lnk' '$INSTDIR\bin\katana.exe']=])
+    set(CPACK_NSIS_DELETE_ICONS_EXTRA [=[  Delete '$DESKTOP\Katana.lnk']=])
     set(CPACK_NSIS_DELETE_FILES [=[Delete "$INSTDIR\bin\katana.exe"
   Delete "$INSTDIR\share\katana\install.json"]=])
     set(CPACK_NSIS_DELETE_DIRECTORIES [=[RMDir "$INSTDIR\bin"
@@ -214,6 +224,29 @@ elseif(MUTATE STREQUAL "uninstaller_runs_without_a_folder")
     katana_mutate([=[Abort "Katana's folder is not known, so nothing was removed."]=] "")
 elseif(MUTATE STREQUAL "uninstaller_that_is_gone_stops_the_install")
     katana_mutate([=[IfFileExists "$0" 0 onInitDone]=] "")
+elseif(MUTATE STREQUAL "desktop_shortcut_not_made")
+    katana_mutate([=[CreateShortCut '$DESKTOP\Katana.lnk' '$INSTDIR\bin\katana.exe']=] "")
+elseif(MUTATE STREQUAL "desktop_shortcut_not_removed")
+    katana_mutate([=[Delete '$DESKTOP\Katana.lnk']=] "")
+elseif(MUTATE STREQUAL "desktop_shortcut_to_another_program")
+    katana_mutate([=['$INSTDIR\bin\katana.exe']=] [=['$INSTDIR\bin\katana_cli.exe']=])
+elseif(MUTATE STREQUAL "desktop_shortcut_with_an_icon_of_its_own")
+    # The icon_file and icon index arguments of CreateShortCut, after an empty parameters one.
+    katana_mutate([=['$INSTDIR\bin\katana.exe']=] [=['$INSTDIR\bin\katana.exe' '' '$INSTDIR\share\other.ico' 0]=])
+elseif(MUTATE STREQUAL "desktop_shortcut_ignores_do_not_create_shortcuts")
+    # Moved, not copied: out of the Start menu page's block, to just after it.
+    katana_mutate([=[CreateShortCut '$DESKTOP\Katana.lnk' '$INSTDIR\bin\katana.exe']=] "")
+    katana_mutate([=[!insertmacro MUI_STARTMENU_WRITE_END]=]
+                  "!insertmacro MUI_STARTMENU_WRITE_END\n  CreateShortCut '$DESKTOP\\Katana.lnk' '$INSTDIR\\bin\\katana.exe'")
+elseif(MUTATE STREQUAL "desktop_shortcut_starts_in_another_folder")
+    katana_mutate([=[SetOutPath '$INSTDIR']=] [=[SetOutPath '$INSTDIR\bin']=])
+elseif(MUTATE STREQUAL "desktop_shortcut_removed_by_wildcard")
+    katana_mutate([=[Delete '$DESKTOP\Katana.lnk']=] [=[Delete '$DESKTOP\*.lnk']=])
+elseif(MUTATE STREQUAL "desktop_shortcut_under_another_name")
+    # The create and the delete both, so that the one fault is the name the Start menu does not have.
+    katana_mutate([=[$DESKTOP\Katana.lnk]=] [=[$DESKTOP\Katana CAD.lnk]=])
+elseif(MUTATE STREQUAL "desktop_is_used_for_something_else")
+    katana_mutate([=[Delete '$DESKTOP\Katana.lnk']=] "Delete '$DESKTOP\\Katana.lnk'\n  RMDir '$DESKTOP\\Katana'")
 elseif(MUTATE)
     message(FATAL_ERROR "unknown mutation '${MUTATE}'")
 endif()
@@ -539,6 +572,99 @@ if(NOT _manifest_delete EQUAL -1 AND NOT _manifest_call EQUAL -1 AND _manifest_d
     katana_problem("Delete \"$INSTDIR\\share\\katana\\installed.manifest.json\" comes before Call un.DeleteManifestFiles: the list would be gone before it is read, and every file an update added would be left behind")
 endif()
 
+# 7. The Desktop shortcut (cmake/KatanaPackaging.cmake: CPACK_NSIS_CREATE_ICONS_EXTRA and
+# CPACK_NSIS_DELETE_ICONS_EXTRA). The installer puts ONE shortcut on the current user's Desktop:
+# to the program the Start menu's goes to and under that one's name; with no icon argument, so
+# that its icon is the program's, which is the Start menu's; starting in the install folder (a
+# shortcut starts in the output folder the installer has set when it makes it, which the
+# SetOutPath before it settles). It is made between the two macros of the Start menu page, which
+# skip what is between them for a person who ticked "Do not create shortcuts" - the wizard has no
+# page of its own for it. The uninstaller deletes it by that name. No other instruction of the
+# script names the Desktop, so nothing else is made there or taken from it. (Machine-wide is
+# refused above: no all-users shell context.) NSIS takes ' and ` as it takes ", and a value that
+# CPackConfig.cmake carries cannot hold a ", so Katana's Desktop lines are written with ': the
+# shortcut lines are read with the quotes made alike.
+function(katana_alike text out)
+    string(REGEX REPLACE "['`]" "\"" _alike "${text}")
+    set(${out} "${_alike}" PARENT_SCOPE)
+endfunction()
+set(_desktop_links "")
+set(_menu_link "")
+string(REGEX MATCHALL "(^|\n)[ \t]*CreateShortCut[^\n]*" _shortcuts "${_install}")
+foreach(_shortcut IN LISTS _shortcuts)
+    string(STRIP "${_shortcut}" _shortcut)
+    katana_alike("${_shortcut}" _shortcut)
+    if(_shortcut MATCHES "[$]DESKTOP")
+        list(APPEND _desktop_links "${_shortcut}")
+    elseif(_shortcut MATCHES "^CreateShortCut \"[$]SMPROGRAMS\\\\[$]STARTMENU_FOLDER\\\\([A-Za-z0-9_ .-]+[.]lnk)\" \"([^\"]+)\"$")
+        # The Start menu's, which CPack makes from CPACK_PACKAGE_EXECUTABLES; Uninstall.lnk is the template's.
+        if(NOT "${CMAKE_MATCH_1}" STREQUAL "Uninstall.lnk")
+            set(_menu_link "${CMAKE_MATCH_1}|${CMAKE_MATCH_2}")
+        endif()
+    endif()
+endforeach()
+list(LENGTH _desktop_links _desktop_count)
+if(_desktop_count EQUAL 0)
+    katana_problem("the installer makes no shortcut on the Desktop: its section has no CreateShortCut that names $DESKTOP")
+elseif(_desktop_count GREATER 1)
+    katana_problem("the installer makes ${_desktop_count} shortcuts on the Desktop, and must make one")
+else()
+    list(GET _desktop_links 0 _desktop_link)
+    if(NOT _desktop_link MATCHES "^CreateShortCut \"[$]DESKTOP\\\\([A-Za-z0-9_ .-]+[.]lnk)\" \"([^\"]+)\"$")
+        katana_problem("${_desktop_link}: a shortcut on the Desktop must name its file and the program and nothing after them; an icon of its own would make it differ from the Start menu's, which shows the program's")
+    else()
+        set(_desktop_name "${CMAKE_MATCH_1}")
+        set(_desktop_target "${CMAKE_MATCH_2}")
+        if(NOT _desktop_target STREQUAL "$INSTDIR\\bin\\katana.exe")
+            katana_problem("the Desktop shortcut goes to ${_desktop_target}, and must go to the program: $INSTDIR\\bin\\katana.exe")
+        endif()
+        if(_menu_link STREQUAL "")
+            katana_problem("the installer makes no Start menu shortcut for the Desktop one to be the same as (CPack makes it from CPACK_PACKAGE_EXECUTABLES)")
+        elseif(NOT _menu_link STREQUAL "${_desktop_name}|${_desktop_target}")
+            katana_problem("the Desktop shortcut and the Start menu one are not the same, ${_desktop_name}|${_desktop_target} against ${_menu_link}: both are Katana, by one name, to one program")
+        endif()
+        string(FIND "${_install}" "!insertmacro MUI_STARTMENU_WRITE_BEGIN" _menu_begin)
+        string(FIND "${_install}" "!insertmacro MUI_STARTMENU_WRITE_END" _menu_end)
+        string(FIND "${_install}" "$DESKTOP" _desktop_at)
+        if(_menu_begin EQUAL -1 OR _menu_end EQUAL -1 OR _desktop_at LESS _menu_begin OR _desktop_at GREATER _menu_end)
+            katana_problem("the Desktop shortcut is not between the two macros of the Start menu page (MUI_STARTMENU_WRITE_BEGIN and MUI_STARTMENU_WRITE_END): a person who ticked Do not create shortcuts would get it all the same")
+        else()
+            string(SUBSTRING "${_install}" 0 ${_desktop_at} _before_desktop)
+            string(REGEX MATCHALL "(^|\n)[ \t]*SetOutPath[^\n]*" _out_paths "${_before_desktop}")
+            set(_start_in "")
+            if(_out_paths)
+                list(GET _out_paths -1 _start_in)
+                string(STRIP "${_start_in}" _start_in)
+                katana_alike("${_start_in}" _start_in)
+            endif()
+            if(NOT _start_in STREQUAL "SetOutPath \"$INSTDIR\"")
+                katana_problem("the Desktop shortcut does not start in the install folder: the last SetOutPath before it is  ${_start_in}  and must be  SetOutPath \"$INSTDIR\"")
+            endif()
+        endif()
+        if(NOT _uninstall STREQUAL "")
+            string(REGEX MATCHALL "(^|\n)[ \t]*Delete[^\n]*[$]DESKTOP[^\n]*" _desktop_deletes "${_uninstall}")
+            set(_removes_it FALSE)
+            foreach(_delete IN LISTS _desktop_deletes)
+                string(STRIP "${_delete}" _delete)
+                katana_alike("${_delete}" _delete)
+                if(_delete STREQUAL "Delete \"$DESKTOP\\${_desktop_name}\"")
+                    set(_removes_it TRUE)
+                else()
+                    katana_problem("${_delete}: the uninstaller takes from the Desktop what is not Katana's shortcut, ${_desktop_name}")
+                endif()
+            endforeach()
+            if(NOT _removes_it)
+                katana_problem("the uninstaller does not remove the shortcut on the Desktop: its section has no  Delete \"$DESKTOP\\${_desktop_name}\"")
+            endif()
+        endif()
+    endif()
+endif()
+string(REGEX MATCHALL "[$]DESKTOP" _desktop_mentions "${_text}")
+list(LENGTH _desktop_mentions _desktop_mention_count)
+if(_desktop_mention_count GREATER 2)
+    katana_problem("the script names $DESKTOP ${_desktop_mention_count} times: Katana's one shortcut there is made once and removed once, and nothing else on the Desktop is made, changed or taken")
+endif()
+
 # What the build said goes in (CPack's own lists, from the real staged tree).
 foreach(_file IN LISTS EXPECT_FILES)
     string(REPLACE "/" "\\" _windows "${_file}")
@@ -552,4 +678,5 @@ endif()
 message(STATUS "Installer script (${_what}): per user. RequestExecutionLevel user; ${_hive_count} registry hive "
     "references, all HKCU; ${_box_count} MessageBox, all with /SD; the uninstaller removes .update and the "
     "files the installed manifest lists, and no folder recursively but the updater's; the installer clears "
-    "the updater's record and working folder of a copy it installs over.")
+    "the updater's record and working folder of a copy it installs over; one shortcut on the Desktop, to the "
+    "program of the Start menu's, made in the Start menu page's block and removed by name.")

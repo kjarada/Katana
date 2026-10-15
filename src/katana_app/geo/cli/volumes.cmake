@@ -95,6 +95,60 @@ set_tests_properties(cli.volume_sections_round_a_curve_with_the_default_reach_ar
     PASS_REGULAR_EXPRESSION "error: InvalidArgument: the sections at stations [0-9.]+ and [0-9.]+ cross each other.*at most 40\.000 m")
 
 
+# A strip 10 m wide on the inside of the same curve (left=10, the centre of the
+# curve is on the left): the tangents hold 120 x 10 = 1200 m^3 each, and the
+# curve between its radii 40 and 30, (pi/4)(40^2 - 30^2) = 175 pi = 549.779, so
+# 2949.779 in all. The plain end area, 10 m^2 along the centreline's 20 pi =
+# 62.832, is 2400 + 200 pi = 3028.319 - 78.540 (25 pi) too much, which is what
+# the record says the correction moved. curvature=off gives the plain figure
+# and says it was not corrected.
+add_test(NAME cli.volume_sections_round_a_curve_are_corrected_for_a_strip_on_its_inside
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_curve}
+            -c "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=10 right=0")
+set_tests_properties(cli.volume_sections_round_a_curve_are_corrected_for_a_strip_on_its_inside
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "volume method=endarea base=base top=top alignment=cl .*left=10\\.000 right=0\\.000 curvature=on .*cut=0\\.000 fill=2949\\.779 .*curvature\\.fill=-78\\.540"
+    FAIL_REGULAR_EXPRESSION "error")
+add_test(NAME cli.volume_sections_round_a_curve_with_curvature_off_give_the_plain_end_area
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_curve}
+            -c "VOLUME SECTIONS base top ALIGNMENT cl interval=5 left=10 right=0 curvature=off")
+set_tests_properties(cli.volume_sections_round_a_curve_with_curvature_off_give_the_plain_end_area
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "volume method=endarea base=base top=top alignment=cl .*left=10\\.000 right=0\\.000 curvature=off .*cut=0\\.000 fill=3028\\.319"
+    FAIL_REGULAR_EXPRESSION "error;curvature\\.fill")
+
+# Two legs 15 m apart, east and back west, with a reach of 10 either way: their
+# strips share 5 m along the 100 m that the legs run side by side, and no section
+# of one crosses a section of the other. Refused, naming the stretches.
+add_test(NAME cli.volume_sections_along_two_legs_side_by_side_are_refused_naming_the_stretches
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_curve}
+            -c "ALIGN NEW uturn 20,40 120,40 120,55 20,55"
+            -c "VOLUME SECTIONS base top ALIGNMENT uturn interval=20 left=10 right=10")
+set_tests_properties(cli.volume_sections_along_two_legs_side_by_side_are_refused_naming_the_stretches
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "error: InvalidArgument: the stretch of the alignment from station 0\\.000 to 100\\.000 runs side by side with the stretch from station 120\\.000 to 215\\.000")
+
+# A lot [2, 8]^2 (36 m^2) with a hole [4, 6]^2 (4 m^2) in it, the hole tagged as one
+# (a ring says so with gis.ring, as a geoprocessing result writes it, or source.ring,
+# which IMPORT does): the slab's 1 m over the lot less the hole is 32 m^3, and the
+# polygons record says one ring joined. Entities 1 and 2 are the two surfaces'
+# strings, so the lot is 3 and the hole 4.
+add_test(NAME cli.volume_inside_a_lot_with_a_tagged_hole_measures_the_lot_less_the_hole
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_surfaces}
+            -c "LAYER NEW lots" -c "LAYER SET lots"
+            -c "PLINE 2,2 8,2 8,8 2,8 CLOSE"
+            -c "PLINE 4,4 6,4 6,6 4,6 CLOSE"
+            -c "SELECT 4" -c "PROP SET gis.ring hole"
+            -c "VOLUME SURFACES base top INSIDE FROM LAYERS lots")
+set_tests_properties(cli.volume_inside_a_lot_with_a_tagged_hole_measures_the_lot_less_the_hole
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "polygons used=1 holes=1 skipped\\.open=0 skipped\\.other=0.*volume method=exact base=base top=top polygons=1 polygon\\.area=32\\.000 cut=0\\.000 fill=32\\.000"
+    FAIL_REGULAR_EXPRESSION "error")
+
 # Two lots sharing the edge x = 5.5, which is a line of 1 m cell centres: the
 # lots [2, 5.5] x [2, 8] and [5.5, 8] x [2, 8] hold 4 x 6 and 3 x 6 centres
 # (24 + 18 = 42 when each is measured alone and summed, the 6 on the edge

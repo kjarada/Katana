@@ -8,7 +8,7 @@
 //   RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
 //                [style=hillshade|relief|relief+hillshade|slope|plain]
 //                [azimuth=315] [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]
-//                [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>]
+//                [ramp=terrain|earth|diverging|slope|grey|spectral|<file>] [range=<min>,<max>]
 //                [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]
 //
 // The picture is made by GDAL's own algorithms, step by step through a
@@ -53,12 +53,31 @@ namespace {
 constexpr const char* kUsage =
     "RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path> "
     "[style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315] [altitude=45] [z=1] "
-    "[variant=regular|combined|multidirectional|igor] [ramp=terrain|diverging|slope|grey|<file>] "
+    "[variant=regular|combined|multidirectional|igor] "
+    "[ramp=terrain|earth|diverging|slope|grey|spectral|<file>] "
     "[range=<min>,<max>] [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]";
 
 katana::core::Error refusal(const std::string& why, const std::string& word = {})
 {
     return makeError(ErrorCode::InvalidArgument, why, word);
+}
+
+// The built-in ramps as a phrase for a refusal - "terrain, earth, diverging,
+// slope, grey or spectral" - read from the one table, so a ramp added to it
+// is named here without anyone remembering to.
+std::string rampWords()
+{
+    const std::vector<std::string> names = igeo::builtInRampNames();
+    std::string words;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        words += names[i];
+        if (i + 2 < names.size()) {
+            words += ", ";
+        } else if (i + 2 == names.size()) {
+            words += " or ";
+        }
+    }
+    return words;
 }
 
 std::string utf8Of(const std::filesystem::path& path)
@@ -183,7 +202,7 @@ Result<ShadeWords> shadeWords(const Tokens& tokens, std::size_t at)
             words.variant = variant;
         } else if (key == "ramp") {
             if (text.empty()) {
-                return refusal("ramp is terrain, diverging, slope, grey or a colour-map file");
+                return refusal("ramp is " + rampWords() + " or a colour-map file");
             }
             words.ramp = text;
         } else if (key == "range") {
@@ -479,8 +498,7 @@ Result<Prepared> prepareShade(Context& context, const Tokens& tokens, std::strin
         std::error_code error;
         if (!std::filesystem::exists(pathOf(*words->ramp), error)) {
             return makeError(ErrorCode::NotFound,
-                             "ramp is terrain, diverging, slope, grey or a colour-map file, and "
-                             "no file is there",
+                             "ramp is " + rampWords() + " or a colour-map file, and no file is there",
                              *words->ramp);
         }
     }

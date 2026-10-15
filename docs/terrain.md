@@ -357,16 +357,41 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
 - **Hidden is a matter of the picture.** `NamedSurface::visible` says
   whether the views draw a surface: the plan and 3D views follow it as it
   changes, and a section - the section view, a sheet's sections - is cut
-  from the surfaces that were shown WHEN IT WAS CUT. An open section view is
-  not cut again by itself (Terrain > Cut Section is the person's decision, and
-  its alignment and design profile are not kept to repeat it with); when the
-  drawing's surfaces have changed since, it says so in its legend and its status
-  text (`SectionViewWidget::surfacesChanged`,
-  `SectionView.ASectionSaysItsSurfacesChangedSinceItWasCutAndCuttingAgainClearsIt`).
-  Any change to the surfaces says it, a style change included: the generation
-  it goes by does not tell which part of a surface changed. A hidden surface is
-  still read by every verb - sampled, draped, exported, a corridor's ground -
-  which is why the corridor and the IFC export list them all.
+  from the surfaces that were shown WHEN IT WAS CUT. An open section view
+  follows them: it keeps its recipe, the section's own alignment and the design
+  profile with its name (`ViewState::sectionDesign`), and when the drawing's
+  surfaces change - hidden, shown, edited, merged, removed, undone, redone - the
+  window cuts it again from the event loop, once for all that a command or a
+  script changed (`MainWindow::recutSections`, `ViewWorkspace::recutSections`,
+  `qt_an_open_section_is_cut_again_when_the_surfaces_change_headless`). The cut
+  is `cad::cutDrawingSection` (`cad/terrain/section_cut.hpp`), which Terrain >
+  Cut Section uses too, so the two cannot differ in which surfaces they take or
+  in the interval (`SectionCut.*`); the views are told by the surfaces'
+  generation, which moves for every change to the surfaces and never goes back
+  (`SectionRecut.*`). A person's pan and zoom stay: the station and elevation at
+  the middle of the plot keep their place, and a view they have not touched is
+  fitted to the new section as it was to the old
+  (`SectionViewWidget::replaceSection`). A view turned to another kind keeps its
+  section, and it is cut again in its state. When it cannot be cut again - the
+  last surface hidden, a surface removed from every way of cutting - the view
+  keeps the picture it had and says it is of surfaces that have changed, in its
+  legend and its status text (`SectionViewWidget::surfacesChanged`), and the log
+  says why ("... was not cut again: Every surface is hidden ..."); showing a
+  surface cuts it again. Any change to the surfaces moves the generation,
+  giving a surface another style included - it does not tell which part of a
+  surface changed - so that cuts again too, needlessly and harmlessly; editing a
+  style's own settings does not (`SurfaceStyles` is a change of its own, and a
+  section holds no style). A hidden surface is still read by every verb -
+  sampled, draped, exported, a corridor's ground - which is why the corridor and
+  the IFC export list them all.
+  *Rejected:* marking the section stale and leaving the cut to the person (the
+  finding's smaller alternative: Terrain > Cut Section again after every edit is
+  the work the window can do), and cutting at once inside the document's
+  notification (fifty edits of a script would cut fifty times, a section of two
+  thousand stations each). *Not followed:* an alignment or a design profile
+  edited after the cut - the recipe is what was cut; and the crossings an
+  entity edit moves, which a re-cut would refresh but no change to the entities
+  asks for.
 - **A surface's style is a name.** `NamedSurface::style` names one of the
   drawing's display styles (`include/katana/cad/terrain/surface_style.hpp`);
   empty is the drawing's default. A name the styles do not have is refused
@@ -397,6 +422,12 @@ OPENS - refusing would lock the person out of a drawing they cannot rename
 their way out of - with the name repaired the same way, made unique, and a
 warning in the log
 (`SurfaceDocument.ASurfaceNameAnEarlierBuildStoredAsAnsiBytesOrWithAQuoteIsRepairedOnOpen`).
+The source and the style that open reads are repaired by reading their bytes as
+Windows-1252 as well (`Document::readSurfaceState`, `utf8OrWindows1252`): a
+source "raster caf" + 0xE9 opens as "raster caf" + C3 A9
+(`SurfaceDocument.ASurfaceSourceAndStyleAnEarlierBuildStoredAsAnsiBytesAreReadAsWindows1252`,
+which edits the stored bytes in the project's database and fails without the
+conversion).
 
 **ALL.** `SURFACE SHOW|HIDE ALL` is a keyword, and a surface may be called
 ALL: the verb gives a surface's own name the first claim, so `SURFACE HIDE
@@ -506,7 +537,14 @@ arrangement, so they need no schema change.
   the door, since it also answers `SURFACESTYLE LIST JSON`), and what a save
   writes is guarded apart - `Document::writeSurfaceState` re-checks the set
   and refuses the save, naming the style, rather than write a U+FFFD into the
-  project (`SurfaceDocument.AStyleSetWhoseTextIsNotUtf8IsRefusedSoASaveNeverMeetsIt`,
+  project. The door never lets such a set into the Document, so no test could
+  hand the save the set it refuses; the guard is a function of the set,
+  `detail::surfaceStylesMetadataValue` (`src/katana_cad/terrain/surface_document_io.hpp`),
+  which `writeSurfaceState` calls and a test calls with the sets the door
+  refuses
+  (`SurfaceDocument.TheSaveRefusesAStyleSetTheJsonWriterCouldNotCarryRatherThanRewriteItsText`;
+  the door itself:
+  `SurfaceDocument.AStyleSetWhoseTextIsNotUtf8IsRefusedSoASaveNeverMeetsIt`,
   `SurfaceStyleSets.TextThatIsNotUtf8IsRefusedAndTheMessageDoesNotCarryItsBytes`,
   `DrawingSurfaceVerbs.NamesAndDescriptionsTypedInTheAnsiCodePageAreRefusedAndNothingChanges`).
   *Rejected:* `Result<std::string>` from `surfaceStylesToJson`: the Document
@@ -553,10 +591,14 @@ A key per field of a style (HELP SURFACESTYLE lists them; colours take
 #RRGGBB or a colour name). Replies are records: `surface name= ... style=
 visible=`, `style name= default= surfaces= ...`, `renamed`, `copied`,
 `shown|hidden surfaces= changed=`. `SURFACE RENAME` carries the corridors that
-daylight on the surface and the road objects that stand on it to the new name,
-in its one undo step (`renamed surface= name= corridors= roadobjects=`); left
+daylight on the surface, the road objects that stand on it and the leaders whose
+notes read it (`{dsurface.NAME}`) to the new name, in its one undo step
+(`renamed surface= name= corridors= roadobjects= leaders=`); left
 behind they would find no surface and lose their earthworks and their level
-(`docs/road_objects.md`, "The drawing's record"). SURFACESTYLE INFO prints a
+(`docs/road_objects.md`, "The drawing's record"; `docs/annotation.md`, "A
+surface or an alignment is read by name"). SURFACE REMOVE does not refuse while
+a leader reads the surface: it adds a `warning` record saying how many will
+read nothing. SURFACESTYLE INFO prints a
 style's `options` record, which typed back after SURFACESTYLE NEW gives the same
 style (`DrawingSurfaceVerbs.WhatInfoPrintsTypedBackMakesTheSameStyle`). SURFACE
 COPY shares the triangulation - a copy costs a pointer - so a copy kept
@@ -611,11 +653,10 @@ column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
   cannot be read by a build before it, and that is the owner's decision (the
   alternative, an integrity pass at the open, would read tens of megabytes
   for a check no other table has).
-- **An open section view is not cut again when the surfaces change;** it says
-  they changed (see "Hidden is a matter of the picture"). Cutting it again by
-  itself needs the section's recipe kept with the view - its alignment polyline,
-  its design profile and that profile's name - and a re-cut that keeps the
-  person's framing; neither is built.
+- **An open section view is cut again when the surfaces change, not when the
+  alignment or the entities do** (see "Hidden is a matter of the picture"): the
+  recipe is the polyline and the design profile as they were cut, so an alignment
+  edited since is not followed, and the crossings are those of the cut.
 
 ## Surfaces on every front end
 
@@ -870,7 +911,7 @@ only builds its line:
 RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
              [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]
              [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]
-             [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>]
+             [ramp=terrain|earth|diverging|slope|grey|spectral|<file>] [range=<min>,<max>]
              [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]
 ```
 
@@ -900,10 +941,11 @@ record of the reference raster, `saved file=` with `save=`, then one
   (`raster resize --resampling average`, by the smallest whole step that
   fits), since a finer picture would only be decimated again to be drawn.
   A surface is sampled at its CELL, or the cell suggested for its extent.
-- **Ramps** (`include/katana/interop/geo/colour_ramps.hpp`): terrain
-  (hypsometric tints), diverging (blue, white, red: on design minus
-  existing, cut is blue and fill red), slope (green, pale yellow, red) and
-  grey, the ColorBrewer colours named there. Each style has its own - relief
+- **Ramps** (`include/katana/interop/geo/colour_ramps.hpp`, over the one
+  table of `include/katana/terrain/colour_ramps.hpp`): terrain (the 3D view's
+  elevation tints), earth, diverging (blue, white, red: on design minus
+  existing, cut is blue and fill red), slope (green, yellow, red), grey and
+  spectral, the colours and their sources named there. Each style has its own - relief
   terrain, slope slope, plain grey - and `ramp=` chooses another, or a GDAL
   colour-map file of a person's own, whose value lines (percentages placed
   on the range as GDAL places them) are then the legend. The ramp spans the
@@ -912,10 +954,11 @@ record of the reference raster, `saved file=` with `save=`, then one
   zero, so zero is its white. A span of one value is widened a unit about
   it. The ends are written exactly, so the cells at the range's ends take
   the ramp's end colours exactly
-  (`ShadeVerb.ARampMapsItsEndpointsExactly`). These are the shading verbs'
-  ramps; a surface style has a table of its own whose terrain, diverging,
-  slope and grey are other colours (`docs/surface_display.md`, "The ramps"),
-  so `ramp=terrain` on `RASTER SHADE` and on a surface style are two maps.
+  (`ShadeVerb.ARampMapsItsEndpointsExactly`). These are the surface styles'
+  ramps, the same table (`docs/surface_display.md`, "The ramps"): `ramp=terrain`
+  on `RASTER SHADE` and on a surface style is one map, and a legend lists the
+  same colours. Rasters this verb wrote before the tables were made one
+  (2026-10-15) keep the colours they were written with.
 - **The reference raster** is named `NAME`, or the source's name and the
   style's (`terrain-relief-hillshade`), made unique; its role is Derived,
   its derivation the line, and its display style the style.

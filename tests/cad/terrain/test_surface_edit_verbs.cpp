@@ -11,6 +11,8 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/terrain/surface_edit_verbs.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/text.hpp"
+#include "support/surface_geometry.hpp"
 #include "surface_edit_support.hpp"
 
 using namespace katana::cad;
@@ -55,6 +57,14 @@ struct SurfaceEditVerbs : ::testing::Test {
 bool contains(const std::string& text, const std::string& part)
 {
     return text.find(part) != std::string::npos;
+}
+
+// The whole number a reply gives for `key`: "points_added=4" is 4.
+std::size_t field(const std::string& text, const std::string& key)
+{
+    const auto at = text.find(" " + key + "=");
+    EXPECT_NE(at, std::string::npos) << key << " in " << text;
+    return at == std::string::npos ? 0 : std::stoul(text.substr(at + key.size() + 2));
 }
 
 } // namespace
@@ -136,6 +146,65 @@ TEST_F(SurfaceEditVerbs, ATypedPolygonClosedOnItsFirstCornerIsThatPolygon)
     putSurface(document, "ground", flatGridSurface(10, 1.0, 4.0));
     reply("SURFACE EDIT ground HOLE 3,3 6,3 6,7 3,7 3,3");
     EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 88.0, 1e-9);
+}
+
+TEST_F(SurfaceEditVerbs, HolesFromAScopeOfManyFootprintsMakeWhatOneLinePerFootprintMakes)
+{
+    // 12 footprints in the 10 m cells of a 4 x 3 lattice on a 40 x 40 m ground
+    // (1600 m2), [10 i + 2.3, 10 i + 6.0] x [10 j + 3.1, 10 j + 6.0]: 3.7 x 2.9
+    // = 10.73 m2 each, 128.76 together, 1471.24 left. Cut together they are one
+    // patch of the ground (HOLE FROM LAYERS ...); typed one line at a time they
+    // are twelve - and the same surface, the same counts, and one undo step.
+    const auto level = [](double x, double y) { return 0.5 * x + 0.25 * y; };
+    putSurface(document, "ground", gridSurface(40, 1.0, level));
+    const TinSurface before = surfaceOf(document, "ground");
+    Document typed;
+    CommandInterpreter typedLines{typed};
+    putSurface(typed, "ground", gridSurface(40, 1.0, level));
+    reply("LAYER NEW foot");
+    reply("LAYER SET foot");
+    std::size_t added = 0;
+    std::size_t removed = 0;
+    std::size_t crossings = 0;
+    std::string firstTyped;
+    std::string lastTyped;
+    for (int j = 0; j < 3; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            // Tenths, divided once, so the number is the nearest double to the decimal.
+            const double x0 = (100 * i + 23) / 10.0;
+            const double y0 = (100 * j + 31) / 10.0;
+            const double x1 = (100 * i + 60) / 10.0;
+            const double y1 = (100 * j + 60) / 10.0;
+            polyline({Point2(x0, y0), Point2(x1, y0), Point2(x1, y1), Point2(x0, y1)}, true, "foot");
+            const auto at = [](double v) { return katana::core::formatExactReal(v); };
+            const auto one = typedLines.run("SURFACE EDIT ground HOLE " + at(x0) + "," + at(y0) + " " +
+                                            at(x1) + "," + at(y0) + " " + at(x1) + "," + at(y1) +
+                                            " " + at(x0) + "," + at(y1));
+            ASSERT_TRUE(one.ok()) << one.error().describe();
+            added += field(*one, "points_added");
+            removed += field(*one, "points_removed");
+            crossings += field(*one, "crossings");
+            (firstTyped.empty() ? firstTyped : lastTyped) = *one;
+        }
+    }
+    const std::string text = reply("SURFACE EDIT ground HOLE FROM LAYERS foot ONLY");
+    EXPECT_TRUE(contains(text, "polygons=12")) << text;
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 1600.0 - 128.76, 1e-8);
+    EXPECT_TRUE(katana::test::sameSurfaceGeometry(surfaceOf(document, "ground"),
+                                                  surfaceOf(typed, "ground")));
+    // The reply is the twelve replies summed: the first's "before", the last's
+    // "after", the counts of all.
+    EXPECT_EQ(field(text, "triangles_before"), field(firstTyped, "triangles_before"));
+    EXPECT_EQ(field(text, "triangles_after"), field(lastTyped, "triangles_after"));
+    EXPECT_EQ(field(text, "vertices_before"), field(firstTyped, "vertices_before"));
+    EXPECT_EQ(field(text, "vertices_after"), field(lastTyped, "vertices_after"));
+    EXPECT_EQ(field(text, "points_added"), added);
+    EXPECT_EQ(field(text, "points_removed"), removed);
+    EXPECT_EQ(field(text, "crossings"), crossings);
+    EXPECT_GT(added, 0u);
+    // One undo step for the lot.
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground"), before);
 }
 
 TEST_F(SurfaceEditVerbs, ABoundaryFromAScopeSaysWhatTheScopeTook)
@@ -240,6 +309,28 @@ TEST_F(SurfaceEditVerbs, PasteMergeClipAndOffsetMakeSurfacesByName)
     EXPECT_DOUBLE_EQ(*surfaceOf(document, "ground").elevationAt(50, 50), 15.0);
 }
 
+TEST_F(SurfaceEditVerbs, APasteOfATopWithTwoRimVerticesInsideTheToleranceIsRefusedSayingSo)
+{
+    // The rectangle [2.3, 12.3] x [3.7, 13.7] with two vertices 1e-9 m apart on
+    // its upper side (tin_edit's case): the refusal names the rim and the
+    // tolerance, not "triangle names a vertex twice".
+    using katana::geometry::Point3;
+    putSurface(document, "ground", flatGridSurface(20, 1.0));
+    putSurface(document, "top",
+               makeSurface({Point3(2.3, 3.7, 1), Point3(12.3, 3.7, 1), Point3(12.3, 13.7, 1),
+                            Point3(2.3, 13.7, 1), Point3(8.6, 13.7, 1),
+                            Point3(8.600000001, 13.7, 1)},
+                           {{0, 1, 2}, {0, 2, 5}, {0, 5, 4}, {0, 4, 3}}));
+    const auto generation = document.surfacesGeneration();
+    auto result = interpreter.run("SURFACE PASTE top INTO ground NAME out");
+    ASSERT_FALSE(result.ok()) << *result;
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(result.error().message, "rim")) << result.error().message;
+    EXPECT_TRUE(contains(result.error().message, "coincidence tolerance")) << result.error().message;
+    EXPECT_FALSE(contains(result.error().message, "names a vertex twice")) << result.error().message;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+}
+
 TEST_F(SurfaceEditVerbs, EveryRefusalSaysWhatWasWrongAndChangesNothing)
 {
     putSurface(document, "ground", squareSurface());
@@ -295,6 +386,7 @@ TEST_F(SurfaceEditVerbs, AScopeThatTakesNothingIsReportedAndNoStepIsMade)
                              Case{"DELETE TRIANGLES OUTSIDE FROM DRAWING", "the scope took no polygon"},
                              Case{"DELETE POINTS INSIDE FROM DRAWING", "the scope took no polygon"},
                              Case{"BREAKLINE FROM DRAWING", "the scope took no line"},
+                             Case{"DELETE BREAKLINE FROM DRAWING", "the scope took no line"},
                              Case{"BOUNDARY FROM DRAWING", "the scope took no polygon"},
                              Case{"HOLE FROM DRAWING", "the scope took no polygon"},
                              Case{"RAISE 1 INSIDE FROM DRAWING", "the scope took no polygon"},
@@ -468,10 +560,186 @@ TEST_F(SurfaceEditVerbs, TheToolsActOnTheChosenSurfaceElseTheFirstVisible)
 TEST_F(SurfaceEditVerbs, HelpNamesEveryVerb)
 {
     const std::string help = reply("HELP SURFACE EDIT");
-    for (const char* word : {"DELETE TRIANGLE", "FLIP", "ADD POINTS", "BREAKLINE", "BOUNDARY",
+    for (const char* word : {"DELETE TRIANGLE", "DELETE BREAKLINE", "MOVE POINT", "FLIP", "ADD POINTS", "BREAKLINE", "BOUNDARY",
                              "HOLE", "SETLEVEL", "SMOOTH", "THIN", "SURFACE MERGE",
                              "SURFACE PASTE", "SURFACE CLIP", "SURFACE OFFSET"}) {
         EXPECT_TRUE(contains(help, word)) << word;
     }
     EXPECT_TRUE(contains(reply("HELP"), "SURFACE EDIT"));
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineClearsTheEdgesAlongTheLineAndIsOneUndoStep)
+{
+    // The row y = 4 from x = 1 to 7 of a 10 x 10 unit grid is a breakline of six
+    // lattice edges; its vertex (4,4) cannot be deleted, until the line is.
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 7,4");
+    const TinSurface withLine = surfaceOf(document, "ground");
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE POINT 4,4"), ErrorCode::InvalidGeometry);
+
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 1,4 7,4");
+    EXPECT_TRUE(contains(text, "surface name=ground operation=delete_breakline triangles_before=200 "
+                               "triangles_after=200 vertices_before=121 vertices_after=121 "
+                               "points_added=0 points_removed=0"))
+        << text;
+    EXPECT_TRUE(contains(text, " edges_cleared=6 edges_held=0 changed=yes")) << text;
+    // The triangles are as they were; only the flags went.
+    EXPECT_EQ(surfaceOf(document, "ground").triangles(), withLine.triangles());
+    EXPECT_EQ(surfaceOf(document, "ground").vertices(), withLine.vertices());
+    EXPECT_FALSE(surfaceOf(document, "ground") == withLine) << "the constrained edges are part of a surface";
+    const std::string deleted = reply("SURFACE EDIT ground DELETE POINT 4,4");
+    EXPECT_TRUE(contains(deleted, "points_removed=1")) << deleted;
+
+    // One undo step each: undoing the delete, then the clearing.
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground"), withLine);
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE POINT 4,4"), ErrorCode::InvalidGeometry);
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineAlongNoBreaklineIsNoStepAndSaysNoneWasCleared)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 7,4");
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 1,5 7,5");
+    EXPECT_TRUE(contains(text, " edges_cleared=0 edges_held=0 changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    // PREVIEW works the clearing out and changes nothing.
+    const std::string preview = reply("SURFACE EDIT ground DELETE BREAKLINE 1,4 4,4 PREVIEW");
+    EXPECT_TRUE(contains(preview, " edges_cleared=3 edges_held=0 changed=yes preview=yes")) << preview;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    // A line that is too short, and a name that is no surface.
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE BREAKLINE 1,4"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE BREAKLINE"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT nowhere DELETE BREAKLINE 1,4 7,4"), ErrorCode::NotFound);
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineFromAScopeTakesTheLinesAndSaysWhatTheScopeTook)
+{
+    // Two breaklines of the surface, a polyline over each drawn on a layer: the
+    // scope record says it took two lines, and both are cleared. A third
+    // polyline, on another layer, would clear a third if it were named.
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 3,4");
+    reply("SURFACE EDIT ground BREAKLINE 6,2 6,5");
+    reply("LAYER NEW cleared");
+    reply("LAYER SET cleared");
+    polyline({Point2(0, 4), Point2(4, 4)}, false, "cleared");
+    polyline({Point2(6, 0), Point2(6, 9)}, false, "cleared");
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE FROM LAYERS cleared ONLY");
+    EXPECT_TRUE(contains(text, "lines=2 skipped=0")) << text;
+    EXPECT_TRUE(contains(text, " edges_cleared=5 edges_held=0 changed=yes")) << text;
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineAlongTheConstrainedRimHoldsItAndSaysSo)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BOUNDARY 2.5,2.5 7.5,2.5 7.5,7.5 2.5,7.5");
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 2.5,2.5 7.5,2.5");
+    EXPECT_TRUE(contains(text, " edges_cleared=0 ")) << text;
+    EXPECT_FALSE(contains(text, " edges_held=0 ")) << "the rim edges along the line are counted: " << text;
+    EXPECT_TRUE(contains(text, "changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointMovesTheVertexKeepingItsLevelAsOneUndoStep)
+{
+    // The plane z = 0.5 x + 0.25 y on a 4 x 4 grid: (2,2) is at 1.5, and moved to
+    // (3.5, 2.2) - across the ring of its own triangles - it stays at 1.5,
+    // where the plane there is 2.3. 25 vertices before and after, a vertex made
+    // and a vertex taken out; 32 triangles either way (a polygon of n corners
+    // round k points has n + 2k - 2).
+    putSurface(document, "ground",
+               gridSurface(4, 1.0, [](double x, double y) { return 0.5 * x + 0.25 * y; }));
+    const TinSurface before = surfaceOf(document, "ground");
+    const std::string text = reply("SURFACE EDIT ground MOVE POINT 2,2 TO 3.5,2.2");
+    EXPECT_TRUE(contains(text, "surface name=ground operation=move_point triangles_before=32 "
+                               "triangles_after=32 vertices_before=25 vertices_after=25 "
+                               "points_added=1 points_removed=1"))
+        << text;
+    EXPECT_TRUE(contains(text, " moved=1 ")) << text;
+    EXPECT_TRUE(contains(text, "changed=yes")) << text;
+    const TinSurface after = surfaceOf(document, "ground");
+    EXPECT_NEAR(after.planArea(), 16.0, 1e-9);
+    EXPECT_NEAR(*after.elevationAt(3.5, 2.2), 1.5, 1e-12);
+    EXPECT_EQ(document.history().undoName(), "SURFACE_EDIT_MOVE_POINT");
+
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground"), before);
+    ASSERT_TRUE(interpreter.run("REDO").ok());
+    EXPECT_NEAR(*surfaceOf(document, "ground").elevationAt(3.5, 2.2), 1.5, 1e-12);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointNamesTheVertexByItsReachAndPreviewsWithoutMovingIt)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    const auto generation = document.surfacesGeneration();
+    // (2.1, 2.1) is 0.14 from the vertex (2,2) and is where a click would land.
+    const std::string preview =
+        reply("SURFACE EDIT ground MOVE POINT 2.1,2.1 TO 2.4,1.7 reach=0.5 PREVIEW");
+    EXPECT_TRUE(contains(preview, " moved=1 ")) << preview;
+    EXPECT_TRUE(contains(preview, "changed=yes preview=yes")) << preview;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    reply("SURFACE EDIT ground MOVE POINT 2.1,2.1 TO 2.4,1.7 reach=0.5");
+    bool moved = false;
+    for (const auto& v : surfaceOf(document, "ground").vertices()) {
+        moved = moved || (v.x == 2.4 && v.y == 1.7);
+    }
+    EXPECT_TRUE(moved) << "a vertex at the target";
+    // A reach that finds no vertex, a negative one, a point off the surface.
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 1.5,0.2 TO 1.6,0.3 reach=0.01"),
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5,2.5 reach=-1"),
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 40,40 TO 2.5,2.5"), ErrorCode::InvalidArgument);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointIsRefusedWhereTheVertexOrTheTargetCannotBeAndSaysWhy)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 7,4");
+    const auto generation = document.surfacesGeneration();
+    // A vertex of the breakline; a corner of the rim; a target off the surface.
+    auto onLine = interpreter.run("SURFACE EDIT ground MOVE POINT 4,4 TO 4.2,4.3");
+    ASSERT_FALSE(onLine.ok());
+    EXPECT_EQ(onLine.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(onLine.error().message, "breakline")) << onLine.error().message;
+    auto onRim = interpreter.run("SURFACE EDIT ground MOVE POINT 0,0 TO 0.3,0.2");
+    ASSERT_FALSE(onRim.ok());
+    EXPECT_EQ(onRim.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(onRim.error().message, "rim")) << onRim.error().message;
+    auto off = interpreter.run("SURFACE EDIT ground MOVE POINT 5,6 TO 50,60");
+    ASSERT_FALSE(off.ok());
+    EXPECT_EQ(off.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(contains(off.error().message, "off the surface")) << off.error().message;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    // Clear the breakline and the vertex moves.
+    reply("SURFACE EDIT ground DELETE BREAKLINE 1,4 7,4");
+    reply("SURFACE EDIT ground MOVE POINT 4,4 TO 4.2,4.3");
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 100.0, 1e-9);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointNeedsItsWordsAndAnXyTarget)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE 2,2 TO 2.5,2.5"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5"), ErrorCode::ParseFailure);
+    // A level on the target would be a change of level, which is RAISE's and ADD POINT's.
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5,2.5,9"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground MOVE POINT 2,2 TO 2.5,2.5 extra"), ErrorCode::ParseFailure);
+}
+
+TEST_F(SurfaceEditVerbs, MovePointByLessThanTheToleranceIsNoMoveAndNoStep)
+{
+    putSurface(document, "ground", flatGridSurface(4, 1.0));
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground MOVE POINT 2,2 TO 2.00000005,2");
+    EXPECT_TRUE(contains(text, "changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
 }

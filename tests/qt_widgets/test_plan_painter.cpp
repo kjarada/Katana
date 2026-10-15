@@ -11,11 +11,13 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QMouseEvent>
 #include <QTemporaryDir>
@@ -25,12 +27,15 @@
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/render/framebuffer.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "katana/terrain/tin_surface.hpp"
 #include "plan_painter.hpp"
 #include "widget_harness.hpp"
 
@@ -914,6 +919,69 @@ TEST(PlanPainter, ASinglePagePlotEmbedsTheRasterItShowsAndNotAHiddenOne)
     // whether it has one or not.
     EXPECT_TRUE(plotted({}).contains("/Subtype /Image"));
     EXPECT_FALSE(plotted({id}).contains("/Subtype /Image"));
+}
+
+TEST(PlanPainter, ASinglePagePlotHandsBackWhatItIsWithoutOfASurfacesStyleAndIsWrittenAllTheSame)
+{
+    // The 10 x 10 square z = x as the surface "ground", in a style whose
+    // contours are a millionth of a unit apart: each of its two triangles runs
+    // from 0 to 10, so ten million levels cross each, past the four million
+    // the plan allows. The plot of it at 1:100 about (5, 5) on A4 (a 277 x 190
+    // mm drawing area, 27.7 x 19 m) shows all of it, and is without its
+    // contours; the caller is told which surface, which style and why.
+    auto tin = katana::terrain::TinSurface::create(
+        {{0.0, 0.0, 0.0}, {10.0, 0.0, 10.0}, {10.0, 10.0, 10.0}, {0.0, 10.0, 0.0}}, {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(tin.ok());
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store
+                    .add(katana::terrain::NamedSurface{
+                        "ground", std::make_shared<const katana::terrain::TinSurface>(std::move(*tin)), "test",
+                        "Fine", true})
+                    .ok());
+    katana::cad::SurfaceStyleSet styles = katana::cad::builtInSurfaceStyles();
+    katana::cad::SurfaceDisplayStyle fine;
+    fine.name = "Fine";
+    fine.contours.show = true;
+    fine.contours.interval = 1.0e-6;
+    styles.styles.push_back(fine);
+    PlanSource source;
+    source.surfaces = &store;
+    source.surfaceStyles = &styles;
+    PlotSettings settings;
+    settings.paper = katana::cad::PaperSize::A4;
+    settings.dpi = 150.0;
+    settings.scaleDenominator = 100.0;
+    settings.center = Point2(5.0, 5.0);
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dir.filePath("plot.pdf");
+
+    // The list the caller holds is replaced, so a stale line does not stay.
+    std::vector<katana::cad::SurfaceProblem> problems{{"stale", "old", "from an earlier plot"}};
+    PlanPaintCache cache;
+    ASSERT_TRUE(katana::qt::plotPlanToPdf(path, settings, source, katana::cad::LayerOverrides{}, {},
+                                          cache, QString(), &problems)
+                    .ok());
+    ASSERT_EQ(problems.size(), 1u);
+    EXPECT_EQ(problems[0].surface, "ground");
+    EXPECT_EQ(problems[0].style, "Fine");
+    EXPECT_EQ(problems[0].reason,
+              "contours: an interval of 0.000001 crosses this surface's triangles more than 4000000 "
+              "times; not drawn - set a larger interval");
+    EXPECT_GT(QFileInfo(path).size(), 0) << "the plot is written all the same";
+
+    // The same plot of a style that can be drawn lost nothing, and asking
+    // for the list is optional.
+    styles.styles.back().contours.interval = 1.0;
+    PlanPaintCache again;
+    ASSERT_TRUE(katana::qt::plotPlanToPdf(path, settings, source, katana::cad::LayerOverrides{}, {},
+                                          again, QString(), &problems)
+                    .ok());
+    EXPECT_TRUE(problems.empty());
+    PlanPaintCache unasked;
+    EXPECT_TRUE(katana::qt::plotPlanToPdf(path, settings, source, katana::cad::LayerOverrides{}, {},
+                                          unasked)
+                    .ok());
 }
 
 // ---- screen speed, without a change of look --------------------------------------------

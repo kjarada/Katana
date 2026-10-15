@@ -210,7 +210,32 @@ class ViewWorkspace final : public QMainWindow {
 
     // Shows `section` in the section view used most recently, opening one
     // beside the active view when none is open. Never replaces another view.
-    bool showSection(katana::cad::Section section);
+    // `design`, the design profile cut beside the ground, is kept in the view's
+    // state with the section's own alignment: the recipe that cuts it again
+    // (recutSections).
+    bool showSection(katana::cad::Section section,
+                     std::optional<katana::cad::SectionDesign> design = std::nullopt);
+
+    // What cuts a section again: the section's alignment and its design profile
+    // (null for a section cut along a line) in, the section cut from the drawing's
+    // surfaces as they are now out, or why it cannot be.
+    using SectionCutter = std::function<katana::core::Result<katana::cad::Section>(
+        const katana::geometry::Polyline2& alignment, const katana::cad::SectionDesign* design)>;
+    struct SectionRecut {
+        // The views whose section was cut again.
+        std::vector<katana::cad::ViewId> cut;
+        // The views whose section could not be, and why. Each keeps the section it
+        // had, which says it is of surfaces that have changed
+        // (SectionViewWidget::surfacesChanged), as it always did.
+        std::vector<std::pair<katana::cad::ViewId, katana::core::Error>> refused;
+    };
+    // Cuts again, with `cutter`, every section the views hold that was cut from a
+    // generation of the drawing's surfaces other than the present one: a section
+    // view shown or not (a view turned to plan keeps its section to show again),
+    // each from its own recipe. A view whose section a person has panned or zoomed
+    // keeps their pan and zoom (SectionViewWidget::replaceSection). A section that
+    // is of the present generation is not cut again, so asking twice cuts once.
+    SectionRecut recutSections(const SectionCutter& cutter);
 
     // ---- the tools (include/katana/cad/interactive_tool.hpp) ------------------
     // Starts catalogue tool `id` in the active plan view, first stopping, as
@@ -306,6 +331,21 @@ class ViewWorkspace final : public QMainWindow {
     // VIEWS SET <id> ghosts=on|off, through the command runner, so the change
     // is logged as a typed line is. The box is then set from the view.
     void setSelectionGhosts(katana::cad::ViewId id, bool on);
+    // The rest of what the Layers popup does to a view, each the VIEWS line a
+    // person would type (viewLayersLine, view_layers_popup.hpp), through the
+    // command runner: logged as a typed line is, and the line an agent writes
+    // for the same change. Nothing here edits a view's state itself; the popup
+    // reads its boxes from the view afterwards, so a refused line leaves each
+    // where it was. The outcome says why a line was refused.
+    //   setViewLayersShown   VIEWS SHOW|HIDE <id> <layers>
+    //   showEverythingInView VIEWS SHOW <id> ALL (the layers and the reference layers)
+    //   isolateLayerInView   VIEWS ISOLATE <id> <layer>
+    //   setViewReferenceShown VIEWS SHOW|HIDE <id> REFERENCE <ref>
+    VerbOutcome setViewLayersShown(katana::cad::ViewId id, const std::vector<std::string>& layers,
+                                   bool shown);
+    VerbOutcome showEverythingInView(katana::cad::ViewId id);
+    VerbOutcome isolateLayerInView(katana::cad::ViewId id, const std::string& layer);
+    VerbOutcome setViewReferenceShown(katana::cad::ViewId id, std::uint64_t reference, bool shown);
     // Drops per-view hidden layers that name no layer any more (after a delete
     // or a rename), in every view. See LayerOverrides::pruneMissing.
     void pruneViewLayers();

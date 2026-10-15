@@ -19,6 +19,7 @@
 #include "katana/storage/sqlite_database.hpp"
 #include "katana/terrain/tin_codec.hpp"
 #include "surface_test_support.hpp"
+#include "terrain/surface_document_io.hpp"
 
 namespace fs = std::filesystem;
 using katana::cad::Document;
@@ -471,6 +472,79 @@ TEST(SurfaceDocument, ASurfaceNameAnEarlierBuildStoredAsAnsiBytesOrWithAQuoteIsR
     Document again;
     ASSERT_TRUE(again.open(project).ok());
     EXPECT_EQ(names(again), names(document));
+}
+
+TEST(SurfaceDocument, ASurfaceSourceAndStyleAnEarlierBuildStoredAsAnsiBytesAreReadAsWindows1252)
+{
+    // Free text a katana_cli on Windows typed in the ANSI code page: a source
+    // "raster caf" + 0xE9 (e-acute) and a style named "Pente" + 0xB0 (the
+    // degree sign). Neither is UTF-8, and the project's own JSON replies and
+    // its next save throw on such bytes, so open reads them as the
+    // Windows-1252 they were: U+00E9 is C3 A9, U+00B0 is C2 B0. The name above
+    // is repaired the same way; these two were read with no test that
+    // mutated the conversion away.
+    const ScratchDirectory scratch("repair-text");
+    const fs::path project = scratch.path / "old.katana";
+    {
+        Document document;
+        ASSERT_TRUE(document.setSurfaces(with({}, "ground", tiltedSquare(0.0))).ok());
+        ASSERT_TRUE(document.saveAs(project).ok());
+    }
+    {
+        auto raw = katana::storage::SqliteDatabase::open(project / "project.db");
+        ASSERT_TRUE(raw.ok());
+        // X'72617374657220636166E9' is "raster caf" and 0xE9; X'50656E7465B0' is
+        // "Pente" and 0xB0, stored as text exactly as SQLite is given them.
+        ASSERT_TRUE(raw->execute("UPDATE surfaces SET source = CAST(X'72617374657220636166E9' AS TEXT), "
+                                 "style = CAST(X'50656E7465B0' AS TEXT) WHERE name = 'ground'")
+                        .ok());
+    }
+    Document document;
+    ASSERT_TRUE(document.open(project).ok());
+    const auto* ground = document.surfaces().find("ground");
+    ASSERT_NE(ground, nullptr);
+    EXPECT_EQ(ground->source, "raster caf\xC3\xA9");
+    EXPECT_EQ(ground->style, "Pente\xC2\xB0");
+    // The project is stable: saved and opened again, nothing moves, nothing throws.
+    ASSERT_TRUE(document.save().ok());
+    Document again;
+    ASSERT_TRUE(again.open(project).ok());
+    EXPECT_EQ(again.surfaces().find("ground")->source, ground->source);
+    EXPECT_EQ(again.surfaces().find("ground")->style, ground->style);
+}
+
+TEST(SurfaceDocument, TheSaveRefusesAStyleSetTheJsonWriterCouldNotCarryRatherThanRewriteItsText)
+{
+    // Document::setSurfaceStyles refuses such a set on the way in and a set
+    // read on open passed the same check, so the guard in the save is not
+    // reached through a Document; it is a function of the set
+    // (surfaceStylesMetadataValue), handed the sets the door refuses.
+    using katana::cad::detail::surfaceStylesMetadataValue;
+    const auto badName = surfaceStylesMetadataValue(withStyle("Pente\xB0"));
+    ASSERT_FALSE(badName.ok());
+    EXPECT_EQ(badName.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(badName.error().context, "field=name");
+
+    SurfaceStyleSet described = withStyle("Fine");
+    described.styles.back().description = "caf\xE9";
+    const auto badDescription = surfaceStylesMetadataValue(described);
+    ASSERT_FALSE(badDescription.ok());
+    EXPECT_EQ(badDescription.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(badDescription.error().context, "field=description");
+
+    // A set the check refuses for another reason is refused as well: two with one name.
+    SurfaceStyleSet twice = withStyle("Fine");
+    twice.styles.push_back(twice.styles.back());
+    EXPECT_FALSE(surfaceStylesMetadataValue(twice).ok());
+
+    // And what it lets through: nothing for the built-ins, the set's JSON for another.
+    const auto builtIn = surfaceStylesMetadataValue(builtInSurfaceStyles());
+    ASSERT_TRUE(builtIn.ok());
+    EXPECT_EQ(*builtIn, "");
+    const auto custom = surfaceStylesMetadataValue(withStyle("Fine"));
+    ASSERT_TRUE(custom.ok()) << custom.error().describe();
+    EXPECT_EQ(*custom, katana::cad::surfaceStylesToJson(withStyle("Fine")));
+    EXPECT_NE(custom->find("Fine"), std::string::npos);
 }
 
 TEST(SurfaceDocument, AStyleSetWhoseFormatIsNotAStringLeavesTheBuiltInsInPlaceAndTheTextKept)

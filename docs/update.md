@@ -14,12 +14,14 @@ assets, and the Windows installer), `docs/desktop.md`, "Help > Check for
 Updates" (the window's dialog, state by state), `docs/mcp.md`, "Updates" (the
 agent's tool), and `docs/headless.md`, "Updates in a headless run".
 
-**Where it stands (2026-10-14).** No release carries the updater yet, and no
-installed copy has been updated by it. The public keys the tree pins are
-placeholders, so every build made from it today refuses every release
-(`reason=placeholder_keys`) until the owner has run the key steps below. The
-tests drive the whole path - producer, feed, engine, helper - on releases
-they sign themselves, served from the loopback address
+**Where it stands (2026-10-15).** Release v0.2.0 (2026-10-14) is the first to
+carry the updater, and no installed copy has been updated by it, since no
+later release exists. The owner ran the key steps on 2026-10-14: the tree pins
+real public keys (745606c4), the release workflow's Publish job signed the
+five manifests of v0.2.0 with the active one, and its recheck verified each
+against the pinned key (`docs/release.md`, "What the first release's run
+showed"). The tests drive the whole path - producer, feed, engine, helper - on
+releases they sign themselves, served from the loopback address
 (`docs/testing.md`, "The update system's tests"); what only GitHub can show is
 listed under "To verify on first release".
 
@@ -464,11 +466,11 @@ of small order. So a signature whose S is not below the group order, and a
 public key that is not a canonical point of the prime-order subgroup, are
 refused before OpenSSL is asked for its verdict.
 
-**Placeholders.** Until the owner's key steps the pinned keys are 32 bytes
-that spell `PLACEHOLDER-...` in ASCII and are the encoding of no curve
-point, so no private key matches them. A build with them refuses every
-release - it cannot be updated, and it cannot be forged for - and
-`KATANA_REQUIRE_UPDATE_KEYS=ON`, which every job of the release workflow
+**Placeholders.** Until the owner's key steps (2026-10-14) the pinned keys were
+32 bytes that spelled `PLACEHOLDER-...` in ASCII and are the encoding of no
+curve point, so no private key matched them. A build with placeholders
+refuses every release - it cannot be updated, and it cannot be forged for -
+and `KATANA_REQUIRE_UPDATE_KEYS=ON`, which every job of the release workflow
 passes, makes the configure fail while they are in place. A release can
 never ship with them.
 
@@ -1465,7 +1467,7 @@ the update system can hold (`include/katana/update/credential.hpp`).
 | Target | Gets | Why |
 |---|---|---|
 | Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.cpp`, `spawn_win.cpp` in `src/katana_update/`; `process_scan_win.cpp`, `registry_win.cpp` in `src/katana_updater/`) |
-| Windows on ARM64 | the same code | it has not been built or run on ARM64: the machine this was written on has no ARM64 toolchain. The release workflow's ARM64 job is the first place it meets one ("To verify on first release") |
+| Windows on ARM64 | the same code | it was written on a machine with no ARM64 toolchain. The release workflow's ARM64 job built it and ran the helper's `--selftest` and `UPDATE STATUS` of the installed copy (run 38580778852: `selftest=ok`, `kind=installer`); no update has been applied there ("To verify on first release") |
 | Linux x86-64, aarch64 | check and notify: `UPDATE CHECK` and `UPDATE STATUS` work, and the dialog says "This copy cannot update itself: the release notes say where to download it." | the apply's file system and launcher are not written for Linux (`src/katana_update/fsops_posix.cpp`, `spawn_posix.cpp`: every operation is one refusal). `UPDATE DOWNLOAD` and `UPDATE APPLY` are refused, `reason=platform`, before a request is sent; the helper, which the package carries, refuses a swap and a recovery the same way (exit 13) and writes nothing. The manifests and update zips are published all the same |
 | macOS on Apple silicon | check and notify, from a notify-only manifest: `update=available reason=notify_only` | a file changed inside `Katana.app` breaks the seal of the bundle, so nothing is ever replaced there: the package holds no helper, and the refusal stands for good, whatever is later written for Linux |
 
@@ -1477,8 +1479,10 @@ key check, the jobs' output, the commands that fetch a byte range and
 recheck what GitHub serves - is `docs/release.md`, "To verify on the first
 release"; this is what the UPDATER has to be seen doing. A rehearsal - two
 versions published in a throwaway repository, the second installed as an
-update of the first - is the owner's acceptance step and the gate for the
-first real release; no agent creates a repository, a release or a secret.
+update of the first - is the owner's acceptance step; no agent creates a
+repository, a release or a secret. The first release, v0.2.0, was made on
+2026-10-14 and whether a rehearsal came first is not recorded here; the
+first live update waits for a second release.
 
 - **The real feed addresses, and the latest flag.** That
   `https://github.com/<repo>/releases/latest/download/Katana-update-<target>.json`
@@ -1513,16 +1517,17 @@ first real release; no agent creates a repository, a release or a secret.
   token, so a private repository then answers 404. Whether that redirect
   should carry the token is the owner's to rule; as written, the person
   corrects the repository's name.
-- **A real signing run.** That the Publish job, in the environment
-  `release`, signs each manifest with the secret through the runner's
-  `openssl`, and that the recheck then prints `signature verified by key
-  <key id> (active)` for each. No signature has been made with a real key.
-- **The helper on a real install.** The static helper on Windows ARM64; the
-  copy in `U/run-<tx>` under a virus scanner and SmartScreen, unsigned as it
-  is until the repository holds a code-signing certificate; the `RunOnce`
-  entry at a real logon, and what `--recover` settles there when a helper
-  was cut off during its health run; `katana --update-health` in an
-  installed copy; and how long the swap and the health run take.
+- **A real signing run.** Done by run 38580778852: the Publish job, in the
+  environment `release`, signed each manifest with the secret through the
+  runner's `openssl`, and the recheck printed `signature verified by key
+  4b5436f13549eee7 (active)` for each of the five (`docs/release.md`, "What
+  the first release's run showed").
+- **The helper on a real install.** The copy in `U/run-<tx>` under a virus
+  scanner and SmartScreen, unsigned as it is until the repository holds a
+  code-signing certificate; the `RunOnce` entry at a real logon, and what
+  `--recover` settles there when a helper was cut off during its health run;
+  `katana --update-health` in an installed copy; and how long the swap and
+  the health run take.
 - **A Katana really started as administrator.** Which kind of token is
   refused is tested for every kind, and that the answer is never "yes" for
   a token Windows calls not elevated; a "yes" itself - that
@@ -1713,8 +1718,9 @@ whatever more the manifest's parser allows (4 GiB).
   sees" are estimates.
 - **The live rehearsal has not been run** (T17), nor the spike that would
   have asked the real GitHub about redirects and `Range` (S2): "To verify on
-  first release". The static helper was built on x86-64 only (S1), and
-  nothing of the update system has been built for Windows on ARM64.
+  first release". The static helper was built on x86-64 only (S1); the
+  release workflow built the update system for Windows on ARM64 and ran the
+  helper's `--selftest` there, which is all that has been tried on it.
 - **The per-user installer has not been installed, updated and uninstalled
   on a clean Windows machine** (S3): its script is held to its rules as
   text, and its file removal is run on small trees (`docs/release.md`, "The

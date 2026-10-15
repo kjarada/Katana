@@ -11,7 +11,8 @@ nothing here is a building.
 The code is `include/katana/cad/road/road_objects.hpp` (the kinds, the
 definition, how each is made), `include/katana/cad/road/road_object_mesh.hpp`
 (the solids), `include/katana/cad/road/road_object_verbs.hpp` (the `ROADOBJECT`
-verbs) and `src/katana_cad/road/road_object_store.cpp` (the Document's
+verbs), `include/katana/cad/road/road_object_scope.hpp` (the scope and filter
+they take) and `src/katana_cad/road/road_object_store.cpp` (the Document's
 members); the window's side is `src/katana_qt/bim/`. The road templates and
 corridors beside them are `road_design.md`'s; both are made into the one
 `cad::bim::BimModel` (`include/katana/cad/bim/bim_object.hpp`), corridors first.
@@ -31,9 +32,8 @@ kilobytes of triangles in every save. The definition is a few hundred bytes,
 and making it again costs well under a millisecond for an ordinary object;
 the road model's cache (`bim::bimModel`, `road_design.md`) keeps the model it
 made while what the objects are made from - their key, the alignments, the
-surfaces - is unchanged. (Its key for the objects is wider than that: it looks
-again after every command, and keeps the model it had when the result is
-equal; narrowing it to the three things they read is open, "Not done".)
+surfaces they name - is unchanged: a line drawn, a template edit or a surface
+no object names does not make them again.
 
 What cannot be made is never drawn at a guessed level. `ROADOBJECT ADD`,
 `SET` and `COPY` make the object before they commit it and refuse what does
@@ -199,7 +199,13 @@ not the display: the 3D view draws both faces of every triangle (it never
 culls: `render::RenderOptions::backfaceCull` is off, because a surface is
 looked at from below too, and the GPU pipelines set no cull mode). A solid
 that comes out with no faces, or open, is refused by the verb that places it
-and listed as a problem if it appears later.
+and listed as a problem if it appears later. The two refusals are functions of
+plain data - `cad::road::shapeProblem` (no part at all, or a part with no faces:
+what `buildRoadObject` lists) and `cad::road::checkBuilt` (a problem the model
+was left with, or a part that is not closed: what every edit checks before it
+stores) - because no maker gives either input any more, and a guard that no
+input reaches was once disabled without a test failing; the tests hand each the
+empty part and the open mesh.
 
 - **A sweep**: a cross-section in (u across, left positive; v up) swept along
   the path. The section stays VERTICAL - a barrier stands plumb on a grade,
@@ -237,14 +243,27 @@ Several closed shells may make one object (a barrier's posts and its rail;
 the cells of a box culvert side by side, with no gap): the mesh is still
 closed, and the IFC export judges closure on the mesh's own indices
 (`docs/ifc.md`, "The body"), so shells that touch at a shared position stay one
-closed face set. The triangulation of a section is ear clipping
-(`cad::road::triangulatePolygon`), which keeps a corner with no turn in it, so
-a cap always meets the sides that use that corner. *Rejected:
-`geometry::triangulate`*, which drops such a corner: a cap would then no longer
-meet its sides and the solid would not close. Extending it with a mode that
-keeps them, and deleting this second ear clipper (which also decides a
-straight corner by an exact zero where the shared one uses
-`math::tolerance`'s angular tolerance), is open ("Not done").
+closed face set.
+
+**One ear clipper.** A cap, and a sign's plate, is cut by the shared
+`geometry::triangulate` (`geometry/polygon.hpp`) in its `CollinearVertices::Keep`
+mode, which uses every corner and makes every edge of the polygon an edge of a
+triangle, so a cap meets the quads of the sides at each corner they use, even a
+corner of no turn, and the solid closes. The default mode drops such a corner
+when it meets it; a cap cut that way would leave a T-junction where the side
+quads still use the corner, which is why this code first had an ear clipper of
+its own (`triangulatePolygon` in `road_object_mesh.cpp`). The review called that a second
+clipper that would drift from the first, and it is gone: the mode was added to
+the shared one. *Rejected: the default mode as it was*, which leaves the solid
+open, and *rejected: keeping the private clipper with a note*, which decided a
+straight corner by an exact zero where the shared one uses the angular
+tolerance of `math::tolerance`, and answered a polygon it could not fill with an
+empty list where the shared one says why. The road code still adds nothing for
+such a polygon, and the object is listed as one that could not be made into a
+solid (above). A corner of no turn is cut as a triangle of no area only when no
+ear with area is left, so the triangles that carry area are the ones the default
+would cut; `counterClockwise` takes the orientation from `Polyline2::signedArea`
+rather than from a copy of it.
 
 **Which way.** A barrier's rail is on the face towards its traffic:
 `side=left|right`, or by default towards the centreline along an alignment
@@ -280,13 +299,13 @@ whichever road lies under it (`docs/ifc.md`, "Features").
 
 ```
 ROADOBJECT KINDS [<kind>]
-ROADOBJECT LIST [JSON]
+ROADOBJECT LIST [JSON | <scope> [WHERE k=v ...]]
 ROADOBJECT INFO <id>
 ROADOBJECT ADD <kind> [key=value ...] <placement> [key=value ...] [PREVIEW]
 ROADOBJECT SET <id> key=value ... [PREVIEW]
 ROADOBJECT COPY <id> [station=<s>] [dx=<m>] [dy=<m>] [key=value ...] [PREVIEW]
-ROADOBJECT DELETE <id> [<id> ...] | ALL [PREVIEW]
-ROADOBJECT QUANTITIES [<id> ...]
+ROADOBJECT DELETE <id> [<id> ...] | ALL | <scope> [WHERE k=v ...] [PREVIEW]
+ROADOBJECT QUANTITIES [<id> ... | <scope> [WHERE k=v ...]]
 ROADOBJECT PROBLEMS
 ```
 
@@ -313,14 +332,14 @@ keeps its length, unless the copy is given a `to=`, which is its end whichever
 order the keys are typed in (and is refused when it is before the new station);
 `dx=`/`dy=` move a placement along a line or at points.
 
-**Ids, not a scope.** `LIST`, `QUANTITIES` and `DELETE` act on ids, or on all
-(`DELETE ALL`; `QUANTITIES` with none): a road object is a definition kept by
-id, not a drawn entity the shared scope (`ALONG FROM`'s grammar) can take, as
-the corridor verbs act on names (`road_design.md`). A scope word after them is
-refused by name - it used to be answered with every object by `LIST` and read
-as an id that does not exist by the other two - and an id named twice is one
-object (`QUANTITIES barrier-1 barrier-1` totals one barrier). Taking a scope
-there - by layer, by a view's or an area's plan extent - is open ("Not done").
+**Ids, all, or a scope.** `LIST`, `QUANTITIES` and `DELETE` act on ids, on all
+of them (`DELETE ALL`; `QUANTITIES` with none), or on the objects a scope takes
+("Scope and filter", below). An id named twice is one object (`QUANTITIES
+barrier-1 barrier-1` totals one barrier). Ids and a scope are not mixed (refused
+by name), a word that is neither is never ignored - `LIST` used to answer a
+`LAYERS` scope with every object, and the other two read one as an id that does
+not exist - and `ALL` on its own keeps the plain reply it always had, where `ALL
+WHERE ...` is the drawing's scope, with the scope's record.
 
 The replies are records, the keys in the form the options take:
 
@@ -337,6 +356,91 @@ then a `total` per kind (see "Totals" above). A scope's record
 (`cad::scopeRecord`) leads the reply of a line that took one. `INFO`, `LIST`
 and `QUANTITIES` on a record they cannot read (a newer Katana's, or damaged)
 say so - Unsupported, with the reason - and do not say an object is missing.
+
+## Scope and filter
+
+The project's rule is that any tool that reads or changes drawing data acts on
+the choices of Global Modify, and `LIST`, `QUANTITIES` and `DELETE`, the manager
+and `katana_road_objects` do. The words are the shared grammar (`docs/cad.md`,
+"Scope and filter"), read by the one parser, `cad::parseScopeWords`, and
+resolved by `cad::road::matchRoadObjects` (`road_object_scope.hpp`) with the
+pieces `cad::matchEntities` is made of - the Layers scope and its check
+(`checkScopeLayers`, `layerInScope`), the layer patterns (`layerPassesFilter`),
+the property conditions (`propertiesPassFilter`), whether a layer is drawn
+(`isLayerDrawn`) and `scopeRecord` - which were taken out of `matchEntities` for
+the purpose, so the two cannot read a scope differently. A road object is a
+definition on a layer with a plan extent, not an entity, so each choice says
+what it means for one:
+
+| Word | A road object is taken when |
+|---|---|
+| `DRAWING` (`ALL`) | always |
+| `LAYERS a,b [ONLY]` | its layer (`layerOf`) is one of those, or beneath one unless `ONLY`. A layer the drawing lacks is `NotFound`, as for entities |
+| `AREA x0,y0,x1,y1` | its plan extent meets the box. The plan extent (`cad::road::planExtent`) is the box round the x and y of the vertices of the solids it is made of - the ones the plan and 3D views draw, and the ones Zoom To frames |
+| `VIEW [id] [EXTENTS]` | its layer is shown by the drawing and not hidden in the view and, without `EXTENTS`, its plan extent meets the view's visible area. Headless it is refused, naming `AREA` |
+| `SELECTION`, or no scope word | it was placed ALONG a selected line (`source=#12`) |
+
+**Decided: the selection takes the objects placed along a selected line, and
+those only.** A road object is not an entity and cannot be selected; the one
+link it keeps to an entity is the line its vertices were copied from. So
+"select the line, delete the barrier along it" works, and an object placed
+along an alignment or at points has no entity to select and is never taken by
+`SELECTION`. *Rejected: the objects whose extent touches the selected entities'
+boxes*, which for one long diagonal line is every object in its box, and `DELETE`
+acts on the answer; *rejected: refusing `SELECTION`*, which loses the one case
+that has an exact meaning. As everywhere in the grammar, `WHERE` with no scope
+word is the selection filtered: `LIST WHERE PROP=kind:fence` takes the fences
+placed along what is selected. `LIST` with no scope word at all is every
+object, as it always was.
+
+An object that is not made - its alignment shortened or deleted, its surface
+removed - has no solids, so no plan extent, so it is in no `AREA` and no `VIEW`
+and is not `DRAWN`; the scope's record counts what it would have taken but for
+that, `unmade=4`. `LAYERS` and `DRAWING` do not ask for an extent and take it.
+
+**The `WHERE` keys, read for a road object:**
+
+- `LAYER=pat[,pat]` is the object's layer path, `*` and `?` wild (and `*` runs
+  over a `/`: `light*` is `lighting/poles`).
+- `PROP=key[:pat]` reads the keys `ROADOBJECT SET` writes, as the object has
+  them (`cad::road::filterProperties`): `id`, `kind`, `name`, `layer`, `colour`,
+  `material`, `facility`, `placement`, `alignment`, `station`, `to`, `offset`,
+  `spacing`, `heights`, `surface`, `crossfall`, `dz`, `points` and `source`, then
+  the kind's own keys with the value the object is made with, given or default
+  (`type`, `height`, `side` ...). One of the others that the object was not given
+  - `to`, `spacing`, `surface`, `name`, `facility`, `source` - is absent, not zero:
+  `PROP=spacing` takes the objects that were given a spacing. The key is in
+  any case, the value a pattern, a number as a reply prints it
+  (`PROP=offset:-4`). So the kind of an object is `PROP=kind:barrier`, a barrier
+  of one type `PROP=type:thriebeam` (a W-beam, `PROP=type:wbeam`, though no one
+  typed it), and `PROP=:thriebeam` a value any key holds. *Rejected: a `KIND=`
+  word of the shared grammar*, which would mean nothing to every other verb;
+  the property already says it.
+- `COLOUR=#RRGGBB` is the colour the object is drawn in; `COLOUR=ByLayer` an
+  object with no `colour=` of its own, which is drawn in its kind's.
+- `DRAWN` leaves out an object on a layer the drawing hides, or one that is not
+  made.
+- `TYPE=`, `STYLE=` and `TEXT=` are about entities, and a road object has no
+  type, style or text: they are **refused**, naming the word, never ignored
+  (`cad::road::checkFilterFits`). The manager greys the controls that say them.
+
+The reply is led by the scope's record (`cad::scopeRecord`), then the verb's own
+records:
+
+```
+scope=layers layers=road/objects/sign sublayers=yes matched=1
+roadobjects count=1 problems=0
+object id=sign-2 kind=sign placement=alignment alignment=Main station=50 offset=4 ...
+```
+
+A scope that takes nothing is reported, not refused (`matched=0`; `DELETE` then
+says `deleted count=0` and leaves no undo step). `DELETE` with a scope is ONE
+undo step and has `PREVIEW`, which goes last (`DELETE LAYERS road/objects/sign
+PREVIEW`: before a scope it would be read as a layer). `LIST JSON` is the whole
+stored set and takes no scope, since a record in front of it would make it
+something else; the objects a scope takes, as data, are `katana_road_objects`
+with the same words (below). A record the drawing holds but cannot read is
+`Unsupported` with the reason, as for every other word.
 
 ## The drawing's record
 
@@ -448,6 +552,20 @@ accepted (a refused line keeps it, to be put right). A record the drawing
 holds but cannot read is said in the count ("0 road objects, 1 problems - the
 drawing's road objects cannot be read ..."), not shown as an empty set.
 
+Beside the table is a group, **Road objects by scope** (`roadObjectManagerByScope`),
+with the same "Apply to" and "Only those that match" controls as Global Modify
+(the shared `ScopeFilterWidget`, prefix `roadObjectManager`), starting on the
+whole drawing, and three buttons that put them into a line for the executor:
+**Select Matching** runs `ROADOBJECT LIST <scope>` and chooses the rows of the
+objects it took (the status says `1 chosen - scope=drawing where=... matched=1`),
+**Quantities** runs `ROADOBJECT QUANTITIES <scope>` and shows the answer in the
+details, **Delete Matching** runs `ROADOBJECT DELETE <scope>` - one undo step. The
+controls that are about entities (types, style, text) are greyed with the reason;
+"Selected entities" has a tip saying what the selection means here. Controls that
+do not read - no layer ticked, a colour that is not one - are refused in the
+status, with the control's own reason, and nothing is run. Zoom To frames the
+chosen objects by `planExtent`, the same extent the scope meets.
+
 The 3D and plan views draw the objects through `bim::bimModel`, the road
 model's code (`road_design.md`), each in its colour on its layer. Help >
 Command Reference has a Road objects section: `HELP ROADOBJECT`'s text, read
@@ -460,17 +578,33 @@ as every family's is (`src/katana_qt/command_reference_dialog.cpp`).
 each definition as the drawing keeps it, the solids made of it (id, IFC class
 and predefined type, layer, material, triangles, closed, quantities) and the
 problems (`cad::road::roadObjectsReport`; `docs/mcp.md`). It reads the
-Document, so asking leaves no line in the history.
+Document, so asking leaves no line in the history. It takes the shared scope
+and filter as `katana_export` does - `scope` (`selection`, `drawing`, `area`,
+`layers`), `area`, `layers`, `only`, and `where`, which alone filters the
+selection - and then reports only the objects they take, with a `scope` member:
+its `record` (what a `ROADOBJECT LIST <scope>` reply leads with), `matched`, and
+`unmade`. A scope that takes nothing is a reply with no objects; `TYPE`, `STYLE`
+and `TEXT` conditions, a layer the drawing lacks and a `layers` with no `scope`
+are refused, naming what is wrong. `VIEW` is the window's and is not offered.
 
 ## Tests
 
 - `tests/cad/road/test_road_object_mesh.cpp` - every solid closed, at the
   volume worked out by hand: a box, a mitred corner, a sheared hollow sweep,
-  an inverted T's triangulation; a turn past the mitre limit keeping its full
-  width (1 x 1 x 20) and just inside it staying one ring; a path doubling back;
+  an inverted T capped (28 triangles, 1.96 m3), a straight run and a repeated
+  corner keeping the cap closed, a polygon that cannot be capped adding nothing
+  (a bow-tie, two corners, none, one line, one point, a NaN, an infinity); a
+  turn past the mitre limit keeping its full width (1 x 1 x 20) and just inside
+  it staying one ring; a path doubling back;
   a hollow sweep round a hairpin; a closed square swept as a loop (80 m3,
   off-centre 36) and closed midway along a side, a triangle, and a path that
   returns at another level not a loop.
+- `tests/geometry/test_polygon.cpp` - the shared ear clipper's `Keep` mode
+  (`PolygonTriangulate.KeepingCollinearVertices*`): every corner and every edge
+  used, n - 2 triangles for a run of straight corners, a clockwise polygon, a
+  repeated vertex, the same ears as the default where no corner is straight, and
+  a property over random polygons with straight corners; both modes refusing an
+  open polygon, a bow-tie, a NaN and an infinity.
 - `tests/cad/road/test_road_objects.cpp` - each kind at its hand-worked place
   and size: the sign at station 50 offset 4
   (`RoadObjects.ASignAtStation50Offset4StandsOnTheProfileFacingTheTraffic`),
@@ -482,25 +616,56 @@ Document, so asking leaves no line in the history.
   (a wall's length once, a light's poles); point objects round a closed square
   and over a repeated vertex; a culvert on a surface with an end off the
   alignment; an arc's heights; the cap on a run and the dash under a
-  millimetre; `spacing=` and `crossfall=` refused where nothing reads them.
+  millimetre; `spacing=` and `crossfall=` refused where nothing reads them;
+  the two guards handed their input
+  (`RoadObjects.ObjectsMadeOfNothingOrOfAPartWithNoFacesAreNoObjectAndSayWhy`,
+  `RoadObjects.ABuiltObjectWithAnOpenPartOrAProblemIsRefusedBeforeItIsStored`).
+- `tests/cad/road/test_road_object_scope.cpp` - the scope and filter through
+  the interpreter, on four objects whose layers and extents are worked out in
+  its header: the layers with and without sublayers, an area (corners either
+  way round, one that takes nothing), a view (its hidden layer, its area, and
+  `EXTENTS`; the drawing's own hidden layer), the selection (the fence placed
+  along a selected line and no other object), `WHERE` by kind, type, id
+  pattern, offset, spacing, colour and `DRAWN`, `TYPE=`/`STYLE=`/`TEXT=`
+  refused by name, a scope that takes nothing reported by all three verbs and
+  deleting nothing, `DELETE` by scope as one undo step with its preview,
+  quantities of a scope, objects not made counted (`unmade=4`) and not taken,
+  ids and a scope not mixed, a word after a scope refused, `LIST JSON` with no
+  scope, a record the drawing cannot read; and the pieces on their own - the
+  plan extent, the property keys with their values (absent is not zero), the
+  filter check.
 - `tests/cad/road/test_road_object_verbs.cpp` - the verbs through the
   interpreter: one undo step with the layer and its parents, the RoadModel
   notification, a scope of lines all or nothing, preview, save and open; a
-  wall's total, COPY's `to=` in either order, a repeated id, the scope words
-  refused by LIST, QUANTITIES and DELETE, INFO on a record it cannot read, and
+  wall's total, COPY's `to=` in either order, a repeated id, a word LIST does not
+  take refused and not ignored, INFO on a record it cannot read, and
   `SURFACE RENAME` carrying a corridor and the objects with it.
 - `tests/qt_widgets/bim/test_road_object_dialogs.cpp` - the line the dialog
   writes, the dialogs by object name, the menu and toolbar, the icons; the
   status for a scope that takes nothing and for several lines, the scope's own
   refusal, no two mnemonics alike, the crossfall offered only on the profile,
   the culvert preview's hole, the scroll area, the manager's unreadable record
-  and Copy's keys.
+  and Copy's keys; the manager by scope (`RoadObjectManager.*Matching*`,
+  `RoadObjectManager.QuantitiesRuns...`): the shared controls starting on the
+  drawing with the entity ones greyed, and Select Matching, Quantities and Delete
+  Matching each handing the line a person would type to the executor, the
+  controls that do not read refused with nothing run.
 - `tests/app/test_mcp_server.cpp` - `katana_road_objects`
-  (`McpServer.TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems`).
+  (`McpServer.TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems`)
+  and with the shared scope and filter
+  (`McpServer.TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItTook`).
 - `src/katana_app/road_objects_cli.cmake` - `cli.roadobject_*` through
   `katana_cli`, a save and an open in a second process among them; the
   totals, a closed line's corners, the parent layers undone, ids after an
-  undo, the refusals, and the renamed surface.
+  undo, the refusals, the renamed surface, and the scope: `LIST` by layers, by
+  an area and by a filter, `QUANTITIES` by an area, `DELETE` by a layer in one
+  undo step and one that takes nothing, an entity filter refused, `VIEW`
+  refused headless.
+- `tests/CMakeLists.txt` - `qt_the_road_objects_dialogs_place_list_and_delete_by_scope_headless`,
+  the real window driven headlessly (`docs/headless.md`): a sign and a barrier
+  placed through the BIM menu's placing dialog, the manager listing both, then a
+  layer pattern through the shared controls chosen, its quantities shown and its
+  objects deleted - each line echoed in the command log as a typed one is.
 
 ## Not done
 
@@ -518,23 +683,8 @@ Document, so asking leaves no line in the history.
 - **No placing by clicking.** The dialog takes stations, the selection or a
   scope; a tool in the catalogue that places an object where a person clicks
   in the plan view is not written.
-- **Scope and filter on the list, quantities and delete verbs.** They take ids
-  (the project's rule is that every tool that reads drawing data acts on the
-  shared scope and filter): a road object is a definition with a `layer=` and
-  a plan extent, so LAYERS, AREA and VIEW mean something for it, and a
-  resolver beside `cad::matchEntities` - not a second implementation of the
-  grammar - would give the verbs and the manager the shared controls. A scope
-  word is refused meanwhile.
-- **A second ear clipper.** `cad::road::triangulatePolygon` beside
-  `geometry::triangulate` (see "How an object is made" for why it was not
-  called); the fix is a keep-collinear mode on the shared one, with the
-  tolerance policy of `math::tolerance`.
-- **The placed half of the model is looked at after every command**, though it
-  reads only the `road_objects` key, the alignments and the surfaces
-  (`bim_object.cpp`); the cache keeps the model it had when the result is
-  equal, so the cost is time. Keying it on those three is a measured change
-  not yet made.
-- **No window screenshot test**: the dialogs are tested as widgets
-  (`tests/qt_widgets/bim/`), not through the running window's `--dialog`.
-- **Built and run**: written by a parallel task that could not build; the
-  integration build is the first to compile and run any of it.
+- **Built and run.** The first round of this work was built and run by the
+  integration build (Release, clean, 9683 tests passed, every road-object test
+  among them). The second round - the shared scope and filter, the one ear
+  clipper, the guards' seams and the headless window test - was written by
+  agents that could not build, and awaits its own integration build.

@@ -17,9 +17,11 @@
 #include <QVBoxLayout>
 
 #include <initializer_list>
+#include <string_view>
 #include <utility>
 
 #include "katana/core/text.hpp"
+#include "katana/terrain/colour_ramps.hpp"
 
 namespace katana::qt {
 
@@ -178,7 +180,11 @@ TerrainShadingDialog::TerrainShadingDialog(TerrainDialogContext context, QWidget
     ramp_ = new QComboBox(this);
     ramp_->setObjectName("shadingRamp");
     ramp_->setEditable(true);
-    ramp_->addItems({"terrain", "diverging", "slope", "grey"});
+    // The one table's names (katana/terrain/colour_ramps.hpp), as the verb
+    // takes them: a ramp added there is offered here.
+    for (const std::string_view name : katana::terrain::colourRampNames()) {
+        ramp_->addItem(QString::fromUtf8(name.data(), static_cast<qsizetype>(name.size())));
+    }
     ramp_->setToolTip("A built-in ramp, or the path of a GDAL colour-map file typed in.");
     form->addRow("Ramp:", ramp_);
     auto* rangeRow = new QHBoxLayout();

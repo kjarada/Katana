@@ -28,6 +28,7 @@
 #include <QTemporaryDir>
 #include <QToolBar>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,6 +37,7 @@
 #include "bim/corridor_quantities_dialog.hpp"
 #include "bim/road_template_manager.hpp"
 #include "bim/road_workbench.hpp"
+#include "command_reference_dialog.hpp"
 #include "command_runner.hpp"
 #include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -45,6 +47,7 @@
 #include "katana/geometry/mesh.hpp"
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_surface.hpp"
+#include "plan_painter.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
 
@@ -1051,4 +1054,372 @@ TEST(RoadWorkbench, TheCorridorDialogsOpenForCorridorsWhoseAlignmentLostItsProfi
     workbench.corridorsAction()->trigger();
     ASSERT_FALSE(logged.empty());
     EXPECT_TRUE(logged.back().startsWith("No alignment has a design profile"));
+}
+
+// The curve tolerance (docs/road_design.md, "Building a corridor") is a field of
+// the definition, in the buffer with the others: said in the line only when it
+// is not what the corridor has, so the lines stay the short ones they were.
+TEST(CorridorDialog, TheCurveToleranceIsInTheLineOnlyWhenItIsNotWhatTheCorridorHolds)
+{
+    Document document;
+    Executor executor(document);
+    road(executor);
+    katana::qt::CorridorDialog dialog({&document, executor.runner()});
+    EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.001");
+
+    fill(dialog, "corridorName", "Main");
+    choose(dialog, "corridorAlignment", "road");
+    choose(dialog, "corridorTemplate", "urban street");
+    choose(dialog, "corridorSurface", "(none)");
+    click(dialog, "corridorNew");
+    EXPECT_EQ(executor.last(), "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" "
+                               "interval=10")
+        << "the default is not said";
+    EXPECT_EQ(document.corridors().find("Main")->curveTolerance, 0.001);
+
+    // A new one with another tolerance says it, after the interval.
+    fill(dialog, "corridorName", "Second");
+    fill(dialog, "corridorCurveTolerance", "0.005");
+    click(dialog, "corridorNew");
+    EXPECT_EQ(executor.last(), "CORRIDOR NEW Second ALIGNMENT road TEMPLATE \"urban street\" "
+                               "interval=10 curvetol=0.005");
+    ASSERT_NE(document.corridors().find("Second"), nullptr);
+    EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.005);
+    ASSERT_EQ(dialog.currentCorridor().toStdString(), "Second");
+    // The field shows what the chosen corridor holds, and so does the list.
+    EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.005");
+    auto* list = child<QTableWidget>(dialog, "corridorList");
+    ASSERT_EQ(list->columnCount(), 10);
+    EXPECT_EQ(list->horizontalHeaderItem(9)->text().toStdString(), "Curve tolerance");
+    EXPECT_EQ(list->item(1, 9)->text().toStdString(), "0.005");
+    EXPECT_EQ(list->item(0, 9)->text().toStdString(), "0.001");
+
+    // Apply with the field as it was filled says nothing of it; with it edited,
+    // it does - and 0 is how the verb is told to add no sections.
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.last(),
+              "CORRIDOR SET Second alignment=road template=\"urban street\" surface= interval=10 "
+              "from= to=");
+    fill(dialog, "corridorCurveTolerance", "0");
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.last(),
+              "CORRIDOR SET Second alignment=road template=\"urban street\" surface= interval=10 "
+              "from= to= curvetol=0");
+    EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.0);
+
+    // Not one number: said on the status line, and no line runs. One the
+    // corridor refuses (over a tenth) is the corridor's refusal, shown, and the
+    // field keeps what was typed for the person to correct.
+    const std::size_t lines = executor.lines.size();
+    fill(dialog, "corridorCurveTolerance", "tiny");
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.lines.size(), lines);
+    EXPECT_TRUE(label(dialog, "corridorStatus").contains("curve tolerance"))
+        << label(dialog, "corridorStatus").toStdString();
+    fill(dialog, "corridorCurveTolerance", "0.5");
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.lines.size(), lines + 1);
+    EXPECT_TRUE(label(dialog, "corridorStatus").contains("curve tolerance"))
+        << label(dialog, "corridorStatus").toStdString();
+    EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.0);
+    EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.5");
+}
+
+// ---- templates in a file, and a kerb's facing (docs/road_design.md, "Template files") -----
+
+TEST(RoadTemplateManager, ExportAndImportBuildTheirLinesFromTheFileFieldAndTheReplaceBox)
+{
+    QTemporaryDir folder;
+    ASSERT_TRUE(folder.isValid());
+    // A blank in the path: the line must quote it, as a person would have to.
+    const QString path = folder.filePath("road templates.json");
+    const std::string quotedPath = "\"" + path.toStdString() + "\"";
+
+    Document document;
+    Executor executor(document);
+    katana::qt::RoadTemplateManagerDialog dialog({&document, executor.runner(), [] { return true; }});
+    click(dialog, "roadTemplateDefaults");
+    ASSERT_TRUE(dialog.selectTemplate("urban street"));
+
+    // No file named: nothing runs, and it says what to do.
+    const std::size_t lines = executor.lines.size();
+    click(dialog, "roadTemplateExport");
+    click(dialog, "roadTemplateImport");
+    EXPECT_EQ(executor.lines.size(), lines);
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("Type the file"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+
+    // Export writes the chosen template; a second export of the file is
+    // refused by the verb, and says OVERWRITE.
+    fill(dialog, "roadTemplateFile", path);
+    click(dialog, "roadTemplateExport");
+    EXPECT_EQ(executor.last(), "ROADTEMPLATE EXPORT \"urban street\" " + quotedPath);
+    EXPECT_TRUE(QFile::exists(path));
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").startsWith("exported file="))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    click(dialog, "roadTemplateExport");
+    EXPECT_EQ(executor.last(), "ROADTEMPLATE EXPORT \"urban street\" " + quotedPath);
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("OVERWRITE"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    // Replace ticked: the line says so, and Export All writes every template.
+    child<QCheckBox>(dialog, "roadTemplateOverwrite")->setChecked(true);
+    click(dialog, "roadTemplateExportAll");
+    EXPECT_EQ(executor.last(), "ROADTEMPLATE EXPORT ALL " + quotedPath + " OVERWRITE");
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("templates=3"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+
+    // Another drawing imports it: one line, one undo step, three templates.
+    Document other;
+    Executor otherExecutor(other);
+    katana::qt::RoadTemplateManagerDialog importer(
+        {&other, otherExecutor.runner(), [] { return true; }});
+    fill(importer, "roadTemplateFile", path);
+    click(importer, "roadTemplateImport");
+    EXPECT_EQ(otherExecutor.last(), "ROADTEMPLATE IMPORT " + quotedPath);
+    EXPECT_EQ(other.roadTemplates().templates.size(), 3u);
+    EXPECT_EQ(other.history().undoCount(), 1u);
+    EXPECT_EQ(child<QTableWidget>(importer, "roadTemplateList")->rowCount(), 3);
+    // Again: the drawing has those names; refused, nothing imported, and the
+    // box is the way out.
+    click(importer, "roadTemplateImport");
+    EXPECT_EQ(otherExecutor.last(), "ROADTEMPLATE IMPORT " + quotedPath);
+    EXPECT_TRUE(label(importer, "roadTemplateStatus").contains("OVERWRITE"))
+        << label(importer, "roadTemplateStatus").toStdString();
+    EXPECT_EQ(other.history().undoCount(), 1u);
+    child<QCheckBox>(importer, "roadTemplateOverwrite")->setChecked(true);
+    click(importer, "roadTemplateImport");
+    EXPECT_EQ(otherExecutor.last(), "ROADTEMPLATE IMPORT " + quotedPath + " OVERWRITE");
+    EXPECT_TRUE(label(importer, "roadTemplateStatus").contains("replaced=3"))
+        << label(importer, "roadTemplateStatus").toStdString();
+}
+
+TEST(RoadTemplateManager, ABrowseInAHeadlessRunOpensNoFileDialogAndATemplateCalledAllIsNotExportedAlone)
+{
+    Document document;
+    Executor executor(document);
+    katana::qt::RoadTemplateManagerDialog dialog({&document, executor.runner(), [] { return true; }});
+    fill(dialog, "roadTemplateFile", "keep.json");
+    click(dialog, "roadTemplateBrowse");
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("headless session opens no file dialog"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    EXPECT_EQ(textOf(dialog, "roadTemplateFile").toStdString(), "keep.json");
+
+    // The verb reads ALL as every template, so Export of a template called All
+    // would write them all: the dialog says why not, and runs nothing.
+    fill(dialog, "roadTemplateName", "All");
+    click(dialog, "roadTemplateNew");
+    ASSERT_EQ(dialog.currentTemplate().toStdString(), "All");
+    const std::size_t lines = executor.lines.size();
+    click(dialog, "roadTemplateExport");
+    EXPECT_EQ(executor.lines.size(), lines);
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("called ALL"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+}
+
+TEST(RoadTemplateManager, AKerbsFacingIsAGridColumnAnApplySendsAndNothingElseHasOne)
+{
+    using katana::cad::road::KerbFacing;
+    using katana::cad::road::Side;
+    Document document;
+    Executor executor(document);
+    katana::qt::RoadTemplateManagerDialog dialog({&document, executor.runner()});
+    click(dialog, "roadTemplateDefaults");
+    executor.ok("ROADTEMPLATE NEW strips");
+    executor.ok("ROADTEMPLATE ADD strips left kerb shape=edgestrip");
+    QApplication::processEvents();
+    QApplication::processEvents();
+
+    ASSERT_TRUE(dialog.selectTemplate("divided road"));
+    auto* components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    ASSERT_EQ(components->columnCount(), 8);
+    EXPECT_EQ(components->horizontalHeaderItem(6)->text().toStdString(), "Faces");
+    const int kerb = componentRow(*components, "left", "kerb");
+    const int lane = componentRow(*components, "left", "lane1");
+    ASSERT_GE(kerb, 0);
+    ASSERT_GE(lane, 0);
+    // The median's kerb falls going outward; it is edited in place. A lane has no
+    // face to turn: an empty cell that cannot be edited.
+    EXPECT_EQ(components->item(kerb, 6)->text().toStdString(), "outward");
+    EXPECT_TRUE(components->item(kerb, 6)->flags() & Qt::ItemIsEditable);
+    EXPECT_TRUE(components->item(lane, 6)->text().isEmpty());
+    EXPECT_FALSE(components->item(lane, 6)->flags() & Qt::ItemIsEditable);
+
+    const std::size_t steps = document.history().undoCount();
+    components->item(kerb, 6)->setText("inward");
+    QApplication::processEvents();
+    click(dialog, "roadTemplateApplyComponents");
+    const std::string line = executor.last();
+    EXPECT_TRUE(line.starts_with("ROADTEMPLATE SET \"divided road\" left:kerb ")) << line;
+    EXPECT_NE(line.find(" faces=inward "), std::string::npos) << line;
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    const auto* edited = document.roadTemplates().find("divided road");
+    ASSERT_NE(edited, nullptr);
+    EXPECT_EQ(edited->components[*edited->find(Side::Left, "kerb")].faces, KerbFacing::Inward);
+    EXPECT_EQ(edited->components[*edited->find(Side::Right, "kerb")].faces, KerbFacing::Outward)
+        << "only the row that was edited";
+
+    // A word that is neither is the verb's refusal, said, with nothing changed
+    // and the edit kept to correct.
+    components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    const int again = componentRow(*components, "left", "kerb");
+    components->item(again, 6)->setText("sideways");
+    QApplication::processEvents();
+    click(dialog, "roadTemplateApplyComponents");
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("faces="))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    EXPECT_EQ(components->item(componentRow(*components, "left", "kerb"), 6)->text().toStdString(),
+              "sideways");
+
+    // A flush edge strip has no face, so no cell to edit it in.
+    ASSERT_TRUE(dialog.selectTemplate("strips"));
+    components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    const int strip = componentRow(*components, "left", "kerb");
+    ASSERT_GE(strip, 0);
+    EXPECT_TRUE(components->item(strip, 6)->text().isEmpty());
+    EXPECT_FALSE(components->item(strip, 6)->flags() & Qt::ItemIsEditable);
+}
+
+// ---- Show Road Model's line, and the Command Reference's section of the road verbs ------------
+
+// ROADMODEL SHOW [ON|OFF] is the window's, as GRID is (docs/road_design.md, "In the
+// window"): the workbench takes it before the interpreter does and switches what
+// the menu's item switches, saying roadmodel=on or off once; any other ROADMODEL
+// line is not its.
+TEST(RoadWorkbench, ShowRoadModelHasALineThatSwitchesItOnOrOffOrToggles)
+{
+    Document document;
+    Executor executor(document);
+    QMainWindow window;
+    QMenu menu;
+    std::vector<QString> logged;
+    std::vector<bool> loggedAsError;
+    std::vector<std::size_t> handed;
+    katana::qt::RoadServices services;
+    services.document = &document;
+    services.makeAction = [&window](katana::qt::Icon, const QString& text, const QString& tip,
+                                    const QKeySequence& shortcut, const QString& name) {
+        auto* action = new QAction(text, &window);
+        action->setObjectName(name);
+        action->setStatusTip(tip);
+        action->setShortcut(shortcut);
+        return action;
+    };
+    services.log = [&](const QString& text, bool isError) {
+        logged.push_back(text);
+        loggedAsError.push_back(isError);
+    };
+    services.run = executor.runner();
+    services.headless = [] { return true; };
+    services.setRoadMeshes = [&handed](std::vector<katana::cad::SceneMesh> meshes) {
+        handed.push_back(meshes.size());
+    };
+    katana::qt::RoadWorkbench workbench(window, std::move(services), menu);
+    QAction* show = nullptr;
+    for (QAction* action : menu.actions()) {
+        if (action->objectName() == "bimShowRoadModel") {
+            show = action;
+        }
+    }
+    ASSERT_NE(show, nullptr);
+    road(executor);
+    executor.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    workbench.syncViews();
+    const std::size_t objects = katana::cad::bim::bimModel(document)->objects.size();
+    ASSERT_GT(objects, 0u);
+    ASSERT_TRUE(show->isChecked());
+    ASSERT_EQ(handed.back(), objects);
+
+    // Not its: the rest of ROADMODEL, other verbs, nothing, and SHOW alone as a word.
+    for (const char* other : {"ROADMODEL", "ROADMODEL LIST", "ROADMODEL JSON", "CORRIDOR SHOW",
+                              "SHOW", "", "roadmodels show"}) {
+        logged.clear();
+        EXPECT_FALSE(workbench.runLine(other)) << other;
+        EXPECT_TRUE(logged.empty()) << other;
+    }
+
+    // OFF: the menu item, the views and the painter follow, and it says so once.
+    logged.clear();
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW OFF"));
+    EXPECT_FALSE(show->isChecked());
+    EXPECT_FALSE(katana::qt::roadModelShown());
+    EXPECT_EQ(handed.back(), 0u);
+    ASSERT_EQ(logged.size(), 1u) << "the item's own message is not said as well";
+    EXPECT_EQ(logged.back().toStdString(), "roadmodel=off");
+    EXPECT_FALSE(loggedAsError.back());
+    // The words are read in any case, and OFF again changes nothing more.
+    logged.clear();
+    EXPECT_TRUE(workbench.runLine("roadmodel show off"));
+    EXPECT_FALSE(show->isChecked());
+    EXPECT_EQ(logged.back().toStdString(), "roadmodel=off");
+
+    // Alone, it is the other of the two; ON puts the objects back.
+    logged.clear();
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW"));
+    EXPECT_TRUE(show->isChecked());
+    EXPECT_TRUE(katana::qt::roadModelShown());
+    EXPECT_EQ(handed.back(), objects);
+    EXPECT_EQ(logged.back().toStdString(), "roadmodel=on");
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW"));
+    EXPECT_FALSE(show->isChecked());
+    EXPECT_EQ(handed.back(), 0u);
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW ON"));
+    EXPECT_TRUE(show->isChecked());
+    EXPECT_EQ(handed.back(), objects);
+
+    // A word that is neither is its usage, as an error, and changes nothing.
+    for (const char* wrong : {"ROADMODEL SHOW MAYBE", "ROADMODEL SHOW ON OFF",
+                              "ROADMODEL SHOW 1"}) {
+        logged.clear();
+        loggedAsError.clear();
+        EXPECT_TRUE(workbench.runLine(wrong)) << wrong;
+        ASSERT_EQ(logged.size(), 1u) << wrong;
+        EXPECT_EQ(logged.back().toStdString(), "usage: ROADMODEL SHOW [ON|OFF]") << wrong;
+        EXPECT_TRUE(loggedAsError.back()) << wrong;
+        EXPECT_TRUE(show->isChecked()) << wrong;
+    }
+    // The menu's own item still says what it did, in its own words.
+    logged.clear();
+    show->setChecked(false);
+    ASSERT_EQ(logged.size(), 1u);
+    EXPECT_EQ(logged.back().toStdString(), "road model hidden");
+    show->setChecked(true); // the session's switch, back as it was
+}
+
+// Help > Command Reference reads HELP CORRIDOR as a section of its own, so a word
+// added to the road verbs' help is there at once; and the window's own row names
+// the line that is the window's alone.
+TEST(RoadWorkbench, TheCommandReferenceHasTheRoadVerbsInASectionOfTheirOwn)
+{
+    const auto sections = katana::qt::commandReferenceSections();
+    const auto found = std::ranges::find(sections, QString("Road model"),
+                                         &katana::qt::ReferenceSection::name);
+    ASSERT_NE(found, sections.end());
+    ASSERT_FALSE(found->entries.empty());
+    EXPECT_EQ(found->entries.front().title, "About");
+    QStringList words;
+    for (const auto& entry : found->entries) {
+        words << entry.text;
+    }
+    const QString all = words.join('\n');
+    for (const char* line : {"ROADTEMPLATE ADD", "ROADTEMPLATE EXPORT <t>|ALL <file.json>",
+                             "ROADTEMPLATE IMPORT <file.json> [OVERWRITE]", "CORRIDOR NEW",
+                             "CORRIDOR QUANTITIES", "ROADMODEL SHOW [ON|OFF]"}) {
+        EXPECT_TRUE(all.contains(line)) << line;
+    }
+    // A verb is found by its title, and a double-click puts it on the command line.
+    const auto corridor = std::ranges::find(found->entries, QString("CORRIDOR NEW"),
+                                            &katana::qt::ReferenceEntry::title);
+    ASSERT_NE(corridor, found->entries.end());
+    EXPECT_EQ(corridor->verb, "CORRIDOR NEW");
+    // The Commands section still has the one row of the family.
+    const auto commands = std::ranges::find(sections, QString("Commands"),
+                                            &katana::qt::ReferenceSection::name);
+    ASSERT_NE(commands, sections.end());
+    EXPECT_NE(std::ranges::find(commands->entries, QString("Road"),
+                                &katana::qt::ReferenceEntry::title),
+              commands->entries.end());
+    // The window's rows name ROADMODEL SHOW, as they name GRID.
+    EXPECT_TRUE(katana::qt::windowHelpText().contains("ROADMODEL SHOW [ON|OFF]"));
 }

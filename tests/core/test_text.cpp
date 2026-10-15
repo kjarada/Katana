@@ -123,6 +123,82 @@ TEST(CoreText, ExactRealTextReadsBackAsTheSameDouble)
     }
 }
 
+TEST(CoreText, FixedTextOfOrdinaryValuesIsTheThreeDecimalsARecordAlwaysHad)
+{
+    using katana::core::formatFixed;
+    EXPECT_EQ(formatFixed(0.0, 3), "0.000");
+    EXPECT_EQ(formatFixed(12.0, 3), "12.000");
+    EXPECT_EQ(formatFixed(1.25, 3), "1.250");
+    EXPECT_EQ(formatFixed(-2.25, 3), "-2.250");
+    EXPECT_EQ(formatFixed(0.017, 3), "0.017");
+    EXPECT_EQ(formatFixed(1471.24, 3), "1471.240");
+    EXPECT_EQ(formatFixed(123456.7895, 3), "123456.789");
+    // The exact binary value decides, not the decimal text: the double nearest
+    // 0.0005 is 0.00050000000000000001040..., above the tie, so it rounds up
+    // (and the sign stays, since -0.001 is not nothing); 0.0015 is
+    // 0.0015000000000000000312... and 2.0005 is 2.000500000000000166977... Each
+    // expansion is Python's Decimal(value), which shares no code with this.
+    EXPECT_EQ(formatFixed(0.0005, 3), "0.001");
+    EXPECT_EQ(formatFixed(-0.0005, 3), "-0.001");
+    EXPECT_EQ(formatFixed(0.0015, 3), "0.002");
+    EXPECT_EQ(formatFixed(2.0005, 3), "2.001");
+    EXPECT_EQ(formatFixed(1.25, 0), "1");
+    EXPECT_EQ(formatFixed(1.5, 2), "1.50");
+}
+
+TEST(CoreText, AValueThatRoundsToNothingHasNoSign)
+{
+    using katana::core::formatFixed;
+    EXPECT_EQ(formatFixed(-0.0, 3), "0.000");
+    EXPECT_EQ(formatFixed(-0.0004, 3), "0.000");
+    EXPECT_EQ(formatFixed(-1e-300, 3), "0.000");
+    EXPECT_EQ(formatFixed(-5e-324, 3), "0.000");
+    EXPECT_EQ(formatFixed(-0.4, 0), "0");
+    // One that does not, keeps its sign.
+    EXPECT_EQ(formatFixed(-0.0006, 3), "-0.001");
+    EXPECT_EQ(formatFixed(-0.6, 0), "-1");
+}
+
+TEST(CoreText, FixedTextOfAFiniteValueNeverFailsHoweverLargeItIs)
+{
+    using katana::core::formatFixed;
+    // 1e60 is the double 999999999999999949387135297074018866963645011013410073083904:
+    // sixty digits and three decimals fill the 64 characters the formatter used
+    // to have, to the last; 1e61 is the double 9999999999999999493871352970740188669636450110134100730839040,
+    // a character more, and was printed "nan" (Python's '%.3f' % value for both).
+    EXPECT_EQ(formatFixed(1e60, 3),
+              "999999999999999949387135297074018866963645011013410073083904.000");
+    EXPECT_EQ(formatFixed(1e61, 3),
+              "9999999999999999493871352970740188669636450110134100730839040.000");
+    // -1e300: a sign, 301 digits, the point and three decimals.
+    const std::string minus = formatFixed(-1e300, 3);
+    ASSERT_EQ(minus.size(), 306u);
+    EXPECT_EQ(minus.front(), '-');
+    EXPECT_EQ(minus.substr(minus.size() - 4), ".000");
+    const auto minusBack = parseFiniteDouble(minus.substr(0, minus.size() - 4));
+    ASSERT_TRUE(minusBack.has_value());
+    EXPECT_EQ(*minusBack, -1e300) << "the digits are the double's, exactly";
+    // The largest double: 309 digits, 17976931348623157081... to ...858368.
+    const std::string most = formatFixed(std::numeric_limits<double>::max(), 3);
+    ASSERT_EQ(most.size(), 313u);
+    EXPECT_EQ(most.substr(0, 20), "17976931348623157081");
+    EXPECT_EQ(most.substr(most.size() - 10), "858368.000");
+    const auto mostBack = parseFiniteDouble(most.substr(0, most.size() - 4));
+    ASSERT_TRUE(mostBack.has_value());
+    EXPECT_EQ(*mostBack, std::numeric_limits<double>::max());
+    // The decimals asked for are bounded, so the text is too.
+    EXPECT_EQ(formatFixed(1.5, 100).size(), 62u);
+    EXPECT_EQ(formatFixed(1.25, -2), "1");
+}
+
+TEST(CoreText, FixedTextOfANonFiniteValueIsWhatToCharsWrites)
+{
+    using katana::core::formatFixed;
+    EXPECT_EQ(formatFixed(std::numeric_limits<double>::quiet_NaN(), 3), "nan");
+    EXPECT_EQ(formatFixed(std::numeric_limits<double>::infinity(), 3), "inf");
+    EXPECT_EQ(formatFixed(-std::numeric_limits<double>::infinity(), 3), "-inf");
+}
+
 // ---- key=value replies ------------------------------------------------------------
 
 // Whatever a text holds - blanks, '=', quotes, backslashes, a line break -

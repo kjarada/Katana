@@ -1083,9 +1083,28 @@ if(TARGET katana)
             "-DEXPECT=--dialog bimRoadTemplates opened roadTemplateManagerDialog \"Road Template Manager\".*roadTemplateList: rural two-lane [|] 4 [|] 4 [|] 10 [|].*urban street.*divided road.*--dialog bimCorridors opened corridorDialog \"Corridors\".*corridorList: Main [|] road [|] urban street.*corridorProblems: no target surface.*object id=corridor/Main/left/kerb/1 kind=kerb.*bimMenu: BIM: Road Template Manager[.][.][.] [[]Road templates.*Corridors[.][.][.] [[]Corridors.*Show Road Model [[].*Corridor Quantities[.][.][.] [[].*commandLog: .*> ROADTEMPLATE DEFAULTS added=3.*> CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" interval=10 corridor name=Main"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bim_corridor_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The road objects (docs/road_objects.md, "In the window"): a sign and a barrier
+    # placed through the BIM menu's placing dialog - each line echoed in the log as a
+    # typed one is - then the manager, which lists both, takes a scope through the
+    # shared controls (a layer pattern of the filter), chooses the rows it takes
+    # (ROADOBJECT LIST), shows their quantities (ROADOBJECT QUANTITIES) and deletes
+    # them (ROADOBJECT DELETE). By hand: the sign at station 50, offset 4 on the
+    # alignment that runs (0,0) to (100,0) is on road/objects/sign, the barrier from
+    # 0 to 20 on road/objects/barrier, so "road/objects/s*" takes the sign alone: one
+    # chosen, one sign in the totals, one deleted and one object left. The table
+    # prints a station to the millimetre, "50.000".
+    add_test(NAME qt_the_road_objects_dialogs_place_list_and_delete_by_scope_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>ALIGN NEW Main 0,0 100,0|>ALIGN DESIGN Main 0,10 100,10|@bimRoadSign|roadObjectStation=50|roadObjectOffset=4|?roadObjectLine|!roadObjectAdd|?roadObjectStatus|@bimRoadBarrier|roadObjectStation=0|roadObjectTo=20|!roadObjectAdd|@bimRoadObjects|?roadObjectCount|?roadObjectTable|roadObjectManagerFilterLayer=road/objects/s*|!roadObjectSelectMatching|?roadObjectManagerStatus|!roadObjectQuantities|?roadObjectInfo|!roadObjectDeleteMatching|?roadObjectCount|?commandLog"
+            "-DEXPECT=--dialog bimRoadSign opened roadObjectDialog \"Road Objects\".*roadObjectLine: ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4.*added id=sign-1 kind=sign.*roadObjectStatus: Added - one undo step[.].*--dialog bimRoadBarrier opened roadObjectDialog \"Road Objects\".*added id=barrier-2 kind=barrier.*--dialog bimRoadObjects opened roadObjectManagerDialog \"Road Objects\".*roadObjectCount: 2 road objects, 0 problems.*roadObjectTable: sign-1 [|] Sign [|] [|] Main [|] 50[.]000 [|] [|] 4[.]000 [|] road/objects/sign [|].* ; barrier-2 [|] Safety barrier [|] [|] Main [|] 0[.]000 [|] 20[.]000 [|] 4[.]000 [|] road/objects/barrier.*roadObjectManagerStatus: 1 chosen - scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1.*roadObjectInfo: scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1 quantity object=sign-1.*total kind=sign objects=1 count=1.*roadObjectCount: 1 road objects, 0 problems.*commandLog: .*> ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4.*> ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4.*> ROADOBJECT LIST DRAWING WHERE LAYER=road/objects/s[*].*> ROADOBJECT QUANTITIES DRAWING WHERE LAYER=road/objects/s[*].*> ROADOBJECT DELETE DRAWING WHERE LAYER=road/objects/s[*] scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1 deleted count=1 ids=sign-1"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/road_objects_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
         qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
+        qt_the_road_objects_dialogs_place_list_and_delete_by_scope_headless
         qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
         qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
@@ -1298,7 +1317,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\"|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 -30|?RenderView2|%View2"
-            "-DEXPECT=RenderView2: painted=[1-9][0-9]* target=[^\r\n]* projection=perspective[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: -30 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* "
+            "-DEXPECT=RenderView2: painted=[1-9][0-9]* target=[^\r\n]* projection=perspective[^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: -30 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* "
             "-DFORBID=painted=0 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/the_3d_views_wheel_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1333,6 +1352,45 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_in_plan_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_a_surface_is_drawn_in_plan_in_its_style_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # A plot of a surface whose style's contours are too fine to trace says so
+    # in the PLOT verb's reply (docs/surface_display.md, "In plan"). An
+    # interval of 0.0005 crosses the sample terrain's triangles more than four
+    # million times (SURFACE PLAN reports the same refusal as problem=), so the
+    # plan painter refuses the contours. The plot is made all the same; the
+    # warning is a record naming the surface, its style and why, before the
+    # file record that is the reply's last line.
+    set(_fine_out "${CMAKE_CURRENT_BINARY_DIR}/qt_output")
+    file(MAKE_DIRECTORY "${_fine_out}")
+    add_test(NAME qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACESTYLE NEW Fine FROM Contours interval=0.0005|>SURFACE STYLE ground Fine|>PLOT \"${_fine_out}/fine_plot.pdf\" paper=A3"
+            "-DEXPECT=Plotted to [^\r\n]*fine_plot\\.pdf[^\r\n]*[\r\n]+warning surface=\"ground\" style=\"Fine\" reason=\"contours: an interval of 0\\.000500 crosses this surface's triangles more than 4000000 times; not drawn - set a larger interval\"[\r\n]+file=\"[^\"]*fine_plot\\.pdf\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_fine_contours_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # The 3D view stacks a legend for each visible surface drawn in a style
+    # that colours its faces (docs/surface_display.md, "In 3D"): two copies of
+    # the sample terrain, one in a style of four elevation bands (few, so that
+    # both panels fit the view's height whatever the font) and one in the
+    # built-in Slope Bands, and the first 3D view's report names both legends,
+    # in drawing order. The first was the only one shown.
+    add_test(NAME qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME second|>SURFACESTYLE NEW Few FROM \"Elevation Bands\" bands=4|>SURFACE STYLE ground Few|>SURFACE STYLE second \"Slope Bands\"|?RenderView2"
+            "-DEXPECT=RenderView2: painted=[1-9][0-9]* [^\r\n]*projection=perspective legends=2 legend=\"ground - Few\" legend=\"second - Slope Bands\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/the_3d_view_legends_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
@@ -3038,6 +3096,19 @@ if(TARGET katana)
             "-DFORBID=unknown command|no layer '|does not take"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_ghosts_off_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The popup's Show All, by the mouse: view 2 hides the design layer (a typed
+    # line, whose reply is the record with hidden=design), and the button runs
+    # VIEWS SHOW 2 ALL through the one executor - nothing here types it - whose
+    # reply is the record with nothing hidden; the listing after says the same.
+    add_test(NAME qt_the_layers_popups_show_all_button_runs_the_views_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>VIEWS OPEN plan|>VIEWS HIDE 2 design|%View2|!ViewLayersButton|%ViewLayersPopup|!ViewLayersShowAll|>VIEWS"
+            "-DEXPECT=ghosts=on hidden=design[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+view=1 kind=plan[^\r\n]*[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+views=2"
+            "-DFORBID=unknown command|no layer '|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_show_all_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # And by the View menu, for the active view: the same line through the
     # same executor (its reply, view 2's record with its ghosts off), the
     # item's check set from the view, and view 1 untouched.
@@ -3204,6 +3275,44 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every toolbar along the top shows all its actions at a laptop's width and
+    # at a desktop's (--check-toolbar-fit, MainWindow::toolBarFit): 1366 is a
+    # 1366 x 768 laptop's screen, which the window fills; 1632 the 85% of a
+    # 1920 x 1080 screen that a first run opens at (MainWindow::fitToScreen);
+    # 1920 that screen maximised. The widths a toolbar needs are its size hint's,
+    # measured alone with the headless driver's grab (docs/desktop.md,
+    # "Fitting the screen"): Survey 565, Terrain 379, GIS 312, Surface Edit 692
+    # and BIM 384 px of ink, a handle (about 12 px) before each.
+    #  - on one row the five need 565 + 379 + 312 + 692 + 384 = 2,332 px and
+    #    five handles, some 2,400 px: more than 1,366, so Surface Edit, BIM and
+    #    GIS showed a handle and an arrow, and none of their buttons;
+    #  - the second row of Survey, Terrain and GIS needs 1,256 px and three
+    #    handles, about 1,290: it fits 1,366, where there is 76 to spare;
+    #  - the third, Surface Edit and BIM, needs 1,076 px and two handles, about
+    #    1,100;
+    #  - the first (File, Edit, Properties, View, Format) is about 1,180 px.
+    # Three rows therefore fit at every width asked for; the run prints each
+    # row's sum from the size hints beside the width the window has. Then, at
+    # 1366, the layouts older builds saved are restored: with Surface Edit and
+    # BIM on the second row (the check first proves that layout overflows, so
+    # it can fail), with neither of them, with BIM hidden (a layout of this
+    # version: it stays hidden) and with Surface Edit hidden in an older one
+    # (carried over: it stays hidden). None of those loses a toolbar or leaves
+    # an action behind an arrow.
+    set(_toolbar_fit "[0-9]+ toolbars along the top in 3 rows, none with an action behind its extension button")
+    add_test(NAME qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCHECK_TOOLBAR_FIT=1366x768,1632x918,1920x1080"
+            "-DEXPECT=toolbar fit 1366x768: ${_toolbar_fit}.*toolbar fit 1632x918: ${_toolbar_fit}.*toolbar fit 1920x1080: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout with Surface Edit and BIM on the second row: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout saved before Surface Edit and BIM existed: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout of this version with BIM hidden: [0-9]+ toolbars along the top in 3 rows, none.*toolbar fit 1366x768 after restoring an older layout with Surface Edit hidden: [0-9]+ toolbars along the top in 3 rows, none"
+            "-DFORBID=toolbar fit clash"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_fit_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Edit Surface > Raise, Lower or Set Level through the window
     # (docs/surface_editing.md): the dialog opened by its action, its line run
     # through the window's one executor. samples/gis/terrain.asc as a surface
@@ -3221,6 +3330,26 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # An open section view follows the drawing's surfaces (docs/terrain.md, "Hidden is a
+    # matter of the picture"): in the real window, a section cut along the line and
+    # then a surface raised, one hidden, one shown, and every one hidden and shown again
+    # - each a change to the surfaces, so each cuts the section again from the recipe
+    # the view kept, except the one that leaves nothing to cut, which says it was not.
+    # Each recut is said in the log after the command's own reply (the window cuts it
+    # from the event loop, once for what a command changed).
+    add_test(NAME qt_an_open_section_is_cut_again_when_the_surfaces_change_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>SURFACE COPY ground design|>LINE 0,60 170,60|>SELECT ALL|*terrainSectionAlongSelection|>SURFACE EDIT design RAISE 3|>SURFACE HIDE design|>SURFACE HIDE ground|>SURFACE SHOW design"
+            "-DEXPECT=Section cut along the selection: length 170[.]000.*surface name=design operation=raise.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ is of surfaces that have changed and was not cut again: Every surface is hidden.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.]"
+            "-DFORBID=unknown command|does not take|InvalidArgument|Internal"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/section_recut_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_an_open_section_is_cut_again_when_the_surfaces_change_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 240)
     # The three edits that take the drawing's data by a scope, through the window
     # (docs/surface_editing.md, "In the window"): Add Points from the Drawing
     # takes the two vertices of a PLINE3D (20.3,20.3,50 and 25.3,25.3,50), Delete
@@ -3377,6 +3506,7 @@ if(TARGET katana)
                          qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
                          qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
                          qt_the_layers_popups_box_turns_a_views_ghosts_off_headless
+                         qt_the_layers_popups_show_all_button_runs_the_views_line_headless
                          qt_the_view_menu_turns_the_active_views_ghosts_off_headless
                          qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless
                          qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless

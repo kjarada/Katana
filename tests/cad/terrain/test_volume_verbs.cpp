@@ -30,6 +30,8 @@
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_builder.hpp"
 
+#include "circle_spline.hpp"
+
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
 using katana::core::ErrorCode;
@@ -429,14 +431,16 @@ TEST_F(VolumeVerbs, ASectionTableSaysWhetherItsVolumesAreEndAreaOrPrismoidalAndW
         "method=prismoidal bulk=1.2 shrink=1.5 csv=\"" + path + "\"");
     const auto lines = linesOf(file);
     ASSERT_EQ(lines.size(), 4u);
+    // The curvature column says the figures were made with the correction on
+    // (the default); on a straight it changes none of them.
     EXPECT_EQ(lines[0], "station,key,cut_area,fill_area,width,cut,fill,cut_total,fill_total,mass,"
-                        "method,base,top,alignment,interval,left,right,bulk,shrink");
-    EXPECT_EQ(lines[1], "0.000,yes,0.000,20.000,20.000,,,,,,prismoidal,ground,design,cl,50,"
+                        "method,curvature,base,top,alignment,interval,left,right,bulk,shrink");
+    EXPECT_EQ(lines[1], "0.000,yes,0.000,20.000,20.000,,,,,,prismoidal,on,ground,design,cl,50,"
                         "10.000,10.000,1.2,1.5");
     EXPECT_EQ(lines[2], "50.000,no,0.000,20.000,20.000,0.000,1000.000,0.000,1000.000,-1500.000,"
-                        "prismoidal,ground,design,cl,50,10.000,10.000,1.2,1.5");
+                        "prismoidal,on,ground,design,cl,50,10.000,10.000,1.2,1.5");
     EXPECT_EQ(lines[3], "100.000,yes,0.000,20.000,20.000,0.000,1000.000,0.000,2000.000,-3000.000,"
-                        "prismoidal,ground,design,cl,50,10.000,10.000,1.2,1.5");
+                        "prismoidal,on,ground,design,cl,50,10.000,10.000,1.2,1.5");
     std::filesystem::remove(file);
 }
 
@@ -562,6 +566,155 @@ TEST_F(VolumeVerbs, ARefusalThatTwoSurfacesShareNoGroundNamesWhatEachCovers)
         << apart.error().message;
 }
 
+// ---- a lot with a hole, and a spline that returns to its start ----------------------------------
+
+namespace {
+
+// A square ring as IMPORT leaves one: its tag, `exterior` or `hole`, in the entity's
+// metadata - or untagged, when `tag` is null.
+katana::entity::Entity ringEntity(double x, double y, double side, const char* tag)
+{
+    katana::entity::Entity entity;
+    entity.geometry = katana::geometry::Polyline2{
+        {{x, y}, {x + side, y}, {x + side, y + side}, {x, y + side}}, true};
+    if (tag != nullptr) {
+        entity.metadata["source.ring"] = std::string(tag);
+    }
+    return entity;
+}
+
+} // namespace
+
+TEST_F(VolumeVerbs, ALotWithATaggedHoleIsMeasuredLessTheHoleByEveryMethodThatTakesAPolygon)
+{
+    // Parallel planes 1 m apart over [0, 100]^2, the ground z = 10 + 0.05 x. A lot
+    // [10, 60]^2 (50 x 50 = 2500) with a tagged hole [20, 30]^2 (10 x 10 = 100) in it.
+    //   exact, 1 m deep:      2500 - 100 = 2400 m3 over 2400 m2;
+    //   grid, 1 m cells:      centres at k + 0.5, 50 x 50 in the lot less 10 x 10 in the
+    //                         hole: 2400 cells, none on an edge;
+    //   to the level 10:      the ground is above it by 0.05 x, the integral of x over the lot
+    //                         is 50 x (60^2 - 10^2) / 2 = 87 500, over the hole 10 x (30^2 -
+    //                         20^2) / 2 = 2500: 0.05 x 85 000 = 4250 m3 above;
+    //   stockpile, lowest:    the lowest point on the lot's edge is x = 10, 10.5, so the pile
+    //                         is 0.05 (x - 10) over the lot and the hole, 50 x (50^2 / 2) =
+    //                         62 500 less 10 x ((20^2 - 10^2) / 2) = 1500: 0.05 x 61 000 = 3050;
+    //   stockpile, boundary:  a base made of the corners at the ground's heights is the ground
+    //                         itself, plane for plane: nothing above or below it, 2400 m2.
+    addParallelPlanes();
+    ASSERT_TRUE(document.execute(katana::commands::createEntities(
+                                     {ringEntity(10, 10, 50, "exterior"),
+                                      ringEntity(20, 20, 10, "hole")}))
+                    .ok());
+    const auto lot = document.lastCreatedEntities().front();
+
+    const std::string each = ran("VOLUME SURFACES ground design INSIDE FROM DRAWING EACH");
+    const auto used = record(each, "polygons");
+    EXPECT_EQ(value(used, "used"), "1");
+    EXPECT_EQ(value(used, "holes"), "1");
+    EXPECT_EQ(value(used, "skipped.other"), "0");
+    const auto polygon = record(each, "polygon");
+    EXPECT_EQ(value(polygon, "entity"), std::to_string(lot));
+    EXPECT_EQ(value(polygon, "polygon.area"), "2400.000");
+    EXPECT_EQ(value(polygon, "holes"), "1");
+    EXPECT_EQ(value(polygon, "fill"), "2400.000");
+    const auto total = record(each, "volume");
+    EXPECT_EQ(value(total, "polygon.area"), "2400.000");
+    EXPECT_EQ(value(total, "fill"), "2400.000");
+    EXPECT_EQ(value(total, "area"), "2400.000");
+    EXPECT_FALSE(record(each, "warning").has_value());
+
+    const auto grid = record(ran("VOLUME GRID ground design cell=1 INSIDE FROM DRAWING"), "volume");
+    EXPECT_EQ(value(grid, "cells"), "2400");
+    EXPECT_EQ(value(grid, "fill"), "2400.000");
+
+    const auto level = record(ran("VOLUME DATUM ground 10 INSIDE FROM DRAWING"), "volume");
+    EXPECT_EQ(value(level, "above"), "4250.000");
+    EXPECT_EQ(value(level, "area"), "2400.000");
+
+    const auto lowest =
+        record(ran("VOLUME STOCKPILE ground INSIDE FROM DRAWING base=lowest"), "volume");
+    EXPECT_EQ(value(lowest, "above"), "3050.000");
+    EXPECT_EQ(value(lowest, "lowest"), "10.500");
+    EXPECT_EQ(value(lowest, "area"), "2400.000");
+
+    const auto boundary = record(ran("VOLUME STOCKPILE ground INSIDE FROM DRAWING"), "volume");
+    EXPECT_EQ(value(boundary, "above"), "0.000");
+    EXPECT_EQ(value(boundary, "below"), "0.000");
+    EXPECT_EQ(value(boundary, "area"), "2400.000");
+}
+
+TEST_F(VolumeVerbs, ARingNotTaggedAsAHoleIsAPolygonOfItsOwnAndOverlapsTheLot)
+{
+    // The same lot with the inner ring untagged is a building in the lot: two
+    // polygons that overlap by 100 m2, which one total would count twice.
+    addParallelPlanes();
+    ASSERT_TRUE(document.execute(katana::commands::createEntities(
+                                     {ringEntity(10, 10, 50, "exterior"),
+                                      ringEntity(20, 20, 10, nullptr)}))
+                    .ok());
+    EXPECT_EQ(refused("VOLUME SURFACES ground design INSIDE FROM DRAWING"),
+              ErrorCode::InvalidGeometry);
+    const std::string each = ran("VOLUME SURFACES ground design INSIDE FROM DRAWING EACH");
+    EXPECT_EQ(value(record(each, "polygons"), "used"), "2");
+    EXPECT_EQ(value(record(each, "polygons"), "holes"), "0");
+}
+
+TEST_F(VolumeVerbs, ATaggedHoleInNoLotOfTheScopeIsMeasuredAsAPolygonAndTheReplyWarnsOfIt)
+{
+    // A hole [20, 30]^2 whose lot is not in the scope (only the hole is on the
+    // layer asked for, or is named): it is the polygon asked for, 100 m2, and the
+    // reply says one ring tagged as a hole was left as a polygon of its own.
+    addParallelPlanes();
+    ASSERT_TRUE(document.execute(katana::commands::createEntities(
+                                     {ringEntity(20, 20, 10, "hole")}))
+                    .ok());
+    const std::string reply = ran("VOLUME SURFACES ground design INSIDE FROM DRAWING");
+    EXPECT_EQ(value(record(reply, "polygons"), "used"), "1");
+    EXPECT_EQ(value(record(reply, "polygons"), "holes"), "0");
+    EXPECT_EQ(value(record(reply, "warning"), "holes.alone"), "1");
+    EXPECT_EQ(value(record(reply, "volume"), "fill"), "100.000");
+}
+
+TEST_F(VolumeVerbs, ASplineDrawnBackToItsStartIsAVolumePolygonAndAnOpenOneIsCountedAsOther)
+{
+    // A circle of radius 10 about (50, 50) as a closed spline: 100 pi = 314.159 m2
+    // of the 1 m slab less what its chords cut off, at most the perimeter (62.83)
+    // times the 1 mm they may stand off it, 0.063 - 0.1 allows a chord's farthest
+    // point to be off its middle. An open spline in the same scope bounds nothing:
+    // skipped.other, as before.
+    addParallelPlanes();
+    katana::entity::Entity closed;
+    closed.geometry = katana::cad::testing::circleSpline(katana::geometry::Point2(50, 50), 10.0);
+    katana::entity::Entity open;
+    auto openSpline = katana::geometry::Spline2::fromControlPoints(
+        {katana::geometry::Point2(0, 0), katana::geometry::Point2(10, 0),
+         katana::geometry::Point2(10, 10)},
+        2);
+    ASSERT_TRUE(openSpline.ok());
+    open.geometry = *openSpline;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({closed, open})).ok());
+
+    const std::string reply = ran("VOLUME SURFACES ground design INSIDE FROM DRAWING EACH");
+    const auto used = record(reply, "polygons");
+    EXPECT_EQ(value(used, "used"), "1");
+    EXPECT_EQ(value(used, "skipped.other"), "1");
+    EXPECT_EQ(value(used, "skipped.open"), "0");
+    const auto polygon = record(reply, "polygon");
+    EXPECT_EQ(value(polygon, "chorded"), "yes");
+    const double area = std::stod(value(polygon, "polygon.area"));
+    EXPECT_LE(area, 100.0 * katana::math::kPi);
+    EXPECT_GE(area, 100.0 * katana::math::kPi - 0.1);
+    EXPECT_EQ(value(polygon, "fill"), value(polygon, "polygon.area")); // 1 m deep
+    // Named by id, the open one is refused as what it is.
+    const auto openId = lastId();
+    const auto refusal = interpreter.run("VOLUME SURFACES ground design INSIDE #" +
+                                         std::to_string(openId));
+    ASSERT_FALSE(refusal.ok());
+    EXPECT_EQ(refusal.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(refusal.error().message.find("an open spline"), std::string::npos)
+        << refusal.error().message;
+}
+
 // ---- VOLUME DATUM and STOCKPILE --------------------------------------------------------------------
 
 TEST_F(VolumeVerbs, ATiltedPlaneAgainstALevelInsideARectangleIsCutEastAndFillWest)
@@ -684,6 +837,135 @@ TEST_F(VolumeVerbs, SectionsRoundACurveAreRefusedUntilTheirReachIsShortOfItsRadi
                                  "volume");
         EXPECT_EQ(value(band, "fill"), "9084.956") << interval;
     }
+}
+
+TEST_F(VolumeVerbs, SectionsRoundACurveAreCorrectedForTheCentroidSayBySoMuchAndOffGivesThePlainFigure)
+{
+    // A 1 m slab over [-50, 150]^2 and the alignment 0,0 - 100,0 - 100,100 with a
+    // curve of radius 50 at the PI: 50 m of tangent, a quarter circle about
+    // (50, 50) on the left, 50 m of tangent. A strip 10 wide on the inside (left=10
+    // right=0) holds the tangents' 2 x 500 and the annulus between the radii 40
+    // and 50, (pi/4)(2500 - 1600) = 225 pi: 1000 + 706.858 = 1706.858. The plain
+    // end area, 10 m2 over the centreline's length 100 + 25 pi, is 1000 + 250 pi =
+    // 1785.398, 78.540 = 25 pi too much, which is what the record says it moved.
+    // On the outside (left=0 right=10) the annulus is (pi/4)(3600 - 2500) = 275 pi:
+    // 1863.938, and the correction adds 25 pi. A strip 10 each side is symmetric
+    // about the centreline, 2000 + 500 pi = 3570.796 either way.
+    addSurface("lo", gridSurface(-50, -50, 200, 50, [](double, double) { return 0.0; }));
+    addSurface("hi", gridSurface(-50, -50, 200, 50, [](double, double) { return 1.0; }));
+    ran("ALIGN NEW cl 0,0 100,0 100,100");
+    ran("ALIGN SET cl 1 50");
+    const std::string head = "VOLUME SECTIONS lo hi ALIGNMENT cl interval=10 ";
+
+    const std::string inside = ran(head + "left=10 right=0");
+    const auto total = record(inside, "volume");
+    EXPECT_EQ(value(total, "fill"), "1706.858");
+    EXPECT_EQ(value(total, "cut"), "0.000");
+    EXPECT_EQ(value(total, "curvature"), "on");
+    EXPECT_EQ(value(total, "curvature.fill"), "-78.540");
+    EXPECT_EQ(value(total, "curvature.cut"), "0.000");
+    // A panel on the arc says its radius and which way it turns and what it was
+    // moved by: the one that ends at station 70 is 10 long, A = 10, M = 50, so
+    // 10 x (20 - 0.02 x 100) / 2 = 90 where the plain figure is 100.
+    const auto sections = records(inside, "section");
+    std::size_t curved = 0;
+    for (const ReplyRecord& section : sections) {
+        if (const auto radius = section.value("radius")) {
+            ++curved;
+            EXPECT_EQ(*radius, "50.000");
+            EXPECT_EQ(section.value("turn").value_or(""), "left");
+        }
+        if (section.value("station").value_or("") == "70.000") {
+            EXPECT_EQ(section.value("fill").value_or(""), "90.000");
+            EXPECT_EQ(section.value("curvature.fill").value_or(""), "-10.000");
+            EXPECT_EQ(section.value("curvature.cut").value_or(""), "0.000");
+        }
+        if (section.value("station").value_or("") == "40.000") {
+            // On a tangent: no radius, no turn, no correction to name.
+            EXPECT_FALSE(section.value("radius").has_value());
+            EXPECT_FALSE(section.value("curvature.fill").has_value());
+        }
+    }
+    EXPECT_GT(curved, 5u);
+
+    const auto off = record(ran(head + "left=10 right=0 curvature=off"), "volume");
+    EXPECT_EQ(value(off, "fill"), "1785.398");
+    EXPECT_EQ(value(off, "curvature"), "off");
+    EXPECT_EQ(value(off, "curvature.fill"), "<none>"); // nothing was moved
+    // Any case, and the default is on.
+    EXPECT_EQ(value(record(ran(head + "left=10 right=0 curvature=ON"), "volume"), "fill"),
+              "1706.858");
+
+    const auto outside = record(ran(head + "left=0 right=10"), "volume");
+    EXPECT_EQ(value(outside, "fill"), "1863.938");
+    EXPECT_EQ(value(outside, "curvature.fill"), "78.540");
+    const auto symmetric = record(ran(head + "left=10 right=10"), "volume");
+    EXPECT_EQ(value(symmetric, "fill"), "3570.796");
+    EXPECT_EQ(value(symmetric, "curvature.fill"), "0.000");
+    EXPECT_EQ(value(record(ran(head + "left=10 right=10 curvature=off"), "volume"), "fill"),
+              "3570.796");
+
+    // Prismoidal takes the same correction on the same constant area, and its
+    // record says by how much too.
+    const auto prismoidal =
+        record(ran(head + "left=10 right=0 method=prismoidal"), "volume");
+    EXPECT_EQ(value(prismoidal, "fill"), "1706.858");
+    EXPECT_EQ(value(prismoidal, "curvature.fill"), "-78.540");
+
+    // A word that is neither on nor off is refused by name, and the other forms
+    // take no curvature=.
+    EXPECT_EQ(refused(head + "left=10 right=0 curvature=maybe"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused("VOLUME SURFACES lo hi curvature=off"), ErrorCode::InvalidArgument);
+}
+
+TEST_F(VolumeVerbs, OnAStraightAlignmentTheCurvatureWordChangesNothingAndTheTableSaysWhichItWas)
+{
+    // Parallel planes 1 m apart, sections 13 m across (left=10 right=3) every 50
+    // m along y = 50: 13 m2 on each of three, 50 x 13 = 650 a panel, 1300; the
+    // reply says on and a correction of nothing, off says off, and the section
+    // table has a column that tells a file made one way from the other.
+    addParallelPlanes();
+    ran("ALIGN NEW cl 0,50 100,50");
+    const std::string line = "VOLUME SECTIONS ground design ALIGNMENT cl interval=50 left=10 right=3";
+    const auto on = record(ran(line), "volume");
+    EXPECT_EQ(value(on, "fill"), "1300.000");
+    EXPECT_EQ(value(on, "curvature"), "on");
+    EXPECT_EQ(value(on, "curvature.fill"), "0.000");
+    const auto file = scratchFile(this, "curvature");
+    std::filesystem::remove(file);
+    const std::string path = katana::core::pathToUtf8(file);
+    const auto off = record(ran(line + " curvature=off csv=\"" + path + "\""), "volume");
+    EXPECT_EQ(value(off, "fill"), "1300.000");
+    EXPECT_EQ(value(off, "curvature"), "off");
+    const auto lines = linesOf(file);
+    ASSERT_EQ(lines.size(), 4u);
+    EXPECT_NE(lines[0].find(",method,curvature,base,"), std::string::npos) << lines[0];
+    EXPECT_NE(lines[3].find(",endarea,off,ground,design,cl,50,10.000,3.000"), std::string::npos)
+        << lines[3];
+    std::filesystem::remove(file);
+}
+
+TEST_F(VolumeVerbs, SectionsOfTwoLegsThatRunSideBySideAreRefusedUntilTheirReachClearsOneAnother)
+{
+    // East 100 m, north 15 m, west 100 m: the legs are 15 apart, so a reach of 10
+    // each way sweeps y = 5 to 10 along both, and no section of one crosses a
+    // section of the other. Refused, naming the two stretches by station; 7 each
+    // way (under half the 15) is measured.
+    addSurface("lo", gridSurface(-50, -50, 200, 50, [](double, double) { return 0.0; }));
+    addSurface("hi", gridSurface(-50, -50, 200, 50, [](double, double) { return 1.0; }));
+    ran("ALIGN NEW uturn 0,0 100,0 100,15 0,15");
+    const auto refusedReply =
+        interpreter.run("VOLUME SECTIONS lo hi ALIGNMENT uturn interval=20 left=10 right=10");
+    ASSERT_FALSE(refusedReply.ok());
+    EXPECT_EQ(refusedReply.error().code, ErrorCode::InvalidArgument);
+    const std::string& message = refusedReply.error().message;
+    EXPECT_NE(message.find("side by side"), std::string::npos) << message;
+    EXPECT_NE(message.find("from station 0.000"), std::string::npos) << message;
+    EXPECT_NE(message.find("to 215.000"), std::string::npos) << message;
+    EXPECT_NE(message.find("left= and right="), std::string::npos) << message;
+    const auto measured =
+        record(ran("VOLUME SECTIONS lo hi ALIGNMENT uturn interval=20 left=7 right=7"), "volume");
+    EXPECT_EQ(value(measured, "sections.empty"), "0");
 }
 
 TEST_F(VolumeVerbs, SectionsOfAnAlignmentThatRunsClearOfTheSurfacesAreRefusedNamingEverything)

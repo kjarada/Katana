@@ -202,6 +202,17 @@ struct SurfaceLegend {
 // that are not coloured (None).
 [[nodiscard]] SurfaceLegend surfaceLegend(const SurfaceColouring& colouring);
 
+// A legend and whose it is - the surface and the style it is drawn in: what a
+// view stacks in its corner, one for each surface it draws in colours that
+// mean something. The plan view's paint and the 3D scene both produce them,
+// and both views draw them through one stack (docs/surface_display.md, "The
+// legend").
+struct SurfaceLegendCard {
+    std::string surface;
+    std::string style;
+    SurfaceLegend legend;
+};
+
 // The fewest decimals, at most three, that write every one of `values`
 // exactly to a part in a million of a unit: a legend's labels, so bands of
 // whole metres read "25 - 26" and the sample terrain's tenths of its range

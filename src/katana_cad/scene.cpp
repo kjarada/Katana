@@ -1490,12 +1490,11 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
     const Ramp ramp = rampOf(surfaces);
     layers.rampLow = ramp.low;
     layers.rampHigh = ramp.high;
-    // The legend: the first drawable surface whose display style colours its
-    // faces by a value or by aspect, with the one ramp's range where its
-    // style leaves an end open - its colours as they are drawn.
-    layers.legend.reset();
-    layers.legendSurface.clear();
-    layers.legendStyle.clear();
+    // The legends: each drawable surface whose display style colours its
+    // faces by a value or by aspect, in drawing order, with the one ramp's
+    // range where its style leaves an end open - its colours as they are
+    // drawn.
+    layers.legends.clear();
     // Where each surface's edges begin in edges.lines.
     std::vector<std::size_t> edgeStarts;
     for (const SceneSurface& item : surfaces) {
@@ -1505,12 +1504,9 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
         // Worked out once a surface: a slope style's steepest face is a pass
         // over every triangle.
         const SurfacePaint paint = paintOf(item, ramp);
-        if (!layers.legend.has_value() && item.display.has_value() &&
-            styleOf(item) != SurfaceStyle::Wireframe && paint.colouring.has_value() &&
-            paint.colouring->coloursFaces()) {
-            layers.legend = surfaceLegend(*paint.colouring);
-            layers.legendSurface = item.name;
-            layers.legendStyle = item.display->name;
+        if (item.display.has_value() && styleOf(item) != SurfaceStyle::Wireframe &&
+            paint.colouring.has_value() && paint.colouring->coloursFaces()) {
+            layers.legends.push_back({item.name, item.display->name, surfaceLegend(*paint.colouring)});
         }
         edgeStarts.push_back(layers.edges.lines.size());
         emitSurface(item, options, paint, {normals_, lifted_, summed_}, layers.terrain, &layers);

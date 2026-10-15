@@ -1,11 +1,16 @@
 #include "katana/cad/road/road_section.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
@@ -790,6 +795,102 @@ std::vector<double> sectionStations(double start, double end, double interval,
     return stations;
 }
 
+namespace {
+
+// The greatest |curvature| of the alignment anywhere from `from` to `to`
+// (1/m): a tangent has none, an arc 1/radius, and a spiral's changes linearly,
+// so its greatest is at one end of the part inside the range. The elements are
+// asked rather than curvatureAtStation, which at a joint answers for the
+// element that begins there and so, at the end of a gap that stops where an arc
+// stops, would say the tangent after it.
+double greatestCurvature(const SolvedAlignment& alignment, double from, double to)
+{
+    double greatest = 0.0;
+    // From the element that holds `from` (they are in station order, end to
+    // end), so a corridor of a hundred thousand sections along an alignment of a
+    // thousand elements does not look at a thousand of them for each.
+    const auto& elements = alignment.elements();
+    auto at = std::upper_bound(elements.begin(), elements.end(), from,
+                               [](double station, const katana::geometry::AlignmentElement& e) {
+                                   return station < e.startStation;
+                               });
+    if (at != elements.begin()) {
+        --at;
+    }
+    for (; at != elements.end() && at->startStation < to; ++at) {
+        const katana::geometry::AlignmentElement& element = *at;
+        const double begin = element.startStation;
+        const double finish = begin + element.length;
+        if (finish <= from || begin >= to) {
+            continue;
+        }
+        const double low = std::max(from, begin) - begin;
+        const double high = std::min(to, finish) - begin;
+        const double here = std::visit(
+            [low, high](const auto& shape) -> double {
+                using Shape = std::decay_t<decltype(shape)>;
+                if constexpr (std::is_same_v<Shape, katana::geometry::Arc2>) {
+                    return 1.0 / std::abs(shape.radius);
+                } else if constexpr (std::is_same_v<Shape, katana::geometry::Spiral2>) {
+                    return std::max(std::abs(shape.curvatureAt(low)),
+                                    std::abs(shape.curvatureAt(high)));
+                } else {
+                    return 0.0;
+                }
+            },
+            element.shape);
+        greatest = std::max(greatest, here);
+    }
+    return greatest;
+}
+
+} // namespace
+
+Result<std::vector<double>> sectionStations(double start, double end, double interval,
+                                            const std::vector<double>& keys,
+                                            const SolvedAlignment& alignment,
+                                            double curveTolerance)
+{
+    std::vector<double> plain = sectionStations(start, end, interval, keys);
+    if (!(curveTolerance > 0.0) || !std::isfinite(curveTolerance) || plain.size() < 2) {
+        return plain;
+    }
+    // The turn one step may make: 1 - sin(t) / t is t^2 / 6 for small t.
+    const double turn = std::sqrt(6.0 * curveTolerance);
+    std::vector<double> stations;
+    stations.reserve(plain.size());
+    for (std::size_t i = 0; i + 1 < plain.size(); ++i) {
+        const double a = plain[i];
+        const double b = plain[i + 1];
+        stations.push_back(a);
+        // The fewest equal parts that each turn through no more than `turn`,
+        // counted as a real first: a tolerance of 1e-300 asks for more parts
+        // than a size_t holds. kRelative keeps a gap that turns through exactly
+        // `turn` from being cut for the rounding of the quotient.
+        const double parts = std::ceil(greatestCurvature(alignment, a, b) * (b - a) / turn -
+                                       tol::kRelative);
+        if (!(parts > 1.0)) {
+            continue;
+        }
+        // What the list would hold: those made, the parts' new ones, the rest.
+        const double total =
+            static_cast<double>(stations.size() + plain.size() - i - 1) + (parts - 1.0);
+        if (total > static_cast<double>(kMaximumSections)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a curve tolerance of " + number(curveTolerance) +
+                                 " needs more than " + std::to_string(kMaximumSections) +
+                                 " sections along this alignment: not built",
+                             "stations " + number(start) + " to " + number(end));
+        }
+        const auto count = static_cast<std::size_t>(parts);
+        for (std::size_t j = 1; j < count; ++j) {
+            stations.push_back(a + (b - a) * static_cast<double>(j) / static_cast<double>(count));
+        }
+    }
+    stations.push_back(plain.back());
+    return stations;
+}
+
 // ---- a corridor -------------------------------------------------------------------------
 
 CorridorRange corridorRange(const Corridor& corridor, const SolvedAlignment& alignment,
@@ -852,9 +953,6 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
                                  std::to_string(kMaximumSections) + " sections: not built");
         return built;
     }
-    built.start = start;
-    built.end = end;
-    built.hasRange = true;
 
     // Every key station: where the geometry, the grade, the superelevation
     // or the template changes character, which a schedule must not step over.
@@ -869,7 +967,19 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
         keys.push_back(region.start);
         keys.push_back(region.end);
     }
-    const std::vector<double> stations = sectionStations(start, end, corridor.interval, keys);
+    // And the stations a curve needs for its quantities to be within the
+    // corridor's tolerance. Refused, like an interval that makes too many, before
+    // any section is made, and with no range: nothing was built.
+    auto sectioned = sectionStations(start, end, corridor.interval, keys, alignment,
+                                     corridor.curveTolerance);
+    if (!sectioned) {
+        built.problems.push_back(sectioned.error().message);
+        return built;
+    }
+    const std::vector<double> stations = std::move(*sectioned);
+    built.start = start;
+    built.end = end;
+    built.hasRange = true;
 
     // The runs: the regions in station order, and the corridor's template
     // before, between and after them.
@@ -1053,7 +1163,8 @@ BuiltCorridor buildCorridor(const Document& document, const Corridor& corridor)
 
 Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
                                const std::vector<double>& stations,
-                               const std::vector<std::vector<SolidColumn>>& columns)
+                               const std::vector<std::vector<SolidColumn>>& columns,
+                               double weldBelow)
 {
     const std::size_t count = stations.size();
     if (count < 2 || columns.size() != count) {
@@ -1066,37 +1177,80 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
         return makeError(ErrorCode::InvalidArgument,
                          "a solid needs the same columns, two at least, at every station");
     }
+    const std::size_t last = across - 1;
+    // Where the solid has no thickness its top and bottom are ONE vertex. The
+    // columns that may: a station's first and last (a solid ends there in a
+    // line, as an earthworks stretch does where the ground meets the formation)
+    // and every column of the first and last station (it tapers to a line
+    // there). An interior column is never welded, so a solid cannot pinch to a
+    // line with a body each side, an edge four faces use.
+    const auto welded = [&](std::size_t k, std::size_t i) {
+        const SolidColumn& column = columns[k][i];
+        return column.top - column.bottom <= weldBelow &&
+               (i == 0 || i == last || k == 0 || k + 1 == count);
+    };
     TriangleMesh mesh;
     mesh.vertices.reserve(count * across * 2);
+    std::vector<std::uint32_t> topAt(count * across);
+    std::vector<std::uint32_t> bottomAt(count * across);
     for (std::size_t k = 0; k < count; ++k) {
-        for (const SolidColumn& column : columns[k]) {
+        for (std::size_t i = 0; i < across; ++i) {
+            const SolidColumn& column = columns[k][i];
             const auto plan = alignment.pointAtStationOffset(stations[k], column.offset);
             if (!plan) {
                 return makeError(ErrorCode::InvalidArgument, "the station is outside the alignment",
                                  number(stations[k]));
             }
+            topAt[k * across + i] = static_cast<std::uint32_t>(mesh.vertices.size());
             mesh.vertices.emplace_back(plan->x, plan->y, column.top);
-            mesh.vertices.emplace_back(plan->x, plan->y, column.bottom);
+            if (welded(k, i)) {
+                bottomAt[k * across + i] = topAt[k * across + i];
+            } else {
+                bottomAt[k * across + i] = static_cast<std::uint32_t>(mesh.vertices.size());
+                mesh.vertices.emplace_back(plan->x, plan->y, column.bottom);
+            }
         }
     }
-    const auto vertex = [across](std::size_t k, std::size_t i, std::size_t bottom) {
-        return static_cast<std::uint32_t>((k * across + i) * 2 + bottom);
+    const auto vertex = [&](std::size_t k, std::size_t i, std::size_t bottom) {
+        return bottom != 0 ? bottomAt[k * across + i] : topAt[k * across + i];
     };
-    const auto quad = [&mesh](std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d) {
-        mesh.faces.push_back({a, b, c});
-        mesh.faces.push_back({a, c, d});
+    // A face that names one vertex twice is a welded edge's: it has no area and
+    // is not made, which leaves each edge it touched with the two faces it had.
+    const auto triangle = [&mesh](std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+        if (a != b && b != c && a != c) {
+            mesh.faces.push_back({a, b, c});
+        }
+    };
+    const auto quad = [&triangle](std::uint32_t a, std::uint32_t b, std::uint32_t c,
+                                  std::uint32_t d) {
+        triangle(a, b, c);
+        triangle(a, c, d);
     };
     // Each quad is walked so that every edge it shares is walked the other
     // way by its neighbour (docs/road_design.md, "A closed solid").
     for (std::size_t k = 0; k + 1 < count; ++k) {
         for (std::size_t i = 0; i + 1 < across; ++i) {
-            quad(vertex(k, i, 0), vertex(k, i + 1, 0), vertex(k + 1, i + 1, 0),
-                 vertex(k + 1, i, 0));
-            quad(vertex(k, i, 1), vertex(k + 1, i, 1), vertex(k + 1, i + 1, 1),
-                 vertex(k, i + 1, 1));
+            // A triangle of the cell with nothing between its top and bottom
+            // at all three corners is two faces on one surface, which nothing
+            // is inside: left out, top and bottom both, it leaves the faces
+            // beside it closed along its edges. The cell is split along its
+            // diagonal (k, i) to (k + 1, i + 1): the first triangle has the
+            // corner (k, i + 1), the second (k + 1, i), and each one's bottom
+            // is its top turned over. (Left in, the pair makes the diagonal an
+            // edge four faces use - found by `closedOnItsIndices` on the pieces
+            // of a fill that tapers away along the road.)
+            const bool first = !(welded(k, i) && welded(k, i + 1) && welded(k + 1, i + 1));
+            const bool second = !(welded(k, i) && welded(k + 1, i + 1) && welded(k + 1, i));
+            if (first) {
+                triangle(vertex(k, i, 0), vertex(k, i + 1, 0), vertex(k + 1, i + 1, 0));
+                triangle(vertex(k, i, 1), vertex(k + 1, i + 1, 1), vertex(k, i + 1, 1));
+            }
+            if (second) {
+                triangle(vertex(k, i, 0), vertex(k + 1, i + 1, 0), vertex(k + 1, i, 0));
+                triangle(vertex(k, i, 1), vertex(k + 1, i, 1), vertex(k + 1, i + 1, 1));
+            }
         }
         quad(vertex(k, 0, 0), vertex(k + 1, 0, 0), vertex(k + 1, 0, 1), vertex(k, 0, 1));
-        const std::size_t last = across - 1;
         quad(vertex(k + 1, last, 0), vertex(k, last, 0), vertex(k, last, 1),
              vertex(k + 1, last, 1));
     }
@@ -1104,6 +1258,33 @@ Result<TriangleMesh> loftSolid(const SolvedAlignment& alignment,
         quad(vertex(0, i + 1, 0), vertex(0, i, 0), vertex(0, i, 1), vertex(0, i + 1, 1));
         const std::size_t k = count - 1;
         quad(vertex(k, i, 0), vertex(k, i + 1, 0), vertex(k, i + 1, 1), vertex(k, i, 1));
+    }
+    // A welded vertex whose every face was left out (the end of a line of no
+    // thickness that a neighbouring triangle took) is in no face: not kept.
+    {
+        constexpr std::uint32_t kUnused = std::numeric_limits<std::uint32_t>::max();
+        std::vector<std::uint32_t> placed(mesh.vertices.size(), kUnused);
+        for (const auto& face : mesh.faces) {
+            for (const std::uint32_t index : face) {
+                placed[index] = 0;
+            }
+        }
+        decltype(mesh.vertices) kept;
+        kept.reserve(mesh.vertices.size());
+        for (std::size_t v = 0; v < mesh.vertices.size(); ++v) {
+            if (placed[v] != kUnused) {
+                placed[v] = static_cast<std::uint32_t>(kept.size());
+                kept.push_back(mesh.vertices[v]);
+            }
+        }
+        if (kept.size() != mesh.vertices.size()) {
+            for (auto& face : mesh.faces) {
+                for (std::uint32_t& index : face) {
+                    index = placed[index];
+                }
+            }
+            mesh.vertices = std::move(kept);
+        }
     }
     // Which way that turns depends on the side: offsets grow to the left, so
     // the right side's solids are mirror images. Turned outward by the sign
@@ -1134,6 +1315,58 @@ double areaOf(const RoadSection& section, Side side, bool cutting)
     return cutting ? section.rightCut : section.rightFill;
 }
 
+// One shell of the solid: stretch `stretch` (counted from the centreline) of the
+// sections `begin` to `finish` of `run`. A section that has no such stretch -
+// the one beyond each end of the shell - is the line along the formation at the
+// stretch of its neighbour in the shell, with no thickness there.
+bool earthworkShell(const BuiltCorridor& built, const CorridorRun& run, Side side, bool cutting,
+                    std::size_t stretch, std::size_t begin, std::size_t finish,
+                    katana::geometry::TriangleMesh& solid, std::string& why)
+{
+    const double sign = side == Side::Left ? 1.0 : -1.0;
+    std::vector<double> stations;
+    std::vector<std::vector<SolidColumn>> columns;
+    for (std::size_t m = begin; m <= finish; ++m) {
+        const RoadSection& section = run.sections[m];
+        const bool has = spansOf(section, side, cutting).size() > stretch;
+        const std::size_t like = has ? m : (m == begin ? m + 1 : m - 1);
+        const OutSpan span = spansOf(run.sections[like], side, cutting)[stretch];
+        const std::vector<SectionVertex> formation = vertices(section.formation);
+        std::vector<SolidColumn> across;
+        for (std::size_t c = 0; c < kEarthworksColumns; ++c) {
+            const double out = span.from + (span.to - span.from) * static_cast<double>(c) /
+                                               static_cast<double>(kEarthworksColumns - 1);
+            const double offset = sign * out;
+            const double f = levelOn(formation, offset);
+            if (!has) {
+                across.push_back(SolidColumn{offset, f, f});
+                continue;
+            }
+            const double g = levelOn(section.ground, offset);
+            across.push_back(cutting ? SolidColumn{offset, std::max(g, f), f}
+                                     : SolidColumn{offset, f, std::min(g, f)});
+        }
+        stations.push_back(section.station);
+        columns.push_back(std::move(across));
+    }
+    // A thickness under the model's 0.1 mm is the earthworks' own "none"
+    // (earthworkSpans): welded, where a solid may end in a line.
+    auto mesh = loftSolid(*built.alignment, stations, columns, tol::kCoordinate);
+    if (!mesh) {
+        why = mesh.error().message;
+        return false;
+    }
+    const auto base = static_cast<std::uint32_t>(solid.vertices.size());
+    solid.vertices.insert(solid.vertices.end(), mesh->vertices.begin(), mesh->vertices.end());
+    for (std::array<std::uint32_t, 3> face : mesh->faces) {
+        for (std::uint32_t& index : face) {
+            index += base;
+        }
+        solid.faces.push_back(face);
+    }
+    return true;
+}
+
 // The cut (or fill) of one side of one run, as a closed solid for each piece:
 // a stretch of stations over which the side has earthworks at all
 // (RoadSection::leftCutSpans ...), inside a stretch of complete sections. Each
@@ -1143,6 +1376,15 @@ double areaOf(const RoadSection& section, Side side, bool cutting)
 // where its earthworks start across the section to where they end, so the
 // solid, its plan outline and its GrossArea are the earthworks and not the
 // whole half-section between the centreline and the daylight.
+//
+// The solid is a closed SHELL for each stretch across (earthworkShell): a
+// section whose earthworks are in two stretches - cut, fill, cut across one
+// half-section - makes two, and no column spans the gap between them with no
+// thickness, where the top and the bottom of one solid would lie on one surface.
+// And a shell ends where its stretch does in a line, not a face of no area: the
+// section beyond a piece's end is a line along the formation, and the edge of
+// a stretch, where the ground meets the formation, is one too (loftSolid, which
+// welds them).
 void addEarthworks(bim::BimModel& model, const BuiltCorridor& built, const CorridorRun& run,
                    Side side, bool cutting)
 {
@@ -1197,34 +1439,24 @@ void addEarthworks(bim::BimModel& model, const BuiltCorridor& built, const Corri
             if (!(endArea.value() > 0.0)) {
                 continue;
             }
+            // The plan outline: where the earthworks start across each section
+            // to where they end, the hull of its stretches. A section with none
+            // takes the stretch of its neighbour that has some, and in plan is a
+            // point at the middle of it, which makes the outline taper as the
+            // end-area volume does.
             std::vector<double> stations;
-            std::vector<std::vector<SolidColumn>> columns;
             std::vector<Point2> inner;
             std::vector<Point2> outer;
+            std::size_t stretches = 0;
             for (std::size_t m = from; m <= to; ++m) {
                 const RoadSection& section = run.sections[m];
-                // A section with none takes the stretch of its neighbour that
-                // has some, with no thickness there; in plan it is a point
-                // at the middle of it, which makes the outline taper as the
-                // end-area volume does.
                 const bool has = active(m);
                 const std::size_t like = has ? m : (m == from ? m + 1 : m - 1);
                 const auto& spans = spansOf(run.sections[like], side, cutting);
                 const double outFrom = spans.front().from;
                 const double outTo = spans.back().to;
-                const std::vector<SectionVertex> formation = vertices(section.formation);
-                std::vector<SolidColumn> across;
-                for (std::size_t c = 0; c < kEarthworksColumns; ++c) {
-                    const double out = outFrom + (outTo - outFrom) * static_cast<double>(c) /
-                                                  static_cast<double>(kEarthworksColumns - 1);
-                    const double offset = sign * out;
-                    const double f = levelOn(formation, offset);
-                    const double g = levelOn(section.ground, offset);
-                    across.push_back(cutting ? SolidColumn{offset, std::max(g, f), f}
-                                             : SolidColumn{offset, f, std::min(g, f)});
-                }
+                stretches = std::max(stretches, spansOf(section, side, cutting).size());
                 stations.push_back(section.station);
-                columns.push_back(std::move(across));
                 const double lo = has ? outFrom : 0.5 * (outFrom + outTo);
                 const double hi = has ? outTo : lo;
                 if (const auto p = alignment.pointAtStationOffset(section.station, sign * lo)) {
@@ -1234,10 +1466,36 @@ void addEarthworks(bim::BimModel& model, const BuiltCorridor& built, const Corri
                     outer.push_back(*p);
                 }
             }
-            auto mesh = loftSolid(alignment, stations, columns);
-            if (!mesh) {
+            // The solid: a shell for each stretch across, over the sections that
+            // have it and one beyond each end that is in the piece.
+            katana::geometry::TriangleMesh solid;
+            std::string why;
+            bool made = true;
+            for (std::size_t stretch = 0; stretch < stretches && made; ++stretch) {
+                const auto has = [&](std::size_t m) {
+                    return spansOf(run.sections[m], side, cutting).size() > stretch;
+                };
+                for (std::size_t m = from; m <= to && made; ++m) {
+                    if (!has(m)) {
+                        continue;
+                    }
+                    std::size_t end = m;
+                    while (end + 1 <= to && has(end + 1)) {
+                        ++end;
+                    }
+                    const std::size_t begin = m > from ? m - 1 : m;
+                    const std::size_t finish = end < to ? end + 1 : end;
+                    m = end;
+                    if (begin == finish) {
+                        continue;
+                    }
+                    made = earthworkShell(built, run, side, cutting, stretch, begin, finish, solid,
+                                          why);
+                }
+            }
+            if (!made) {
                 model.problems.push_back(
-                    bim::BimProblem{source, "earthworks " + sideWord + ": " + mesh.error().message});
+                    bim::BimProblem{source, "earthworks " + sideWord + ": " + why});
                 continue;
             }
             katana::geometry::Polyline2 outline;
@@ -1283,7 +1541,7 @@ void addEarthworks(bim::BimModel& model, const BuiltCorridor& built, const Corri
             object.quantities = {quantity("Length", stations.back() - stations.front(), "m"),
                                  quantity("GrossArea", object.plan.front().area(), "m2"),
                                  quantity("GrossVolume", endArea.value(), "m3")};
-            object.mesh = std::move(*mesh);
+            object.mesh = std::move(solid);
             model.objects.push_back(std::move(object));
         }
     }

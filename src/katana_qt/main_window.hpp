@@ -135,6 +135,21 @@ class MainWindow final : public QMainWindow {
     // always the default 1360 x 860 window, so a screenshot is the same on
     // every machine. main() calls restoreSession before the window is shown.
     void restoreSession();
+    // saveState's version of the layout this window saves, and of the one
+    // before it (main_window.cpp, at the top, says what each changed). Public
+    // so that --check-toolbar-fit can save a layout as the older build did.
+    static constexpr int kLayoutVersion = 2;
+    static constexpr int kLayoutVersionBeforeThirdRow = 1;
+    // Puts the panels and toolbars where `state` (saveState's) had them, when
+    // this window can read it: a layout saved by this version, or by the one
+    // before the third toolbar row. From that one the Surface Edit and BIM
+    // toolbars are seated on the third row, because a layout that did not
+    // know them, or put them on the second row with Survey, Terrain and GIS,
+    // leaves them behind overflow arrows. A toolbar the state does not place
+    // is put along the top; one it hides stays hidden. False, the window as it
+    // was, for any other state. restoreSession's one door to a saved layout,
+    // and --check-toolbar-fit's.
+    bool restoreLayout(const QByteArray& state);
     // The first-run size: 85% of the screen's free area, centred; maximised
     // on a screen smaller than 1440 x 900, where the drawing needs every
     // pixel it can have.
@@ -324,6 +339,19 @@ class MainWindow final : public QMainWindow {
     // toolbars show the same actions with the icon alone, and the status bar
     // shows the sentence. For the headless --check-menus switch.
     [[nodiscard]] QStringList menuGaps(int* items = nullptr) const;
+    // Every toolbar along the top, shown, that has an action behind its
+    // extension (overflow) button at the window's present size, one line each
+    // ("SurveyToolBar: 2 of 31 actions are behind its extension button");
+    // empty when each shows all its actions. Two numbers for the report:
+    // `toolBars` is how many toolbars lie along the top and are shown, `rows`
+    // how many lines they stand on. `widths`, when given, gets one line a row
+    // with what its toolbars need side by side (their size hints, the least
+    // width at which every action shows) and the width they have. Draw,
+    // Annotate and Modify run down the sides and are not counted: they
+    // overflow at the first size by design (docs/desktop.md). For the headless
+    // --check-toolbar-fit switch.
+    [[nodiscard]] QStringList toolBarFit(int* toolBars = nullptr, int* rows = nullptr,
+                                         QStringList* widths = nullptr) const;
     // Every key those actions and shortcuts answer to, with the menu path
     // its command is under, in the menus' order: Help > Keyboard Shortcuts'
     // table. The keys are the ones shortcutClashes counts.
@@ -380,6 +408,11 @@ class MainWindow final : public QMainWindow {
     // Each toolbar's name shows while the toolbar lies along the top or the
     // bottom and names are wanted.
     void refreshToolBarNames();
+    // The Surface Edit and BIM toolbars on a third row of their own, below
+    // Survey, Terrain and GIS: the window's one place for that arrangement,
+    // used when it is built and when a layout saved before it is restored
+    // (restoreLayout). A bar the person hid stays hidden.
+    void seatThirdToolBarRow();
     // A right-click in a plan view with no tool running: the shortcut menu
     // (plan_context_menu.hpp) for the selection, at `globalPos`.
     void showPlanContextMenu(const QPoint& globalPos);
@@ -458,14 +491,25 @@ class MainWindow final : public QMainWindow {
     // record logged (plotting/view_image_export.hpp).
     void snapshotView(const SnapshotRequest& request);
 
-    // The part both section commands share: gather the visible surfaces, cut
-    // along `alignment`, show the result. `along` names the source for the
-    // log line.
+    // The part both section commands share: cut the drawing's shown surfaces
+    // along `alignment` (cad::cutDrawingSection, the one cut), show the result.
+    // `along` names the source for the log line.
     // `profile`, when given, is added to the section as a design series named
-    // `profileName`, so the view shows design against ground.
+    // `profileName`, so the view shows design against ground. The view keeps
+    // the alignment and the profile as the recipe that cuts it again.
     void cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along,
                          const katana::geometry::SolvedProfile* profile = nullptr,
                          const std::string& profileName = {});
+    // Cuts again every open section whose drawing's surfaces have changed since
+    // it was cut - hidden, shown, edited, removed, undone - from its own
+    // alignment and design profile (ViewWorkspace::recutSections), keeping the
+    // pan and zoom a person made. Says, in the log, which it cut and which it
+    // could not (no surface left to cut): those keep the old picture, marked as
+    // of surfaces that have changed. Queued on the event loop by the surfaces
+    // listener, once however many changes came first, as scheduleRefresh is: a
+    // script of fifty surface edits cuts once.
+    void recutSections();
+    void scheduleSectionRecut();
     // View > Vertical Exaggeration: the factor asked for in a box, then the
     // EXAGGERATION line run through the one executor; headless, refused with
     // the line to type instead.
@@ -844,6 +888,7 @@ class MainWindow final : public QMainWindow {
     bool refreshingReferences_ = false; // ditto, for the reference table
     bool refreshingStyles_ = false;     // ditto, for the current-style choice
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
+    bool sectionRecutPending_ = false;  // a recutSections() is queued on the event loop
     bool headless_ = false;
     // What this session's host offers (set where the host is made,
     // loadDefaultCustomisation), for the Format workbench: the kept

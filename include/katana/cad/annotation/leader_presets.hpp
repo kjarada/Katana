@@ -20,12 +20,14 @@
 // resolveLeaderPreset, so a tool clicked and a line typed make the same
 // leader, and what the note says stays live like any smart leader's.
 
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "katana/cad/scope_verbs.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -117,12 +119,83 @@ struct RecognisedPreset {
 };
 [[nodiscard]] std::optional<RecognisedPreset> recognisePreset(std::string_view templateText);
 
-// The drawing's leaders as JSON (LEADER LIST JSON, MCP's katana_leaders):
+// The leaders a scope and filter take (LEADER LIST, VALUES, FREEZE ... and
+// MCP's katana_leaders over `scope`): cad::matchScope - the one scope
+// grammar and matcher, so a view, layers, an area, the selection or the
+// drawing, and WHERE, mean here what they mean in Global Modify - with what
+// it matched narrowed to the leaders among it, so the `matched=` of the
+// scope's record counts leaders. A scope that takes none is no failure.
+[[nodiscard]] katana::core::Result<katana::cad::ScopeMatch>
+matchLeaders(const Document& document, const katana::cad::ScopeWords& words,
+             const katana::cad::ScopeViewProvider& views);
+
+// ---- the JSON ------------------------------------------------------------------------------
+//
+// The report is plain data and the writer a function taking it, so the one
+// thing the writer must do - write a byte that is not UTF-8 as U+FFFD
+// instead of throwing - can be handed such a byte by a test: nothing in a
+// Document can hold one any more (SurfaceStore::checkName and the repair on
+// open), so no drawing could reach the guard.
+
+// One leader as the JSON says it.
+struct LeaderReport {
+    katana::entity::EntityId id = 0;
+    std::string layer{};
+    // The first vertex; absent for a leader with none.
+    std::optional<katana::geometry::Point2> tip{};
+    std::size_t vertices = 0;
+    // The entity the tip is on and where on it, absent for a plain leader.
+    std::optional<katana::entity::EntityId> target{};
+    std::optional<std::string> anchor{};
+    bool smart = false;
+    // Absent for a leader whose note is plain text.
+    std::optional<std::string> templateText{};
+    std::optional<std::string> labelStyle{};
+    // The preset the template is, and the surface or alignment it reads.
+    std::optional<std::string> preset{};
+    std::optional<std::string> reads{};
+    std::string arrow{};
+    std::string callout{};
+    // What the note says now, whole and line by line.
+    std::string text{};
+    std::vector<std::string> lines{};
+};
+
+// The scope the leaders were chosen by: its record (cad::scopeRecord, as the
+// verbs reply it) and how many leaders it took.
+struct LeadersScopeReport {
+    std::string record{};
+    std::size_t matched = 0;
+};
+
+struct LeadersReport {
+    std::vector<LeaderReport> leaders{};
+    std::vector<std::string> surfaces{};
+    std::vector<std::string> alignments{};
+    std::optional<LeadersScopeReport> scope{};
+};
+
+// The drawing's leaders as a report: `only` the leaders of those ids when
+// set - and then NONE when it is empty, which is what a scope that took
+// nothing must give - and, when `target` is given, only those on it.
+[[nodiscard]] LeadersReport
+leadersReport(const Document& document,
+              const std::optional<std::vector<katana::entity::EntityId>>& only = std::nullopt,
+              std::optional<katana::entity::EntityId> target = std::nullopt);
+
+// The report as JSON (LEADER LIST JSON, MCP's katana_leaders):
 // {"leaders": [{id, layer, tip, vertices, target, anchor, smart, template,
 // labelstyle, preset, reads, arrow, callout, text, lines}], "presets":
 // [{name, title, reads, template, tool, says}], "surfaces": [...],
-// "alignments": [...]} - `only` the leaders of those ids when not empty,
-// and only those on `target` when given. Absent members are null.
+// "alignments": [...]} and, when the leaders were chosen by a scope,
+// "scope": {"record": "scope=drawing matched=3", "matched": 3}. Absent
+// members are null. A reply, not a stored value, so U+FFFD for a byte that
+// is not UTF-8 and never an exception (docs/cad.md).
+[[nodiscard]] std::string leadersJsonOf(const LeadersReport& report);
+
+// leadersReport then leadersJsonOf, for the drawing's leaders `only` those of
+// the ids when not empty (an empty list is all of them, as it always was) and
+// only those on `target` when given.
 [[nodiscard]] std::string leadersJson(const Document& document,
                                       const std::vector<katana::entity::EntityId>& only = {},
                                       std::optional<katana::entity::EntityId> target = std::nullopt);

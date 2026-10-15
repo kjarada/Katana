@@ -6,6 +6,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/cad/layer_overrides.hpp"
@@ -74,6 +75,12 @@ class SelectionSet {
 // colour too, so it resolves once and asks this.
 [[nodiscard]] bool isDrawn(const katana::entity::ResolvedLayer& layer,
                            const katana::entity::Entity& entity, const LayerOverrides& view);
+// The layer's half of that rule, for something drawn on a layer that is not an
+// entity (a road object, docs/road_objects.md): the document shows the layer -
+// it and every ancestor are shown, and a layer that is not there is not - and
+// `view` does not hide the path. isDrawn is this and the entity's own switch.
+[[nodiscard]] bool isLayerDrawn(const katana::entity::ResolvedLayer& layer, std::string_view path,
+                                const LayerOverrides& view);
 // The ghost rule, the drawn rule's other half: `view` alone hides the entity -
 // the document draws it and a layer the view hides of its own takes it out.
 // Where a view shows a SELECTED entity faintly instead of not at all

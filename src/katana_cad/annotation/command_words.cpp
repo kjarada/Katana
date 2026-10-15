@@ -46,6 +46,34 @@ Result<std::string> annotationTextWord(std::string_view text)
     return commandWord(escaped);
 }
 
+std::string anchorWord(const katana::entity::AnchorRef& ref)
+{
+    using katana::entity::AnchorPoint;
+    const std::string entity = "#" + std::to_string(ref.entity);
+    switch (ref.point) {
+    case AnchorPoint::Position:
+        return entity + ".position";
+    case AnchorPoint::Start:
+        return entity + ".start";
+    case AnchorPoint::End:
+        return entity + ".end";
+    case AnchorPoint::Mid:
+        return entity + ".mid";
+    case AnchorPoint::Centre:
+        return entity + ".centre";
+    case AnchorPoint::Vertex:
+        return entity + ".v" + std::to_string(ref.index);
+    case AnchorPoint::SegmentMid:
+        return entity + ".s" + std::to_string(ref.index);
+    case AnchorPoint::Along:
+        return entity + ".along" + std::to_string(ref.index) + ":" +
+               katana::core::formatExactReal(ref.parameter);
+    case AnchorPoint::Inside:
+        return entity + ".inside";
+    }
+    return entity;
+}
+
 std::string recordValue(std::string_view value)
 {
     const bool needs = value.empty() || value.find_first_of(" \"\\\n=") != std::string_view::npos;
