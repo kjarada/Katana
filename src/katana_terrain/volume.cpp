@@ -337,8 +337,11 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
     result.boundaryArea = region->area();
     TinSurface base;
     if (options.base == StockpileBase::Boundary) {
-        // The toe as it stands: each vertex's own height, or the ground's
-        // there. A vertex with neither is refused - its height would be a
+        // The toe as it stands: the boundary's own heights when EVERY vertex
+        // has one, otherwise the ground's at each vertex (a vertex's own
+        // height is then not used, even where the ground has none under it:
+        // mixing the two would build a base from two sources). A vertex off
+        // the ground with no height to use is refused - its height would be a
         // guess, and a base at 0 there would add a cone of nothing.
         const bool own = !ringHeights.empty() && ringHeights.size() == ring.vertices.size() &&
                          std::all_of(ringHeights.begin(), ringHeights.end(),
@@ -351,6 +354,29 @@ Result<StockpileVolume> stockpileVolume(const TinSurface& surface, const Polylin
             const Point2& at = ring.vertices[v];
             const std::optional<double> height = own ? ringHeights[v] : surface.elevationAt(at);
             if (!height) {
+                const auto hasOwn = [&](std::size_t index) {
+                    return index < ringHeights.size() && ringHeights[index].has_value() &&
+                           std::isfinite(*ringHeights[index]);
+                };
+                if (hasOwn(v)) {
+                    // This vertex has a height, but the rule is all or none:
+                    // say which vertex is the one that has none.
+                    std::size_t missing = 0;
+                    while (missing < ring.vertices.size() && hasOwn(missing)) {
+                        ++missing;
+                    }
+                    return makeError(
+                        ErrorCode::InvalidGeometry,
+                        "boundary vertex " + std::to_string(v + 1) +
+                            " is off the surface, and its own height is not used: the "
+                            "boundary's own heights are used only when every vertex has one, "
+                            "and vertex " +
+                            std::to_string(missing + 1) +
+                            " has none; give every vertex a height, or use the lowest point or "
+                            "a level",
+                        "vertex=" + std::to_string(v + 1) +
+                            " missing=" + std::to_string(missing + 1));
+                }
                 return makeError(ErrorCode::InvalidGeometry,
                                  "boundary vertex " + std::to_string(v + 1) +
                                      " is off the surface and has no height of its own, so the "

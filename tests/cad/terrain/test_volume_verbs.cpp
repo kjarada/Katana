@@ -291,10 +291,15 @@ TEST_F(VolumeVerbs, ACsvIsWrittenAndAFileAlreadyThereIsReplacedOnlyWhenAsked)
     std::ifstream in(file, std::ios::binary);
     std::string header;
     std::getline(in, header);
-    EXPECT_EQ(header, "record,polygon,entity,polygon_area,area,cut,fill,net\r");
+    // The eight columns where they always were, then what the reply also says:
+    // the areas (the whole 10 000 m2 is fill, the design 1 m above the ground
+    // everywhere) and the method and the surfaces that made the table.
+    EXPECT_EQ(header, "record,polygon,entity,polygon_area,area,cut,fill,net,cut_area,fill_area,"
+                      "method,base,top\r");
     std::string row;
     std::getline(in, row);
-    EXPECT_EQ(row, "total,,,,10000.000,0.000,10000.000,10000.000\r");
+    EXPECT_EQ(row, "total,,,,10000.000,0.000,10000.000,10000.000,0.000,10000.000,exact,ground,"
+                   "design\r");
     in.close();
     EXPECT_EQ(refused("VOLUME SURFACES ground design csv=\"" + path + "\""),
               ErrorCode::AlreadyExists);
@@ -321,6 +326,239 @@ TEST_F(VolumeVerbs, WhatCannotBeMeasuredIsRefusedSayingWhy)
     // A polygon wholly off the surfaces measures nothing, which is said.
     EXPECT_EQ(refused("VOLUME SURFACES ground design INSIDE 200,200 210,200 210,210"),
               ErrorCode::InvalidGeometry);
+}
+
+namespace {
+
+// A file's lines (CRLF removed) or none.
+std::vector<std::string> linesOf(const std::filesystem::path& file)
+{
+    std::vector<std::string> lines;
+    std::ifstream in(file, std::ios::binary);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+std::filesystem::path scratchFile(const void* owner, const char* stem)
+{
+    return std::filesystem::temp_directory_path() /
+           (std::string("katana_volume_verbs_") + stem + "_" +
+            std::to_string(reinterpret_cast<std::uintptr_t>(owner)) + ".csv");
+}
+
+} // namespace
+
+TEST_F(VolumeVerbs, ATableNamesItsMethodAndInputsAndCarriesTheAreasLevelsAndCellsOfTheReply)
+{
+    // Parallel planes 1 m apart over [0, 100]^2, ground z = 10 + 0.05 x. The
+    // columns after the eighth say what the reply says: for the exact surfaces
+    // 0 of cut area and the whole 10 000 m2 of fill area, which design 1 m
+    // above the ground everywhere gives; for a level the above and below, and
+    // the level.
+    addParallelPlanes();
+    const auto file = scratchFile(this, "columns");
+    std::filesystem::remove(file);
+    const std::string path = katana::core::pathToUtf8(file);
+    const auto csv = [&](const std::string& line) {
+        std::filesystem::remove(file);
+        ran(line + " csv=\"" + path + "\"");
+        return linesOf(file);
+    };
+
+    // The exact surfaces.
+    auto surfaces = csv("VOLUME SURFACES ground design");
+    ASSERT_EQ(surfaces.size(), 2u);
+    EXPECT_EQ(surfaces[0], "record,polygon,entity,polygon_area,area,cut,fill,net,cut_area,"
+                           "fill_area,method,base,top");
+    EXPECT_EQ(surfaces[1], "total,,,,10000.000,0.000,10000.000,10000.000,0.000,10000.000,exact,"
+                           "ground,design");
+
+    // The grid: 10 m cells, a hundred of them, each 1 m deep: 10 000 m3 -
+    // the same numbers as the exact file, and the method and the cell are what
+    // tell the two apart.
+    auto grid = csv("VOLUME GRID ground design cell=10");
+    ASSERT_EQ(grid.size(), 2u);
+    EXPECT_EQ(grid[0], "record,polygon,entity,polygon_area,area,cut,fill,net,cells,method,base,"
+                       "top,cell");
+    EXPECT_EQ(grid[1], "total,,,,10000.000,0.000,10000.000,10000.000,100,grid,ground,design,10");
+
+    // A level: z = 10 + 0.05 x crosses 11 at x = 20. Above it, x from 20 to
+    // 100: 100 x (0.025 (100^2 - 20^2) - 80) = 100 x 160 = 16 000 m3 over
+    // 80 x 100 = 8000 m2; below it, 100 x (20 - 0.025 x 20^2) = 100 x 10 =
+    // 1000 m3 over 2000 m2; net 1000 - 16000 = -15 000.
+    auto level = csv("VOLUME DATUM ground 11");
+    ASSERT_EQ(level.size(), 2u);
+    EXPECT_EQ(level[0], "record,polygon,entity,polygon_area,area,cut,fill,net,cut_area,fill_area,"
+                        "above,below,method,surface,level");
+    EXPECT_EQ(level[1], "total,,,,10000.000,16000.000,1000.000,-15000.000,8000.000,2000.000,"
+                        "16000.000,1000.000,exact,ground,11");
+
+    // The factors are columns too, after the quantities they adjust.
+    auto factored = csv("VOLUME SURFACES ground design bulk=1.25 shrink=1.1");
+    ASSERT_EQ(factored.size(), 2u);
+    EXPECT_EQ(factored[0], "record,polygon,entity,polygon_area,area,cut,fill,net,cut_adjusted,"
+                           "fill_adjusted,net_adjusted,cut_area,fill_area,method,base,top,bulk,"
+                           "shrink");
+    EXPECT_EQ(factored[1], "total,,,,10000.000,0.000,10000.000,10000.000,0.000,11000.000,"
+                           "11000.000,0.000,10000.000,exact,ground,design,1.25,1.1");
+    std::filesystem::remove(file);
+}
+
+TEST_F(VolumeVerbs, ASectionTableSaysWhetherItsVolumesAreEndAreaOrPrismoidalAndWhatMadeThem)
+{
+    // Sections every 50 m along y = 50, 10 m each side of the parallel planes
+    // 1 m apart: 20 m2 on each of the three, so 50 x 20 = 1000 m3 a panel by
+    // either formula (Simpson's rule on a constant is the constant). With
+    // method=prismoidal the plain cut and fill columns hold the prismoidal
+    // volumes - which the method column is the only thing to say - and the mass
+    // ordinate is the cut x bulk less the fill x shrink: 0 - 1000 x 1.5, then
+    // -3000.
+    addParallelPlanes();
+    ran("ALIGN NEW cl 0,50 100,50");
+    const auto file = scratchFile(this, "sections");
+    std::filesystem::remove(file);
+    const std::string path = katana::core::pathToUtf8(file);
+    ran("VOLUME SECTIONS ground design ALIGNMENT cl interval=50 left=10 right=10 "
+        "method=prismoidal bulk=1.2 shrink=1.5 csv=\"" + path + "\"");
+    const auto lines = linesOf(file);
+    ASSERT_EQ(lines.size(), 4u);
+    EXPECT_EQ(lines[0], "station,key,cut_area,fill_area,width,cut,fill,cut_total,fill_total,mass,"
+                        "method,base,top,alignment,interval,left,right,bulk,shrink");
+    EXPECT_EQ(lines[1], "0.000,yes,0.000,20.000,20.000,,,,,,prismoidal,ground,design,cl,50,"
+                        "10.000,10.000,1.2,1.5");
+    EXPECT_EQ(lines[2], "50.000,no,0.000,20.000,20.000,0.000,1000.000,0.000,1000.000,-1500.000,"
+                        "prismoidal,ground,design,cl,50,10.000,10.000,1.2,1.5");
+    EXPECT_EQ(lines[3], "100.000,yes,0.000,20.000,20.000,0.000,1000.000,0.000,2000.000,-3000.000,"
+                        "prismoidal,ground,design,cl,50,10.000,10.000,1.2,1.5");
+    std::filesystem::remove(file);
+}
+
+TEST_F(VolumeVerbs, ACsvWithAScopeThatTakesNoPolygonWritesNothingAndSaysSo)
+{
+    // The file a run before left is as it was - even with OVERWRITE, as nothing
+    // ran - and the reply names the file and says it was not written, where it
+    // used to say nothing of it.
+    addParallelPlanes();
+    const auto file = scratchFile(this, "norun");
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << "OLD TABLE FROM AN EARLIER RUN\r\n";
+    }
+    const std::string path = katana::core::pathToUtf8(file);
+    const std::string reply = ran("VOLUME SURFACES ground design INSIDE FROM AREA 500,500,600,600 csv=\"" +
+                                  path + "\" OVERWRITE");
+    EXPECT_EQ(value(record(reply, "volume"), "ran"), "no");
+    const auto written = record(reply, "csv");
+    ASSERT_TRUE(written.has_value()) << reply;
+    EXPECT_EQ(value(written, "file"), path);
+    EXPECT_EQ(value(written, "written"), "no");
+    EXPECT_FALSE(written->value("rows").has_value());
+    const auto kept = linesOf(file);
+    ASSERT_EQ(kept.size(), 1u);
+    EXPECT_EQ(kept[0], "OLD TABLE FROM AN EARLIER RUN");
+    // A file that was not there is not made.
+    std::filesystem::remove(file);
+    const std::string again = ran("VOLUME SURFACES ground design INSIDE FROM AREA 500,500,600,600 csv=\"" +
+                                  path + "\"");
+    EXPECT_EQ(value(record(again, "csv"), "written"), "no");
+    EXPECT_FALSE(std::filesystem::exists(file));
+    // Asked of nothing, a line with no csv= says nothing of a file.
+    EXPECT_FALSE(record(ran("VOLUME SURFACES ground design INSIDE FROM AREA 500,500,600,600"), "csv")
+                     .has_value());
+}
+
+TEST_F(VolumeVerbs, ATotalSaysWhichBaseAStockpileWasMeasuredAgainstAndWhichHeightsItsToeUsed)
+{
+    // The pyramid [0, 100]^2, apex 30 high at the centre: its height is
+    // 0.6 min(x, y) on the lower-left quarter and 30 - 0.6 (max(x, y) - 50) on
+    // the upper right. Against base=lowest the level is the lowest point on the
+    // boundary: the square [10, 40]^2 has it at the corner (10, 10), 0.6 x 10 =
+    // 6, and [55, 80]^2 at (80, 80), 30 - 0.6 x 30 = 12. A toe typed with every
+    // height is its own; one with none uses the ground's. The total of ONE
+    // polygon has what its EACH record has; of two that differ it has the
+    // fields they share and EACH has the rest.
+    addSurface("pile", pyramid());
+    const std::string lowerLeft = "10,10 40,10 40,40 10,40";
+    const std::string upperRight = "55,55 80,55 80,80 55,80";
+    EXPECT_EQ(value(record(ran("VOLUME STOCKPILE pile INSIDE " + lowerLeft + " base=lowest"),
+                           "volume"),
+                    "lowest"),
+              "6.000");
+    EXPECT_EQ(value(record(ran("VOLUME STOCKPILE pile INSIDE " + upperRight + " base=lowest"),
+                           "volume"),
+                    "lowest"),
+              "12.000");
+    EXPECT_EQ(value(record(ran("VOLUME STOCKPILE pile INSIDE " + lowerLeft), "volume"), "heights"),
+              "surface");
+    EXPECT_EQ(value(record(ran("VOLUME STOCKPILE pile INSIDE 10,10,6 40,10,6 40,40,24 10,40,6"),
+                           "volume"),
+                    "heights"),
+              "own");
+    // Two polygons that differ in the level they found: no one value for the
+    // total, and each polygon's own with EACH.
+    ran("PLINE " + lowerLeft + " CLOSE");
+    const auto first = lastId();
+    ran("PLINE " + upperRight + " CLOSE");
+    const auto second = lastId();
+    const std::string pair = " INSIDE #" + std::to_string(first) + " #" + std::to_string(second);
+    const std::string differing = ran("VOLUME STOCKPILE pile" + pair + " base=lowest");
+    EXPECT_FALSE(record(differing, "volume")->value("lowest").has_value()) << differing;
+    const std::string each = ran("VOLUME STOCKPILE pile" + pair + " base=lowest EACH");
+    const auto polygons = records(each, "polygon");
+    ASSERT_EQ(polygons.size(), 2u) << each;
+    EXPECT_EQ(polygons[0].value("lowest").value_or(""), "6.000");
+    EXPECT_EQ(polygons[1].value("lowest").value_or(""), "12.000");
+    // Two that agree: the shared field is on the total.
+    EXPECT_EQ(value(record(ran("VOLUME STOCKPILE pile" + pair), "volume"), "heights"), "surface");
+}
+
+TEST_F(VolumeVerbs, ARefusalThatTwoSurfacesShareNoGroundNamesWhatEachCovers)
+{
+    // a is the triangle (0,0) (60,0) (0,60), b the triangle (100,100) (40,100)
+    // (100,40): the boxes meet on [40, 60]^2 over triangles that do not. The
+    // refusal names each surface and its extent, for every form, so a person
+    // who has drawn one in the wrong coordinates sees it.
+    TinInput first;
+    first.points = {Point3(0, 0, 0), Point3(60, 0, 0), Point3(0, 60, 0)};
+    addSurface("a", katana::terrain::buildTin(first)->surface);
+    TinInput second;
+    second.points = {Point3(100, 100, 1), Point3(40, 100, 1), Point3(100, 40, 1)};
+    addSurface("b", katana::terrain::buildTin(second)->surface);
+    ran("ALIGN NEW cl 0,50 100,50");
+    const std::string a = "a covers 0.000,0.000,60.000,60.000";
+    const std::string b = "b covers 40.000,40.000,100.000,100.000";
+    for (const char* line : {"VOLUME SURFACES a b", "VOLUME GRID a b cell=1",
+                             "VOLUME SECTIONS a b ALIGNMENT cl", "SURFACE DIFFERENCE a b",
+                             "SURFACE ENVELOPE a b MAX"}) {
+        const auto reply = interpreter.run(line);
+        ASSERT_FALSE(reply.ok()) << line;
+        EXPECT_EQ(reply.error().code, ErrorCode::InvalidGeometry) << line;
+        EXPECT_NE(reply.error().message.find(a), std::string::npos)
+            << line << ": " << reply.error().message;
+        EXPECT_NE(reply.error().message.find(b), std::string::npos)
+            << line << ": " << reply.error().message;
+    }
+    // A polygon off a surface names that surface's extent.
+    for (const char* line : {"VOLUME DATUM a 1 INSIDE 200,200 210,200 210,210",
+                             "VOLUME STOCKPILE a INSIDE 200,200 210,200 210,210 level=1"}) {
+        const auto reply = interpreter.run(line);
+        ASSERT_FALSE(reply.ok()) << line;
+        EXPECT_NE(reply.error().message.find(a), std::string::npos)
+            << line << ": " << reply.error().message;
+    }
+    // Boxes that do not meet name them as before.
+    addSurface("far", gridSurface(500, 500, 10, 10, [](double, double) { return 1.0; }));
+    const auto apart = interpreter.run("VOLUME SURFACES a far");
+    ASSERT_FALSE(apart.ok());
+    EXPECT_NE(apart.error().message.find("far covers 500.000,500.000,510.000,510.000"),
+              std::string::npos)
+        << apart.error().message;
 }
 
 // ---- VOLUME DATUM and STOCKPILE --------------------------------------------------------------------
@@ -454,9 +692,9 @@ TEST_F(VolumeVerbs, SectionsOfAnAlignmentThatRunsClearOfTheSurfacesAreRefusedNam
     const auto reply = interpreter.run("VOLUME SECTIONS ground design ALIGNMENT away");
     ASSERT_FALSE(reply.ok());
     EXPECT_EQ(reply.error().code, ErrorCode::InvalidGeometry);
-    // Which surfaces and which alignment, and what the surfaces cover.
-    for (const char* named : {"base ground", "top design", "alignment away",
-                              "0.000,0.000,100.000,100.000"}) {
+    // Which alignment, which surfaces and what each covers.
+    for (const char* named : {"alignment away", "ground covers 0.000,0.000,100.000,100.000",
+                              "design covers 0.000,0.000,100.000,100.000"}) {
         EXPECT_NE(reply.error().message.find(named), std::string::npos)
             << named << " in: " << reply.error().message;
     }

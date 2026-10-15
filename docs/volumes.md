@@ -66,22 +66,56 @@ index= entity= polygon.area= ...` record per polygon (`chorded=yes` when an
 arc was chorded), then the total with `polygons=` and `polygon.area=`.
 `area=` is always the plan area measured - where both surfaces (or the
 surface and the polygon) have ground - and `polygon.area=` the polygons'
-own, so a polygon reaching off a surface shows it. SECTIONS gives one
+own, so a polygon reaching off a surface shows it. A stockpile adds what it
+measured against: `lowest=<z>` for `base=lowest` (the level found) and
+`heights=own|surface` for `base=boundary` (whether the toe's own heights were
+used, or the surface's because a vertex had none) - on each polygon's record
+and, because the total is the only record without EACH, on the total when
+every polygon says the same, which one polygon always does (two polygons that
+found different levels have no one `lowest=`, and EACH gives each). SECTIONS gives one
 `section station= [key=yes] cut.area= fill.area= width=` record per section,
 each after the first with its panel's `cut= fill=`, the running `cut.total=
 fill.total=` and the mass haul ordinate `mass=`, then one `volume
 method=endarea` and/or `volume method=prismoidal` total.
 
 **What changes.** The VOLUME forms change nothing. `csv=<file>` writes the
-records as a table (RFC 4180: CRLF, a field with a comma or quote quoted),
+quantities as a table (RFC 4180: CRLF, a field with a comma or quote quoted),
 refusing a file already there unless OVERWRITE, as every verb that writes a
-file does. SURFACE DIFFERENCE and ENVELOPE add a surface to the drawing
+file does. The table of the surfaces, a level, a stockpile or a grid has a row
+per polygon with EACH and one for the total, with `record, polygon, entity,
+polygon_area, area, cut, fill, net` first (and the adjusted three after them
+when factors are given) and then what the reply also says: `cut_area,
+fill_area` (not for the grid), `above, below` (a level or a base), `cells`
+(the grid), and on every row the method and its inputs, the head of the reply
+- `method, base, top` or `method, surface, level` or `method, base, top, cell`
+- and `bulk, shrink` when factors are given, so a file handed on says whether
+it is the exact method or the grid, and of what. The SECTIONS table is one row
+per section: the section's areas and its panel's volumes, running totals and
+mass ordinate, then `method` (endarea, prismoidal or both - with
+`method=prismoidal` the plain `cut`, `fill`, `cut_total`, `fill_total` and
+`mass` columns hold the prismoidal volumes, which only this column tells from
+an end-area file, and `both` adds the `*_prismoidal` columns), `base, top,
+alignment, interval, left, right`, and `bulk, shrink` when given. The totals
+are the last row's running totals; the prismoidal correction is the difference
+of the two sets of columns under `both`. Rejected: appending the totals as rows
+of the section table, which would put a volume under the station column.
+When the scope takes no polygon nothing runs and nothing is written, whatever
+OVERWRITE says, and the reply says so (`csv file=<f> written=no reason=...`)
+where it used to say nothing, so a file an earlier run left is known to be as
+it was
+(`VolumeVerbs.ACsvWithAScopeThatTakesNoPolygonWritesNothingAndSaysSo`,
+`VolumeVerbs.ATableNamesItsMethodAndInputsAndCarriesTheAreasLevelsAndCellsOfTheReply`,
+`VolumeVerbs.ASectionTableSaysWhetherItsVolumesAreEndAreaOrPrismoidalAndWhatMadeThem`). SURFACE DIFFERENCE and ENVELOPE add a surface to the drawing
 through `Document::setSurfaces`: one undo step, named after the verb; with
 PREVIEW they say what they would add and add nothing.
 
 **Refused, saying why:** a surface or an alignment the drawing has not got
 (NotFound); surfaces with no ground in common, or polygons with nothing of
-it inside (InvalidGeometry, naming both surfaces' extents); an `#id` that is
+it inside (InvalidGeometry, naming each surface and the extent it covers,
+whether their boxes do not meet or meet over triangles that do not -
+`VolumeVerbs.ARefusalThatTwoSurfacesShareNoGroundNamesWhatEachCovers` runs
+every form; SECTIONS also when no section of the range reaches ground both
+have); sections that cross one another (InvalidArgument, below); an `#id` that is
 no polygon - not a closed polyline, curve polyline, circle or ellipse
 (InvalidGeometry, saying what it is); fewer than three typed corners; EACH
 without INSIDE; a factor that is not more than 0; polygons that overlap
@@ -220,9 +254,18 @@ base made from the boundary:
 - **`base=boundary`** (the default): the boundary's heights triangulated
   inside it, the toe of the pile as it stands. The boundary's own height at
   every vertex when it has one at each (a 3D string surveyed along the toe,
-  or typed `x,y,z` corners); otherwise the surface's at each vertex. A vertex
-  off the surface with no height of its own is refused, naming it: its height
-  would be a guess, and a base at 0 there would add a cone of nothing.
+  or typed `x,y,z` corners); otherwise the surface's at each vertex - all or
+  none, never a mixture, so one vertex without a height means the others' own
+  heights are not used either. A vertex off the surface is then refused,
+  naming it: its height would be a guess, and a base at 0 there would add a
+  cone of nothing. Where that vertex has a height of its own the refusal says
+  so and names the vertex that has none (`boundary vertex 2 is off the
+  surface, and its own height is not used: the boundary's own heights are used
+  only when every vertex has one, and vertex 1 has none`), and not that it has
+  no height of its own, which was untrue and sent a person to the wrong vertex
+  (`Stockpile.AnOffSurfaceVertexWithItsOwnHeightIsRefusedNamingTheVertexThatHasNone`).
+  Rejected: a per-vertex fallback (own where present, the surface's elsewhere),
+  which would change the documented rule and the `heights=` it reports.
 - **`base=lowest`**: a level plane at the lowest point of the surface along
   the boundary - its vertices and every place an edge of the surface crosses
   it, read exactly by the segment profiler below.
@@ -366,8 +409,23 @@ total. A polygon's own edge cells still count (`area=` may exceed
 `polygon.area=` by the midpoint rule's usual boundary cells).
 
 The DEM tools' RASTER DIFFERENCE (`docs/terrain.md`, "The DEM tools") is
-the grid method on rasters; VOLUME GRID is the same method on the drawing's
-surfaces, so a raster's answer and a surface's can be set side by side.
+the same midpoint rule on rasters, but NOT on the same cells, so the two
+agree only where the cells coincide. VOLUME GRID puts its cells on lines at
+whole multiples of the cell. A `SURFACE <name> CELL <m>` source of RASTER
+DIFFERENCE is sampled by `surfaceGrid` on the surface's own lattice, anchored
+at its (min x, max y) corner, `ceil(width / cell)` by `ceil(height / cell)`
+cells whose last column and row reach up to half a cell past the surface; and
+where the two rasters' lattices differ RASTER DIFFERENCE resamples the second
+bilinearly onto the first (`aligned=no resampling=bilinear`), so its depths are
+not the two surfaces read at the same centres. On the sample terrain against a
+tilted design the two verbs count 23 986 and 23 674 cells and their fills are
+2.9% apart and their nets 46% (the exact 2542.912; VOLUME GRID 2107.914; RASTER
+DIFFERENCE 3078.654). They agree exactly where both surfaces' rasters happen to
+start on whole multiples of the cell - two surfaces over [0, 100]^2 with a cell
+of 1 m give 10 000 cells each - so set them side by side only there, and take
+the exact method as the reference. Not made to agree by snapping the surface
+raster to whole multiples (a new option on `surfaceGrid`): that would change the
+grid RASTER EXPORT writes, for a cross-check nobody asked to be exact.
 
 ## Factors
 
@@ -420,7 +478,10 @@ executor; the reply's records fill `volumesResults` (a column per key, in
 the order first met) and, along an alignment, the mass haul diagram
 (`volumesMassHaul`). Copy puts the table on the clipboard; Save CSV runs the
 same line with `csv=` and OVERWRITE (the file dialog asks before choosing a
-file); Make Cut/Fill Map (`CutFillMap` icon) runs SURFACE DIFFERENCE of the
+file) and says "Saved the table to ..." only when the reply carries the `csv`
+record with its rows - a scope that takes no polygon writes nothing, and the
+status says the file was not written
+(`VolumesDialog.SaveCsvOfAScopeThatTakesNoPolygonSaysNothingWasSavedAndLeavesTheFile`); Make Cut/Fill Map (`CutFillMap` icon) runs SURFACE DIFFERENCE of the
 page's two surfaces and offers the new surface at once; Make Envelope
 (`volumesEnvelope`, beside `volumesEnvelopeSide`, Higher or Lower of the two,
 and `volumesEnvelopeName`) runs SURFACE ENVELOPE of the same two the same way.
@@ -476,6 +537,7 @@ records do not carry.
   `cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice`,
   `cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_on_it_once`,
   `cli.volume_datum_of_a_flat_surface_at_its_own_level_has_no_cut_area_or_fill_area`,
+  `cli.volume_stockpile_total_names_the_level_it_was_measured_against`,
   `cli.surface_difference_keeps_the_cut_fill_map_as_a_surface`,
   `cli.volume_of_a_surface_that_is_not_there_is_refused`.
 - `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`.

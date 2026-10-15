@@ -285,6 +285,25 @@ std::string boxText(const katana::geometry::Box2& box)
            fixed(box.max.y);
 }
 
+// "ground covers 0.000,0.000,100.000,100.000": what a refusal that two
+// surfaces share no ground names of each, so a coordinate-system mistake shows.
+std::string coverage(const Named& surface)
+{
+    return surface.name + " covers " + boxText(surface.surface->bounds());
+}
+
+// A refusal that two surfaces share no ground, with what each covers; any
+// other error as it was.
+Error withCoverage(const Error& error, const Named& first, const Named& second)
+{
+    if (error.code != ErrorCode::InvalidGeometry) {
+        return error;
+    }
+    return makeError(error.code,
+                     error.message + " (" + coverage(first) + "; " + coverage(second) + ")",
+                     error.context);
+}
+
 // ---- measuring inside polygons -------------------------------------------------------------
 
 // What one method measured over one area.
@@ -334,9 +353,60 @@ std::string measureFields(const Reading& reading, const Measure& measure, const 
     return text + measure.fields + factorFields(factors, measure.cut, measure.fill);
 }
 
+// What a table says about how it was made, as columns that repeat on every
+// row: the reply's own head (method=, the surfaces or the level, the cell) and
+// the factors. A file handed on has no reply beside it, and an exact table
+// and a grid table of the same polygons would otherwise differ only in their
+// numbers.
+struct CsvInputs {
+    std::vector<std::string> keys;
+    std::vector<std::string> values;
+};
+
+CsvInputs csvInputs(const Reading& reading, const Factors& factors)
+{
+    CsvInputs inputs;
+    if (const auto head = katana::core::readReplyRecord(reading.head)) {
+        for (const auto& [key, value] : head->fields) {
+            inputs.keys.push_back(key);
+            inputs.values.push_back(value);
+        }
+    }
+    if (factors.given) {
+        inputs.keys.insert(inputs.keys.end(), {"bulk", "shrink"});
+        inputs.values.insert(inputs.values.end(), {exact(factors.bulk), exact(factors.shrink)});
+    }
+    return inputs;
+}
+
+// The columns of a table of quantities, in the order of csvRow. The first
+// eight, and the adjusted three, are where they always were; what the reply
+// also says follows them, so a reader that counts columns still finds its own.
+std::vector<std::string> csvHeader(const Reading& reading, const Factors& factors,
+                                   const CsvInputs& inputs)
+{
+    std::vector<std::string> header = {"record", "polygon", "entity", "polygon_area",
+                                       "area",   "cut",     "fill",   "net"};
+    if (factors.given) {
+        header.insert(header.end(), {"cut_adjusted", "fill_adjusted", "net_adjusted"});
+    }
+    if (reading.areas) {
+        header.insert(header.end(), {"cut_area", "fill_area"});
+    }
+    if (reading.levelReading) {
+        header.insert(header.end(), {"above", "below"});
+    }
+    if (reading.cells) {
+        header.push_back("cells");
+    }
+    header.insert(header.end(), inputs.keys.begin(), inputs.keys.end());
+    return header;
+}
+
 std::vector<std::string> csvRow(std::string kind, std::string index, std::string entity,
                                 std::string polygonArea, const Measure& measure,
-                                const Factors& factors)
+                                const Factors& factors, const Reading& reading,
+                                const CsvInputs& inputs)
 {
     std::vector<std::string> row{std::move(kind),         std::move(index),
                                  std::move(entity),       std::move(polygonArea),
@@ -347,6 +417,16 @@ std::vector<std::string> csvRow(std::string kind, std::string index, std::string
         row.push_back(fixed(measure.fill * factors.shrink));
         row.push_back(fixed(measure.fill * factors.shrink - measure.cut * factors.bulk));
     }
+    if (reading.areas) {
+        row.insert(row.end(), {fixed(measure.cutArea), fixed(measure.fillArea)});
+    }
+    if (reading.levelReading) {
+        row.insert(row.end(), {fixed(measure.cut), fixed(measure.fill)});
+    }
+    if (reading.cells) {
+        row.push_back(std::to_string(measure.cells));
+    }
+    row.insert(row.end(), inputs.values.begin(), inputs.values.end());
     return row;
 }
 
@@ -386,10 +466,8 @@ Result<std::string> measureAreas(const Reading& reading,
 {
     std::vector<std::string> lines;
     Table table;
-    table.header = {"record", "polygon", "entity", "polygon_area", "area", "cut", "fill", "net"};
-    if (factors.given) {
-        table.header.insert(table.header.end(), {"cut_adjusted", "fill_adjusted", "net_adjusted"});
-    }
+    const CsvInputs inputs = csvInputs(reading, factors);
+    table.header = csvHeader(reading, factors, inputs);
 
     if (!polygons) {
         auto whole = measure(nullptr, nullptr, {});
@@ -400,7 +478,7 @@ Result<std::string> measureAreas(const Reading& reading,
             return makeError(ErrorCode::InvalidGeometry, reading.nothing);
         }
         lines.push_back(reading.head + measureFields(reading, *whole, factors));
-        table.rows.push_back(csvRow("total", "", "", "", *whole, factors));
+        table.rows.push_back(csvRow("total", "", "", "", *whole, factors, reading, inputs));
     } else {
         if (polygons->scope) {
             // What the boundary's scope took, as every verb that takes a
@@ -417,6 +495,13 @@ Result<std::string> measureAreas(const Reading& reading,
             // A scope that takes no closed outline is said, not refused.
             lines.push_back(reading.head + " ran=no reason=" +
                             recordValue("the scope took no closed polygon"));
+            if (const std::string* path = options.find("csv")) {
+                // Nothing ran, so nothing is written - the file a run before
+                // left there is as it was, and the reply says so rather than
+                // leave the person to find it still holds the old numbers.
+                lines.push_back("csv file=" + recordValue(*path) + " written=no reason=" +
+                                recordValue("the scope took no closed polygon"));
+            }
             std::string reply;
             for (const std::string& line : lines) {
                 reply += line + "\n";
@@ -467,6 +552,12 @@ Result<std::string> measureAreas(const Reading& reading,
         katana::math::CompensatedSum fillArea;
         katana::math::CompensatedSum polygonArea;
         std::size_t cells = 0;
+        // What the method says of its own about each polygon (a stockpile's
+        // base level, whether the toe's own heights were used): on the total
+        // when every polygon says the same, which one polygon always does.
+        // Where they differ there is no one value to give, and EACH gives each.
+        std::optional<std::string> sharedFields;
+        bool fieldsAgree = true;
         for (std::size_t i = 0; i < regions.size(); ++i) {
             const DrawingShape& polygon = polygons->shapes[i];
             auto measured =
@@ -483,6 +574,11 @@ Result<std::string> measureAreas(const Reading& reading,
             fillArea.add(measured->fillArea);
             polygonArea.add(regions[i].area());
             cells += measured->cells;
+            if (!sharedFields) {
+                sharedFields = measured->fields;
+            } else if (*sharedFields != measured->fields) {
+                fieldsAgree = false;
+            }
             const std::string entity = polygon.entity ? std::to_string(*polygon.entity) : "";
             if (each) {
                 std::string record = "polygon index=" + std::to_string(i + 1);
@@ -496,7 +592,8 @@ Result<std::string> measureAreas(const Reading& reading,
                 }
                 lines.push_back(record);
                 table.rows.push_back(csvRow("polygon", std::to_string(i + 1), entity,
-                                            fixed(regions[i].area()), *measured, factors));
+                                            fixed(regions[i].area()), *measured, factors, reading,
+                                            inputs));
             }
         }
         for (const auto& [i, j] : overlaps) {
@@ -518,6 +615,9 @@ Result<std::string> measureAreas(const Reading& reading,
         total.cutArea = cutArea.value();
         total.fillArea = fillArea.value();
         total.cells = cells;
+        if (fieldsAgree && sharedFields) {
+            total.fields = *sharedFields;
+        }
         if (!(total.area > 0.0)) {
             return makeError(ErrorCode::InvalidGeometry,
                              "nothing inside the polygons was measured: " + reading.nothing);
@@ -525,7 +625,8 @@ Result<std::string> measureAreas(const Reading& reading,
         lines.push_back(reading.head + " polygons=" + std::to_string(regions.size()) +
                         " polygon.area=" + fixed(polygonArea.value()) +
                         measureFields(reading, total, factors));
-        table.rows.push_back(csvRow("total", "", "", fixed(polygonArea.value()), total, factors));
+        table.rows.push_back(csvRow("total", "", "", fixed(polygonArea.value()), total, factors,
+                                    reading, inputs));
     }
 
     if (const std::string* path = options.find("csv")) {
@@ -633,7 +734,8 @@ Result<std::string> volumeSurfaces(const Document& document, Words words,
     Reading reading;
     reading.head = "volume method=exact base=" + recordValue(base->name) +
                    " top=" + recordValue(top->name);
-    reading.nothing = "the surfaces have no ground in common there";
+    reading.nothing = "the surfaces have no ground in common there (" + coverage(*base) + "; " +
+                      coverage(*top) + ")";
     const TinSurface& existing = *base->surface;
     const TinSurface& design = *top->surface;
     const Measurer measure = [&](const DrawingShape*, const OverlayRegion* region,
@@ -690,7 +792,7 @@ Result<std::string> volumeDatum(const Document& document, Words words,
     reading.head = "volume method=exact surface=" + recordValue(surface->name) +
                    " level=" + exact(*level);
     reading.levelReading = true;
-    reading.nothing = "the polygons are off the surface";
+    reading.nothing = "the polygons are off the surface (" + coverage(*surface) + ")";
     const TinSurface& ground = *surface->surface;
     const double datum = *level;
     const Measurer measure = [&](const DrawingShape*, const OverlayRegion* region,
@@ -764,7 +866,7 @@ Result<std::string> volumeStockpile(const Document& document, Words words,
         reading.head += " level=" + exact(**level);
     }
     reading.levelReading = true;
-    reading.nothing = "the polygons are off the surface";
+    reading.nothing = "the polygons are off the surface (" + coverage(*surface) + ")";
     const TinSurface& ground = *surface->surface;
     const Measurer measure = [&](const DrawingShape* polygon, const OverlayRegion*,
                                  std::span<const OverlayRegion>) -> Result<Measure> {
@@ -835,7 +937,8 @@ Result<std::string> volumeGrid(const Document& document, Words words,
     reading.areas = false;
     reading.cells = true;
     reading.countsOnce = true;
-    reading.nothing = "no cell's centre is on both surfaces";
+    reading.nothing = "no cell's centre is on both surfaces (" + coverage(*base) + "; " +
+                      coverage(*top) + ")";
     const TinSurface& existing = *base->surface;
     const TinSurface& design = *top->surface;
     const double side = **cell;
@@ -927,19 +1030,19 @@ Result<std::string> volumeSections(const Document& document, Words words)
         }
     }
     sections.prismoidal = prismoidal;
+    const std::string methodWord =
+        endArea ? (prismoidal ? "both" : "endarea") : "prismoidal";
     auto volumes = katana::terrain::volumesAlongAlignment(*base->surface, *top->surface, *solved,
                                                           sections);
     if (!volumes) {
-        const Error& refused = volumes.error();
-        if (refused.code == ErrorCode::InvalidGeometry) {
-            // Nothing to measure: which surfaces and which alignment, as the
-            // other forms name theirs.
-            return makeError(refused.code,
-                             "base " + base->name + ", top " + top->name + ", alignment " +
-                                 alignment->name + ": " + refused.message,
-                             refused.context);
+        if (volumes.error().code == ErrorCode::InvalidGeometry) {
+            // Nothing to measure: which alignment, and what each surface
+            // covers, as the other forms name theirs.
+            const Error named = withCoverage(volumes.error(), *base, *top);
+            return makeError(named.code, "alignment " + alignment->name + ": " + named.message,
+                             named.context);
         }
-        return refused;
+        return volumes.error();
     }
 
     // The mass haul ordinate: cut taken as positive and fill as negative,
@@ -953,6 +1056,17 @@ Result<std::string> volumeSections(const Document& document, Words words)
         table.header.insert(table.header.end(), {"cut_prismoidal", "fill_prismoidal",
                                                  "cut_total_prismoidal", "fill_total_prismoidal",
                                                  "mass_prismoidal"});
+    }
+    // The columns above are the section table. The ones that follow say how it
+    // was made, on every row: with method=prismoidal the plain cut, fill and
+    // mass columns hold the prismoidal volumes, which only this column tells
+    // from an end-area file, and the factors behind a factored mass column are
+    // here too.
+    const std::size_t quantityColumns = table.header.size();
+    table.header.insert(table.header.end(),
+                        {"method", "base", "top", "alignment", "interval", "left", "right"});
+    if (factors->given) {
+        table.header.insert(table.header.end(), {"bulk", "shrink"});
     }
     katana::math::CompensatedSum cutTotal;
     katana::math::CompensatedSum fillTotal;
@@ -1002,7 +1116,13 @@ Result<std::string> volumeSections(const Document& document, Words words)
                                        fixed(prismFillTotal.value()), fixed(prismMass)});
             }
         } else {
-            row.resize(table.header.size());
+            row.resize(quantityColumns);
+        }
+        row.insert(row.end(), {methodWord, base->name, top->name, alignment->name,
+                               exact(sections.interval), fixed(volumes->left),
+                               fixed(volumes->right)});
+        if (factors->given) {
+            row.insert(row.end(), {exact(factors->bulk), exact(factors->shrink)});
         }
         lines.push_back(record);
         table.rows.push_back(std::move(row));
@@ -1138,7 +1258,7 @@ Result<std::string> surfaceDifference(Document& document, Words words)
     }
     auto difference = katana::terrain::differenceSurface(*base->surface, *top->surface);
     if (!difference) {
-        return difference.error();
+        return withCoverage(difference.error(), *base, *top);
     }
     std::string record = "difference base=" + recordValue(base->name) +
                          " top=" + recordValue(top->name) +
@@ -1177,7 +1297,7 @@ Result<std::string> surfaceEnvelope(Document& document, Words words)
     }
     auto envelope = katana::terrain::envelopeSurface(*first->surface, *second->surface, which);
     if (!envelope) {
-        return envelope.error();
+        return withCoverage(envelope.error(), *first, *second);
     }
     const char* side = which == katana::terrain::Envelope::Upper ? "max" : "min";
     std::string record = std::string("envelope first=") + recordValue(first->name) +

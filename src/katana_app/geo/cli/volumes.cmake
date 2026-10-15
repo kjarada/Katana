@@ -125,6 +125,21 @@ set_tests_properties(cli.volume_datum_of_a_flat_surface_at_its_own_level_has_no_
     PROPERTIES
     PASS_REGULAR_EXPRESSION "volume method=exact surface=base level=10 polygons=1 polygon\\.area=89\\.664 cut=0\\.000 fill=0\\.000 net=0\\.000 area=89\\.664 above=0\\.000 below=0\\.000 cut\\.area=0\\.000 fill\\.area=0\\.000"
     FAIL_REGULAR_EXPRESSION "error")
+
+# The total of a stockpile says what it was measured against. The top slab is
+# flat at 11; its lowest point inside the square [2, 8]^2 is 11, and that level
+# is the base: nothing stands above it or below it (36 m^2 of ground, none of it
+# cut or fill, the surface being its own base), and the reply names the level.
+# The record of one polygon without EACH is the total, which used to leave
+# `lowest=` out.
+add_test(NAME cli.volume_stockpile_total_names_the_level_it_was_measured_against
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_surfaces}
+            -c "VOLUME STOCKPILE top INSIDE 2,2 8,2 8,8 2,8 base=lowest")
+set_tests_properties(cli.volume_stockpile_total_names_the_level_it_was_measured_against
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "volume method=exact surface=top base=lowest polygons=1 polygon\.area=36\.000 cut=0\.000 fill=0\.000 net=0\.000 area=36\.000 above=0\.000 below=0\.000 cut\.area=0\.000 fill\.area=0\.000 lowest=11\.000"
+    FAIL_REGULAR_EXPRESSION "error")
 # The cut/fill map: the top less the base, 1 everywhere, kept as a surface
 # the session then lists beside the two.
 add_test(NAME cli.surface_difference_keeps_the_cut_fill_map_as_a_surface

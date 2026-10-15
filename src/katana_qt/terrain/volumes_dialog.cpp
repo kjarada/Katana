@@ -461,7 +461,9 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     browse->setObjectName(QStringLiteral("volumesCsvBrowse"));
     auto* save = new QPushButton(QStringLiteral("Sa&ve CSV"), this);
     save->setObjectName(QStringLiteral("volumesSaveCsv"));
-    save->setToolTip(QStringLiteral("The line run again with csv= the file: the records as a table"));
+    save->setToolTip(QStringLiteral(
+        "The line run again with csv= the file: the quantities as a table, with the method and "
+        "its inputs on every row. Nothing is written when nothing is measured."));
     fileRow->addWidget(copy);
     fileRow->addWidget(csvPath_, 1);
     fileRow->addWidget(browse);
@@ -955,10 +957,28 @@ bool VolumesDialog::saveCsv()
     // Save replaces the file it names; the file dialog asked before choosing one.
     const VerbOutcome outcome = context_.run(*made + ' ' + *file + QStringLiteral(" OVERWRITE"));
     showReply(outcome);
-    if (outcome.ok) {
-        setStatus(QStringLiteral("Saved the table to %1.").arg(path), false);
+    if (!outcome.ok) {
+        return false;
     }
-    return outcome.ok;
+    // Saved only when the reply says it wrote the file (a `csv` record with its
+    // rows): a scope that takes no polygon runs nothing and writes nothing, so
+    // a file an earlier save left is as it was and must not be called saved.
+    const qsizetype rowsColumn = table_.columns.indexOf(QStringLiteral("rows"));
+    const bool wrote = rowsColumn > 0 &&
+                       std::any_of(table_.rows.begin(), table_.rows.end(),
+                                   [rowsColumn](const QStringList& row) {
+                                       return row.front() == QStringLiteral("csv") &&
+                                              rowsColumn < row.size() &&
+                                              !row[rowsColumn].isEmpty();
+                                   });
+    if (wrote) {
+        setStatus(QStringLiteral("Saved the table to %1.").arg(path), false);
+    } else {
+        setStatus(QStringLiteral("Nothing was measured, so nothing was saved: %1 was not written.")
+                      .arg(path),
+                  false);
+    }
+    return wrote;
 }
 
 bool VolumesDialog::runMaking(const Result<QString>& line, const QString& done)

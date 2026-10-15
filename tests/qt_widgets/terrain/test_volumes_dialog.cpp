@@ -21,6 +21,10 @@
 #include <QTabWidget>
 #include <QGuiApplication>
 
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
@@ -326,6 +330,59 @@ TEST(VolumesDialog, SaveCsvRunsTheSameLineWritingTheFileItNames)
     child<QPushButton>(dialog, "volumesSaveCsv")->click();
     ASSERT_EQ(lines.size(), 1);
     EXPECT_EQ(lines.front(), "VOLUME SURFACES ground design csv=C:/site/volumes.csv OVERWRITE");
+}
+
+TEST(VolumesDialog, SaveCsvOfAScopeThatTakesNoPolygonSaysNothingWasSavedAndLeavesTheFile)
+{
+    // "The polygons below" on the default scope (the selection) with nothing
+    // selected: the verb runs nothing and writes nothing, and the status used to
+    // say "Saved the table to ..." over a file that still held what an earlier
+    // save left there.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    dialog.setMethod(VolumeMethod::Surfaces);
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() /
+        ("katana_volumes_dialog_" +
+         std::to_string(reinterpret_cast<std::uintptr_t>(&dialog)) + ".csv");
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << "OLD TABLE FROM AN EARLIER RUN\r\n";
+    }
+    const QString path = QString::fromStdString(file.generic_string());
+    child<QLineEdit>(dialog, "volumesCsvPath")->setText(path);
+    child<QRadioButton>(dialog, "volumesBoundaryScope")->click();
+    auto* status = child<QLabel>(dialog, "volumesStatus");
+
+    child<QPushButton>(dialog, "volumesSaveCsv")->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_FALSE(status->text().contains("Saved the table")) << status->text().toStdString();
+    EXPECT_TRUE(status->text().contains("was not written")) << status->text().toStdString();
+    EXPECT_TRUE(dialog.resultsText().contains("written")); // the csv record is in the table
+    {
+        std::ifstream in(file, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "OLD TABLE FROM AN EARLIER RUN\r\n");
+    }
+
+    // The same save over typed corners that measure something writes the file
+    // and says so.
+    child<QRadioButton>(dialog, "volumesBoundaryCorners")->click();
+    child<QLineEdit>(dialog, "volumesCorners")->setText("10,0 50,0 50,4");
+    child<QPushButton>(dialog, "volumesSaveCsv")->click();
+    ASSERT_EQ(runner.lines.size(), 2);
+    EXPECT_TRUE(status->text().contains("Saved the table to")) << status->text().toStdString();
+    {
+        std::ifstream in(file, std::ios::binary);
+        std::string first;
+        std::getline(in, first);
+        EXPECT_EQ(first.rfind("record,polygon,entity,polygon_area,area,cut,fill,net", 0), 0u)
+            << first;
+    }
+    std::filesystem::remove(file);
 }
 
 TEST(VolumeResultTable, EveryRecordIsARowAndEveryKeyAColumnInTheOrderFirstMet)

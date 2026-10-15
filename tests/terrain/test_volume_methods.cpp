@@ -436,6 +436,47 @@ TEST(Stockpile, AToeVertexOffTheGroundWithNoHeightOfItsOwnIsRefusedAndWithOneIsU
     EXPECT_NEAR(used->volume.planArea, 100.0, 1e-9); // the quarter on the site
 }
 
+TEST(Stockpile, AnOffSurfaceVertexWithItsOwnHeightIsRefusedNamingTheVertexThatHasNone)
+{
+    // The boundary's own heights are used only when every vertex has one. The
+    // square [40, 60]^2 has its first corner on the 100 x 100 site (it ends at
+    // 50) and no height of its own, and its second, (60, 40), off the site with
+    // the height 0: the base is built from the ground's heights, so vertex 2
+    // is refused - and not as having no height of its own, which it has.
+    const Pile heap = pile(Plane{0, 0, 0}, 12, 20.0, 9.0);
+    const Polyline2 toe = square(40, 40, 20);
+    StockpileOptions options;
+    options.boundaryHeights = {std::nullopt, 0.0, 0.0, 0.0};
+    const auto refused = stockpileVolume(heap.surface, toe, options);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(refused.error().message.find("boundary vertex 2 is off the surface, and its own "
+                                           "height is not used"),
+              std::string::npos)
+        << refused.error().message;
+    EXPECT_NE(refused.error().message.find("vertex 1 has none"), std::string::npos)
+        << refused.error().message;
+    EXPECT_EQ(refused.error().message.find("no height of its own"), std::string::npos)
+        << refused.error().message;
+    EXPECT_EQ(refused.error().context, "vertex=2 missing=1");
+
+    // A height that is not finite is none: here it is vertex 4's that is missing.
+    options.boundaryHeights = {0.0, 0.0, 0.0, std::nan("")};
+    const auto nan = stockpileVolume(heap.surface, toe, options);
+    ASSERT_FALSE(nan.ok());
+    EXPECT_NE(nan.error().message.find("boundary vertex 2 is off the surface, and its own "
+                                       "height is not used"),
+              std::string::npos)
+        << nan.error().message;
+    EXPECT_NE(nan.error().message.find("vertex 4 has none"), std::string::npos)
+        << nan.error().message;
+    options.boundaryHeights = {};
+    const auto none = stockpileVolume(heap.surface, toe, options);
+    ASSERT_FALSE(none.ok());
+    EXPECT_NE(none.error().message.find("no height of its own"), std::string::npos);
+    EXPECT_EQ(none.error().context, "vertex=2");
+}
+
 TEST(Stockpile, AToeThatNeverMeetsTheGroundHasNoLowestPoint)
 {
     const Pile heap = pile(Plane{0, 0, 0}, 12, 20.0, 9.0);

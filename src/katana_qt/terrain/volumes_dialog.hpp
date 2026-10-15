@@ -135,7 +135,9 @@ class VolumesDialog final : public QDialog {
     // line was refused, with the reason in the status.
     bool measure();
     // The line run again with csv= the file field names, replacing it (a
-    // file dialog asked first when it chose the file).
+    // file dialog asked first when it chose the file). True when the file was
+    // written: not when the line was refused, nor when nothing was measured
+    // (a scope that takes no polygon), which the status says.
     bool saveCsv();
     // SURFACE DIFFERENCE run, and the surface lists reloaded so the map is
     // offered at once.
