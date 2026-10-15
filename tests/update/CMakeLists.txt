@@ -212,6 +212,29 @@ katana_add_update_keys_test(refuses_the_third_published_test_key OFF published_t
 set_tests_properties(update_keys_refuses_the_third_published_test_key PROPERTIES
     PASS_REGULAR_EXPRESSION "${_phrase}")
 
+# The file states the policy its IN_LIST needs, so that run as a script it needs nothing of the caller:
+# a CMake older than 4.0 (the release workflow's first job runs under 3.31.6) starts a script with no
+# policy set and stops at IN_LIST. The runs above cannot tell, since CMake 4 sets that policy itself; the
+# text can (tests/update/check_keys_policy.cmake), and each way of getting it wrong is shown refused.
+set(_katana_keys_policy_check "${CMAKE_CURRENT_SOURCE_DIR}/check_keys_policy.cmake")
+add_test(NAME update_keys_file_states_the_policy_its_in_list_needs
+    COMMAND ${CMAKE_COMMAND} "-DKEYS=${_katana_keys_script}" -P "${_katana_keys_policy_check}")
+set_tests_properties(update_keys_file_states_the_policy_its_in_list_needs PROPERTIES
+    PASS_REGULAR_EXPRESSION "states CMP0057 before its first IN_LIST"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+function(katana_add_keys_policy_mutation mutation phrase)
+    katana_phrase(_regex "${phrase}")
+    add_test(NAME update_keys_policy_check_catches_${mutation}
+        COMMAND ${CMAKE_COMMAND} "-DKEYS=${_katana_keys_script}" -DMUTATE=${mutation}
+                -P "${_katana_keys_policy_check}")
+    set_tests_properties(update_keys_policy_check_catches_${mutation} PROPERTIES
+        PASS_REGULAR_EXPRESSION "${_regex}")
+endfunction()
+katana_add_keys_policy_mutation(policy_removed "as an instruction: run as a script under a CMake older than")
+katana_add_keys_policy_mutation(policy_in_a_comment "as an instruction: run as a script under a CMake older than")
+katana_add_keys_policy_mutation(policy_after_the_use "after its first IN_LIST: the policy has to be set before")
+katana_add_keys_policy_mutation(policy_the_wrong_way "sets CMP0057 to OLD, which is the behaviour that stops at IN_LIST")
+
 # ---- the helper's imports (tests/update/check_updater_imports.cmake) -----------------------
 #
 # The check, on a listing of a static program and on one that imports the GCC runtime,
@@ -400,6 +423,62 @@ if(_katana_tool_tests_ready)
     set_tests_properties(update_tools_rfc8032_oracle PROPERTIES TIMEOUT 120)
 endif()
 
+# ---- the release workflow's shape (tools/check_release_workflow.py) ------------------------------
+#
+# What keeps the update signing key safe is written in docs/release.md: the workflow starts by hand
+# only, the key is read by one job behind the environment `release`, every action is named by its
+# commit, every configure requires the update keys. The check reads the file's lines (Python's
+# standard library has no YAML parser) and needs Python and nothing else, no openssl and no cmake:
+#
+#   release_workflow_has_the_shape_the_documents_describe   the real file
+#   update_tools_check_release_workflow                     the check on the real file's text changed in
+#                                                           one way at a time that undoes one rule
+if(Python3_Interpreter_FOUND AND Python3_VERSION VERSION_GREATER_EQUAL 3.10)
+    add_test(NAME release_workflow_has_the_shape_the_documents_describe
+        COMMAND "${KATANA_PYTHON}" -I -B "${PROJECT_SOURCE_DIR}/tools/check_release_workflow.py"
+                "${PROJECT_SOURCE_DIR}/.github/workflows/release.yml")
+    set_tests_properties(release_workflow_has_the_shape_the_documents_describe PROPERTIES
+        PASS_REGULAR_EXPRESSION "starts by hand only")
+    add_test(NAME update_tools_check_release_workflow
+        COMMAND "${KATANA_PYTHON}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/test_check_release_workflow.py")
+
+    # And every script of the workflow handed to its shell's own parser, which runs nothing
+    # (check_release_workflow.py --scripts): "exited with $LASTEXITCODE: ..." is a parse error in
+    # PowerShell and sat in the installer smoke test until it was read with the parser, since only a
+    # run of five builds would have shown it. Registered only where the shell answers (a bash that
+    # echoes - Windows' own bash.exe starts a Linux distribution that may not be installed - and a
+    # PowerShell), because a test that could not make its check must not pass; the tool itself exits 2
+    # without the shell.
+    function(katana_shell_answers out program probe_arguments)
+        set(${out} OFF PARENT_SCOPE)
+        if(program)
+            execute_process(COMMAND "${program}" ${probe_arguments}
+                OUTPUT_VARIABLE _answer RESULT_VARIABLE _status ERROR_QUIET TIMEOUT 60)
+            if(_status EQUAL 0 AND _answer MATCHES "katana-ok")
+                set(${out} ON PARENT_SCOPE)
+            endif()
+        endif()
+    endfunction()
+    find_program(KATANA_WORKFLOW_BASH NAMES bash)
+    find_program(KATANA_WORKFLOW_PWSH NAMES pwsh powershell)
+    katana_shell_answers(_katana_workflow_bash "${KATANA_WORKFLOW_BASH}" "-c;echo katana-ok")
+    katana_shell_answers(_katana_workflow_pwsh "${KATANA_WORKFLOW_PWSH}" "-NoProfile;-NonInteractive;-Command;Write-Output katana-ok")
+    foreach(_katana_shell IN ITEMS bash pwsh)
+        if(_katana_workflow_${_katana_shell})
+            add_test(NAME release_workflow_${_katana_shell}_steps_parse
+                COMMAND "${KATANA_PYTHON}" -I -B "${PROJECT_SOURCE_DIR}/tools/check_release_workflow.py"
+                        --scripts ${_katana_shell} "${PROJECT_SOURCE_DIR}/.github/workflows/release.yml")
+            set_tests_properties(release_workflow_${_katana_shell}_steps_parse PROPERTIES
+                PASS_REGULAR_EXPRESSION "[0-9]+ ${_katana_shell} step[(]s[)] of release.yml parse")
+        endif()
+    endforeach()
+    if(_katana_workflow_bash AND _katana_workflow_pwsh)
+        add_test(NAME update_tools_check_release_workflow_scripts
+            COMMAND "${KATANA_PYTHON}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/test_check_release_workflow_scripts.py")
+        set_tests_properties(update_tools_check_release_workflow_scripts PROPERTIES TIMEOUT 300)
+    endif()
+endif()
+
 # ---- the Windows installer is per user (cmake/NSIS.template.in) -----------------------------
 #
 # Decision D1 (docs/update.md): the installer asks for no administrator rights, installs under
@@ -512,6 +591,25 @@ katana_add_nsis_mutation(uninstaller_runs_without_a_folder
 # An entry in Settings > Apps whose uninstaller was deleted by hand must not stop the install.
 katana_add_nsis_mutation(uninstaller_that_is_gone_stops_the_install
     "runs the uninstaller that the entry in Settings > Apps names without looking for it first")
+# The Desktop shortcut (cmake/KatanaPackaging.cmake, CPACK_NSIS_CREATE_ICONS_EXTRA and _DELETE_): one, to the
+# Start menu's program under its name and with its icon, starting in the install folder, made inside the
+# Start menu page's block (so that "Do not create shortcuts" leaves it out) and removed by name, and the
+# Desktop used for nothing else. The unbroken script passes in packaging_nsis_template_is_per_user above.
+katana_add_nsis_mutation(desktop_shortcut_not_made "the installer makes no shortcut on the Desktop")
+katana_add_nsis_mutation(desktop_shortcut_not_removed "the uninstaller does not remove the shortcut on the Desktop")
+katana_add_nsis_mutation(desktop_shortcut_to_another_program
+    "the Desktop shortcut goes to [$]INSTDIR.bin.katana_cli[.]exe, and must go to the program")
+katana_add_nsis_mutation(desktop_shortcut_with_an_icon_of_its_own
+    "a shortcut on the Desktop must name its file and the program and nothing after them")
+katana_add_nsis_mutation(desktop_shortcut_ignores_do_not_create_shortcuts
+    "the Desktop shortcut is not between the two macros of the Start menu page")
+katana_add_nsis_mutation(desktop_shortcut_starts_in_another_folder
+    "the Desktop shortcut does not start in the install folder")
+katana_add_nsis_mutation(desktop_shortcut_removed_by_wildcard
+    "the uninstaller takes from the Desktop what is not Katana's shortcut")
+katana_add_nsis_mutation(desktop_shortcut_under_another_name
+    "the Desktop shortcut and the Start menu one are not the same, Katana CAD[.]lnk")
+katana_add_nsis_mutation(desktop_is_used_for_something_else "the script names [$]DESKTOP 3 times")
 # The case no mutation can stand for: the template this one replaces, as CMake ships it. It is
 # the installer Katana had (administrator rights, HKLM, Program Files); the check must refuse it
 # on its own terms. Where CMake keeps it differs between versions, so it is only looked for.

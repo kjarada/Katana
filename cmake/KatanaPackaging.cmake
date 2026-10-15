@@ -344,6 +344,27 @@ if(WIN32)
         # same four as above).
         set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\katana.exe")
         set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+        # The Desktop shortcut, beside the Start menu one CPACK_PACKAGE_EXECUTABLES makes: the same
+        # program (bin\katana.exe), so the same icon - the shortcut names none, and Windows takes
+        # the program's own - and the install folder as the folder it starts in (a shortcut starts
+        # in the installer's current output folder, hence the SetOutPath). Per user, as the rest:
+        # $DESKTOP is the Desktop of the account that runs the installer, because the template
+        # sets the current user's shell context. The template puts these two values inside the
+        # Start menu page's own block, so a person who ticks "Do not create shortcuts" gets no
+        # Desktop one either, and no wizard page of its own is added; the person who does not
+        # want it deletes the file, and nothing puts it back but an install (an update replaces
+        # files in the install folder and never the shortcut, which is not one of them:
+        # UPDATE_EXCLUDE and the manifest are unchanged). docs/release.md, "The Windows
+        # installer", says it too; tests/update/check_nsis_script.cmake holds the generated script
+        # to all of it. Two things about how the text is written. Single quotes, which NSIS takes
+        # as it takes double ones, because CPack writes the value into CPackConfig.cmake inside
+        # double quotes and a double quote in it would end the string there. And doubled
+        # backslashes, four as at CPACK_NSIS_INSTALL_ROOT above: CMake reads that file again, and
+        # the single backslash NSIS wants must survive the second unescaping. The line break is
+        # \n and not a line of this file, so that it does not depend on this file's line ends.
+        set(CPACK_NSIS_CREATE_ICONS_EXTRA
+            "  SetOutPath '$INSTDIR'\n  CreateShortCut '$DESKTOP\\\\Katana.lnk' '$INSTDIR\\\\bin\\\\katana.exe'")
+        set(CPACK_NSIS_DELETE_ICONS_EXTRA "  Delete '$DESKTOP\\\\Katana.lnk'")
         # The licence page: the installer shows the licence before it asks for a folder. What it
         # shows is made here from the two texts that are binding - LICENSE, the GNU General Public
         # License, and ADDITIONAL_TERMS.md, the terms added under its section 7 - behind a short

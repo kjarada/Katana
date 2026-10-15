@@ -12,21 +12,30 @@
 # hands; the owner generates them (tools/update_keytool.py --help).
 #
 # ======================================================================================
-# !!!  THE KEYS BELOW ARE PLACEHOLDERS - NOT REAL KEYS  !!!
-#
-# Each is 32 bytes that spell "PLACEHOLDER-..." in ASCII and are NOT the encoding of any
-# point on the curve, so no private key exists that matches either, and a build that
-# carries them verifies nothing: update/trust.hpp makes verifyManifest refuse. It cannot
-# be updated, and it cannot be forged for.
+# The keys below are the owner's real public keys, pinned on 2026-10-14 (745606c4).
+# Before that they were PLACEHOLDERS: each 32 bytes that spell "PLACEHOLDER-..." in ASCII
+# and are NOT the encoding of any point on the curve, so no private key exists that
+# matches either, and a build that carries them verifies nothing: update/trust.hpp makes
+# verifyManifest refuse. It cannot be updated, and it cannot be forged for. The tests
+# still use such keys, as fixtures.
 #
 # KATANA_REQUIRE_UPDATE_KEYS (OFF by default; ON in .github/workflows/release.yml) makes
-# the configure step FAIL while they are in place, so a release can never ship with them.
+# the configure step FAIL while placeholders are in place, so a release can never ship
+# with them.
 #
-# To replace them (the owner, once; docs/update.md has the whole sequence):
+# To replace the keys (the owner; docs/update.md, "What the owner does", has the sequence):
 #   openssl genpkey -algorithm ed25519 -out update-signing.pem     (and update-spare.pem)
 #   python tools/update_keytool.py pub update-signing.pem update-spare.pem
 # which rewrites ONLY the block between the two marker lines below.
 # ======================================================================================
+
+# The one policy this file needs, said here and not left to whoever runs it. It is included
+# from a configure, where the root CMakeLists.txt has set the policies of its minimum, and it
+# is run as a script (the second line of the header), which starts with none set: a CMake older
+# than 4.0 then does not know `if(<value> IN_LIST <list>)` below and stops at it (seen with
+# CMake 3.31.6, which the release workflow's first job runs under). A policy set here ends with
+# the file, so the includer's are not changed. tests/update/check_keys_policy.cmake holds it.
+cmake_policy(SET CMP0057 NEW)
 
 # >>> keys: rewritten by tools/update_keytool.py between these two lines, and nowhere else
 set(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS OFF)

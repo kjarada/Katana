@@ -72,11 +72,12 @@ passed; `packaging_installs_only_present_first_party_files` failed, because a
 filtered tree has no program to install. More to run is under
 [Try it](#try-it).
 
-**Status.** Pre-release, version 0.2.0. At the time of writing (2026-10-08) no
-release has been published and `git tag` lists no tags, so building from source
-is the way in; [Install](#install) describes what a release contains once there
-is one. Nothing here has been validated for professional or legal survey work:
-check results against an independent calculation before you rely on them.
+**Status.** Pre-release, version 0.2.0. Release v0.2.0 was published on
+2026-10-14 (its packages are unsigned, so Windows and macOS warn about the
+download; [Install](#install) says what to do), and building from source is
+the other way in. Nothing here has been validated for professional or legal
+survey work: check results against an independent calculation before you rely
+on them.
 
 **Come and help.** Humans and AI agents are both welcome. Start with
 [Contribute](#contribute), or read [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -566,8 +567,10 @@ you install it into, apart from your own projects and settings.
    your own profile) and finish. The installer is for your account only, so it
    needs no administrator rights and Windows does not ask to let it make
    changes to your device; any folder you can write to will do. Katana appears
-   in your Start menu. Uninstall it from **Settings > Apps**, where the
-   publisher is shown as Jarada.
+   in your Start menu and as a **Katana** shortcut on your Desktop. Tick **Do
+   not create shortcuts** on the Start menu page to have neither, or delete the
+   Desktop one if you would rather not keep it. Uninstall it from **Settings >
+   Apps**, where the publisher is shown as Jarada.
 
 To install it without questions, for example from a deployment script, run
 the installer with `/S`, and choose the folder with `/D=`, which must come
@@ -578,7 +581,9 @@ to:
 Start-Process .\Katana-X.Y.Z-win64.exe -ArgumentList '/S','/D=C:\Katana' -Wait
 ```
 
-Its uninstaller, `C:\Katana\Uninstall.exe`, takes `/S` too.
+Its uninstaller, `C:\Katana\Uninstall.exe`, takes `/S` too. A silent install
+makes the same Start menu and Desktop shortcuts as one with questions, and the
+uninstaller removes them.
 
 #### From the zip (x64 or ARM64)
 

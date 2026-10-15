@@ -16,11 +16,11 @@ from what a user downloads and each installer silently, signs what it has
 keys for, makes the update assets an installed Katana reads to find and
 fetch the next version ("Update assets"), and publishes them.
 
-Once, before the first release, the owner makes the update keys and pins
-their public halves ("Update signing"). Every job configures with
-`-DKATANA_REQUIRE_UPDATE_KEYS=ON` and the tree holds placeholder keys until
-that is done, so until then every run stops in its first job, a run without
-a tag included.
+The owner made the update keys and pinned their public halves on 2026-10-14
+("Update signing"; `cmake/KatanaUpdateKeys.cmake` holds real keys since
+745606c4). Every job configures with `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, so
+should the tree ever hold placeholder keys again every run stops in its
+first job, a run without a tag included.
 
 1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION X.Y.Z)`,
    and merge it to `main`.
@@ -69,8 +69,10 @@ that place for each package, because the installer's default folder is under `%L
 which Explorer hides, and nothing in the window points there. **Not done, and
 decided against for now:** a Help > Open Sample Project (a feature of its own,
 with all three surfaces, and it would have to copy the project first, since
-opening one updates it in place) and a Start menu shortcut to the folder
-(`CPACK_NSIS_CREATE_ICONS_EXTRA`, with its matching delete entry).
+opening one updates it in place) and a Start menu shortcut to the folder (a
+second use of `CPACK_NSIS_CREATE_ICONS_EXTRA`, with its matching delete entry;
+the first use makes the Desktop shortcut to the program, "The Windows
+installer").
 
 Each Windows and Linux archive holds `bin/katana`, `bin/katana_cli`,
 `bin/katana_mcp` and `bin/katana_updater` (the helper that swaps an install's
@@ -208,9 +210,10 @@ made on Windows carries (its archiver's guess from the file names) become
 real, and the producer would read them: as `exec` in the manifest, and as a
 reason to class a file in `bin/` as a program. The step clears them, so a
 Windows file is classed by its name alone (`.exe`, `.dll`), as the producer
-classes it when it runs on Windows, where there is no such bit. This is the
+classes it when it runs on Windows, where there is no such bit. This was the
 one part of the step that could not be tried on the machine it was written
-on, which has no such bits either ("Not done").
+on, which has no such bits either; the Publish job of run 38580778852 ran it
+on Linux, and the recheck of the manifests it made passed.
 
 **No package holds a symbolic link,** which the producer refuses (a manifest
 has no way to say one, and the updater does not follow links,
@@ -260,22 +263,25 @@ left without it.
 
 ### To verify on the first release
 
-Nothing in the workflow has run since the update assets were added ("Not
-done"), and several things can only be seen on GitHub. Before the run, the
-reads that end step 3 of "Update signing" must say that the environment
-`release` has its reviewers and takes the branch `main` and no other. In
-the run:
+The first release, v0.2.0, was made by run 38580778852 (2026-10-14, started
+by hand on `b99e6da3`): every job passed, the Publish job among them. What
+that run showed is under "What the first release's run showed", below; the
+list here is what to read in a run, and the next one is the first to use the
+commits of "Not done". Before a run with a tag, the reads that end step 3 of
+"Update signing" must say that the environment `release` has its reviewers
+and takes the branch `main` and no other (they did on 2026-10-15). In the
+run:
 
 * Every job's first step, "Set up job", lists the actions it fetched, each
   by the 40 digits the workflow names it with ("The actions the workflow
   runs"), and no job stops there for an action GitHub could not find.
-* The annotations on the run's summary page, read for Node 20. Five of
-  the six actions ask for it ("Not done"). A warning that names them says
-  either that they were run on Node 24 instead, or that they ran on Node
-  20 and the day it leaves the runner: either is the reason to move those
-  actions before the next release, and a step that fails inside one of
-  them is the reason to move it now. No such warning means only that
-  GitHub asked the runner for none.
+* The annotations on the run's summary page, read for Node 20. Run
+  38580778852 warned in every job that five actions target Node 20 and were
+  being forced onto Node 24; they were moved to majors that ask for Node 24
+  on 2026-10-15 ("The actions the workflow runs") and no run has used the
+  new commits yet, so the next run is the first that should show no such
+  warning. One that still names an action is the reason to move it; a step
+  that fails inside one is the reason to move it back.
 * The Version job's step "Update keys" ends `Update keys: pinned, active
   <key id>, spare <key id>`, with no warning: the key check ran under the
   runner's own CMake. The job's first step prints the run's sequence.
@@ -306,6 +312,31 @@ the run:
   members for each of the four packages it unpacks and ends
   `verified 5 manifest(s) in dist`, after a line `signature verified by key
   <key id> (active)` for each manifest.
+
+**What the first release's run showed.** Read from the run's page and log
+with `gh run view 38580778852 --log` on 2026-10-15, and from `gh release view
+v0.2.0`; nothing was changed by reading. The run started at 14:28 UTC on
+2026-10-14 and its Publish job at 20:39, after the environment's reviewer
+approved it.
+
+* Version: `Update keys: pinned, active 4b5436f13549eee7, spare
+  f5f20acdd524798a`, and the same line in every job's configure.
+* The five build jobs passed, with the signing steps skipped (no
+  certificate) and, on Windows x86-64, the NSIS step skipped by that name.
+  The Windows and Linux jobs' smoke tests printed `selftest=ok`, `keys=pinned`
+  and `kind=archive`, the Windows installers (x86-64 and ARM64) then
+  installed silently and said `kind=installer`, and on macOS the bundle was
+  "sealed again, ad hoc, with its install record" and
+  `codesign --verify --deep --strict` said "valid on disk".
+* Publish: the sequence 1791988099 was read from each package's install
+  record, and the recheck printed `signature verified by key 4b5436f13549eee7
+  (active)` for the five manifests and `verified 5 manifest(s) in dist`. The
+  release has the packages, five manifests with their `.sig`, four update
+  zips and `SHA256SUMS.txt`; not draft, marked Latest, made on `b99e6da3`.
+  The OpenPGP step was skipped (no key).
+
+Not seen: the byte-range read through GitHub's redirect, an installed copy
+being offered an update, and anything of the commits made after that run.
 
 On the release, from any machine (with `<repo>` and the version filled in):
 
@@ -387,22 +418,27 @@ purpose. Looking for the name
 in the built programs was considered and not done: a short text assigned to
 a string may be compiled into the instructions that store it, piece by
 piece, so its absence from the file's bytes would prove nothing and could
-stop a good release ("Not done").
+stop a good release.
 
 The first job, before any toolchain is installed, asks the keys file the
 same question the configures will: it runs `cmake/KatanaUpdateKeys.cmake`
 as a script with `KATANA_REQUIRE_UPDATE_KEYS` on, so a tree with placeholder
-keys fails in the first minute and says what to do. The file is not run
-bare. It is written for a configure, where the root `CMakeLists.txt` has
-set the policies of its minimum CMake before including it; a script starts
-with none set, and the hosted runner's own CMake (3.31.6 on the image of
-2026-10-04; the build jobs install 4.x) then refuses the file's
-`if(... IN_LIST ...)`. So the step writes a script of two lines, the same
-`cmake_minimum_required` and an `include` of the file, and runs that. Only
-a refusal the keys file itself states stops the run. If CMake stops for
-another reason, the step says so in a warning and the run goes on: each
-job's configure makes the same check, and a check that could not run is not
-a reason to refuse a release.
+keys fails in the first minute and says what to do. The step does not run
+the file bare. It is written for a configure, where the root `CMakeLists.txt`
+has set the policies of its minimum CMake before including it; a script
+starts with none set, and the hosted runner's own CMake (3.31.6 on the image
+of 2026-10-04; the build jobs install 4.x) refused the file's
+`if(... IN_LIST ...)`. The file now sets the one policy that needs
+(`cmake_policy(SET CMP0057 NEW)`, held by `update_keys_file_states_the_policy_its_in_list_needs`
+and its `update_keys_policy_check_catches_*` tests, which read the text,
+because CMake 4 sets that policy itself and a run here cannot tell), but the
+step still writes a script of two lines, the same `cmake_minimum_required`
+and an `include` of the file, and runs that: it is what the run of
+2026-10-14 passed through, and the file run bare has not been tried under
+3.31.6. Only a refusal the keys file itself states stops the run. If CMake
+stops for another reason, the step says so in a warning and the run goes
+on: each job's configure makes the same check, and a check that could not
+run is not a reason to refuse a release.
 
 The ARM64 jobs build natively on GitHub's ARM runners, which private
 repositories have had since 2026-01-29, rather than cross-compiling: the
@@ -522,8 +558,70 @@ GitHub can be told to refuse any other: the repository's Actions
 permissions (Settings > Actions > General) hold a requirement that actions
 be pinned to a full-length commit SHA, which
 `gh api repos/kjarada/Katana/actions/permissions --jq .sha_pinning_required`
-shows (`false` on 2026-10-14). It has not been turned on, and what it
-does to a run was not tried ("Not done").
+shows (`false` on 2026-10-14, and again on 2026-10-15). It has not been
+turned on, and what it does to a run was not tried.
+
+### The workflow's shape, held
+
+The workflow is where a secret that matters, the update signing key, meets
+code that a commit can change, so what keeps it safe is held by a check and
+not left to whoever edits the file next. `tools/check_release_workflow.py`
+reads `.github/workflows/release.yml` and refuses it, naming the line, when:
+
+1. it starts on anything but `workflow_dispatch` (a commit, a tag, a pull
+   request, a schedule or another workflow starts nothing: the owner's
+   decision of 2026-09-26);
+2. the token it is given is not `permissions: contents: read`, or any job but
+   Publish writes, or Publish does not say so itself;
+3. a `uses:` is not named by the 40 digits of a commit with the tag it was
+   read from as a comment, or one action is two commits;
+4. the environment `release` is named by any job but Publish, or by Publish
+   as anything else, or the secret `UPDATE_SIGNING_KEY` is read outside
+   Publish or more than once, or a job inherits secrets;
+5. Publish does not wait for the Version job and both build jobs, or runs
+   without a tag;
+6. a configure step (`cmake --preset`) does not pass
+   `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, `-DKATANA_UPDATE_REPO` and
+   `-DKATANA_UPDATE_SEQUENCE`;
+7. a `run:` holds `${{ inputs.* }}`, `${{ github.event.* }}` or
+   `${{ github.head_ref }}`, which a person typed when starting the run: they
+   go in through `env:` (script injection);
+8. `UPDATE_SEED`, `UPDATE_EXCLUDE` or `UPDATE_EXCLUDE_LINUX` is not what
+   "Update assets" says, which would change what an update leaves alone.
+
+With `--scripts bash` or `--scripts pwsh` it hands every `run:` of that shell
+to the shell's own parser (`bash -n`; PowerShell's `Parser`, `pwsh` first and
+Windows PowerShell if that is all there is, which does not read PowerShell
+7's `&&`), after replacing each `${{ ... }}` by a word, and runs nothing. It
+was added for one defect: `"... exited with $LASTEXITCODE: proj.db ..."` in
+the installer smoke test is a parse error in PowerShell (a colon after a
+variable name), it sat in the workflow from 1228fa5d until 2026-10-15, and
+only a run of five builds would have shown it. A shell that is not there
+or does not answer is exit status 2 and never a pass.
+
+*Decisions.* It reads lines and indentation and not YAML, because Python's
+standard library has no YAML parser and the build must not need `pip`; the
+file is regular, and a form the check does not read (triggers on the same
+line as `on:`, say) is a problem and not a pass. *Rejected:* `actionlint`,
+which checks GitHub's schema and expressions and not these rules, and is not
+on every machine; a check in CMake, where reading structure out of text is
+worse than in Python. Every rule is shown to be needed: the tests below
+remove each rule from a copy of the check in turn and at least three of them
+fail each time (done by hand when this was written, not a test).
+
+Tests, all in `tests/update`: `release_workflow_has_the_shape_the_documents_describe`
+holds the real file; `update_tools_check_release_workflow` makes 37
+changes a later edit could make to the file's own text (a push trigger, an
+action by tag, by a short digest, by branch, the key read by another job,
+`secrets: inherit`, a configure without the update keys, the tag typed into a
+script, a widened exclude list ...) and requires the check to refuse each by
+name, with the empty file, a file of comments, CRLF line ends and a missing
+file as the degenerate inputs; `release_workflow_bash_steps_parse` and
+`release_workflow_pwsh_steps_parse` run the real file through the shells'
+parsers, and `update_tools_check_release_workflow_scripts` breaks a step of
+each kind (the `$LASTEXITCODE:` case as it was) and checks the same. The last
+three are registered only where the shell answers, since a test that could
+not make its check must not pass.
 
 ### The whole suite, on the machine the package is for
 
@@ -600,14 +698,23 @@ user's machine. On Windows `PATH` is cut to the Windows directories.
 On macOS the disk image is mounted, its link to `/Applications` checked,
 and `Katana.app` copied out of it as a user drags it; `Info.plist` must parse,
 the icon must be there, and `codesign --verify --deep --strict` must accept
-the bundle's seal before the programs in `Contents/MacOS` run.
+the bundle's seal before the programs in `Contents/MacOS` run. CPack adds
+`share/katana/install.json` to the bundle after the install sealed it, so
+`cmake/KatanaSign.cmake` seals the bundle again, ad hoc, when no Developer ID
+is named (its stage `pre`): the macOS job of run 38580778852 printed `sealed
+again, ad hoc, with its install record` and then `valid on disk`.
 
 **The installers.** Each Windows installer is then run as a deployment script
 runs it, as the user the job runs as (the installer asks for no administrator
 rights): `/S /D=<folder>`, silently, into a folder of its own. The installed
-`katana_cli` must name `EPSG:32630` and read `EPSG:7856` as above, and the uninstaller
-(`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
-remove `bin\katana_cli.exe`.
+`katana_cli` must name `EPSG:32630` and read `EPSG:7856` as above, the Desktop
+shortcut `Katana.lnk` must be there, going to the installed `bin\katana.exe` and
+starting in the install folder (read back through `WScript.Shell` in a process
+of its own, because a shortcut opened through COM stays open until that process
+ends and the uninstaller could not then delete it; a runner with no Desktop
+folder gets a warning, since NSIS does not make one), and the
+uninstaller (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for
+it) must remove `bin\katana_cli.exe` and that shortcut.
 
 ## The Windows installer
 
@@ -631,6 +738,41 @@ per-machine installer.
   Jarada, `UninstallString`, `InstallLocation`, `DisplayIcon`, `EstimatedSize`,
   `NoModify`, `NoRepair`), which the updater rewrites after an update. The
   Start-menu folder and its shortcuts are the current user's.
+* **The Desktop shortcut.** Beside the Start menu entry the installer puts a
+  shortcut named `Katana` on the Desktop of the account that runs it
+  (`$DESKTOP`; the installer is per user and sets the current user's shell
+  context, so it is that user's and never the all-users Desktop). It goes to
+  `bin\katana.exe` and names no icon of its own, so Windows shows the
+  program's own icon, which is the one the Start menu entry shows; it starts
+  in the install folder (a shortcut starts in the installer's current output
+  folder, so the installer sets that first). `cmake/KatanaPackaging.cmake`
+  says the two NSIS lines - `CPACK_NSIS_CREATE_ICONS_EXTRA` and
+  `CPACK_NSIS_DELETE_ICONS_EXTRA`, CPack's hooks for them - and the template
+  puts them inside the Start menu page's own block. That is deliberate:
+  the page already asks "Do not create shortcuts", and a person who ticks it
+  gets no Desktop shortcut either, with **no page of the wizard added** (a
+  silent install makes it, as it makes the Start menu entry). A person who
+  does not want it deletes the file. Nothing makes it again but an installer
+  run: an update replaces files inside the install folder and never a
+  shortcut, which is no file of the package, so the manifest and
+  `UPDATE_EXCLUDE` (only `bin`, `share`, `etc` and `lib` beside `LICENSE`)
+  mean what they did. The uninstaller deletes `Katana.lnk` from the Desktop
+  by that name and takes nothing else from it; a shortcut the person renamed
+  stays, and one they made by the same name for another purpose goes (NSIS
+  has no stock way to read what a shortcut points at). *Rejected:* a check
+  box on a page of its own (the owner asked for none, and the Start menu
+  page's box is already the person's answer to "shortcuts?"); the all-users
+  Desktop (machine-wide, and this installer writes nothing machine-wide); a
+  `.lnk` among the package's files (it would be a file of the package, with
+  a path that only the installing machine knows); the explicit icon
+  argument of `CreateShortCut` (the Start menu entry names none, and a
+  second place that names the icon is a second place to differ from it).
+  The text is written with single quotes, which NSIS takes as it takes
+  double ones, because CPack writes the value into `CPackConfig.cmake` inside
+  double quotes; the backslashes are doubled for the second reading of that
+  file, as at `CPACK_NSIS_INSTALL_ROOT`. The release workflow's installer
+  smoke test reads the shortcut back after the silent install (its target
+  and its start-in folder) and checks that the uninstaller took it away.
 * **What the uninstaller removes.** The files the installer put down; every file
   the installed manifest lists (`share/katana/installed.manifest.json`: an update
   adds files that the uninstaller, built before them, has never heard of); the
@@ -725,9 +867,14 @@ per-machine installer.
   the folder and the registry values above, the folder tried before anything is
   cleared or written, what an install over a copy clears, an entry whose
   uninstaller is gone, what the uninstaller removes, in which order, and what it
-  keeps, and a default answer to every question. It reads text. What only a run
-  shows (the exit code of a refused folder, the size in **Settings > Apps**, the
-  shortcuts) it does not hold; a block comment and a condition it cannot
+  keeps, the one Desktop shortcut (to the Start menu entry's program and name,
+  with no icon of its own, starting in the install folder, made inside the
+  Start menu page's block, removed by name, and the Desktop used for nothing
+  else: the `packaging_nsis_check_catches_desktop_*` tests break each of
+  these), and a default answer to every question. It reads text. What only a
+  run shows (the exit code of a refused folder, the size in **Settings > Apps**,
+  whether the shortcuts are really there) it does not hold, apart from the
+  Desktop shortcut, which the workflow's smoke test reads back; a block comment and a condition it cannot
   evaluate it refuses, and what is inside a false condition it leaves out, as
   NSIS does; an instruction that is compiled and never reached it cannot see.
   Each `packaging_nsis_check_catches_*` test breaks one rule in that text and
@@ -751,7 +898,12 @@ per-machine installer.
   acceptance step**, and with it an install after the folder was deleted by
   hand, which needs the registry and so has no test that runs it; the release
   workflow's installer smoke test (above) covers the silent install and
-  uninstall only.
+  uninstall only. What to look at in the wizard for the Desktop shortcut: the
+  Start menu page's **Do not create shortcuts** box, ticked, leaves the Desktop
+  without a **Katana** icon and the Start menu without the folder; unticked,
+  the icon is on the Desktop after the install, wears the program's icon,
+  opens Katana, and its **Properties** show **Start in** the install folder;
+  and the uninstaller removes it.
 
 ## How the Linux and macOS packages are made self-contained
 
@@ -1155,11 +1307,14 @@ gives the same steps).
        # branch main, and no other line
    ```
 
-   None of the three could be run here when this was written: the
-   environment did not exist ("Not done"). They were run as they stand
-   on an environment of another public repository that has both settings
-   (`pypa/pip`, `PyPI`), where the first two printed the lines above and
-   the third one line for that environment's one rule.
+   When this was written none of the three could be run: the environment
+   did not exist. They were tried as they stand on an environment of
+   another public repository that has both settings (`pypa/pip`, `PyPI`),
+   and on 2026-10-15, against `kjarada/Katana`, they printed `branch_policy
+   required_reviewers`, `custom=true protected=false` and `branch main`:
+   the environment `release` exists with reviewers, takes `main` only, and
+   holds the secret `UPDATE_SIGNING_KEY` (`gh secret list --env release`;
+   the repository itself holds none).
 4. Publish a release and install it by hand ("The first release that carries
    the updater").
 
@@ -1239,104 +1394,60 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   the download ("Windows: why a download is warned about", above): a
   code-signing service has to be chosen and its secrets put in the workflow
   (the owner's), and the signing through a service written.
-* **The workflow has run once, and has not yet published a release.** The
-  first run, on 2026-10-14 for `v0.2.0`, passed the Version job (with the
-  update keys pinned that day) and the whole Windows x86-64 job: build, suite,
-  package, smoke test and installer test. The other four stopped before their
-  packages, and none on the workflow itself:
-  * Windows ARM64: MSYS2's package download timed out at a mirror, before any
-    of the project's code ran.
-  * macOS arm64: a test captured two constants in lambdas, which clang
-    rejects as unneeded (`-Wunused-lambda-capture` under `-Werror`).
-  * Linux x86-64 and ARM64: four headless window tests expected a count
-    grouped with a comma, which the runner's C locale does not group; and a
-    fake-feed tool test expected its records in the order the requests were
-    sent, which a threaded server does not keep.
-
-  The same day a local build with clang and libc++ (MSYS2 CLANG64, the
-  library of the Windows ARM64 build) found what that job would have met
-  next, all under libc++ on Windows only: `sha256FileHex` hashed the null
-  device as an empty file and returned the digest of a file's first part
-  when a read failed part way (libc++'s `std::filesystem::status` cannot
-  classify NUL, and its `ifstream` reports a failed read as the end of the
-  file), and the update library's path helper turned an empty path into the
-  current folder. All of these are fixed. What was done before the run,
-  for the record: the file was parsed by an independent YAML parser, every script
+* **The workflow has made one release; what changed since has not run on
+  GitHub.** Run 38580778852 (2026-10-14, on `b99e6da3`) was the fourth of
+  that day and the first to pass; "What the first release's run showed" says
+  what it did. The three before it failed. The first stopped, none of it
+  in the workflow, on a mirror timing out for MSYS2's Windows ARM64
+  packages, a test capturing two constants in lambdas that clang rejects as
+  unneeded (`-Wunused-lambda-capture` under `-Werror`), four headless window
+  tests expecting a count grouped with a comma that the Linux runners' C
+  locale does not group, and a fake-feed tool test expecting its records in
+  the order the requests were sent, which a threaded server does not keep;
+  a local build with clang and libc++ (MSYS2 CLANG64, the library of the
+  Windows ARM64 build) found the same day what that job would have met next:
+  `sha256FileHex` hashed the null device as an empty file and returned the
+  digest of a file's first part when a read failed part way, and the update
+  library's path helper turned an empty path into the current folder. All of
+  these are fixed; the logs of the other two are on their run pages. Before
+  the runs, the file was parsed by an independent YAML parser, every script
   in it passed `bash -n` or PowerShell's parser, every option it gives `gh`
   and the update tools was held to their own lists, and the scripts of the
   first job and of the Publish job (all but the OpenPGP step) were run as
-  they stand on made-up packages, with a throwaway key and a stand-in for
-  `gh`. The first job's key check was run under CMake 3.31.6, the version
-  the hosted image carries, and under 4.4; the check that ends each
-  Configure step was run on cache files CMake itself wrote, for projects
-  that do and do not declare the two options. Still not tried on a runner:
-  the Publish job - against the real `gh` and GitHub, and on a file system
-  that has execute bits (the Windows packages' part of "Update assets") -
-  and the smoke tests of the four packages other than Windows x86-64's. A
-  rehearsal - two versions published in a throwaway
-  repository, the second installed as an update of the first - is the
-  owner's acceptance step and the gate for the first real release ("To
-  verify on the first release").
-* **Nor has it run since its actions were named by commit** (2026-10-14,
-  "The actions the workflow runs"). The six commits were read from GitHub,
-  each two ways that agree, and every `uses:` line was held to them by a
-  script of that session; the edit is those lines and a comment. The first
-  run (2026-10-14) fetched five of the six by these digits, every job past
-  its "Set up job" step; `actions/download-artifact`, which only the Publish
-  job runs, has not been fetched yet.
-* **Nor since the packages were given the run's sequence** (2026-10-14,
-  "Update assets", "The package names its own build"). What was done
-  instead: the workflow's bash scripts passed `bash -n` again (the two
-  PowerShell steps did not change); the reading of the install record was
-  run on made-up records - one as the packaging writes it, one spread over
-  lines with white space, one with its members in another order, one
-  without a sequence, one whose sequence only begins with the run's, one of
-  another target and version, and none at all; and the cache check was run
-  on the cache CMake wrote for a project that declares
-  `KATANA_UPDATE_SEQUENCE` and for one that does not. The first run
-  (2026-10-14) built the Windows x86-64 package with the option, and that
-  job's smoke test found the run's target, version and sequence in the
-  package's install record; the other four packages, and the Publish job's
-  reading of the records, have not got that far yet ("To verify on the
-  first release").
-* **Nothing in the repository holds the workflow.** The checks above were
-  made with scripts of the sessions that wrote and changed the workflow;
-  they are not in the repository and not in ctest. So no test fails if a
-  later edit gives the workflow a second trigger, takes the Publish job out
-  of the environment `release`, names an action by a tag again, or drops
-  `-DKATANA_REQUIRE_UPDATE_KEYS=ON` from a configure, which is what keeps a
-  release from being built with the placeholder keys. A check of the file's
-  shape that needs only Python's standard library, with a list of breaks it
-  must notice, was written for this and is not yet in the tree; when it is,
-  a `uses:` that does not end in 40 hexadecimal digits belongs among what
-  it refuses. For that one break GitHub has a setting of its own, which is
-  off ("The actions the workflow runs", at its end).
+  they stand on made-up packages. The run fetched all six actions by their
+  commits (`actions/download-artifact` in the Publish job too) and gave every
+  package the run's sequence. What no run has used: the Node 24 majors of
+  five actions (7f32475e, 2026-10-15), the licence page and the notices
+  (78677e7b), the installer smoke test's check of `proj.db` (1228fa5d), and
+  the Desktop shortcut and its read-back ("The Windows installer"). That
+  step had a PowerShell parse error from 1228fa5d until 2026-10-15 - a
+  variable followed by a colon inside a string, `"$LASTEXITCODE: ..."` - found
+  by running PowerShell's parser over the step, so it had not run as
+  written. And the rehearsal, the owner's acceptance step, is still to do:
+  a second release installed as an update of the first. v0.2.0 is the only
+  release, so no installed copy has been updated.
+* **What holds the workflow holds its shape, and that its scripts parse; no
+  more.** `tools/check_release_workflow.py` ("The workflow's shape, held")
+  refuses a second trigger, a write outside the Publish job, an action
+  named by a tag, the signing key read outside the environment `release`, a
+  configure without the update keys required, and the rest of the list
+  there. It does not run the scripts (a script that parses can still be
+  wrong; the workflow's own run is what shows that), does not read YAML (a
+  construct it does not know is reported, not understood), and cannot see
+  GitHub's own settings: the reads of "Update signing", step 3, do, and the
+  setting that refuses an action not named by a commit is off ("The actions
+  the workflow runs", at its end). The options the workflow gives `gh` and
+  the update tools, and the made-up packages the first job and the Publish
+  job were tried on, were checked by hand and are not in the repository.
 * **Nothing says when a pinned action has a newer version.** An action
   stays at its commit until it is moved by hand ("The actions the workflow
   runs"), and the repository has no `.github/dependabot.yml`, which would
-  propose each move as a pull request.
-* **Five of the six actions are old major versions that ask for Node 20.**
-  At the commits the workflow names, the `action.yml` of
-  `actions/checkout`, `actions/upload-artifact`, `actions/setup-python`,
-  `actions/cache` and `actions/download-artifact` says `using: node20`
-  (`msys2/setup-msys2` says `node24`), and Node 20 reached its end of
-  life in April 2026. On 2026-10-14 their publishers' latest releases
-  were checkout 7.0.1, upload-artifact 7.0.2, setup-python 7.0.0, cache
-  6.1.0 and download-artifact 8.0.2, each `node24`. Naming commits did
-  not cause this: the tags `v4` and `v5` name these same commits, and
-  that change moved no version. The runner of that day (2.338.0;
-  `HandlerFactory.cs` and `JobExtension.cs` of its worker, in the
-  repository `actions/runner`) still carries Node 20 beside Node 24 and,
-  on the machines these jobs run on, refuses no action for asking for
-  it: it runs such an action on one or the other, as GitHub tells it for
-  the run, and can name it in a warning on the run's page. So the first run says where this stands
-  ("To verify on the first release"). Each of the five is moved as "The
-  actions the workflow runs" says, with the release notes of every major
-  version between read; none has been tried.
+  propose each move as a pull request. Not added: it makes the repository
+  open pull requests on its own, which is the owner's to decide.
 * **`main` itself is not guarded.** The environment `release` takes runs
   of `main` only ("Update signing", step 3), and that is worth what
   decides what gets into `main`. On 2026-10-14 the right to push was all
-  that did:
+  that did, and the same reads on 2026-10-15 printed the same:
 
   ```sh
   gh api repos/kjarada/Katana/branches/main --jq .protected
@@ -1357,31 +1468,17 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   request it asks for is that account's own to open and to merge: a
   recorded step, not a second person. Until then the approval on the
   run's page is the guard there is.
-* **The update keys are placeholders** until the owner's key steps ("Update
-  signing"); until then the workflow stops in its first job. The
-  environment `release` of those steps, with its reviewers and its
-  restriction to `main`, did not exist on 2026-10-14 either: GitHub would
-  make one with neither the first time a run reached the Publish job.
 * **No program says which repository it asks for updates,** so the jobs
   prove `-DKATANA_UPDATE_REPO` only as far as the update library's compile
   line ("What each job does"). Were `UPDATE STATUS` to name the feed, the
   smoke test could prove it in the program a user runs.
-* **The keys file cannot be run bare by a CMake older than 4.0.**
-  `cmake -P cmake/KatanaUpdateKeys.cmake`, the use the file's own header
-  gives, stops there at `if(... IN_LIST ...)`, because a script has no
-  policy set (seen with CMake 3.31.6, 2026-10-13). The workflow goes round
-  it ("What each job does"); the file should state the policy itself.
-* **On macOS without a Developer ID the install record is added after the
-  bundle is sealed.** Found by reading, 2026-10-13, and not yet seen on a
-  Mac: `cmake --install` seals `Katana.app` ad hoc
-  (`cmake/KatanaDeployUnix.cmake.in`, its last step), and CPack then writes
-  `Contents/Resources/share/katana/install.json` into the staged bundle
-  (`cmake/KatanaPackaging.cmake`, "install.json"). With a Developer ID
-  `cmake/KatanaSign.cmake` signs everything again afterwards; without one
-  nothing does, so `codesign --verify --deep --strict` in the macOS smoke
-  test should refuse the bundle for a file added to it. The bundle has to be
-  sealed again after the record is written, in the packaging and not in the
-  workflow.
+* **The keys file run bare has not been tried under CMake 3.31.6.** The file
+  states the policy its `IN_LIST` needs (`cmake_policy(SET CMP0057 NEW)`), but
+  the host that builds this project has CMake 4, which sets that policy
+  itself, so only the text of the file is held
+  (`update_keys_file_states_the_policy_its_in_list_needs`). The first job's
+  step still runs it through a script of two lines; it can run it bare once a
+  run under 3.31.6 has shown that it works.
 * **macOS is told about a release, not updated,** and the Linux packages are
   not yet updated in place either (`docs/update.md`); their manifests and
   update zips are published all the same.
@@ -1407,7 +1504,15 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   fails) and never skips it, but by then it has already replaced other files;
   the uninstaller leaves such a file behind and still removes its entry in
   **Settings > Apps**. Close Katana first.
-* **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball.
+* **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball, and so
+  makes no menu entry: a `.desktop` file names the program by an absolute path
+  (`Exec=`), which is wherever the person unpacked the tarball and which no file
+  inside it can know. Decided against for now: a script in the tarball that
+  writes the entry, because nothing of Linux packaging has been run on Linux
+  here (not even the desktop file's own validator), and a program that writes
+  into the person's home on its own. The project's front page gives the seven
+  lines to write by hand, in its install reference for Linux; an AppImage or a
+  `.deb` would carry the entry. macOS needs none: Launchpad finds `Katana.app`.
 * **The Windows toolchain is not frozen.** MSYS2 installs what it has on the
   day; two runs a month apart may build with different GCC and Qt versions.
   An update between two such releases therefore fetches the libraries that
