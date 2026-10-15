@@ -27,6 +27,39 @@ using katana::geometry::Triangle2;
 
 namespace {
 
+// The plan area of a piece on which a function is linear, split into where it is
+// above zero and where it is below, by its values at the corners.
+struct AreaSplit {
+    double positive = 0.0;
+    double negative = 0.0;
+};
+
+// With vertex values f0, f1, f2 and plan area A, when the signs differ exactly
+// one vertex p stands alone against q and r. The zero line meets edges pq and
+// pr at the fractions tq = fp/(fp-fq) and tr = fp/(fp-fr), cutting off the
+// triangle (p, mq, mr) of area A*tq*tr; the rest of the piece is on the other
+// side. A corner at zero belongs to neither side.
+AreaSplit splitArea(double area, const std::array<double, 3>& f)
+{
+    const int positives = (f[0] > 0.0) + (f[1] > 0.0) + (f[2] > 0.0);
+    const int negatives = (f[0] < 0.0) + (f[1] < 0.0) + (f[2] < 0.0);
+    if (negatives == 0 || positives == 0) {
+        return AreaSplit{positives != 0 ? area : 0.0, negatives != 0 ? area : 0.0};
+    }
+    const bool lonePositive = positives == 1;
+    std::size_t p = 0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        if (lonePositive ? f[i] > 0.0 : f[i] < 0.0) {
+            p = i;
+        }
+    }
+    const double fp = std::abs(f[p]);
+    const double fq = std::abs(f[(p + 1) % 3]);
+    const double fr = std::abs(f[(p + 2) % 3]);
+    const double tipArea = area * (fp / (fp + fq)) * (fp / (fp + fr));
+    return lonePositive ? AreaSplit{tipArea, area - tipArea} : AreaSplit{area - tipArea, tipArea};
+}
+
 // Integral of a function that is linear over a triangle, positive and negative
 // part kept apart.
 //
@@ -38,6 +71,19 @@ namespace {
 // triangles (mq, q, r) of area A*(1-tq) and (mq, r, mr) of area A*tq*(1-tr).
 // Every term of a part has the same sign, so nothing cancels, and no coordinates
 // are constructed.
+//
+// THE AREAS ARE KEPT BY WHAT THE SURFACES DO, NOT BY THE LAST BIT. The volumes
+// are summed from f as it is, so their bits are what they always were. The
+// plan areas where the function is above and below zero are sorted by f with
+// every corner within kGeometric (0.1 micrometre) of zero taken as zero: two
+// coincident surfaces are read at a piece's corners by barycentric weights
+// that sum to 1 only to a few ulps, so their difference there is +/- 1e-15
+// and not 0, and a sort by the sign of the last bit booked whole pieces of
+// ground that does not change as cut area or fill area (a flat surface
+// against its own level inside a skewed polygon: 44.6 m2 of cut and 23.3 of
+// fill; a stockpile on planar ground: 700 m2 of cut round a toe of 400). A
+// height difference under 0.1 micrometre is no earthwork on any survey, and
+// the volume it holds, under that times the area, stays in the volumes.
 class SignedIntegral {
   public:
     void add(double area, const std::array<double, 3>& f)
@@ -51,35 +97,44 @@ class SignedIntegral {
             const double volume = area * ((f[0] + f[1] + f[2]) / 3.0);
             if (positives != 0) {
                 positive_.add(volume);
-                positiveArea_.add(area);
             } else if (negatives != 0) {
                 negative_.add(-volume);
-                negativeArea_.add(area);
             }
-            return;
+        } else {
+            // Mixed signs: the lone vertex is the only positive or the only negative one.
+            const bool lonePositive = positives == 1;
+            std::size_t p = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                if (lonePositive ? f[i] > 0.0 : f[i] < 0.0) {
+                    p = i;
+                }
+            }
+            const double fp = std::abs(f[p]);
+            const double fq = std::abs(f[(p + 1) % 3]); // the others lie on the opposite
+            const double fr = std::abs(f[(p + 2) % 3]); // side or on the zero line
+            const double tq = fp / (fp + fq);
+            const double tr = fp / (fp + fr);
+            const double tipArea = area * tq * tr;
+            const double tipVolume = tipArea * fp / 3.0;
+            const double restVolume =
+                area * (1.0 - tq) * (fq + fr) / 3.0 + area * tq * (1.0 - tr) * fr / 3.0;
+            (lonePositive ? positive_ : negative_).add(tipVolume);
+            (lonePositive ? negative_ : positive_).add(restVolume);
         }
 
-        // Mixed signs: the lone vertex is the only positive or the only negative one.
-        const bool lonePositive = positives == 1;
-        std::size_t p = 0;
-        for (std::size_t i = 0; i < 3; ++i) {
-            if (lonePositive ? f[i] > 0.0 : f[i] < 0.0) {
-                p = i;
+        std::array<double, 3> counted = f;
+        for (double& value : counted) {
+            if (std::abs(value) <= tol::kGeometric) {
+                value = 0.0;
             }
         }
-        const double fp = std::abs(f[p]);
-        const double fq = std::abs(f[(p + 1) % 3]); // the others lie on the opposite
-        const double fr = std::abs(f[(p + 2) % 3]); // side or on the zero line
-        const double tq = fp / (fp + fq);
-        const double tr = fp / (fp + fr);
-        const double tipArea = area * tq * tr;
-        const double tipVolume = tipArea * fp / 3.0;
-        const double restVolume =
-            area * (1.0 - tq) * (fq + fr) / 3.0 + area * tq * (1.0 - tr) * fr / 3.0;
-        (lonePositive ? positive_ : negative_).add(tipVolume);
-        (lonePositive ? positiveArea_ : negativeArea_).add(tipArea);
-        (lonePositive ? negative_ : positive_).add(restVolume);
-        (lonePositive ? negativeArea_ : positiveArea_).add(area - tipArea);
+        const AreaSplit areas = splitArea(area, counted);
+        if (areas.positive != 0.0) {
+            positiveArea_.add(areas.positive);
+        }
+        if (areas.negative != 0.0) {
+            negativeArea_.add(areas.negative);
+        }
     }
 
     // Folds another integral's four sums into this one's. Used to combine the

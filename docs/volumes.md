@@ -116,6 +116,33 @@ comparison and the difference surface are held to
 (`VolumeInsidePolygon.GivesTheSameBitsOnOneThreadAsOnMany`,
 `DifferenceSurface.IsTheSameSurfaceAtAnyThreadCount`).
 
+**Coincident ground is neither cut nor fill.** `cut.area=` and `fill.area=`
+are the plan area where the top is below and above the base, and a piece's
+corner heights are read off each triangle's plane by barycentric weights that
+sum to 1 only to a few ulps: two surfaces that coincide (one plane
+triangulated two ways, a flat surface against its own level inside a polygon,
+a stockpile's ground beyond its toe against a base made of that ground) differ
+there by +/- 1e-15, not 0. Sorted by the sign of the last bit, whole pieces of
+unchanged ground were booked as cut area or fill area: 44.6 m2 and 23.3 m2
+inside a skewed polygon of a surface at its own level, 750 m2 and 9 m2 on one
+plane in two triangulations (100 m2 the other way round), 700 m2 of cut and 75 of
+fill round a toe of 400. A pay item measured by area would have been paid on
+rounding. The areas are now sorted with every corner difference within
+`kGeometric` (0.1 micrometre) of zero taken as zero - the one tolerance of the
+policy, not a second for heights - and a piece whose corners are all within it
+is neither. The volumes are summed from the differences as they are, so their
+bits are unchanged, and a coincidence within 0.1 micrometre keeps the (at most
+that times the area) volume it holds: `compareSurfaces` of a 5e-8 rise over
+10 000 m2 is 5e-4 m3 of fill and no fill area, a rise of 1 mm is 10 m3 and all
+10 000 m2
+(`CompareSurfaces.OnePlaneTriangulatedTwoWaysHasNoCutAreaAndNoFillAreaInEitherOrder`,
+`VolumeToLevelInsidePolygon.AFlatSurfaceAgainstItsOwnLevelHasNeitherCutAreaNorFillArea`,
+`Stockpile.OnSlopingGroundWithAPolygonWiderThanTheToeOnlyTheToeIsCutArea`).
+Rejected: a tolerance relative to the heights (a few ulps of the largest), which
+a sliver triangle's weights, off by the triangle's aspect ratio times that,
+would have overrun, and which would be a second constant beside `kGeometric`.
+Heights are in metres; a model in millimetres would need the tolerance scaled.
+
 **Joining the pieces into a surface.** A difference or an envelope is a TIN
 made of the pieces, so a corner two pieces share must be one vertex. Each
 corner is named by what it is - a vertex of one surface, or the crossing of
@@ -428,6 +455,7 @@ records do not carry.
   `cli.volume_sections_round_a_curve_give_the_band_when_the_reach_is_short_of_its_radius`,
   `cli.volume_sections_round_a_curve_with_the_default_reach_are_refused_not_counted_twice`,
   `cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_on_it_once`,
+  `cli.volume_datum_of_a_flat_surface_at_its_own_level_has_no_cut_area_or_fill_area`,
   `cli.surface_difference_keeps_the_cut_fill_map_as_a_surface`,
   `cli.volume_of_a_surface_that_is_not_there_is_refused`.
 - `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`.

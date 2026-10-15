@@ -252,6 +252,40 @@ TEST(VolumeToLevelInsidePolygon, AWholeSurfaceRegionAgreesWithTheVolumeToTheDatu
     EXPECT_NEAR(inside->planArea, 6400.0, 1e-8);
 }
 
+TEST(VolumeToLevelInsidePolygon, AFlatSurfaceAgainstItsOwnLevelHasNeitherCutAreaNorFillArea)
+{
+    // z = 10 over [0, 10]^2 against the level 10 inside a skewed quadrilateral:
+    // above = below = 0 whatever the polygon. The region is compared with
+    // the surface as a flat surface of its own, read by weights that sum to 1
+    // only to a few ulps, so the difference at a corner that is no vertex was
+    // +/- 1e-15: 44.6 m2 of the polygon were booked as cut area and 23.3 as
+    // fill area, and none is either. The polygon's area by the shoelace sum:
+    //   (0.123 x 0.321 - 9.876 x 0.456) + (9.876 x 9.9 - 9.5 x 0.321)
+    //   + (9.5 x 9.7 - 0.2 x 9.9) + (0.2 x 0.456 - 0.123 x 9.7)
+    //   = -4.463973 + 94.7229 + 90.17 - 1.1019 = 179.327027, halved.
+    const TinSurface flat = buildFromPoints({Point3(0, 0, 10), Point3(10, 0, 10),
+                                             Point3(10, 10, 10), Point3(0, 10, 10)});
+    const OverlayRegion skewed = regionOf(ring({Point2(0.123, 0.456), Point2(9.876, 0.321),
+                                                Point2(9.5, 9.9), Point2(0.2, 9.7)}));
+    const OverlayRegion whole = regionOf(square(0, 0, 10));
+    const OverlayRegion sliver = regionOf(ring({Point2(1.3, 1.1), Point2(8.7, 1.2), Point2(8.9, 1.4)}));
+    for (const OverlayRegion* region : {&skewed, &whole, &sliver}) {
+        const auto volume = volumeToDatum(flat, 10.0, *region);
+        ASSERT_TRUE(volume.ok()) << volume.error().describe();
+        EXPECT_NEAR(volume->planArea, region->area(), 1e-9);
+        EXPECT_NEAR(volume->above, 0.0, 1e-9);
+        EXPECT_NEAR(volume->below, 0.0, 1e-9);
+        EXPECT_EQ(volume->planAreaAbove, 0.0);
+        EXPECT_EQ(volume->planAreaBelow, 0.0);
+    }
+    EXPECT_NEAR(skewed.area(), 89.6635135, 1e-9);
+    // Without a region the surface is read at its own vertices, exactly.
+    const auto exact = volumeToDatum(flat, 10.0);
+    ASSERT_TRUE(exact.ok());
+    EXPECT_EQ(exact->planAreaAbove, 0.0);
+    EXPECT_EQ(exact->planAreaBelow, 0.0);
+}
+
 TEST(VolumeToLevelInsidePolygon, RefusesANonFiniteLevelAnEmptySurfaceAndAnEmptyRegion)
 {
     const TinSurface surface = planeSurface(Plane{0, 0, 5}, 10.0, 5, 17);
@@ -308,6 +342,36 @@ TEST(Stockpile, OnSlopingGroundTheToeBaseFollowsTheSlope)
     ASSERT_TRUE(volume.ok()) << volume.error().describe();
     EXPECT_NEAR(volume->volume.above, 3600.0, 1e-8);
     EXPECT_NEAR(volume->volume.below, 0.0, 1e-9);
+}
+
+TEST(Stockpile, OnSlopingGroundWithAPolygonWiderThanTheToeOnlyTheToeIsCutArea)
+{
+    // The pile of twelve faces on a toe of radius 20 (1200 m2) on the ground
+    // z = 0.1 x + 5, measured inside the square [-30, 30]^2 of 3600 m2 with a
+    // base made of the boundary's heights read off the ground: a plane. The
+    // pile stands above it over the toe, 3600 m3, and everywhere else the
+    // ground is the base: cut area 1200, fill area 0, and the other 2400 m2
+    // neither (it was 700 m2 of cut round a toe of 400 and 75 of fill).
+    const Pile heap = pile(Plane{0.1, 0, 5}, 12, 20.0, 9.0);
+    const Polyline2 wider = square(-30, -30, 60);
+    const auto volume = stockpileVolume(heap.surface, wider, StockpileOptions{});
+    ASSERT_TRUE(volume.ok()) << volume.error().describe();
+    EXPECT_NEAR(volume->volume.above, 3600.0, 1e-7);
+    EXPECT_NEAR(volume->volume.below, 0.0, 1e-9);
+    EXPECT_NEAR(volume->volume.planArea, 3600.0, 1e-8);
+    EXPECT_NEAR(volume->volume.planAreaAbove, 1200.0, 1e-8);
+    EXPECT_EQ(volume->volume.planAreaBelow, 0.0);
+
+    // Against a level just under the whole polygon's ground the ground is
+    // all above it: the whole 3600 m2 is cut area, the pile's faces and the
+    // plane beside them alike.
+    StockpileOptions level;
+    level.base = StockpileBase::Level;
+    level.level = -5.0;
+    const auto beneath = stockpileVolume(heap.surface, wider, level);
+    ASSERT_TRUE(beneath.ok()) << beneath.error().describe();
+    EXPECT_NEAR(beneath->volume.planAreaAbove, 3600.0, 1e-8);
+    EXPECT_EQ(beneath->volume.planAreaBelow, 0.0);
 }
 
 TEST(Stockpile, AgainstTheLowestPointOfTheToeTheWedgeOfGroundBelowItIsAdded)

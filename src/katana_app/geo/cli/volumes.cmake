@@ -110,6 +110,21 @@ set_tests_properties(cli.volume_grid_over_lots_sharing_an_edge_counts_the_cells_
     PROPERTIES
     PASS_REGULAR_EXPRESSION "volume method=grid base=base top=top cell=1 polygons=2 polygon\\.area=36\\.000 cut=0\\.000 fill=36\\.000 net=36\\.000 area=36\\.000 cells=36"
     FAIL_REGULAR_EXPRESSION "error")
+
+# The base slab is flat at 10: against the level 10, inside a skewed
+# quadrilateral of 89.6635 m^2 (the shoelace sum), nothing is above or below it,
+# and no area is either. The overlay reads the surface and the polygon's flat
+# level by weights that sum to 1 to a few ulps, so the differences at the
+# corners of its pieces were +/- 1e-15, and 44.629 m^2 of the polygon were
+# reported as cut area and 23.317 as fill area.
+add_test(NAME cli.volume_datum_of_a_flat_surface_at_its_own_level_has_no_cut_area_or_fill_area
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_volume_surfaces}
+            -c "VOLUME DATUM base 10 INSIDE 0.123,0.456 9.876,0.321 9.5,9.9 0.2,9.7")
+set_tests_properties(cli.volume_datum_of_a_flat_surface_at_its_own_level_has_no_cut_area_or_fill_area
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION "volume method=exact surface=base level=10 polygons=1 polygon\\.area=89\\.664 cut=0\\.000 fill=0\\.000 net=0\\.000 area=89\\.664 above=0\\.000 below=0\\.000 cut\\.area=0\\.000 fill\\.area=0\\.000"
+    FAIL_REGULAR_EXPRESSION "error")
 # The cut/fill map: the top less the base, 1 everywhere, kept as a surface
 # the session then lists beside the two.
 add_test(NAME cli.surface_difference_keeps_the_cut_fill_map_as_a_surface

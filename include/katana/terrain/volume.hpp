@@ -66,7 +66,11 @@ struct SurfaceComparison {
     double net = 0.0;  // fill - cut = integral of (zDesign - zExisting)
     double planArea = 0.0; // common area that was compared
     double cutArea = 0.0;
-    double fillArea = 0.0; // planArea - cutArea - fillArea is where the surfaces coincide
+    // planArea - cutArea - fillArea is where the surfaces coincide: every
+    // corner of a piece within kGeometric of the other surface's height is on
+    // it, so rounding (+/- 1e-15 where two readings of one plane differ in the
+    // last bit) is not booked as cut or fill. The volumes are not rounded.
+    double fillArea = 0.0;
     std::size_t overlayTriangleCount = 0; // triangles of the overlay inside the common area
 };
 
