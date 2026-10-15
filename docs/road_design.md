@@ -723,11 +723,14 @@ class, layer, quantities and properties, and every problem
   nothing.** The solids are split along the road where a side has none and
   drawn over the stretch across the section where it has some, but the end
   section of a piece (the one with none) and a gap inside one section have
-  no thickness: the mesh is closed, but the IFC writer drops a face of no
-  area (docs/ifc.md, "Road model"), which leaves its neighbours' edges used
-  once, and writes the solid as an open face set with a warning. Every course
-  is closed. The piece should end in a real closed taper (a wedge welded to a
-  line), and a section with a gap should be two stretches across.
+  no thickness: the mesh is closed on its own indices, and the IFC writer
+  judges closure there first and writes it as it is (docs/ifc.md, "Road
+  model"), so the solid goes out Closed with its triangles of no area in it
+  (seen on the rural two-lane tour: every earthworks solid Closed, and
+  `tools/check_ifc.py` with no finding); a viewer that refuses a degenerate
+  triangle would still object. Every course is closed. The piece should end in
+  a real closed taper (a wedge welded to a line), and a section with a gap
+  should be two stretches across.
 - **Course areas and volumes and kerb lengths on a curve are chord
   approximations.** A course is lofted between sections with flat quads and a
   kerb's Length sums the chords between sections, so on an arc of radius R a
