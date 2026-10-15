@@ -1754,3 +1754,191 @@ TEST(TinEdit, CuttingHolesRefusesWhatCuttingThemOneByOneRefusesAndSaysTheSame)
     EXPECT_EQ(apart->surface, ground);
     EXPECT_EQ(beside.patches, 1u);
 }
+
+// ---- deleting a breakline ----------------------------------------------------------------------
+
+namespace {
+
+// `ground` with a draped breakline along the straight run from `from` to `to`
+// (a row or a column of the unit lattice, so its edges are the lattice's).
+TinSurface withBreakline(const TinSurface& ground, const Point2& from, const Point2& to)
+{
+    const std::vector<BreaklineVertex> line = {{from, std::nullopt}, {to, std::nullopt}};
+    auto made = katana::terrain::addBreakline(ground, line, false);
+    EXPECT_TRUE(made.ok()) << (made.ok() ? "" : made.error().describe());
+    return made.ok() ? made->surface : ground;
+}
+
+Polyline2 openLine(std::vector<Point2> vertices)
+{
+    Polyline2 line;
+    line.vertices = std::move(vertices);
+    return line;
+}
+
+} // namespace
+
+TEST(TinEdit, DeletingABreaklineMakesItsEdgesOrdinaryAndChangesNoTriangleNorVertex)
+{
+    // The row y = 4 from x = 1 to 7 of a 10 x 10 unit grid: six lattice edges.
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    ASSERT_NEAR(constrainedLength(before), 6.0, 1e-9) << "the setup: six edges of one metre";
+    // The line may run past the breakline at either end and need not pass
+    // through the surface's vertices to lie along its edges.
+    const auto cleared = katana::terrain::deleteBreaklines(
+        before, std::vector<Polyline2>{openLine({Point2(0.5, 4), Point2(7.5, 4)})});
+    ASSERT_TRUE(cleared.ok()) << cleared.error().describe();
+    EXPECT_EQ(cleared->report.edgesCleared, 6u);
+    EXPECT_EQ(cleared->report.edgesHeld, 0u);
+    EXPECT_NEAR(constrainedLength(cleared->surface), 0.0, 1e-12);
+    // Nothing else changed: the same vertices, the same triangles in the same
+    // order, the same area.
+    EXPECT_EQ(cleared->surface.vertices(), before.vertices());
+    EXPECT_EQ(cleared->surface.triangles(), before.triangles());
+    EXPECT_EQ(cleared->report.trianglesBefore, cleared->report.trianglesAfter);
+    EXPECT_EQ(cleared->report.verticesBefore, cleared->report.verticesAfter);
+    EXPECT_EQ(cleared->report.pointsAdded, 0u);
+    EXPECT_EQ(cleared->report.pointsRemoved, 0u);
+    EXPECT_NEAR(cleared->surface.planArea(), 100.0, 1e-9);
+
+    // The vertex (4,4) was on a breakline, and DELETE POINT refused it; now it
+    // is an ordinary vertex of six triangles, and goes.
+    const int vertex = vertexIndex(before, 4, 4);
+    ASSERT_GE(vertex, 0);
+    const auto vertices = std::vector<std::uint32_t>{static_cast<std::uint32_t>(vertex)};
+    const auto refused = katana::terrain::deletePoints(before, vertices);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_TRUE(katana::terrain::onConstrainedEdge(before, vertices.front()));
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, vertices.front()));
+    const auto deleted = katana::terrain::deletePoints(cleared->surface, vertices);
+    ASSERT_TRUE(deleted.ok()) << deleted.error().describe();
+    EXPECT_EQ(deleted->report.pointsRemoved, 1u);
+    EXPECT_NEAR(deleted->surface.planArea(), 100.0, 1e-9);
+}
+
+TEST(TinEdit, ALineOverPartOfABreaklineClearsTheEdgesOfThatPartAndNoOther)
+{
+    // The line from (1,4) to (4,4) lies along three of the six edges: (1..2),
+    // (2..3), (3..4). The other three, (4..5), (5..6), (6..7), stay.
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    const auto cleared = katana::terrain::deleteBreaklines(
+        before, std::vector<Polyline2>{openLine({Point2(1, 4), Point2(4, 4)})});
+    ASSERT_TRUE(cleared.ok()) << cleared.error().describe();
+    EXPECT_EQ(cleared->report.edgesCleared, 3u);
+    EXPECT_NEAR(constrainedLength(cleared->surface), 3.0, 1e-9);
+    const auto at = [&](double x) {
+        return static_cast<std::uint32_t>(vertexIndex(cleared->surface, x, 4));
+    };
+    // (1,4), (2,4) and (3,4) have only cleared edges; (4,4) is still the end of
+    // the edge to (5,4), which stays.
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, at(1)));
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, at(2)));
+    EXPECT_FALSE(katana::terrain::onConstrainedEdge(cleared->surface, at(3)));
+    EXPECT_TRUE(katana::terrain::onConstrainedEdge(cleared->surface, at(4)));
+    EXPECT_TRUE(katana::terrain::onConstrainedEdge(cleared->surface, at(5)));
+    // And (4,4) is refused as before.
+    EXPECT_EQ(katana::terrain::deletePoints(cleared->surface, std::vector<std::uint32_t>{at(4)})
+                  .error().code,
+              ErrorCode::InvalidGeometry);
+}
+
+TEST(TinEdit, ALineAlongNoBreaklineChangesNothingAndSaysSo)
+{
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    // A row with no breakline, one across the breakline, one that stops short
+    // of the first edge's far end, and one 2e-7 above it - beyond the
+    // coincidence tolerance, 1e-7 - each lies along none of its edges.
+    for (const Polyline2& line : {openLine({Point2(1, 5), Point2(7, 5)}),
+                                  openLine({Point2(3, 3), Point2(5, 5)}),
+                                  openLine({Point2(1, 4), Point2(1.5, 4)}),
+                                  openLine({Point2(1, 4.0000002), Point2(7, 4.0000002)})}) {
+        const auto result = katana::terrain::deleteBreaklines(before, std::vector<Polyline2>{line});
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        EXPECT_EQ(result->report.edgesCleared, 0u);
+        EXPECT_EQ(result->surface, before) << "the surface as it was, not a copy rebuilt";
+    }
+    // 5e-8 above it is within the tolerance: the same six edges.
+    const auto within = katana::terrain::deleteBreaklines(
+        before, std::vector<Polyline2>{openLine({Point2(1, 4.00000005), Point2(7, 4.00000005)})});
+    ASSERT_TRUE(within.ok()) << within.error().describe();
+    EXPECT_EQ(within->report.edgesCleared, 6u);
+}
+
+TEST(TinEdit, AClosedLinesClosingSideLiesAlongEdgesAndAnOpenOnesDoesNot)
+{
+    // A breakline up the column x = 1 from y = 4 to 7: three edges. The ring
+    // (1,4) (5,4) (5,7) (1,7) comes back to (1,4) by the closing side (1,7)-(1,4),
+    // which is that column; opened, the same four vertices stop at (1,7).
+    const TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(1, 7));
+    ASSERT_NEAR(constrainedLength(before), 3.0, 1e-9);
+    Polyline2 ring = openLine({Point2(1, 4), Point2(5, 4), Point2(5, 7), Point2(1, 7)});
+    const auto opened = katana::terrain::deleteBreaklines(before, std::vector<Polyline2>{ring});
+    ASSERT_TRUE(opened.ok()) << opened.error().describe();
+    EXPECT_EQ(opened->report.edgesCleared, 0u);
+    ring.closed = true;
+    const auto closed = katana::terrain::deleteBreaklines(before, std::vector<Polyline2>{ring});
+    ASSERT_TRUE(closed.ok()) << closed.error().describe();
+    EXPECT_EQ(closed->report.edgesCleared, 3u);
+    EXPECT_NEAR(constrainedLength(closed->surface), 0.0, 1e-12);
+}
+
+TEST(TinEdit, SeveralLinesClearTheEdgesAlongAnyOfThem)
+{
+    // Two breaklines: the row y = 4 from 1 to 3 (two edges) and the column
+    // x = 6 from 2 to 5 (three). Two lines clear both, one clears its own.
+    TinSurface before = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(3, 4));
+    before = withBreakline(before, Point2(6, 2), Point2(6, 5));
+    ASSERT_NEAR(constrainedLength(before), 5.0, 1e-9);
+    const std::vector<Polyline2> both = {openLine({Point2(0, 4), Point2(4, 4)}),
+                                         openLine({Point2(6, 0), Point2(6, 9)})};
+    const auto all = katana::terrain::deleteBreaklines(before, both);
+    ASSERT_TRUE(all.ok()) << all.error().describe();
+    EXPECT_EQ(all->report.edgesCleared, 5u);
+    const auto one =
+        katana::terrain::deleteBreaklines(before, std::span<const Polyline2>(both.data(), 1));
+    ASSERT_TRUE(one.ok()) << one.error().describe();
+    EXPECT_EQ(one->report.edgesCleared, 2u);
+    EXPECT_NEAR(constrainedLength(one->surface), 3.0, 1e-9);
+}
+
+TEST(TinEdit, TheConstrainedRimIsTheBoundaryNotABreaklineAndIsHeld)
+{
+    // A boundary makes its rim edges constrained: [2.5, 7.5]^2 cut from a 10 x
+    // 10 grid has a rim of 4 x 5 = 20 m, all constrained. A line along its
+    // bottom side clears nothing and counts the edges it left.
+    const auto clipped =
+        katana::terrain::clipToBoundary(flatGrid(10, 1.0), rectangle(2.5, 2.5, 7.5, 7.5));
+    ASSERT_TRUE(clipped.ok()) << clipped.error().describe();
+    ASSERT_NEAR(constrainedLength(clipped->surface), 20.0, 1e-9);
+    const auto result = katana::terrain::deleteBreaklines(
+        clipped->surface, std::vector<Polyline2>{openLine({Point2(2.5, 2.5), Point2(7.5, 2.5)})});
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->report.edgesCleared, 0u);
+    EXPECT_GE(result->report.edgesHeld, 5u)
+        << "the side of 5 m is cut by the lattice's vertical lines at least five times";
+    EXPECT_EQ(result->surface, clipped->surface);
+}
+
+TEST(TinEdit, DeletingABreaklineNeedsALineWithLengthAndFiniteCoordinates)
+{
+    const TinSurface ground = withBreakline(flatGrid(10, 1.0), Point2(1, 4), Point2(7, 4));
+    const auto refused = [&ground](std::vector<Polyline2> lines) {
+        return katana::terrain::deleteBreaklines(ground, lines);
+    };
+    EXPECT_EQ(refused({}).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused({openLine({Point2(1, 4)})}).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(
+        refused({openLine({Point2(1, 4), Point2(std::numeric_limits<double>::quiet_NaN(), 4)})})
+            .error().code,
+        ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused({openLine({Point2(1, 4), Point2(1e12, 4)})}).error().code,
+              ErrorCode::InvalidArgument);
+    // Two vertices that coincide are no length at all.
+    EXPECT_EQ(refused({openLine({Point2(3, 4), Point2(3, 4)})}).error().code,
+              ErrorCode::InvalidGeometry);
+    EXPECT_EQ(katana::terrain::deleteBreaklines(
+                  TinSurface{}, std::vector<Polyline2>{openLine({Point2(1, 4), Point2(2, 4)})})
+                  .error().code,
+              ErrorCode::InvalidArgument);
+}

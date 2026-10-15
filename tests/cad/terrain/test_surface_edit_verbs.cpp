@@ -386,6 +386,7 @@ TEST_F(SurfaceEditVerbs, AScopeThatTakesNothingIsReportedAndNoStepIsMade)
                              Case{"DELETE TRIANGLES OUTSIDE FROM DRAWING", "the scope took no polygon"},
                              Case{"DELETE POINTS INSIDE FROM DRAWING", "the scope took no polygon"},
                              Case{"BREAKLINE FROM DRAWING", "the scope took no line"},
+                             Case{"DELETE BREAKLINE FROM DRAWING", "the scope took no line"},
                              Case{"BOUNDARY FROM DRAWING", "the scope took no polygon"},
                              Case{"HOLE FROM DRAWING", "the scope took no polygon"},
                              Case{"RAISE 1 INSIDE FROM DRAWING", "the scope took no polygon"},
@@ -559,10 +560,86 @@ TEST_F(SurfaceEditVerbs, TheToolsActOnTheChosenSurfaceElseTheFirstVisible)
 TEST_F(SurfaceEditVerbs, HelpNamesEveryVerb)
 {
     const std::string help = reply("HELP SURFACE EDIT");
-    for (const char* word : {"DELETE TRIANGLE", "FLIP", "ADD POINTS", "BREAKLINE", "BOUNDARY",
+    for (const char* word : {"DELETE TRIANGLE", "DELETE BREAKLINE", "FLIP", "ADD POINTS", "BREAKLINE", "BOUNDARY",
                              "HOLE", "SETLEVEL", "SMOOTH", "THIN", "SURFACE MERGE",
                              "SURFACE PASTE", "SURFACE CLIP", "SURFACE OFFSET"}) {
         EXPECT_TRUE(contains(help, word)) << word;
     }
     EXPECT_TRUE(contains(reply("HELP"), "SURFACE EDIT"));
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineClearsTheEdgesAlongTheLineAndIsOneUndoStep)
+{
+    // The row y = 4 from x = 1 to 7 of a 10 x 10 unit grid is a breakline of six
+    // lattice edges; its vertex (4,4) cannot be deleted, until the line is.
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 7,4");
+    const TinSurface withLine = surfaceOf(document, "ground");
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE POINT 4,4"), ErrorCode::InvalidGeometry);
+
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 1,4 7,4");
+    EXPECT_TRUE(contains(text, "surface name=ground operation=delete_breakline triangles_before=200 "
+                               "triangles_after=200 vertices_before=121 vertices_after=121 "
+                               "points_added=0 points_removed=0"))
+        << text;
+    EXPECT_TRUE(contains(text, " edges_cleared=6 edges_held=0 changed=yes")) << text;
+    // The triangles are as they were; only the flags went.
+    EXPECT_EQ(surfaceOf(document, "ground").triangles(), withLine.triangles());
+    EXPECT_EQ(surfaceOf(document, "ground").vertices(), withLine.vertices());
+    EXPECT_FALSE(surfaceOf(document, "ground") == withLine) << "the constrained edges are part of a surface";
+    const std::string deleted = reply("SURFACE EDIT ground DELETE POINT 4,4");
+    EXPECT_TRUE(contains(deleted, "points_removed=1")) << deleted;
+
+    // One undo step each: undoing the delete, then the clearing.
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(surfaceOf(document, "ground"), withLine);
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE POINT 4,4"), ErrorCode::InvalidGeometry);
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineAlongNoBreaklineIsNoStepAndSaysNoneWasCleared)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 7,4");
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 1,5 7,5");
+    EXPECT_TRUE(contains(text, " edges_cleared=0 edges_held=0 changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    // PREVIEW works the clearing out and changes nothing.
+    const std::string preview = reply("SURFACE EDIT ground DELETE BREAKLINE 1,4 4,4 PREVIEW");
+    EXPECT_TRUE(contains(preview, " edges_cleared=3 edges_held=0 changed=yes preview=yes")) << preview;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
+    // A line that is too short, and a name that is no surface.
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE BREAKLINE 1,4"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(refusal("SURFACE EDIT ground DELETE BREAKLINE"), ErrorCode::ParseFailure);
+    EXPECT_EQ(refusal("SURFACE EDIT nowhere DELETE BREAKLINE 1,4 7,4"), ErrorCode::NotFound);
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineFromAScopeTakesTheLinesAndSaysWhatTheScopeTook)
+{
+    // Two breaklines of the surface, a polyline over each drawn on a layer: the
+    // scope record says it took two lines, and both are cleared. A third
+    // polyline, on another layer, would clear a third if it were named.
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BREAKLINE 1,4 3,4");
+    reply("SURFACE EDIT ground BREAKLINE 6,2 6,5");
+    reply("LAYER NEW cleared");
+    reply("LAYER SET cleared");
+    polyline({Point2(0, 4), Point2(4, 4)}, false, "cleared");
+    polyline({Point2(6, 0), Point2(6, 9)}, false, "cleared");
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE FROM LAYERS cleared ONLY");
+    EXPECT_TRUE(contains(text, "lines=2 skipped=0")) << text;
+    EXPECT_TRUE(contains(text, " edges_cleared=5 edges_held=0 changed=yes")) << text;
+}
+
+TEST_F(SurfaceEditVerbs, DeleteBreaklineAlongTheConstrainedRimHoldsItAndSaysSo)
+{
+    putSurface(document, "ground", flatGridSurface(10, 1.0));
+    reply("SURFACE EDIT ground BOUNDARY 2.5,2.5 7.5,2.5 7.5,7.5 2.5,7.5");
+    const auto generation = document.surfacesGeneration();
+    const std::string text = reply("SURFACE EDIT ground DELETE BREAKLINE 2.5,2.5 7.5,2.5");
+    EXPECT_TRUE(contains(text, " edges_cleared=0 ")) << text;
+    EXPECT_FALSE(contains(text, " edges_held=0 ")) << "the rim edges along the line are counted: " << text;
+    EXPECT_TRUE(contains(text, "changed=no")) << text;
+    EXPECT_EQ(document.surfacesGeneration(), generation);
 }

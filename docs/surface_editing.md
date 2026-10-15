@@ -14,7 +14,7 @@ saved, undone, styled - are `docs/terrain.md`'s.
 | terrain | `include/katana/terrain/tin_edit.hpp`, `src/katana_terrain/tin_edit.cpp`, `tin_patch.*`, `tin_thin.cpp` | pure functions: a surface in, a NEW surface or a refusal out |
 | cad | `include/katana/cad/terrain/surface_edit_verbs.hpp`, `src/katana_cad/terrain/surface_edit_verbs.cpp` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
 | cad | `src/katana_cad/tools/terrain_edit.cpp` | eight catalogue tools, category Terrain, each running the verb |
-| qt | `src/katana_qt/terrain/surface_edit_ui.*`, `surface_edit_dialogs.*`, `src/katana_qt/tools/icons_terrain.cpp` | Terrain > Edit Surface, the Surface Edit toolbar, five dialogs |
+| qt | `src/katana_qt/terrain/surface_edit_ui.*`, `surface_edit_dialogs.*`, `src/katana_qt/tools/icons_terrain.cpp` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
 
 The verbs (`HELP SURFACE EDIT` prints them all):
 
@@ -22,6 +22,7 @@ The verbs (`HELP SURFACE EDIT` prints them all):
 SURFACE EDIT <name> DELETE TRIANGLE x,y | DELETE TRIANGLES INSIDE|OUTSIDE <polygon>
                     DELETE LONG <length> | DELETE THIN <degrees>
                     DELETE POINT x,y [reach=<m>] | DELETE POINTS INSIDE <polygon>
+                    DELETE BREAKLINE <line>
                     FLIP x,y
                     ADD POINT x,y,z [x,y,z ...] | ADD POINTS <points>
                     BREAKLINE <line>
@@ -227,7 +228,8 @@ triangles, they do not reshape them.
 ### What every edit keeps
 
 - **Constrained edges.** No edit removes a breakline or boundary edge it was
-  not asked to: DELETE POINT refuses a vertex on one
+  not asked to (DELETE BREAKLINE is asked to, along a line, and only interior
+  edges): DELETE POINT refuses a vertex on one
   (`HeldPointRule::Refuse`), DELETE POINTS INSIDE leaves such vertices and
   counts them (`held=`), SMOOTH and THIN hold them, FLIP refuses a
   constrained edge.
@@ -267,6 +269,31 @@ triangles, they do not reshape them.
   limit leaves areas and volumes (sums of products of three such numbers)
   finite. One gate in the edit core, so the window's dialogs and an agent's
   line meet it alike.
+- **DELETE BREAKLINE makes the breakline edges along a line ordinary edges**
+  (`terrain::deleteBreaklines`). It clears the constrained flag on both sides
+  of every edge that LIES ALONG the line - both its ends within
+  `tolerance::kGeometric` of one segment of it, the closing segment of a closed
+  line included - and nothing else: the vertices and the triangles are exactly
+  as they were, in the same order, so the edit is a flag per edge and no
+  re-triangulation, and it is one undo step like the others. A line over part
+  of a breakline clears the edges of that part; a line along none clears
+  nothing, which is `changed=no` and no step, not a refusal; the line's levels
+  are not asked, and its vertices need not be vertices of the surface. A vertex
+  whose every constrained edge was cleared is then an ordinary vertex and
+  DELETE POINT takes it (a vertex at the end of an edge that stays is refused as
+  before). The reply adds `edges_cleared=` and `edges_held=` to the record,
+  after `crossings=`. *Edges on the rim are never cleared*: a constrained rim
+  edge is the surface's boundary, which BOUNDARY, HOLE and CLIP make, not a
+  breakline, and `edges_held=` counts those along the line so that a line over a
+  boundary that cleared nothing says why. *Rejected:* clearing the rim as well
+  (the verb is named for breaklines, and a rim made unconstrained by a line
+  drawn along it would be a boundary lost without anyone asking for it);
+  matching an edge by its midpoint or by the nearest segment (a line that cuts
+  across the corner of a breakline is near both ends of nothing); merging
+  collinear segments of the line first (a TIN edge never spans a vertex of the
+  breakline it came from, since that vertex is a vertex of the surface); and a
+  catalogue tool that picks one polyline - the Terrain menu's dialog takes the
+  lines by the shared scope, which a click on one entity cannot say.
 - **A point at an existing vertex gives it its level**, and no triangle
   changes (`relevelled=`). That is what a surveyor means by "the ground is
   here, at this level". Two points at one position with levels more than
@@ -425,7 +452,10 @@ entity cannot say: Delete Points Inside Polygons... (`surfaceDeletePointsDialog`
 `DELETE POINTS INSIDE FROM <scope>`), Delete Triangles by Polygons...
 (`surfaceDeleteTrianglesDialog`, `DELETE TRIANGLES INSIDE|OUTSIDE FROM <scope>`:
 the union of any number of polygons, which the one-pick tool cannot make
-- OUTSIDE of the first of two already deletes what the second would keep) and
+- OUTSIDE of the first of two already deletes what the second would keep),
+Delete Breaklines Along Lines... (`surfaceDeleteBreaklineDialog`, menu item
+`terrainSurfaceDeleteBreakline`, `DELETE BREAKLINE FROM <scope>`: the lines of
+a layer, the selection or a view, with the scope's filter) and
 Add Points from the Drawing... (`surfaceAddPointsDialog`, `ADD POINTS FROM
 <scope>`). Each has the shared scope widget with no tick box in front of it
 (the scope is what the dialog is about), the surface, the line it will run,
@@ -543,6 +573,15 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   polygon refused, a point in a square hole (area back to 400) and beyond an L's
   notch (500), two abutting squares merged (200) and a pyramid with a top that
   touches two faces at a point (400).
+- Breaklines: `TinEdit.DeletingABreaklineMakesItsEdgesOrdinaryAndChangesNoTriangleNorVertex`
+  (six lattice edges of a breakline along a row, cleared by a line that runs
+  past both ends, the triangles and vertices equal, the middle vertex refused
+  by DELETE POINT before and taken after), the same for a line over half of it
+  (three edges, and the vertex at the end of the half that stays still
+  refused), a line along nothing, across it, short of it and 2e-7 above it
+  (beyond the tolerance, 1e-7: nothing; 5e-8 above: all six), a closed line's
+  closing side, several lines, the constrained rim held and counted, and every
+  refusal.
 - `tests/cad/terrain/test_surface_edit_verbs.cpp`: the verbs through the
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
   refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`;
@@ -615,9 +654,6 @@ are measured on one machine in one run.
   one undo step (the surface handed to the job as the shared immutable pointer
   it already is, and `Document::surfacesCommand` built where it lands), which
   is a change of the window's executor and not of this area.
-- **Deleting a breakline**, or a vertex on one: refused, by the rule that
-  constrained edges are kept. A DELETE BREAKLINE that unflags edges is the
-  natural addition.
 - **Moving a vertex in plan**, and editing a vertex's level by dragging in
   the window: only ADD POINT at an existing vertex relevels it.
 - **A DELETE LONG that works from the rim inwards**, as some packages trim a

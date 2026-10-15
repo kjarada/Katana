@@ -751,6 +751,112 @@ Result<TinEditResult> addBreaklines(const TinSurface& surface, std::span<const B
     return finishPatch(surface, std::move(*output));
 }
 
+Result<TinEditResult> deleteBreaklines(const TinSurface& surface, std::span<const Polyline2> lines)
+{
+    if (const Status status = requireSurface(surface); !status) {
+        return status.error();
+    }
+    if (lines.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no line was given");
+    }
+    // The segments of the lines, each with its box grown by the tolerance.
+    struct Piece {
+        Segment2 segment;
+        katana::geometry::Box2 box;
+    };
+    std::vector<Piece> pieces;
+    for (std::size_t l = 0; l < lines.size(); ++l) {
+        const Polyline2& line = lines[l];
+        const std::string which = lines.size() > 1 ? " line=" + std::to_string(l) : std::string{};
+        if (line.vertices.size() < 2) {
+            return makeError(ErrorCode::InvalidArgument, "a line needs at least two vertices",
+                             "vertices=" + std::to_string(line.vertices.size()) + which);
+        }
+        for (const Point2& vertex : line.vertices) {
+            if (!vertex.isFinite()) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "a line has a non-finite coordinate", which);
+            }
+            if (!detail::withinMagnitude(vertex.x) || !detail::withinMagnitude(vertex.y)) {
+                return detail::tooLarge(describePosition(vertex));
+            }
+        }
+        const std::size_t count = line.closed && line.vertices.size() > 2 ? line.vertices.size()
+                                                                          : line.vertices.size() - 1;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Segment2 segment{line.vertices[i], line.vertices[(i + 1) % line.vertices.size()]};
+            if (segment.length() <= tol::kGeometric) {
+                continue; // a repeated vertex: no length, and along no edge
+            }
+            pieces.push_back({segment, segment.boundingBox().inflated(tol::kGeometric)});
+        }
+    }
+    if (pieces.empty()) {
+        return makeError(ErrorCode::InvalidGeometry, "the line has no length: its vertices coincide");
+    }
+    const auto lies = [&pieces](const Point2& a, const Point2& b) {
+        return std::ranges::any_of(pieces, [&a, &b](const Piece& piece) {
+            return piece.box.contains(a) && piece.box.contains(b) &&
+                   piece.segment.distanceTo(a) <= tol::kGeometric &&
+                   piece.segment.distanceTo(b) <= tol::kGeometric;
+        });
+    };
+
+    const auto& vertices = surface.vertices();
+    const auto& triangles = surface.triangles();
+    std::vector<std::uint8_t> masks = surface.constrainedEdges();
+    std::size_t cleared = 0;
+    std::size_t held = 0;
+    for (std::uint32_t t = 0; t < surface.triangleCount(); ++t) {
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            if (!surface.isEdgeConstrained(t, k)) {
+                continue;
+            }
+            const std::uint32_t across = surface.neighbors()[t][k];
+            // Each edge once: a rim edge is only ever seen from its one triangle,
+            // an interior one from the lower of its two.
+            if (across != kNoTriangle && across < t) {
+                continue;
+            }
+            const std::uint32_t a = triangles[t][k];
+            const std::uint32_t b = triangles[t][(k + 1) % 3];
+            if (!lies(planOf(vertices[a]), planOf(vertices[b]))) {
+                continue;
+            }
+            if (across == kNoTriangle) {
+                ++held;
+                continue;
+            }
+            std::uint32_t j = 0;
+            while (j < 3 && !(triangles[across][j] == b && triangles[across][(j + 1) % 3] == a)) {
+                ++j;
+            }
+            if (j == 3) {
+                return makeError(ErrorCode::Internal, "the triangle across the edge does not share it");
+            }
+            masks[t] = static_cast<std::uint8_t>(masks[t] & ~(1u << k));
+            masks[across] = static_cast<std::uint8_t>(masks[across] & ~(1u << j));
+            ++cleared;
+        }
+    }
+    if (cleared == 0) {
+        TinEditResult unchangedResult = detail::unchanged(surface);
+        unchangedResult.report.edgesHeld = held;
+        return unchangedResult;
+    }
+    auto cleaned = detail::TinSurfaceFactory::assemble(vertices, triangles, surface.neighbors(),
+                                                       std::move(masks));
+    if (!cleaned) {
+        return cleaned.error();
+    }
+    TinEditResult result;
+    result.report = detail::reportOf(surface, *cleaned);
+    result.report.edgesCleared = cleared;
+    result.report.edgesHeld = held;
+    result.surface = std::move(*cleaned);
+    return result;
+}
+
 namespace {
 
 // A polygon as a cut takes it: cleaned (cleanPolygon), with its box and its

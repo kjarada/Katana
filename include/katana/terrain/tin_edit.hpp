@@ -79,6 +79,11 @@ struct TinEditReport {
     std::size_t pointsHeld = 0;
     // Vertices made where a new line crossed an edge of the surface.
     std::size_t crossings = 0;
+    // deleteBreaklines: the breakline edges made ordinary edges, and the
+    // constrained edges along the line it left alone on the rim (the
+    // surface's boundary, not a breakline).
+    std::size_t edgesCleared = 0;
+    std::size_t edgesHeld = 0;
     // The largest change of level at any vertex (heights, smoothing), or the
     // bound on how far a thinned surface lies from the original (thinning).
     double largestChange = 0.0;
@@ -223,6 +228,24 @@ struct BreaklineVertex {
 //   TriangulationFailure  from the kernel.
 [[nodiscard]] katana::core::Result<TinEditResult>
 addBreakline(const TinSurface& surface, std::span<const BreaklineVertex> vertices, bool closed);
+
+// The constrained edges that lie along any of `lines` made ordinary edges, so
+// a breakline the surface was given (or a seam) is no longer one: the triangles
+// and the vertices are exactly as they were, only the flags go, on both sides
+// of each edge. An edge lies along a line when both its ends are within
+// tolerance::kGeometric of ONE segment of it (a line's closing segment
+// included when it is closed), so a line over part of a breakline clears the
+// edges of that part and no other, and a vertex of the line need not be a vertex
+// of the surface. The levels of the line are not asked. An edge on the rim is
+// never cleared - a constrained rim edge is the surface's boundary, which
+// BOUNDARY and HOLE make - and is counted in `edgesHeld`. A vertex whose every
+// constrained edge was cleared can then be deleted (deletePoints). No edge
+// along the lines is no change: the surface as it was. Fails with
+//   InvalidArgument  no line, a line of fewer than two vertices, a coordinate
+//                    that is not finite or is beyond kMostMagnitude;
+//   InvalidGeometry  lines whose vertices all coincide.
+[[nodiscard]] katana::core::Result<TinEditResult>
+deleteBreaklines(const TinSurface& surface, std::span<const Polyline2> lines);
 
 // One line of an edit that adds several (BreaklineVertex's rules).
 struct BreaklineInput {

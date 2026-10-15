@@ -243,6 +243,7 @@ struct Outcome {
     tin::TinSurface surface;
     tin::TinEditReport report;
     bool levels = false; // the edit changes levels: report largest_change
+    bool edges = false;  // the edit clears breakline edges: report edges_cleared, edges_held
 };
 
 void accumulate(Outcome& outcome, const tin::TinEditResult& step, bool first)
@@ -300,6 +301,10 @@ std::string surfaceRecord(std::string_view name, std::string_view operation,
                          " moved=" + std::to_string(r.pointsMoved) +
                          " held=" + std::to_string(r.pointsHeld) +
                          " crossings=" + std::to_string(r.crossings);
+    if (outcome.edges) {
+        record += " edges_cleared=" + std::to_string(r.edgesCleared) +
+                  " edges_held=" + std::to_string(r.edgesHeld);
+    }
     if (outcome.levels) {
         record += " largest_change=" + number(r.largestChange);
     }
@@ -438,7 +443,8 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
     if (op == "DELETE") {
         if (at >= words.size()) {
             return makeError(ErrorCode::ParseFailure,
-                             "DELETE needs TRIANGLE, TRIANGLES, LONG, THIN, POINT or POINTS");
+                             "DELETE needs TRIANGLE, TRIANGLES, LONG, THIN, POINT, POINTS or "
+                             "BREAKLINE");
         }
         const std::string what = katana::core::uppered(words[at++]);
         if (what == "TRIANGLE") {
@@ -577,9 +583,35 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
                        !s) {
                 return s.error();
             }
+        } else if (what == "BREAKLINE") {
+            // The breakline edges along the lines, made ordinary: the surface's
+            // triangles and vertices as they were, the flags gone.
+            edit.operation = "delete_breakline";
+            edit.outcome.edges = true;
+            auto geometry = readGeometry(document, words, at, DataKind::Line, views);
+            if (!geometry) {
+                return geometry.error();
+            }
+            edit.record = geometry->record;
+            if (geometry->shapes.empty()) {
+                edit.outcome = nothing(surface);
+                edit.outcome.edges = true;
+                edit.notRun = "the scope took no line";
+                return edit;
+            }
+            std::vector<Polyline2> lines;
+            lines.reserve(geometry->shapes.size());
+            for (const DrawingShape& shape : geometry->shapes) {
+                lines.push_back(shape.outline);
+            }
+            if (Status s = take(one(tin::deleteBreaklines(surface, lines))); !s) {
+                return s.error();
+            }
+            edit.outcome.edges = true;
         } else {
             return makeError(ErrorCode::ParseFailure,
-                             "DELETE takes TRIANGLE, TRIANGLES, LONG, THIN, POINT or POINTS",
+                             "DELETE takes TRIANGLE, TRIANGLES, LONG, THIN, POINT, POINTS or "
+                             "BREAKLINE",
                              words[at - 1]);
         }
     } else if (op == "FLIP") {
@@ -1081,7 +1113,8 @@ Result<std::string> runSurfaceEditVerb(Document& document, const std::vector<std
 std::string surfaceEditHelpSummary()
 {
     return R"(Surfaces  SURFACE EDIT name DELETE TRIANGLE|POINT x,y | DELETE TRIANGLES INSIDE|OUTSIDE poly
-          | DELETE LONG m | DELETE THIN deg | DELETE POINTS INSIDE poly | FLIP x,y | ADD POINT
+          | DELETE LONG m | DELETE THIN deg | DELETE POINTS INSIDE poly | DELETE BREAKLINE line
+          | FLIP x,y | ADD POINT
           x,y,z ... | ADD POINTS pts | BREAKLINE line | BOUNDARY poly | HOLE poly | RAISE|LOWER
           dz | SETLEVEL z | SCALE f [base=z] [INSIDE poly] | SMOOTH [passes=] [weight=] [INSIDE
           poly] | THIN tol    SURFACE MERGE a b ... NAME new | PASTE top INTO base [NAME new]
@@ -1104,6 +1137,8 @@ SURFACE EDIT <name> DELETE THIN <degrees>          triangles with an angle below
 SURFACE EDIT <name> DELETE POINT x,y [reach=<m>]   the vertex of the triangle under x,y nearest
                                                    it (within reach); not one on a breakline
 SURFACE EDIT <name> DELETE POINTS INSIDE <polygon> breakline and boundary vertices are held
+SURFACE EDIT <name> DELETE BREAKLINE <line>        the breakline edges along the line become
+                                                   ordinary edges; the triangles are as they were
 SURFACE EDIT <name> FLIP x,y                       the edge nearest x,y of the triangle under it
 SURFACE EDIT <name> ADD POINT x,y,z [x,y,z ...]    off the surface, a point extends it
 SURFACE EDIT <name> ADD POINTS <points>            points and levelled vertices of the entities

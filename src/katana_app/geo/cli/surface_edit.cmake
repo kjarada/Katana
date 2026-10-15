@@ -61,7 +61,7 @@ add_test(NAME cli.surface_edit_help_names_the_family
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "HELP SURFACE EDIT")
 set_tests_properties(cli.surface_edit_help_names_the_family PROPERTIES
-    PASS_REGULAR_EXPRESSION "SURFACE EDIT <name> FLIP x,y.*SURFACE PASTE <top> INTO <base>")
+    PASS_REGULAR_EXPRESSION "SURFACE EDIT <name> DELETE BREAKLINE <line>.*SURFACE EDIT <name> FLIP x,y.*SURFACE PASTE <top> INTO <base>")
 
 # A surface nothing has is refused, and the session exits with a failure.
 add_test(NAME cli.surface_edit_of_no_such_surface_is_refused
@@ -203,4 +203,33 @@ add_test(NAME cli.surface_merge_of_two_abutting_clips_is_all_of_the_surface
             -c "SURFACE INFO merged")
 set_tests_properties(cli.surface_merge_of_two_abutting_clips_is_all_of_the_surface PROPERTIES
     PASS_REGULAR_EXPRESSION "surface name=merged operation=merge .*surface name=merged triangles=[0-9]+ .*area plan=23829\\.750 "
+    FAIL_REGULAR_EXPRESSION "error")
+
+# DELETE BREAKLINE makes the edges along a line ordinary and changes no
+# triangle. The row y = 51.25 of the sample's lattice (vertices at -4.25 + 1.5 k)
+# from x = 0.25 (k = 3) to 99.25 (k = 69) is 66 lattice edges; a draped
+# breakline along it flags them all, DELETE BREAKLINE clears the 66, and the
+# vertex (49.75, 51.25) in the middle of it - a vertex DELETE POINT refuses
+# while the breakline stands - goes.
+add_test(NAME cli.surface_edit_delete_breakline_clears_the_edges_and_the_vertex_can_go
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_surface_edit_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE EDIT ground BREAKLINE 0.25,51.25 99.25,51.25"
+            -c "SURFACE EDIT ground DELETE BREAKLINE 0.25,51.25 99.25,51.25"
+            -c "SURFACE EDIT ground DELETE POINT 49.75,51.25")
+set_tests_properties(cli.surface_edit_delete_breakline_clears_the_edges_and_the_vertex_can_go PROPERTIES
+    PASS_REGULAR_EXPRESSION "operation=breakline .*changed=yes.*operation=delete_breakline .*edges_cleared=66 edges_held=0 changed=yes.*operation=delete_point .*points_removed=1 "
+    FAIL_REGULAR_EXPRESSION "error")
+
+# A line along no breakline is reported, not refused: nothing cleared, no step,
+# and the session goes on.
+add_test(NAME cli.surface_edit_delete_breakline_along_nothing_is_reported_and_the_session_goes_on
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_surface_edit_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE EDIT ground DELETE BREAKLINE 0,0 10,10"
+            -c "SURFACE INFO ground")
+set_tests_properties(cli.surface_edit_delete_breakline_along_nothing_is_reported_and_the_session_goes_on PROPERTIES
+    PASS_REGULAR_EXPRESSION "operation=delete_breakline .*edges_cleared=0 edges_held=0 changed=no[\r\n]+surface name=ground triangles=[0-9]+ "
     FAIL_REGULAR_EXPRESSION "error")
