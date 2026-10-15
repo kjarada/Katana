@@ -358,7 +358,8 @@ road job is measured and paid.
 - **Reach:** `left=` and `right=` from the centreline; absent, the diagonal
   of the ground the two surfaces share, so a section reaches across all of
   it wherever it is cut. That is right on a straight run and wrong anywhere
-  the alignment turns: see "Sections that cross" below, which refuses it.
+  the alignment turns or doubles back: see "Sections that cross" and
+  "Stretches side by side" below, which refuse it.
 - **Sections that cross are refused.** The average end area takes the volume
   of a panel from the areas of the two sections that bound it, and is right
   only while the panels tile the ground. Where two sections cross - the
