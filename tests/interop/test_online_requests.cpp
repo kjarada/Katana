@@ -207,6 +207,13 @@ TEST(OnlineWeb, AFailureIsExplainedByWhatActuallyStoppedIt)
         explain(0, 77, "error adding trust anchors from file: C:/k/bin/../etc/ssl/certs/ca-bundle.crt");
     EXPECT_EQ(noBundle.code, ErrorCode::FileImportFailure);
     EXPECT_TRUE(says(noBundle, "ca-bundle.crt")) << noBundle.message;
+    // It names the file libcurl was given, as libcurl wrote it - a path mangled
+    // by a code page shows as it arrived - and no longer says to reinstall as if
+    // that were the cure for every cause (an install under a folder named outside
+    // the ANSI code page was not helped by it).
+    EXPECT_TRUE(says(noBundle, "C:/k/bin/../etc/ssl/certs/ca-bundle.crt")) << noBundle.message;
+    EXPECT_TRUE(says(noBundle, "CURL_CA_BUNDLE")) << noBundle.message;
+    EXPECT_FALSE(says(noBundle, "reinstall or rebuild")) << noBundle.message;
     EXPECT_TRUE(says(explain(0, 35, "error adding trust anchors from file: x"), "certificates"));
     EXPECT_TRUE(says(explain(0, 60, "SSL certificate problem"), "could not be verified"));
 

@@ -12,6 +12,14 @@
 
 #include <cpl_conv.h>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -22,6 +30,7 @@
 #include <vector>
 
 #include "katana/core/library_data.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
 
@@ -132,8 +141,37 @@ TEST(GdalAdapter, GdalIsPointedAtTheCertificatesBesideLibcurl)
     const char* given = CPLGetConfigOption("CURL_CA_BUNDLE", nullptr);
     ASSERT_NE(given, nullptr);
     EXPECT_TRUE(std::filesystem::equivalent(given, *certificates)) << given;
+#elif defined(_WIN32)
+    // MSYS2's libcurl works out where its certificates are through the ANSI code
+    // page, so an install under a folder with a letter outside it (a profile named
+    // "Lukasz" with the stroke, or in Han characters) looked for a file under a
+    // path of '?'s and every https:// request failed. The adapter now hands libcurl
+    // the path, wide, in UTF-8: etc/ssl/certs/ca-bundle.crt beside the DLL's bin
+    // folder, wherever that folder is.
+    if (!katana::core::environmentVariable("CURL_CA_BUNDLE").empty() ||
+        !katana::core::environmentVariable("SSL_CERT_FILE").empty()) {
+        GTEST_SKIP() << "the environment names the certificates already";
+    }
+    (void)katana::gis::gdalVersion(); // registers GDAL
+    const HMODULE curl = GetModuleHandleW(L"libcurl-4.dll");
+    if (curl == nullptr) {
+        GTEST_SKIP() << "libcurl is not MSYS2's libcurl-4.dll in this build";
+    }
+    std::wstring dll(1024, L'\0');
+    dll.resize(GetModuleFileNameW(curl, dll.data(), static_cast<DWORD>(dll.size())));
+    const std::filesystem::path expected =
+        std::filesystem::path(dll).parent_path().parent_path() / "etc" / "ssl" / "certs" /
+        "ca-bundle.crt";
+    std::error_code ignored;
+    if (!std::filesystem::is_regular_file(expected, ignored)) {
+        GTEST_SKIP() << "no etc/ssl/certs/ca-bundle.crt beside libcurl's bin folder";
+    }
+    const char* given = CPLGetConfigOption("CURL_CA_BUNDLE", nullptr);
+    ASSERT_NE(given, nullptr) << "GDAL was not told where the certificates are";
+    // Given as UTF-8, and the file it names is the one the DLL's folder holds.
+    EXPECT_TRUE(std::filesystem::equivalent(katana::core::pathFromUtf8(given), expected)) << given;
 #else
-    GTEST_SKIP() << "MSYS2's libcurl finds the certificates the deploy puts beside it";
+    GTEST_SKIP() << "no platform's rule for the certificates is written for this one";
 #endif
 }
 

@@ -770,6 +770,26 @@ Each yields to the user's own setting (`PROJ_DATA`, `GDAL_DATA`,
 `CURL_CA_BUNDLE`, `SSL_CERT_FILE`), and does nothing for a distribution's
 library, which has no such directory beside it.
 
+Windows has a fourth row of its own, and it is the one that breaks when the
+install folder is named outside the ANSI code page. MSYS2's libcurl works out
+`etc/ssl/certs/ca-bundle.crt` (beside `bin/`) from the location of its own DLL
+through that code page, so under `C:\Users\Łukasz\AppData\Local\Programs\Katana`
+- the installer's default folder is under the profile, whose name "can hold
+any character" - it looked for a file under `Lukasz` or `??`, and every
+`https://` request failed before reaching a server: Online Data, `/vsicurl/`,
+the update check (`reason=offline`, which the automatic check swallows, so
+such a copy never updated). `locateCertificates` now finds `libcurl*.dll`
+among the loaded modules with the wide API, as `locateGdalData` finds GDAL,
+and hands GDAL the path of `etc/ssl/certs/ca-bundle.crt` beside its `bin/` in
+UTF-8 (`CURL_CA_BUNDLE`, which GDAL gives libcurl as `CURLOPT_CAINFO`;
+OpenSSL opens a UTF-8 path correctly - tried 2026-10-15 with the shipped
+`libcurl-4.dll` under `Łukasz_测试`). The user's own `CURL_CA_BUNDLE` and
+`SSL_CERT_FILE` are read wide (`core::environmentVariable`) and handed on the
+same way, so the documented override works from such a folder too
+(`GdalAdapter.GdalIsPointedAtTheCertificatesBesideLibcurl`). The refusal for
+an unreadable bundle names the file libcurl was given and no longer says only
+to reinstall (`explainHttpFailure`).
+
 Qt's plugins are copied from the prefix into `lib/qt6/plugins`, and
 `bin/qt.conf` points Qt at them; without it Qt asks the prefix compiled into
 it, the build machine's.

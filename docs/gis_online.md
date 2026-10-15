@@ -454,7 +454,7 @@ published shapes.
 | 401, 403 | `FileImportFailure`: it may need a key, not allow this use, or not answer from where this computer is |
 | CloudFront's own 403 "Request blocked" page | `FileImportFailure`: the service may answer only from its own country |
 | a proxy refuses the host | `FileImportFailure`: the host may be blocked where Katana runs |
-| the certificate bundle beside libcurl is missing (curl 77, "trust anchors") | `FileImportFailure` naming `etc/ssl/certs/ca-bundle.crt` |
+| the certificate bundle beside libcurl cannot be read (curl 77, "trust anchors") | `FileImportFailure` carrying libcurl's own words, which name the file it was given, and `etc/ssl/certs/ca-bundle.crt` / `CURL_CA_BUNDLE` as the way out |
 | the service's certificate does not verify (curl 60) | `FileImportFailure`: a proxy or antivirus inspecting `https://` may be in the way |
 | no answer in time | retried, then `FileImportFailure` saying how long it waited |
 | cancelled | `InvalidState` "cancelled"; nothing applied |

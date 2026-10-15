@@ -712,6 +712,10 @@ toolchain's bundle there too. Until it did, every online request from
 `bin/katana.exe` failed with "error adding trust anchors from file" while the
 tests passed - they load libcurl from the toolchain, beside its own bundle.
 `runtime_has_the_certificates_https_is_checked_against` checks it is there.
+libcurl finds that path through the ANSI code page, which a folder named
+outside it (a profile "Łukasz") breaks, so `locateCertificates` also hands
+GDAL the real path in UTF-8 on Windows (`docs/release.md`, the table of
+libraries' data).
 
 The bundle is about 504 MB without the update helper. Measured on 2026-10-13
 in a Release build tree, whose `bin/` and `share/` are what the bundle is
