@@ -796,9 +796,14 @@ mistake in the writer and the same mistake in the reader cannot agree:
   test had pinned the wrong spelling. Counts are written as integers now (see
   "Quantities"). Nothing else was reported: the attribute counts, the
   features' mandatory inverses, NoVoidElement, each quantity's WR and
-  UniqueQuantityNames all passed, with the EXPRESS rules on (0.8.5). The fixed
-  writer's file has to be judged again before this is called clean, and
-  buildingSMART's rules have not been run on the road model at all.
+  UniqueQuantityNames all passed, with the EXPRESS rules on (0.8.5). Checked
+  on a corridor with a barrier, a sign, guide posts, a fence, a light, a wall
+  and a marking written by the old writer: 9 findings, all the nine
+  `IfcQuantityCount`s; the same file with those nine spelled as integers - what
+  the fixed writer writes - has **0 findings** under 0.8.5 (EXPRESS rules on)
+  and 0.9.0. The fixed writer's own file has still to be judged before this is
+  called clean, and buildingSMART's rules have not been run on the road model
+  at all.
   `tools/check_ifc.py` runs under both versions (0.9 dropped
   `entity_instance.wrapped_data`, which the alignment evaluator used).
 - **Import**: all 46 files of buildingSMART's IFC 4.3 sample models

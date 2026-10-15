@@ -482,10 +482,7 @@ updater's exchanges (`gis::httpExchange` asks GDAL to set up its handle):
 Linux and macOS check against the bundle the deploy puts at `ssl/cacert.pem`
 (`docs/release.md`) and have no store setting.
 
-Not done: the system proxy. libcurl reads `HTTPS_PROXY`, not Windows's own
-proxy settings (WinHTTP, a PAC script), so a network with an explicit proxy
-needs `GDAL_HTTP_PROXY` (or `HTTPS_PROXY`) set by hand. The transparent proxy
-of the network this was checked on needed nothing.
+The system proxy is a separate matter, and not done (below).
 
 ## Failure modes
 
@@ -509,6 +506,11 @@ of the network this was checked on needed nothing.
 
 ## Not done
 
+- **The system proxy** (WinHTTP, a PAC script) is not read: libcurl reads
+  `HTTPS_PROXY` and GDAL `GDAL_HTTP_PROXY`, so a network with an explicit proxy
+  needs one of them set by hand ("Which certificates are trusted"). The
+  transparent proxy of the network the certificate handling was checked on
+  needed nothing, so this is traced from the code, not reproduced.
 - The catalogue's `verified` fields are still empty for the services that
   answered on 2026-09-25 (above); filling them in is the owner's call.
 - WMTS is read only on the Web Mercator (GoogleMapsCompatible) grid; a service
