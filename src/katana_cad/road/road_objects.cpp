@@ -2219,24 +2219,53 @@ bim::BimModel buildRoadObject(const PlacementContext& context, const RoadObject&
             model.objects = makeMarking(object, placement);
             break;
         }
-        if (model.objects.empty()) {
-            fail("its placement gives nowhere to stand it");
-        }
-        // A solid with no faces is one that could not be made - a section that
-        // does not triangulate, a sweep of a single point - and would be
-        // counted and written to IFC as an element with no shape.
-        for (const bim::BimObject& part : model.objects) {
-            if (part.mesh.faces.empty()) {
-                fail(std::format("{} could not be made into a solid: its placement or its "
-                                 "dimensions give it no shape",
-                                 part.id));
-            }
+        if (const auto why = shapeProblem(model.objects)) {
+            fail(*why);
         }
     } catch (const Unplaceable& problem) {
         model.objects.clear();
         model.problems.push_back({"object " + object.id, problem.message});
     }
     return model;
+}
+
+std::optional<std::string> shapeProblem(std::span<const bim::BimObject> parts)
+{
+    if (parts.empty()) {
+        return "its placement gives nowhere to stand it";
+    }
+    // A solid with no faces is one that could not be made - a section that
+    // does not triangulate, a sweep of a single point - and would be
+    // counted and written to IFC as an element with no shape.
+    for (const bim::BimObject& part : parts) {
+        if (part.mesh.faces.empty()) {
+            return std::format("{} could not be made into a solid: its placement or its "
+                               "dimensions give it no shape",
+                               part.id);
+        }
+    }
+    return std::nullopt;
+}
+
+Status checkBuilt(const RoadObject& object, const bim::BimModel& built)
+{
+    if (!built.problems.empty()) {
+        std::string where = object.id;
+        if (object.placement.source != katana::entity::kInvalidEntityId) {
+            where += " (#" + std::to_string(object.placement.source) + ")";
+        }
+        return makeError(ErrorCode::InvalidArgument, built.problems.front().message, where);
+    }
+    for (const bim::BimObject& part : built.objects) {
+        if (!isClosedMesh(part.mesh)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::format("{} is not a closed solid; its placement or its "
+                                         "dimensions make a shape that does not close",
+                                         part.id),
+                             object.id);
+        }
+    }
+    return {};
 }
 
 namespace {

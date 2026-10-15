@@ -262,30 +262,10 @@ Result<RoadObjectSet> editableSet(const Document& document)
 
 // Made, or refused naming what stopped it: what every edit checks before it
 // commits, so a definition the model would only list as a problem is never
-// stored.
+// stored (checkBuilt, road_objects.hpp).
 Status checkBuilds(const PlacementContext& context, const RoadObject& object)
 {
-    const bim::BimModel built = buildRoadObject(context, object);
-    if (!built.problems.empty()) {
-        std::string where = object.id;
-        if (object.placement.source != katana::entity::kInvalidEntityId) {
-            where += " (#" + std::to_string(object.placement.source) + ")";
-        }
-        return makeError(ErrorCode::InvalidArgument, built.problems.front().message, where);
-    }
-    // Every solid is closed (road_objects.hpp): the IFC export writes it as a
-    // closed face set and its volume is read off the triangles. Checked here,
-    // once per edit, rather than on every rebuild of the model.
-    for (const bim::BimObject& part : built.objects) {
-        if (!isClosedMesh(part.mesh)) {
-            return makeError(ErrorCode::InvalidArgument,
-                             std::format("{} is not a closed solid; its placement or its "
-                                         "dimensions make a shape that does not close",
-                                         part.id),
-                             object.id);
-        }
-    }
-    return {};
+    return checkBuilt(object, buildRoadObject(context, object));
 }
 
 // A road object is a definition kept by id, not a drawn entity a scope can

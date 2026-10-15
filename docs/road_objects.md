@@ -199,7 +199,13 @@ not the display: the 3D view draws both faces of every triangle (it never
 culls: `render::RenderOptions::backfaceCull` is off, because a surface is
 looked at from below too, and the GPU pipelines set no cull mode). A solid
 that comes out with no faces, or open, is refused by the verb that places it
-and listed as a problem if it appears later.
+and listed as a problem if it appears later. The two refusals are functions of
+plain data - `cad::road::shapeProblem` (no part at all, or a part with no faces:
+what `buildRoadObject` lists) and `cad::road::checkBuilt` (a problem the model
+was left with, or a part that is not closed: what every edit checks before it
+stores) - because no maker gives either input any more, and a guard that no
+input reaches was once disabled without a test failing; the tests hand each the
+empty part and the open mesh.
 
 - **A sweep**: a cross-section in (u across, left positive; v up) swept along
   the path. The section stays VERTICAL - a barrier stands plumb on a grade,
@@ -503,7 +509,9 @@ Document, so asking leaves no line in the history.
   (a wall's length once, a light's poles); point objects round a closed square
   and over a repeated vertex; a culvert on a surface with an end off the
   alignment; an arc's heights; the cap on a run and the dash under a
-  millimetre; `spacing=` and `crossfall=` refused where nothing reads them.
+  millimetre; `spacing=` and `crossfall=` refused where nothing reads them;
+  the two guards handed their input (`RoadObjects.ObjectsMadeOfNothingOrOfAPartWithNoFacesAreNoObjectAndSayWhy`,
+  `RoadObjects.ABuiltObjectWithAnOpenPartOrAProblemIsRefusedBeforeItIsStored`).
 - `tests/cad/road/test_road_object_verbs.cpp` - the verbs through the
   interpreter: one undo step with the layer and its parents, the RoadModel
   notification, a scope of lines all or nothing, preview, save and open; a
