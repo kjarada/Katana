@@ -90,6 +90,20 @@ constexpr double kPathStep = 1.0;
 // A station this close to an end of the alignment is that end: a station
 // typed as the end the reply gave must not fall off it by a rounding.
 constexpr double kStationTolerance = 1e-6;
+// Two points of a placed line this close in plan are one: a micrometre, below
+// anything set out and above the noise of a coordinate typed twice.
+constexpr double kSamePosition = 1e-6;
+// The solids a mark of a broken line is made of are swept with the same
+// millimetre a sweep passes points closer than over (road_object_mesh.cpp's
+// kSamePoint): a dash shorter than it has no solid.
+constexpr double kShortestMark = 1e-3;
+// The most posts, signs, poles or marks one definition makes. Each is a
+// solid, the model is made again after every command, and a spacing typed as
+// 0.001 for 0.1 would otherwise ask for a hundred times the memory of a run
+// that was merely long: a million posts took 5.7 s and 2.3 GB to make. Ten
+// thousand is 19 km of barrier at its 1.905 m posts or 120 km of centre line;
+// a longer run is placed in lengths.
+constexpr double kMaxPlacedParts = 10000.0;
 
 // ---- the parameter tables -----------------------------------------------------------------
 
@@ -384,7 +398,8 @@ class Path {
     explicit Path(std::vector<PathPoint> points)
     {
         for (PathPoint& point : points) {
-            if (!points_.empty() && points_.back().position.distanceTo(point.position) < 1e-6) {
+            if (!points_.empty() &&
+                points_.back().position.distanceTo(point.position) < kSamePosition) {
                 continue;
             }
             const double step =
@@ -454,17 +469,33 @@ class Path {
     std::vector<double> along_;
 };
 
+// How many whole spacings fit in `length`, refused when a definition would
+// make more than kMaxPlacedParts of something at that spacing: the check comes
+// before anything is allocated, so an absurd spacing is a refusal naming it
+// and not an out-of-memory.
+std::size_t wholeSpacings(double length, double spacing, std::string_view of)
+{
+    const double whole = std::floor(length / spacing + 1e-9);
+    if (!(whole + 1.0 <= kMaxPlacedParts)) {
+        fail(std::format("{} every {} m along {} m would make more than the {} a definition "
+                         "takes; place the run in lengths, or give a larger spacing",
+                         of, real(spacing), real(length),
+                         static_cast<std::size_t>(kMaxPlacedParts)));
+    }
+    return static_cast<std::size_t>(whole);
+}
+
 // Distances from 0 to `length` every `spacing`, the end always among them:
 // the posts of a barrier or a fence, the end post where the spacing does not
 // come out even.
 std::vector<double> postDistances(double length, double spacing)
 {
     std::vector<double> out;
-    const auto whole = static_cast<std::size_t>(std::floor(length / spacing + 1e-9));
+    const std::size_t whole = wholeSpacings(length, spacing, "posts");
     for (std::size_t k = 0; k <= whole; ++k) {
         out.push_back(std::min(static_cast<double>(k) * spacing, length));
     }
-    if (length - out.back() > 1e-6) {
+    if (length - out.back() > kSamePosition) {
         out.push_back(length);
     }
     return out;
@@ -476,11 +507,21 @@ std::vector<double> postDistances(double length, double spacing)
 std::vector<double> everySpacing(double length, double spacing)
 {
     std::vector<double> out;
-    const auto whole = static_cast<std::size_t>(std::floor(length / spacing + 1e-9));
+    const std::size_t whole = wholeSpacings(length, spacing, "objects");
     for (std::size_t k = 0; k <= whole; ++k) {
         out.push_back(static_cast<double>(k) * spacing);
     }
     return out;
+}
+
+// True when the path comes back to where it started: a closed polyline, or a
+// line drawn out and back. Whatever stands at its end then stands on what
+// stands at its start.
+bool returnsToStart(const Path& path)
+{
+    const std::vector<PathPoint>& points = path.points();
+    return points.size() > 1 &&
+           points.front().position.distanceTo(points.back().position) < kSamePosition;
 }
 
 // The posts of a barrier or a fence along `path`: postDistances, less the
@@ -489,11 +530,35 @@ std::vector<double> everySpacing(double length, double spacing)
 std::vector<double> postsAlong(const Path& path, double spacing)
 {
     std::vector<double> out = postDistances(path.length(), spacing);
-    const std::vector<PathPoint>& points = path.points();
-    if (out.size() > 1 && points.front().position.distanceTo(points.back().position) < 1e-6) {
+    if (out.size() > 1 && returnsToStart(path)) {
         out.pop_back();
     }
     return out;
+}
+
+// The vertices of a placed line that stand for a corner of it, by index. A
+// vertex on the one before it is that corner again - a node edited twice
+// leaves one - and has no direction of its own; the closing vertex of a line
+// that comes back to its start is its first corner again, and a point object
+// stood on it would be the first one's twin. Both would make an empty solid
+// (no direction to stand it) or a doubled count (docs/road_objects.md,
+// "Placing").
+std::vector<std::size_t> cornersOf(std::span<const PlacedVertex> vertices)
+{
+    std::vector<std::size_t> kept;
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        if (!kept.empty() &&
+            vertices[kept.back()].position.distanceTo(vertices[i].position) < kSamePosition) {
+            continue;
+        }
+        kept.push_back(i);
+    }
+    if (kept.size() > 2 &&
+        vertices[kept.front()].position.distanceTo(vertices[kept.back()].position) <
+            kSamePosition) {
+        kept.pop_back();
+    }
+    return kept;
 }
 
 // One object stood on its ground: what a placement resolves to before any
@@ -559,6 +624,15 @@ class Placement {
             if (surface_ == nullptr) {
                 fail(std::format("surface {} does not exist", placement.surface));
             }
+        }
+        // Only the profile is carried out to an offset; a crossfall given to
+        // an object that stands on anything else would be echoed and ignored.
+        if (placement.crossfall != 0.0 && source_ != HeightSource::Profile) {
+            fail(std::format("crossfall= carries the design profile out to the offset, and this "
+                             "object stands on {}; leave crossfall= out, or stand it on the "
+                             "profile",
+                             source_ == HeightSource::Surface ? "a surface"
+                                                              : "the heights of its line or points"));
         }
     }
 
@@ -730,30 +804,57 @@ class Placement {
             }
             return out;
         }
-        if (placement.kind == PlacementKind::Points || !placement.spacing) {
-            const std::size_t count = placement.vertices.size();
-            for (std::size_t i = 0; i < count; ++i) {
+        if (placement.vertices.size() > static_cast<std::size_t>(kMaxPlacedParts)) {
+            fail(std::format("{} points is more than the {} a definition takes; place them in "
+                             "groups",
+                             placement.vertices.size(),
+                             static_cast<std::size_t>(kMaxPlacedParts)));
+        }
+        if (placement.kind == PlacementKind::Points) {
+            for (std::size_t i = 0; i < placement.vertices.size(); ++i) {
                 Spot spot;
                 spot.position = placement.vertices[i].position;
                 spot.z = vertexLevel(i);
-                if (placement.kind == PlacementKind::Points || count < 2) {
-                    // At points nothing says which way is along: north, so a
-                    // sign faces south, down a drawing.
+                // At points nothing says which way is along: north, so a sign
+                // faces south, down a drawing.
+                spot.forward = Vec2(0.0, 1.0);
+                out.push_back(spot);
+            }
+            return out;
+        }
+        if (!placement.spacing) {
+            // One at each corner of the line. A repeated vertex is the corner
+            // it repeats, and a line that comes back to its start stands one
+            // object there, not two (cornersOf).
+            const std::vector<std::size_t> corners = cornersOf(placement.vertices);
+            for (std::size_t k = 0; k < corners.size(); ++k) {
+                Spot spot;
+                spot.position = placement.vertices[corners[k]].position;
+                spot.z = vertexLevel(corners[k]);
+                if (corners.size() < 2) {
                     spot.forward = Vec2(0.0, 1.0);
                 } else {
-                    // The segment it starts, or the last one at the end.
-                    const std::size_t from = i + 1 < count ? i : i - 1;
-                    spot.forward = (placement.vertices[from + 1].position -
-                                    placement.vertices[from].position)
+                    // Along the segment it starts, or the last one at the end:
+                    // between corners that differ, so never a zero direction.
+                    const std::size_t from = k + 1 < corners.size() ? k : k - 1;
+                    spot.forward = (placement.vertices[corners[from + 1]].position -
+                                    placement.vertices[corners[from]].position)
                                        .normalized();
                 }
                 out.push_back(spot);
             }
             return out;
         }
-        // Along a line, every `spacing` from its start.
+        // Along a line, every `spacing` from its start; on a line that comes
+        // back to its start, the distance that is the whole line is the start
+        // again.
         const Path path = linearPath();
-        for (const double along : everySpacing(path.length(), *placement.spacing)) {
+        std::vector<double> distances = everySpacing(path.length(), *placement.spacing);
+        if (distances.size() > 1 && returnsToStart(path) &&
+            path.length() - distances.back() < kSamePosition) {
+            distances.pop_back();
+        }
+        for (const double along : distances) {
             const Path::Sample sample = path.at(along);
             out.push_back(Spot{sample.position, sample.z, sample.direction, 0.0});
         }
@@ -1018,12 +1119,32 @@ std::vector<bim::BimObject> makeMarking(const RoadObject& object, const Placemen
     if (dash > 0.0 && !(gap > 0.0)) {
         fail("a broken line needs gap= as well as dash=");
     }
+    if (dash > 0.0) {
+        // A mark shorter than the millimetre a sweep passes points closer than
+        // has no solid, and would still be counted and measured.
+        if (dash < kShortestMark) {
+            fail(std::format("dash= ({} m) is shorter than the {} m a mark is made to; give 0 for "
+                             "a continuous line",
+                             real(dash), real(kShortestMark)));
+        }
+        const double marks = std::ceil(path.length() / (dash + gap));
+        if (!(marks <= kMaxPlacedParts)) {
+            fail(std::format("dash= {} m and gap= {} m along {} m would make {} marks, more than "
+                             "the {} a definition takes; place the line in lengths, or give a "
+                             "longer dash and gap",
+                             real(dash), real(gap), real(path.length()), real(marks),
+                             static_cast<std::size_t>(kMaxPlacedParts)));
+        }
+    }
     bim::BimObject made =
         skeleton(object, values, "", "", {"IfcSurfaceFeature", "LINEMARKING", "CARRIAGEWAY"});
     const auto profile = rectangleProfile(-width / 2.0, width / 2.0, 0.0, thickness);
     double marked = 0.0;
     std::size_t marks = 0;
     const auto mark = [&](double from, double to) {
+        if (to - from < kShortestMark) {
+            return; // what is left of the line after its last whole mark
+        }
         const std::vector<PathPoint> piece = path.between(from, to);
         addSweep(made.mesh, piece, profile);
         Polyline2 line;
@@ -1272,9 +1393,15 @@ CulvertEnds resolveCulvert(const RoadObject& object, const Placement& placement)
         if (needGround) {
             // Each end's own station and offset, for the profile: exact on
             // a straight, the end's frame at the culvert's station on a curve.
+            // The station matters to the profile alone, so it is checked
+            // there: an end of a skewed culvert near the alignment's start
+            // may fall before it and still stand on a surface that covers it.
             const double along = std::sin(skew) * length / 2.0;
             const double across = std::cos(skew) * length / 2.0;
             const auto level = [&](double station, double offset, const Point2& at) {
+                if (placement.source() == HeightSource::Surface) {
+                    return placement.surfaceLevel(at) + where.dz;
+                }
                 return placement.levelOnAlignment(placement.checkedStation(station), offset, at);
             };
             groundIn = level(where.station + along, where.offset - across, inlet);
@@ -1911,6 +2038,17 @@ Status applyKey(RoadObject& object, std::string_view key, std::string_view value
         if (auto status = alongAlignment(); !status) {
             return status;
         }
+        if (value.empty()) {
+            // An offset goes back to the centreline; a station has no default
+            // to go back to - where along the alignment is the whole point of
+            // the placement.
+            if (folded == "station") {
+                return makeError(ErrorCode::InvalidArgument, "station= needs a number",
+                                 object.id);
+            }
+            placement.offset = RoadObjectPlacement{}.offset;
+            return {};
+        }
         auto parsed = number(-kFar, kFar);
         if (!parsed) {
             return parsed.error();
@@ -1937,6 +2075,26 @@ Status applyKey(RoadObject& object, std::string_view key, std::string_view value
         if (value.empty()) {
             placement.spacing.reset();
             return {};
+        }
+        // Read by the point kinds placed along an alignment or a line and by
+        // nothing else; a barrier's and a fence's posts have postspacing=.
+        // Accepted anywhere else it would be echoed in the reply and ignored.
+        if (shapeOf(object.kind) != KindShape::Point) {
+            const bool posts = object.kind == RoadObjectKind::Barrier ||
+                               object.kind == RoadObjectKind::Fence;
+            return makeError(ErrorCode::InvalidArgument,
+                             std::format("spacing= is for guide posts, signs and light poles; "
+                                         "a {} {}",
+                                         kindWord(object.kind),
+                                         posts ? "takes postspacing= for its posts"
+                                               : "has nothing to space"),
+                             object.id);
+        }
+        if (placement.kind == PlacementKind::Points) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "spacing= places a run along an alignment or a line; at points one "
+                             "stands at each point",
+                             object.id);
         }
         auto parsed = number(0.0, kFar);
         if (!parsed) {
@@ -1966,16 +2124,35 @@ Status applyKey(RoadObject& object, std::string_view key, std::string_view value
         return {};
     }
     if (folded == "crossfall") {
+        if (value.empty()) {
+            placement.crossfall = RoadObjectPlacement{}.crossfall;
+            return {};
+        }
         // Percent: a road's crossfall is a few percent, a verge's up to a
         // batter's 50 (1 on 2).
         auto parsed = number(-50.0, 50.0);
         if (!parsed) {
             return parsed.error();
         }
+        // The profile is only along an alignment; an object placed along a
+        // line or at points never reads it. (An alignment object that stands
+        // on a surface is refused where it is made, Placement.)
+        if (*parsed != 0.0) {
+            if (auto status = alongAlignment(); !status) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "crossfall= carries the design profile out to the offset; this "
+                                 "object has no profile to carry",
+                                 object.id);
+            }
+        }
         placement.crossfall = *parsed;
         return {};
     }
     if (folded == "dz") {
+        if (value.empty()) {
+            placement.dz = RoadObjectPlacement{}.dz;
+            return {};
+        }
         auto parsed = number(-1000.0, 1000.0);
         if (!parsed) {
             return parsed.error();
@@ -2045,6 +2222,16 @@ bim::BimModel buildRoadObject(const PlacementContext& context, const RoadObject&
         if (model.objects.empty()) {
             fail("its placement gives nowhere to stand it");
         }
+        // A solid with no faces is one that could not be made - a section that
+        // does not triangulate, a sweep of a single point - and would be
+        // counted and written to IFC as an element with no shape.
+        for (const bim::BimObject& part : model.objects) {
+            if (part.mesh.faces.empty()) {
+                fail(std::format("{} could not be made into a solid: its placement or its "
+                                 "dimensions give it no shape",
+                                 part.id));
+            }
+        }
     } catch (const Unplaceable& problem) {
         model.objects.clear();
         model.problems.push_back({"object " + object.id, problem.message});
@@ -2052,11 +2239,33 @@ bim::BimModel buildRoadObject(const PlacementContext& context, const RoadObject&
     return model;
 }
 
+namespace {
+
+// A part that stands under or hangs from the one its object is named for: a
+// wall's footing runs the wall's whole length, a light pole's luminaire is
+// the pole's own. Each says its own Length or Count (IFC reads them off the
+// element), but they measure the same run, or the same pole, a second time.
+bool isSupportingPart(const bim::BimObject& part)
+{
+    return part.ifcClass == "IfcFooting" || part.ifcClass == "IfcLightFixture";
+}
+
+// The quantities that count a thing once however many parts carry it.
+bool countedOnce(std::string_view name)
+{
+    return name == "Length" || name == "Count" || name == "GrossArea";
+}
+
+} // namespace
+
 std::vector<bim::Quantity> totalQuantities(std::span<const bim::BimObject> objects)
 {
     std::vector<bim::Quantity> totals;
     for (const bim::BimObject& object : objects) {
         for (const bim::Quantity& quantity : object.quantities) {
+            if (isSupportingPart(object) && countedOnce(quantity.name)) {
+                continue;
+            }
             const auto found = std::ranges::find(totals, quantity.name, &bim::Quantity::name);
             if (found == totals.end()) {
                 totals.push_back(quantity);

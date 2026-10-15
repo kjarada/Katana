@@ -22,7 +22,10 @@ namespace katana::cad {
 // each kept on what it is made from, because they are made from different
 // things: the corridors from the templates, the corridors, the alignments and
 // the surfaces - so a line drawn does not make them again - and the placed
-// objects, which may stand on a drawn line, from every step (modelRevision).
+// objects from every step (modelRevision). That is wider than they need: an
+// object copies the line it is placed along and reads only its key, the
+// alignments and the surfaces (road_objects.cpp, placementContext), so it is
+// a conservative key, not a dependency - docs/road_objects.md, "Not done".
 // A half made again that equals what it replaced keeps the old one, so the
 // model a view holds stays the same object until something in it changes.
 struct Document::BimCache {

@@ -6,12 +6,15 @@
 #include <algorithm>
 #include <charconv>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
 
+#include "katana/cad/road/corridor_model.hpp"
+#include "katana/cad/road/road_objects.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/core/text.hpp"
@@ -102,10 +105,67 @@ Result<std::string> renameSurface(Document& document, const Tokens& tokens)
     if (auto status = next.rename(old, tokens[3]); !status) {
         return status.error();
     }
-    if (auto status = document.setSurfaces(std::move(next), "SURFACE RENAME"); !status) {
-        return status.error();
+    // A corridor names the surface its batters daylight on and a road object
+    // the surface it stands on: left behind by a rename they would find no
+    // surface, and lose their earthworks and their level, quietly (the next
+    // build lists the problem). They follow it in the same step, as the
+    // corridors of a renamed road template do (ROADTEMPLATE RENAME).
+    if (const Status status = document.corridorsStatus(); !status) {
+        return makeError(ErrorCode::InvalidState,
+                         "the drawing's corridors cannot be read: nothing is changed",
+                         status.error().describe());
     }
-    return "renamed surface=" + recordValue(old) + " name=" + recordValue(tokens[3]) + "\n" +
+    if (const Status status = document.roadObjectsStatus(); !status) {
+        return makeError(ErrorCode::InvalidState,
+                         "the drawing's road objects cannot be read: nothing is changed",
+                         status.error().describe());
+    }
+    road::CorridorSet corridors = document.corridors();
+    std::size_t followingCorridors = 0;
+    for (road::Corridor& corridor : corridors.corridors) {
+        if (katana::core::equalsIgnoringCase(corridor.surface, old)) {
+            corridor.surface = tokens[3];
+            ++followingCorridors;
+        }
+    }
+    road::RoadObjectSet objects = document.roadObjects();
+    std::size_t followingObjects = 0;
+    for (road::RoadObject& object : objects.objects) {
+        if (katana::core::equalsIgnoringCase(object.placement.surface, old)) {
+            object.placement.surface = tokens[3];
+            ++followingObjects;
+        }
+    }
+    auto surfacesStep = document.surfacesCommand(std::move(next), "SURFACE RENAME");
+    if (!surfacesStep) {
+        return surfacesStep.error();
+    }
+    auto corridorsStep = document.corridorsCommand(corridors, "SURFACE RENAME");
+    if (!corridorsStep) {
+        return corridorsStep.error();
+    }
+    auto objectsStep = document.roadObjectsCommand(objects, "SURFACE RENAME");
+    if (!objectsStep) {
+        return objectsStep.error();
+    }
+    auto transaction = std::make_unique<katana::commands::Transaction>("SURFACE RENAME");
+    if (*surfacesStep) {
+        transaction->add(std::move(*surfacesStep));
+    }
+    if (*corridorsStep) {
+        transaction->add(std::move(*corridorsStep));
+    }
+    if (*objectsStep) {
+        transaction->add(std::move(*objectsStep));
+    }
+    if (transaction->size() > 0) {
+        if (auto status = document.execute(std::move(transaction)); !status) {
+            return status.error();
+        }
+    }
+    return "renamed surface=" + recordValue(old) + " name=" + recordValue(tokens[3]) +
+           " corridors=" + std::to_string(followingCorridors) +
+           " roadobjects=" + std::to_string(followingObjects) + "\n" +
            surfaceRecord(*document.surfaces().find(tokens[3]), document.surfaceStyles());
 }
 

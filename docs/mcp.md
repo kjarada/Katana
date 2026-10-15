@@ -19,10 +19,10 @@ It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a
 client instead of typed. Every tool that changes anything is a shape over the
 command line's verbs, so there is one implementation of each, pinned by the
 `cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
-not. Every change is one undoable command, as it is when typed. (Four tools
-run no line and change nothing: `katana_status`, `katana_customisation` and
-`katana_road_objects` read the Document for what no reply holds as structure,
-and
+not. Every change is one undoable command, as it is when typed. (Five tools
+run no line and change nothing: `katana_status`, `katana_customisation`,
+`katana_road_objects` and `katana_leaders` read the Document for what no reply
+holds as structure, and
 `katana_check_update` asks whether a newer Katana has been released -
 "Updates", below.)
 

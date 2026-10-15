@@ -404,9 +404,13 @@ rather than duplicating it. Details in `docs/cad.md`.
 
 Profiles, corridor quantities and the corridor surface, and parcels are built;
 grading has an engine (`cad::gradeToSurface`) without a GUI route or a verb.
-No table references an alignment BY NAME, so `deleteAlignment` still has no
-in-use guard; a leader's template may name one (`{station.NAME}`), and its
-lines then say nothing once the alignment is gone (`docs/annotation.md`). A section view keeps the polyline it was cut along
+Corridors (`Corridor::alignment`) and road objects
+(`RoadObjectPlacement::alignment`) name an alignment BY NAME, and
+`deleteAlignment` still has no in-use guard: what names an alignment that is
+gone is left out of the road model and its problem listed
+(`docs/road_objects.md`, "The drawing's record"). A leader's template may name
+one too (`{station.NAME}`), and its lines then say nothing once the alignment
+is gone (`docs/annotation.md`). A section view keeps the polyline it was cut along
 (`cad::Section::alignment`, held in `ViewState::section`), not the name of an
 alignment, so deleting the alignment leaves the section as it was cut. (This
 section listed profiles, corridors and parcels as not done, and then cited a

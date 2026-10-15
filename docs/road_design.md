@@ -288,7 +288,9 @@ costs nothing (below).
 once per change of what it is made from, in two halves: the corridors' on the
 two keys' text, the alignments' revision and the surfaces' generation - so a
 line drawn does not rebuild them - and the placed objects' on their key and
-every step, since an object may stand on a drawn line. A half made again that
+every step. (That is wider than they need: they read only their key, the
+alignments and the surfaces, and a line is copied into an object, never
+followed - `road_objects.md`, "Not done".) A half made again that
 equals what it replaced keeps the old one, so the model a view holds is the
 same object until something in it changes
 (`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`).
