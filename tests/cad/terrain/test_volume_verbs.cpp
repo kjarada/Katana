@@ -867,9 +867,12 @@ TEST_F(VolumeVerbs, ASurfaceTheseVerbsMakeIsReportedAsSurfaceInfoReportsItWithOr
         }
         EXPECT_EQ(value(made, "visible"), "yes");
     };
-    sameAsInfo(ran("SURFACE DIFFERENCE ground design NAME withCutFill"), "withCutFill");
     sameAsInfo(ran("SURFACE ENVELOPE ground design MAX NAME upper"), "upper");
+    sameAsInfo(ran("SURFACE DIFFERENCE ground design NAME withCutFill"), "withCutFill");
 
+    // A style a surface is drawn in cannot be deleted: the map goes first.
+    ran("UNDO");
+    ASSERT_EQ(document.surfaces().find("withCutFill"), nullptr);
     ran("SURFACESTYLE DELETE \"Cut Fill\"");
     const std::string preview = ran("SURFACE DIFFERENCE ground design NAME without PREVIEW");
     EXPECT_EQ(value(record(preview, "surface"), "preview"), "yes");

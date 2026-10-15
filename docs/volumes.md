@@ -118,9 +118,11 @@ every form; SECTIONS also when no section of the range reaches ground both
 have); sections that cross one another (InvalidArgument, below); an `#id` that is
 no polygon - not a closed polyline, curve polyline, circle or ellipse
 (InvalidGeometry, saying what it is); fewer than three typed corners; EACH
-without INSIDE; a factor that is not more than 0; polygons that overlap
-without EACH. A scope that takes no closed
-polygon is said - `polygons used=0` and `ran=no` - not refused (`docs/cad.md`, "Scope and filter").
+without INSIDE (and EACH on VOLUME GRID, which counts each cell once across
+all the polygons: the refusal names the forms that take it); a factor that is
+not more than 0; polygons that overlap without EACH (not for GRID). A scope
+that takes no closed polygon is said - `polygons used=0` and `ran=no` - not
+refused (`docs/cad.md`, "Scope and filter").
 
 ## One overlay
 
@@ -620,6 +622,13 @@ records do not carry.
   curve of radius R are 2R apart, and a reach over R crosses at its centre), but
   a U-turn made of corners can, and so can two roads laid side by side in one
   alignment. The spacing of legs is not tested.
+- **Not measured: the crossing test on a very long run.** It indexes the
+  sections' boxes and tests the pairs whose boxes overlap, on the task pool.
+  On an alignment along an axis no boxes overlap; on a diagonal one each
+  section pairs with every section within a reach of it, so a diagonal
+  alignment cut every 0.1 m over 10 km (100 000 sections, a 14 km default
+  reach) would test about 5e9 pairs. Nothing at that size has been timed;
+  at a road's usual 10 to 20 m interval it is a few hundred.
 - **Polygons with holes from the drawing.** The region takes holes
   (`OverlayRegion::fromPolygon`), but the verbs take each closed outline as a
   polygon of its own: a tagged hole joining its area, as the GIS conversion
