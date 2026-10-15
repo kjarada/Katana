@@ -210,9 +210,10 @@ made on Windows carries (its archiver's guess from the file names) become
 real, and the producer would read them: as `exec` in the manifest, and as a
 reason to class a file in `bin/` as a program. The step clears them, so a
 Windows file is classed by its name alone (`.exe`, `.dll`), as the producer
-classes it when it runs on Windows, where there is no such bit. This is the
+classes it when it runs on Windows, where there is no such bit. This was the
 one part of the step that could not be tried on the machine it was written
-on, which has no such bits either ("Not done").
+on, which has no such bits either; the Publish job of run 38580778852 ran it
+on Linux, and the recheck of the manifests it made passed.
 
 **No package holds a symbolic link,** which the producer refuses (a manifest
 has no way to say one, and the updater does not follow links,
@@ -417,7 +418,7 @@ purpose. Looking for the name
 in the built programs was considered and not done: a short text assigned to
 a string may be compiled into the instructions that store it, piece by
 piece, so its absence from the file's bytes would prove nothing and could
-stop a good release ("Not done").
+stop a good release.
 
 The first job, before any toolchain is installed, asks the keys file the
 same question the configures will: it runs `cmake/KatanaUpdateKeys.cmake`
@@ -557,8 +558,8 @@ GitHub can be told to refuse any other: the repository's Actions
 permissions (Settings > Actions > General) hold a requirement that actions
 be pinned to a full-length commit SHA, which
 `gh api repos/kjarada/Katana/actions/permissions --jq .sha_pinning_required`
-shows (`false` on 2026-10-14). It has not been turned on, and what it
-does to a run was not tried ("Not done").
+shows (`false` on 2026-10-14, and again on 2026-10-15). It has not been
+turned on, and what it does to a run was not tried.
 
 ### The workflow's shape, held
 
