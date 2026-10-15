@@ -117,7 +117,9 @@ set_tests_properties(cli.surface_edit_scope_that_takes_nothing_is_reported_and_t
 # from (40,70) to there, used to cross the old one a few ulps from its end and
 # ramp down to the old level (33.75, 32.5, 31.25, 30.23 at the quarter points).
 # It is level at 35, the quarter points on it worked out by hand:
-# (40 - 25.7 s, 70 - 65.71 s) for s = 1/4, 1/2, 3/4, 0.95 and the end.
+# (40 - 25.7 s, 70 - 65.71 s) for s = 1/4, 1/2, 3/4, 0.95 and the end: the
+# s = 0.95 point is (15.585, 7.5755), and a point 0.0005 below it is in a
+# triangle on the other side of the line, where the surface is 34.97.
 set(_z "(35|34\\.9999[0-9]*|35\\.0000[0-9]*)")
 add_test(NAME cli.surface_edit_breakline_ending_within_rounding_of_a_breakline_stays_level
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -125,9 +127,9 @@ add_test(NAME cli.surface_edit_breakline_ending_within_rounding_of_a_breakline_s
             -c "SURFACE FROM FILE \"${_surface_edit_samples}/terrain.asc\" NAME g"
             -c "SURFACE EDIT g BREAKLINE 0,0,30 100,30,30"
             -c "SURFACE EDIT g BREAKLINE 40,70,35 14.3,4.29,35"
-            -c "RASTER SAMPLE SURFACE g AT 33.575,53.5725 AT 27.15,37.145 AT 20.725,20.7175 AT 15.585,7.575 AT 14.3,4.29")
+            -c "RASTER SAMPLE SURFACE g AT 33.575,53.5725 AT 27.15,37.145 AT 20.725,20.7175 AT 15.585,7.5755 AT 14.3,4.29")
 set_tests_properties(cli.surface_edit_breakline_ending_within_rounding_of_a_breakline_stays_level PROPERTIES
-    PASS_REGULAR_EXPRESSION "operation=breakline .*crossings=0 changed=yes.*sample at=33\\.575,53\\.5725 z=${_z}[\r\n]+sample at=27\\.15,37\\.145 z=${_z}[\r\n]+sample at=20\\.725,20\\.7175 z=${_z}[\r\n]+sample at=15\\.585,7\\.575 z=${_z}[\r\n]+sample at=14\\.3,4\\.29 z=${_z}"
+    PASS_REGULAR_EXPRESSION "operation=breakline .*crossings=0 changed=yes.*sample at=33\\.575,53\\.5725 z=${_z}[\r\n]+sample at=27\\.15,37\\.145 z=${_z}[\r\n]+sample at=20\\.725,20\\.7175 z=${_z}[\r\n]+sample at=15\\.585,7\\.5755 z=${_z}[\r\n]+sample at=14\\.3,4\\.29 z=${_z}"
     FAIL_REGULAR_EXPRESSION "error")
 
 # A parallelogram with two decimal corners on that breakline and its edge along
@@ -172,7 +174,7 @@ add_test(NAME cli.surface_edit_hole_that_crosses_itself_at_a_vertex_is_refused
             -c "SURFACE FROM FILE \"${_surface_edit_samples}/terrain.asc\" NAME ground"
             -c "SURFACE EDIT ground HOLE 20,20 60,20 40,40 35,50 45,50 40,40")
 set_tests_properties(cli.surface_edit_hole_that_crosses_itself_at_a_vertex_is_refused PROPERTIES
-    PASS_REGULAR_EXPRESSION "InvalidGeometry: the hole touches or crosses itself")
+    PASS_REGULAR_EXPRESSION "InvalidGeometry: the polygon touches or crosses itself \\[at \\(40, 40\\)\\]")
 
 # A point put in a 20 x 20 hole fills all of it: the plan area is the ground's
 # 23829.750 again (23429.750 less the 400 m2 hole, plus the 400 the fans of the

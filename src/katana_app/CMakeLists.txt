@@ -1370,7 +1370,7 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
                 -c "PLINE 0,0 10,0 10,10 CLOSE" -c "OPEN #1" -c REFS
                 -c "SELECT #1" -c "OPEN SELECTION" -c REFS)
     set_tests_properties(cli.open_of_a_polyline_keeps_the_reference_layers PROPERTIES
-        PASS_REGULAR_EXPRESSION "kind=polyline closed=no [^\r\n]*[\r\n]+references rasters=1 clouds=0 missing=0.*kind=polyline closed=no [^\r\n]*[\r\n]+references rasters=1 clouds=0 missing=0"
+        PASS_REGULAR_EXPRESSION "kind=polyline closed=no [^\r\n]*[\r\n]+(reference id=[^\r\n]*[\r\n]+)+references rasters=1 clouds=0 missing=0.*kind=polyline closed=no [^\r\n]*[\r\n]+(reference id=[^\r\n]*[\r\n]+)+references rasters=1 clouds=0 missing=0"
         FAIL_REGULAR_EXPRESSION "error;references rasters=0")
 endif()
 

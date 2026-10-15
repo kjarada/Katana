@@ -1581,6 +1581,43 @@ Result<SectionsSurface> sectionsSurface(const std::vector<const RoadSection*>& s
         breakline.vertices = string.points;
         input.breaklines.push_back(std::move(breakline));
     }
+    // The two sections of a join are lines the triangulation must keep. The
+    // strings end at the join, and the only constraint left across it would be
+    // the Delaunay rule: the first section of the later run lies a millimetre
+    // on, its points inside the circles of the thin triangles between the
+    // earlier run's last two sections, so the TIN joined the last interval to
+    // the other template and blended the two over it (9.793 at 6 m out and
+    // 35 m on the rural-urban road, where the rural surface is 9.585). With
+    // each section a breakline the interval before the join is the earlier
+    // run's alone, the 1 mm beyond it the face, and the later run its own.
+    const auto crossLine = [&](const Placed& at) {
+        katana::terrain::Breakline breakline;
+        const auto& line = formation ? at.section->formation : at.section->top;
+        for (const SectionPoint& point : line) {
+            const auto plan = alignment.pointAtStationOffset(at.station, point.offset);
+            // A vertical face (two levels at one offset) is one place in plan.
+            if (plan && !(!breakline.vertices.empty() &&
+                          std::hypot(plan->x - breakline.vertices.back().x,
+                                     plan->y - breakline.vertices.back().y) <= tol::kGeometric)) {
+                breakline.vertices.emplace_back(plan->x, plan->y, point.level);
+            }
+        }
+        return breakline;
+    };
+    for (std::size_t i = 1; i < placed.size(); ++i) {
+        const RoadSection& before = *placed[i - 1].section;
+        const RoadSection& after = *placed[i].section;
+        if (before.run == after.run || std::abs(before.station - after.station) > tol::kGeometric ||
+            !take(before) || !take(after)) {
+            continue;
+        }
+        for (const Placed* at : {&placed[i - 1], &placed[i]}) {
+            katana::terrain::Breakline breakline = crossLine(*at);
+            if (breakline.vertices.size() >= 2) {
+                input.breaklines.push_back(std::move(breakline));
+            }
+        }
+    }
     // A ring with gaps in it is not a ring: with sections left out the
     // surface is bounded by its hull instead (docs/cad.md).
     if (result.leftOut == 0) {

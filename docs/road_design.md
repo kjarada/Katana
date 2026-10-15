@@ -262,7 +262,13 @@ only the region has is one string from the region's start to its end, not
 from one interval after), and a surface lays the later run's section 1 mm on
 (`kFaceRun`, the formation's device across an offset) so that the TIN, which
 holds one level at a point, has a near-vertical face there and each template's
-own surface either side of it. Before, the later run's section at the join was
+own surface either side of it. The strings end at the join, so nothing but the
+Delaunay rule would keep the TIN from joining the earlier run's last interval to
+the points a millimetre on - and it did, blending the two over that interval (9.793
+at 6 m out, 35 m along the rural-urban test road, where the rural surface is
+9.585) - so the two sections of a join are breaklines as well
+(`sectionsSurface`; a section across the road, its vertices the strings' own).
+Before, the later run's section at the join was
 dropped for the earlier run's: a region's own codes lost their first interval,
 a region one interval long lost its strings altogether, a code both templates
 have was joined across the change, and the surface blended the two templates

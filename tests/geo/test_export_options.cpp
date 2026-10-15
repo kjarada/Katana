@@ -395,12 +395,14 @@ TEST_F(ExportOptions, AScopedDxfExportKeepsTheNoteOfALeaderWhoseTargetTheScopeLe
 
 TEST_F(ExportOptions, ALeaderWhoseNoteCannotBeReadIsWrittenAndTheExportSaysItHasNoNote)
 {
-    // The entity its tip is on is not there at all: nothing to read, a bare
-    // arrow in the file - and the reply says which leader, rather than leave
-    // the callout silently blank.
+    // The entity its tip is on has no level, which the note reads: nothing to
+    // read, a bare arrow in the file - and the reply says which leader, rather
+    // than leave the callout silently blank. (A target that is not in the
+    // drawing at all cannot be built here: a smart leader goes with its target.)
+    const auto bare = add(katana::entity::PointGeometry{{10.0, 60.0}}, "pegs");
     katana::entity::LeaderGeometry leader;
     leader.vertices = {{10.0, 60.0}, {30.0, 70.0}};
-    leader.tipRef = katana::entity::AnchorRef{9999, katana::entity::AnchorPoint::Position};
+    leader.tipRef = katana::entity::AnchorRef{bare, katana::entity::AnchorPoint::Position};
     leader.text = "RL {rl:.3f}";
     leader.fields = true;
     const auto note = add(leader, "notes");

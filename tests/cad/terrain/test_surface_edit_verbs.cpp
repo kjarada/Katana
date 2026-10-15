@@ -353,17 +353,19 @@ TEST_F(SurfaceEditVerbs, SeveralBreaklinesThatAgreeWhereTheyCrossAreOneEdit)
 TEST_F(SurfaceEditVerbs, ASurfaceOrALayerCalledPreviewIsANameNotThePreviewFlag)
 {
     putSurface(document, "ground", flatGridSurface(10, 1.0, 4.0));
-    putSurface(document, "Preview", flatGridSurface(10, 1.0, 4.0));
+    // A new surface called preview (surface names compare ignoring case, so it
+    // is the one name for the rest): 4 + 3 = 7 over [0, 10]^2.
+    reply("SURFACE OFFSET ground 3 NAME preview");
+    ASSERT_NE(document.surfaces().find("Preview"), nullptr);
+    EXPECT_DOUBLE_EQ(*surfaceOf(document, "preview").elevationAt(5, 5), 7.0);
     // A surface called Preview as the source of an offset, a clip and a paste's
-    // top, as a member of a merge, and a new surface called preview.
+    // top, and as a member of a merge.
     reply("SURFACE OFFSET Preview 1 NAME up");
-    EXPECT_DOUBLE_EQ(*surfaceOf(document, "up").elevationAt(5, 5), 5.0);
+    EXPECT_DOUBLE_EQ(*surfaceOf(document, "up").elevationAt(5, 5), 8.0);
     reply("SURFACE CLIP Preview 1,1 5,1 5,5 1,5 NAME clipped");
     EXPECT_NEAR(surfaceOf(document, "clipped").planArea(), 16.0, 1e-9);
     reply("SURFACE MERGE ground Preview NAME merged");
     EXPECT_NE(document.surfaces().find("merged"), nullptr);
-    reply("SURFACE OFFSET ground 3 NAME preview");
-    EXPECT_NE(document.surfaces().find("preview"), nullptr);
     // A layer called preview in a FROM scope.
     reply("LAYER NEW preview");
     reply("LAYER SET preview");

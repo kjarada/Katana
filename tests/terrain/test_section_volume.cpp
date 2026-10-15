@@ -393,7 +393,9 @@ TEST(SegmentProfiler, ASegmentAlongABoundaryEdgeIsOnTheSurfaceWholeToWithinTheGe
                 1e-12);
     // The tolerance is kGeometric, 1e-7: 5e-8 outside the edge is the edge, 5e-7
     // outside is off the surface, and 5e-7 inside is on it, as it always was.
-    EXPECT_NEAR(covered(Point2(-10, -5e-8), Point2(110, -5e-8)), 100.0 / 120.0, 1e-12);
+    // Within it, not exactly: the covered piece may run past each end of the edge by up to
+    // kGeometric, so 100 m +- 2e-7 of the segment's 120 is 100/120 +- 1.7e-9.
+    EXPECT_NEAR(covered(Point2(-10, -5e-8), Point2(110, -5e-8)), 100.0 / 120.0, 2e-7 / 120.0);
     EXPECT_EQ(covered(Point2(-10, -5e-7), Point2(110, -5e-7)), 0.0);
     EXPECT_NEAR(covered(Point2(-10, 5e-7), Point2(110, 5e-7)), 100.0 / 120.0, 1e-12);
     // The neighbours of the case: a short segment wholly on the edge is wholly

@@ -21,6 +21,7 @@
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/cad/terrain/volume_verbs.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/path_text.hpp"
@@ -856,9 +857,21 @@ TEST_F(VolumeVerbs, ASurfaceTheseVerbsMakeIsReportedAsSurfaceInfoReportsItWithOr
     // gives, visible= among them, and a style that names a style - the drawing's
     // default once Cut Fill is gone, not a word that names none.
     addParallelPlanes();
+    //
+    // SURFACE INFO is a geoprocessing verb of katana_app (it lives with LIST and
+    // REMOVE beside the GDAL ones), so this layer cannot run it: it answers with
+    // cad::surfaceRecord of the stored surface, and so is that applied to the
+    // surface the verb stored.
+    const auto infoOf = [&](const std::string& name) {
+        const katana::terrain::NamedSurface* stored = document.surfaces().find(name);
+        EXPECT_NE(stored, nullptr) << name;
+        return stored == nullptr
+                   ? std::string()
+                   : katana::cad::surfaceRecord(*stored, document.surfaceStyles());
+    };
     const auto sameAsInfo = [&](const std::string& reply, const std::string& name) {
         const auto made = record(reply, "surface");
-        const auto info = record(ran("SURFACE INFO " + name), "surface");
+        const auto info = record(infoOf(name), "surface");
         ASSERT_TRUE(made.has_value()) << reply;
         ASSERT_TRUE(info.has_value());
         for (const char* key : {"name", "triangles", "points", "bounds", "zmin", "zmax", "source",
@@ -879,7 +892,7 @@ TEST_F(VolumeVerbs, ASurfaceTheseVerbsMakeIsReportedAsSurfaceInfoReportsItWithOr
     EXPECT_EQ(value(record(preview, "surface"), "style"), document.surfaceStyles().defaultStyle);
     EXPECT_EQ(value(record(preview, "surface"), "visible"), "yes");
     sameAsInfo(ran("SURFACE DIFFERENCE ground design NAME without"), "without");
-    EXPECT_NE(value(record(ran("SURFACE INFO without"), "surface"), "style"), "default");
+    EXPECT_NE(value(record(infoOf("without"), "surface"), "style"), "default");
 }
 
 TEST_F(VolumeVerbs, HelpVolumeGivesEveryForm)

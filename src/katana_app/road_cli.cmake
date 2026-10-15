@@ -142,7 +142,7 @@ add_test(NAME cli.removing_a_name_from_both_sides_of_a_template_made_right_side_
             -c "ROADTEMPLATE INFO t")
 set_tests_properties(cli.removing_a_name_from_both_sides_of_a_template_made_right_side_first
     PROPERTIES
-    PASS_REGULAR_EXPRESSION "side=left name=lane removed.*side=right name=lane removed.*template name=t left=0 right=0 courses=0"
+    PASS_REGULAR_EXPRESSION "side=right name=lane removed.*side=left name=lane removed.*template name=t left=0 right=0 courses=0"
     FAIL_REGULAR_EXPRESSION "error")
 
 # A bench every tenth of a millimetre is refused at once, naming the batter, and
@@ -163,7 +163,7 @@ add_test(NAME cli.the_divided_roads_lanes_start_under_its_median
             $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
             -c "ROADTEMPLATE SECTION \"divided road\"")
 set_tests_properties(cli.the_divided_roads_lanes_start_under_its_median PROPERTIES
-    PASS_REGULAR_EXPRESSION "point code=left/kerb/face offset=2[.]150 level=0[.]000.*point code=left/kerb/lip offset=2[.]300 level=-0[.]100.*point code=left/lane1/outer offset=5[.]800 level=-0[.]205"
+    PASS_REGULAR_EXPRESSION "point code=left/lane1/outer offset=5[.]800 level=-0[.]205.*point code=left/kerb/lip offset=2[.]300 level=-0[.]100.*point code=left/kerb/face offset=2[.]150 level=0[.]000"
     FAIL_REGULAR_EXPRESSION "error")
 
 # Renaming a corridor carries the strings it drew, so its next STRINGS replaces

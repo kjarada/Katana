@@ -378,8 +378,12 @@ TEST(SuperSurface, AnOverlapThinnerThanTheToleranceIsTouchingAndOneBeyondItIsCov
     const auto covered = combineSurfaces({&base, &overlapping});
     ASSERT_TRUE(covered.ok());
     EXPECT_EQ(covered->triangleCount(), 2u);
-    EXPECT_EQ(covered->elevationAt(Point2(9.5, 0.5)), 2.0);
-    EXPECT_EQ(covered->elevationAt(Point2(9.5, 9.8)), 2.0);
+    // The pad is flat at 2: barycentric weights sum to one within a few ulps (2.2e-16 each
+    // at this size), so the height is 2 to 1e-12, not bit for bit.
+    ASSERT_TRUE(covered->elevationAt(Point2(9.5, 0.5)).has_value());
+    ASSERT_TRUE(covered->elevationAt(Point2(9.5, 9.8)).has_value());
+    EXPECT_NEAR(*covered->elevationAt(Point2(9.5, 0.5)), 2.0, 1e-12);
+    EXPECT_NEAR(*covered->elevationAt(Point2(9.5, 9.8)), 2.0, 1e-12);
 }
 
 TEST(SuperSurface, ATopThatTouchesAFaceOnlyAtAPointOnItsEdgeLeavesTheFaceBe)
