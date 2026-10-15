@@ -283,6 +283,12 @@ Result<std::vector<std::size_t>> componentsNamed(const RoadTemplate& roadTemplat
                          "template " + roadTemplate.name + " has no component " + std::string(ref) +
                              ": ROADTEMPLATE INFO " + roadTemplate.name + " lists them");
     }
+    // Ascending in `components`, not left side first: a side's first
+    // component is appended at the end of the vector (insertionPoint), so a
+    // template whose right side was made first stores its right components
+    // BEFORE its left ones. REMOVE walks these backwards and erases each, which
+    // only keeps every later index valid when the indices ascend.
+    std::ranges::sort(found);
     return found;
 }
 

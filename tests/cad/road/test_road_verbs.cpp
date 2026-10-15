@@ -146,6 +146,63 @@ TEST(RoadVerbs, ATemplateIsMadeAndEditedComponentByComponentEachEditOneStep)
     EXPECT_FALSE(session.document.metadata().unknownKeys.contains("road_templates"));
 }
 
+TEST(RoadVerbs, ABareNameIsRemovedFromBothSidesWhicheverSideWasMadeFirst)
+{
+    using katana::cad::road::Side;
+    // A side's first component is appended at the end of the vector, so a
+    // template whose right side was made first is stored
+    //   [right:lane 0, right:shoulder 1, left:lane 2, left:shoulder 3]
+    // and the left lane's index (2) is the larger one: REMOVE lane must erase
+    // 2 and then 0, and never the 0 first (which slid left:shoulder into 2).
+    Session session;
+    session.ok("ROADTEMPLATE NEW four");
+    session.ok("ROADTEMPLATE ADD four right lane");
+    session.ok("ROADTEMPLATE ADD four right shoulder");
+    session.ok("ROADTEMPLATE ADD four left lane");
+    session.ok("ROADTEMPLATE ADD four left shoulder");
+    const auto* four = session.document.roadTemplates().find("four");
+    ASSERT_NE(four, nullptr);
+    ASSERT_EQ(four->components.size(), 4u);
+    ASSERT_EQ(four->components[0].side, Side::Right) << "the premise: right is stored first";
+    ASSERT_EQ(four->components[2].side, Side::Left);
+    const std::size_t before = session.steps();
+    const std::string reply = session.ok("ROADTEMPLATE REMOVE four lane");
+    EXPECT_TRUE(contains(reply, "side=left name=lane removed")) << reply;
+    EXPECT_TRUE(contains(reply, "side=right name=lane removed")) << reply;
+    EXPECT_EQ(session.steps(), before + 1) << "both sides, one undo step";
+    four = session.document.roadTemplates().find("four");
+    ASSERT_EQ(four->components.size(), 2u);
+    ASSERT_TRUE(four->find(Side::Left, "shoulder").has_value()) << "the left shoulder stays";
+    ASSERT_TRUE(four->find(Side::Right, "shoulder").has_value()) << "the right shoulder stays";
+    EXPECT_FALSE(four->find(Side::Left, "lane").has_value());
+    EXPECT_FALSE(four->find(Side::Right, "lane").has_value());
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.roadTemplates().find("four")->components.size(), 4u);
+
+    // Two components only, right made before left: the indices are [1, 0],
+    // and walking them with the 0 erased first read past the end.
+    session.ok("ROADTEMPLATE NEW two");
+    session.ok("ROADTEMPLATE ADD two right lane");
+    session.ok("ROADTEMPLATE ADD two left lane");
+    session.ok("ROADTEMPLATE REMOVE two lane");
+    EXPECT_TRUE(session.document.roadTemplates().find("two")->components.empty());
+
+    // ADD both after a right-only component stores [right 0, right 1, left 2].
+    session.ok("ROADTEMPLATE NEW mixed");
+    session.ok("ROADTEMPLATE ADD mixed right lane");
+    session.ok("ROADTEMPLATE ADD mixed both shoulder");
+    session.ok("ROADTEMPLATE REMOVE mixed shoulder");
+    const auto* mixed = session.document.roadTemplates().find("mixed");
+    ASSERT_EQ(mixed->components.size(), 1u);
+    EXPECT_EQ(mixed->components[0].name, "lane");
+
+    // A name that is on no side is refused and changes nothing.
+    const std::size_t steps = session.steps();
+    EXPECT_EQ(session.refused("ROADTEMPLATE REMOVE mixed nothing").code, ErrorCode::NotFound);
+    EXPECT_EQ(session.steps(), steps);
+    EXPECT_EQ(session.document.roadTemplates().find("mixed")->components.size(), 1u);
+}
+
 TEST(RoadVerbs, RefusalsNameWhatIsWrongAndChangeNothing)
 {
     Session session;
