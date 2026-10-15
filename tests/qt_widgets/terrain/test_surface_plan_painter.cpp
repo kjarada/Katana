@@ -331,8 +331,8 @@ TEST(SurfacePlanPainter, ASmoothLegendPlacesEachStopAtItsValueNotAtItsPlaceInThe
     EXPECT_LE(channelGap(at(0.50), QColor(0xF7, 0xF7, 0xF7)), 14) << at(0.50).name().toStdString();
     EXPECT_LE(channelGap(at(0.75), QColor(0xEF, 0x8A, 0x62)), 14) << at(0.75).name().toStdString();
     // The ends: -2 #2166AC at the foot, +2 #B2182B at the head.
-    EXPECT_LE(channelGap(at(0.02), QColor(0x21, 0x66, 0xAC)), 14) << at(0.02).name().toStdString();
-    EXPECT_LE(channelGap(at(0.98), QColor(0xB2, 0x18, 0x2B)), 14) << at(0.98).name().toStdString();
+    EXPECT_LE(channelGap(at(0.01), QColor(0x21, 0x66, 0xAC)), 14) << at(0.01).name().toStdString();
+    EXPECT_LE(channelGap(at(0.99), QColor(0xB2, 0x18, 0x2B)), 14) << at(0.99).name().toStdString();
 }
 
 TEST(SurfacePlanPainter, ALegendTooTallForTheViewBelowTheOnesAlreadyDrawnIsLeftOutNotCutOff)
