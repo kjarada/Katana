@@ -144,6 +144,10 @@ RoadObjectManagerDialog& RoadObjectWorkbench::manager()
         context.document = services_.document;
         context.run = services_.run;
         context.place = [this](RoadObjectKind kind) { open(kind); };
+        if (services_.views != nullptr) {
+            ViewWorkspace* views = services_.views;
+            context.views = [views] { return scopeFilterViews(views->viewSet()); };
+        }
         managerDialog_ = new RoadObjectManagerDialog(std::move(context), &window_);
     }
     return *managerDialog_;

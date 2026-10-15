@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/cad/road/road_object_mesh.hpp"
+#include "katana/cad/road/road_object_scope.hpp"
 #include "katana/cad/road/road_objects.hpp"
 #include "katana/core/text.hpp"
 #include "katana/geometry/chording.hpp"
@@ -31,9 +32,10 @@ using Words = std::vector<std::string>;
 namespace {
 
 constexpr std::string_view kUsage =
-    "ROADOBJECT KINDS [kind] | LIST [JSON] | INFO id | ADD kind <placement> [key=value ...] "
-    "[PREVIEW] | SET id key=value ... [PREVIEW] | COPY id [station=] [dx=] [dy=] [key=value ...] "
-    "[PREVIEW] | DELETE id ...|ALL [PREVIEW] | QUANTITIES [id ...] | PROBLEMS   (HELP ROADOBJECT)";
+    "ROADOBJECT KINDS [kind] | LIST [JSON] [scope] | INFO id | ADD kind <placement> [key=value "
+    "...] [PREVIEW] | SET id key=value ... [PREVIEW] | COPY id [station=] [dx=] [dy=] "
+    "[key=value ...] [PREVIEW] | DELETE id ...|ALL|scope [PREVIEW] | QUANTITIES [id ...|scope] | "
+    "PROBLEMS   (HELP ROADOBJECT)";
 
 Error usage(std::string_view text)
 {
@@ -268,19 +270,54 @@ Status checkBuilds(const PlacementContext& context, const RoadObject& object)
     return checkBuilt(object, buildRoadObject(context, object));
 }
 
-// A road object is a definition kept by id, not a drawn entity a scope can
-// take, so LIST, QUANTITIES and DELETE act on ids (or all of them), as the
-// corridor verbs act on names. A scope word is refused by name - never ignored
-// (LIST used to answer a LAYERS scope with every object) and never read as an
-// id that does not exist (docs/road_objects.md, "The verbs").
-Status refuseScope(std::string_view verb, const std::string& word)
+// LIST, QUANTITIES and DELETE take the objects by id, or by the shared scope
+// and filter (road_object_scope.hpp): when the word at `at` begins a scope it
+// is read by the one parser from there, `at` is left at the first word after
+// it, and the objects it takes are matched; nullopt when it does not, so the
+// words are ids. A scope word is never ignored, and never read as an id that
+// does not exist (docs/road_objects.md, "Scope and filter").
+Result<std::optional<RoadObjectMatch>> readScope(const Document& document, const Words& args,
+                                                 std::size_t& at, const ScopeViewProvider& views)
 {
-    if (!isScopeWord(word)) {
-        return {};
+    if (at >= args.size() || !isScopeWord(args[at])) {
+        return std::optional<RoadObjectMatch>{};
     }
+    auto words = parseScopeWords(args, at);
+    if (!words) {
+        return words.error();
+    }
+    auto match = matchRoadObjects(document, *words, views);
+    if (!match) {
+        return match.error();
+    }
+    return std::optional<RoadObjectMatch>(std::move(*match));
+}
+
+// The words that ended a scope, which are the verb's own: `allowed` (PREVIEW
+// for DELETE) and nothing else.
+Status onlyAfterScope(std::string_view verb, const Words& args, std::size_t at,
+                      std::string_view allowed)
+{
+    for (std::size_t i = at; i < args.size(); ++i) {
+        if (allowed.empty() || upper(args[i]) != allowed) {
+            return makeError(ErrorCode::ParseFailure,
+                             std::format("not a word ROADOBJECT {} takes after a scope{}", verb,
+                                         allowed.empty() ? std::string()
+                                                         : std::format(": {} may end the line",
+                                                                       allowed)),
+                             args[i]);
+        }
+    }
+    return {};
+}
+
+// An id among the words of a line that gave a scope, or a scope word among
+// ids: one or the other.
+Error idsOrScope(std::string_view verb, const std::string& word)
+{
     return makeError(ErrorCode::InvalidArgument,
-                     std::format("ROADOBJECT {} acts on road objects by id and takes no scope or "
-                                 "filter: a road object is a definition, not a drawn entity",
+                     std::format("ROADOBJECT {} takes ids or one scope (DRAWING, SELECTION, VIEW, "
+                                 "AREA or LAYERS, then WHERE ...), not both",
                                  verb),
                      word);
 }
@@ -355,36 +392,53 @@ Result<std::string> kinds(const Words& args)
     return out;
 }
 
-Result<std::string> list(const Document& document, const Words& args)
+Result<std::string> list(const Document& document, const Words& args,
+                         const ScopeViewProvider& views)
 {
-    for (std::size_t i = 2; i < args.size(); ++i) {
-        if (auto status = refuseScope("LIST", args[i]); !status) {
-            return status.error();
-        }
-        if (i > 2 || upper(args[i]) != "JSON") {
-            return usage("ROADOBJECT LIST [JSON]");
-        }
+    std::size_t at = 2;
+    const bool json = at < args.size() && upper(args[at]) == "JSON";
+    if (json) {
+        ++at;
     }
-    if (args.size() > 2 && upper(args[2]) == "JSON") {
-        if (const Status status = document.roadObjectsStatus(); !status) {
-            return status.error();
-        }
-        return roadObjectsToJson(document.roadObjects());
+    auto scoped = readScope(document, args, at, views);
+    if (!scoped) {
+        return scoped.error();
+    }
+    if (at < args.size()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "usage: ROADOBJECT LIST [JSON] [<scope> [WHERE key=value ...]]",
+                         args[at]);
+    }
+    if (json && *scoped) {
+        // The stored set is one document, and a scope's record cannot lead it
+        // without making it something else.
+        return makeError(ErrorCode::InvalidArgument,
+                         "ROADOBJECT LIST JSON is the whole stored set: LIST with a scope gives "
+                         "the objects it takes as records, and the katana_road_objects tool "
+                         "gives them as data",
+                         args[2]);
     }
     if (const Status status = document.roadObjectsStatus(); !status) {
         return status.error();
     }
+    if (json) {
+        return roadObjectsToJson(document.roadObjects());
+    }
     const PlacementContext context = placementContext(document);
     std::string body;
     std::size_t problems = 0;
+    std::size_t count = 0;
     for (const RoadObject& object : document.roadObjects().objects) {
+        if (*scoped && std::ranges::find((*scoped)->ids, object.id) == (*scoped)->ids.end()) {
+            continue;
+        }
         const bim::BimModel built = buildRoadObject(context, object);
         problems += built.problems.size();
+        ++count;
         body += "\n" + objectRecord("object", object, built);
     }
-    return std::format("roadobjects count={} problems={}", document.roadObjects().objects.size(),
-                       problems) +
-           body;
+    return (*scoped ? (*scoped)->record() + "\n" : std::string()) +
+           std::format("roadobjects count={} problems={}", count, problems) + body;
 }
 
 Result<std::string> info(const Document& document, const Words& args)
@@ -818,10 +872,12 @@ Result<std::string> copy(Document& document, const Words& args)
     return reply;
 }
 
-Result<std::string> remove(Document& document, const Words& args)
+Result<std::string> remove(Document& document, const Words& args,
+                           const ScopeViewProvider& views)
 {
     if (args.size() < 3) {
-        return usage("ROADOBJECT DELETE id [id ...] | ALL [PREVIEW]");
+        return usage("ROADOBJECT DELETE id [id ...] | ALL | <scope> [WHERE key=value ...] "
+                     "[PREVIEW]");
     }
     auto set = editableSet(document);
     if (!set) {
@@ -830,22 +886,47 @@ Result<std::string> remove(Document& document, const Words& args)
     bool preview = false;
     bool all = false;
     std::vector<std::string> ids;
+    // ALL on its own is every object, and keeps its plain reply; ALL followed
+    // by WHERE is the shared scope's DRAWING, with the scope's record.
+    std::vector<std::string> given; // the words that are not PREVIEW
     for (std::size_t i = 2; i < args.size(); ++i) {
-        const std::string folded = upper(args[i]);
-        if (folded == "PREVIEW") {
-            preview = true;
-        } else if (folded == "ALL") {
-            all = true;
-        } else {
-            if (auto status = refuseScope("DELETE", args[i]); !status) {
-                return status.error();
-            }
-            const RoadObject* object = set->find(args[i]);
-            if (object == nullptr) {
-                return makeError(ErrorCode::NotFound, "no road object has that id", args[i]);
-            }
-            if (std::ranges::find(ids, object->id) == ids.end()) {
-                ids.push_back(object->id);
+        if (upper(args[i]) != "PREVIEW") {
+            given.push_back(args[i]);
+        }
+    }
+    const bool bareAll = given.size() == 1 && upper(given.front()) == "ALL";
+    std::string lead;
+    std::size_t at = 2;
+    auto scoped = bareAll ? Result<std::optional<RoadObjectMatch>>(std::optional<RoadObjectMatch>{})
+                          : readScope(document, args, at, views);
+    if (!scoped) {
+        return scoped.error();
+    }
+    if (*scoped) {
+        if (auto status = onlyAfterScope("DELETE", args, at, "PREVIEW"); !status) {
+            return status.error();
+        }
+        preview = at < args.size();
+        ids = (*scoped)->ids;
+        lead = (*scoped)->record() + "\n";
+    } else {
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            const std::string folded = upper(args[i]);
+            if (folded == "PREVIEW") {
+                preview = true;
+            } else if (folded == "ALL") {
+                all = true;
+            } else {
+                if (isScopeWord(args[i])) {
+                    return idsOrScope("DELETE", args[i]);
+                }
+                const RoadObject* object = set->find(args[i]);
+                if (object == nullptr) {
+                    return makeError(ErrorCode::NotFound, "no road object has that id", args[i]);
+                }
+                if (std::ranges::find(ids, object->id) == ids.end()) {
+                    ids.push_back(object->id);
+                }
             }
         }
     }
@@ -860,8 +941,8 @@ Result<std::string> remove(Document& document, const Words& args)
         named += (named.empty() ? "" : ",") + id;
     }
     const std::string reply =
-        std::format("{} count={}{}", preview ? "preview delete" : "deleted", ids.size(),
-                    ids.empty() ? std::string() : " ids=" + named);
+        lead + std::format("{} count={}{}", preview ? "preview delete" : "deleted", ids.size(),
+                           ids.empty() ? std::string() : " ids=" + named);
     if (preview || ids.empty()) {
         return reply;
     }
@@ -874,30 +955,49 @@ Result<std::string> remove(Document& document, const Words& args)
     return reply;
 }
 
-Result<std::string> quantities(const Document& document, const Words& args)
+Result<std::string> quantities(const Document& document, const Words& args,
+                               const ScopeViewProvider& views)
 {
     if (const Status status = document.roadObjectsStatus(); !status) {
         return status.error();
     }
     const RoadObjectSet& set = document.roadObjects();
-    std::vector<const RoadObject*> chosen;
-    for (std::size_t i = 2; i < args.size(); ++i) {
-        if (auto status = refuseScope("QUANTITIES", args[i]); !status) {
+    std::size_t at = 2;
+    auto scoped = readScope(document, args, at, views);
+    if (!scoped) {
+        return scoped.error();
+    }
+    if (*scoped) {
+        if (auto status = onlyAfterScope("QUANTITIES", args, at, {}); !status) {
             return status.error();
         }
-        const RoadObject* object = set.find(args[i]);
-        if (object == nullptr) {
-            return makeError(ErrorCode::NotFound, "no road object has that id", args[i]);
-        }
-        // An id named twice is one object, as DELETE reads it: counting it
-        // twice would double its length and its count in the totals.
-        if (std::ranges::find(chosen, object) == chosen.end()) {
-            chosen.push_back(object);
-        }
     }
-    if (chosen.empty()) {
+    std::vector<const RoadObject*> chosen;
+    if (*scoped) {
         for (const RoadObject& object : set.objects) {
-            chosen.push_back(&object);
+            if (std::ranges::find((*scoped)->ids, object.id) != (*scoped)->ids.end()) {
+                chosen.push_back(&object);
+            }
+        }
+    } else {
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            if (isScopeWord(args[i])) {
+                return idsOrScope("QUANTITIES", args[i]);
+            }
+            const RoadObject* object = set.find(args[i]);
+            if (object == nullptr) {
+                return makeError(ErrorCode::NotFound, "no road object has that id", args[i]);
+            }
+            // An id named twice is one object, as DELETE reads it: counting it
+            // twice would double its length and its count in the totals.
+            if (std::ranges::find(chosen, object) == chosen.end()) {
+                chosen.push_back(object);
+            }
+        }
+        if (chosen.empty()) {
+            for (const RoadObject& object : set.objects) {
+                chosen.push_back(&object);
+            }
         }
     }
     const PlacementContext context = placementContext(document);
@@ -905,6 +1005,9 @@ Result<std::string> quantities(const Document& document, const Words& args)
     const auto line = [&out](const std::string& text) {
         out += (out.empty() ? "" : "\n") + text;
     };
+    if (*scoped) {
+        line((*scoped)->record());
+    }
     // The totals by kind, in the order the kinds are listed.
     std::map<RoadObjectKind, std::pair<std::size_t, std::vector<bim::BimObject>>> byKind;
     for (const RoadObject* object : chosen) {
@@ -925,8 +1028,8 @@ Result<std::string> quantities(const Document& document, const Words& args)
         line(std::format("total kind={} objects={}", kindWord(kind), entry.first) +
              quantityKeys(totalQuantities(entry.second)));
     }
-    if (out.empty()) {
-        return std::string("roadobjects count=0");
+    if (chosen.empty()) {
+        line("roadobjects count=0");
     }
     return out;
 }
@@ -964,7 +1067,7 @@ Result<std::string> runRoadObjectVerb(Document& document, const Words& tokens,
         return kinds(tokens);
     }
     if (action == "LIST") {
-        return list(document, tokens);
+        return list(document, tokens, views);
     }
     if (action == "INFO") {
         return info(document, tokens);
@@ -979,10 +1082,10 @@ Result<std::string> runRoadObjectVerb(Document& document, const Words& tokens,
         return copy(document, tokens);
     }
     if (action == "DELETE") {
-        return remove(document, tokens);
+        return remove(document, tokens, views);
     }
     if (action == "QUANTITIES") {
-        return quantities(document, tokens);
+        return quantities(document, tokens, views);
     }
     if (action == "PROBLEMS") {
         return problems(document);
@@ -998,6 +1101,7 @@ std::string roadObjectVerbHelp()
 
 ROADOBJECT KINDS [kind]          the kinds, or one kind's keys with units, ranges, defaults
 ROADOBJECT LIST [JSON]           a record per object, or the stored JSON
+ROADOBJECT LIST <scope> [WHERE k=v ...]     the objects a scope takes (below)
 ROADOBJECT INFO id               its keys, the 3D objects made of it, its problems
 ROADOBJECT ADD kind [key=value ...] <placement> [key=value ...] [PREVIEW]
   placement: ALIGNMENT name station=s [to=s] [offset=o] [spacing=m]
@@ -1006,14 +1110,19 @@ ROADOBJECT ADD kind [key=value ...] <placement> [key=value ...] [PREVIEW]
   (after WHERE every key=value is a condition: give an object's keys before ALONG or AT)
 ROADOBJECT SET id key=value ... [PREVIEW]
 ROADOBJECT COPY id [station=s] [dx=m] [dy=m] [key=value ...] [PREVIEW]
-ROADOBJECT DELETE id [id ...] | ALL [PREVIEW]
-ROADOBJECT QUANTITIES [id ...]   per 3D object, then totals by kind
+ROADOBJECT DELETE id [id ...] | ALL | <scope> [WHERE k=v ...] [PREVIEW]
+ROADOBJECT QUANTITIES [id ... | <scope> [WHERE k=v ...]]   per 3D object, then totals by kind
 ROADOBJECT PROBLEMS              what could not be made, and why
 Every object: name= layer= colour=#RRGGBB|name material= facility= (the road it is part of)
   station= to= offset= (left positive) spacing= (guide posts, signs, lights) heights=profile|surface|line
   surface=name crossfall=% (from the centreline out, on the profile) dz= (raised from the ground)
   (empty: offset= crossfall= dz= go back to 0; to= spacing= heights= surface= and the kind's keys clear)
-LIST, QUANTITIES and DELETE take ids (DELETE ALL), and no scope: a road object is a definition
+<scope> is SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY], as every
+  verb on drawing data takes it; its record (scope=... matched=N) leads the reply, and a scope that
+  takes nothing is reported. Of a road object: LAYERS and WHERE LAYER= read its layer; AREA and VIEW
+  its plan extent (an object that is not made has none: unmade=N); SELECTION the objects placed
+  ALONG a selected line. WHERE PROP=key:pattern reads the keys SET writes (kind, id, type, offset ...),
+  COLOUR= the colour it is drawn in, DRAWN a layer that is shown; TYPE=, STYLE= and TEXT= are refused.
 Kinds:)";
     for (const RoadObjectKind kind : roadObjectKinds()) {
         std::string keys;
@@ -1025,10 +1134,18 @@ Kinds:)";
     return text;
 }
 
-std::string roadObjectsReport(const Document& document)
+namespace {
+
+// The report of the drawing's road objects, or of the ones `match` took.
+std::string reportOf(const Document& document, const RoadObjectMatch* match)
 {
     using Json = nlohmann::json;
     Json report{{"format", "katana-road-objects-report"}, {"version", 1}};
+    if (match != nullptr) {
+        report["scope"] = Json{{"record", match->record()},
+                               {"matched", match->ids.size()},
+                               {"unmade", match->unmade}};
+    }
     Json objects = Json::array();
     Json problems = Json::array();
     if (const Status status = document.roadObjectsStatus(); !status) {
@@ -1045,6 +1162,9 @@ std::string roadObjectsReport(const Document& document)
     for (const RoadObject& object : document.roadObjects().objects) {
         Json entry = index < list.size() ? list[index] : Json{{"id", object.id}};
         ++index;
+        if (match != nullptr && std::ranges::find(match->ids, object.id) == match->ids.end()) {
+            continue;
+        }
         const bim::BimModel built = buildRoadObject(context, object);
         Json made = Json::array();
         for (const bim::BimObject& part : built.objects) {
@@ -1074,6 +1194,23 @@ std::string roadObjectsReport(const Document& document)
     report["objects"] = std::move(objects);
     report["problems"] = std::move(problems);
     return report.dump(2, ' ', false, Json::error_handler_t::replace);
+}
+
+} // namespace
+
+std::string roadObjectsReport(const Document& document)
+{
+    return reportOf(document, nullptr);
+}
+
+Result<std::string> roadObjectsReport(const Document& document, const ScopeWords& words,
+                                      const ScopeViewProvider& views)
+{
+    auto match = matchRoadObjects(document, words, views);
+    if (!match) {
+        return match.error();
+    }
+    return reportOf(document, &*match);
 }
 
 } // namespace katana::cad::road

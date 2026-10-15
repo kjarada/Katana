@@ -1083,9 +1083,28 @@ if(TARGET katana)
             "-DEXPECT=--dialog bimRoadTemplates opened roadTemplateManagerDialog \"Road Template Manager\".*roadTemplateList: rural two-lane [|] 4 [|] 4 [|] 10 [|].*urban street.*divided road.*--dialog bimCorridors opened corridorDialog \"Corridors\".*corridorList: Main [|] road [|] urban street.*corridorProblems: no target surface.*object id=corridor/Main/left/kerb/1 kind=kerb.*bimMenu: BIM: Road Template Manager[.][.][.] [[]Road templates.*Corridors[.][.][.] [[]Corridors.*Show Road Model [[].*Corridor Quantities[.][.][.] [[].*commandLog: .*> ROADTEMPLATE DEFAULTS added=3.*> CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" interval=10 corridor name=Main"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bim_corridor_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The road objects (docs/road_objects.md, "In the window"): a sign and a barrier
+    # placed through the BIM menu's placing dialog - each line echoed in the log as a
+    # typed one is - then the manager, which lists both, takes a scope through the
+    # shared controls (a layer pattern of the filter), chooses the rows it takes
+    # (ROADOBJECT LIST), shows their quantities (ROADOBJECT QUANTITIES) and deletes
+    # them (ROADOBJECT DELETE). By hand: the sign at station 50, offset 4 on the
+    # alignment that runs (0,0) to (100,0) is on road/objects/sign, the barrier from
+    # 0 to 20 on road/objects/barrier, so "road/objects/s*" takes the sign alone: one
+    # chosen, one sign in the totals, one deleted and one object left. The table
+    # prints a station to the millimetre, "50.000".
+    add_test(NAME qt_the_road_objects_dialogs_place_list_and_delete_by_scope_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>ALIGN NEW Main 0,0 100,0|>ALIGN DESIGN Main 0,10 100,10|@bimRoadSign|roadObjectStation=50|roadObjectOffset=4|?roadObjectLine|!roadObjectAdd|?roadObjectStatus|@bimRoadBarrier|roadObjectStation=0|roadObjectTo=20|!roadObjectAdd|@bimRoadObjects|?roadObjectCount|?roadObjectTable|roadObjectManagerFilterLayer=road/objects/s*|!roadObjectSelectMatching|?roadObjectManagerStatus|!roadObjectQuantities|?roadObjectInfo|!roadObjectDeleteMatching|?roadObjectCount|?commandLog"
+            "-DEXPECT=--dialog bimRoadSign opened roadObjectDialog \"Road Objects\".*roadObjectLine: ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4.*> ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4.*added id=sign-1 kind=sign.*roadObjectStatus: Added - one undo step[.].*--dialog bimRoadBarrier opened roadObjectDialog \"Road Objects\".*> ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4.*added id=barrier-2 kind=barrier.*--dialog bimRoadObjects opened roadObjectManagerDialog \"Road Objects\".*roadObjectCount: 2 road objects, 0 problems.*roadObjectTable: sign-1 [|] Sign [|] [|] Main [|] 50[.]000 [|] [|] 4[.]000 [|] road/objects/sign [|].* ; barrier-2 [|] Safety barrier [|] [|] Main [|] 0[.]000 [|] 20[.]000 [|] 4[.]000 [|] road/objects/barrier.*roadObjectManagerStatus: 1 chosen - scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1.*roadObjectInfo: scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1 quantity object=sign-1.*total kind=sign objects=1 count=1.*roadObjectCount: 1 road objects, 0 problems.*commandLog: .*> ROADOBJECT LIST DRAWING WHERE LAYER=road/objects/s[*].*> ROADOBJECT QUANTITIES DRAWING WHERE LAYER=road/objects/s[*].*> ROADOBJECT DELETE DRAWING WHERE LAYER=road/objects/s[*] scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1 deleted count=1 ids=sign-1"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/road_objects_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
         qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
+        qt_the_road_objects_dialogs_place_list_and_delete_by_scope_headless
         qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
         qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         PROPERTIES ENVIRONMENT_MODIFICATION

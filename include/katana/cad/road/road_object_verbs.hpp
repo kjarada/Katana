@@ -5,7 +5,7 @@
 // object dialogs, katana_cli and katana_mcp place them alike.
 //
 //   ROADOBJECT KINDS [<kind>]
-//   ROADOBJECT LIST [JSON]
+//   ROADOBJECT LIST [JSON | <scope> [WHERE k=v ...]]
 //   ROADOBJECT INFO <id>
 //   ROADOBJECT ADD <kind> [key=value ...] <placement> [key=value ...] [PREVIEW]
 //     <placement> is one of
@@ -18,8 +18,8 @@
 //       AT FROM <scope> [WHERE k=v ...]    at the points the scope takes
 //   ROADOBJECT SET <id> key=value ... [PREVIEW]
 //   ROADOBJECT COPY <id> [station=<s>] [dx=<m>] [dy=<m>] [key=value ...] [PREVIEW]
-//   ROADOBJECT DELETE <id> [<id> ...] | ALL [PREVIEW]
-//   ROADOBJECT QUANTITIES [<id> ...]
+//   ROADOBJECT DELETE <id> [<id> ...] | ALL | <scope> [WHERE k=v ...] [PREVIEW]
+//   ROADOBJECT QUANTITIES [<id> ... | <scope> [WHERE k=v ...]]
 //   ROADOBJECT PROBLEMS
 //
 // <kind> is barrier, guidepost, sign, light, culvert, wall, fence or marking.
@@ -32,9 +32,14 @@
 // on the profile; each is refused where nothing would read it. <scope> is the
 // shared scope and filter grammar (cad/scope_verbs.hpp); after its WHERE every
 // word with '=' is a condition, so an object's own keys stand before ALONG or
-// AT there. LIST, QUANTITIES and DELETE act on ids, or on all, and take no
-// scope: a road object is a definition, not a drawn entity (a scope word is
-// refused by name).
+// AT there. LIST, QUANTITIES and DELETE act on ids, or on all of them, or on
+// the objects a <scope> takes (road_object_scope.hpp says what each choice
+// means for a road object, which is a definition and not an entity): ids and a
+// scope are not mixed, a scope word is never read as an id, and LIST JSON is
+// the whole stored set and takes no scope. The scope's record leads the reply
+// (scope=layers layers=road/objects/sign sublayers=yes matched=1), and a scope
+// that takes nothing is reported, not refused: DELETE then says count=0 and
+// leaves no undo step.
 //
 // Words are case-insensitive. Every edit is ONE undo step and a refused one
 // changes nothing; an ADD of several lines is all or nothing. PREVIEW says
@@ -72,5 +77,13 @@ runRoadObjectVerb(Document& document, const std::vector<std::string>& tokens,
 // katana_mcp's katana_road_objects tool returns (a tool, not a resource:
 // docs/mcp.md).
 [[nodiscard]] std::string roadObjectsReport(const Document& document);
+
+// The same for the objects a scope and filter take, with a "scope" member:
+// `record` (the scope's record, as a reply leads with it), `matched`, and
+// `unmade` (objects the scope would take but for not being made). The
+// problems are those of the objects it took. Fails as matchRoadObjects does.
+[[nodiscard]] katana::core::Result<std::string>
+roadObjectsReport(const Document& document, const ScopeWords& words,
+                  const ScopeViewProvider& views = {});
 
 } // namespace katana::cad::road

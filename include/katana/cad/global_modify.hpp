@@ -255,6 +255,36 @@ struct GlobalModifyPlan {
 [[nodiscard]] katana::core::Result<std::vector<katana::entity::EntityId>>
 matchEntities(const Document& document, const ModifyScope& scope, const ModifyFilter& filter);
 
+// ---- the pieces of matchEntities that a resolver of something else shares -------------------
+//
+// Not every tool acts on entities: the road objects (docs/road_objects.md) are
+// definitions that sit on a layer and have a plan extent, and the ROADOBJECT
+// verbs take the same scope and filter (cad::road::matchRoadObjects). They
+// resolve with these, so the layer rules, the pattern match and the property
+// conditions are written once; matchEntities calls the same.
+
+// A Layers scope's layers against the drawing: InvalidArgument when it names
+// none, NotFound naming the first the drawing lacks. Nothing to check, so ok,
+// for any other kind of scope.
+[[nodiscard]] katana::core::Status checkScopeLayers(const katana::entity::Model& model,
+                                                    const ModifyScope& scope);
+
+// Whether a Layers scope takes what is on `layer`: the layer is one of the
+// scope's, or lies beneath one when the scope takes sublayers. False for any
+// other kind of scope, which does not decide by layer.
+[[nodiscard]] bool layerInScope(const ModifyScope& scope, std::string_view layer);
+
+// The filter's layer patterns against the full path of `layer`: any of them
+// (matchesPattern), and every layer when there are none.
+[[nodiscard]] bool layerPassesFilter(const ModifyFilter& filter, std::string_view layer);
+
+// The filter's property conditions against `properties`: with a key, a property
+// of exactly that name (and, with a value, one whose value as entity::toString
+// prints it matches the pattern); with only a value, any property that does;
+// no conditions pass anything.
+[[nodiscard]] bool propertiesPassFilter(const ModifyFilter& filter,
+                                        const katana::entity::PropertyMap& properties);
+
 // The command and its report. Fails, changing nothing, for a request the
 // drawing would refuse - a style, linetype, hatch pattern or dimension style
 // it does not have, a layer name that is not a valid path, a weight, height

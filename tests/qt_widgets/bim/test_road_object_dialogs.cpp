@@ -17,11 +17,14 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QGroupBox>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMenu>
 #include <QPainter>
@@ -36,6 +39,7 @@
 #include <QToolBar>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -738,4 +742,205 @@ TEST(RoadObjectManager, CopyTakesTheKeysFieldSoACopyAtPointsCanBeMovedFromTheWin
     EXPECT_EQ(text(manager, "roadObjectKeys"), "nosuchkey=1");
     EXPECT_TRUE(text(manager, "roadObjectManagerStatus").startsWith("Refused"))
         << text(manager, "roadObjectManagerStatus").toStdString();
+}
+
+// ---- the manager by scope ---------------------------------------------------------------------
+//
+// The shared "Apply to" and "Only those that match" controls beside the table,
+// and the three buttons that put them into ROADOBJECT LIST, QUANTITIES and DELETE
+// - each the line a person would type, run by the window's executor.
+
+namespace {
+
+// The manager on a site of three objects, in this order:
+//   barrier-1  road/objects/barrier  stations 0 to 20, offset 4
+//   sign-2     road/objects/sign     station 50, offset 4
+//   light-3    lighting/poles        poles at stations 0, 30 and 60, offset 6
+struct ScopedManager {
+    ScopedManager()
+    {
+        site.run("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4");
+        site.run("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4");
+        site.run("ROADOBJECT ADD light ALIGNMENT Main station=0 to=60 spacing=30 offset=6 "
+                 "layer=lighting/poles");
+        RoadObjectManagerContext context;
+        context.document = &site.document;
+        context.run = site.runner();
+        manager = std::make_unique<RoadObjectManagerDialog>(std::move(context));
+        QApplication::processEvents();
+    }
+
+    Site site;
+    std::unique_ptr<RoadObjectManagerDialog> manager;
+};
+
+void chooseScope(QWidget& manager, const char* radio)
+{
+    auto* button = child<QRadioButton>(manager, radio);
+    ASSERT_NE(button, nullptr);
+    button->click();
+    QApplication::processEvents();
+}
+
+} // namespace
+
+TEST(RoadObjectManager, TheSharedScopeControlsStartOnTheWholeDrawingAndGreyWhatARoadObjectHasNoneOf)
+{
+    ScopedManager scoped;
+    RoadObjectManagerDialog& manager = *scoped.manager;
+    EXPECT_NE(manager.findChild<QGroupBox*>("roadObjectManagerByScope"), nullptr);
+    auto* drawing = child<QRadioButton>(manager, "roadObjectManagerScopeDrawing");
+    ASSERT_NE(drawing, nullptr);
+    EXPECT_TRUE(drawing->isChecked());
+    // An entity's type, style and text: a road object has none, so they are
+    // greyed with the reason, where the verb would refuse them by name.
+    for (const char* name : {"roadObjectManagerTypePoint", "roadObjectManagerTypeLine",
+                             "roadObjectManagerTypeSpline"}) {
+        auto* box = child<QCheckBox>(manager, name);
+        ASSERT_NE(box, nullptr);
+        EXPECT_FALSE(box->isEnabled()) << name;
+        EXPECT_TRUE(box->toolTip().contains("not an entity")) << name;
+    }
+    for (const char* name : {"roadObjectManagerFilterStyle", "roadObjectManagerFilterText"}) {
+        auto* edit = child<QLineEdit>(manager, name);
+        ASSERT_NE(edit, nullptr);
+        EXPECT_FALSE(edit->isEnabled()) << name;
+        EXPECT_TRUE(edit->toolTip().contains("not an entity")) << name;
+    }
+    // What means something for one stays live: a layer pattern, a colour, a
+    // property and its value, and what is drawn.
+    for (const char* name : {"roadObjectManagerFilterLayer", "roadObjectManagerFilterColour",
+                             "roadObjectManagerFilterProperty", "roadObjectManagerFilterValue"}) {
+        auto* edit = child<QLineEdit>(manager, name);
+        ASSERT_NE(edit, nullptr);
+        EXPECT_TRUE(edit->isEnabled()) << name;
+    }
+    EXPECT_TRUE(child<QCheckBox>(manager, "roadObjectManagerDrawnOnly")->isEnabled());
+    // The three buttons, each with a mnemonic of its own beside the others'.
+    QSet<QChar> letters;
+    for (const auto* button : manager.findChildren<QAbstractButton*>()) {
+        const qsizetype at = button->text().indexOf('&');
+        if (at < 0 || at + 1 >= button->text().size()) {
+            continue;
+        }
+        const QChar letter = button->text()[at + 1].toLower();
+        EXPECT_FALSE(letters.contains(letter))
+            << "two buttons use Alt+" << letter.toLatin1() << ": " << button->text().toStdString();
+        letters.insert(letter);
+    }
+    for (const char* name :
+         {"roadObjectSelectMatching", "roadObjectQuantities", "roadObjectDeleteMatching"}) {
+        EXPECT_NE(manager.findChild<QPushButton*>(name), nullptr) << name;
+    }
+}
+
+TEST(RoadObjectManager, SelectMatchingRunsListWithTheScopeAndChoosesTheRowsItTook)
+{
+    ScopedManager scoped;
+    RoadObjectManagerDialog& manager = *scoped.manager;
+    Site& site = scoped.site;
+
+    // A property and its value on the whole drawing: the kind.
+    fill(manager, "roadObjectManagerFilterProperty", "kind");
+    fill(manager, "roadObjectManagerFilterValue", "barrier");
+    click(manager, "roadObjectSelectMatching");
+    EXPECT_EQ(site.lines.back(), "ROADOBJECT LIST DRAWING WHERE PROP=kind:barrier");
+    EXPECT_EQ(manager.selectedIds(), QStringList{"barrier-1"});
+    EXPECT_TRUE(text(manager, "roadObjectManagerStatus")
+                    .startsWith("1 chosen - scope=drawing where=\"PROP=kind:barrier\" matched=1"))
+        << text(manager, "roadObjectManagerStatus").toStdString();
+
+    // A layer pattern of the filter: the lights' layer.
+    fill(manager, "roadObjectManagerFilterProperty", "");
+    fill(manager, "roadObjectManagerFilterValue", "");
+    fill(manager, "roadObjectManagerFilterLayer", "lighting/*");
+    click(manager, "roadObjectSelectMatching");
+    EXPECT_EQ(site.lines.back(), "ROADOBJECT LIST DRAWING WHERE LAYER=lighting/*");
+    EXPECT_EQ(manager.selectedIds(), QStringList{"light-3"});
+
+    // The checked layers: the sign's, with the layers beneath it.
+    fill(manager, "roadObjectManagerFilterLayer", "");
+    chooseScope(manager, "roadObjectManagerScopeLayers");
+    auto* layers = child<QListWidget>(manager, "roadObjectManagerLayers");
+    ASSERT_NE(layers, nullptr);
+    int ticked = 0;
+    for (int row = 0; row < layers->count(); ++row) {
+        if (layers->item(row)->text() == "road/objects/sign") {
+            layers->item(row)->setCheckState(Qt::Checked);
+            ++ticked;
+        }
+    }
+    ASSERT_EQ(ticked, 1);
+    click(manager, "roadObjectSelectMatching");
+    EXPECT_EQ(site.lines.back(), "ROADOBJECT LIST LAYERS road/objects/sign");
+    EXPECT_EQ(manager.selectedIds(), QStringList{"sign-2"});
+
+    // A scope that takes nothing is said, not refused, and chooses nothing.
+    chooseScope(manager, "roadObjectManagerScopeDrawing");
+    fill(manager, "roadObjectManagerFilterProperty", "kind");
+    fill(manager, "roadObjectManagerFilterValue", "culvert");
+    click(manager, "roadObjectSelectMatching");
+    EXPECT_TRUE(manager.selectedIds().isEmpty());
+    EXPECT_TRUE(text(manager, "roadObjectManagerStatus")
+                    .startsWith("0 chosen - scope=drawing where=\"PROP=kind:culvert\" matched=0"))
+        << text(manager, "roadObjectManagerStatus").toStdString();
+}
+
+TEST(RoadObjectManager, QuantitiesRunsQuantitiesWithTheScopeAndShowsThemInTheDetails)
+{
+    ScopedManager scoped;
+    RoadObjectManagerDialog& manager = *scoped.manager;
+    fill(manager, "roadObjectManagerFilterProperty", "kind");
+    fill(manager, "roadObjectManagerFilterValue", "barrier");
+    click(manager, "roadObjectQuantities");
+    EXPECT_EQ(scoped.site.lines.back(), "ROADOBJECT QUANTITIES DRAWING WHERE PROP=kind:barrier");
+    // The one barrier is 20 m long.
+    const QString details = text(manager, "roadObjectInfo");
+    EXPECT_TRUE(details.startsWith("scope=drawing where=\"PROP=kind:barrier\" matched=1"))
+        << details.toStdString();
+    EXPECT_TRUE(details.contains("total kind=barrier objects=1 length=20")) << details.toStdString();
+    EXPECT_FALSE(details.contains("kind=sign")) << details.toStdString();
+}
+
+TEST(RoadObjectManager, DeleteMatchingRunsDeleteWithTheScopeAsOneStepAndTheTableFollows)
+{
+    ScopedManager scoped;
+    RoadObjectManagerDialog& manager = *scoped.manager;
+    Site& site = scoped.site;
+    fill(manager, "roadObjectManagerFilterLayer", "road/objects/s*");
+    click(manager, "roadObjectDeleteMatching");
+    EXPECT_EQ(site.lines.back(), "ROADOBJECT DELETE DRAWING WHERE LAYER=road/objects/s*");
+    EXPECT_EQ(site.document.roadObjects().find("sign-2"), nullptr);
+    EXPECT_NE(site.document.roadObjects().find("barrier-1"), nullptr);
+    EXPECT_NE(site.document.roadObjects().find("light-3"), nullptr);
+    QApplication::processEvents();
+    EXPECT_EQ(child<QTableWidget>(manager, "roadObjectTable")->rowCount(), 2);
+    EXPECT_TRUE(text(manager, "roadObjectManagerStatus").contains("deleted count=1 ids=sign-2"))
+        << text(manager, "roadObjectManagerStatus").toStdString();
+    // One undo brings it back.
+    site.run("UNDO");
+    QApplication::processEvents();
+    EXPECT_NE(site.document.roadObjects().find("sign-2"), nullptr);
+    EXPECT_EQ(child<QTableWidget>(manager, "roadObjectTable")->rowCount(), 3);
+}
+
+TEST(RoadObjectManager, ControlsThatDoNotReadRefuseWithTheirOwnReasonAndRunNothing)
+{
+    ScopedManager scoped;
+    RoadObjectManagerDialog& manager = *scoped.manager;
+    Site& site = scoped.site;
+    const std::size_t before = site.lines.size();
+    // The layers scope with no layer ticked, and a colour that is not a colour.
+    chooseScope(manager, "roadObjectManagerScopeLayers");
+    click(manager, "roadObjectDeleteMatching");
+    EXPECT_TRUE(text(manager, "roadObjectManagerStatus").startsWith("Refused: "))
+        << text(manager, "roadObjectManagerStatus").toStdString();
+    chooseScope(manager, "roadObjectManagerScopeDrawing");
+    fill(manager, "roadObjectManagerFilterColour", "red");
+    click(manager, "roadObjectSelectMatching");
+    EXPECT_TRUE(text(manager, "roadObjectManagerStatus").startsWith("Refused: "))
+        << text(manager, "roadObjectManagerStatus").toStdString();
+    // Nothing was handed to the executor, and nothing was deleted.
+    EXPECT_EQ(site.lines.size(), before);
+    EXPECT_EQ(site.document.roadObjects().objects.size(), 3u);
 }

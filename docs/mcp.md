@@ -84,7 +84,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the drawing's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
-| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | nothing: read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
+| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | `scope` (`selection`, `drawing`, `area`, `layers`), `area`, `layers`, `only`, `where` - the shared scope and filter, as `katana_export` takes them; none: every object. Read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
 | `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`src/katana_app/update_verbs.hpp`), for the surface `UpdateSurface::Mcp` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -440,6 +440,24 @@ object's, each with its `source`. A tool rather than a resource, so an agent
 is told of it in the tool list it reads first.
 `McpServer.TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems`
 places a barrier, reads it, deletes its alignment and reads the problem.
+
+The tool takes the shared scope and filter (`docs/road_objects.md`, "Scope and
+filter"), written as `katana_export` writes them (`scopeArgumentWords`, the one
+reading of those arguments): `scope` is `selection`, `drawing`, `area` (with
+`area`, `[x0, y0, x1, y1]`) or `layers` (with `layers` and `only`), an `area`
+alone is the scope, and `where` is a list of conditions - `["PROP=kind:barrier",
+"LAYER=road/objects/*"]` - which alone filter the selection, as `WHERE` alone does
+on the command line. With any of them only the objects they take are reported,
+and the structured content gains `scope`: `record` (the scope's record, as
+`ROADOBJECT LIST <scope>` leads its reply with it), `matched`, and `unmade` (the
+objects the scope would take but for not being made, which have no plan extent).
+A scope that takes nothing is a reply with no objects. A layer the drawing lacks,
+a `TYPE`, `STYLE` or `TEXT` condition (an entity's, refused for a road object by
+name) and `layers` without `scope` are refused. `VIEW` is the window's and is not
+offered; `area` says the same without one.
+`McpServer.TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItTook`
+places a barrier and a sign and takes them by layer, by area, by filter on the
+drawing and by filter on the (empty) selection.
 
 ## Geoprocessing tools
 

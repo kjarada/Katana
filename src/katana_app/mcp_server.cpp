@@ -440,23 +440,8 @@ std::string exportOptionWords(const Json& arguments)
             throw ToolRefusal{"\"cloud\" is a reference point cloud's id or name"};
         }
     }
-    const Json& scope = argument(arguments, "scope");
-    const Json& area = argument(arguments, "area");
-    if (!scope.is_null() || !area.is_null()) {
-        if (!scope.is_null() && !scope.is_string()) {
-            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
-        }
-        words += " " + scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
-                                    argument(arguments, "layers"),
-                                    optionalBool(arguments, "only", false),
-                                    argument(arguments, "where"));
-    } else if (!argument(arguments, "where").is_null() && argument(arguments, "layers").is_null()) {
-        // "where" alone filters the selection, as WHERE alone does on the
-        // command line (the one scope parser's rule, MODIFY's): written
-        // SELECTION WHERE ..., so the line says what it takes.
-        words += " " + scopeWordsOf("selection", area, Json(), false, argument(arguments, "where"));
-    } else if (!argument(arguments, "layers").is_null()) {
-        throw ToolRefusal{"\"layers\" says a scope: give \"scope\": \"layers\" with it"};
+    if (const auto given = scopeArgumentWords(arguments)) {
+        words += " " + *given;
     }
     if (const Json& name = argument(arguments, "layer_name"); !name.is_null()) {
         if (!name.is_string() || name.get<std::string>().empty()) {
@@ -1169,12 +1154,61 @@ const std::vector<Tool>& tools()
             "ALIGNMENT Main station=0 to=120 offset=4, ROADOBJECT ADD sign AT x,y,z code=R1-1, "
             "ROADOBJECT ADD fence ALONG FROM LAYERS boundary, ROADOBJECT SET id key=value, "
             "ROADOBJECT DELETE id; ROADOBJECT KINDS <kind> lists a kind's keys, units, ranges "
-            "and defaults (HELP ROADOBJECT).",
-            objectSchema(Json::object()), hints(true, false, true),
-            [](Session& session, const Json&) {
-                const std::string report =
-                    katana::cad::road::roadObjectsReport(session.document());
-                return ToolReply{report, Json::parse(report)};
+            "and defaults (HELP ROADOBJECT). With a scope it reports only the objects the scope "
+            "and filter take, as ROADOBJECT LIST <scope> does, and says what it took in "
+            "\"scope\": its record, how many it matched, and how many it would have taken but "
+            "for not being made (they have no plan extent, which an area asks for).",
+            objectSchema(
+                Json{{"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "Which road objects (the shared scope grammar); all of them when neither "
+                        "this nor \"area\" nor \"where\" is given. selection takes the objects "
+                        "placed along a selected line; area those whose plan extent meets the "
+                        "box; layers those on the layers (and beneath them unless \"only\")."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description", "[x0, y0, x1, y1]: scope area (given alone, the scope)."}}},
+                     {"layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on the objects the scope takes: [\"PROP=kind:barrier\", "
+                        "\"LAYER=road/objects/*\"]. PROP=key:pattern reads the keys SET writes "
+                        "(kind, id, type, offset, station ...); COLOUR=#RRGGBB the colour drawn; "
+                        "DRAWN a layer that is shown. TYPE, STYLE and TEXT are refused. Without "
+                        "\"scope\" they filter the selection, as WHERE alone does on the "
+                        "command line; \"scope\": \"drawing\" filters all."}}}}),
+            hints(true, false, true), [](Session& session, const Json& arguments) {
+                const auto given = scopeArgumentWords(arguments);
+                if (!given) {
+                    const std::string report =
+                        katana::cad::road::roadObjectsReport(session.document());
+                    return ToolReply{report, Json::parse(report)};
+                }
+                const auto tokens = katana::cad::CommandInterpreter::tokenize(*given);
+                std::size_t at = 0;
+                auto words = tokens ? katana::cad::parseScopeWords(*tokens, at)
+                                    : katana::core::Result<katana::cad::ScopeWords>(tokens.error());
+                if (!words) {
+                    throw ToolRefusal{words.error().describe()};
+                }
+                const auto report = katana::cad::road::roadObjectsReport(session.document(), *words);
+                if (!report) {
+                    throw ToolRefusal{report.error().describe()};
+                }
+                return ToolReply{*report, Json::parse(*report)};
             }});
         // ---- end road objects ----
 
@@ -1340,6 +1374,30 @@ std::string scopeWordsOf(const std::string& kind, const Json& area, const Json& 
         throw ToolRefusal{words.error().describe()};
     }
     return *words;
+}
+
+std::optional<std::string> scopeArgumentWords(const Json& arguments)
+{
+    const Json& scope = argument(arguments, "scope");
+    const Json& area = argument(arguments, "area");
+    if (!scope.is_null() || !area.is_null()) {
+        if (!scope.is_null() && !scope.is_string()) {
+            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+        }
+        return scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
+                            argument(arguments, "layers"), optionalBool(arguments, "only", false),
+                            argument(arguments, "where"));
+    }
+    if (!argument(arguments, "where").is_null() && argument(arguments, "layers").is_null()) {
+        // "where" alone filters the selection, as WHERE alone does on the
+        // command line (the one scope parser's rule, MODIFY's): written
+        // SELECTION WHERE ..., so the line says what it takes.
+        return scopeWordsOf("selection", area, Json(), false, argument(arguments, "where"));
+    }
+    if (!argument(arguments, "layers").is_null()) {
+        throw ToolRefusal{"\"layers\" says a scope: give \"scope\": \"layers\" with it"};
+    }
+    return std::nullopt;
 }
 
 // A path as the interpreter reads it: one quoted word. It has no escape, so a

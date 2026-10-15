@@ -66,7 +66,13 @@ bool isDrawn(const Model& model, const Entity& entity, const LayerOverrides& vie
 bool isDrawn(const katana::entity::ResolvedLayer& layer, const Entity& entity,
              const LayerOverrides& view)
 {
-    return entity.visible && layer.shown && !view.hides(entity.layer);
+    return entity.visible && isLayerDrawn(layer, entity.layer, view);
+}
+
+bool isLayerDrawn(const katana::entity::ResolvedLayer& layer, std::string_view path,
+                  const LayerOverrides& view)
+{
+    return layer.shown && !view.hides(path);
 }
 
 bool isGhost(const Model& model, const Entity& entity, const LayerOverrides& view)

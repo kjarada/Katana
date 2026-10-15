@@ -6,6 +6,7 @@
 // of thing and refuses the same way (docs/mcp.md).
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,14 @@ struct LineOutcome {
 // katana_import and katana_export all say a scope through it.
 [[nodiscard]] std::string scopeWordsOf(const std::string& kind, const Json& area,
                                        const Json& layers, bool only, const Json& where);
+
+// The scope a tool's arguments say, as the words of the same grammar, or
+// nullopt when they say none: "scope" (selection, drawing, area or layers), an
+// "area" alone, "layers" with "only", and "where" - which alone filters the
+// selection, as WHERE alone does on the command line, written SELECTION WHERE
+// ... so the line says what it takes. "layers" without "scope" is refused. The
+// arguments katana_export and katana_road_objects share.
+[[nodiscard]] std::optional<std::string> scopeArgumentWords(const Json& arguments);
 
 // katana_check_update's reply for `context` (mcp_server.cpp): UPDATE CHECK and
 // UPDATE STATUS as the verbs answer them (update_verbs.hpp), one line each in

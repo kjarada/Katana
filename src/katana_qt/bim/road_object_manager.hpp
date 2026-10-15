@@ -11,6 +11,17 @@
 // table and the details show is read from the drawing and from the verb's
 // own INFO, so the window and the command line say the same thing.
 //
+// BY SCOPE. Beside the table stand the same "Apply to" and "Only those that
+// match" controls every dialog on drawing data shows (the shared
+// ScopeFilterWidget, customisation/scope_filter_widget.hpp), and three buttons
+// that put what they say into ROADOBJECT LIST, QUANTITIES and DELETE
+// (docs/road_objects.md, "Scope and filter"): Select Matching runs LIST <scope>
+// and chooses the rows of the objects it took, Quantities runs QUANTITIES
+// <scope> and shows the answer in the details, Delete Matching runs DELETE
+// <scope> - one undo step. A scope that takes nothing is said, not refused.
+// The filter's entity-only controls (types, style, text) are greyed: a road
+// object has none, and the verb would refuse them by name.
+//
 // NON-MODAL, kept by the workbench. It hears the Document through a
 // DocumentWatcher, so a ROADOBJECT typed on the command line, an undo or an
 // open reloads it once, from the event loop, keeping the chosen objects.
@@ -26,6 +37,13 @@
 //   roadObjectApply           ROADOBJECT SET <id> <keys>
 //   roadObjectCopy            ROADOBJECT COPY <id> [the keys]
 //   roadObjectDelete          ROADOBJECT DELETE <ids> - the chosen rows
+//   roadObjectManagerByScope  the group of the scope controls and their buttons
+//   roadObjectManagerScope    the shared scope and filter widget (ScopeFilterWidget
+//                             with the prefix roadObjectManager: roadObjectManagerScopeDrawing,
+//                             roadObjectManagerScopeLayers, roadObjectManagerFilterProperty ...)
+//   roadObjectSelectMatching  ROADOBJECT LIST <scope>: chooses the rows it took
+//   roadObjectQuantities      ROADOBJECT QUANTITIES <scope>: shown in the details
+//   roadObjectDeleteMatching  ROADOBJECT DELETE <scope>
 //   roadObjectZoom            ZOOM WINDOW round the chosen objects
 //   roadObjectNew             the placing dialog, on the current row's kind
 //   roadObjectManagerStatus   what the last line replied, or why it was refused
@@ -39,7 +57,10 @@
 #include <memory>
 #include <optional>
 
+#include <vector>
+
 #include "command_runner.hpp"
+#include "customisation/scope_filter_widget.hpp"
 #include "katana/cad/road/road_objects.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
@@ -57,6 +78,8 @@ struct RoadObjectManagerContext {
     CommandRunner run{};
     // Opens the placing dialog on a kind. Empty: New does nothing.
     std::function<void(katana::cad::road::RoadObjectKind)> place{};
+    // The open views, for the scope's "What a view shows". Empty: none.
+    std::function<std::vector<ScopeFilterView>()> views{};
 };
 
 // The plan box round the solids of the objects `ids` names, widened by a

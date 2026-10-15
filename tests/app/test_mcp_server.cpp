@@ -2826,4 +2826,77 @@ TEST_F(McpServer, TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProb
     EXPECT_NE(after["problems"][0]["message"].get<std::string>().find("does not exist"),
               std::string::npos);
 }
+
+// The same tool, given the shared scope and filter: the barrier (20 m, offset 4,
+// layer road/objects/barrier) and the sign (station 50, offset 4, layer
+// road/objects/sign) on a straight alignment from (0,0) to (100,0). The sign
+// stands within a metre of (50, 4) and the barrier lies from x = 0 to 20, so the
+// box 45,0,55,10 takes the sign alone.
+TEST_F(McpServer, TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItTook)
+{
+    initialize();
+    const Json placed = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"ALIGN NEW Main 0,0 100,0", "ALIGN DESIGN Main 0,10 100,10",
+               "ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4",
+               "ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4"}}});
+    ASSERT_FALSE(placed["isError"].get<bool>()) << textOf(placed);
+    const auto ids = [](const Json& result) {
+        std::string out;
+        for (const Json& object : result["structuredContent"]["objects"]) {
+            out += (out.empty() ? "" : ",") + object["id"].get<std::string>();
+        }
+        return out;
+    };
+
+    // No scope: both, and no "scope" member.
+    const Json everything = call("katana_road_objects");
+    EXPECT_EQ(ids(everything), "barrier-1,sign-2");
+    EXPECT_FALSE(everything["structuredContent"].contains("scope"));
+
+    // Layers: the sign's, with the record a ROADOBJECT LIST would lead with.
+    const Json byLayer = call("katana_road_objects",
+                              Json{{"scope", "layers"}, {"layers", {"road/objects/sign"}}});
+    ASSERT_FALSE(byLayer["isError"].get<bool>()) << textOf(byLayer);
+    EXPECT_EQ(ids(byLayer), "sign-2");
+    EXPECT_EQ(byLayer["structuredContent"]["scope"]["record"],
+              "scope=layers layers=road/objects/sign sublayers=yes matched=1");
+    EXPECT_EQ(byLayer["structuredContent"]["scope"]["matched"], 1);
+    EXPECT_EQ(byLayer["structuredContent"]["scope"]["unmade"], 0);
+
+    // An area alone is the scope; its box takes the sign.
+    const Json byArea = call("katana_road_objects", Json{{"area", {45, 0, 55, 10}}});
+    ASSERT_FALSE(byArea["isError"].get<bool>()) << textOf(byArea);
+    EXPECT_EQ(ids(byArea), "sign-2");
+    EXPECT_EQ(byArea["structuredContent"]["scope"]["record"],
+              "scope=area area=45,0,55,10 matched=1");
+
+    // "where" with "scope": drawing filters the whole drawing; alone it filters
+    // the selection, which holds no road object.
+    const Json barriers = call("katana_road_objects", Json{{"scope", "drawing"},
+                                                           {"where", {"PROP=kind:barrier"}}});
+    ASSERT_FALSE(barriers["isError"].get<bool>()) << textOf(barriers);
+    EXPECT_EQ(ids(barriers), "barrier-1");
+    const Json selected = call("katana_road_objects", Json{{"where", {"PROP=kind:barrier"}}});
+    EXPECT_EQ(ids(selected), "");
+    EXPECT_EQ(selected["structuredContent"]["scope"]["record"],
+              "scope=selection where=\"PROP=kind:barrier\" matched=0");
+
+    // Taking nothing is a reply, not an error.
+    const Json nothing = call("katana_road_objects", Json{{"area", {200, 200, 300, 300}}});
+    ASSERT_FALSE(nothing["isError"].get<bool>()) << textOf(nothing);
+    EXPECT_TRUE(nothing["structuredContent"]["objects"].empty());
+
+    // What is wrong is refused, naming it.
+    const Json missing = call("katana_road_objects",
+                              Json{{"scope", "layers"}, {"layers", {"nosuch"}}});
+    EXPECT_TRUE(missing["isError"].get<bool>());
+    EXPECT_NE(textOf(missing).find("nosuch"), std::string::npos) << textOf(missing);
+    const Json entity = call("katana_road_objects", Json{{"scope", "drawing"},
+                                                         {"where", {"TYPE=point"}}});
+    EXPECT_TRUE(entity["isError"].get<bool>());
+    EXPECT_NE(textOf(entity).find("TYPE"), std::string::npos) << textOf(entity);
+    EXPECT_TRUE(call("katana_road_objects", Json{{"layers", {"road"}}})["isError"].get<bool>());
+}
 // ---- end road objects ----
