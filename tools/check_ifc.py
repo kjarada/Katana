@@ -7,6 +7,8 @@
 # agree with each other. Run by the cli.ifc_* tests when the Python that
 # configured the build can import ifcopenshell; `pip install ifcopenshell`
 # (and pytest, which IfcOpenShell's EXPRESS rule executor needs) provides it.
+# Written against 0.8.5 and run against 0.9.0 as well (the alignment evaluator
+# is the one call whose API moved: see evaluator()).
 #
 # What is checked:
 #   * the file opens, and its schema is IFC4X3_ADD2;
@@ -40,7 +42,12 @@ def angle_between(a, b):
 def evaluator(settings, curve):
     from ifcopenshell import ifcopenshell_wrapper as wrapper
 
-    function = wrapper.map_shape(settings, curve.wrapped_data)
+    # IfcOpenShell 0.8 maps the wrapped C++ instance (`curve.wrapped_data`);
+    # 0.9 removed that attribute and maps the entity_instance itself (its own
+    # api/alignment/util.py does). The instance is the argument either way, so
+    # take the wrapped one where there is one - a missing attribute raises
+    # AttributeError in 0.9, which getattr's default turns into the instance.
+    function = wrapper.map_shape(settings, getattr(curve, "wrapped_data", curve))
     return function, wrapper.function_item_evaluator(settings, function)
 
 

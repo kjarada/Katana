@@ -67,3 +67,29 @@ add_test(NAME cli.a_refused_corridor_fails_the_script
             $<TARGET_FILE:katana_cli> -c "ALIGN NEW road 0,0 100,0" -c "ROADTEMPLATE DEFAULTS"
             -c "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"")
 set_tests_properties(cli.a_refused_corridor_fails_the_script PROPERTIES WILL_FAIL TRUE)
+
+# The road model goes out with an IFC export, and NOROADMODEL leaves it out
+# (docs/ifc.md, "Road model"): a corridor is the one thing that gives the model
+# objects, so both directions are asked of the same drawing. The cli.ifc_*
+# test of the word runs the sample scenario, which has no corridor and so has no
+# road record whichever way the word goes; these run the corridor above. The
+# default reply holds the record (`road elements=N skipped=0 roads=1 parts=P`,
+# N and P above zero: the urban street's courses, kerbs and batters in a road
+# with parts) and the road and its parts as classes; with the word, the reply
+# goes straight from `counts` to the classes - the alignment and its stations
+# only - and no class of the road is among them.
+add_test(NAME cli.ifc_export_writes_a_corridors_road_model_by_default
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_setup}
+            -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli road default.ifc\" PREVIEW")
+set_tests_properties(cli.ifc_export_writes_a_corridors_road_model_by_default PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "ifc previewed file=\"cli road default\\.ifc\" [^\n]*\ncounts [^\n]*\nroad elements=[1-9][0-9]* skipped=0 roads=1 parts=[1-9][0-9]*\nclass name=IfcAlignment.*class name=IfcRoad count=1\n.*class name=IfcRoadPart count=[1-9]")
+add_test(NAME cli.ifc_noroadmodel_leaves_a_corridors_road_model_out
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_setup}
+            -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli road left out.ifc\" NOROADMODEL PREVIEW")
+set_tests_properties(cli.ifc_noroadmodel_leaves_a_corridors_road_model_out PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "ifc previewed file=\"cli road left out\\.ifc\" [^\n]*\ncounts alignments=1 [^\n]*\nclass name=IfcAlignment"
+    FAIL_REGULAR_EXPRESSION "road elements=|class name=IfcRoad|class name=IfcCourse")

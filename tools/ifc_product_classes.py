@@ -42,6 +42,14 @@ import ifcopenshell
 
 SCHEMAS = ["IFC2X3", "IFC4", "IFC4X3_ADD2"]
 
+# Features the import draws although they are subtractions. A feature is, in
+# general, what a wall or a slab is cut by (an opening, a void, a recess) and
+# not an object of its own, so the import does not draw it. An
+# IfcEarthworksCut is the exception: the road model writes each cut batter as
+# one, with a Body and a FootPrint (docs/ifc.md, "Road model"), and a cut that
+# its own export cannot be read back from would vanish on a round trip.
+DRAWN_FEATURES = {"IfcEarthworksCut"}
+
 
 def descendants(schema, name):
     out = set()
@@ -79,6 +87,7 @@ def main():
                 features |= descendants(schema, root)
             except RuntimeError:
                 pass
+        features -= DRAWN_FEATURES
         for name in products:
             if name in spatial:
                 kind = "Spatial"

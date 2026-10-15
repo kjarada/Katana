@@ -2679,22 +2679,52 @@ TEST_F(McpServer, AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines)
 
 // ifc (docs/ifc.md, "Road model"): the road model goes out with the drawing
 // unless the line says NOROADMODEL, File > Export IFC's "Road model" box -
-// a word an agent types as the dialog writes it; given twice, refused.
+// a word an agent types as the dialog writes it; given twice, refused. The
+// drawing has a corridor, the one thing that gives the model objects: without
+// one the reply has no road record whichever way the word goes, and the test
+// could not tell a word honoured from a word ignored. So the same drawing is
+// previewed both ways - the record (`road elements=N skipped=0 roads=1
+// parts=P`, N and P above zero) by default, none and no class of the road
+// with the word.
 TEST_F(McpServer, AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord)
 {
     initialize();
     const TempDir dir("ifc-road");
     const std::string file = dir.file("roadless.ifc");
+    const Json made = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LAYER NEW Survey/Kerb", "LAYER SET Survey/Kerb", "PL 0,0 10,0 20,5",
+               "ALIGN NEW road 0,0 100,0", "ALIGN DESIGN road 0,10 100,10", "ROADTEMPLATE DEFAULTS",
+               "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\""}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+
+    const Json written = call("katana_run_commands",
+                              Json{{"commands", {"EXPORT \"" + file + "\" PREVIEW"}}});
+    ASSERT_FALSE(written["isError"].get<bool>()) << textOf(written);
+    const std::string withRoad = textOf(written);
+    const std::size_t record = withRoad.find("road elements=");
+    ASSERT_NE(record, std::string::npos) << withRoad;
+    EXPECT_NE(withRoad.find(" skipped=0 roads=1 parts=", record), std::string::npos) << withRoad;
+    EXPECT_EQ(withRoad.find("road elements=0 "), std::string::npos) << withRoad;
+    EXPECT_NE(withRoad.find("class name=IfcRoad count=1"), std::string::npos) << withRoad;
+
     const Json previewed = call(
         "katana_run_commands",
-        Json{{"commands", {"LAYER NEW Survey/Kerb", "LAYER SET Survey/Kerb", "PL 0,0 10,0 20,5",
-                           "EXPORT \"" + file + "\" NOROADMODEL PREVIEW"}}});
+        Json{{"commands", {"EXPORT \"" + file + "\" NOROADMODEL PREVIEW"}}});
     ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
     EXPECT_NE(textOf(previewed).find("ifc previewed file=\"roadless.ifc\" schema=IFC4X3_ADD2"),
               std::string::npos)
         << textOf(previewed);
-    // No road model was given, so the reply has no road record.
-    EXPECT_EQ(textOf(previewed).find("road elements="), std::string::npos);
+    // Left out: the reply has no road record and none of the road's classes,
+    // while the drawing's own (the polyline, the alignment) is still there.
+    EXPECT_EQ(textOf(previewed).find("road elements="), std::string::npos) << textOf(previewed);
+    EXPECT_EQ(textOf(previewed).find("class name=IfcRoad"), std::string::npos)
+        << textOf(previewed);
+    EXPECT_EQ(textOf(previewed).find("class name=IfcCourse"), std::string::npos)
+        << textOf(previewed);
+    EXPECT_NE(textOf(previewed).find("class name=IfcAlignment"), std::string::npos)
+        << textOf(previewed);
     EXPECT_TRUE(call("katana_run_commands",
                      Json{{"commands", {"EXPORT \"" + file + "\" NOROADMODEL NOROADMODEL"}}})
                     ["isError"]

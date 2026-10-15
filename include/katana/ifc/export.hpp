@@ -90,6 +90,7 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -117,8 +118,9 @@ struct Georeference {
     std::string mapZone;       // "56"
 };
 
-// A surface to export, by name. The surfaces are session data, not the
-// model's (docs/cad.md), so the caller passes the ones it has.
+// A surface to export, by name. The drawing's surfaces are kept beside the
+// entity model, not in it (Document::surfaces), so the caller passes the ones
+// it has.
 struct SurfaceInput {
     std::string name;
     const katana::terrain::TinSurface* surface = nullptr;
@@ -143,7 +145,9 @@ struct UtilityInput {
 // ("Length", "Width", "Thickness", "GrossArea", "GrossVolume", "Weight",
 // "Count") and written as the IfcPhysicalSimpleQuantity its unit says:
 // "m" IfcQuantityLength, "m2" IfcQuantityArea, "m3" IfcQuantityVolume, "kg"
-// or "t" IfcQuantityWeight (in kilograms), "" IfcQuantityCount.
+// or "t" IfcQuantityWeight (in kilograms), "" IfcQuantityCount - written as an
+// INTEGER, which IFC4X3_ADD2 asks of it; a count that is not a whole number
+// is left out, said.
 struct RoadQuantity {
     std::string name;
     double value = 0.0;
@@ -250,6 +254,20 @@ struct ExportOptions {
     std::vector<ClassificationRule> rules;
     bool exportEntities = true;
     bool exportAlignments = true;
+
+    // What a smart leader's note is read from. A leader is written as the
+    // note it SAYS (entity::leaderNote), never as its template: a template is
+    // "RL {rl:.3f}", the note "RL 12.000". The note reads the entity the tip
+    // is on and, for a value of a surface or an alignment ({dsurface.ground},
+    // {station.MC01}), the drawing's own, which this layer cannot see
+    // (check_layering.cmake: katana_ifc sees entity and terrain, not cad), so
+    // the front end hands them over - cad::annotation::leaderContext(document)
+    // and cad::codePropertyCandidates(), as every other consumer of a leader
+    // does. Left empty, a leader's note is read off its target alone, and a
+    // line that names a surface or an alignment is dropped from it, as the
+    // DXF writer's own fallback does (nothing made up).
+    katana::entity::LeaderContext leaderContext{};
+    std::vector<std::string> codeProperties;
 };
 
 // One line of the account of what an export wrote: so many objects of one

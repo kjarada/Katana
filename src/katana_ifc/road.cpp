@@ -79,6 +79,7 @@
 #include <vector>
 
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 #include "parts.hpp"
 #include "product_layout.hpp"
 
@@ -135,6 +136,28 @@ std::optional<Measured> measured(const RoadQuantity& quantity)
         return Measured{QuantityKind::Count, quantity.value};
     }
     return std::nullopt;
+}
+
+// IfcQuantityCount's CountValue is an IfcCountMeasure, which is an INTEGER in
+// IFC4X3_ADD2 (the type is `TYPE IfcCountMeasure = INTEGER`; in IFC4 it was a
+// NUMBER, so a REAL there was valid and is not here: IfcOpenShell 0.8.5 and
+// 0.9.0 both refuse `28.`). A count is written as that integer; one that is
+// not a whole number, or that is beyond what a 32-bit reader holds, has no
+// valid spelling and is left out, said. The bound is the largest 32-bit signed
+// integer because that is what IfcOpenShell 0.8.5 reads a larger STEP INTEGER
+// as (3000000000 came back as 2147483647), silently, which is worse than
+// absent. The tolerance is math::tolerance::kRelative from the nearest whole
+// number: a count is dimensionless, its double spacing is 1.2e-10 up to
+// a million, and a few operations on it stay inside 1e-9.
+constexpr double kLargestCount = 2147483647.0;
+
+std::optional<long long> wholeCount(double value)
+{
+    const double whole = std::round(value);
+    if (!(whole <= kLargestCount) || !math::nearlyZero(value - whole, math::tolerance::kRelative)) {
+        return std::nullopt;
+    }
+    return static_cast<long long>(whole);
 }
 
 // A class's base quantity set: its name, and each quantity it defines with
@@ -429,6 +452,9 @@ class RoadWriter {
         for (const std::string& problem : road_.problems) {
             b_.warn("the road model: " + problem);
         }
+        for (const RoadElement& element : road_.elements) {
+            nameFirst(element);
+        }
         std::vector<Accepted> accepted;
         std::set<std::string> ids;
         for (const RoadElement& element : road_.elements) {
@@ -470,9 +496,49 @@ class RoadWriter {
         std::map<std::string, Container> parts;
     };
 
-    static std::string sourceOf(const RoadElement& element)
+    // A facility is a corridor's name, and Katana finds a corridor ignoring
+    // case (CorridorSet::find, "found ignoring case" in docs/road_design.md),
+    // so a road object that says facility=main beside the corridor Main is on
+    // Main. Matching the spelling exactly made it a second IfcRoad with a part
+    // of its own, and a line marking of it found no course "of its road" under
+    // it and was left out. A facility, and a part within it, are written under
+    // the spelling of the first element of the model that names them, in any
+    // letter case: the IfcRoad's and IfcRoadPart's names and GlobalIds come
+    // from that one. (Rejected: folding the case where the app converts the
+    // model - it would leave every other caller of the writer to repeat it.)
+    void nameFirst(const RoadElement& element)
     {
-        return element.facility.empty() ? std::string("road model") : "road " + element.facility;
+        if (element.facility.empty()) {
+            return;
+        }
+        const std::string facility = core::lowered(element.facility);
+        facilityNames_.emplace(facility, element.facility);
+        if (!element.part.empty()) {
+            partNames_.emplace(std::make_pair(facility, core::lowered(element.part)),
+                               element.part);
+        }
+    }
+
+    // The facility and part an element is written under (nameFirst); empty for
+    // none.
+    std::string facilityOf(const RoadElement& element) const
+    {
+        return element.facility.empty() ? std::string()
+                                        : facilityNames_.at(core::lowered(element.facility));
+    }
+
+    std::string partOf(const RoadElement& element) const
+    {
+        // A part with no facility is no part: the element is the site's.
+        return element.part.empty() || element.facility.empty()
+                   ? element.part
+                   : partNames_.at({core::lowered(element.facility), core::lowered(element.part)});
+    }
+
+    std::string sourceOf(const RoadElement& element) const
+    {
+        return element.facility.empty() ? std::string("road model")
+                                        : "road " + facilityOf(element);
     }
 
     static std::string whyOf(const RoadElement& element)
@@ -555,15 +621,16 @@ class RoadWriter {
             if (element.facility.empty() || item.feature) {
                 continue; // a feature is contained nowhere
             }
-            auto found = facilities_.find(element.facility);
+            const std::string facility = facilityOf(element);
+            auto found = facilities_.find(facility);
             if (found == facilities_.end()) {
-                found = facilities_.emplace(element.facility, writeRoad(element.facility)).first;
+                found = facilities_.emplace(facility, writeRoad(facility)).first;
                 roads.push_back(found->second.road);
             }
-            if (!element.part.empty() && !found->second.parts.contains(element.part)) {
-                found->second.parts.emplace(
-                    element.part, writePart(element.facility, found->second, element.part));
-                partOrder_[element.facility].push_back(element.part);
+            const std::string part = partOf(element);
+            if (!part.empty() && !found->second.parts.contains(part)) {
+                found->second.parts.emplace(part, writePart(facility, found->second, part));
+                partOrder_[facility].push_back(part);
             }
         }
         b_.aggregate(b_.site(), "site", roads);
@@ -593,6 +660,11 @@ class RoadWriter {
                                                      .enumeration("NOTDEFINED"));
         ++b_.report().classes["IfcRoad"];
         ++b_.report().roads;
+        // In the account too, as every product the report counts is
+        // (IfcExportTally): the preview's table is filled from it, and its
+        // count of what would be written is a sum of it.
+        b_.tally("road " + name, {"IfcRoad", "NOTDEFINED", {}}, {},
+                 "a corridor, the road its parts and elements are in");
         Facility out;
         out.road = road;
         out.container = Container{road, placement, 0, "road/" + name};
@@ -621,6 +693,8 @@ class RoadWriter {
                               .enumeration(type.predefinedType));
         ++b_.report().classes["IfcRoadPart"];
         ++b_.report().roadParts;
+        b_.tally("road " + facility, {"IfcRoadPart", type.predefinedType, type.objectType}, {},
+                 "a part of road " + facility);
         return Container{id, placement, 0, "road/" + facility + "/" + part};
     }
 
@@ -632,9 +706,9 @@ class RoadWriter {
             site_ = b_.siteContainer();
             return site_;
         }
-        Facility& facility = facilities_.at(element.facility);
+        Facility& facility = facilities_.at(facilityOf(element));
         Container& container =
-            element.part.empty() ? facility.container : facility.parts.at(element.part);
+            element.part.empty() ? facility.container : facility.parts.at(partOf(element));
         if (container.elementPlacement == 0) {
             container.elementPlacement = b_.placementIn(container.placement);
         }
@@ -805,7 +879,7 @@ class RoadWriter {
             const Accepted* candidate = entry.second;
             const RoadElement& element = *candidate->element;
             if ((!item.element->facility.empty() &&
-                 element.facility != item.element->facility) ||
+                 !core::equalsIgnoringCase(element.facility, item.element->facility)) ||
                 !isSurfaceClass(element.ifcClass.entity)) {
                 continue;
             }
@@ -896,6 +970,14 @@ class RoadWriter {
                 ++invalidQuantities_; // the schema's WR: a quantity's value is not negative
                 continue;
             }
+            std::optional<long long> count;
+            if (value->kind == QuantityKind::Count) {
+                count = wholeCount(value->value);
+                if (!count) {
+                    ++fractionalCounts_; // before the name is taken: nothing was written
+                    continue;
+                }
+            }
             if (!named.insert(quantity.name).second) {
                 ++repeatedQuantities_; // UniqueQuantityNames, within the element
                 continue;
@@ -907,7 +989,11 @@ class RoadWriter {
             } else {
                 args.null(); // the project's unit (writeProjectFrame)
             }
-            args.real(value->value).null();
+            if (count) {
+                args.integer(*count).null(); // INTEGER, not REAL (wholeCount)
+            } else {
+                args.real(value->value).null();
+            }
             const Id id = b_.file().add(entityOf(value->kind), args);
             (base != nullptr && templateDefines(*base, quantity.name, value->kind) ? standard : own)
                 .push_back(id);
@@ -982,6 +1068,11 @@ class RoadWriter {
             b_.warn(std::to_string(invalidQuantities_) +
                     " road element quantities are negative, not finite or unnamed and are left out");
         }
+        if (fractionalCounts_ > 0) {
+            b_.warn(std::to_string(fractionalCounts_) +
+                    " road element counts are not whole numbers, or are beyond 2147483647, and are "
+                    "left out: IfcQuantityCount takes an INTEGER in IFC4X3_ADD2");
+        }
         if (repeatedQuantities_ > 0 || repeated_ > 0) {
             b_.warn(std::to_string(repeatedQuantities_ + repeated_) +
                     " road element quantities or properties repeat a name on their element; the "
@@ -1002,6 +1093,8 @@ class RoadWriter {
     Builder& b_;
     const RoadModelInput& road_;
     const std::map<std::string, Id>& terrain_;
+    std::map<std::string, std::string> facilityNames_; // folded -> the first spelling
+    std::map<std::pair<std::string, std::string>, std::string> partNames_;
     std::map<std::string, Facility> facilities_;
     std::map<std::string, std::vector<std::string>> partOrder_;
     Container site_;
@@ -1014,6 +1107,7 @@ class RoadWriter {
     std::set<std::string> units_;
     std::size_t open_ = 0;
     std::size_t invalidQuantities_ = 0;
+    std::size_t fractionalCounts_ = 0;
     std::size_t repeatedQuantities_ = 0;
     std::size_t repeated_ = 0;
     std::size_t unnamed_ = 0;

@@ -128,11 +128,19 @@ its warnings. `IfcFrontEnd.EveryChoiceOfTheDialogsIsAWordOfTheLine`,
 `IfcFrontEnd.TheLineADialogWritesReadsBackAsItsArguments` and
 `cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line` pin the grammar,
 `IfcFrontEnd.NoRoadModelIsAWordAndNoDrawingLeavesTheRoadModelOutToo`,
-`cli.ifc_noroadmodel_is_a_word_of_the_export_line` and
-`cli.ifc_noroadmodel_given_twice_is_refused` its road model word;
-`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` and
-`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord` are an agent
-doing it through `katana_mcp`.
+`cli.ifc_noroadmodel_is_a_word_of_the_export_line` (the word is taken, on a
+drawing with no corridor, so the reply has no road record either way) and
+`cli.ifc_noroadmodel_given_twice_is_refused` its road model word; what the word
+DOES is judged on a drawing with a corridor, against the default, since
+without one nothing could tell a word honoured from a word ignored:
+`cli.ifc_export_writes_a_corridors_road_model_by_default` and
+`cli.ifc_noroadmodel_leaves_a_corridors_road_model_out` for `katana_cli`,
+`qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless` for the
+window's own wiring, and
+`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord` for an agent
+doing it through `katana_mcp` (as is
+`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` for
+the rest of the grammar).
 
 ### In the window
 
@@ -163,7 +171,9 @@ PREVIEW reads. Four of its rows for the scenario with the sample schedule
 
 What is not written is accounted for too: a label is "not written", "a
 label: labels are not exported". Every product the report counts is in the
-table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`).
+table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`;
+a road model's `IfcRoad` and `IfcRoadPart` are rows too, "a corridor" and "a
+part of road Main", `IfcExportRoad.EveryRoadAndPartTheReportCountsIsInTheAccountOnce`).
 
 The table is the file the choices made when Preview was pressed: changing any
 of them but the file's name clears it, and a problem found since replaces the
@@ -183,7 +193,12 @@ kept, as every import asks; declining is a cancel, which the dialog says as
 one. File > Import and a path given to the window, whose line says neither,
 ask about the coordinate system; a typed IMPORT or a headless session asks no
 one and says how (`CRS SET`). Terrain comes in as surfaces of the drawing,
-in the import's one undo step, which Export IFC writes out again.
+in the import's one undo step, which Export IFC writes out again. The two
+dialogs say so - "The drawing's surfaces (N)", "Ready to import, as one step
+Undo takes back, surfaces included" - where they once called the terrain
+session data that Undo leaves alone, which stopped being true when the
+surfaces moved into the drawing
+(`qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless`).
 
 
 ## Export: what goes where
@@ -412,7 +427,22 @@ out as how it was drawn rather than what it is. A curve polyline or spline is
 a run to the default rules, so a kerb drawn with an arc is still an `IfcKerb`,
 and a rules file's `kinds` may name `CurvePolyline`, `Ellipse` and `Spline`.
 Text is `IfcTextLiteralWithExtent` (plain
-`IfcTextLiteral` is deprecated in 4.3). Each entity keeps its layer as an
+`IfcTextLiteral` is deprecated in 4.3). A leader is its curve and the NOTE it
+says (`entity::leaderNote`), not its `text`: a smart leader's `text` is a
+template (`RL {rl:.3f}`) and one made from a label style has none, so a
+template written as it stands, or no words at all, would say what the plan,
+`LIST` and the DXF do not. The note reads the entity the tip is on and, for
+`{dsurface.ground}` or `{station.MC01}`, the drawing's surfaces and
+alignments, which this layer cannot see, so both front ends hand them over
+(`ExportOptions::leaderContext` and `codeProperties`, set by
+`app::setLeaderNotes` from `cad::annotation::leaderContext` and
+`cad::codePropertyCandidates`, as every other consumer of a leader does). A
+writer given none (a library caller) reads a note off its target alone, and a
+line that names a surface or an alignment is dropped from it, as the DXF
+writer's own fallback drops it: absent is not a made-up figure
+(`IfcExportLeaders.ASmartLeaderIsWrittenAsTheNoteItSaysNotItsTemplate`,
+`cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template`). Each
+entity keeps its layer as an
 `IfcPresentationLayerAssignment`, its colour as a curve style, its properties
 (`Katana_Attributes`) and its provenance (`Katana_Provenance`). Labels are not
 written: what a label says and where it stands are the placer's, which this
@@ -498,7 +528,14 @@ them against the schema, and does not second-guess them.
 - aggregated into the site, and an `IfcRoadPart` (7.9.3.4) per part of it,
 aggregated into its road, in the order the model first names them; each
 element contained in its part, in its road when it names no part, in the site
-when it names no road (a sign of no corridor). The road is an ELEMENT and its
+when it names no road (a sign of no corridor). A facility, and a part within
+it, match **ignoring letter case**, as Katana finds a corridor by its name
+(`facility=main` is on the corridor Main): they are written under the
+spelling of the first element of the model that names them, so one road is
+one `IfcRoad` and a line marking of it finds the pavement under it
+(`IfcExportRoad.AFacilityAndPartMatchIgnoringCaseAsACorridorsNameDoes`).
+**Rejected:** matching them exactly, which made `main` a second `IfcRoad`
+and its marking "on no course of its road", left out. The road is an ELEMENT and its
 parts PARTIAL: between facilities IfcRoad asks for a COMPLEX parent over an
 ELEMENT child, an ELEMENT over a PARTIAL. A part's UsageType (mandatory on
 IfcFacilityPart; IfcFacilityUsageEnum, 5.4.2.11) is LATERAL for the parts of
@@ -616,7 +653,15 @@ Qto_ set (a set holding names its template lacks), and every quantity in
 Katana's own (a take-off tool would find none). A quantity in another unit, a
 negative or non-finite one (each quantity's WR: not negative) and a second of
 one name on an element (UniqueQuantityNames) are left out, each kind said
-once.
+once. **A count is an INTEGER**: `IfcQuantityCount`'s `CountValue` is an
+`IfcCountMeasure`, a NUMBER in IFC4 but `TYPE IfcCountMeasure = INTEGER` in
+IFC4X3_ADD2, the schema the file declares, so `28.` is not valid there and
+`28` is. A count that is not a whole number (within 1e-9, `math::tolerance::kRelative`)
+or is above 2147483647 has no spelling and is left out, said once: the
+bound is the largest 32-bit signed integer because IfcOpenShell 0.8.5 reads a
+larger STEP INTEGER as that number, without a word (3000000000 came back as
+2147483647), which would be worse than absent
+(`IfcExportRoad.ACountIsAnIntegerAndOneThatCannotBeIsLeftOutAndSaid`).
 
 **Properties.** `Katana_RoadElement`: the object's id, kind, facility, part,
 layer, material and whether its body is a closed solid. `Katana_RoadProperties`:
@@ -682,7 +727,7 @@ are generated from IfcOpenShell's schemas (`tools/ifc_product_classes.py`,
 | In the file | In the drawing |
 |---|---|
 | `IfcAlignment` | a named alignment, its PIs and PVIs **reconstructed** from the business logic and **checked** (below); else a 3D polyline of its exact geometry on "IFC/Alignments", and a warning saying why |
-| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid) a point at its placement, counted |
+| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid), or none at all (the stand-in ground of a cut whose surface is not in the file), a point at its placement, counted and said. An `IfcEarthworksCut` is an element like the others and comes back as its `FootPrint` outline (`IfcExportRoad.ACutBatterIsReadBackFromItsFileAsItsFootPrintOutline`); the other feature elements (openings and the like) are not drawn |
 | a terrain (`IfcGeographicElement` TERRAIN, a TIN) | a surface, for a caller that keeps surfaces |
 | property sets and quantities | properties "Set/Property", lengths, areas, volumes and angles in Katana's units |
 | classifications, the system served | "Classification/<system>", "System" |
@@ -750,13 +795,26 @@ mistake in the writer and the same mistake in the reader cannot agree:
   `IfcExportRoad.TheRoadModelIsWrittenForTheValidator` and judged by
   `tools/check_ifc.py` in `ifc.the_road_model_export_is_valid_to_ifcopenshell`,
   registered beside the others where IfcOpenShell is installed
-  (`tests/ifc/CMakeLists.txt`). It has **not yet been run**: IfcOpenShell is
-  not installed on the machine the road model was written on (2026-10-15),
-  nor have buildingSMART's rules been run on it. What the schema asks that
-  IfcOpenShell checks was worked through by hand from each class's page -
-  the attribute counts, the features' mandatory inverses, NoVoidElement,
-  each quantity's WR, UniqueQuantityNames - and the tests pin it; the first
-  run where IfcOpenShell is installed is what settles it.
+  (`tests/ifc/CMakeLists.txt`). Its first run (2026-10-15, by the review that
+  followed the road model's merge) found one finding on a corridor with a
+  barrier (IfcOpenShell 0.8.5 and 0.9.0 alike) and 18 on one with a sign,
+  lights, walls, guide posts, a fence, a marking and a barrier (0.9.0),
+  **every one an
+  `IfcQuantityCount` written as a REAL** (`28.`), where IFC4X3_ADD2 asks for
+  an INTEGER; the hand-worked reading of the schema had missed it, and the
+  test had pinned the wrong spelling. Counts are written as integers now (see
+  "Quantities"). Nothing else was reported: the attribute counts, the
+  features' mandatory inverses, NoVoidElement, each quantity's WR and
+  UniqueQuantityNames all passed, with the EXPRESS rules on (0.8.5). Checked
+  on a corridor with a barrier, a sign, guide posts, a fence, a light, a wall
+  and a marking written by the old writer: 9 findings, all the nine
+  `IfcQuantityCount`s; the same file with those nine spelled as integers - what
+  the fixed writer writes - has **0 findings** under 0.8.5 (EXPRESS rules on)
+  and 0.9.0. The fixed writer's own file has still to be judged before this is
+  called clean, and buildingSMART's rules have not been run on the road model
+  at all.
+  `tools/check_ifc.py` runs under both versions (0.9 dropped
+  `entity_instance.wrapped_data`, which the alignment evaluator used).
 - **Import**: all 46 files of buildingSMART's IFC 4.3 sample models
   (`IFC4.3.x-sample-models` at 50e6c5c) import without error by hand; the
   railway sample's alignment is reconstructed to 4 PIs, and the UTM and
@@ -782,14 +840,21 @@ mistake in the writer and the same mistake in the reader cannot agree:
 - **Solids** are not read beyond swept disks and triangulated surfaces:
   Katana has no solid entity, so an extruded wall or a B-rep comes in as a
   point at its placement with its properties.
+- **Feature elements other than a cut** (an opening, a void, a recess, a
+  port) are skipped by the import, uncounted and unreported: they are what a
+  wall or slab is cut by, not objects of their own, and the generated class
+  table calls them not drawn. `IfcEarthworksCut` alone is drawn (a road model
+  writes each cut batter as one), by an exemption in
+  `tools/ifc_product_classes.py`.
 - **Export of 3D solids** other than swept disks and the road model's meshes
   (a drawn pit as a box) is not attempted; a pit is its footprint and, from a
   .12da archive, a cylinder from invert to top.
 - **The road model** ("Road model", above), as far as it goes:
-  - its file has not been judged by IfcOpenShell or buildingSMART's rules
-    yet ("Validation"), and whether IFC431, the Alignment-based view's scope,
-    lists IfcRoad, IfcRoadPart and the road elements is unknown - its
-    warnings, if any, are the first run's to report;
+  - its file was judged by IfcOpenShell once, which found the counts written
+    as REALs ("Validation"); the fixed writer's file has not been judged
+    again, nor by buildingSMART's rules, and whether IFC431, the
+    Alignment-based view's scope, lists IfcRoad, IfcRoadPart and the road
+    elements is unknown - its warnings, if any, are the first run's to report;
   - courses are elements of their part, not aggregated into an `IfcPavement`
     (IfcPavement's page does not model that aggregation), and they are not
     an `IfcMaterialLayerSet`; there are no type objects (`IfcCourseType` ...);

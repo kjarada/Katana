@@ -289,6 +289,8 @@ Result<std::string> MainWindow::exportIfc(const katana::ifc::ExportArguments& ar
     }
     options.exportEntities = arguments.entities;
     options.exportAlignments = arguments.alignments;
+    // A leader is written as the note it says, as katana_cli's is.
+    katana::app::setLeaderNotes(options, document_);
     if (arguments.selected) {
         options.entities = document_.selection().ids();
         // An empty list is every entity (ExportOptions::entities): a

@@ -989,7 +989,8 @@ elements - goes out with the drawing, and `NOROADMODEL` leaves it out, as the
 export dialog's "Road model" box does; a reply that carried one has a `road
 elements= skipped= roads= parts=` record, and what the model could not build
 is among its warnings (`docs/ifc.md`, "Road model";
-`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord`). No tool of
+`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord`, which
+previews a corridor both ways). No tool of
 its own: the line is the whole of it, and the road model's own data is the
 road verbs' to report.
 

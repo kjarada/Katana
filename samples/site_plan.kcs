@@ -1,6 +1,8 @@
 # Katana sample drawing - a small site plan.
 # Run:  katana_cli samples/site_plan.kcs
 # or open the saved project from the GUI: File > Open -> samples/site_plan
+# (in a source checkout; a package keeps the samples in share/katana/samples:
+# run katana_cli with the full path to this file, and open a COPY of site_plan)
 
 # ---- layers -------------------------------------------------------------
 LAYER NEW BOUNDARY #FFD54F

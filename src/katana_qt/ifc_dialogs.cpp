@@ -166,7 +166,7 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
                                           "and its profile's, with stations"),
                            true, this);
     surfaces_ = checkBox(QStringLiteral("ifcExportSurfaces"),
-                         QStringLiteral("The surfaces of this session, as IfcGeographicElement "
+                         QStringLiteral("The drawing's surfaces, as IfcGeographicElement "
                                         "TERRAIN"),
                          true, this);
     form->addRow(QStringLiteral("Drawing:"), entities_);
@@ -339,7 +339,7 @@ void IfcExportDialog::refresh()
     }
     selectedOnly_->setEnabled(entities_->isChecked());
     alignments_->setText(QStringLiteral("Alignments (") + grouped(state_.alignments) + ')');
-    surfaces_->setText(QStringLiteral("Surfaces of this session (") + grouped(state_.surfaces) +
+    surfaces_->setText(QStringLiteral("The drawing's surfaces (") + grouped(state_.surfaces) +
                        ')');
     crs_->setText(state_.georeferenced
                       ? QStringLiteral("Georeferenced in ") + state_.coordinateSystem +
@@ -711,8 +711,8 @@ IfcImportDialog::IfcImportDialog(IfcImportContext context, QWidget* parent)
                  QStringLiteral("Elements and annotations, with their property sets"), true, this);
     elements_->setText(QStringLiteral("Elements and annotations"));
     surfaces_ = checkBox(QStringLiteral("ifcImportSurfaces"),
-                         QStringLiteral("Terrain as surfaces of this session (not saved with the "
-                                        "project, and not undone)"),
+                         QStringLiteral("Terrain as the drawing's surfaces (saved with the "
+                                        "project, and taken back by Undo with the import)"),
                          true, this);
     surfaces_->setText(QStringLiteral("Surfaces"));
     local_ =
@@ -853,9 +853,7 @@ void IfcImportDialog::recheck()
     if (showingResult_) {
         return;
     }
-    say(QStringLiteral("Ready to import, as one step Undo takes back (surfaces are session data "
-                       "and stay)."),
-        false);
+    say(QStringLiteral("Ready to import, as one step Undo takes back, surfaces included."), false);
 }
 
 void IfcImportDialog::setFile(const QString& path)

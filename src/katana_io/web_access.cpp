@@ -331,8 +331,10 @@ katana::core::Error explainHttpFailure(const HttpFailure& failure, std::string c
     }
     if (curlCode == 60 /* CURLE_PEER_FAILED_VERIFICATION */) {
         return makeError(ErrorCode::FileImportFailure,
-                         "the service's certificate could not be verified; a proxy or "
-                         "antivirus that inspects https:// may be in the way",
+                         "the service's certificate could not be verified against the "
+                         "certificates Katana trusts (its bundle and, on Windows, the Windows "
+                         "certificate store); a proxy or antivirus that inspects https:// may be "
+                         "in the way, and its certificate is not trusted by this computer",
                          std::move(context));
     }
     return makeError(ErrorCode::FileImportFailure, "the request failed", std::move(context));

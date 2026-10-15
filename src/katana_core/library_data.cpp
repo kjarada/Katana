@@ -10,6 +10,19 @@
 #include <mach-o/dyld.h>
 
 #include <cstdint>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+// PSAPI_VERSION 2 maps EnumProcessModules onto the copy in kernel32, so no
+// extra library is linked for it.
+#define PSAPI_VERSION 2
+#include <psapi.h>
+
+#include <algorithm>
+#include <vector>
 #endif
 
 namespace katana::core {
@@ -52,6 +65,55 @@ std::optional<std::filesystem::path> loadedLibraryPath(std::string_view fileName
         }
         const std::filesystem::path path(name);
         if (path.filename().string().starts_with(fileNamePrefix)) {
+            return path;
+        }
+    }
+    return std::nullopt;
+#elif defined(_WIN32)
+    // By NAME among the loaded modules, for the reason above: asking Windows
+    // which module holds the address of a function gives, under MinGW, the
+    // import THUNK inside the importing program, so the program itself is
+    // named (gdal_adapter.cpp found this the hard way). Wide characters
+    // throughout: a path outside the ANSI code page (a Cyrillic or CJK folder
+    // name) does not survive a narrow string.
+    std::vector<HMODULE> modules(1024);
+    DWORD bytes = 0;
+    if (EnumProcessModules(GetCurrentProcess(), modules.data(),
+                           static_cast<DWORD>(modules.size() * sizeof(HMODULE)), &bytes) == 0) {
+        return std::nullopt;
+    }
+    modules.resize(std::min<std::size_t>(modules.size(), bytes / sizeof(HMODULE)));
+    for (const HMODULE module : modules) {
+        std::wstring candidate(512, L' ');
+        for (;;) {
+            const DWORD length = GetModuleFileNameW(module, candidate.data(),
+                                                    static_cast<DWORD>(candidate.size()));
+            if (length == 0) {
+                candidate.clear();
+                break;
+            }
+            if (length < candidate.size()) {
+                candidate.resize(length);
+                break;
+            }
+            candidate.resize(candidate.size() * 2); // truncated: longer than the buffer
+        }
+        if (candidate.empty()) {
+            continue;
+        }
+        const std::filesystem::path path(candidate);
+        const std::wstring name = path.filename().wstring();
+        // The prefix is ASCII (a library's name); compared without regard to
+        // ASCII case, as Windows file names are.
+        const auto lower = [](wchar_t c) {
+            return c >= L'A' && c <= L'Z' ? static_cast<wchar_t>(c - L'A' + L'a') : c;
+        };
+        if (name.size() >= fileNamePrefix.size() &&
+            std::equal(fileNamePrefix.begin(), fileNamePrefix.end(), name.begin(),
+                       [&](char wanted, wchar_t found) {
+                           return lower(static_cast<wchar_t>(static_cast<unsigned char>(wanted))) ==
+                                  lower(found);
+                       })) {
             return path;
         }
     }
@@ -104,6 +166,25 @@ std::optional<std::filesystem::path> dataBesideLibrary(std::string_view fileName
     return dataBesideLibraryFile(*library, relative);
 }
 
+const std::optional<std::filesystem::path>& bundledProjDataDirectory()
+{
+    static const std::optional<std::filesystem::path> directory =
+        []() -> std::optional<std::filesystem::path> {
+#if defined(__APPLE__)
+        constexpr std::string_view library = "libproj."; // libproj.25.dylib
+#elif defined(_WIN32)
+        constexpr std::string_view library = "libproj"; // libproj-25.dll
+#else
+        constexpr std::string_view library = "libproj.so";
+#endif
+        if (auto data = dataBesideLibrary(library, "share/proj/proj.db")) {
+            return data->parent_path();
+        }
+        return std::nullopt;
+    }();
+    return directory;
+}
+
 const std::optional<std::filesystem::path>& projDataDirectory()
 {
     static const std::optional<std::filesystem::path> directory =
@@ -112,16 +193,13 @@ const std::optional<std::filesystem::path>& projDataDirectory()
         if (std::getenv("PROJ_DATA") != nullptr || std::getenv("PROJ_LIB") != nullptr) {
             return std::nullopt;
         }
-#if defined(__APPLE__)
-        constexpr std::string_view library = "libproj."; // libproj.25.dylib
+        return bundledProjDataDirectory();
 #else
-        constexpr std::string_view library = "libproj.so";
-#endif
-        if (auto data = dataBesideLibrary(library, "share/proj/proj.db")) {
-            return data->parent_path();
-        }
-#endif
+        // Windows: PROJ finds share/proj beside its DLL by itself; the
+        // environment's choice, if any, is tried first and the bundled data
+        // is what its users fall back on (bundledProjDataDirectory).
         return std::nullopt;
+#endif
     }();
     return directory;
 }

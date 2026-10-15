@@ -62,6 +62,13 @@ Result<geodesy::CoordinateReferenceSystem> parse(std::string_view text)
         return makeError(ErrorCode::InvalidCRS, "no coordinate system was given");
     }
     auto crs = geodesy::CoordinateReferenceSystem::fromUserInput(input);
+    if (!crs && crs.error().code == ErrorCode::NotFound) {
+        // PROJ's database would not open (geodesy::ProjContext::create): the
+        // installation, not the text, is what is wrong, and "give an EPSG
+        // code" blamed a valid one. Said as it is, with what was asked.
+        return makeError(ErrorCode::NotFound, crs.error().message,
+                         input + "; " + crs.error().context);
+    }
     if (!crs) {
         // The text, then what PROJ made of it: "not a coordinate system"
         // alone left a person to guess whether the text or the program was

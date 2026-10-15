@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <cwctype>
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -17,18 +16,6 @@
 #include <system_error>
 #include <variant>
 #include <vector>
-
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-// PSAPI_VERSION 2 maps EnumProcessModules onto the copy in kernel32, so no
-// extra library is linked for it.
-#define PSAPI_VERSION 2
-#include <psapi.h>
-#endif
 
 #include <cpl_conv.h>
 #include <cpl_error.h>
@@ -64,52 +51,6 @@ using katana::core::Status;
 // dataset in the process, so calling it when one dataset closes - as this file
 // used to - invalidates every other dataset and every later open. The driver
 // manager is freed by process exit, which is correct and costs nothing.
-
-#if defined(_WIN32)
-// The path of the first loaded module whose lower-cased file name `matches`
-// accepts, as the wide text Windows holds it in; empty when there is none.
-//
-// Found by NAME among the loaded modules. The obvious route - ask Windows
-// which module holds the address of GDALAllRegister - gives the wrong answer
-// under MinGW: in an importing program that address is the import THUNK
-// inside our own executable, so Windows truthfully names us, the data
-// directory is looked for beside our own program, and nothing is found. That
-// was tried first, and failed exactly so.
-template <typename Matches> std::wstring loadedModule(Matches matches)
-{
-    std::vector<HMODULE> modules(1024);
-    DWORD bytes = 0;
-    if (EnumProcessModules(GetCurrentProcess(), modules.data(),
-                           static_cast<DWORD>(modules.size() * sizeof(HMODULE)), &bytes) == 0) {
-        return {};
-    }
-    modules.resize(std::min<std::size_t>(modules.size(), bytes / sizeof(HMODULE)));
-    for (const HMODULE module : modules) {
-        std::wstring candidate(512, L' ');
-        for (;;) {
-            const DWORD length = GetModuleFileNameW(module, candidate.data(),
-                                                    static_cast<DWORD>(candidate.size()));
-            if (length == 0) {
-                candidate.clear();
-                break;
-            }
-            if (length < candidate.size()) {
-                candidate.resize(length);
-                break;
-            }
-            candidate.resize(candidate.size() * 2); // truncated: longer than the buffer
-        }
-        std::wstring name = std::filesystem::path(candidate).filename().wstring();
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-        if (!candidate.empty() && matches(name)) {
-            return candidate;
-        }
-    }
-    return {};
-}
-#endif
-
 // Tells GDAL where its support files are, when nothing else has.
 //
 // GDAL reads data files at run time - header.dxf and trailer.dxf, the
@@ -134,21 +75,17 @@ void locateGdalData()
         return;
     }
 #if defined(_WIN32)
-    // libgdal-38.dll from MinGW, gdal.dll or gdal308.dll from MSVC.
-    const std::wstring buffer = loadedModule([](const std::wstring& name) {
-        return name.ends_with(L".dll") &&
-               (name.starts_with(L"libgdal") || name.starts_with(L"gdal"));
-    });
-    if (buffer.empty()) {
-        return;
+    // Found by NAME among the loaded modules (core/library_data.hpp has why
+    // not by an address): libgdal-38.dll from MinGW, gdal.dll or gdal308.dll
+    // from MSVC.
+    auto data = katana::core::dataBesideLibrary("libgdal", "share/gdal");
+    if (!data) {
+        data = katana::core::dataBesideLibrary("gdal", "share/gdal");
     }
-    std::error_code ignored;
-    const std::filesystem::path data =
-        std::filesystem::path(buffer).parent_path().parent_path() / "share" / "gdal";
-    if (std::filesystem::is_directory(data, ignored)) {
+    if (data) {
         // GDAL takes UTF-8 (GDAL_FILENAME_IS_UTF8 defaults to YES), and
         // forward slashes on every platform.
-        const std::u8string utf8 = data.generic_u8string();
+        const std::u8string utf8 = data->generic_u8string();
         CPLSetConfigOption("GDAL_DATA", std::string(utf8.begin(), utf8.end()).c_str());
     }
 #else
@@ -168,61 +105,70 @@ void locateGdalData()
 }
 
 // Tells libcurl, through GDAL, which certificates https:// is checked against,
-// when nothing else has. The Windows deploy puts them at etc/ssl/certs beside
-// bin/, where MSYS2's libcurl looks - but by a path it works out through the
-// ANSI code page, so on Windows the path is worked out here as well, wide
-// (below); conda-forge's libcurl, which the
-// Linux and macOS builds use, looks at <its prefix>/ssl/cacert.pem, compiled
-// in, so in a relocated bundle it would find none and refuse every https://
-// answer. The deploy copies the file to ssl/cacert.pem beside lib/ and this
-// points GDAL at it. A distribution's libcurl has no ssl/ beside its
-// directory, so its own default stands; CURL_CA_BUNDLE or SSL_CERT_FILE, set
-// by the user, win.
+// when nothing else has. conda-forge's libcurl, which the Linux and macOS
+// builds use, looks at <its prefix>/ssl/cacert.pem, compiled in, so in a
+// relocated bundle it would find none and refuse every https:// answer. The
+// deploy copies the file to ssl/cacert.pem beside lib/ and this points GDAL
+// at it. A distribution's libcurl has no ssl/ beside its directory, so its own
+// default stands; CURL_CA_BUNDLE or SSL_CERT_FILE, set by the user, win.
+//
+// WINDOWS does two things, both by GDAL's own settings so that GIS > Online
+// Data, GDAL's web drivers and the updater (gis::httpExchange asks GDAL to set
+// up its handle, CPLHTTPSetOptions) all get them:
+//
+//  1. It names the bundle the deploy put beside bin/ (etc/ssl/certs/
+//     ca-bundle.crt), in UTF-8. MSYS2's libcurl finds it by itself, but works
+//     out where bin/ is with the ANSI API, so an install under a folder with
+//     a character outside the ANSI code page - a Cyrillic or CJK user name -
+//     is told a mangled path ("pkg_?/Katana/etc/...": error adding trust
+//     anchors from file) and refuses every https:// answer. OpenSSL opens a
+//     UTF-8 path with the wide API, so the explicit setting works wherever
+//     the folder is. It is a config option set in this process, a UTF-8
+//     string, and not an environment variable: the environment's narrow
+//     strings are ANSI and would mangle it again.
+//  2. It turns on GDAL_HTTP_USE_CAPI_STORE, which adds the certificates of
+//     the Windows store to what OpenSSL trusts, ON TOP of the bundle. The
+//     bundle holds the public roots; a company proxy or an antivirus that
+//     inspects https:// re-signs with a root of its own that it installs in
+//     the store, which the person's browser trusts and this program, without
+//     it, did not: every Online Data and update request failed with "unable
+//     to get local issuer certificate". The person's own GDAL_HTTP_USE_CAPI_STORE
+//     (NO included) wins, as a bundle they name does.
+//  Rejected: CURLSSLOPT_NATIVE_CA on the handles of our own. The same thing
+//  for the one handle gis::httpExchange makes, but not for the requests GDAL
+//  makes itself (Online Data, /vsicurl/), so two mechanisms would be needed
+//  where GDAL's covers both.
 void locateCertificates()
 {
 #if defined(_WIN32)
-    // The certificate file of the user's own choosing wins, and is read WIDE:
-    // GDAL reads the same two variables with getenv, which on Windows is the
-    // ANSI code page's version - a folder with a letter outside it is already
-    // a '?' - so the variable is handed over as the UTF-8 it is, as a config
-    // option, which outranks the environment in GDAL.
-    bool given = false;
+    // A certificate file the person named wins, and is read WIDE: GDAL reads
+    // CURL_CA_BUNDLE and SSL_CERT_FILE with getenv, which on Windows is the ANSI
+    // code page's version - a letter outside it is already a '?' - so each is
+    // handed over as the UTF-8 it is, as a config option, which outranks the
+    // environment in GDAL and makes the test just below see it.
     for (const char* name : {"CURL_CA_BUNDLE", "SSL_CERT_FILE"}) {
         if (const std::string value = katana::core::environmentVariable(name); !value.empty()) {
             CPLSetConfigOption(name, value.c_str());
-            given = true;
         }
     }
-    if (given || CPLGetConfigOption("CURL_CA_BUNDLE", nullptr) != nullptr ||
-        CPLGetConfigOption("SSL_CERT_FILE", nullptr) != nullptr) {
-        return;
+    if (CPLGetConfigOption("CURL_CA_BUNDLE", nullptr) == nullptr &&
+        CPLGetConfigOption("GDAL_CURL_CA_BUNDLE", nullptr) == nullptr &&
+        CPLGetConfigOption("SSL_CERT_FILE", nullptr) == nullptr) {
+        // libcurl's own DLL, else GDAL's (the same bin/): the bundle is beside
+        // whichever is loaded.
+        auto bundle = katana::core::dataBesideLibrary("libcurl", "etc/ssl/certs/ca-bundle.crt");
+        if (!bundle) {
+            bundle = katana::core::dataBesideLibrary("libgdal", "etc/ssl/certs/ca-bundle.crt");
+        }
+        if (bundle) {
+            const std::u8string utf8 = bundle->generic_u8string();
+            CPLSetConfigOption("CURL_CA_BUNDLE", std::string(utf8.begin(), utf8.end()).c_str());
+        }
     }
-    // Otherwise libcurl is left to find the bundle by itself, and MSYS2's does
-    // so by working out where its own DLL is through the ANSI code page: an
-    // install under a folder with a character outside it (a profile name
-    // "Łukasz" or "测试", the default install folder being under the profile)
-    // was looked for under a path of '?'s, and every https:// request failed
-    // before it reached a server - Online Data, /vsicurl/ and the update
-    // check. So the path is worked out here, wide, and handed to libcurl in
-    // UTF-8, which OpenSSL opens correctly (tried 2026-10-15 with the shipped
-    // libcurl-4.dll, CURLOPT_CAINFO under such a folder). Where the file is
-    // not there the libcurl default stands, as before.
-    const std::wstring curl = loadedModule([](const std::wstring& name) {
-        return name.ends_with(L".dll") && name.starts_with(L"libcurl");
-    });
-    if (curl.empty()) {
-        return;
+    if (CPLGetConfigOption("GDAL_HTTP_USE_CAPI_STORE", nullptr) == nullptr) {
+        CPLSetConfigOption("GDAL_HTTP_USE_CAPI_STORE", "YES");
     }
-    std::error_code ignored;
-    const std::filesystem::path bundle =
-        std::filesystem::path(curl).parent_path().parent_path() / "etc" / "ssl" / "certs" /
-        "ca-bundle.crt";
-    if (std::filesystem::is_regular_file(bundle, ignored)) {
-        const std::u8string utf8 = bundle.generic_u8string();
-        CPLSetConfigOption("CURL_CA_BUNDLE", std::string(utf8.begin(), utf8.end()).c_str());
-    }
-#endif
-#if defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__) || defined(__APPLE__)
     if (CPLGetConfigOption("CURL_CA_BUNDLE", nullptr) != nullptr ||
         CPLGetConfigOption("SSL_CERT_FILE", nullptr) != nullptr) {
         return;
