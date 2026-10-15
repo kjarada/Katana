@@ -1359,15 +1359,16 @@ if(TARGET katana)
         TIMEOUT 180)
     # The 3D view stacks a legend for each visible surface drawn in a style
     # that colours its faces (docs/surface_display.md, "In 3D"): two copies of
-    # the sample terrain, one in Elevation Bands and one in Slope Bands, and
-    # the first 3D view's report names both legends, in drawing order. The
-    # first was the only one shown.
+    # the sample terrain, one in a style of four elevation bands (few, so that
+    # both panels fit the view's height whatever the font) and one in the
+    # built-in Slope Bands, and the first 3D view's report names both legends,
+    # in drawing order. The first was the only one shown.
     add_test(NAME qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME second|>SURFACE STYLE ground \"Elevation Bands\"|>SURFACE STYLE second \"Slope Bands\"|?RenderView2"
-            "-DEXPECT=RenderView2: painted=[1-9][0-9]* [^\r\n]*projection=perspective legends=2 legend=\"ground - Elevation Bands\" legend=\"second - Slope Bands\""
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME second|>SURFACESTYLE NEW Few FROM \"Elevation Bands\" bands=4|>SURFACE STYLE ground Few|>SURFACE STYLE second \"Slope Bands\"|?RenderView2"
+            "-DEXPECT=RenderView2: painted=[1-9][0-9]* [^\r\n]*projection=perspective legends=2 legend=\"ground - Few\" legend=\"second - Slope Bands\""
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/the_3d_view_legends_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless PROPERTIES
