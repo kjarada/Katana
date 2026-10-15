@@ -13,7 +13,10 @@
 // off: a cut is the ground taken away, and drawn solid it would bury the
 // road it was taken away for), so after that the Layers panel shows and
 // hides them like anything else. A view that hides a layer of its own hides
-// its objects there too.
+// its objects there too: a plan view through isShown(..., its overrides), a 3D
+// view through SceneMesh::layer, which it tests against its own hidden layers
+// (RenderViewWidget::shownMeshes) because the window makes ONE list of meshes
+// for all of them, with the drawing's layers only.
 
 #include <string>
 #include <vector>

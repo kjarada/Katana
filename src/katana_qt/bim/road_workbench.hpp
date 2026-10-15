@@ -18,7 +18,10 @@
 // Corridors... and Corridor Quantities... are shown in Terrain's Corridors
 // section too - the same QAction objects, as File shows the imports of the
 // other menus - where Corridor Quantities... and Corridor Surface... were
-// (docs/road_design.md, "Where the old corridor commands went"). Each
+// (docs/road_design.md, "Where the old corridor commands went"). In a
+// drawing with no corridor and no alignment that has a design profile they
+// open nothing and say where one is made; once it has a corridor they always
+// open. Each
 // action's data names its dialog (roadTemplateManagerDialog, corridorDialog,
 // corridorQuantitiesDialog), which is how --dialog finds it.
 //
@@ -101,6 +104,11 @@ class RoadWorkbench {
     // False, having said why and where an alignment is made, when no
     // alignment has a design profile.
     bool haveProfiledAlignment();
+    // Whether Corridors... and Corridor Quantities... open: when the drawing
+    // has a corridor (its dialogs show it, and its problems, whatever became of
+    // its alignment), else when an alignment has a design profile to make one
+    // from (haveProfiledAlignment, which says where one is made when none has).
+    bool corridorDialogsMayOpen();
     void scheduleSync();
 
     QMainWindow& window_;

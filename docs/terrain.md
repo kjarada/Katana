@@ -342,7 +342,12 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   when the phase ends the executor commits what it changed as one step named
   after the verb, and a phase that fails commits nothing
   (`SurfaceVerbs.SurfaceFromIsOneUndoStepAndUndoLeavesNone`,
-  `SurfaceVerbs.RemoveIsOneUndoStepAndUndoPutsTheSameSurfaceBack`). An apply
+  `SurfaceVerbs.RemoveIsOneUndoStepAndUndoPutsTheSameSurfaceBack`). The copy is
+  dropped when the phase ends, on every path out of it (`Staging`): it holds a
+  pointer to every surface and the Context lives as long as the window or the
+  session, so a copy left behind kept the previous drawing's surfaces in
+  memory after New until the next geoprocessing line
+  (`SurfaceVerbs.TheStagingCopyIsDroppedWhenTheLineEndsWhateverItAnswered`). An apply
   that commits in a step of its own (an IMPORT) leaves an equal store, and
   the executor's commit then records nothing. *Rejected:* each verb calling
   `Document::setSurfaces` itself - twenty-odd verbs bind a surface, and one
@@ -350,10 +355,18 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   the Document's store by reference - a mutable store outside the Document
   is the second store this replaced.
 - **Hidden is a matter of the picture.** `NamedSurface::visible` says
-  whether the views draw a surface: the plan and 3D views, the section view,
-  a sheet's sections. A hidden surface is still read by every verb - sampled,
-  draped, exported, a corridor's ground - which is why the corridor and the
-  IFC export list them all.
+  whether the views draw a surface: the plan and 3D views follow it as it
+  changes, and a section - the section view, a sheet's sections - is cut
+  from the surfaces that were shown WHEN IT WAS CUT. An open section view is
+  not cut again by itself (Terrain > Cut Section is the person's decision, and
+  its alignment and design profile are not kept to repeat it with); when the
+  drawing's surfaces have changed since, it says so in its legend and its status
+  text (`SectionViewWidget::surfacesChanged`,
+  `SectionView.ASectionSaysItsSurfacesChangedSinceItWasCutAndCuttingAgainClearsIt`).
+  Any change to the surfaces says it, a style change included: the generation
+  it goes by does not tell which part of a surface changed. A hidden surface is
+  still read by every verb - sampled, draped, exported, a corridor's ground -
+  which is why the corridor and the IFC export list them all.
 - **A surface's style is a name.** `NamedSurface::style` names one of the
   drawing's display styles (`include/katana/cad/terrain/surface_style.hpp`);
   empty is the drawing's default. A name the styles do not have is refused
@@ -598,6 +611,11 @@ column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
   cannot be read by a build before it, and that is the owner's decision (the
   alternative, an integrity pass at the open, would read tens of megabytes
   for a check no other table has).
+- **An open section view is not cut again when the surfaces change;** it says
+  they changed (see "Hidden is a matter of the picture"). Cutting it again by
+  itself needs the section's recipe kept with the view - its alignment polyline,
+  its design profile and that profile's name - and a re-cut that keeps the
+  person's framing; neither is built.
 
 ## Surfaces on every front end
 
@@ -618,6 +636,13 @@ SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog] [format=<dr
 ```
 
 Every form takes PREVIEW, which says what would be read and makes nothing.
+PREVIEW refuses what the run would refuse, for a scope or a cloud's classes
+that leave fewer than three points with a height to triangulate, with the
+same message (`SurfaceVerbs.APreviewOfAScopeTheRunRefusesIsRefusedAsTheRunIs`,
+`SurfaceVerbs.APreviewOfACloudWithTooFewPointsInTheClassesIsRefusedAsTheRunIs`):
+the Surface From dialog previews through this line, and a preview that said
+`valid=yes` was followed by a refusal. A raster's points are not counted by a
+preview, which does not read it.
 A reply is key=value records: how the source was read (`sampled stride=
 pixels= nodata= points=`, `thinned from= step= points=`, the drawing's
 `scope` record), `merged duplicates=` when coincident points were averaged,

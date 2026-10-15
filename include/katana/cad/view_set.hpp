@@ -83,6 +83,11 @@ struct ViewState {
     // Section: what was cut, and how it is drawn.
     std::optional<Section> section;
     double sectionExaggeration = 10.0;
+    // Document::surfacesGeneration when `section` was cut. A section is a
+    // measured picture of the surfaces that were shown then and is cut again
+    // only when asked, so a view whose drawing's generation has moved says the
+    // picture is of surfaces it no longer has (SectionViewWidget).
+    std::uint64_t sectionSurfaces = 0;
 
     // Linked views (view_link.hpp): every linked view shows the same centre
     // and scale, so a design view zoomed takes the as-built view with it.

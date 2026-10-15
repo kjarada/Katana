@@ -336,6 +336,25 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
 #endif
 }
 
+const std::vector<katana::cad::SceneMesh>& RenderViewWidget::shownMeshes() const
+{
+    const auto& all = meshes();
+    const katana::cad::LayerOverrides& hidden = state_.layers;
+    const auto hiddenHere = [&hidden](const katana::cad::SceneMesh& mesh) {
+        return !mesh.layer.empty() && hidden.hides(mesh.layer);
+    };
+    if (hidden.empty() || std::ranges::none_of(all, hiddenHere)) {
+        return all;
+    }
+    shownMeshes_.clear();
+    for (const katana::cad::SceneMesh& mesh : all) {
+        if (!hiddenHere(mesh)) {
+            shownMeshes_.push_back(mesh);
+        }
+    }
+    return shownMeshes_;
+}
+
 void RenderViewWidget::setContext(const ViewContext& context)
 {
     context_ = context;
@@ -408,7 +427,8 @@ void RenderViewWidget::setVerticalExaggeration(double factor)
     if (context_.document != nullptr) {
         katana::cad::SceneOptions flat = context_.options;
         flat.verticalExaggeration = 1.0;
-        const auto box = katana::cad::sceneBounds(*context_.document, surfaces(), flat, meshes());
+        const auto box =
+            katana::cad::sceneBounds(*context_.document, surfaces(), flat, shownMeshes());
         context_.options.exaggerationDatum = box.empty() ? 0.0 : box.center().z;
     }
     invalidateScene();
@@ -443,7 +463,7 @@ void RenderViewWidget::rebuildIfNeeded()
     const bool gridDirty = terrainDirty_ || entitiesDirty_;
     const bool terrainRebuilt = terrainDirty_;
     if (terrainDirty_) {
-        builder_.buildTerrain(surfaces(), meshes(), context_.options, layers_);
+        builder_.buildTerrain(surfaces(), shownMeshes(), context_.options, layers_);
         ++terrainBuilds_;
         entitiesDirty_ = true;
     }

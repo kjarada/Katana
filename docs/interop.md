@@ -730,7 +730,13 @@ Decisions, and what was rejected:
   panel's selection first.
 * **Reference data goes with its drawing.** File > New, Open, and `NEW` or
   `OPEN` typed on the command line clear the rasters and clouds (QT-17): an
-  orthophoto of the last site no longer sits behind the next one.
+  orthophoto of the last site no longer sits behind the next one. Only an
+  `OPEN` of a project does: `OPEN #12` and `OPEN SELECTION` open a polyline
+  for editing and leave the drawing, and so its reference data, as it was
+  (`CommandInterpreter::replacesDocument`, which the session asks as the window
+  does; `Session.OpenOfAPolylineKeepsTheReferenceLayersAndNewTakesThemOff`,
+  `cli.open_of_a_polyline_keeps_the_reference_layers`). The session cleared
+  them for any `OPEN`, so `RASTER 1` was gone after editing a polyline.
 
 The interoperability verbs now exist in BOTH command lines, as the CLI's own
 comment always claimed: `IMPORT`, `EXPORT`, `INFO` and `REFS` in the desktop

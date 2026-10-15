@@ -255,10 +255,17 @@ as the Cut Fill surface style draws them.
 path the drawing has decides, so "road" switched off hides everything under
 it even before "road/pavement" is made, and a path the drawing has none of
 is drawn - an object is not an entity and is drawn in its own colour. A view
-that hides a layer of its own hides its objects there. `CORRIDOR NEW` makes
-the layers its objects are on in the same undo step, `road/earthworks/cut`
-switched OFF: a cut is the ground taken away, and drawn solid it would bury
-the road it was taken away for.
+that hides a layer of its own hides its objects there: a plan view through
+`isShown` with its overrides, a 3D view through `SceneMesh::layer`, which
+`bim::sceneMeshes` fills and `RenderViewWidget::shownMeshes` tests against the
+view's own hidden layers. The window makes ONE list of meshes for every 3D
+view, with the drawing's layers only. *Rejected:* a list for each view, a copy
+of every mesh a view for the sake of a layer hidden in one; a view that hides
+none of the meshes uses the window's list as it is, and copies nothing
+(`RoadWorkbench.AThreeDViewThatHidesALayerOfItsOwnDoesNotDrawTheRoadObjectsOnIt`).
+`CORRIDOR NEW` makes the layers its objects are on in the same undo step,
+`road/earthworks/cut` switched OFF: a cut is the ground taken away, and drawn
+solid it would bury the road it was taken away for.
 
 ## Kept with the project
 
@@ -290,11 +297,17 @@ two keys' text, the alignments' revision and the surfaces' generation - so a
 line drawn does not rebuild them - and the placed objects' on their key and
 every step. (That is wider than they need: they read only their key, the
 alignments and the surfaces, and a line is copied into an object, never
-followed - `road_objects.md`, "Not done".) A half made again that
-equals what it replaced keeps the old one, so the model a view holds is the
-same object until something in it changes
-(`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`).
-The views call it every paint; the comparison is a few kilobytes of text.
+followed - `road_objects.md`, "Not done".) A half made again that equals what
+it replaced keeps the old one - BOTH halves, the corridors' too: the
+alignments' revision and the surfaces' generation move for an alignment or a
+surface no corridor uses, and a model handed to the views as a different
+object made every 3D view build its terrain again - so the model a view holds
+is the same object until something in it changes
+(`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`,
+`RoadVerbs.TheRoadModelIsTheSameObjectAfterAnEditThatLeftItAsItWas`). The
+views call it every paint; while nothing it is made from moved that is a few
+counters and two texts, and a half made again is compared with the old one
+(vertex for vertex) only after a key moved.
 
 ## The verbs
 
@@ -304,9 +317,9 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     ROADTEMPLATE [LIST] [JSON] | INFO <t> | DEFAULTS | SECTION <t>
     ROADTEMPLATE NEW <t> [FROM <t>] [description=] | DELETE <t> | RENAME <t> <new>
     ROADTEMPLATE ADD <t> left|right|both <kind> [name=] [at=<n>] [key=value ...]
-    ROADTEMPLATE SET <t> <component> key=value ... | REMOVE <t> <component>
+    ROADTEMPLATE SET <t> <component> key=value ... [<component> key=value ...] | REMOVE <t> <component>
     ROADTEMPLATE COURSE <t> <component> ADD <course> thickness= [material=] [ifc=] [colour=] [at=]
-    ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... | REMOVE <course>
+    ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... [<course> key=value ...] | REMOVE <course>
     CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
     CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=]
     CORRIDOR SET <c> key=value ... | DELETE <c> | RENAME <c> <new>
@@ -320,6 +333,21 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
 A `<component>` is `side:name` or `name`, every side that has one. A
 component goes before its side's batter, or at `at=`; a second of a name is
 `name2`. Words are case-insensitive, names found ignoring case.
+
+**SET takes any number of groups.** `ROADTEMPLATE SET <t> left:lane width=3.25
+right:lane width=3.75` and `ROADTEMPLATE COURSE <t> left:lane SET AC14
+thickness=0.06 base thickness=0.3` apply every group to ONE copy of the
+template and commit it once: one undo step, and a value the template refuses -
+a width of 0, a thickness of 0 - in any group, an unknown component or course,
+or a group with no `key=value`, refuses the whole line and changes nothing. A
+word that is not `key=value` starts the next group, and names its component
+(or course) as the groups before it left it, as the same lines typed one
+after another would. This is what the Road
+Template Manager's Apply sends for a grid of edited rows. *Rejected:* one line
+a row, as the first version did - N undo steps for one user edit, and a
+template half applied when a later row was refused (the earlier rows had
+committed); and a verb of its own for the grid, a second way to do what SET
+does.
 
 **Replies** are records, key=value, one a line. A definition's numbers are
 written exactly (`core::formatExactReal`), so a value a reply prints can be
@@ -364,14 +392,59 @@ its line and running it through the window's one executor:
 The road objects' items follow, in a section of their own (the road
 objects document, docs/road_objects.md). The dialogs' widgets and what each runs are listed
 in their headers: `src/katana_qt/bim/road_template_manager.hpp` (the templates;
-the components and courses in two grids that are buffers, applied by one SET
-line per edited row, as the Alignment Manager's are; a drawing of the
+the components and courses in two grids that are buffers, each applied by ONE
+line - a group of `key=value` for every edited row - so an Apply is one undo
+step and a refused value leaves the template as it was; a drawing of the
 template across a level road - `road::templateSection` - its courses
 coloured and its vertical exaggerated so a 50 mm course can be seen),
 `src/katana_qt/bim/corridor_dialog.hpp` (the corridors, their regions and
 superelevation, Build, Build Strings, Build Surfaces, and the problems) and
 `src/katana_qt/bim/corridor_quantities_dialog.hpp` (the records of CORRIDOR
 QUANTITIES as a table, Copy and Save CSV; no file dialog in a headless run).
+
+**What a dialog shows, and when its buffer is kept.** The dialogs show the
+DOCUMENT's state after an edit, an undo, a redo, New and Open, and keep a
+person's unapplied edits only while what they were made on is as it was:
+
+- *Template Manager.* The components grid keeps its edits across a reload that
+  left the template as it was (`filledFrom`). The courses grid does the same on
+  what it was filled from - the template, the component and the component's
+  courses as the drawing held them - not on the component's reference alone
+  (`left:lane` is in every template that has a lane, so a grid filled from
+  another template's was kept under this one's components and its Apply wrote
+  the stale thickness, material and IFC type to the template chosen second).
+  Choosing another template drops both grids' edits. At its opening size each
+  grid shows four rows and the start of the next (the preview takes less),
+  where it was left with one; a dialog taller than the screen is fitted to it
+  by the application, so no scroll area of its own.
+- *Corridors.* The definition fields (name, alignment, template, surface,
+  interval, from, to) are a buffer, refilled from the corridor when it is
+  chosen and when its stored definition changes, and kept across any other
+  reload: a typed interval survives a line drawn. New and Rename read the name
+  BEFORE the line runs (the reload refilled the field from the corridor still
+  chosen, so New chose the old corridor again and Build, Delete and the rest
+  acted on that one). The combos show the name the corridor holds - found
+  ignoring case, as the verbs find it - or, where the drawing has none (a
+  surface since removed, an alignment that lost its profile), an extra item
+  with that name. `QComboBox::setCurrentText` does neither on a combo that is
+  not editable, and Apply, which writes every key, then re-pointed the corridor
+  to whatever item was showing; Apply now also writes a name in the case the
+  corridor already holds it.
+  `CorridorDialog.ApplyKeepsTheTemplateAndSurfaceACorridorNamesInAnotherCase` and
+  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`.
+- *Corridor Quantities.* The table and the totals are the records of the
+  last line it ran, so when the road model that line read (`bim::bimModel`'s
+  object) is no longer the drawing's - an edit, an undo, a redo, New, Open -
+  they are cleared, the status says to press List Quantities again, and Copy
+  hands out nothing. *Rejected:* running the line again by itself - a CORRIDOR
+  QUANTITIES line in the command log after every edit - and clearing on any
+  change at all, which wiped the listing when a line was drawn.
+- *Opening.* Corridors... and Corridor Quantities... say where an alignment
+  with a design profile is made only when the drawing has no corridor and no
+  such alignment; with a corridor they open whatever became of its alignment,
+  as its problems ("the alignment road has no design profile") are what the
+  Corridors dialog is there to show
+  (`RoadWorkbench.TheCorridorDialogsOpenForCorridorsWhoseAlignmentLostItsProfile`).
 
 **Where the old corridor commands went.** Terrain > Corridor Quantities... and
 Corridor Surface... asked for an alignment, a surface and an assembly in a
@@ -380,7 +453,7 @@ kept, nothing to undo, nothing an agent could reach. They are gone; Terrain's
 Corridors section now shows the BIM menu's Corridors... and Corridor
 Quantities... - the same QAction objects, as File shows the other menus'
 imports - and both still say where an alignment with a design profile is made
-when there is none
+when there is none and no corridor to show
 (`qt_terrain_commands_point_to_the_alignment_manager_headless`). A
 one-carriageway corridor is a template like any other now. The Terrain
 toolbar lost the two buttons, which are the BIM toolbar's.
@@ -426,17 +499,25 @@ class, layer, quantities and properties, and every problem
   ids and IFC classes, a kerb's length and volume, the earthworks against the
   old assembly's end areas, regions, problems, strings and surfaces.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
-  layers, renames, quantities and the CSV, strings, surfaces, the cache, the
-  RoadModel change, the JSON the project keeps.
+  layers, renames, quantities and the CSV, strings, surfaces, the cache (the
+  same object after an edit that left the model as it was), the RoadModel
+  change, the JSON the project keeps; several components or courses set by one
+  line, one step, and a refused value in any group changing none.
 - `tests/cad/test_corridor.cpp`: the old functions, unchanged, on the new engine.
 - `tests/qt_widgets/bim/test_road_dialogs.cpp`: each dialog's lines and the
-  workbench's menu and meshes.
+  workbench's menu and meshes; the dialogs' state across New, Rename, an
+  unrelated command, an undo and a changed drawing (the Corridors dialog's
+  fields and combos, the Template Manager's two grids, the listing of the
+  Quantities dialog); an Apply of several rows as one line; the 3D view's own
+  hidden layers.
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
   window.
 - `src/katana_app/road_cli.cmake`: `katana_cli` end to end, and a road model
   saved and read back by another process
-  (`cli.a_saved_road_model_is_read_back_by_another_process`).
+  (`cli.a_saved_road_model_is_read_back_by_another_process`); several
+  components or courses set by one line and taken back by one UNDO, and a
+  refused value stopping the script.
 - `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`.
 
 ## Not done
@@ -474,3 +555,9 @@ class, layer, quantities and properties, and every problem
   templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
 - The window's Command Reference shows the road verbs in its Commands
   section from the general help, not a section of their own.
+- The corridors are sectioned again when ANY surface changes (the road
+  model's corridor half is keyed on the surfaces' whole generation), though
+  the model comes out the same object when nothing in it moved; keying the
+  half on the surfaces a corridor targets would skip the work as well.
+- Corridor Quantities clears its listing when the road model changes and does
+  not list again by itself: pressing List Quantities is the person's act.

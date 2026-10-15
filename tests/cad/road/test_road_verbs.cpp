@@ -13,12 +13,16 @@
 #include <vector>
 
 #include "katana/cad/bim/bim_object.hpp"
+#include "katana/cad/bim/bim_view.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/road/corridor_model.hpp"
 #include "katana/cad/road/road_template.hpp"
 #include "katana/cad/road/road_verbs.hpp"
 #include "katana/core/text.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "katana/terrain/tin_surface.hpp"
 
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
@@ -435,6 +439,207 @@ TEST(RoadVerbs, TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise)
         << "undo makes the model it took back";
     session.ok("ALIGN DESIGN road 0,11 100,11");
     EXPECT_NE(*katana::cad::bim::bimModel(session.document), *first) << "the profile moved";
+}
+
+// The corridors are made again when the alignments' revision or the surfaces'
+// generation moves - a new alignment, a hidden surface - and the model is the
+// same object if it came out the same, so that a view holding it, and the 3D
+// views the road workbench hands it to, have nothing to do.
+TEST(RoadVerbs, TheRoadModelIsTheSameObjectAfterAnEditThatLeftItAsItWas)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    const auto first = katana::cad::bim::bimModel(session.document);
+    ASSERT_FALSE(first->objects.empty()) << "an empty model would be the same object anyway";
+
+    // A new alignment no corridor uses: the alignments' revision moves.
+    const std::uint64_t alignments = session.document.model().alignments.revision();
+    session.ok("ALIGN NEW other 0,50 100,50");
+    ASSERT_NE(session.document.model().alignments.revision(), alignments)
+        << "the key the corridors are made again on did not move";
+    EXPECT_EQ(katana::cad::bim::bimModel(session.document), first);
+
+    // A surface no corridor uses, added and then hidden: the surfaces'
+    // generation moves each time.
+    auto tin = katana::terrain::TinSurface::create({{0, 100, 1}, {10, 100, 2}, {10, 110, 3}},
+                                                   {{0, 1, 2}});
+    ASSERT_TRUE(tin.ok());
+    katana::terrain::SurfaceStore store = session.document.surfaces();
+    ASSERT_TRUE(
+        store.add({"unused", std::make_shared<const katana::terrain::TinSurface>(*tin), "test"})
+            .ok());
+    const std::uint64_t generation = session.document.surfacesGeneration();
+    ASSERT_TRUE(session.document.setSurfaces(store, "TEST").ok());
+    ASSERT_NE(session.document.surfacesGeneration(), generation);
+    EXPECT_EQ(katana::cad::bim::bimModel(session.document), first) << "a surface was added";
+    ASSERT_TRUE(store.setVisible("unused", false).ok());
+    const std::uint64_t shown = session.document.surfacesGeneration();
+    ASSERT_TRUE(session.document.setSurfaces(store, "TEST").ok());
+    ASSERT_NE(session.document.surfacesGeneration(), shown);
+    EXPECT_EQ(katana::cad::bim::bimModel(session.document), first) << "a surface was hidden";
+
+    // What the model is made from still makes a new one.
+    session.ok("ROADTEMPLATE SET \"urban street\" lane width=3.6");
+    EXPECT_NE(katana::cad::bim::bimModel(session.document), first);
+}
+
+// A 3D view applies the layers it hides itself to the meshes it is handed
+// (RenderViewWidget::shownMeshes), so each mesh says which layer it is on.
+TEST(RoadVerbs, EachSceneMeshOfTheRoadModelNamesTheLayerItsObjectIsOn)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    const auto model = katana::cad::bim::bimModel(session.document);
+    const auto meshes = katana::cad::bim::sceneMeshes(*model, session.document.model(),
+                                                      katana::cad::kNoLayerOverrides);
+    ASSERT_FALSE(meshes.empty());
+    std::size_t at = 0;
+    for (const auto& object : model->objects) {
+        if (object.mesh.empty()) {
+            continue;
+        }
+        ASSERT_LT(at, meshes.size());
+        EXPECT_EQ(meshes[at].layer, object.layer) << object.id;
+        EXPECT_FALSE(object.layer.empty()) << object.id << " is on no layer";
+        ++at;
+    }
+    EXPECT_EQ(at, meshes.size());
+    // The layer hidden for the whole drawing takes its objects out of the list,
+    // which is the drawing's rule; a view's own is the view's to apply.
+    session.ok("LAYER HIDE road/kerb");
+    const auto without = katana::cad::bim::sceneMeshes(*model, session.document.model(),
+                                                       katana::cad::kNoLayerOverrides);
+    EXPECT_LT(without.size(), meshes.size());
+    for (const auto& mesh : without) {
+        EXPECT_NE(mesh.layer, "road/kerb");
+    }
+}
+
+TEST(RoadVerbs, SeveralComponentsAreSetByOneLineAsOneStepAndARefusedValueChangesNone)
+{
+    using katana::cad::road::Side;
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    const auto widthOf = [&](Side side, const std::string& name) {
+        const auto* roadTemplate = session.document.roadTemplates().find("rural two-lane");
+        return roadTemplate->components[*roadTemplate->find(side, name)].width;
+    };
+    // The standard rural two-lane: a 3.5 m lane (Austroads) and a 2 m shoulder
+    // each side (road_template.cpp, defaultComponent and the template itself).
+    ASSERT_EQ(widthOf(Side::Left, "lane"), 3.5);
+    ASSERT_EQ(widthOf(Side::Right, "lane"), 3.5);
+    ASSERT_EQ(widthOf(Side::Left, "shoulder"), 2.0);
+    ASSERT_EQ(widthOf(Side::Right, "shoulder"), 2.0);
+    const std::size_t before = session.steps();
+
+    const std::string reply = session.ok(
+        "ROADTEMPLATE SET \"rural two-lane\" left:lane width=3.25 right:lane width=3.75 "
+        "left:shoulder width=2.5 crossfall=-4");
+    EXPECT_EQ(session.steps(), before + 1) << "three components, one step";
+    EXPECT_EQ(widthOf(Side::Left, "lane"), 3.25);
+    EXPECT_EQ(widthOf(Side::Right, "lane"), 3.75);
+    EXPECT_EQ(widthOf(Side::Left, "shoulder"), 2.5);
+    EXPECT_EQ(widthOf(Side::Right, "shoulder"), 2.0) << "the right shoulder was not named";
+    EXPECT_TRUE(contains(reply, "side=left name=lane")) << reply;
+    EXPECT_TRUE(contains(reply, "side=right name=lane")) << reply;
+    EXPECT_TRUE(contains(reply, "side=left name=shoulder")) << reply;
+    session.ok("UNDO");
+    EXPECT_EQ(widthOf(Side::Left, "lane"), 3.5);
+    EXPECT_EQ(widthOf(Side::Right, "lane"), 3.5);
+    EXPECT_EQ(widthOf(Side::Left, "shoulder"), 2.0);
+    EXPECT_EQ(session.steps(), before);
+
+    // A value the template refuses in the LAST group leaves the first ones
+    // undone: nothing is committed, so there is no step to take back.
+    const auto zero = session.refused(
+        "ROADTEMPLATE SET \"rural two-lane\" left:lane width=3.25 right:lane width=0");
+    EXPECT_TRUE(contains(zero.describe(), "positive")) << zero.describe();
+    EXPECT_EQ(widthOf(Side::Left, "lane"), 3.5);
+    EXPECT_EQ(session.steps(), before);
+    // An unknown component and a group with no key are refused as a whole too.
+    session.refused("ROADTEMPLATE SET \"rural two-lane\" left:lane width=3.25 left:nothing width=1");
+    EXPECT_EQ(widthOf(Side::Left, "lane"), 3.5);
+    const auto bare =
+        session.refused("ROADTEMPLATE SET \"rural two-lane\" left:lane width=3.25 right:lane");
+    EXPECT_TRUE(contains(bare.describe(), "needs key=value")) << bare.describe();
+    EXPECT_EQ(widthOf(Side::Left, "lane"), 3.5);
+    EXPECT_EQ(session.steps(), before);
+
+    // One group is the line it always was.
+    session.ok("ROADTEMPLATE SET \"rural two-lane\" lane width=3.4");
+    EXPECT_EQ(widthOf(Side::Left, "lane"), 3.4);
+    EXPECT_EQ(widthOf(Side::Right, "lane"), 3.4);
+    EXPECT_EQ(session.steps(), before + 1);
+
+    // A group names its component as the groups before it left it, as the
+    // same two lines typed one after the other would: the second finds the
+    // lane the first renamed.
+    session.ok("ROADTEMPLATE SET \"rural two-lane\" left:lane name=carriageway "
+               "left:carriageway width=3.1");
+    const auto* renamed = session.document.roadTemplates().find("rural two-lane");
+    ASSERT_TRUE(renamed->find(Side::Left, "carriageway").has_value());
+    EXPECT_EQ(renamed->components[*renamed->find(Side::Left, "carriageway")].width, 3.1);
+    EXPECT_FALSE(renamed->find(Side::Left, "lane").has_value());
+    EXPECT_EQ(session.steps(), before + 2);
+}
+
+TEST(RoadVerbs, SeveralCoursesAreSetByOneLineAsOneStepAndARefusedValueChangesNone)
+{
+    using katana::cad::road::Side;
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    const auto thicknessOf = [&](const std::string& course) {
+        const auto* roadTemplate = session.document.roadTemplates().find("rural two-lane");
+        const auto& lane = roadTemplate->components[*roadTemplate->find(Side::Left, "lane")];
+        for (const auto& each : lane.courses) {
+            if (each.name == course) {
+                return each.thickness;
+            }
+        }
+        return -1.0;
+    };
+    // A lane's flexible pavement: 50 mm of AC14, 200 mm of base, 250 mm of
+    // subbase (road_template.cpp, defaultComponent).
+    ASSERT_EQ(thicknessOf("AC14"), 0.05);
+    ASSERT_EQ(thicknessOf("base"), 0.2);
+    ASSERT_EQ(thicknessOf("subbase"), 0.25);
+    const std::size_t before = session.steps();
+
+    const std::string reply = session.ok(
+        "ROADTEMPLATE COURSE \"rural two-lane\" left:lane SET AC14 thickness=0.06 base "
+        "thickness=0.3 material=gravel");
+    EXPECT_EQ(session.steps(), before + 1) << "two courses, one step";
+    EXPECT_EQ(thicknessOf("AC14"), 0.06);
+    EXPECT_EQ(thicknessOf("base"), 0.3);
+    EXPECT_EQ(thicknessOf("subbase"), 0.25) << "not named";
+    EXPECT_TRUE(contains(reply, "name=AC14")) << reply;
+    EXPECT_TRUE(contains(reply, "name=base")) << reply;
+    session.ok("UNDO");
+    EXPECT_EQ(thicknessOf("AC14"), 0.05);
+    EXPECT_EQ(thicknessOf("base"), 0.2);
+    EXPECT_EQ(session.steps(), before);
+
+    const auto zero = session.refused(
+        "ROADTEMPLATE COURSE \"rural two-lane\" left:lane SET AC14 thickness=0.06 base thickness=0");
+    EXPECT_TRUE(contains(zero.describe(), "positive")) << zero.describe();
+    EXPECT_EQ(thicknessOf("AC14"), 0.05) << "the first course was left as it was";
+    session.refused("ROADTEMPLATE COURSE \"rural two-lane\" left:lane SET AC14 thickness=0.06 "
+                    "nothing thickness=1");
+    EXPECT_EQ(thicknessOf("AC14"), 0.05);
+    const auto bare = session.refused(
+        "ROADTEMPLATE COURSE \"rural two-lane\" left:lane SET AC14 thickness=0.06 base");
+    EXPECT_TRUE(contains(bare.describe(), "needs key=value")) << bare.describe();
+    EXPECT_EQ(thicknessOf("AC14"), 0.05);
+    EXPECT_EQ(session.steps(), before);
+
+    // One course is the line it always was.
+    session.ok("ROADTEMPLATE COURSE \"rural two-lane\" left:lane SET subbase thickness=0.3");
+    EXPECT_EQ(thicknessOf("subbase"), 0.3);
+    EXPECT_EQ(session.steps(), before + 1);
 }
 
 TEST(RoadVerbs, ARoadModelEditIsReportedAsARoadModelChangeAndALineIsNot)
