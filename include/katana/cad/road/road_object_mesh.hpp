@@ -11,7 +11,12 @@
 // direction it is swept in, v up. It stays VERTICAL wherever it is swept -
 // a barrier or a wall stands upright on a grade, it does not lean with it -
 // and is mitred at a bend of the path, so a constant section keeps its width
-// round a corner.
+// round a corner. A bend sharper than a mitre of four times the half-width
+// allows (a turn of more than about 151 degrees) is bevelled instead: each leg
+// keeps its full width to the joint, and the two ends of the joint are joined
+// side to side, so the volume error is the size of the corner and never
+// spreads along the leg. A path that comes back to its start is swept as a
+// loop - mitred at its start like any other corner, with no end faces.
 
 #include <array>
 #include <cstdint>
@@ -73,9 +78,11 @@ void addBox(katana::geometry::TriangleMesh& mesh, const katana::geometry::Point3
             const katana::geometry::Vec2& along, double length, double width, double height);
 
 // `profile`, in (u, v), swept along `path`: a closed solid with a flat end at
-// each end of the path. Points of the path closer than a millimetre to the
-// one before are passed over. Adds nothing for fewer than two distinct
-// points or a profile that does not triangulate.
+// each end of the path - or, when the path returns to its first point (same
+// plan position and level, within a millimetre), a closed ring with no ends.
+// Points of the path closer than a millimetre to the one before are passed
+// over. Adds nothing for fewer than two distinct points or a profile that does
+// not triangulate.
 void addSweep(katana::geometry::TriangleMesh& mesh, std::span<const PathPoint> path,
               std::span<const katana::geometry::Point2> profile);
 
