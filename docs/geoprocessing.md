@@ -332,7 +332,11 @@ asked (`properties`).
   `source.part`), else the smallest, and of equals the one made nearest
   before it, so a file imported twice joins each hole to its own exterior
   (`DrawingDataset.ATaggedHoleJoinsItsExterior`: 10000 - 400 = 9600 m2). A
-  tagged hole inside no area stays an area of its own, and says so. GEOS's
+  tagged hole inside no area stays an area of its own, and says so. The rule
+  is `entity::HoleJoiner` (`include/katana/entity/ring_tags.hpp`, tested by
+  `HoleJoiner.OfEqualRingsTheHoleJoinsTheOneMadeNearestBeforeIt` and its
+  neighbours), shared with the volume verbs, which read a lot with a hole the
+  same way (`docs/volumes.md`, "A lot with a hole"). GEOS's
   organisePolygons was the design's choice for this; a point-in-polygon test
   of every vertex does it without GDAL in the interop layer, and it is what
   the part hint is checked against.
