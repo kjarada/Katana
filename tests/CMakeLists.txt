@@ -1336,6 +1336,40 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # Editing a surface is not gaining one. The window decided that a surface
+    # was gained by the pointer of its TIN, and an edit - its undo and redo
+    # too - puts a new TIN under the same name: it opened a 3D view in the middle
+    # of the edit (the plan view, half as wide, with a tool waiting for clicks in
+    # it) and re-framed the camera of one the person had set. A project with one
+    # surface, made by katana_cli, is opened in the window with its plan view
+    # alone; an edit and its undo leave it alone (views=1 each time, never 2).
+    set(_surface_edit_project "${CMAKE_CURRENT_BINARY_DIR}/surface_edit_window_project")
+    add_test(NAME cli.surface_project_for_the_window_edit_check_is_cleared
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_surface_edit_project}")
+    add_test(NAME cli.surface_project_for_the_window_edit_check_is_made
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground"
+                -c "SAVE \"${_surface_edit_project}\"")
+    set_tests_properties(cli.surface_project_for_the_window_edit_check_is_cleared PROPERTIES
+        FIXTURES_SETUP surface_edit_window_cleared)
+    set_tests_properties(cli.surface_project_for_the_window_edit_check_is_made PROPERTIES
+        FIXTURES_REQUIRED surface_edit_window_cleared
+        FIXTURES_SETUP surface_edit_window_project)
+    add_test(NAME qt_editing_a_surface_and_undoing_it_open_no_3d_view_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${_surface_edit_project}"
+            "-DDRIVE=>VIEWS|>SURFACE EDIT ground RAISE 1|>VIEWS|>UNDO|>VIEWS"
+            "-DEXPECT=views=1 linked=0[\r\n]+.*operation=raise.*views=1 linked=0[\r\n]+.*1 undone.*views=1 linked=0"
+            "-DFORBID=views=2|kind=3d"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_edit_opens_no_3d_view_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_editing_a_surface_and_undoing_it_open_no_3d_view_headless PROPERTIES
+        FIXTURES_REQUIRED surface_edit_window_project
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Surface Styles, by its object names: a style's contour
     # interval edited and applied, then a copy of it made under a new name -
     # each the SURFACESTYLE line the dialog shows and runs through the

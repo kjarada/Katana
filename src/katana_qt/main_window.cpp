@@ -5185,10 +5185,16 @@ void MainWindow::syncSceneSurfaces(bool showGained)
     }
     const katana::terrain::SurfaceStore& store = document_.surfaces();
     // Whether the drawing gained a shown surface the scene has not drawn:
-    // SURFACE FROM, TO SURFACE, an import and an undone removal alike.
+    // SURFACE FROM, TO SURFACE, an import and an undone removal alike. Neither
+    // its triangulation NOR its name is among the scene's: an edit, its undo and
+    // its redo put a different TinSurface under the same name, which is not a
+    // surface gained - counting it so opened a 3D view in the middle of a tool,
+    // raised it over the plan view the tool was waiting for clicks in, and
+    // re-framed a camera the person had set, on every click.
     const bool gained = std::ranges::any_of(store.all(), [&](const auto& named) {
         return named.visible && std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
-            return shown.surface == named.surface.get();
+            return shown.surface == named.surface.get() ||
+                   katana::core::equalsIgnoringCase(shown.name, named.name);
         });
     });
     std::vector<cad::SceneSurface> next;
