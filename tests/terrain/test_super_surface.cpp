@@ -4,14 +4,15 @@
 // because that is what a super tin is made of in practice - a survey tin of
 // thousands of small triangles with a design pad over it - and the rule
 // these tests pin (a triangle of a lower member is dropped whole if a higher
-// member covers any of it) only behaves well when the pad is larger than the
-// triangles it covers. A two-triangle base would be removed entirely by a
+// member covers any AREA of it) only behaves well when the pad is larger than
+// the triangles it covers. A two-triangle base would be removed entirely by a
 // pad in the middle of it, which is true of the rule and says nothing about
 // real data.
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -121,9 +122,11 @@ TEST(SuperSurface, TheLastMemberWinsWhichIsWhatTheOrderMeans)
 TEST(SuperSurface, TheSeamIsRaggedOutwardByAtMostOneTriangleOfTheLowerMember)
 {
     // The documented approximation, pinned so that an exact clip later is a
-    // deliberate change. A base triangle that the pad only touches goes with
-    // the rest, so a ring of ground just outside the pad has no level -
-    // which is honest, where a wrong level would not be.
+    // deliberate change. A base triangle that the pad OVERLAPS goes whole, so
+    // a ring of ground just outside the pad has no level - which is honest,
+    // where a wrong level would not be. (The 10 m triangles reaching the 45 m
+    // pad cover area beyond its edge; one the pad only touched would stay -
+    // see TilesThatOnlyAbutAreBothKept.)
     const TinSurface base = grid(0, 0, 100, 100, 10.0, 10);
     const TinSurface pad = grid(45, 45, 55, 55, 15.0, 1);
     const auto combined = combineSurfaces({&base, &pad});
@@ -166,33 +169,56 @@ TEST(SuperSurface, CombiningIsPureAndLeavesTheMembersAsTheyWere)
         << "the base still answers for its own ground";
 }
 
-// ---- the vertex test is indexed, and must answer what the scan answered -----
+// ---- the overlap test is indexed, and must answer what the pairwise scan answered -----
 
 namespace {
 
-// The "is any vertex of the higher member inside this triangle" predicate,
-// stated here the way super_surface.cpp stated it before the bucket grid went
-// in: every vertex, no index, no bounding box around the triangle. This is the
-// exhaustive run the culled one has to agree with (CLAUDE.md section 4).
-bool vertexInsideExhaustively(const TinSurface& higher, const Point3& a, const Point3& b,
-                              const Point3& c)
+// How far p lies to the inside (the left) of the directed edge from -> to.
+double inwardDistance(const Point3& from, const Point3& to, const Point3& p)
 {
-    const auto side = [](const Point3& from, const Point3& to, const Point3& p) {
-        return (to.x - from.x) * (p.y - from.y) - (to.y - from.y) * (p.x - from.x);
-    };
-    for (const Point3& vertex : higher.vertices()) {
-        const double ab = side(a, b, vertex);
-        const double bc = side(b, c, vertex);
-        const double ca = side(c, a, vertex);
-        if ((ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)) {
+    const double length = std::hypot(to.x - from.x, to.y - from.y);
+    return ((to.x - from.x) * (p.y - from.y) - (to.y - from.y) * (p.x - from.x)) / length;
+}
+
+// Whether a line along an edge of `t` parts `u` from it: every vertex of u on
+// the outer side of the line, or within the coincidence tolerance of it.
+bool partedByAnEdgeOf(const std::array<Point3, 3>& t, const std::array<Point3, 3>& u)
+{
+    constexpr double kTolerance = 1e-7; // math::tolerance::kGeometric
+    for (std::size_t k = 0; k < 3; ++k) {
+        bool allOutside = true;
+        for (const Point3& vertex : u) {
+            allOutside = allOutside && inwardDistance(t[k], t[(k + 1) % 3], vertex) <= kTolerance;
+        }
+        if (allOutside) {
             return true;
         }
     }
     return false;
 }
 
-// The other half of the predicate: the triangle's own corners and middle
-// against the higher surface.
+// The rule, stated the plain way and pair by pair, with no index and no
+// bounding box: a triangle is covered when some triangle of the higher member
+// shares an AREA with it - two counter-clockwise triangles share none when an
+// edge line of the one parts them (the separating axis theorem), which is also
+// what touching along an edge or at a corner is.
+bool coversExhaustively(const TinSurface& higher, const Point3& a, const Point3& b,
+                        const Point3& c)
+{
+    for (const TinTriangle& tri : higher.triangles()) {
+        const std::array<Point3, 3> u{higher.vertices()[tri[0]], higher.vertices()[tri[1]],
+                                      higher.vertices()[tri[2]]};
+        const std::array<Point3, 3> t{a, b, c};
+        if (!partedByAnEdgeOf(t, u) && !partedByAnEdgeOf(u, t)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The cheap half the old rule had: the triangle's own corners and middle
+// against the higher surface. A triangle that only the pairwise test drops is
+// one this misses.
 bool sampleInsideExhaustively(const TinSurface& higher, const Point3& a, const Point3& b,
                               const Point3& c)
 {
@@ -207,9 +233,9 @@ bool sampleInsideExhaustively(const TinSurface& higher, const Point3& a, const P
 }
 
 // A band two vertices deep: `columns` + 1 across, 2 up. Coarse across and thin
-// up the page, which is what puts a lone vertex of it inside a base triangle,
-// hard against that triangle's bounding box, where a query box even slightly
-// too small would lose it.
+// up the page, which is what puts a lone strip of it across a base triangle,
+// between its corners and its middle, with its vertices ON the triangle's
+// edges.
 TinSurface band(double x0, double y0, double x1, double y1, double level, int columns)
 {
     std::vector<Point3> vertices;
@@ -231,44 +257,28 @@ TinSurface band(double x0, double y0, double x1, double y1, double level, int co
     return surface.ok() ? std::move(*surface) : TinSurface{};
 }
 
-bool coversExhaustively(const TinSurface& higher, const Point3& a, const Point3& b,
-                        const Point3& c)
-{
-    const katana::geometry::Box2 box = higher.bounds();
-    const double minX = std::min({a.x, b.x, c.x});
-    const double maxX = std::max({a.x, b.x, c.x});
-    const double minY = std::min({a.y, b.y, c.y});
-    const double maxY = std::max({a.y, b.y, c.y});
-    if (box.empty() || maxX < box.min.x || minX > box.max.x || maxY < box.min.y ||
-        minY > box.max.y) {
-        return false;
-    }
-    return sampleInsideExhaustively(higher, a, b, c) || vertexInsideExhaustively(higher, a, b, c);
-}
-
 } // namespace
 
-TEST(SuperSurface, TheIndexedVertexTestKeepsExactlyTheTrianglesTheExhaustiveScanKept)
+TEST(SuperSurface, TheIndexedOverlapTestKeepsExactlyTheTrianglesThePairwiseScanKept)
 {
     // The pads are FINE grids over a coarse base. That is what makes this test
-    // sharp: the bucket grid sizes its cells for about one vertex each, so a
-    // 700-vertex pad over 30 m has cells near a metre, and a query box even
-    // slightly too small loses vertices the scan would have found. A pad of
-    // three cells would hide any such mistake behind cells wider than the base
-    // triangles.
+    // sharp: the bucket grid sizes its cells for about two triangles each, so a
+    // 1250-triangle pad over 30 m has cells of a metre or so, and a query box
+    // even slightly too small loses triangles the scan would have found. A pad
+    // of three cells would hide any such mistake behind cells wider than the
+    // base triangles.
     //
-    // One pad is placed off the base's 10 m grid lines, so its vertices fall in
-    // the middle of base triangles; one is placed exactly ON them, which is the
-    // case where the sign tests read zero and the boundary counts as inside.
+    // One pad is placed off the base's 10 m grid lines, so its triangles fall
+    // across the middle of base triangles; one is placed exactly ON them, which
+    // is the case where touching along an edge must not count.
     const TinSurface base = grid(0, 0, 100, 100, 10.0, 10);
     const TinSurface offGrid = grid(33.3, 41.7, 63.3, 71.7, 15.0, 25);
     const TinSurface onGrid = grid(10, 10, 40, 40, 12.0, 20);
     // The knife edge. This band crosses the base's triangles between y = 47 and
     // y = 48, missing every corner and every centroid of them, and its vertices
     // are 10 m apart across - so a base triangle like (40,40)-(50,50)-(40,50)
-    // is decided by ONE pair of band vertices, at x = 40, exactly on that
-    // triangle's own bounding box. Nothing but the vertex test answers there,
-    // and it answers only if the query box really does reach the box's edge.
+    // has the band's vertices (40,47) and (40,48) ON its left edge and the band
+    // between them running across it. Nothing but the pair test answers there.
     const TinSurface knifeEdge = band(0, 47, 100, 48, 20.0, 10);
     const std::vector<const TinSurface*> members{&base, &offGrid, &onGrid, &knifeEdge};
 
@@ -277,7 +287,7 @@ TEST(SuperSurface, TheIndexedVertexTestKeepsExactlyTheTrianglesTheExhaustiveScan
 
     std::vector<std::array<Point3, 3>> expected;
     std::size_t dropped = 0;
-    std::size_t droppedByTheVertexTestAlone = 0;
+    std::size_t droppedByThePairTestAlone = 0;
     for (std::size_t rank = 0; rank < members.size(); ++rank) {
         const TinSurface& member = *members[rank];
         for (std::size_t t = 0; t < member.triangleCount(); ++t) {
@@ -292,7 +302,7 @@ TEST(SuperSurface, TheIndexedVertexTestKeepsExactlyTheTrianglesTheExhaustiveScan
                 }
                 overridden = true;
                 if (!sampleInsideExhaustively(*members[higher], a, b, c)) {
-                    ++droppedByTheVertexTestAlone;
+                    ++droppedByThePairTestAlone;
                 }
                 break;
             }
@@ -305,10 +315,14 @@ TEST(SuperSurface, TheIndexedVertexTestKeepsExactlyTheTrianglesTheExhaustiveScan
     }
 
     // A cull that never fires proves nothing, and neither does one that only
-    // the cheap sample test ever answers: the grid replaces the vertex scan, so
-    // triangles must exist that ONLY the vertex scan rejects.
+    // the cheap sample test ever answers: triangles must exist that ONLY the
+    // pair test drops. The knife-edge band crosses the base's row of cells at
+    // y = 40..50; the six of them at x = 0..30 and 70..100 are reached by no
+    // other pad (the off-grid one covers 30..70, the on-grid one only touches
+    // the row along y = 40), and the band is the one thing over their two
+    // triangles each: twelve.
     EXPECT_GT(dropped, 20u);
-    EXPECT_GT(droppedByTheVertexTestAlone, 5u);
+    EXPECT_GE(droppedByThePairTestAlone, 12u);
 
     ASSERT_EQ(combined->triangleCount(), expected.size());
     for (std::size_t t = 0; t < expected.size(); ++t) {
@@ -321,6 +335,84 @@ TEST(SuperSurface, TheIndexedVertexTestKeepsExactlyTheTrianglesTheExhaustiveScan
             EXPECT_EQ(got.z, want.z) << "triangle " << t << " corner " << k;
         }
     }
+}
+
+TEST(SuperSurface, TilesThatOnlyAbutAreBothKept)
+{
+    // Two 10 x 10 squares at 1 and 2 sharing the edge x = 10: nothing of
+    // either is covered by the other, so the merge is both - four triangles,
+    // area 200 - in either order. The lower one's two triangles used to go
+    // with the first, because the higher member's rim vertices are ON their
+    // edge and the boundary counted as inside.
+    const TinSurface west = grid(0, 0, 10, 10, 1.0, 1);
+    const TinSurface east = grid(10, 0, 20, 10, 2.0, 1);
+    for (const auto& members : {std::vector<const TinSurface*>{&west, &east},
+                                std::vector<const TinSurface*>{&east, &west}}) {
+        const auto combined = combineSurfaces(members);
+        ASSERT_TRUE(combined.ok()) << combined.error().describe();
+        EXPECT_EQ(combined->triangleCount(), 4u);
+        EXPECT_NEAR(combined->planArea(), 200.0, 1e-12);
+        EXPECT_EQ(combined->elevationAt(Point2(5.0, 5.0)), 1.0);
+        EXPECT_EQ(combined->elevationAt(Point2(15.0, 5.0)), 2.0);
+    }
+    // Touching at one corner is touching too.
+    const TinSurface diagonal = grid(10, 10, 20, 20, 3.0, 1);
+    const auto corner = combineSurfaces({&west, &diagonal});
+    ASSERT_TRUE(corner.ok());
+    EXPECT_EQ(corner->triangleCount(), 4u);
+}
+
+TEST(SuperSurface, AnOverlapThinnerThanTheToleranceIsTouchingAndOneBeyondItIsCover)
+{
+    const TinSurface base = grid(0, 0, 10, 10, 1.0, 1);
+    // A pad overlapping by 1e-9 (rounding of the coordinates of a seam made
+    // twice): the two triangles of the base stay and the pad's two are added.
+    const TinSurface sliver = grid(10.0 - 1e-9, 0, 20, 10, 2.0, 1);
+    const auto kept = combineSurfaces({&base, &sliver});
+    ASSERT_TRUE(kept.ok());
+    EXPECT_EQ(kept->triangleCount(), 4u);
+    // A pad overlapping by 1 m: x in [9,10] is shared by both of the base's
+    // triangles ((9.5,0.5) is in the lower, (9.5,9.8) in the upper), and the
+    // base is covered where the pad reaches - only the pad's two remain.
+    const TinSurface overlapping = grid(9, 0, 20, 10, 2.0, 1);
+    const auto covered = combineSurfaces({&base, &overlapping});
+    ASSERT_TRUE(covered.ok());
+    EXPECT_EQ(covered->triangleCount(), 2u);
+    EXPECT_EQ(covered->elevationAt(Point2(9.5, 0.5)), 2.0);
+    EXPECT_EQ(covered->elevationAt(Point2(9.5, 9.8)), 2.0);
+}
+
+TEST(SuperSurface, ATopThatTouchesAFaceOnlyAtAPointOnItsEdgeLeavesTheFaceBe)
+{
+    // A pyramid on [0,20]^2 with its apex at (10,10,5) and a flat top 15..25 x
+    // 5..15 at 3. The top's corners (15,5) and (15,15) are on the edges of the
+    // south and north faces (the diagonals from the corners to the apex:
+    // (20,0)-(10,10) holds (15,5), (10,10)-(20,20) holds (15,15)) and the top
+    // reaches those faces at no other point. The east face is under it. Three
+    // faces of 100 and the top's 100: 400, not the 200 the faces touched at a
+    // point used to leave.
+    const TinSurface pyramid = [] {
+        auto surface = TinSurface::create(
+            {Point3{0, 0, 0}, Point3{20, 0, 0}, Point3{20, 20, 0}, Point3{0, 20, 0},
+             Point3{10, 10, 5}},
+            {{0, 1, 4}, {1, 2, 4}, {2, 3, 4}, {3, 0, 4}});
+        EXPECT_TRUE(surface.ok());
+        return surface.ok() ? std::move(*surface) : TinSurface{};
+    }();
+    const TinSurface top = [] {
+        auto surface = TinSurface::create({Point3{15, 5, 3}, Point3{25, 5, 3}, Point3{25, 15, 3},
+                                           Point3{15, 15, 3}},
+                                          {{0, 1, 2}, {0, 2, 3}});
+        EXPECT_TRUE(surface.ok());
+        return surface.ok() ? std::move(*surface) : TinSurface{};
+    }();
+    const auto combined = combineSurfaces({&pyramid, &top});
+    ASSERT_TRUE(combined.ok()) << combined.error().describe();
+    EXPECT_EQ(combined->triangleCount(), 5u);
+    EXPECT_NEAR(combined->planArea(), 400.0, 1e-9);
+    EXPECT_TRUE(combined->elevationAt(Point2(10.0, 3.0)).has_value()) << "the south face";
+    EXPECT_TRUE(combined->elevationAt(Point2(10.0, 17.0)).has_value()) << "the north face";
+    EXPECT_EQ(combined->elevationAt(Point2(18.0, 10.0)), 3.0) << "the east face is the top's";
 }
 
 TEST(SuperSurface, AVertexOnTheFarSideOfThePadFromTheTriangleIsNotMistakenForOneInside)
