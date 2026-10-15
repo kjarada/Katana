@@ -11,7 +11,9 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <optional>
+#include <vector>
 
 #include <QImage>
 #include <QMouseEvent>
@@ -21,6 +23,8 @@
 #include "katana/cad/section.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "katana/terrain/tin_surface.hpp"
 #include "widget_harness.hpp"
 
 using katana::cad::Section;
@@ -343,4 +347,54 @@ TEST(SectionView, AnUnselectedCrossingOnAHiddenLayerStaysOutWithAnotherSelected)
     (void)cut.orangeInk();
     EXPECT_EQ(cut.view->lastHiddenCrossingCount(), 1u);
     EXPECT_EQ(cut.view->lastGhostCrossingCount(), 0u);
+}
+
+TEST(SectionView, ASectionSaysItsSurfacesChangedSinceItWasCutAndCuttingAgainClearsIt)
+{
+    // The section is cut again only when asked, so a surface hidden, edited,
+    // removed or put back by an undo leaves the old picture on screen: the
+    // view must say that it is of surfaces the drawing no longer has.
+    katana::cad::Document document;
+    ViewSet views;
+    ViewState& state = views.add(ViewKind::Section);
+    SectionViewWidget view(state);
+    view.setDocument(&document);
+    view.resize(800, 300);
+    std::vector<QString> stats;
+    view.onFrameStats = [&stats](const QString& text) { stats.push_back(text); };
+
+    EXPECT_FALSE(view.surfacesChanged()) << "no section, nothing to be out of date";
+    view.setSection(ground(100.0));
+    paint(view);
+    EXPECT_FALSE(view.surfacesChanged());
+    ASSERT_FALSE(stats.empty());
+    EXPECT_FALSE(stats.back().contains("surfaces changed"));
+
+    // A change to the drawing's surfaces: a triangle added.
+    auto triangle = katana::terrain::TinSurface::create({{0, 0, 1}, {10, 0, 2}, {0, 10, 3}},
+                                                        {{0, 1, 2}});
+    ASSERT_TRUE(triangle.ok());
+    katana::terrain::SurfaceStore store = document.surfaces();
+    ASSERT_TRUE(
+        store.add({"ground", std::make_shared<const katana::terrain::TinSurface>(*triangle), "test"})
+            .ok());
+    ASSERT_TRUE(document.setSurfaces(store, "TEST").ok());
+    EXPECT_TRUE(view.surfacesChanged());
+    paint(view);
+    EXPECT_TRUE(stats.back().contains("surfaces changed since the cut"))
+        << stats.back().toStdString();
+
+    // Hiding it is a change too.
+    ASSERT_TRUE(store.setVisible("ground", false).ok());
+    ASSERT_TRUE(document.setSurfaces(store, "TEST").ok());
+    EXPECT_TRUE(view.surfacesChanged());
+
+    // Cut again: the section is of the surfaces the drawing has now.
+    view.setSection(ground(100.0));
+    EXPECT_FALSE(view.surfacesChanged());
+    paint(view);
+    EXPECT_FALSE(stats.back().contains("surfaces changed")) << stats.back().toStdString();
+    // And an undo of the hide changes them again.
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_TRUE(view.surfacesChanged());
 }
