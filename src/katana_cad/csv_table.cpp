@@ -4,6 +4,7 @@
 #include <fstream>
 #include <system_error>
 
+#include "katana/cad/code_edit.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/path_text.hpp"
 
@@ -12,21 +13,6 @@ namespace katana::cad {
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
-
-std::string csvField(std::string_view text)
-{
-    if (text.find_first_of(",\"\r\n") == std::string_view::npos) {
-        return std::string(text);
-    }
-    std::string out = "\"";
-    for (const char c : text) {
-        out += c;
-        if (c == '"') {
-            out += '"';
-        }
-    }
-    return out + "\"";
-}
 
 Result<std::string> writeCsvTable(const CsvTable& table, const std::string& path, bool overwrite)
 {
