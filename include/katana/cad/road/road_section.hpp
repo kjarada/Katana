@@ -108,6 +108,10 @@ struct SectionSolid {
 };
 
 struct RoadSection {
+    // The run of its corridor it belongs to (CorridorRun::region, from 1); 0
+    // for a section made on its own. Where two runs meet, each has a section at
+    // the one station, and this is what tells them apart.
+    std::size_t run = 0;
     double station = 0.0;
     katana::geometry::Point2 centre{};
     double direction = 0.0; // of the alignment, radians from +x
@@ -259,8 +263,11 @@ loftSolid(const katana::geometry::SolvedAlignment& alignment, const std::vector<
 //   corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]   (<piece> from 2)
 [[nodiscard]] bim::BimModel corridorSolids(const BuiltCorridor& built);
 
-// The sections of every run in station order, each station once: where two
-// runs meet, the first run's section stands for the station.
+// The sections of every run in station order. Where two runs meet - a region's
+// ends - both have a section at the station, the earlier run's first: the
+// templates differ there, so each run keeps its own section (RoadSection::run
+// tells them apart), and what is made from the list does not blend one into
+// the other across the interval beside the join.
 [[nodiscard]] std::vector<const RoadSection*> corridorSections(const BuiltCorridor& built);
 
 // One longitudinal string of the finished surface (or the formation): the
@@ -269,8 +276,8 @@ struct CorridorString {
     std::string code;
     std::vector<katana::geometry::Point3> points;
 };
-// Every string, each broken where a section lacks its code; a section that
-// repeats the station of the one before (where two runs meet) is left out.
+// Every string, each broken where a section lacks its code and at every join
+// of two runs, so a string runs over its own run's stations and no further.
 [[nodiscard]] std::vector<CorridorString> corridorStrings(const BuiltCorridor& built,
                                                           bool formation);
 
@@ -278,8 +285,12 @@ struct CorridorString {
 // its strings as breaklines, and its outermost points as the boundary.
 // `completeOnly` leaves the incomplete sections out, breaking the strings
 // there, and then uses no boundary if any was left out - what the old
-// corridorSurface did. InvalidGeometry when fewer than two sections go in
-// (naming how many were incomplete), else whatever buildTin reports.
+// corridorSurface did. Where two runs meet the later run's first section is
+// laid kFaceRun (1 mm) further on and the strings break between them, so the
+// surface steps from one template to the next across the join - a TIN holds
+// no two levels at one point - and not over the interval beside it.
+// InvalidGeometry when fewer than two sections go in (naming how many were
+// incomplete), else whatever buildTin reports.
 struct SectionsSurface {
     katana::terrain::TinSurface surface;
     std::size_t sections = 0;

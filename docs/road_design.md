@@ -221,6 +221,25 @@ threshold on the object (1e-6 m3 or so) - the area is the thing wrong, and
 of earthworks thinner than 0.1 mm over a wide road is left out (0.05 mm over
 a 30 m width and 100 m is 0.15 m3).
 
+**Where two runs meet** - a region's start or end - each run has a section of
+its own at the station, built with its own template (`RoadSection::run` tells
+them apart). The solids are lofted per run, so they step there. The strings
+and the surfaces do the same: `road::corridorSections` lists both sections,
+every string breaks at the join and runs over its own run's stations (a code
+only the region has is one string from the region's start to its end, not
+from one interval after), and a surface lays the later run's section 1 mm on
+(`kFaceRun`, the formation's device across an offset) so that the TIN, which
+holds one level at a point, has a near-vertical face there and each template's
+own surface either side of it. Before, the later run's section at the join was
+dropped for the earlier run's: a region's own codes lost their first interval,
+a region one interval long lost its strings altogether, a code both templates
+have was joined across the change, and the surface blended the two templates
+over the interval beside each join, so it disagreed with the solids and the
+region (0.17 m low on a kerb inside a region, 0.21 m high on a drain just after
+it). *Rejected:* one section standing for the station, taken from the run
+that is longer or the later one - either way the other template's last
+interval is drawn with the wrong section.
+
 **One engine.** `cad::corridorSection`, `corridorQuantities` and
 `corridorSurface` (`include/katana/cad/corridor.hpp`) are this engine run on
 `road::templateFromAssembly` - a lane each side at the assembly's half width
@@ -405,8 +424,9 @@ corridor uses is not deleted from under it.
 before and nothing else. **SURFACE** puts the finished surface and the
 formation into the drawing's surfaces (`Document::setSurfaces`), as `<c>
 finished` and `<c> subgrade` unless named, replacing surfaces of those names
-in place: every section's points, each code's string as a breakline, the
-outermost points as the boundary. Both have PREVIEW.
+in place: every section's points (the reply's `sections=` counts them, both of
+a join's), each code's string as a breakline, the outermost points as the
+boundary. Both have PREVIEW.
 
 **Scope.** The corridor verbs act on named definitions, not on drawing
 entities, so they take no scope or filter (the scope and filter words are for
@@ -521,7 +541,8 @@ class, layer, quantities and properties, and every problem
   superelevated shoulder takes the lane's crossfall.
 - A template that changes width along a run (lane widening, tapers) other
   than by a region of another template, and transitions between regions: a
-  region's ends are steps.
+  region's ends are steps (the solids step, the strings break, the surface
+  has a face 1 mm wide).
 - Daylight to a surface other than the corridor's target per side, and cut
   and fill batters with different benches.
 - Courses under a kerb (its bedding) and a lined table drain's lining as a

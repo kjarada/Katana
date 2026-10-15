@@ -903,6 +903,7 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
             if (!section->complete) {
                 ++run.incompleteSections;
             }
+            section->run = run.region;
             run.sections.push_back(std::move(*section));
         }
         // End areas between two complete sections; an interval touching an
@@ -1373,10 +1374,6 @@ std::vector<const RoadSection*> corridorSections(const BuiltCorridor& built)
     std::vector<const RoadSection*> out;
     for (const CorridorRun& run : built.runs) {
         for (const RoadSection& section : run.sections) {
-            if (!out.empty() &&
-                std::abs(out.back()->station - section.station) <= tol::kGeometric) {
-                continue;
-            }
             out.push_back(&section);
         }
     }
@@ -1385,10 +1382,42 @@ std::vector<const RoadSection*> corridorSections(const BuiltCorridor& built)
 
 namespace {
 
-// Strings by code over `sections`: a code missing from a section, or a
-// section not taken (`take` false), ends the strings through it.
+// A section and the station its points are laid at along the alignment.
+struct Placed {
+    const RoadSection* section;
+    double station;
+};
+
+// The sections where they stand, or - `step` - with the first section of each
+// run that meets the one before at one station laid kFaceRun further on (no
+// further than a quarter of the way to its run's next section). A surface
+// holds one level at a point: two runs' sections at one station would make the
+// TIN keep one of them, or blend them over the interval beside the join; a
+// millimetre apart (more than the TIN's duplicate tolerance) they make a
+// near-vertical face, the step a change of template is.
+std::vector<Placed> placedSections(const std::vector<const RoadSection*>& sections, bool step)
+{
+    std::vector<Placed> out;
+    out.reserve(sections.size());
+    for (std::size_t i = 0; i < sections.size(); ++i) {
+        double station = sections[i]->station;
+        if (step && i > 0 && sections[i]->run != sections[i - 1]->run &&
+            std::abs(station - sections[i - 1]->station) <= tol::kGeometric) {
+            double room = kFaceRun;
+            if (i + 1 < sections.size() && sections[i + 1]->run == sections[i]->run) {
+                room = std::min(room, 0.25 * (sections[i + 1]->station - station));
+            }
+            station = sections[i - 1]->station + room;
+        }
+        out.push_back(Placed{sections[i], station});
+    }
+    return out;
+}
+
+// Strings by code over `placed`: a code missing from a section, a section not
+// taken (`take` false) and the join of two runs end the strings through it.
 template <typename Take>
-std::vector<CorridorString> stringsOver(const std::vector<const RoadSection*>& sections,
+std::vector<CorridorString> stringsOver(const std::vector<Placed>& placed,
                                         const SolvedAlignment& alignment, bool formation, Take take)
 {
     std::vector<CorridorString> finished;
@@ -1398,18 +1427,24 @@ std::vector<CorridorString> stringsOver(const std::vector<const RoadSection*>& s
             finished.push_back(std::move(string));
         }
     };
-    for (const RoadSection* section : sections) {
-        if (!take(*section)) {
-            for (auto& entry : open) {
-                close(entry.second);
+    const RoadSection* before = nullptr;
+    for (const Placed& at : placed) {
+        const RoadSection* section = at.section;
+        const bool joined = before != nullptr && before->run != section->run;
+        before = section;
+        if (!take(*section) || joined) {
+            for (auto& each : open) {
+                close(each.second);
             }
             open.clear();
-            continue;
+            if (!take(*section)) {
+                continue;
+            }
         }
         const auto& line = formation ? section->formation : section->top;
         std::map<std::string, CorridorString> next;
         for (const SectionPoint& point : line) {
-            const auto plan = alignment.pointAtStationOffset(section->station, point.offset);
+            const auto plan = alignment.pointAtStationOffset(at.station, point.offset);
             if (!plan) {
                 continue;
             }
@@ -1441,7 +1476,7 @@ std::vector<CorridorString> corridorStrings(const BuiltCorridor& built, bool for
     if (!built.alignment) {
         return {};
     }
-    return stringsOver(corridorSections(built), *built.alignment, formation,
+    return stringsOver(placedSections(corridorSections(built), false), *built.alignment, formation,
                        [](const RoadSection& section) { return section.top.size() >= 2; });
 }
 
@@ -1459,23 +1494,23 @@ Result<SectionsSurface> sectionsSurface(const std::vector<const RoadSection*>& s
         const auto& line = formation ? section.formation : section.top;
         return (!completeOnly || section.complete) && line.size() >= 2;
     };
-    for (const RoadSection* section : sections) {
+    const std::vector<Placed> placed = placedSections(sections, true);
+    for (const Placed& entry : placed) {
+        const RoadSection* section = entry.section;
         if (!take(*section)) {
             ++result.leftOut;
             continue;
         }
         const auto& line = formation ? section->formation : section->top;
         for (const SectionPoint& point : line) {
-            if (const auto plan = alignment.pointAtStationOffset(section->station, point.offset)) {
+            if (const auto plan = alignment.pointAtStationOffset(entry.station, point.offset)) {
                 input.points.emplace_back(plan->x, plan->y, point.level);
             }
         }
-        if (const auto first =
-                alignment.pointAtStationOffset(section->station, line.front().offset)) {
+        if (const auto first = alignment.pointAtStationOffset(entry.station, line.front().offset)) {
             leftEdge.push_back(*first);
         }
-        if (const auto last =
-                alignment.pointAtStationOffset(section->station, line.back().offset)) {
+        if (const auto last = alignment.pointAtStationOffset(entry.station, line.back().offset)) {
             rightEdge.push_back(*last);
         }
         ++result.sections;
@@ -1485,7 +1520,7 @@ Result<SectionsSurface> sectionsSurface(const std::vector<const RoadSection*>& s
                          "fewer than two sections reach the ground: there is no surface to build",
                          std::to_string(result.leftOut) + " incomplete");
     }
-    for (const CorridorString& string : stringsOver(sections, alignment, formation, take)) {
+    for (const CorridorString& string : stringsOver(placed, alignment, formation, take)) {
         katana::terrain::Breakline breakline;
         breakline.vertices = string.points;
         input.breaklines.push_back(std::move(breakline));

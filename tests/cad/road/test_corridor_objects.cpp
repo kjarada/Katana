@@ -549,6 +549,75 @@ TEST(CorridorObjects, ARegionIsARunOfItsOwnNumberedInStationOrder)
     EXPECT_EQ(objectWithId(model, "corridor/Main/left/lane/AC14/2"), nullptr);
 }
 
+TEST(CorridorObjects, ARegionsStringsRunOverItsOwnStationsAndTheSurfaceStepsAtItsEnds)
+{
+    // The rural two-lane road with the urban street from 40 to 60, on a 100 m
+    // straight at 10 m: runs 0-40, 40-60 and 60-100, 5 + 3 + 5 = 13 sections.
+    RoadTemplateSet templates;
+    templates.templates = standardTemplates();
+    Corridor corridor = corridorOf("rural two-lane");
+    corridor.regions = {TemplateRegion{40.0, 60.0, "urban street"}};
+    const auto built = buildCorridor(corridor, templates, straight(100.0), level(10.0, 0.0, 100.0),
+                                     nullptr);
+    ASSERT_EQ(built.runs.size(), 3u);
+    EXPECT_EQ(built.sections, 13u);
+
+    // Strings, by code: the first and last x of each string made.
+    using Span = std::pair<double, double>;
+    std::map<std::string, std::vector<Span>> spans;
+    const auto strings = corridorStrings(built, false);
+    for (const CorridorString& string : strings) {
+        spans[string.code].emplace_back(string.points.front().x, string.points.back().x);
+    }
+    const auto expectSpans = [&](const std::string& code, const std::vector<Span>& expected) {
+        const auto& found = spans[code];
+        ASSERT_EQ(found.size(), expected.size()) << code;
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_NEAR(found[i].first, expected[i].first, 1e-9) << code << " string " << i;
+            EXPECT_NEAR(found[i].second, expected[i].second, 1e-9) << code << " string " << i;
+        }
+    };
+    // What only the region has runs its whole 40 to 60 (it began at 50: the
+    // region's section at 40 was dropped for the rural run's).
+    expectSpans("left/footpath/outer", {{40.0, 60.0}});
+    expectSpans("right/kerb/back", {{40.0, 60.0}});
+    // What only the rural template has stops at 40 and resumes at 60 (it
+    // resumed at 70: the section at 60 was dropped for the urban run's).
+    expectSpans("left/shoulder/outer", {{0.0, 40.0}, {60.0, 100.0}});
+    expectSpans("right/drain/invert", {{0.0, 40.0}, {60.0, 100.0}});
+    // What both have is broken at each join, not carried across one.
+    expectSpans("left/lane/outer", {{0.0, 40.0}, {40.0, 60.0}, {60.0, 100.0}});
+    expectSpans("CL", {{0.0, 40.0}, {40.0, 60.0}, {60.0, 100.0}});
+    // The centreline and 4 + 4 rural codes (the lane's and shoulder's edges and
+    // the drain's invert and outer edge) a side before and after the
+    // region, and the urban street's centreline and 7 + 7 for the region: 9 + 15
+    // + 9.
+    EXPECT_EQ(strings.size(), 33u);
+
+    // The finished surface: the urban street's kerb top (9.964: 10 less the
+    // lane's 3.3 x 3 % = 0.099 and the parking's 2.3 x 3 % = 0.069 to the lip at
+    // 9.832, the gutter 0.3 m falling 6 % to 9.814, the face up 0.15 to
+    // 9.964) at 6 m out in the region, the rural drain (5.5 m at 9.835, its
+    // invert at 6.5 m 0.5 down, so 9.585 at 6 m) outside it - and a step between,
+    // not a blend: 1 mm either side of the join the surface is each template's.
+    const auto finished = sectionsSurface(corridorSections(built), *built.alignment, false, false);
+    ASSERT_TRUE(finished.ok()) << finished.error().describe();
+    EXPECT_EQ(finished->sections, 13u) << "every section built, the join's both";
+    const auto level6 = [&](double station) {
+        const auto z = finished->surface.elevationAt(station, 6.0);
+        EXPECT_TRUE(z.has_value()) << station;
+        return z.value_or(0.0);
+    };
+    EXPECT_NEAR(level6(35.0), 9.585, 1e-9);
+    EXPECT_NEAR(level6(39.999), 9.585, 1e-9);
+    EXPECT_NEAR(level6(40.002), 9.964, 1e-9);
+    EXPECT_NEAR(level6(45.0), 9.964, 1e-9);
+    EXPECT_NEAR(level6(55.0), 9.964, 1e-9);
+    EXPECT_NEAR(level6(59.999), 9.964, 1e-9);
+    EXPECT_NEAR(level6(60.002), 9.585, 1e-9);
+    EXPECT_NEAR(level6(65.0), 9.585, 1e-9);
+}
+
 TEST(CorridorObjects, WhatCannotBeBuiltIsListedAndTheRestIsBuilt)
 {
     // No surface for the batters; a region naming a template that is not

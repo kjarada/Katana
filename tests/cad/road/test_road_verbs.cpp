@@ -472,6 +472,34 @@ TEST(RoadVerbs, TheFinishedAndSubgradeSurfacesGoIntoTheDrawingAsOneStep)
     EXPECT_EQ(session.document.surfaces().all().size(), 2u);
 }
 
+TEST(RoadVerbs, ARegionKeepsItsOwnStringsAndSectionsEvenWhenItIsOneIntervalLong)
+{
+    // The rural two-lane road (the centreline and four codes a side: 9
+    // strings) with the urban street (the centreline and seven a side: 15)
+    // in a region. Each run has its own strings from its first section to its
+    // last, so there are 9 + 15 + 9 whatever the region's length, and the
+    // surfaces take every section built - 13 in both cases (5 + 3 + 5, and
+    // 5 + 2 + 6) - not the 11 the join's second sections were dropped to.
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"rural two-lane\"");
+    for (const char* region : {"40 60", "40 50"}) {
+        session.ok("CORRIDOR REGION Main CLEAR");
+        session.ok(std::string("CORRIDOR REGION Main ADD ") + region + " \"urban street\"");
+        const std::string strings = session.ok("CORRIDOR STRINGS Main PREVIEW");
+        EXPECT_TRUE(contains(strings, "strings created=33 replaced=0")) << region << "\n" << strings;
+        const std::string surface = session.ok("CORRIDOR SURFACE Main PREVIEW");
+        EXPECT_TRUE(contains(surface, "kind=finished")) << surface;
+        std::size_t thirteen = 0;
+        for (std::size_t at = surface.find("sections=13"); at != std::string::npos;
+             at = surface.find("sections=13", at + 1)) {
+            ++thirteen;
+        }
+        EXPECT_EQ(thirteen, 2u) << region << " finished and subgrade: " << surface;
+    }
+}
+
 TEST(RoadVerbs, TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise)
 {
     Session session;
