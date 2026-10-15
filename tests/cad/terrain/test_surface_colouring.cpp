@@ -14,6 +14,7 @@
 #include "katana/cad/scene.hpp"
 #include "katana/cad/terrain/surface_colouring.hpp"
 #include "katana/cad/terrain/surface_style.hpp"
+#include "katana/terrain/colour_ramps.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
 namespace {
@@ -112,6 +113,35 @@ TEST(SurfaceRamps, TheSlopeRampKeepsTheScenesOldSlopeColoursAtItsStops)
     EXPECT_EQ(katana::cad::surfaceRampColour("slope", 0.5), rgb(255, 255, 38));
     EXPECT_EQ(katana::cad::surfaceRampColour("slope", 0.75), rgb(255, 128, 38));
     EXPECT_EQ(katana::cad::surfaceRampColour("slope", 1.0), rgb(255, 0, 38));
+}
+
+TEST(SurfaceRamps, EveryStyleRampIsTheOneTablesRampAtFullAlphaAndItsNamesAreTheTables)
+{
+    // The styles hold no colours of their own: each ramp is the terrain
+    // layer's table row (katana/terrain/colour_ramps.hpp), the same one RASTER
+    // SHADE paints with, with alpha 255 - and the names a style may use are
+    // its names, in its order.
+    const auto table = katana::terrain::colourRamps();
+    const auto names = katana::cad::surfaceRampNames();
+    ASSERT_EQ(names.size(), table.size());
+    for (std::size_t r = 0; r < table.size(); ++r) {
+        EXPECT_EQ(names[r], table[r].name);
+        const katana::cad::SurfaceRampStops& stops = katana::cad::surfaceRampStops(table[r].name);
+        for (std::size_t i = 0; i < stops.size(); ++i) {
+            EXPECT_EQ(stops[i], rgb(table[r].stops[i].r, table[r].stops[i].g, table[r].stops[i].b))
+                << table[r].name << " " << i;
+        }
+    }
+}
+
+TEST(SurfaceRamps, ARampsStopsAreOneObjectWhateverTheCaseOfTheNameAndAnUnknownNameIsTheFirstsObject)
+{
+    // The scene keeps a pointer to a ramp's stops (`&surfaceRampStops(name)`),
+    // so a lookup must hand back the one object, not a copy that dies.
+    EXPECT_EQ(&katana::cad::surfaceRampStops("terrain"), &katana::cad::surfaceRampStops("TERRAIN"));
+    EXPECT_NE(&katana::cad::surfaceRampStops("terrain"), &katana::cad::surfaceRampStops("grey"));
+    EXPECT_EQ(&katana::cad::surfaceRampStops("rainbow"), &katana::cad::surfaceRampStops("terrain"));
+    EXPECT_EQ(&katana::cad::surfaceRampStops(""), &katana::cad::surfaceRampStops("terrain"));
 }
 
 TEST(SurfaceAspect, EachSectorIsCentredOnItsCompassPoint)

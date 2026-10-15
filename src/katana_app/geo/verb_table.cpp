@@ -144,9 +144,10 @@ const std::vector<VerbEntry>& verbTable()
              "RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
              "          [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]\n"
              "          [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]\n"
-             "          [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>] [NAME <n>]\n"
-             "          [save=<file.tif>] [OVERWRITE] [PREVIEW]  a picture of the terrain,\n"
-             "          kept as a derived reference raster, with its legend"});
+             "          [ramp=terrain|earth|diverging|slope|grey|spectral|<file>]\n"
+             "          [range=<min>,<max>] [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]\n"
+             "          a picture of the terrain, kept as a derived reference raster, with its\n"
+             "          legend"});
         // ---- T3: RASTER SLOPE, RASTER ASPECT ----
         rows.push_back(
             {"RASTER", "SLOPE", &prepareSlope,

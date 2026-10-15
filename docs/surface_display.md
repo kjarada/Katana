@@ -18,7 +18,8 @@ document is what is DONE with a style.
 
 | Where | What |
 |---|---|
-| `src/katana_cad/terrain/surface_ramps.cpp` | the surface styles' ramp table: `surfaceRampNames`, `surfaceRampColour`, `surfaceRampStops` (RASTER SHADE keeps one of its own: "The ramps") |
+| `include/katana/terrain/colour_ramps.hpp` | THE ramp table, plain data with the source of each ramp's colours: `colourRamps`, `colourRampNames`, `findColourRamp` ("The ramps") |
+| `src/katana_cad/terrain/surface_ramps.cpp` | the surface styles' view of it, in the drawing's colours: `surfaceRampNames`, `surfaceRampStops`, and the lookup arithmetic the 3D kernels are held to (`surfaceRampColour`) |
 | `include/katana/cad/terrain/surface_colouring.hpp` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
 | `include/katana/cad/terrain/surface_plan.hpp` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surfacePlan`, `SurfacePlanCache`) |
 | `include/katana/cad/terrain/surface_display_verbs.hpp` | `SURFACE LEGEND` and `SURFACE PLAN` |
@@ -46,26 +47,63 @@ parameters are filled from the ramp the style names
 | grey | 32, 80, 128, 176, 224 | chosen here: equal steps, so order survives a monochrome plot |
 | spectral | #2b83ba #abdda4 #ffffbf #fdae61 #d7191c | ColorBrewer Spectral, five classes, reversed |
 
-**A second table, on purpose.** `RASTER SHADE` and `RASTER SLOPE` have a ramp
-table of their own (`src/katana_interop/geo/colour_ramps.cpp`, `docs/terrain.md`,
-"Shading") with four of the same names - terrain, diverging, slope and grey -
-and different colours: its terrain is the hypsometric green to white, (38, 115,
-0) to (255, 255, 255), where this one is the 3D scene's deep blue to white; its
-diverging and slope are ColorBrewer's eleven-class RdBu and RdYlGn, where these
-are five-class and the scene's green-yellow-red; its grey runs 0 to 255 where
-this runs 32 to 224. So `ramp=terrain` on a surface style and on `RASTER
-SHADE` are two maps (the legends each prints say which: `SURFACE LEGEND` and
-`RASTER SHADE`'s `legend value=` records), and `RASTER SHADE` takes a GDAL
-colour-map file where a style does not, and refuses `ramp=spectral` and
-`earth` where a style takes them. They are not merged: each table is held to
-its own colours by tests (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
-here, the legend records of `cli.raster_shade_*` and `ShadeVerb` there), and
-which look wins - the 3D view's colours or the shading's - is the owner's to
-say, because either choice moves pictures people have seen. Nothing but that
-choice stops it: both tables are data without GDAL, and the `terrain` layer is
-visible to `cad` and `interop` alike ("Not done"). An earlier version of this
-file and of `surface_ramps.cpp` called this "THE ramp table"; it is the
-surface styles'.
+**One table.** The ramps are rows of `katana::terrain::colourRamps()`
+(`include/katana/terrain/colour_ramps.hpp`, `src/katana_terrain/colour_ramps.cpp`):
+plain data, three bytes a colour, each row with the source of its colours (the
+Source column above is that field). It sits in the `terrain` layer because that
+is the lowest layer both users may see (`tools/check_layering.cmake`: `cad` may
+not see `interop`, and `interop` may not see `render` or `cad`; `core` could
+hold it, but a colour ramp is no concern of `core`). The surface styles read it through
+`cad::surfaceRampStops` (the drawing's `Color`, alpha 255) and `RASTER SHADE` /
+`RASTER SLOPE` through `interop::geo::builtInRamp` (which gives each stop its
+place along the range, 0, 1/4, 1/2, 3/4 and 1, the form GDAL's colour map
+reads); both find a ramp by name through the one lookup, `terrain::findColourRamp`
+(any case), and the style form, the shading dialog and the shading verb's
+refusals list the table's names, so a ramp added to the table is offered
+everywhere without a second edit
+(`ColourRamps.TheShadingsRampsAreTheSurfaceStylesRampsStopForStop`,
+`SurfaceRamps.EveryStyleRampIsTheOneTablesRampAtFullAlphaAndItsNamesAreTheTables`).
+
+Until 2026-10-15 `RASTER SHADE` and `RASTER SLOPE` had a table of their own
+(`src/katana_interop/geo/colour_ramps.cpp`) with four of the same names -
+terrain, diverging, slope and grey - and different colours, so `ramp=terrain`
+was two maps, and an earlier version of this file called the styles' table
+"THE ramp table" while the other existed. Its terrain was the hypsometric green
+to white, (38, 115, 0) to (255, 255, 255); its diverging and slope were
+ColorBrewer's eleven-class RdBu and RdYlGn at five stops; its grey ran 0 to 255
+in two stops; and it refused `ramp=spectral` and `earth`.
+
+**Decided (the owner had not chosen; this was taken to remove the second way of
+doing it, and is the one to reverse if the shading's look is wanted):** the
+surface styles' colours are the table. They are what the person sees in the
+window and in 3D, and the scene's terrain ramp is held to the bit by its
+kernels (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`).
+`RASTER SHADE` and `RASTER SLOPE` adopt them. The old names stay accepted: the
+four names the shading had are in the table, so `ramp=terrain`, `diverging`,
+`slope` and `grey` still work and mean the table's ramps; there is no alias to
+add. `earth` and `spectral` are accepted by the shading now, too. Rejected:
+
+* *The shading's colours win.* The 3D view's elevation colours would change,
+  and with them the scene kernels' constants and the tests that hold them to
+  the bit, for every picture of the window.
+* *Rename one set* (the shading's ramps under other names). It leaves two tables
+  and the second way of doing it, which was the defect.
+* *Keep both and say so,* which is what this section did before.
+
+What changes for a person, plainly: **a raster that `RASTER SHADE` or `RASTER
+SLOPE` wrote before keeps the colours it was written with (a derived reference
+raster is pixels); running the same line now paints it differently.** Terrain is
+deep blue, green, sand, brown and snow where it was green to white; diverging
+is the five-class RdBu (#0571b0 to #ca0020, through #f7f7f7) where it was
+(33, 102, 172) to (178, 24, 43); slope is green to red through yellow at full
+saturation where it was RdYlGn's softer greens and reds, so a class of
+`RASTER SLOPE classes=` takes the table's colour at its place among the classes;
+and grey runs 32 to 224 in five steps, so the darkest cell of a `style=plain`
+picture is a dark grey and not black. Nothing is migrated: a line run again
+restyles. The blending between stops is still each consumer's own: the scene's
+kernels' (`cad::surfaceRampColour`, to the bit) and GDAL's colour map (which
+rounds as GDAL does), so between two stops the two may differ by a level of 255;
+the stops, and the legends that list them, are the same.
 
 The scene's `elevationRampColor` is now the table's terrain ramp, operation
 for operation (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
@@ -628,8 +666,9 @@ another build with `tools/compare_benchmarks.py --alternate`.
 * **The rasteriser's tie rule is the top-left rule**, not vertex numbers.
 * **A range that is a point keeps a value's side of it** (and slope's point is
   the ramp's start), rather than the one middle colour for everything.
-* **Two ramp tables stay two** until the owner chooses whose colours win
-  ("The ramps", "Not done").
+* **One ramp table, in the `terrain` layer, with the surface styles' colours**
+  ("The ramps"). Rejected: letting the shading's colours win, renaming one set,
+  and keeping two.
 
 ## Not done
 
@@ -653,11 +692,10 @@ another build with `tools/compare_benchmarks.py --alternate`.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
   batters and flat pads they go from the flats when the batters crowd them.
 * The 3D view's legend shows the first styled surface only.
-* `RASTER SHADE` / `RASTER SLOPE` and the surface styles keep separate ramp
-  tables whose terrain, diverging, slope and grey differ in colour ("The
-  ramps"). One data table below both layers, with a decision about whose
-  colours stay, would remove the second way of doing it; it moves pictures
-  either way, so it is not done.
+* `RASTER ASPECT` colours the eight compass directions with a constant of its
+  own (`src/katana_app/geo/slope_verbs.cpp`), which is neither the aspect wheel
+  a surface style uses (`aspectSectorColour`) nor a row of the ramp table: two
+  palettes for aspect.
 * The contours refused for the plan are told to the plan view's log and its
   headless report; a plot or a sheet viewport paints the same stats
   (`PlanPaintStats::surfaceProblems`) and nothing there reads them, so a plot

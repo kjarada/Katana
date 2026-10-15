@@ -870,7 +870,7 @@ only builds its line:
 RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
              [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]
              [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]
-             [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>]
+             [ramp=terrain|earth|diverging|slope|grey|spectral|<file>] [range=<min>,<max>]
              [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]
 ```
 
@@ -900,10 +900,11 @@ record of the reference raster, `saved file=` with `save=`, then one
   (`raster resize --resampling average`, by the smallest whole step that
   fits), since a finer picture would only be decimated again to be drawn.
   A surface is sampled at its CELL, or the cell suggested for its extent.
-- **Ramps** (`include/katana/interop/geo/colour_ramps.hpp`): terrain
-  (hypsometric tints), diverging (blue, white, red: on design minus
-  existing, cut is blue and fill red), slope (green, pale yellow, red) and
-  grey, the ColorBrewer colours named there. Each style has its own - relief
+- **Ramps** (`include/katana/interop/geo/colour_ramps.hpp`, over the one
+  table of `include/katana/terrain/colour_ramps.hpp`): terrain (the 3D view's
+  elevation tints), earth, diverging (blue, white, red: on design minus
+  existing, cut is blue and fill red), slope (green, yellow, red), grey and
+  spectral, the colours and their sources named there. Each style has its own - relief
   terrain, slope slope, plain grey - and `ramp=` chooses another, or a GDAL
   colour-map file of a person's own, whose value lines (percentages placed
   on the range as GDAL places them) are then the legend. The ramp spans the
@@ -912,10 +913,11 @@ record of the reference raster, `saved file=` with `save=`, then one
   zero, so zero is its white. A span of one value is widened a unit about
   it. The ends are written exactly, so the cells at the range's ends take
   the ramp's end colours exactly
-  (`ShadeVerb.ARampMapsItsEndpointsExactly`). These are the shading verbs'
-  ramps; a surface style has a table of its own whose terrain, diverging,
-  slope and grey are other colours (`docs/surface_display.md`, "The ramps"),
-  so `ramp=terrain` on `RASTER SHADE` and on a surface style are two maps.
+  (`ShadeVerb.ARampMapsItsEndpointsExactly`). These are the surface styles'
+  ramps, the same table (`docs/surface_display.md`, "The ramps"): `ramp=terrain`
+  on `RASTER SHADE` and on a surface style is one map, and a legend lists the
+  same colours. Rasters this verb wrote before the tables were made one
+  (2026-10-15) keep the colours they were written with.
 - **The reference raster** is named `NAME`, or the source's name and the
   style's (`terrain-relief-hillshade`), made unique; its role is Derived,
   its derivation the line, and its display style the style.
