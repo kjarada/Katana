@@ -234,6 +234,15 @@ File had seventeen top-level items and has fifteen.
   archives and IFC as well as the GIS vector formats, which "Export Vector"
   did not say, and its tip says what it takes. Tests, scripts and
   `--trigger` find an item by its object name, which is why none moved.
+- **Save As offers a folder the person owns.** `MainWindow::saveDocumentAs`
+  proposed the bare name `untitled.katana`, which Qt resolves against the
+  working directory: for a Start menu shortcut or a double-click, the
+  program's own folder, `bin/` of the install - read-only in a per-machine
+  install, and no place for a project. It now proposes the name beside the
+  project already open, else in the person's Documents. Not tested: the
+  dialog is a native modal one, which a headless run refuses
+  (`refuseFileDialog`), so the folder it opens in has no seam to be read
+  from.
 - **No toolbar changed**, so `kLayoutVersion` stays 1 and a saved layout
   still fits: File's toolbar keeps New, Open, Save, Import Any File, Export
   Drawing, Plot and Sheets.

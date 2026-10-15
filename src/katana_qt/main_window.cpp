@@ -2841,7 +2841,17 @@ bool MainWindow::saveDocumentAs()
     if (refuseFileDialog("SAVE <directory>")) {
         return false;
     }
-    QString target = QFileDialog::getSaveFileName(this, "Save Project As", "untitled.katana",
+    // Offered in a folder the person owns: beside the project already open, else
+    // in their Documents. A bare "untitled.katana" is resolved by Qt against the
+    // working directory, which for a Start menu shortcut or a double-click is
+    // the program's own folder - bin/ of the install, which a per-machine
+    // install keeps read-only and where a project does not belong.
+    QString folder = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (const auto current = document_.projectDirectory()) {
+        folder = fromPath(current->parent_path());
+    }
+    QString target = QFileDialog::getSaveFileName(this, "Save Project As",
+                                                  QDir(folder).filePath("untitled.katana"),
                                                   "Katana project (*.katana)");
     if (target.isEmpty()) {
         return false;
