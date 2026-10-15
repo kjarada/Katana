@@ -338,7 +338,9 @@ thickness=0.06 base thickness=0.3` apply every group to ONE copy of the
 template and commit it once: one undo step, and a value the template refuses -
 a width of 0, a thickness of 0 - in any group, an unknown component or course,
 or a group with no `key=value`, refuses the whole line and changes nothing. A
-word that is not `key=value` starts the next group. This is what the Road
+word that is not `key=value` starts the next group, and names its component
+(or course) as the groups before it left it, as the same lines typed one
+after another would. This is what the Road
 Template Manager's Apply sends for a grid of edited rows. *Rejected:* one line
 a row, as the first version did - N undo steps for one user edit, and a
 template half applied when a later row was refused (the earlier rows had
@@ -551,3 +553,9 @@ class, layer, quantities and properties, and every problem
   templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
 - The window's Command Reference shows the road verbs in its Commands
   section from the general help, not a section of their own.
+- The corridors are sectioned again when ANY surface changes (the road
+  model's corridor half is keyed on the surfaces' whole generation), though
+  the model comes out the same object when nothing in it moved; keying the
+  half on the surfaces a corridor targets would skip the work as well.
+- Corridor Quantities clears its listing when the road model changes and does
+  not list again by itself: pressing List Quantities is the person's act.

@@ -574,6 +574,17 @@ TEST(RoadVerbs, SeveralComponentsAreSetByOneLineAsOneStepAndARefusedValueChanges
     EXPECT_EQ(widthOf(Side::Left, "lane"), 3.4);
     EXPECT_EQ(widthOf(Side::Right, "lane"), 3.4);
     EXPECT_EQ(session.steps(), before + 1);
+
+    // A group names its component as the groups before it left it, as the
+    // same two lines typed one after the other would: the second finds the
+    // lane the first renamed.
+    session.ok("ROADTEMPLATE SET \"rural two-lane\" left:lane name=carriageway "
+               "left:carriageway width=3.1");
+    const auto* renamed = session.document.roadTemplates().find("rural two-lane");
+    ASSERT_TRUE(renamed->find(Side::Left, "carriageway").has_value());
+    EXPECT_EQ(renamed->components[*renamed->find(Side::Left, "carriageway")].width, 3.1);
+    EXPECT_FALSE(renamed->find(Side::Left, "lane").has_value());
+    EXPECT_EQ(session.steps(), before + 2);
 }
 
 TEST(RoadVerbs, SeveralCoursesAreSetByOneLineAsOneStepAndARefusedValueChangesNone)

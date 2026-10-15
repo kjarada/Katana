@@ -762,12 +762,12 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
         // SET takes any number of groups, <component> key=value ..., and
         // applies them all to the one copy before committing it: a grid of
         // edited rows (the Road Template Manager's Apply) is ONE undo step, and
-        // a value that any group is refused for changes nothing.
+        // a value that any group is refused for changes nothing. Each group
+        // names its component in the copy as the groups before it left it, as
+        // the same lines typed one after the other would.
         std::size_t at = 2;
-        bool first = true;
         while (at < args.size()) {
-            auto named = first ? std::move(indices) : componentsNamed(roadTemplate, args[at]);
-            first = false;
+            auto named = componentsNamed(edited, args[at]);
             if (!named) {
                 return named.error();
             }
