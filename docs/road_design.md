@@ -903,22 +903,43 @@ class, layer, quantities and properties, and every problem
 ## Not done
 
 - Superelevation by design speed and radius: the table is entered by hand.
+  The rates, the side friction and the runoff lengths are a design standard's
+  tables, which differ between authorities, and no number is made up here.
 - Shoulder rollover on the high side of a superelevated section: a
-  superelevated shoulder takes the lane's crossfall.
+  superelevated shoulder takes the lane's crossfall. The limit on the
+  algebraic difference is a standard's, as above.
 - A template that changes width along a run (lane widening, tapers) other
   than by a region of another template, and transitions between regions: a
   region's ends are steps (the solids step, the strings break, the surface
-  has a face 1 mm wide).
+  has a face 1 mm wide). The taper lengths are a standard's table by speed; a
+  feature beyond this round.
 - Daylight to a surface other than the corridor's target per side, and cut
-  and fill batters with different benches.
+  and fill batters with different benches. A second target would be in the
+  corridor and in every reader of the one engine; beyond this round.
 - Courses under a kerb (its bedding) and a lined table drain's lining as a
-  solid apart from its courses.
+  solid apart from its courses. No standard thickness for either is quoted
+  here; beyond this round.
 - The earthworks' quantity by the prismoidal formula: end area only, as
-  corridorQuantities. The volumes work has a prismoidal method along an
-  alignment between two surfaces (the volumes document, docs/volumes.md).
-- Mass haul for a corridor.
+  corridorQuantities (the sections a curve adds bring it nearer the true
+  volume there). The volumes work has a prismoidal method along an alignment
+  between two surfaces (the volumes document, docs/volumes.md).
+- Mass haul for a corridor: it needs the haul distances and the free-haul and
+  overhaul limits of a contract, which the drawing does not hold.
 - Sections of a corridor in the section view, and sheets of cross sections
-  from a corridor (GENERATE sections draws the ground and the profile only).
+  from a corridor (GENERATE sections draws the ground and the profile only); a
+  feature beyond this round.
+- The old assembly functions (cad::corridorQuantities, corridorSurface) have no
+  curve tolerance and keep the interval's stations, as their unchanged tests
+  require; only a corridor of the drawing is sectioned inside curves.
+- The shells of an earthworks piece are the k-th stretch of each section, not
+  matched by overlap: a stretch that appears or vanishes between two sections
+  is drawn skewed (the mesh is the look; the quantity is the end area, which
+  does not depend on it).
+- Both halves of the road model read the whole alignment set's revision, so an
+  alignment no corridor or object uses makes them again (the model comes out
+  the same object).
+- The cost of that cache (benchmarks/bench_road.cpp) and of the sections a
+  curve adds is not measured: the benchmark has not been run.
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
 - Corridor Quantities clears its listing when the road model changes and does
