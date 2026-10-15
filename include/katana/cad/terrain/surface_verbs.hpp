@@ -44,6 +44,14 @@ namespace katana::cad {
 [[nodiscard]] katana::core::Result<std::string>
 runSurfaceVerb(Document& document, const std::vector<std::string>& tokens);
 
+// The drawing's style set as JSON for a reader that is not a person
+// (SURFACESTYLE LIST JSON, the katana://surface-styles resource): the set as
+// surfaceStylesToJson writes it and, when the project's own styles could not be
+// read (Document::surfaceStylesStatus), two members that say the set is a
+// stand-in: "standing_in": {"code", "message"} and "editable" (false for styles
+// a newer Katana wrote, which every edit refuses). Never throws.
+[[nodiscard]] std::string surfaceStylesReport(const Document& document);
+
 // One surface as every reply that names one writes it - SURFACE LIST and
 // INFO, SURFACE FROM, an IMPORT that brings surfaces, and the verbs here -
 // with heights and bounds to the millimetre and the style it is drawn in
@@ -81,7 +89,10 @@ importSurfaces(Document& document, katana::commands::CommandPtr command,
 // ... (empty clears), min=, max= (empty clears), flatcolour=,
 // shading=automatic|shaded|edges|wireframe|hidden,
 // faces3d=flat|elevation|slope|aspect. A colour is #RRGGBB, #RRGGBBAA or a
-// colour name `colours` or the standard names know. InvalidArgument naming
+// colour name `colours` or the standard names know. A description is read as
+// a typed text (core::unescapeTyped: "\\" is one backslash, "\n" a line break,
+// which a description may not hold), so what INFO prints reads back as it was.
+// InvalidArgument naming
 // the key for a key there is none of or a value it cannot take; the style is
 // left as it was. Whether the style as a whole can be drawn is
 // checkSurfaceStyle's to say.

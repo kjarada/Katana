@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -14,6 +16,7 @@
 #include "katana/cad/terrain/surface_style.hpp"
 #include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/storage/sqlite_database.hpp"
 #include "surface_test_support.hpp"
 
 using katana::cad::CommandInterpreter;
@@ -297,4 +300,169 @@ TEST_F(DrawingSurfaceVerbs, TheHelpNamesTheVerbsAndEveryKey)
     for (const auto& [key, value] : katana::cad::surfaceStyleOptions(SurfaceDisplayStyle{})) {
         EXPECT_TRUE(contains(help, key + "=")) << key;
     }
+}
+
+// ---- text the verbs refuse, and the reply that says what stands in -----------------------
+
+TEST_F(DrawingSurfaceVerbs, NamesAndDescriptionsTypedInTheAnsiCodePageAreRefusedAndNothingChanges)
+{
+    // katana_cli on Windows arrives with 0xB0 for the degree sign and 0xE9 for e-acute: not
+    // UTF-8, and the project stores a style set as JSON, whose writer threw out of SAVE.
+    refused("SURFACESTYLE NEW Pente\xB0", ErrorCode::InvalidArgument);
+    refused("SURFACESTYLE NEW Fine description=caf\xE9", ErrorCode::InvalidArgument);
+    refused("SURFACESTYLE SET Contours description=caf\xE9", ErrorCode::InvalidArgument);
+    refused("SURFACESTYLE RENAME Contours Pente\xB0", ErrorCode::InvalidArgument);
+    refused("SURFACE RENAME ground terrain\xE9", ErrorCode::InvalidArgument);
+    refused("SURFACE COPY ground caf\xE9", ErrorCode::InvalidArgument);
+
+    // What was refused never reached the model, so a save has nothing to throw on.
+    const katana::cad::surface_testing::ScratchDirectory scratch("ansi-verbs");
+    EXPECT_NO_THROW({
+        const auto saved = document.saveAs(scratch.path / "p.katana");
+        EXPECT_TRUE(saved.ok()) << saved.error().describe();
+    });
+    // The same text as UTF-8 is accepted: nothing is wrong with the letters.
+    (void)ok("SURFACESTYLE NEW Pente\xC2\xB0 description=caf\xC3\xA9");
+    EXPECT_EQ(document.surfaceStyles().find("Pente\xC2\xB0")->description, "caf\xC3\xA9");
+}
+
+TEST_F(DrawingSurfaceVerbs, AnImportedNameWithAQuoteIsMadeNameableSoTheSurfaceCanBeAddressed)
+{
+    // A TIN named PAD "A" in a 12d archive, or an IFC string: the tokenizer has no escape inside
+    // quotes, so no line could ever name it - listed, never removed, renamed or styled.
+    std::vector<katana::terrain::NamedSurface> brought(2);
+    brought[0].name = "PAD \"A\"";
+    brought[0].surface = tiltedSquare(50.0);
+    brought[1].name = "PAD \"A\"";
+    brought[1].surface = tiltedSquare(51.0);
+    auto records = katana::cad::importSurfaces(document, nullptr, std::move(brought), "IMPORT");
+    ASSERT_TRUE(records.ok()) << records.error().describe();
+    ASSERT_EQ(records->size(), 2u);
+    EXPECT_TRUE(contains((*records)[0], "surface name=\"PAD 'A'\"")) << (*records)[0];
+    EXPECT_TRUE(contains((*records)[1], "surface name=\"PAD 'A' (2)\"")) << (*records)[1];
+    // And a line can now name it.
+    EXPECT_TRUE(contains(ok("SURFACE HIDE \"PAD 'A'\""), "hidden surfaces=1 changed=1"));
+    (void)ok("SURFACE RENAME \"PAD 'A'\" pad");
+    EXPECT_NE(document.surfaces().find("pad"), nullptr);
+}
+
+TEST_F(DrawingSurfaceVerbs, HideOfASurfaceNamedAllHidesOnlyThatSurface)
+{
+    // The tokenizer drops quotes, so SURFACE HIDE "ALL" - what the Surfaces panel sends for the
+    // check box of a surface called ALL - reached the verb as the keyword and hid every surface.
+    (void)ok("SURFACE COPY ground ALL");
+    const std::string hidden = ok("SURFACE HIDE \"ALL\"");
+    EXPECT_TRUE(contains(hidden, "hidden surfaces=1 changed=1")) << hidden;
+    EXPECT_TRUE(document.surfaces().find("ground")->visible);
+    EXPECT_TRUE(document.surfaces().find("design")->visible);
+    EXPECT_FALSE(document.surfaces().find("ALL")->visible);
+    const std::string shown = ok("SURFACE SHOW all");
+    EXPECT_TRUE(contains(shown, "shown surfaces=1 changed=1")) << shown;
+    EXPECT_TRUE(document.surfaces().find("ALL")->visible);
+    // Several names still work, ALL among them as a name.
+    (void)ok("SURFACE HIDE ground ALL");
+    EXPECT_FALSE(document.surfaces().find("ground")->visible);
+    EXPECT_FALSE(document.surfaces().find("ALL")->visible);
+    EXPECT_TRUE(document.surfaces().find("design")->visible);
+    // With no surface of that name the keyword means all, as it always did.
+    ASSERT_TRUE(document.surfaces().find("ALL") != nullptr);
+    (void)ok("SURFACE RENAME ALL everything");
+    EXPECT_TRUE(contains(ok("SURFACE SHOW ALL"), "shown surfaces=3 changed=2"));
+}
+
+TEST_F(DrawingSurfaceVerbs, ADescriptionsBackslashesSurviveWhatInfoPrintsTypedBack)
+{
+    // INFO prints the description through recordValue, which doubles each backslash; the verb
+    // read it plain, so each trip doubled them again. A description is read as a typed text.
+    (void)ok("SURFACESTYLE NEW Dir description=C:\\dir");
+    EXPECT_EQ(document.surfaceStyles().find("Dir")->description, "C:\\dir") << "one backslash";
+    for (const std::string description : {"C:\\dir", "a\\\\nb", "x\\", "plain", ""}) {
+        auto styles = document.surfaceStyles();
+        std::ranges::find_if(styles.styles, [](const SurfaceDisplayStyle& each) {
+            return each.name == "Dir";
+        })->description = description;
+        ASSERT_TRUE(document.setSurfaceStyles(std::move(styles)).ok());
+        const std::string info = ok("SURFACESTYLE INFO Dir");
+        const std::size_t options = info.find("\noptions ");
+        ASSERT_NE(options, std::string::npos) << info;
+        (void)ok("SURFACESTYLE NEW Back " + info.substr(options + std::string("\noptions ").size()));
+        EXPECT_EQ(document.surfaceStyles().find("Back")->description, description) << description;
+        (void)ok("SURFACESTYLE DELETE Back");
+    }
+    // A backslash and an n typed on a line is a line break, which a description may not hold;
+    // the refusal says what to type instead.
+    const auto broken = interpreter.run("SURFACESTYLE NEW Line description=a\\nb");
+    ASSERT_FALSE(broken.ok());
+    EXPECT_EQ(broken.error().code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(broken.error().message, "two backslashes")) << broken.error().message;
+}
+
+namespace {
+
+// A project whose `surface_styles` metadata the test chose, opened in `document`.
+void openWithStoredStyles(katana::cad::Document& document, const std::string& stored,
+                          const std::string& name)
+{
+    static const katana::cad::surface_testing::ScratchDirectory scratch("stored-styles");
+    const std::filesystem::path project = scratch.path / (name + ".katana");
+    {
+        katana::cad::Document made;
+        ASSERT_TRUE(made.saveAs(project).ok());
+    }
+    {
+        auto raw = katana::storage::SqliteDatabase::open(project / "project.db");
+        ASSERT_TRUE(raw.ok());
+        ASSERT_TRUE(raw->execute("UPDATE metadata SET value = '" + stored +
+                                 "' WHERE key = 'surface_styles'")
+                        .ok());
+    }
+    ASSERT_TRUE(document.open(project).ok());
+}
+
+} // namespace
+
+TEST_F(DrawingSurfaceVerbs, TheJsonOfStylesThatOnlyStandInSaysSoAndAHealthySetDoesNot)
+{
+    EXPECT_FALSE(contains(ok("SURFACESTYLE LIST JSON"), "standing_in")) << "a read set carries no note";
+
+    Document newer;
+    CommandInterpreter newerRun{newer};
+    openWithStoredStyles(newer, R"({"format":"katana-surface-styles","version":99,"styles":[]})",
+                         "newer");
+    auto reply = newerRun.run("SURFACESTYLE LIST JSON");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_TRUE(contains(*reply, "\"standing_in\":{\"code\":\"Unsupported\"")) << *reply;
+    EXPECT_TRUE(contains(*reply, "\"editable\":false")) << *reply;
+    // The set itself is still there to read, in the form a save writes.
+    EXPECT_TRUE(contains(*reply, "\"format\":\"katana-surface-styles\"")) << *reply;
+
+    Document damaged;
+    CommandInterpreter damagedRun{damaged};
+    openWithStoredStyles(damaged, "{not json", "damaged");
+    reply = damagedRun.run("SURFACESTYLE LIST JSON");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_TRUE(contains(*reply, "\"standing_in\":{\"code\":\"ParseFailure\"")) << *reply;
+    EXPECT_TRUE(contains(*reply, "\"editable\":true")) << *reply;
+    // What a save writes into the project never carries the note.
+    EXPECT_FALSE(contains(katana::cad::surfaceStylesToJson(damaged.surfaceStyles()), "standing_in"));
+}
+
+TEST_F(DrawingSurfaceVerbs, ASetThatChangesNoFieldOnUnreadableStylesSaysItReplacedThem)
+{
+    Document damaged;
+    CommandInterpreter damagedRun{damaged};
+    openWithStoredStyles(damaged, "{not json", "damaged-set");
+    const std::size_t steps = damaged.history().undoCount();
+    // Standard already shows its boundary, so no field of the style moves.
+    auto reply = damagedRun.run("SURFACESTYLE SET Standard boundary=on");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_TRUE(contains(*reply, "set style=Standard changed=yes replaced=unreadable-styles"))
+        << *reply;
+    EXPECT_EQ(damaged.history().undoCount(), steps + 1) << "and the step it recorded is real";
+    EXPECT_TRUE(damaged.surfaceStylesStatus().ok()) << "the built-ins are now the project's own";
+    // A second one, on a set that reads, is changed=no as it always was.
+    reply = damagedRun.run("SURFACESTYLE SET Standard boundary=on");
+    ASSERT_TRUE(reply.ok());
+    EXPECT_TRUE(contains(*reply, "set style=Standard changed=no\n")) << *reply;
+    EXPECT_FALSE(contains(*reply, "replaced=")) << *reply;
 }

@@ -19,6 +19,7 @@
 
 #include <utility>
 
+#include "command_word.hpp"
 #include "icons.hpp"
 #include "katana/core/text.hpp"
 
@@ -27,13 +28,6 @@ namespace katana::qt {
 namespace cad = katana::cad;
 
 namespace {
-
-// A name as a line takes it: quoted, so blanks and words such as ALL are
-// the name and nothing else.
-QString quoted(const std::string& name)
-{
-    return "\"" + QString::fromStdString(name) + "\"";
-}
 
 QToolButton* tool(QWidget* parent, Icon which, const QString& objectName, const QString& name,
                   const QString& tip)
@@ -269,6 +263,29 @@ void SurfacesPanel::run(const QString& line)
     }
 }
 
+void SurfacesPanel::run(const QString& verb, const std::vector<std::string>& names)
+{
+    // A name is judged by the window's one rule for a word of a line
+    // (command_word.hpp): a double quote or a line break cannot be carried by a
+    // quoted word, so it is REFUSED, and no line is sent. The panel once wrapped
+    // a quote in quotes without looking, and the line it built named another
+    // surface: a Remove of PAD "A" removed PAD A. A name that passes is written
+    // quoted, always: that keeps a blank in one word, though not a word such as
+    // ALL apart from a keyword - the tokenizer drops the quotes, which is why
+    // SURFACE SHOW|HIDE give a surface's own name the first claim on it.
+    QString line = verb;
+    for (const std::string& name : names) {
+        const QString text = QString::fromStdString(name);
+        if (const auto word = commandWord(text, "the surface's name"); !word) {
+            lastReply_ = QString::fromStdString(word.error().message);
+            status_->setText(lastReply_);
+            return;
+        }
+        line += " \"" + text + "\"";
+    }
+    run(line);
+}
+
 void SurfacesPanel::onItemChanged(QTableWidgetItem* item)
 {
     if (filling_ || item == nullptr) {
@@ -288,9 +305,9 @@ void SurfacesPanel::onItemChanged(QTableWidgetItem* item)
     // One cell says two things: the check box whether it is shown, the text
     // its name. Whichever differs from the drawing is what was changed.
     if (named != nullptr && ticked != named->visible) {
-        run((ticked ? "SURFACE SHOW " : "SURFACE HIDE ") + quoted(name));
+        run(ticked ? "SURFACE SHOW" : "SURFACE HIDE", {name});
     } else if (!typed.isEmpty() && typed.toStdString() != name) {
-        run("SURFACE RENAME " + quoted(name) + " " + quoted(typed.toStdString()));
+        run("SURFACE RENAME", {name, typed.toStdString()});
     } else {
         // Nothing to do: the cell goes back to what the drawing has.
         const QSignalBlocker block(table_);
@@ -314,7 +331,7 @@ void SurfacesPanel::onStyleChosen(int row, int index)
         return;
     }
     const std::string name = nameItem->data(Qt::UserRole).toString().toStdString();
-    run("SURFACE STYLE " + quoted(name) + " " + quoted(combo->itemData(index).toString().toStdString()));
+    run("SURFACE STYLE", {name, combo->itemData(index).toString().toStdString()});
 }
 
 void SurfacesPanel::renamePicked()
@@ -334,7 +351,7 @@ void SurfacesPanel::copyPicked()
     }
     // "ground (2)", as an import names a second of a name.
     const std::string copy = document_.surfaces().uniqueName(*picked);
-    run("SURFACE COPY " + quoted(*picked) + " " + quoted(copy));
+    run("SURFACE COPY", {*picked, copy});
 }
 
 void SurfacesPanel::removePicked()
@@ -343,7 +360,7 @@ void SurfacesPanel::removePicked()
     if (!picked) {
         return;
     }
-    run("SURFACE REMOVE " + quoted(*picked));
+    run("SURFACE REMOVE", {*picked});
 }
 
 void SurfacesPanel::zoomToPicked()
@@ -423,6 +440,17 @@ SurfacesPanelUi installSurfacesPanel(QMainWindow& window, cad::Document& documen
     QObject::connect(ui.terrainItem, &QAction::triggered, dock, [dock] {
         dock->show();
         dock->raise();
+    });
+    // View > Panels > Surfaces is Qt's own toggle: it shows the dock, which
+    // for a page of a tab group is not the same as bringing it to the front
+    // (dock_chrome.cpp: raise() is what makes a tab current), so the panel
+    // came back as a tab behind Reference Data. `triggered` is a person's or a
+    // step's choice of the item and runs after Qt's own slot has shown the
+    // dock; `toggled` would also fire for a layout restore.
+    QObject::connect(ui.toggle, &QAction::triggered, dock, [dock](bool shown) {
+        if (shown) {
+            dock->raise();
+        }
     });
     if (terrainMenu != nullptr) {
         // After Surface From Drawing, with the other surface items; at the
