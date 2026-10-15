@@ -2551,9 +2551,14 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             return status.error();
         }
         const auto ids = document_.lastCreatedEntities();
+        // Why the first was left out, said when any was (the window shows it
+        // beside the count, and an agent reads it without a second call).
+        const std::string why = made->skipped > 0 && !made->firstSkip.empty()
+                                    ? " firstskip=" + field(made->firstSkip)
+                                    : std::string();
         return withScope(*picked, std::string("created ") + (balloon ? "balloons=" : "leaders=") +
                                       std::to_string(ids.size()) + " ids=" + idList(ids) +
-                                      " skipped=" + std::to_string(made->skipped) +
+                                      " skipped=" + std::to_string(made->skipped) + why +
                                       presetReply(*preset));
     }
 

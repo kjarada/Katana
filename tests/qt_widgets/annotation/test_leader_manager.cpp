@@ -68,6 +68,26 @@ struct Drawing {
         return katana::entity::leaderNote(document.model(), leader(id));
     }
     [[nodiscard]] std::size_t steps() const { return document.history().undoCount(); }
+
+    // The window's executor, as the dialog sees it: each line the dialog hands
+    // over is recorded and run by the interpreter on this drawing, and what it
+    // replied or why it refused comes back, as MainWindow::runVerbLine's
+    // outcome does.
+    QStringList lines;
+    katana::qt::LeaderManagerContext context()
+    {
+        katana::qt::LeaderManagerContext made;
+        made.run = [this](const QString& line) {
+            lines << line;
+            const auto reply = interpreter.run(line.toStdString());
+            if (!reply) {
+                return katana::qt::VerbOutcome{false, {},
+                                               QString::fromStdString(reply.error().describe())};
+            }
+            return katana::qt::VerbOutcome{true, QString::fromStdString(*reply), {}};
+        };
+        return made;
+    }
 };
 
 template <typename Widget> Widget* child(QWidget& dialog, const char* name)
@@ -121,7 +141,7 @@ TEST(LeaderManager, TheFormShowsTheLeaderWhatItSaysAndWhatItsEntityOffers)
     d.run("PROP SET elevation 12.25");
     const EntityId leader =
         d.run("LEADER #" + std::to_string(pit) + " 20,20 template=\"IL {prop.invert:.2f}\"");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     EXPECT_EQ(dialog.currentLeader(), leader);
     EXPECT_EQ(child<QComboBox>(dialog, "leaderNoteKind")->currentData().toInt(), kTemplate);
@@ -149,7 +169,7 @@ TEST(LeaderManager, ATemplateIsCheckedAsItIsTypedAndApplyIsOneStep)
     d.run("SELECT " + std::to_string(pit));
     d.run("PROP SET invert 10.5");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 text=PIT");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     chooseData(child<QComboBox>(dialog, "leaderNoteKind"), kTemplate);
     auto* note = child<QPlainTextEdit>(dialog, "leaderNote");
@@ -187,7 +207,7 @@ TEST(LeaderManager, ADoubleClickedValueMakesTheNoteATemplate)
     Drawing d;
     const EntityId line = d.run("LINE 0,0 40,0");
     const EntityId leader = d.run("LEADER #" + std::to_string(line) + "@10,1 20,10 text=\"L=\"");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* note = child<QPlainTextEdit>(dialog, "leaderNote");
     auto* table = child<QTableWidget>(dialog, "leaderValues");
@@ -224,7 +244,7 @@ TEST(LeaderManager, AnUntouchedFormIsNoStepAndWhatItsWidgetsCannotHoldIsKept)
     ASSERT_TRUE(d.document.execute(katana::commands::createEntities({entity})).ok());
     const EntityId leader = d.document.lastCreatedEntities().front();
     const LeaderGeometry drawn = d.leader(leader);
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     EXPECT_TRUE(dialog.formChange().empty());
     const std::size_t before = d.steps();
@@ -263,7 +283,7 @@ TEST(LeaderManager, ANoteMadeAStylesAndBackKeepsTheUsersWordsAndLook)
     d.run(
         "LABELSTYLE NEW Invert kind=point text=\"INV {prop.invert:.2f}\" textstyle=Notes paper=3");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 text=X paper=2");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* kind = child<QComboBox>(dialog, "leaderNoteKind");
     auto* note = child<QPlainTextEdit>(dialog, "leaderNote");
@@ -332,7 +352,7 @@ TEST(LeaderManager, ALookSetBackOverAStylesIsKeptAndAnotherStyleLendsOverTheOneB
 {
     StyledDrawing d;
     const EntityId kept = d.plainLeader("5,5");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     auto* textStyle = child<QComboBox>(dialog, "leaderTextStyle");
     auto* paper = child<QDoubleSpinBox>(dialog, "leaderPaperHeight");
 
@@ -371,7 +391,7 @@ TEST(LeaderManager, ALookTypedAfterALendIsKeptAndAStylesHeightIsLentExactly)
     StyledDrawing d;
     const EntityId typed = d.plainLeader("5,5");
     const EntityId fine = d.plainLeader("5,-5");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     auto* textStyle = child<QComboBox>(dialog, "leaderTextStyle");
     auto* paper = child<QDoubleSpinBox>(dialog, "leaderPaperHeight");
 
@@ -404,7 +424,7 @@ TEST(LeaderManager, AStyleThatComesOrGoesUnderTheFormLendsItsLook)
     d.run("PROP SET invert 10.5");
     d.run("TEXTSTYLE NEW Notes paper=3.5");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 text=X paper=2");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* style = child<QComboBox>(dialog, "leaderLabelStyle");
     auto* textStyle = child<QComboBox>(dialog, "leaderTextStyle");
@@ -444,7 +464,7 @@ TEST(LeaderManager, ForSelectionShowsTheLookAStyleLendsAndMakesWhatItShows)
     d.run("SELECT " + std::to_string(other));
     d.run("PROP SET invert 9.25");
     d.run("SELECT " + std::to_string(d.pit));
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
     auto* kind = child<QComboBox>(dialog, "leaderForNoteKind");
     auto* style = child<QComboBox>(dialog, "leaderForLabelStyle");
@@ -488,7 +508,7 @@ TEST(LeaderManager, ANumberedBalloonMustStayACircle)
     Drawing d;
     const EntityId a = d.run("POINT 0,0");
     d.run("SELECT " + std::to_string(a));
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
     child<QCheckBox>(dialog, "leaderForBalloon")->setChecked(true);
     chooseData(child<QComboBox>(dialog, "leaderForCallout"), kBox);
@@ -497,7 +517,8 @@ TEST(LeaderManager, ANumberedBalloonMustStayACircle)
         << dialog.forPreview().toStdString();
     const std::size_t before = d.steps();
     EXPECT_FALSE(dialog.makeForSelection());
-    EXPECT_TRUE(dialog.problem().startsWith(QStringLiteral("a numbered balloon is a circle")))
+    // In the verb's own words: the dialog only hands the line over.
+    EXPECT_TRUE(dialog.problem().contains(QStringLiteral("a numbered balloon is a circle")))
         << dialog.problem().toStdString();
     EXPECT_EQ(d.steps(), before);
     // With a note it is not numbered, and may be a box.
@@ -515,7 +536,7 @@ TEST(LeaderManager, AStylesNoteIsReadAfreshWhenTheStyleChanges)
     d.run("PROP SET invert 10.5");
     d.run("LABELSTYLE NEW Invert kind=point text=\"INV {prop.invert:.2f}\"");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 labelstyle=Invert");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* note = child<QPlainTextEdit>(dialog, "leaderNote");
     EXPECT_TRUE(note->isReadOnly());
@@ -535,7 +556,7 @@ TEST(LeaderManager, TheListChoosesAndFreezeWaitsForTheFormToBeApplied)
     const EntityId pit = d.run("POINT 0,0");
     const EntityId first = d.run("LEADER 20,0 25,5 text=ONE");
     const EntityId second = d.run("LEADER #" + std::to_string(pit) + " 5,5 template=\"PIT {id}\"");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     EXPECT_EQ(dialog.currentLeader(), first) << "the first there is, with nothing selected";
     auto* list = child<QListWidget>(dialog, "leaderList");
     ASSERT_EQ(list->count(), 2);
@@ -578,7 +599,7 @@ TEST(LeaderManager, SeveralSelectedLeadersAreChangedTogetherInOneStep)
     const EntityId b = d.run("LEADER #" + std::to_string(pit) + " 5,-5 template=\"B {id}\"");
     const EntityId c = d.run("LEADER 30,0 35,5 text=C");
     d.run("SELECT " + std::to_string(a) + " " + std::to_string(b));
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     EXPECT_EQ(dialog.currentLeader(), a);
     EXPECT_EQ(dialog.targets(), (std::vector<EntityId>{a, b}));
     auto* scope = child<QLabel>(dialog, "leaderScope");
@@ -621,7 +642,7 @@ TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
     const EntityId dim = d.run("DIM 0,20 10,20 2");
     const EntityId line = d.run("LINE 0,0 40,0");
     const EntityId leader = d.run("LEADER 10,1 20,10 text=X");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     auto* attach = child<QPushButton>(dialog, "leaderAttachSelected");
     auto* along = child<QDoubleSpinBox>(dialog, "leaderAlong");
     EXPECT_FALSE(attach->isEnabled()) << "nothing else is selected";
@@ -709,7 +730,7 @@ TEST(LeaderManager, AttachingATipThatIsInsideALotPointsIntoIt)
         std::get<katana::geometry::Polyline2>(d.document.model().entities.find(lot)->geometry)
             .closed)
         << "the premise: a closed lot";
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     d.run("SELECT " + std::to_string(in) + " " + std::to_string(lot));
     processEvents();
     ASSERT_EQ(dialog.currentLeader(), in);
@@ -735,7 +756,7 @@ TEST(LeaderManager, AnAttributeIsSetOnTheEntityThroughItsLeader)
     const EntityId pit = d.run("POINT 0,0");
     const EntityId leader =
         d.run("LEADER #" + std::to_string(pit) + " 5,5 template=\"PIT {id}\\nIL {prop.invert}\"");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     child<QLineEdit>(dialog, "leaderAttributeName")->setText(QStringLiteral("invert"));
     child<QLineEdit>(dialog, "leaderAttributeValue")->setText(QStringLiteral("9"));
@@ -764,7 +785,7 @@ TEST(LeaderManager, FreezeKeepsTheWordsAndDetachLetsTheTipGo)
     Drawing d;
     const EntityId pit = d.run("POINT 0,0");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 template=\"PIT {id}\"");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     ASSERT_TRUE(dialog.freeze());
     EXPECT_FALSE(katana::entity::isSmart(d.leader(leader)));
@@ -786,7 +807,7 @@ TEST(LeaderManager, TheFormFollowsTheSelectionAndAnUndoButKeepsUnappliedEdits)
     const EntityId first = d.run("LEADER 0,0 5,5 text=ONE");
     const EntityId second = d.run("LEADER 10,0 15,5 text=TWO");
     const EntityId line = d.run("LINE 100,0 110,0");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     d.run("SELECT " + std::to_string(second));
     processEvents();
     EXPECT_EQ(dialog.currentLeader(), second);
@@ -822,7 +843,7 @@ TEST(LeaderManager, ALabelStyleNoteLendsItsLookAndIsReadLive)
     d.run(
         "LABELSTYLE NEW Invert kind=point text=\"INV {prop.invert:.2f}\" textstyle=Notes paper=3");
     const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 text=X");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
     auto* style = child<QComboBox>(dialog, "leaderLabelStyle");
     EXPECT_FALSE(style->isEnabled()) << "until the note is a style's";
@@ -849,7 +870,7 @@ TEST(LeaderManager, ForSelectionMakesALeaderToEachSelectedEntityInOneStep)
     const EntityId a = d.run("POINT 0,0");
     const EntityId b = d.run("POINT 10,0");
     d.run("SELECT " + std::to_string(dim) + " " + std::to_string(a) + " " + std::to_string(b));
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
     processEvents();
     EXPECT_EQ(child<QLabel>(dialog, "leaderForSelection")->text(),
@@ -897,7 +918,7 @@ TEST(LeaderManager, ForSelectionMakesALeaderToEachSelectedEntityInOneStep)
     d.run("SELECT NONE");
     const std::size_t steps = d.steps();
     EXPECT_FALSE(dialog.makeForSelection());
-    EXPECT_TRUE(dialog.problem().startsWith(QStringLiteral("nothing is selected")))
+    EXPECT_TRUE(dialog.problem().contains(QStringLiteral("nothing is selected")))
         << dialog.problem().toStdString();
     EXPECT_EQ(d.steps(), steps);
 }
@@ -910,7 +931,7 @@ TEST(LeaderManager, ForSelectionIsPreviewedForTheFirstAndPlacedAsTold)
     const EntityId pit = d.run("POINT 0,0");
     d.run("SELECT " + std::to_string(pit));
     d.run("PROP SET invert 10.5");
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
     chooseData(child<QComboBox>(dialog, "leaderForNoteKind"), kTemplate);
     auto* note = child<QPlainTextEdit>(dialog, "leaderForNote");
@@ -976,7 +997,7 @@ TEST(LeaderManager, ArrangeAlignsTheSelectedNotesAndRenumbersTheBalloons)
     const EntityId a = d.run("LEADER 0,0 10,30 text=A");
     const EntityId b = d.run("LEADER 5,0 22,40 text=B");
     d.run("SELECT " + std::to_string(a) + " " + std::to_string(b));
-    LeaderManagerDialog dialog(d.document);
+    LeaderManagerDialog dialog(d.document, d.context());
     dialog.showTab(LeaderManagerDialog::Tab::Arrange);
     child<QCheckBox>(dialog, "leaderAlignUseSpacing")->setChecked(true);
     child<QDoubleSpinBox>(dialog, "leaderAlignSpacing")->setValue(8.0);
@@ -988,7 +1009,7 @@ TEST(LeaderManager, ArrangeAlignsTheSelectedNotesAndRenumbersTheBalloons)
 
     d.run("SELECT NONE");
     EXPECT_FALSE(dialog.alignSelection());
-    EXPECT_TRUE(dialog.problem().startsWith(QStringLiteral("no leader is selected")))
+    EXPECT_TRUE(dialog.problem().contains(QStringLiteral("no leader is selected")))
         << dialog.problem().toStdString();
 
     const EntityId seven = d.run("BALLOON 30,0 35,5 n=7");
@@ -1071,7 +1092,7 @@ TEST(LeaderManager, ADrawingReplacedStartsTheFormAfresh)
         Drawing d;
         const EntityId leader = d.run("LEADER 0,0 5,5 text=ONE");
         ASSERT_TRUE(d.document.saveAs(directory).ok());
-        LeaderManagerDialog dialog(d.document);
+        LeaderManagerDialog dialog(d.document, d.context());
         ASSERT_EQ(dialog.currentLeader(), leader);
         auto* note = child<QPlainTextEdit>(dialog, "leaderNote");
         note->setPlainText(QStringLiteral("EDITED"));

@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/annotation/command_words.hpp"
 #include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -741,4 +742,40 @@ TEST(LeaderScope, ALeadersReportRoundTripsThroughTheDocumentsJsonAndAnEmptyOneIs
     EXPECT_EQ(ann::leadersReport(s.document).leaders.size(), 5U);
     const ann::LeadersReport onP1 = ann::leadersReport(s.document, std::nullopt, s.p1);
     EXPECT_EQ(onP1.leaders.size(), 3U) << "a1, a3 and a4 are on p1";
+}
+
+// ---- the words the Leaders manager hands to the verbs ----------------------------------------------
+
+TEST(LeaderScope, AnAnchorWordReadsBackAsTheSamePlaceTheDialogShowed)
+{
+    Session s;
+    const EntityId point = s.point(Point2(0, 0), "0");
+    const EntityId line = s.made("LINE 0,0 40,0");
+    const EntityId circle = s.made("CIRCLE 100,0 5");
+    const EntityId open = s.made("PLINE 0,50 10,50 10,60 20,60");
+    const EntityId lot = s.made("PLINE 0,100 10,100 10,110 0,110 C");
+    const EntityId leader = s.made("LEADER 0,0 5,5 text=A");
+    // Every kind of place the dialog or a tool can name, on an entity that
+    // has it: the verb must read the word back as exactly this reference,
+    // the fraction included.
+    const std::vector<AnchorRef> places = {
+        {point, AnchorPoint::Position, 0, 0.0},
+        {line, AnchorPoint::Start, 0, 0.0},
+        {line, AnchorPoint::End, 0, 0.0},
+        {line, AnchorPoint::Mid, 0, 0.0},
+        {line, AnchorPoint::Along, 0, 0.123456},
+        {circle, AnchorPoint::Centre, 0, 0.0},
+        {circle, AnchorPoint::Along, 0, 0.5},
+        {open, AnchorPoint::Vertex, 2, 0.0},
+        {open, AnchorPoint::SegmentMid, 1, 0.0},
+        {open, AnchorPoint::Along, 1, 0.25},
+        {lot, AnchorPoint::Inside, 0, 0.0},
+    };
+    for (const AnchorRef& place : places) {
+        const std::string word = ann::anchorWord(place);
+        s.run("LEADER SET " + id(leader) + " tip=" + word);
+        EXPECT_EQ(s.leader(leader).tipRef, place) << word;
+    }
+    EXPECT_EQ(ann::anchorWord(AnchorRef{12, AnchorPoint::Along, 3, 0.25}), "#12.along3:0.25");
+    EXPECT_EQ(ann::anchorWord(AnchorRef{12, AnchorPoint::Vertex, 4, 0.0}), "#12.v4");
 }

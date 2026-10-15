@@ -1,14 +1,27 @@
 #pragma once
 
 // The Leaders manager (Annotate > Leaders...; docs/annotation.md "In the
-// window"): smart leaders from the window, a thin front end over
-// cad/annotation/leader_edit.hpp - the same edits the LEADER and BALLOON
-// verbs make, each ONE undo step, refused in the command line's own words.
+// window"): smart leaders from the window, a thin front end over the LEADER
+// and BALLOON verbs.
 //
-//   Leader         the drawing's leaders in a list, and a form for the one
-//                  chosen (it follows the drawing's selection): what its tip
-//                  is on and how far along; its note as text, a template or
-//                  a label style's, checked as it is typed and shown as it
+// THE DIALOG CHANGES NOTHING ITSELF. Every button builds the verb line a
+// person would type - LEADER SET, ATTACH, FREEZE, DETACH, PROP, FOR, ALIGN,
+// BALLOON FOR and RENUMBER - shown as it will run in leaderLine, and hands it
+// to the window's one executor (command_runner.hpp, docs/desktop.md "One
+// executor"), so the edit is echoed in the command log, kept in the history,
+// ONE undo step, and refused in the verb's own words in the dialog's problem
+// line. It still calls the read-only helpers of annotation/leader_edit.hpp
+// (what a note would say, the place a leader goes on an entity, the value
+// rows) to preview; none of them edits. A note a command line cannot carry -
+// one holding a double quote, or a backslash before an n - is refused in the
+// problem line, naming the field, and nothing runs.
+//
+//   Leader         the drawing's leaders in a list - every one, or those a
+//                  scope and filter take ("Which leaders...": the shared Apply
+//                  to / Only those that match controls) - and a form for the
+//                  one chosen (it follows the drawing's selection): what its
+//                  tip is on and how far along; its note as text, a template
+//                  or a label style's, checked as it is typed and shown as it
 //                  would read, or a PRESET's template (the level, the height
 //                  above a surface, the cut or fill, the name, the code, the
 //                  station - leader_presets.hpp) with the surface or the
@@ -19,22 +32,25 @@
 //                  entity set through it; the tip attached to a selected
 //                  entity; Freeze, Detach and Apply. With several leaders
 //                  selected, Apply, Freeze and Detach change them all.
-//   For Selection  a leader, or a numbered balloon, to each selected entity
-//                  (LEADER FOR, BALLOON FOR), its note - typed, or a preset's
-//                  - checked and shown as it would read for the first, with
-//                  that entity's values and the look the leaders are made
-//                  with.
-//   Arrange        the selected leaders' notes in a column (LEADER ALIGN),
-//                  and the balloons numbered again (BALLOON RENUMBER).
+//   For Selection  a leader, or a numbered balloon, to each entity the Apply
+//                  to / Only those that match controls take - the selected
+//                  ones to begin with (LEADER FOR, BALLOON FOR) -, its note -
+//                  typed, or a preset's - checked and shown as it would read
+//                  for the first, with that entity's values and the look the
+//                  leaders are made with.
+//   Arrange        the notes of the leaders the Apply to controls take - the
+//                  selected ones to begin with - in a column (LEADER ALIGN),
+//                  and the balloons numbered again (BALLOON RENUMBER; all of
+//                  them, or with "Only the balloons Apply to takes" those).
 //
 // Apply sends only what the user CHANGED: the form remembers what it showed,
-// and a field still showing that is left out of the edit, so a value the
+// and a field still showing that is left out of the line, so a value the
 // widgets cannot hold exactly (a height finer than their 3 decimals, such as
 // 2.3456 mm, a landing past their 1000 mm, a non-breaking space) is never
 // rewritten, and an untouched form applied is no step. A note made a label
 // style's is the exception the core forces: the style lends its look to
 // whatever the edit leaves out, so the look the form shows is sent unless
-// it is the style's own.
+// it is the style's own. Numbers are written exactly (core::formatExactReal).
 //
 // It follows docs/desktop.md, "The rules a dialog or panel follows": no moc,
 // non-modal and kept by AnnotationWorkbench, a command never run from the
@@ -44,16 +60,35 @@
 // the leader whenever the leader changes under it (an undo, a verb typed)
 // or the drawing is replaced, and left alone - unapplied edits and all -
 // when neither happens.
+//
+// Object names, besides the form's (leaderNote, leaderApply ...):
+//   leaderListScopeToggle     "Which leaders...": pressed, the list shows the
+//                             leaders the scope takes
+//   leaderListScope...        the shared controls (ScopeFilterWidget, prefix
+//                             "leaderList": leaderListScopeDrawing,
+//                             leaderListFilterLayer ...)
+//   leaderListScopeProblem    why the controls cannot be read
+//   leaderForScope...         the same for the For Selection tab (prefix
+//                             "leaderFor": leaderForScopeSelection ...)
+//   leaderForScopeReport      what the scope took: the verb's scope record
+//   leaderArrangeScope...     the same for Arrange (prefix "leaderArrange")
+//   balloonRenumberScoped     renumber only the balloons the scope takes
+//   leaderLine                the line the last action ran (read-only)
 
+#include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <QDialog>
 #include <QString>
 
+#include "command_runner.hpp"
+#include "customisation/scope_filter_widget.hpp"
 #include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/leader_values.hpp"
 
@@ -68,18 +103,60 @@ class QPushButton;
 class QSpinBox;
 class QTableWidget;
 class QTabWidget;
+class QToolButton;
+class QWidget;
 
 namespace katana::qt {
 
 class DocumentWatcher;
 struct DocumentChanges;
 
+// ---- the lines the dialog hands to the executor ----------------------------------------------
+//
+// Pure functions of plain data, so a test checks the very line without a
+// window. Each fails with InvalidArgument, naming the field, for a value a
+// command line cannot carry: a double quote anywhere, a backslash before an
+// n in a note (the verb would read it as a line break), a line break in a
+// name.
+
+// The options of LEADER SET and LEADER FOR that make `change`, one leading
+// blank each, in the order text=|template=|labelstyle=, arrow=, callout=,
+// style=, paper=, arrowsize=, landing=, tip=: only what the change sets, the
+// numbers exact. Empty for a change that sets nothing.
+[[nodiscard]] katana::core::Result<std::string>
+leaderOptionWords(const katana::cad::annotation::LeaderChange& change);
+
+// LEADER SET id [id...] <options>; an empty string for a change that sets
+// nothing (no line to run). InvalidArgument for no leader.
+[[nodiscard]] katana::core::Result<QString>
+leaderSetLine(const std::vector<katana::entity::EntityId>& ids,
+              const katana::cad::annotation::LeaderChange& change);
+
+// LEADER FOR <options> angle=<deg> length=<mm> <scope> or the BALLOON FOR
+// line: the options first, since a WHERE in the scope words takes every
+// key=value after it as a condition (annotation_verbs.cpp). `scope` is
+// ScopeFilterWidget::verbWords.
+[[nodiscard]] katana::core::Result<QString>
+leadersForLine(bool balloon, const QString& scope,
+               const katana::cad::annotation::LeaderChange& change, double angleDegrees,
+               double lengthMillimetres);
+
+// What the dialog is given by the window: the executor its lines run through
+// and the open views the scopes' "What a view shows" lists.
+struct LeaderManagerContext {
+    // Empty: the dialog says it has no command line to run on.
+    CommandRunner run{};
+    // Empty: the scopes offer one "Whole drawing view" hiding nothing.
+    std::function<std::vector<ScopeFilterView>()> views{};
+};
+
 class LeaderManagerDialog final : public QDialog {
   public:
     // The tabs, in order.
     enum class Tab { Leader = 0, ForSelection = 1, Arrange = 2 };
 
-    explicit LeaderManagerDialog(katana::cad::Document& document, QWidget* parent = nullptr);
+    explicit LeaderManagerDialog(katana::cad::Document& document,
+                                 LeaderManagerContext context = {}, QWidget* parent = nullptr);
     ~LeaderManagerDialog() override;
 
     void showTab(Tab tab);
@@ -99,6 +176,8 @@ class LeaderManagerDialog final : public QDialog {
     [[nodiscard]] QString preview() const;
     // What the last refused action said; empty after one that worked.
     [[nodiscard]] QString problem() const;
+    // The line the last action ran (or tried to); empty before the first.
+    [[nodiscard]] QString lastLine() const;
     // Puts "{name}" into the note at the cursor (the end of the note, until
     // the user puts the cursor elsewhere), making the note a template.
     void insertValue(const QString& name);
@@ -123,11 +202,16 @@ class LeaderManagerDialog final : public QDialog {
     bool setAttribute();
     bool removeAttribute();
 
+    // The leaders the list shows: every one, or those the "Which leaders..."
+    // scope takes (ascending). The scope's problem, when the controls cannot
+    // be read, is in leaderListScopeProblem and the list is empty.
+    [[nodiscard]] std::vector<katana::entity::EntityId> listedLeaders() const;
+
     // ---- the For Selection tab
     bool makeForSelection();
     // What the last one made, as LEADER FOR replies.
     [[nodiscard]] QString forReport() const;
-    // What a leader for the first selected entity would say, or why not.
+    // What a leader for the first entity the scope takes would say, or why not.
     [[nodiscard]] QString forPreview() const;
     void insertForValue(const QString& name);
     // choosePreset for the leaders For Selection makes (LEADER FOR preset=).
@@ -177,6 +261,11 @@ class LeaderManagerDialog final : public QDialog {
     // The drawing's surfaces and alignments as a note reads them, made
     // afresh for each use (annotation/leader_presets.hpp).
     [[nodiscard]] katana::entity::LeaderContext readContext() const;
+    // Runs `line` through the executor and shows what came back: the problem
+    // line says why it was refused, empty when it was carried out. False when
+    // `line` could not be built (its error is shown), there is no executor, or
+    // the line was refused. `outcome`, when given, gets what the line logged.
+    bool submit(const katana::core::Result<QString>& line, VerbOutcome* outcome = nullptr);
     // The note made the preset chosen in the Leader tab's boxes, or the For
     // Selection tab's; true when none is chosen.
     bool usePreset(bool forTab);
@@ -198,9 +287,14 @@ class LeaderManagerDialog final : public QDialog {
     [[nodiscard]] std::vector<katana::entity::EntityId> selectedLeaders() const;
     [[nodiscard]] const katana::entity::LeaderGeometry* leader() const;
     [[nodiscard]] const katana::entity::Entity* forTarget() const;
+    // The entities the For Selection scope takes, or why it takes none.
+    [[nodiscard]] std::vector<katana::entity::EntityId> forTargets() const;
+    // The leaders the Arrange scope takes (ids), for the report.
     [[nodiscard]] katana::cad::annotation::LeadersForOptions forOptions() const;
 
     katana::cad::Document& document_;
+    CommandRunner run_;
+    std::function<std::vector<ScopeFilterView>()> views_;
     katana::entity::EntityId shown_ = 0;
     // The leader as the form last showed it: re-read only when the drawing's
     // differs, so an unrelated edit leaves unapplied changes in the form.
@@ -217,11 +311,16 @@ class LeaderManagerDialog final : public QDialog {
     // the next refresh starts the form afresh rather than applying edits
     // meant for the old drawing to a leader of the new one.
     bool replaced_ = false;
+    QString lastLine_;
 
     QTabWidget* tabs_ = nullptr;
     QLabel* problem_ = nullptr;
 
     // Leader
+    QToolButton* listScopeToggle_ = nullptr;
+    QWidget* listScopeArea_ = nullptr;
+    ScopeFilterWidget* listScope_ = nullptr;
+    QLabel* listScopeProblem_ = nullptr;
     QListWidget* list_ = nullptr;
     QLabel* scope_ = nullptr;
     QLabel* target_ = nullptr;
@@ -251,6 +350,8 @@ class LeaderManagerDialog final : public QDialog {
     QPushButton* apply_ = nullptr;
 
     // For Selection
+    ScopeFilterWidget* forScope_ = nullptr;
+    QLabel* forScopeReport_ = nullptr;
     QLabel* forSelection_ = nullptr;
     QComboBox* forNoteKind_ = nullptr;
     QComboBox* forPreset_ = nullptr;
@@ -272,13 +373,16 @@ class LeaderManagerDialog final : public QDialog {
     QLabel* forReport_ = nullptr;
 
     // Arrange
+    ScopeFilterWidget* arrangeScope_ = nullptr;
     QCheckBox* alignUseX_ = nullptr;
     QDoubleSpinBox* alignX_ = nullptr;
     QCheckBox* alignUseSpacing_ = nullptr;
     QDoubleSpinBox* alignSpacing_ = nullptr;
     QSpinBox* renumberStart_ = nullptr;
     QComboBox* renumberOrder_ = nullptr;
+    QCheckBox* renumberScoped_ = nullptr;
     QLabel* arrangeReport_ = nullptr;
+    QLineEdit* line_ = nullptr;
 
     katana::cad::Document::ListenerHandle replacedListener_{};
     // Last, so it goes first (docs/desktop.md).
