@@ -367,6 +367,24 @@ triangles, they do not reshape them.
   each makes, not the footprint, and patches of one surface cannot be joined
   without a rebuild of the whole). Nothing here runs in parallel, so the
   result cannot depend on the thread count.
+- **A record prints any finite number, in full.** The edits refuse a level past
+  `kMostMagnitude`, but a project, an archive or a LandXML file may hold one,
+  and the SURFACE records that name the surface (`bounds=`, `zmin=`, `zmax=`)
+  printed `nan` for a FINITE level whose digits and three decimals filled more
+  than the 64 characters their formatter had (1e61, a level of 61 digits,
+  where 1e60 filled it to the last). The formatter was written twice, in
+  `src/katana_cad/terrain/surface_verbs.cpp` and in
+  `src/katana_app/geo/replies.cpp`; it is now one, `core::formatFixed`
+  (`include/katana/core/text.hpp`), whose buffer is the longest fixed text of
+  a double (DBL_MAX, 309 digits) and which the two `fixed3` call. The text of
+  an ordinary value is unchanged byte for byte; a value that rounds to nothing
+  has no sign ("-0.0004" is "0.000", as before; "-0.0005" is "-0.001": the
+  double nearest it is a hair above the tie, and the exact value decides,
+  which is also how `to_chars` rounds); non-finite values are what `to_chars`
+  writes, "nan", "inf", "-inf". *Rejected:* printing the value in general
+  notation when it is too large for a buffer (a record's `zmax=1e+61` would be
+  a number of another shape than every other, and a reader that parses fixed
+  text would take it for a bound it is not).
 - **CLIP is BOUNDARY on a copy, OFFSET is RAISE on a copy**: one function
   each, the verbs name them for the person making a new surface.
 - **The active surface is the program's, not the drawing's.** Which surface
@@ -578,12 +596,6 @@ are measured on one machine in one run.
   one undo step (the surface handed to the job as the shared immutable pointer
   it already is, and `Document::surfacesCommand` built where it lands), which
   is a change of the window's executor and not of this area.
-- **A level too large for the surface record.** The edits refuse anything past
-  `kMostMagnitude`, but the SURFACE INFO record's number formatter (`fixed3`,
-  `surface_verbs.cpp`, and the copy in `src/katana_app/geo/replies.cpp` it came
-  from) still prints `nan` for a FINITE value its 64-byte buffer cannot hold
-  (about 1e60), so a surface read from a file with such a level is misreported;
-  those two files belong to the surfaces and geoprocessing areas, not this one.
 - **Deleting a breakline**, or a vertex on one: refused, by the rule that
   constrained edges are kept. A DELETE BREAKLINE that unflags edges is the
   natural addition.

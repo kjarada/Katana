@@ -665,7 +665,9 @@ steps with no name use the bound input and the run's output.
 One record per line: a word saying what it is, then `key=value` fields in a
 fixed order. A value holding a blank, a quote or an `=` is quoted
 (`cad::recordValue`); an empty one is bare (`aliases=`). A measure to the
-millimetre (`geo::fixed3`) that rounds to nothing has no sign: a surface of
+millimetre (`geo::fixed3`, a call of `core::formatFixed`, which writes any
+finite value in full - a level of 1e61 was `nan` - and shares its text with
+the SURFACE records) that rounds to nothing has no sign: a surface of
 a raster less its own surface said `zmin=-0.000`
 (`GisRecords.AValueThatRoundsToZeroHasNoSign`). Errors go to stderr as
 `error: <Code>: <message>`.
