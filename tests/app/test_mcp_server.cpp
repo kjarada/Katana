@@ -672,6 +672,37 @@ TEST_F(McpServer, AScriptsIndentedNoteRunsNothing)
     EXPECT_EQ(textOf(ran).find("not run"), std::string::npos) << textOf(ran);
 }
 
+TEST_F(McpServer, AScriptSavedInTheAnsiCodePageIsReadAsTextAndItsNamesAreUtf8)
+{
+    // A script saved from an ANSI editor on Windows holds e-acute as the byte 0xE9
+    // (Windows-1252, CP1252.TXT), which is no UTF-8. katana_run_script read it as
+    // bytes and the name went to the model as they were: LAYER NEW refused it, and
+    // a surface or style named so ended the server's next SAVE or JSON reply.
+    // Decoded as a text file is (core::decodeText) it is "Café" - C3 A9 - and
+    // the guess is said on stderr, the server's log.
+    const TempDir folder("ansi-script");
+    std::ofstream(folder.file("ansi.kcs"), std::ios::binary) << "LAYER NEW Caf\xE9\nLAYER LIST\n";
+    // A UTF-8 script with a byte order mark and Windows line ends, as Notepad writes
+    // "UTF-8 with BOM": the mark is not part of the first word.
+    std::ofstream(folder.file("bom.kcs"), std::ios::binary)
+        << "\xEF\xBB\xBF"
+        << "LAYER NEW Pente\xC2\xB0\r\nLAYER LIST\r\n";
+    initialize();
+    const Json ansi = call("katana_run_script", Json{{"path", folder.file("ansi.kcs")}});
+    EXPECT_FALSE(ansi["isError"].get<bool>()) << textOf(ansi);
+    EXPECT_NE(textOf(ansi).find("Caf\xC3\xA9"), std::string::npos) << textOf(ansi);
+    EXPECT_EQ(textOf(ansi).find("Caf\xE9"), std::string::npos) << "no raw 0xE9 in the reply";
+
+    const Json bom = call("katana_run_script", Json{{"path", folder.file("bom.kcs")}});
+    EXPECT_FALSE(bom["isError"].get<bool>()) << textOf(bom);
+    EXPECT_NE(textOf(bom).find("Pente\xC2\xB0"), std::string::npos) << textOf(bom);
+    EXPECT_EQ(textOf(bom).find("\xEF\xBB\xBF"), std::string::npos) << "the BOM is not a word";
+    // A script that is not there says so, and names the path.
+    const Json missing = call("katana_run_script", Json{{"path", folder.file("none.kcs")}});
+    EXPECT_TRUE(missing["isError"].get<bool>());
+    EXPECT_NE(textOf(missing).find("cannot read the script"), std::string::npos) << textOf(missing);
+}
+
 TEST_F(McpServer, TheWindowsOwnVerbsAreRefusedSayingWhereTheyRun)
 {
     // PLOT, SNAPSHOT, ONLINE and SCRIPT run only in the desktop window; an

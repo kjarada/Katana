@@ -75,6 +75,9 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "2 entities.*Polyline.*layer=Survey.*area=600")
     set_tests_properties(cli.rejects_bad_input PROPERTIES WILL_FAIL TRUE)
 
+    # Names and paths outside ASCII, through the real programs (text_cli.cmake).
+    include("${CMAKE_CURRENT_SOURCE_DIR}/text_cli.cmake")
+
     # VERTEX INSERT with a point OF the polyline (docs/drawing.md, "What a
     # vertex tool acts on"): "#1@4,0.3" is the place on it nearest (4,0.3),
     # ON the line, as the window's Insert Vertex puts a click; "#1.s1" with

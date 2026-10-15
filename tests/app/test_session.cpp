@@ -377,6 +377,79 @@ TEST(Session, ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes)
     EXPECT_EQ(refused.err.find('\n'), refused.err.size() - 1) << refused.err;
 }
 
+TEST(Session, ALineThatIsNotUtf8IsReadAsWindows1252AndSaidOnceAndBecomesAName)
+{
+    // What a pipe from a program that writes the ANSI code page, or a script saved
+    // from an ANSI editor, hands the session: 0xE9 for e-acute, 0xB0 for the degree
+    // sign (Windows-1252, CP1252.TXT) - U+00E9 and U+00B0, UTF-8 C3 A9 and C2 B0.
+    // Refused, as a layer's name once was, it turns a keyboard away; passed on, it
+    // ended the process at the next JSON writer.
+    Session session(nullptr);
+    const Printed first = run(session, "LAYER NEW Caf\xE9");
+    EXPECT_TRUE(first.ok) << first.err;
+    EXPECT_TRUE(contains(first.err, "Windows-1252")) << "the guess is said: " << first.err;
+    EXPECT_TRUE(contains(first.out, "layer Caf\xC3\xA9 created")) << first.out;
+
+    const Printed second = run(session, "LAYER NEW Pente\xB0");
+    EXPECT_TRUE(second.ok) << second.err;
+    EXPECT_FALSE(contains(second.err, "Windows-1252")) << "once a session, not once a line";
+    EXPECT_TRUE(contains(second.out, "layer Pente\xC2\xB0 created")) << second.out;
+
+    // A line that already is UTF-8 is not read a second time as two letters.
+    const Printed utf8 = run(session, "LAYER NEW Gr\xC3\xBC\xC3\x9F");
+    EXPECT_TRUE(utf8.ok);
+    EXPECT_TRUE(contains(utf8.out, "layer Gr\xC3\xBC\xC3\x9F created")) << utf8.out;
+}
+
+TEST(Session, AStyleNamedInTheAnsiCodePageListsAsJsonAndSavesWithoutEndingTheProcess)
+{
+    // SURFACESTYLE NEW Pente + 0xB0, then SURFACESTYLE LIST JSON and SAVE, threw
+    // nlohmann's type_error.316 out of Session::run (exit 127 in katana_cli, the
+    // session's work lost). The name is now text: UTF-8 from the first line on.
+    const ScratchDirectory scratch("ansi-style");
+    Session session(nullptr);
+    ASSERT_TRUE(run(session, "SURFACESTYLE NEW Pente\xB0").ok);
+    const Printed listed = run(session, "SURFACESTYLE LIST JSON");
+    EXPECT_TRUE(listed.ok) << listed.err;
+    EXPECT_TRUE(contains(listed.out, "\"name\":\"Pente\xC2\xB0\"")) << listed.out;
+    EXPECT_TRUE(run(session, "LEADER LIST JSON").ok);
+    const Printed saved =
+        run(session, "SAVE \"" + (scratch.path / "p").generic_string() + "\"");
+    EXPECT_TRUE(saved.ok) << saved.err;
+    EXPECT_TRUE(contains(saved.out, "saved to")) << saved.out;
+}
+
+TEST(Session, ANonUtf8PathInALineIsAnAnswerNotAnExceptionOutOfRun)
+{
+    // OPEN of a path with 0xE9 in it handed std::filesystem bytes it throws on, and
+    // the session let it out: katana_cli ended and an MCP --project ended before it
+    // answered. The line is read as text first, names a folder that is not there,
+    // and fails like any other.
+    const ScratchDirectory scratch("ansi-path");
+    Session session(nullptr);
+    Printed opened;
+    EXPECT_NO_THROW(opened = run(session, "OPEN \"" + scratch.path.generic_string() + "/Jos\xE9\""));
+    EXPECT_FALSE(opened.ok);
+    EXPECT_TRUE(contains(opened.err, "error: ")) << opened.err;
+    // And the script reader: a script saved in the ANSI page is text, its path a UTF-8
+    // path, and a missing one is a Status that names it.
+    const auto missing = Session::readScript(scratch.path.generic_string() + "/none.kcs");
+    ASSERT_FALSE(missing.ok());
+    EXPECT_EQ(missing.error().code, katana::core::ErrorCode::NotFound);
+    const std::string script = scratch.file("ansi.kcs", "LAYER NEW Caf\xE9\r\n\r\nLAYER LIST\r\n");
+    testing::internal::CaptureStderr();
+    const auto lines =
+        Session::readScript(scratch.path.generic_string() + "/ansi.kcs");
+    const std::string said = testing::internal::GetCapturedStderr();
+    ASSERT_TRUE(lines.ok()) << lines.error().describe();
+    ASSERT_EQ(lines->size(), 3U) << "CRLF ends a line and a blank line in the middle is kept";
+    EXPECT_EQ((*lines)[0], "LAYER NEW Caf\xC3\xA9");
+    EXPECT_EQ((*lines)[1], "");
+    EXPECT_EQ((*lines)[2], "LAYER LIST");
+    EXPECT_TRUE(contains(said, "Windows-1252")) << said;
+    EXPECT_FALSE(script.empty());
+}
+
 TEST(Session, InfoWithAnEntityIdDescribesTheEntityInEveryBuild)
 {
     // With the GIS module every INFO was once read as INFO <file>, before the
