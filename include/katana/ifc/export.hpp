@@ -144,7 +144,9 @@ struct UtilityInput {
 // ("Length", "Width", "Thickness", "GrossArea", "GrossVolume", "Weight",
 // "Count") and written as the IfcPhysicalSimpleQuantity its unit says:
 // "m" IfcQuantityLength, "m2" IfcQuantityArea, "m3" IfcQuantityVolume, "kg"
-// or "t" IfcQuantityWeight (in kilograms), "" IfcQuantityCount.
+// or "t" IfcQuantityWeight (in kilograms), "" IfcQuantityCount - written as an
+// INTEGER, which IFC4X3_ADD2 asks of it; a count that is not a whole number
+// is left out, said.
 struct RoadQuantity {
     std::string name;
     double value = 0.0;

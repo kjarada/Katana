@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -644,8 +645,11 @@ TEST(IfcExportRoad, QuantitiesTheTemplateNamesAreBaseQuantitiesAndTheRestKatanas
     EXPECT_EQ(quantitiesOf(all, sign.at("'Qto_SignBaseQuantities'")),
               (std::set<std::string>{"IFCQUANTITYLENGTH('Height',$,$,0.9,$)",
                                      "IFCQUANTITYLENGTH('Width',$,$,0.6,$)"}));
+    // A count is an INTEGER, "1" and not "1.": CountValue is an IfcCountMeasure,
+    // and IFC 4.3.2.0 (IFC4X3_ADD2) declares `TYPE IfcCountMeasure = INTEGER`
+    // (IFC4 declared a NUMBER, which is why the REAL was written).
     EXPECT_EQ(quantitiesOf(all, sign.at("'Katana_Quantities'")),
-              std::set<std::string>{"IFCQUANTITYCOUNT('Count',$,$,1.,$)"});
+              std::set<std::string>{"IFCQUANTITYCOUNT('Count',$,$,1,$)"});
 
     // The fill's compacted volume is its template's (6.6.5.4); the wall,
     // whose class has no template here, has no quantity set at all.
@@ -674,6 +678,64 @@ TEST(IfcExportRoad, AQuantityTheSchemaWouldRefuseIsLeftOutAndSaid)
     EXPECT_TRUE(warned(out, "quantities in \"ft\" are left out"));
     EXPECT_TRUE(warned(out, "1 road element quantities are negative"));
     EXPECT_TRUE(warned(out, "repeat a name on their element"));
+}
+
+// IfcQuantityCount's CountValue is an IfcCountMeasure: an INTEGER in IFC4X3_ADD2
+// (`TYPE IfcCountMeasure = INTEGER`), so a count is written as one. A count
+// with no integer spelling is left out, said: a half (2.5), and one past the
+// largest 32-bit signed integer, 2147483647 - IfcOpenShell 0.8.5 reads a larger
+// STEP INTEGER as 2147483647, silently. By hand, for each:
+//   Posts    28            -> 28
+//   None     0             -> 0 (a count may be none; not negative)
+//   Nearly   12 - 4e-10    -> 12 (4e-10 from a whole number, inside the 1e-9 a
+//                             few roundings of a count stay within)
+//   Largest  2147483647    -> 2147483647 (the bound itself is written)
+//   Half     2.5, Past 2147483648, Huge 3000000000 -> left out, 3 said
+// and a left-out count does not take its name: a second "Half" that is whole
+// is written.
+TEST(IfcExportRoad, ACountIsAnIntegerAndOneThatCannotBeIsLeftOutAndSaid)
+{
+    ifc::ExportInput input;
+    auto posts = element("p", "sign", {"IfcSign", "PICTORAL", {}}, "", "",
+                         box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0));
+    posts.quantities = {{"Posts", 28.0, ""},
+                        {"None", 0.0, ""},
+                        {"Nearly", 12.0 - 4e-10, ""},
+                        {"Largest", 2147483647.0, ""},
+                        {"Half", 2.5, ""},
+                        {"Past", 2147483648.0, ""},
+                        {"Huge", 3000000000.0, ""},
+                        {"Half", 3.0, ""}};
+    input.road.elements.push_back(posts);
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_EQ(quantitiesOf(all, setsOf(all, byTag(all, "p")).at("'Katana_Quantities'")),
+              (std::set<std::string>{"IFCQUANTITYCOUNT('Posts',$,$,28,$)",
+                                     "IFCQUANTITYCOUNT('None',$,$,0,$)",
+                                     "IFCQUANTITYCOUNT('Nearly',$,$,12,$)",
+                                     "IFCQUANTITYCOUNT('Largest',$,$,2147483647,$)",
+                                     "IFCQUANTITYCOUNT('Half',$,$,3,$)"}));
+    EXPECT_TRUE(warned(out, "3 road element counts are not whole numbers"));
+    // No REAL is ever written for a count, whatever its value.
+    EXPECT_EQ(out.text.find("IFCQUANTITYCOUNT('Posts',$,$,28.,"), std::string::npos);
+}
+
+// A count that is not finite or is negative is the same refusal as any other
+// quantity's (the schema's WR), said with those, not as a fractional count.
+TEST(IfcExportRoad, ACountThatIsNegativeOrNotFiniteIsLeftOutWithTheOtherInvalidQuantities)
+{
+    ifc::ExportInput input;
+    auto posts = element("p", "sign", {"IfcSign", "PICTORAL", {}}, "", "",
+                         box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0));
+    posts.quantities = {{"Negative", -1.0, ""},
+                        {"Infinite", std::numeric_limits<double>::infinity(), ""},
+                        {"Missing", std::numeric_limits<double>::quiet_NaN(), ""}};
+    input.road.elements.push_back(posts);
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_FALSE(setsOf(all, byTag(all, "p")).contains("'Katana_Quantities'"));
+    EXPECT_TRUE(warned(out, "3 road element quantities are negative, not finite or unnamed"));
+    EXPECT_FALSE(warned(out, "counts are not whole numbers"));
 }
 
 // What Katana knows of the element (Katana_RoadElement) and the element's own

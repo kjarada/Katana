@@ -622,7 +622,15 @@ Qto_ set (a set holding names its template lacks), and every quantity in
 Katana's own (a take-off tool would find none). A quantity in another unit, a
 negative or non-finite one (each quantity's WR: not negative) and a second of
 one name on an element (UniqueQuantityNames) are left out, each kind said
-once.
+once. **A count is an INTEGER**: `IfcQuantityCount`'s `CountValue` is an
+`IfcCountMeasure`, a NUMBER in IFC4 but `TYPE IfcCountMeasure = INTEGER` in
+IFC4X3_ADD2, the schema the file declares, so `28.` is not valid there and
+`28` is. A count that is not a whole number (within 1e-9, `math::tolerance::kRelative`)
+or is above 2147483647 has no spelling and is left out, said once: the
+bound is the largest 32-bit signed integer because IfcOpenShell 0.8.5 reads a
+larger STEP INTEGER as that number, without a word (3000000000 came back as
+2147483647), which would be worse than absent
+(`IfcExportRoad.ACountIsAnIntegerAndOneThatCannotBeIsLeftOutAndSaid`).
 
 **Properties.** `Katana_RoadElement`: the object's id, kind, facility, part,
 layer, material and whether its body is a closed solid. `Katana_RoadProperties`:
@@ -756,13 +764,21 @@ mistake in the writer and the same mistake in the reader cannot agree:
   `IfcExportRoad.TheRoadModelIsWrittenForTheValidator` and judged by
   `tools/check_ifc.py` in `ifc.the_road_model_export_is_valid_to_ifcopenshell`,
   registered beside the others where IfcOpenShell is installed
-  (`tests/ifc/CMakeLists.txt`). It has **not yet been run**: IfcOpenShell is
-  not installed on the machine the road model was written on (2026-10-15),
-  nor have buildingSMART's rules been run on it. What the schema asks that
-  IfcOpenShell checks was worked through by hand from each class's page -
-  the attribute counts, the features' mandatory inverses, NoVoidElement,
-  each quantity's WR, UniqueQuantityNames - and the tests pin it; the first
-  run where IfcOpenShell is installed is what settles it.
+  (`tests/ifc/CMakeLists.txt`). Its first run (2026-10-15, by the review that
+  followed the road model's merge) found one finding on a corridor with a
+  barrier (IfcOpenShell 0.8.5 and 0.9.0 alike) and 18 on one with a sign,
+  lights, walls, guide posts, a fence, a marking and a barrier (0.9.0),
+  **every one an
+  `IfcQuantityCount` written as a REAL** (`28.`), where IFC4X3_ADD2 asks for
+  an INTEGER; the hand-worked reading of the schema had missed it, and the
+  test had pinned the wrong spelling. Counts are written as integers now (see
+  "Quantities"). Nothing else was reported: the attribute counts, the
+  features' mandatory inverses, NoVoidElement, each quantity's WR and
+  UniqueQuantityNames all passed, with the EXPRESS rules on (0.8.5). The fixed
+  writer's file has to be judged again before this is called clean, and
+  buildingSMART's rules have not been run on the road model at all.
+  `tools/check_ifc.py` runs under both versions (0.9 dropped
+  `entity_instance.wrapped_data`, which the alignment evaluator used).
 - **Import**: all 46 files of buildingSMART's IFC 4.3 sample models
   (`IFC4.3.x-sample-models` at 50e6c5c) import without error by hand; the
   railway sample's alignment is reconstructed to 4 PIs, and the UTM and

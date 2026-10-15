@@ -79,6 +79,7 @@
 #include <vector>
 
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 #include "parts.hpp"
 #include "product_layout.hpp"
 
@@ -135,6 +136,28 @@ std::optional<Measured> measured(const RoadQuantity& quantity)
         return Measured{QuantityKind::Count, quantity.value};
     }
     return std::nullopt;
+}
+
+// IfcQuantityCount's CountValue is an IfcCountMeasure, which is an INTEGER in
+// IFC4X3_ADD2 (the type is `TYPE IfcCountMeasure = INTEGER`; in IFC4 it was a
+// NUMBER, so a REAL there was valid and is not here: IfcOpenShell 0.8.5 and
+// 0.9.0 both refuse `28.`). A count is written as that integer; one that is
+// not a whole number, or that is beyond what a 32-bit reader holds, has no
+// valid spelling and is left out, said. The bound is the largest 32-bit signed
+// integer because that is what IfcOpenShell 0.8.5 reads a larger STEP INTEGER
+// as (3000000000 came back as 2147483647), silently, which is worse than
+// absent. The tolerance is math::tolerance::kRelative from the nearest whole
+// number: a count is dimensionless, its double spacing is 1.2e-10 up to
+// a million, and a few operations on it stay inside 1e-9.
+constexpr double kLargestCount = 2147483647.0;
+
+std::optional<long long> wholeCount(double value)
+{
+    const double whole = std::round(value);
+    if (!(whole <= kLargestCount) || !math::nearlyZero(value - whole, math::tolerance::kRelative)) {
+        return std::nullopt;
+    }
+    return static_cast<long long>(whole);
 }
 
 // A class's base quantity set: its name, and each quantity it defines with
@@ -822,6 +845,14 @@ class RoadWriter {
                 ++invalidQuantities_; // the schema's WR: a quantity's value is not negative
                 continue;
             }
+            std::optional<long long> count;
+            if (value->kind == QuantityKind::Count) {
+                count = wholeCount(value->value);
+                if (!count) {
+                    ++fractionalCounts_; // before the name is taken: nothing was written
+                    continue;
+                }
+            }
             if (!named.insert(quantity.name).second) {
                 ++repeatedQuantities_; // UniqueQuantityNames, within the element
                 continue;
@@ -833,7 +864,11 @@ class RoadWriter {
             } else {
                 args.null(); // the project's unit (writeProjectFrame)
             }
-            args.real(value->value).null();
+            if (count) {
+                args.integer(*count).null(); // INTEGER, not REAL (wholeCount)
+            } else {
+                args.real(value->value).null();
+            }
             const Id id = b_.file().add(entityOf(value->kind), args);
             (base != nullptr && templateDefines(*base, quantity.name, value->kind) ? standard : own)
                 .push_back(id);
@@ -908,6 +943,11 @@ class RoadWriter {
             b_.warn(std::to_string(invalidQuantities_) +
                     " road element quantities are negative, not finite or unnamed and are left out");
         }
+        if (fractionalCounts_ > 0) {
+            b_.warn(std::to_string(fractionalCounts_) +
+                    " road element counts are not whole numbers, or are beyond 2147483647, and are "
+                    "left out: IfcQuantityCount takes an INTEGER in IFC4X3_ADD2");
+        }
         if (repeatedQuantities_ > 0 || repeated_ > 0) {
             b_.warn(std::to_string(repeatedQuantities_ + repeated_) +
                     " road element quantities or properties repeat a name on their element; the "
@@ -940,6 +980,7 @@ class RoadWriter {
     std::set<std::string> units_;
     std::size_t open_ = 0;
     std::size_t invalidQuantities_ = 0;
+    std::size_t fractionalCounts_ = 0;
     std::size_t repeatedQuantities_ = 0;
     std::size_t repeated_ = 0;
     std::size_t unnamed_ = 0;
