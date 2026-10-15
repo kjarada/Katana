@@ -680,7 +680,16 @@ per-machine installer.
   `packaging_installer_licence_check_*` hand the check a configure wrong in one
   way each - no licence file, a page of Unix line ends with no licence, a
   template with no page, notices no install rule names - and read the refusal.
-  The release smoke test checks that each package holds the notices.
+  The release smoke test checks that each package holds the notices. *Seen,
+  2026-10-15:* the interactive installer, run on a machine that already had
+  Katana installed (so it first asked about uninstalling the old one, answered
+  No), showed Welcome, then **License Agreement** with the header "Please review
+  the licence of Katana before installing it.", the licence text in its scroll
+  box beginning with the note and the copyright line, the line that nobody has to
+  accept it, and **Next >** between **< Back** and **Cancel**; it was closed
+  there, before the Install step, so nothing was written. (Run an installer from a
+  shell with `MSYS2_ARG_CONV_EXCL='*'`, or `/S` is rewritten as a path and the
+  wizard opens instead of a silent install.)
 * **NSIS.** The template, `cmake/NSIS.template.in`, replaces CPack's: CPack's asks
   for administrator rights, writes `HKLM` and installs to Program Files. It has no
   components, no "add to PATH" and no Install Options page (Katana has never
