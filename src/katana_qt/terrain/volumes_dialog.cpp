@@ -361,6 +361,13 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
                                                "midpoint rule on square cells."),
                                 gridPage));
     methods_->addTab(gridPage, QStringLiteral("Grid"));
+    // The tabs are as tall as the page shown, not as the tallest page: a tab
+    // widget keeps room for every page, and Along Alignment's mass haul chart
+    // made each of the others a tall empty block - the dialog some 1550 px,
+    // taller than a laptop's screen. A page not shown is Ignored, which a
+    // stacked layout leaves out of its size (fitMethodPage); the height left
+    // goes to the results table (stretch 1 below).
+    methods_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     layout->addWidget(methods_);
 
     // The boundary: none, the shared scope and filter, or typed corners.
@@ -526,7 +533,19 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
         connect(radio, &QRadioButton::toggled, this, [this] { refreshLine(); });
     }
     connect(each_, &QCheckBox::toggled, this, [this] { refreshLine(); });
-    connect(methods_, &QTabWidget::currentChanged, this, [this] { refreshLine(); });
+    const auto fitMethodPage = [this] {
+        for (int index = 0; index < methods_->count(); ++index) {
+            methods_->widget(index)->setSizePolicy(
+                QSizePolicy::Preferred,
+                index == methods_->currentIndex() ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+        }
+        methods_->updateGeometry();
+    };
+    fitMethodPage();
+    connect(methods_, &QTabWidget::currentChanged, this, [this, fitMethodPage] {
+        fitMethodPage();
+        refreshLine();
+    });
     scope_->onChanged = [this] { refreshLine(); };
 
     resize(760, 860);
