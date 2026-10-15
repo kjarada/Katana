@@ -626,6 +626,13 @@ another build with `tools/compare_benchmarks.py --alternate`.
 
 ## Not done
 
+* `SURFACE LEGEND JSON` (and `LEADER LIST JSON`, docs/annotation.md) write
+  U+FFFD for a byte of a name that is not UTF-8 instead of throwing, as a second
+  line behind `SurfaceStore::checkName` and the repair on open. No test reaches
+  that guard: nothing puts such a name into a Document any more. A mutation check
+  (2026-10-15) put the strict `dump` back in both and every test still passed, so
+  those two verbs are protected at the door only; a test needs a seam that skips
+  `SurfaceStore::add`.
 * A legend on a plot or sheet (a sheet's title-block legend), and a View
   menu switch to hide the screen legend (today: a style without faces has
   none).
