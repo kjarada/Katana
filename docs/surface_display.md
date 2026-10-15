@@ -738,7 +738,11 @@ another build with `tools/compare_benchmarks.py --alternate`.
   the door (`SURFACE LEGEND JSON` has one, "On the command line").
 * A legend on a plot or sheet (a sheet's title-block legend), and a View
   menu switch to hide the screen legend (today: a style without faces has
-  none).
+  none). The pieces exist - `cad::SurfaceLegendCard` is plain data, and
+  `paintSurfaceLegendStack` takes any painter - but where a sheet keeps one is
+  undecided: a line of the smart legend (`computeLegend`), an option of the
+  plan viewport (a change to the sheet set's schema, on every surface at once),
+  or a block of the title block; a plot made by `PLOT` has no sheet to hold it.
 * The plan view's faces are not shaded (no hillshade in plan); a hillshade
   face colouring would be a fifth `SurfaceFaces` value and a contract change.
 * Smooth elevation in plan evaluates the ramp at every pixel; a lookup table
