@@ -236,8 +236,7 @@ TEST(SectionRecut, ASectionThatCannotBeCutAgainSaysItsSurfacesChangedAndKeepsIts
 
 TEST(SectionRecut, TheDesignProfileAndItsNameRideIntoTheCutAgain)
 {
-    // The sag from the profile tests: PVIs (0, 16), (100, 13, L = 100) ... kept to the
-    // 100 m section: PVIs (0, 16) and (100, 18), a 2% grade, 18 at the east end.
+    // A design of two PVIs, (0, 16) and (100, 18): a straight 2% grade, 18 at the east end.
     katana::geometry::VerticalAlignment definition;
     definition.pvis = {katana::geometry::ProfilePVI{0.0, 16.0},
                        katana::geometry::ProfilePVI{100.0, 18.0}};
