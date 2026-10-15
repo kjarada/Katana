@@ -25,6 +25,8 @@
 //   CORRIDOR QUANTITIES <c>|ALL [csv=<file> [OVERWRITE]]
 //
 //   ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>
+//   ROADMODEL SHOW [ON|OFF]    the desktop window's alone (it is taken before it
+//                              reaches here); a session with no views refuses it
 //
 // <kind> is lane, shoulder, kerb, footpath, verge, median, drain or batter.
 // <component> is side:name (left:lane) or name, which is every side that has

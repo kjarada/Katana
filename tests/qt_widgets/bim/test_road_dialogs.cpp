@@ -28,6 +28,7 @@
 #include <QTemporaryDir>
 #include <QToolBar>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,6 +37,7 @@
 #include "bim/corridor_quantities_dialog.hpp"
 #include "bim/road_template_manager.hpp"
 #include "bim/road_workbench.hpp"
+#include "command_reference_dialog.hpp"
 #include "command_runner.hpp"
 #include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -45,6 +47,7 @@
 #include "katana/geometry/mesh.hpp"
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_surface.hpp"
+#include "plan_painter.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
 
@@ -1276,4 +1279,147 @@ TEST(RoadTemplateManager, AKerbsFacingIsAGridColumnAnApplySendsAndNothingElseHas
     ASSERT_GE(strip, 0);
     EXPECT_TRUE(components->item(strip, 6)->text().isEmpty());
     EXPECT_FALSE(components->item(strip, 6)->flags() & Qt::ItemIsEditable);
+}
+
+// ---- Show Road Model's line, and the Command Reference's section of the road verbs ------------
+
+// ROADMODEL SHOW [ON|OFF] is the window's, as GRID is (docs/road_design.md, "In the
+// window"): the workbench takes it before the interpreter does and switches what
+// the menu's item switches, saying roadmodel=on or off once; any other ROADMODEL
+// line is not its.
+TEST(RoadWorkbench, ShowRoadModelHasALineThatSwitchesItOnOrOffOrToggles)
+{
+    Document document;
+    Executor executor(document);
+    QMainWindow window;
+    QMenu menu;
+    std::vector<QString> logged;
+    std::vector<bool> loggedAsError;
+    std::vector<std::size_t> handed;
+    katana::qt::RoadServices services;
+    services.document = &document;
+    services.makeAction = [&window](katana::qt::Icon, const QString& text, const QString& tip,
+                                    const QKeySequence& shortcut, const QString& name) {
+        auto* action = new QAction(text, &window);
+        action->setObjectName(name);
+        action->setStatusTip(tip);
+        action->setShortcut(shortcut);
+        return action;
+    };
+    services.log = [&](const QString& text, bool isError) {
+        logged.push_back(text);
+        loggedAsError.push_back(isError);
+    };
+    services.run = executor.runner();
+    services.headless = [] { return true; };
+    services.setRoadMeshes = [&handed](std::vector<katana::cad::SceneMesh> meshes) {
+        handed.push_back(meshes.size());
+    };
+    katana::qt::RoadWorkbench workbench(window, std::move(services), menu);
+    QAction* show = nullptr;
+    for (QAction* action : menu.actions()) {
+        if (action->objectName() == "bimShowRoadModel") {
+            show = action;
+        }
+    }
+    ASSERT_NE(show, nullptr);
+    road(executor);
+    executor.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    workbench.syncViews();
+    const std::size_t objects = katana::cad::bim::bimModel(document)->objects.size();
+    ASSERT_GT(objects, 0u);
+    ASSERT_TRUE(show->isChecked());
+    ASSERT_EQ(handed.back(), objects);
+
+    // Not its: the rest of ROADMODEL, other verbs, nothing, and SHOW alone as a word.
+    for (const char* other : {"ROADMODEL", "ROADMODEL LIST", "ROADMODEL JSON", "CORRIDOR SHOW",
+                              "SHOW", "", "roadmodels show"}) {
+        logged.clear();
+        EXPECT_FALSE(workbench.runLine(other)) << other;
+        EXPECT_TRUE(logged.empty()) << other;
+    }
+
+    // OFF: the menu item, the views and the painter follow, and it says so once.
+    logged.clear();
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW OFF"));
+    EXPECT_FALSE(show->isChecked());
+    EXPECT_FALSE(katana::qt::roadModelShown());
+    EXPECT_EQ(handed.back(), 0u);
+    ASSERT_EQ(logged.size(), 1u) << "the item's own message is not said as well";
+    EXPECT_EQ(logged.back().toStdString(), "roadmodel=off");
+    EXPECT_FALSE(loggedAsError.back());
+    // The words are read in any case, and OFF again changes nothing more.
+    logged.clear();
+    EXPECT_TRUE(workbench.runLine("roadmodel show off"));
+    EXPECT_FALSE(show->isChecked());
+    EXPECT_EQ(logged.back().toStdString(), "roadmodel=off");
+
+    // Alone, it is the other of the two; ON puts the objects back.
+    logged.clear();
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW"));
+    EXPECT_TRUE(show->isChecked());
+    EXPECT_TRUE(katana::qt::roadModelShown());
+    EXPECT_EQ(handed.back(), objects);
+    EXPECT_EQ(logged.back().toStdString(), "roadmodel=on");
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW"));
+    EXPECT_FALSE(show->isChecked());
+    EXPECT_EQ(handed.back(), 0u);
+    EXPECT_TRUE(workbench.runLine("ROADMODEL SHOW ON"));
+    EXPECT_TRUE(show->isChecked());
+    EXPECT_EQ(handed.back(), objects);
+
+    // A word that is neither is its usage, as an error, and changes nothing.
+    for (const char* wrong : {"ROADMODEL SHOW MAYBE", "ROADMODEL SHOW ON OFF",
+                              "ROADMODEL SHOW 1"}) {
+        logged.clear();
+        loggedAsError.clear();
+        EXPECT_TRUE(workbench.runLine(wrong)) << wrong;
+        ASSERT_EQ(logged.size(), 1u) << wrong;
+        EXPECT_EQ(logged.back().toStdString(), "usage: ROADMODEL SHOW [ON|OFF]") << wrong;
+        EXPECT_TRUE(loggedAsError.back()) << wrong;
+        EXPECT_TRUE(show->isChecked()) << wrong;
+    }
+    // The menu's own item still says what it did, in its own words.
+    logged.clear();
+    show->setChecked(false);
+    ASSERT_EQ(logged.size(), 1u);
+    EXPECT_EQ(logged.back().toStdString(), "road model hidden");
+    show->setChecked(true); // the session's switch, back as it was
+}
+
+// Help > Command Reference reads HELP CORRIDOR as a section of its own, so a word
+// added to the road verbs' help is there at once; and the window's own row names
+// the line that is the window's alone.
+TEST(RoadWorkbench, TheCommandReferenceHasTheRoadVerbsInASectionOfTheirOwn)
+{
+    const auto sections = katana::qt::commandReferenceSections();
+    const auto found = std::ranges::find(sections, QString("Road model"),
+                                         &katana::qt::ReferenceSection::name);
+    ASSERT_NE(found, sections.end());
+    ASSERT_FALSE(found->entries.empty());
+    EXPECT_EQ(found->entries.front().title, "About");
+    QStringList words;
+    for (const auto& entry : found->entries) {
+        words << entry.text;
+    }
+    const QString all = words.join('\n');
+    for (const char* line : {"ROADTEMPLATE ADD", "ROADTEMPLATE EXPORT <t>|ALL <file.json>",
+                             "ROADTEMPLATE IMPORT <file.json> [OVERWRITE]", "CORRIDOR NEW",
+                             "CORRIDOR QUANTITIES", "ROADMODEL SHOW [ON|OFF]"}) {
+        EXPECT_TRUE(all.contains(line)) << line;
+    }
+    // A verb is found by its title, and a double-click puts it on the command line.
+    const auto corridor = std::ranges::find(found->entries, QString("CORRIDOR NEW"),
+                                            &katana::qt::ReferenceEntry::title);
+    ASSERT_NE(corridor, found->entries.end());
+    EXPECT_EQ(corridor->verb, "CORRIDOR NEW");
+    // The Commands section still has the one row of the family.
+    const auto commands = std::ranges::find(sections, QString("Commands"),
+                                            &katana::qt::ReferenceSection::name);
+    ASSERT_NE(commands, sections.end());
+    EXPECT_NE(std::ranges::find(commands->entries, QString("Road"),
+                                &katana::qt::ReferenceEntry::title),
+              commands->entries.end());
+    // The window's rows name ROADMODEL SHOW, as they name GRID.
+    EXPECT_TRUE(katana::qt::windowHelpText().contains("ROADMODEL SHOW [ON|OFF]"));
 }

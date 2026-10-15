@@ -3290,6 +3290,11 @@ bool MainWindow::runWorkbenchLine(const QString& line)
     if (online_ != nullptr && online_->runLine(line)) {
         return true;
     }
+    // ROADMODEL SHOW [ON|OFF]: Show Road Model's line, the window's own as GRID
+    // is (the rest of ROADMODEL is the interpreter's).
+    if (road_ != nullptr && road_->runLine(line)) {
+        return true;
+    }
     // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW, REGRADE, SCHEDULE: the
     // interpreter's verb, through the utilities workbench, which frames what a
     // DRAW or a REGRADE drew.

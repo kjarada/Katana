@@ -280,3 +280,13 @@ set_tests_properties(cli.road_templates_imported_over_the_standard_ones_replace_
     FIXTURES_REQUIRED cli_road_templates_written
     PASS_REGULAR_EXPRESSION "templates=3 added=0 replaced=3.*side=left name=lane kind=lane width=3[.]6 .*1 undone.*side=left name=lane kind=lane width=3[.]3 "
     FAIL_REGULAR_EXPRESSION "error")
+
+# ROADMODEL SHOW is the desktop window's, as GRID is: katana_cli has no views, says
+# so by name, and the script stops there.
+add_test(NAME cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> ${_road_setup} -c "ROADMODEL SHOW OFF"
+            -c "ROADMODEL NEVER REACHED")
+set_tests_properties(cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so PROPERTIES
+    PASS_REGULAR_EXPRESSION "Unsupported: ROADMODEL SHOW is the desktop window's"
+    FAIL_REGULAR_EXPRESSION "NEVER REACHED")

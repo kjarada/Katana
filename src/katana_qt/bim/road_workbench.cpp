@@ -5,9 +5,12 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QObject>
+#include <QSignalBlocker>
+#include <QStringList>
 #include <QTimer>
 #include <QToolBar>
 
+#include <optional>
 #include <utility>
 
 #include "bim/corridor_dialog.hpp"
@@ -93,8 +96,7 @@ RoadWorkbench::RoadWorkbench(QMainWindow& window, RoadServices services, QMenu& 
         });
     });
     QObject::connect(show_, &QAction::toggled, guard_.get(), [this](bool on) {
-        setRoadModelShown(on);
-        syncViews();
+        setShown(on);
         if (services_.log) {
             services_.log(QString("road model %1").arg(on ? "shown" : "hidden"), false);
         }
@@ -120,6 +122,46 @@ RoadWorkbench::~RoadWorkbench()
     delete templateManager_.data();
     delete corridorDialog_.data();
     delete quantitiesDialog_.data();
+}
+
+void RoadWorkbench::setShown(bool on)
+{
+    setRoadModelShown(on);
+    syncViews();
+}
+
+bool RoadWorkbench::runLine(const QString& line)
+{
+    const QStringList words = line.split(' ', Qt::SkipEmptyParts);
+    if (words.size() < 2 || words[0].toUpper() != "ROADMODEL" || words[1].toUpper() != "SHOW") {
+        return false;
+    }
+    // ON, OFF, or nothing to toggle - and anything else refused, as GRID has it.
+    std::optional<bool> on;
+    if (words.size() == 2) {
+        on = !show_->isChecked();
+    } else if (words.size() == 3 && words[2].toUpper() == "ON") {
+        on = true;
+    } else if (words.size() == 3 && words[2].toUpper() == "OFF") {
+        on = false;
+    }
+    if (!on) {
+        if (services_.log) {
+            services_.log("usage: ROADMODEL SHOW [ON|OFF]", true);
+        }
+        return true;
+    }
+    // The action follows the line without its own message, which the line's
+    // reply replaces; the views and the painter are set the same way.
+    {
+        const QSignalBlocker quiet(show_);
+        show_->setChecked(*on);
+    }
+    setShown(*on);
+    if (services_.log) {
+        services_.log(QString("roadmodel=%1").arg(*on ? "on" : "off"), false);
+    }
+    return true;
 }
 
 void RoadWorkbench::fillToolBar(QToolBar& toolBar)

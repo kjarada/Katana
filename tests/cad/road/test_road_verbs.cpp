@@ -1630,3 +1630,29 @@ TEST(RoadVerbs, AnExportWritesAFileOnlyWhereThereIsNoneOrOverwriteSaysSoAndRefus
     EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "ROADTEMPLATE IMPORT <file.json> [OVERWRITE]"));
     std::filesystem::remove(file);
 }
+
+TEST(RoadVerbs, ROADMODELSHOWIsTheWindowsAloneAndASessionWithNoViewsRefusesItByName)
+{
+    // Show Road Model's line is taken by the window before the interpreter
+    // (RoadWorkbench::runLine); here, with no views, it says whose it is and
+    // where to hide the objects instead - not "unknown word", which would read as
+    // a typing mistake.
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"");
+    const std::size_t steps = session.steps();
+    for (const char* line : {"ROADMODEL SHOW", "ROADMODEL SHOW OFF", "roadmodel show on"}) {
+        const auto error = session.refused(line);
+        EXPECT_EQ(error.code, ErrorCode::Unsupported) << line;
+        EXPECT_TRUE(contains(error.message, "ROADMODEL SHOW is the desktop window's"))
+            << error.message;
+        EXPECT_TRUE(contains(error.message, "LAYER HIDE road")) << error.message;
+    }
+    EXPECT_EQ(session.steps(), steps);
+    // The rest of the verb is as it was, and a word it does not know is still a
+    // mistake.
+    EXPECT_TRUE(contains(session.ok("ROADMODEL"), "road model objects="));
+    EXPECT_EQ(session.refused("ROADMODEL HIDE").code, ErrorCode::ParseFailure);
+    EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "ROADMODEL SHOW [ON|OFF]"));
+}

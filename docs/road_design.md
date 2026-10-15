@@ -702,7 +702,7 @@ its line and running it through the window's one executor:
 |---|---|---|---|
 | Templates | Road Template Manager... | `bimRoadTemplates` | `roadTemplateManagerDialog` |
 | Corridors | Corridors... | `bimCorridors` | `corridorDialog` |
-| Model | Show Road Model | `bimShowRoadModel` | - |
+| Model | Show Road Model (`ROADMODEL SHOW`) | `bimShowRoadModel` | - |
 | Quantities | Corridor Quantities... (Ctrl+Shift+Q) | `bimCorridorQuantities` | `corridorQuantitiesDialog` |
 
 The road objects' items follow, in a section of their own (the road
@@ -796,7 +796,28 @@ earthworks dashed; Zoom Extents counts them. The meshes are made again from
 the event loop when the road model, the surfaces, the alignments or the
 layers change, and handed over only when what is shown changed. Show Road
 Model (`setRoadModelShown`) takes them out of all of it for the session, as
-View > Thin screen lines is set; an agent hides them by their layers.
+View > Thin screen lines is set.
+
+**Show Road Model has a line**, `ROADMODEL SHOW [ON|OFF]` (alone, the other of
+the two), as View > Grid has `GRID`: it is the window's own, the session's
+display state, so the road workbench takes it (`RoadWorkbench::runLine`, from
+`MainWindow::runWorkbenchLine` where the online and update workbenches take
+theirs) before the interpreter ever sees it, switches the same action as the
+menu's item and replies `roadmodel=on` or `roadmodel=off`, once. An agent that
+drives the window (`katana --command`, a script, a dialog's line) no longer has
+to switch the road layers off to see the drawing without the model. In a
+session with no views - `katana_cli`, `katana_mcp` - the verb is refused by
+name, `Unsupported`, saying whose it is and to hide the objects by their layers
+there (`LAYER HIDE road`), as `GRID` is refused. *Rejected:* a flag in the
+Document, which is saved and undone and would make a view setting a project
+edit; and a hidden-layer shortcut, which changes the drawing's layers for a
+picture.
+
+**The Command Reference** (Help) lists the road verbs in a section of their own,
+Road model, read from `HELP CORRIDOR` (`road::roadVerbHelp`) as the Road objects
+section is from `HELP ROADOBJECT`, so a word added to the verbs' help is there at
+once; its Window section names `ROADMODEL SHOW`, the one of them that is the
+window's alone.
 
 **The layout.** The new toolbar does not bump `kLayoutVersion`: a layout saved
 before it has no BIM toolbar, which Qt then places at the end of the second
@@ -855,7 +876,9 @@ class, layer, quantities and properties, and every problem
   unrelated command, an undo and a changed drawing (the Corridors dialog's
   fields and combos, the Template Manager's two grids, the listing of the
   Quantities dialog); the template file row's lines, quoting and Replace box,
-  and the Faces column; an Apply of several rows as one line; the 3D view's own
+  and the Faces column; Show Road Model's line and the Command Reference's
+  section of the road verbs (`TheCommandReferenceHasTheRoadVerbsInASectionOfTheirOwn`);
+  an Apply of several rows as one line; the 3D view's own
   hidden layers.
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
@@ -873,7 +896,9 @@ class, layer, quantities and properties, and every problem
   a second import refused, and OVERWRITE
   (`cli.road_templates_exported_by_one_process_are_imported_by_another`).
 - `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt` and
-  `McpServer.AnAgentMovesRoadTemplatesThroughAFileByTheirLines`.
+  `McpServer.AnAgentMovesRoadTemplatesThroughAFileByTheirLines`;
+  `cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so` for the
+  refusal where there are no views.
 
 ## Not done
 
@@ -894,11 +919,7 @@ class, layer, quantities and properties, and every problem
 - Mass haul for a corridor.
 - Sections of a corridor in the section view, and sheets of cross sections
   from a corridor (GENERATE sections draws the ground and the profile only).
-- A verb for Show Road Model (session display state, as the grid's toggle is
-  in a window verb): an agent hides the objects by their layers.
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
-- The window's Command Reference shows the road verbs in its Commands
-  section from the general help, not a section of their own.
 - Corridor Quantities clears its listing when the road model changes and does
   not list again by itself: pressing List Quantities is the person's act.

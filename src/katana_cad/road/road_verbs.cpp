@@ -2078,6 +2078,16 @@ Result<std::string> roadModelVerb(const Document& document, const Tokens& args)
         return makeError(ErrorCode::NotFound,
                          "the road model has no object " + args[1] + ": ROADMODEL LIST names them");
     }
+    if (sub == "SHOW") {
+        // The window's switch, as GRID is: whether its views draw the road
+        // model. The window takes the line before it reaches here; a session with
+        // no views is told so by name, and where to hide objects instead.
+        return makeError(ErrorCode::Unsupported,
+                         "ROADMODEL SHOW is the desktop window's: it sets whether its views draw "
+                         "the road model, and katana_cli and katana_mcp have no views; hide the "
+                         "objects there by their layers (LAYER HIDE road), or run katana "
+                         "headless with --command");
+    }
     return usage("unknown ROADMODEL word " + args[0] + " (HELP ROADMODEL)");
 }
 
@@ -2159,7 +2169,10 @@ CORRIDOR QUANTITIES <c>|ALL [csv=<file> [OVERWRITE]]   each object's quantities,
                                        with no target surface); a file already there is only
                                        replaced with OVERWRITE
 
-ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>   every 3D object of the road model)";
+ROADMODEL [LIST] | JSON | PROBLEMS | INFO <id>   every 3D object of the road model
+ROADMODEL SHOW [ON|OFF]                the desktop window's: draw the road model in its views,
+                                       or not (BIM > Show Road Model); katana_cli and
+                                       katana_mcp have no views and refuse it)";
 }
 
 std::string roadModelJson(const bim::BimModel& model)
