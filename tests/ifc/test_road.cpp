@@ -810,6 +810,100 @@ TEST(IfcExportRoad, AMarkingWithNothingUnderItIsNotWrittenAndSaid)
               byTag(all, "slab"));
 }
 
+// A road object has a road only when one is given (facility=), so the marking
+// a person places with no road is the site's: it adheres to the course of
+// whichever road is under it, as a marking of a road adheres to that road's,
+// and is not dropped for want of a road it was never told.
+TEST(IfcExportRoad, AMarkingThatNamesNoRoadAdheresToTheCourseUnderIt)
+{
+    ifc::ExportInput input = roadInput();
+    for (auto& each : input.road.elements) {
+        if (each.id == kMarking) {
+            each.facility.clear();
+            each.part.clear();
+        }
+    }
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    const int marking = byTag(all, kMarking);
+    ASSERT_NE(marking, 0) << "the marking was dropped";
+    EXPECT_EQ(out.roadElementsSkipped, 0u);
+    ASSERT_EQ(ofType(all, "IFCRELADHERESTOELEMENT").size(), 1u);
+    const Instance& adheres = all.at(ofType(all, "IFCRELADHERESTOELEMENT").front());
+    EXPECT_EQ(refOf(adheres.args[4]), byTag(all, kWearing));
+    EXPECT_EQ(refsOf(adheres.args[5]), std::vector<int>{marking});
+}
+
+// With nothing under it the reason given is the true one: it names no road AND
+// no course of any road lies under it.
+TEST(IfcExportRoad, AMarkingThatNamesNoRoadAndHasNoCourseUnderItSaysSo)
+{
+    ifc::ExportInput input;
+    input.road.elements.push_back(element("lonely", "marking",
+                                          {"IfcSurfaceFeature", "LINEMARKING", {}}, "", "",
+                                          box(0.0, 0.0, 0.0, 10.0, 0.1, 0.003)));
+    input.road.elements.push_back(element("slab", "pavement", {"IfcSlab", "PAVING", {}}, "Main",
+                                          "", box(100.0, 100.0, 0.0, 110.0, 110.0, 0.2)));
+    const auto out = exported(input);
+    EXPECT_EQ(out.roadElementsSkipped, 1u);
+    EXPECT_TRUE(warned(out, "road element \"lonely\" is not written: a surface feature adheres to "
+                            "an element, and it names no road (facility=)"));
+}
+
+// Two closed boxes that touch - the cells of a box culvert side by side, with
+// no gap between their walls - share positions without sharing an edge. Each
+// is closed by its own indices, so the face set is closed: merging them by
+// position would make four faces of the shared edges and write a closed solid
+// as an open face set with a warning.
+TEST(IfcExportRoad, ClosedShellsThatTouchAreOneClosedFaceSetNotAnOpenOne)
+{
+    const TriangleMesh left = box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+    const TriangleMesh right = box(1.0, 0.0, 0.0, 2.0, 1.0, 1.0);
+    TriangleMesh both = left;
+    const auto offset = static_cast<std::uint32_t>(both.vertices.size());
+    both.vertices.insert(both.vertices.end(), right.vertices.begin(), right.vertices.end());
+    for (const auto& face : right.faces) {
+        both.faces.push_back({face[0] + offset, face[1] + offset, face[2] + offset});
+    }
+    ifc::ExportInput input;
+    input.road.elements.push_back(
+        element("cells", "culvert", {"IfcPipeSegment", "CULVERT", {}}, "", "", both));
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    const FaceSet body = bodyOf(all, byTag(all, "cells"));
+    EXPECT_TRUE(body.closed);
+    // The positions are not merged: 2 x 8 points and 2 x 12 triangles.
+    EXPECT_EQ(body.points.size(), 16u);
+    EXPECT_EQ(body.triangles.size(), 24u);
+    // Two unit cubes.
+    EXPECT_NEAR(volumeOf(body), 2.0, 1e-12);
+    EXPECT_FALSE(warned(out, "not closed solids"));
+}
+
+// What is not closed by its indices is still judged as it always was: merged by
+// position, and open when an edge is left over. A pair of touching boxes with a
+// face missing is open.
+TEST(IfcExportRoad, TouchingShellsWithAFaceMissingAreStillWrittenOpenAndSaid)
+{
+    const TriangleMesh left = box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+    const TriangleMesh right = box(1.0, 0.0, 0.0, 2.0, 1.0, 1.0);
+    TriangleMesh both = left;
+    const auto offset = static_cast<std::uint32_t>(both.vertices.size());
+    both.vertices.insert(both.vertices.end(), right.vertices.begin(), right.vertices.end());
+    // The second box without its last two triangles (its +x face).
+    for (std::size_t i = 0; i + 2 < right.faces.size(); ++i) {
+        const auto& face = right.faces[i];
+        both.faces.push_back({face[0] + offset, face[1] + offset, face[2] + offset});
+    }
+    ifc::ExportInput input;
+    input.road.elements.push_back(
+        element("cells", "culvert", {"IfcPipeSegment", "CULVERT", {}}, "", "", both));
+    const auto out = exported(input);
+    const Instances all = instancesIn(out.text);
+    EXPECT_FALSE(bodyOf(all, byTag(all, "cells")).closed);
+    EXPECT_TRUE(warned(out, "1 road elements are not closed solids"));
+}
+
 // ---- what is refused -----------------------------------------------------------------------
 
 // Everything that would make an invalid file is left out, each element said

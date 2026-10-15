@@ -524,12 +524,13 @@ whose predefined type the schema has:
 | a whole pavement | `IfcPavement` FLEXIBLE, RIGID | "usually comprising several courses" (6.6.3.12); written as given, the courses not aggregated into it (Not done) |
 | kerb | `IfcKerb` | the raised edge along a carriageway or footway (7.9.3.1); its enumeration has nothing more particular |
 | footpath | `IfcSlab` SIDEWALK, or its courses as `IfcCourse` in a SIDEWALK part | IfcSlabTypeEnum (6.1.2.19) |
-| fill batter, embankment, verge | `IfcEarthworksFill` SLOPEFILL, EMBANKMENT; a verge USERDEFINED "VERGE" | SLOPEFILL is fill forming a batter beside the road structure (6.6.2.3); topsoil is soil, so earthworks rather than a course (6.6.3.2) |
+| fill (batter and embankment) | `IfcEarthworksFill` EMBANKMENT | the corridor builds ONE fill solid a side and run, from the formation down to the ground, batter and embankment together (`road_design.md`), so there is no separate batter to call SLOPEFILL (fill forming a batter beside the road structure, 6.6.2.3), which was rejected |
+| verge, median topsoil | `IfcCourse` NOTDEFINED | a course of the template's cross-section, with a thickness, built like every other course (`road_design.md`); `IfcEarthworksFill` USERDEFINED "VERGE", because topsoil is soil (6.6.3.2), was rejected, as the corridor has a course to write and no earthworks solid |
 | cut batter, excavation | `IfcEarthworksCut` CUT | the void left by excavating existing terrain (6.6.3.4) |
 | safety barrier (W-beam, thrie-beam, wire rope, concrete) | `IfcRailing` GUARDRAIL | a guardrail can also restrain errant road vehicles beside a road or on its central reserve (IfcRailingTypeEnum, 6.1.2.14); IfcWall PARAPET is for falls from edges and was rejected |
 | guide post | `IfcSign` MARKER | a post-style sign (IfcSignTypeEnum, 6.6.2.8) |
 | sign | `IfcSign` PICTORAL | a flat panel of text or symbols (6.6.2.8) |
-| light pole | `IfcMember` POST; its luminaire, as an object of its own, `IfcLightFixture` DIRECTIONSOURCE | a post is a usually vertical member supporting something (IfcMemberTypeEnum, 6.1.2.12); IfcColumn's STANDCOLUMN is a column under an arch (6.1.2.6) and was rejected; a road lantern emits in a direction (7.4.2.17) |
+| light pole | `IfcMember` POST; its luminaire, as an object of its own, `IfcLightFixture` POINTSOURCE | a post is a usually vertical member supporting something (IfcMemberTypeEnum, 6.1.2.12); IfcColumn's STANDCOLUMN is a column under an arch (6.1.2.6) and was rejected; the lantern is drawn as a box at a point and Katana records nothing of its light distribution, so the enumeration's plain point source (7.4.2.17) is what the builder writes (`road_objects.md`) - DIRECTIONSOURCE, which this table once gave, is the choice for a job whose lighting model records a direction |
 | culvert | `IfcPipeSegment` CULVERT | "A covered channel or large pipe that forms a watercourse below ground level, usually under a road or railway" (7.5.2.26), box or pipe alike |
 | retaining wall, headwall | `IfcWall` RETAININGWALL | a wall holding back soil, headwalls and wing walls among its examples (6.1.2.22) |
 | noise wall | `IfcWall` USERDEFINED "NOISEBARRIER" | no enumerator of IfcWallTypeEnum is a noise barrier |
@@ -550,13 +551,18 @@ nothing to be a feature of.
 **The body** is an `IfcTriangulatedFaceSet` (8.8.3.47) in the `Body` context,
 Closed when every edge of the mesh is used once in each direction - which is
 what a closed face set asserts: each edge used by exactly two faces, the
-normals pointing out of the material. A closed mesh wound inwards (its signed
-volume negative) is written wound outwards; vertices at exactly the same
-place are written once, so a mesh that repeats each corner for each face is
-still closed; a face naming one place twice is dropped; a mesh that is not
-closed is written open, and the count of those said once. None of that moves
-a coordinate. Its colour is a surface style (`Builder::colourSurface`), its
-layer the object's. **Rejected:** `IfcPolygonalFaceSet` - the meshes are
+normals pointing out of the material. That is judged first on the mesh's own
+indices, as the road objects and the corridor build their solids: a mesh
+closed so is written as it is, its vertices not merged, so several closed
+shells that meet (the cells of a box culvert side by side, their walls on one
+plane) stay one closed face set - merged by position they would share edges
+four faces to an edge and be written open. Any other mesh is face soup: its
+vertices at exactly the same place are written once, so a mesh that repeats
+each corner for each face is still closed, a face naming one place twice is
+dropped, and what is still not closed is written open, the count of those
+said once. A closed mesh wound inwards (its signed volume negative) is
+written wound outwards. None of that moves a coordinate. Its colour is a
+surface style (`Builder::colourSurface`), its layer the object's. **Rejected:** `IfcPolygonalFaceSet` - the meshes are
 triangles already, merging coplanar ones would only save bytes, and the
 triangulated set is the one the surfaces write, inside the Alignment-based
 view the file declares; and a profile swept along the alignment (a course's
@@ -581,7 +587,10 @@ written on its host and contained nowhere, placed relative to the host:
 - a marking adheres to the element its `Host` names; else to the course,
   pavement or slab of its road that lies under the middle of its first face,
   the highest there - the wearing course over the base; with none, it is not
-  written, said, since a marking on nothing would be an invalid file.
+  written, said, since a marking on nothing would be an invalid file. A
+  marking that names no road (a road object has none unless `facility=` gives
+  it one) is the site's and adheres to the surface of any road under it; the
+  warning then says it names no road as well as that nothing lies under it.
 
 A cut takes no material: IfcRelAssociatesMaterial's NoVoidElement rule
 refuses a void. Its material is said in its `Katana_RoadElement`.
@@ -794,8 +803,8 @@ mistake in the writer and the same mistake in the reader cannot agree:
     take as a boolean of a large TIN and a long solid; cutting the ground's
     face set instead is not done;
   - the import reads a road element back as its FootPrint outline, not its
-    body (Katana has no solid entity), and `katana_cli`'s IMPORT counts a
-    file's terrain without keeping it in the drawing's surfaces;
+    body (Katana has no solid entity); a file's terrain it does keep, as the
+    drawing's surfaces, in the import's one undo step;
   - the road model is not scoped (above): it is all written, or none.
 - **Cant**, IFC4X1-form alignments, and transitions other than the clothoid
   have no Katana equivalent, so they come in as exact polylines.
