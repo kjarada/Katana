@@ -8,7 +8,7 @@
 //          [csv=<file> [OVERWRITE]]
 //   VOLUME DATUM <surface> <level> [INSIDE <polygon> [EACH]] [bulk=] [shrink=] [csv=]
 //   VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH]
-//          [csv=]
+//          [bulk=] [shrink=] [csv=]
 //   VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=]
 //          [right=] [method=endarea|prismoidal|both] [bulk=] [shrink=] [csv=]
 //   VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
@@ -33,8 +33,10 @@
 // fill.adjusted= and net.adjusted=.
 //
 // The VOLUME verbs change nothing (csv= writes a file, refusing one already
-// there unless OVERWRITE). SURFACE DIFFERENCE and ENVELOPE add a surface to
-// the drawing - ONE undo step - and with PREVIEW say what they would add.
+// there unless OVERWRITE; with a scope that takes no polygon it writes nothing
+// and says so). SURFACE DIFFERENCE and ENVELOPE add a surface to the drawing -
+// ONE undo step - and with PREVIEW say what they would add; the difference is
+// drawn in the Cut Fill style, the envelope (real levels) in the default.
 
 #include <cstddef>
 #include <string>

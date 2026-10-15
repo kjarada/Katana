@@ -224,6 +224,86 @@ TEST(VolumesDialog, MakeCutFillMapAddsTheDifferenceAndOffersItAtOnce)
     EXPECT_GE(child<QComboBox>(dialog, "volumesBase")->findText("cut fill"), 0);
 }
 
+TEST(VolumesDialog, MakeEnvelopeRunsSurfaceEnvelopeOfThePagesTwoSurfacesAndOffersTheResultAtOnce)
+{
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    auto* side = child<QComboBox>(dialog, "volumesEnvelopeSide");
+    auto* name = child<QLineEdit>(dialog, "volumesEnvelopeName");
+    auto* button = child<QPushButton>(dialog, "volumesEnvelope");
+    ASSERT_NE(side, nullptr);
+
+    // The line the fields make: the page's two surfaces, MAX by default.
+    dialog.setMethod(VolumeMethod::Surfaces);
+    const auto upper = dialog.envelopeLine();
+    ASSERT_TRUE(upper.ok()) << upper.error().describe();
+    EXPECT_EQ(*upper, "SURFACE ENVELOPE ground design MAX");
+    side->setCurrentIndex(side->findData(QStringLiteral("MIN")));
+    name->setText("lower level");
+    const auto lower = dialog.envelopeLine();
+    ASSERT_TRUE(lower.ok());
+    EXPECT_EQ(*lower, "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    // The other pages use their own two surfaces, as the cut/fill map does.
+    dialog.setMethod(VolumeMethod::Grid);
+    EXPECT_EQ(*dialog.envelopeLine(), "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    dialog.setMethod(VolumeMethod::Sections);
+    EXPECT_EQ(*dialog.envelopeLine(), "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    dialog.setMethod(VolumeMethod::Surfaces);
+    EXPECT_TRUE(runner.lines.isEmpty()); // building a line runs nothing
+
+    // The button hands exactly that line to the executor; the surface is in the
+    // drawing in the default style and the lists offer it at once.
+    button->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_EQ(runner.lines.front(), "SURFACE ENVELOPE ground design MIN NAME \"lower level\"");
+    const katana::terrain::NamedSurface* made = document.surfaces().find("lower level");
+    ASSERT_NE(made, nullptr);
+    EXPECT_TRUE(made->style.empty());
+    EXPECT_GE(child<QComboBox>(dialog, "volumesBase")->findText("lower level"), 0);
+    EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("Made the envelope"));
+    EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("lower"));
+
+    // Without a name the verb's own: ground-design-max.
+    side->setCurrentIndex(side->findData(QStringLiteral("MAX")));
+    name->clear();
+    button->click();
+    ASSERT_EQ(runner.lines.size(), 2);
+    EXPECT_EQ(runner.lines.back(), "SURFACE ENVELOPE ground design MAX");
+    EXPECT_NE(document.surfaces().find("ground-design-max"), nullptr);
+}
+
+TEST(VolumesDialog, MakeEnvelopeWithNoSurfaceOrARefusedNameSaysWhyAndChangesNothing)
+{
+    // No surfaces: a line cannot be made, naming what is missing, and nothing runs.
+    {
+        Document document;
+        CommandInterpreter interpreter(document);
+        Runner runner{document, interpreter, {}};
+        VolumesDialog dialog(runner.context());
+        const auto none = dialog.envelopeLine();
+        ASSERT_FALSE(none.ok());
+        EXPECT_NE(none.error().message.find("no surface"), std::string::npos);
+        child<QPushButton>(dialog, "volumesEnvelope")->click();
+        EXPECT_TRUE(runner.lines.isEmpty());
+        EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("no surface"));
+    }
+    // The verb's refusal reaches the status and the drawing is as it was: a name
+    // the drawing already has.
+    Document document;
+    CommandInterpreter interpreter(document);
+    addWedge(document, interpreter);
+    Runner runner{document, interpreter, {}};
+    VolumesDialog dialog(runner.context());
+    child<QLineEdit>(dialog, "volumesEnvelopeName")->setText("ground");
+    child<QPushButton>(dialog, "volumesEnvelope")->click();
+    ASSERT_EQ(runner.lines.size(), 1);
+    EXPECT_TRUE(child<QLabel>(dialog, "volumesStatus")->text().contains("already has"));
+    EXPECT_EQ(document.surfaces().all().size(), 2u);
+}
+
 TEST(VolumesDialog, SaveCsvRunsTheSameLineWritingTheFileItNames)
 {
     Document document;

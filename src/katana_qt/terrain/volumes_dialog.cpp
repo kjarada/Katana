@@ -483,6 +483,30 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     mapRow->addWidget(map);
     layout->addLayout(mapRow);
 
+    auto* envelopeRow = new QHBoxLayout();
+    envelopeSide_ = new QComboBox(this);
+    envelopeSide_->setObjectName(QStringLiteral("volumesEnvelopeSide"));
+    envelopeSide_->addItem(QStringLiteral("The higher of the two"), QStringLiteral("MAX"));
+    envelopeSide_->addItem(QStringLiteral("The lower of the two"), QStringLiteral("MIN"));
+    envelopeSide_->setToolTip(QStringLiteral(
+        "Which of the two surfaces the envelope follows where they differ: the higher "
+        "(the finished ground over an as-built, say) or the lower"));
+    envelopeName_ = textBox(this, "volumesEnvelopeName", QStringLiteral("base-top-max"),
+                            QStringLiteral("The envelope's name; blank for base-top-max or "
+                                           "base-top-min"));
+    auto* envelope = new QPushButton(QStringLiteral("Make &Envelope"), this);
+    envelope->setObjectName(QStringLiteral("volumesEnvelope"));
+    envelope->setToolTip(QStringLiteral(
+        "The higher or lower of the base and the top as a new surface in the drawing's "
+        "default style (real levels, not a difference): SURFACE ENVELOPE"));
+    auto* envelopeLabel = new QLabel(QStringLiteral("Envelope &name:"), this);
+    envelopeLabel->setBuddy(envelopeName_);
+    envelopeRow->addWidget(envelopeSide_);
+    envelopeRow->addWidget(envelopeLabel);
+    envelopeRow->addWidget(envelopeName_, 1);
+    envelopeRow->addWidget(envelope);
+    layout->addLayout(envelopeRow);
+
     status_ = new QLabel(this);
     status_->setObjectName(QStringLiteral("volumesStatus"));
     status_->setWordWrap(true);
@@ -505,6 +529,7 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
             [this] { QGuiApplication::clipboard()->setText(resultsText()); });
     connect(save, &QPushButton::clicked, this, [this] { (void)saveCsv(); });
     connect(map, &QPushButton::clicked, this, [this] { (void)makeCutFillMap(); });
+    connect(envelope, &QPushButton::clicked, this, [this] { (void)makeEnvelope(); });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     connect(browse, &QPushButton::clicked, this, [this] {
         if (context_.headless && context_.headless()) {
@@ -736,7 +761,7 @@ Result<QString> VolumesDialog::line() const
     return words.join(' ') + factorWords();
 }
 
-Result<QString> VolumesDialog::cutFillMapLine() const
+Result<std::pair<QString, QString>> VolumesDialog::surfacePair() const
 {
     const QComboBox* base = base_;
     const QComboBox* top = top_;
@@ -754,9 +779,36 @@ Result<QString> VolumesDialog::cutFillMapLine() const
     if (!baseWord || !topWord) {
         return baseWord ? topWord.error() : baseWord.error();
     }
-    QString text = QStringLiteral("SURFACE DIFFERENCE ") + *baseWord + ' ' + *topWord;
+    return std::make_pair(*baseWord, *topWord);
+}
+
+Result<QString> VolumesDialog::cutFillMapLine() const
+{
+    auto pair = surfacePair();
+    if (!pair) {
+        return pair.error();
+    }
+    QString text = QStringLiteral("SURFACE DIFFERENCE ") + pair->first + ' ' + pair->second;
     if (!mapName_->text().trimmed().isEmpty()) {
         auto name = lineWord(mapName_->text().trimmed(), QStringLiteral("Map name"));
+        if (!name) {
+            return name.error();
+        }
+        text += QStringLiteral(" NAME ") + *name;
+    }
+    return text;
+}
+
+Result<QString> VolumesDialog::envelopeLine() const
+{
+    auto pair = surfacePair();
+    if (!pair) {
+        return pair.error();
+    }
+    QString text = QStringLiteral("SURFACE ENVELOPE ") + pair->first + ' ' + pair->second + ' ' +
+                   envelopeSide_->currentData().toString();
+    if (!envelopeName_->text().trimmed().isEmpty()) {
+        auto name = lineWord(envelopeName_->text().trimmed(), QStringLiteral("Envelope name"));
         if (!name) {
             return name.error();
         }
@@ -909,28 +961,42 @@ bool VolumesDialog::saveCsv()
     return outcome.ok;
 }
 
-bool VolumesDialog::makeCutFillMap()
+bool VolumesDialog::runMaking(const Result<QString>& line, const QString& done)
 {
-    const auto made = cutFillMapLine();
-    if (!made) {
-        setStatus(QString::fromStdString(made.error().message), true);
+    if (!line) {
+        setStatus(QString::fromStdString(line.error().message), true);
         return false;
     }
     if (!context_.run) {
         setStatus(QStringLiteral("Nothing here can run a command."), true);
         return false;
     }
-    const VerbOutcome outcome = context_.run(*made);
+    const VerbOutcome outcome = context_.run(*line);
     reply_->setPlainText((outcome.ok ? outcome.reply : outcome.error).trimmed());
     if (!outcome.ok) {
         setStatus(outcome.error.trimmed(), true);
         return false;
     }
-    setStatus(QStringLiteral("Made the cut/fill map: a new surface in the Cut Fill style, "
-                             "fill above zero and cut below. UNDO removes it."),
-              false);
+    setStatus(done, false);
     reload();
     return true;
+}
+
+bool VolumesDialog::makeCutFillMap()
+{
+    return runMaking(cutFillMapLine(),
+                     QStringLiteral("Made the cut/fill map: a new surface in the Cut Fill style, "
+                                    "fill above zero and cut below. UNDO removes it."));
+}
+
+bool VolumesDialog::makeEnvelope()
+{
+    return runMaking(envelopeLine(),
+                     QStringLiteral("Made the envelope: a new surface following the %1 of the "
+                                    "base and the top, in the default style. UNDO removes it.")
+                         .arg(envelopeSide_->currentData().toString() == QStringLiteral("MAX")
+                                  ? QStringLiteral("higher")
+                                  : QStringLiteral("lower")));
 }
 
 QString VolumesDialog::resultsText() const

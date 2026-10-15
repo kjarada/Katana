@@ -586,6 +586,61 @@ TEST_F(VolumeVerbs, TheUpperEnvelopeOfCrossingPlanesIsTheHigherOfThem)
     EXPECT_EQ(refused("SURFACE ENVELOPE ground design"), ErrorCode::ParseFailure);
 }
 
+TEST_F(VolumeVerbs, TheEnvelopeIsDrawnInTheDefaultStyleNotTheCutFillMapOfADifference)
+{
+    // An envelope holds real levels (here 10 to 15), not a difference about 0:
+    // in the Cut Fill style, whose ramp ends at +2, every face past the top stop
+    // would be drawn in the one colour of fill. Only the difference is a map.
+    addSurface("ground", gridSurface(0, 0, 100, 25, [](double, double) { return 10.0; }));
+    addSurface("design", gridSurface(0, 0, 100, 25, [](double x, double) {
+                   return 10.0 + 0.1 * (x - 50.0);
+               }));
+    const std::string upper = ran("SURFACE ENVELOPE ground design MAX NAME upper");
+    const katana::terrain::NamedSurface* envelope = document.surfaces().find("upper");
+    ASSERT_NE(envelope, nullptr);
+    EXPECT_TRUE(envelope->style.empty()) << envelope->style;
+    EXPECT_EQ(value(record(upper, "surface"), "style"), document.surfaceStyles().defaultStyle);
+    EXPECT_EQ(value(record(upper, "surface"), "zmax"), "15.000");
+
+    const std::string lower = ran("SURFACE ENVELOPE ground design MIN NAME lower");
+    EXPECT_NE(value(record(lower, "surface"), "style"), "Cut Fill");
+
+    // The difference of the same two is the map.
+    const std::string map = ran("SURFACE DIFFERENCE ground design NAME map");
+    EXPECT_EQ(value(record(map, "surface"), "style"), "Cut Fill");
+    EXPECT_EQ(document.surfaces().find("map")->style, "Cut Fill");
+}
+
+TEST_F(VolumeVerbs, ASurfaceTheseVerbsMakeIsReportedAsSurfaceInfoReportsItWithOrWithoutCutFill)
+{
+    // One surface record for every reply that names a surface
+    // (cad::surfaceRecord): the same keys and values the INFO of the new surface
+    // gives, visible= among them, and a style that names a style - the drawing's
+    // default once Cut Fill is gone, not a word that names none.
+    addParallelPlanes();
+    const auto sameAsInfo = [&](const std::string& reply, const std::string& name) {
+        const auto made = record(reply, "surface");
+        const auto info = record(ran("SURFACE INFO " + name), "surface");
+        ASSERT_TRUE(made.has_value()) << reply;
+        ASSERT_TRUE(info.has_value());
+        for (const char* key : {"name", "triangles", "points", "bounds", "zmin", "zmax", "source",
+                                "style", "visible"}) {
+            EXPECT_EQ(value(made, key), value(info, key)) << key << " of " << name;
+        }
+        EXPECT_EQ(value(made, "visible"), "yes");
+    };
+    sameAsInfo(ran("SURFACE DIFFERENCE ground design NAME withCutFill"), "withCutFill");
+    sameAsInfo(ran("SURFACE ENVELOPE ground design MAX NAME upper"), "upper");
+
+    ran("SURFACESTYLE DELETE \"Cut Fill\"");
+    const std::string preview = ran("SURFACE DIFFERENCE ground design NAME without PREVIEW");
+    EXPECT_EQ(value(record(preview, "surface"), "preview"), "yes");
+    EXPECT_EQ(value(record(preview, "surface"), "style"), document.surfaceStyles().defaultStyle);
+    EXPECT_EQ(value(record(preview, "surface"), "visible"), "yes");
+    sameAsInfo(ran("SURFACE DIFFERENCE ground design NAME without"), "without");
+    EXPECT_NE(value(record(ran("SURFACE INFO without"), "surface"), "style"), "default");
+}
+
 TEST_F(VolumeVerbs, HelpVolumeGivesEveryForm)
 {
     const std::string help = ran("HELP VOLUME");

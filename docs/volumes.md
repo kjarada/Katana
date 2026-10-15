@@ -22,7 +22,8 @@ Terrain > Volumes only builds their lines
 VOLUME SURFACES <base> <top> [INSIDE <polygon> [EACH]] [bulk=<f>] [shrink=<f>]
        [csv=<file> [OVERWRITE]]
 VOLUME DATUM <surface> <level> [INSIDE <polygon> [EACH]] [bulk=] [shrink=] [csv=]
-VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH] [csv=]
+VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH]
+       [bulk=] [shrink=] [csv=]
 VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=] [to=] [left=] [right=]
        [method=endarea|prismoidal|both] [bulk=] [shrink=] [csv=]
 VOLUME GRID <base> <top> cell=<m> [INSIDE <polygon>] [bulk=] [shrink=] [csv=]
@@ -391,7 +392,21 @@ SURFACE ENVELOPE makes the higher (MAX) or lower (MIN) of two surfaces over
 their common ground (`terrain::envelopeSurface`): a piece on which the two
 cross is split along the line where they meet - a vertex per edge it crosses,
 placed from the edge's ends in a fixed order so the pieces either side share
-it - and each part is one surface's plane.
+it - and each part is one surface's plane. It is drawn in the drawing's
+default style, NOT Cut Fill: an envelope holds real levels (24 to 39 m on the
+sample terrain), and the Cut Fill ramp ends at +2, so every face would be
+painted the one colour of fill, a uniform red sheet whose legend read -2 to 2
+(`VolumeVerbs.TheEnvelopeIsDrawnInTheDefaultStyleNotTheCutFillMapOfADifference`).
+The style is the caller's choice in `addMadeSurface`: the difference passes
+"Cut Fill", the envelope none.
+
+Both reply with the first record of what they made (`difference` or
+`envelope`) and then the surface as every reply that names one writes it,
+`cad::surfaceRecord` (the same keys and values SURFACE INFO gives, `visible=`
+among them, and a `style=` that names a style: the drawing's default once
+Cut Fill has been deleted, where the reply used to say `style=default`, which
+names none), with `preview=yes` appended under PREVIEW
+(`VolumeVerbs.ASurfaceTheseVerbsMakeIsReportedAsSurfaceInfoReportsItWithOrWithoutCutFill`).
 
 ## In the window
 
@@ -406,8 +421,12 @@ the order first met) and, along an alignment, the mass haul diagram
 (`volumesMassHaul`). Copy puts the table on the clipboard; Save CSV runs the
 same line with `csv=` and OVERWRITE (the file dialog asks before choosing a
 file); Make Cut/Fill Map (`CutFillMap` icon) runs SURFACE DIFFERENCE of the
-page's two surfaces and offers the new surface at once. Every widget's
-object name is listed in `src/katana_qt/terrain/volumes_dialog.hpp`.
+page's two surfaces and offers the new surface at once; Make Envelope
+(`volumesEnvelope`, beside `volumesEnvelopeSide`, Higher or Lower of the two,
+and `volumesEnvelopeName`) runs SURFACE ENVELOPE of the same two the same way.
+Until the review of 2026-10-15 SURFACE ENVELOPE was typed on the command line
+only, with no window control, and docs/terrain.md said it had a dialog. Every
+widget's object name is listed in `src/katana_qt/terrain/volumes_dialog.hpp`.
 
 ## Through katana_mcp
 
@@ -442,11 +461,12 @@ records do not carry.
   heights, the words, and a scope that takes nothing.
 - The window (`tests/qt_widgets/terrain/test_volumes_dialog.cpp`): each
   page's line by object name; Measure with the interpreter as the executor,
-  filling the table and the mass haul diagram; Make Cut/Fill Map; Save CSV.
+  filling the table and the mass haul diagram; Make Cut/Fill Map; Make
+  Envelope; Save CSV.
   And the real window, headless (`tests/geo/headless/volumes.cmake`):
   `qt_volumes_dialog_measures_inside_typed_corners_and_makes_the_cut_fill_map_headless`
   draws the two surfaces, opens Terrain > Volumes, measures inside typed
-  corners (16 m3) and makes the cut/fill map.
+  corners (16 m3), makes the cut/fill map and makes the envelope.
 - `katana_cli` (`src/katana_app/geo/cli/volumes.cmake`):
   `cli.volume_between_two_surfaces_is_the_slab_whole_and_inside_a_square`,
   `cli.volume_to_a_level_reads_what_lies_below_it_as_fill`,

@@ -9,7 +9,8 @@
 // run, and Measure hands that line to the window's one executor. The reply's
 // records fill the results table, and on the Along Alignment page the mass
 // haul diagram; Copy puts the table on the clipboard, Save CSV runs the same
-// line with csv=, and Make Cut/Fill Map runs SURFACE DIFFERENCE. So a person
+// line with csv=, Make Cut/Fill Map runs SURFACE DIFFERENCE and Make Envelope
+// SURFACE ENVELOPE. So a person
 // in the window, katana_cli and an agent through katana_mcp get the same
 // numbers from the same code, and the log shows every line.
 //
@@ -30,9 +31,11 @@
 // volumesScopeDrawing, volumesFilterLayer ...); volumesBulk, volumesShrink;
 // volumesCommand; volumesRun; volumesResults; volumesCopy; volumesCsvPath,
 // volumesCsvBrowse, volumesSaveCsv; volumesMapName, volumesCutFillMap;
-// volumesStatus; volumesReply; volumesClose.
+// volumesEnvelopeSide, volumesEnvelopeName, volumesEnvelope; volumesStatus;
+// volumesReply; volumesClose.
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 #include <QDialog>
@@ -123,6 +126,10 @@ class VolumesDialog final : public QDialog {
     // page's when the page has one surface), with the map's name when given.
     [[nodiscard]] katana::core::Result<QString> cutFillMapLine() const;
 
+    // SURFACE ENVELOPE of the same two surfaces: the higher (MAX) or the lower
+    // (MIN) of them, as volumesEnvelopeSide says, with the name when given.
+    [[nodiscard]] katana::core::Result<QString> envelopeLine() const;
+
     // Measure: the line run, its records put in the table and, along an
     // alignment, the mass haul diagram. False when there was no line or the
     // line was refused, with the reason in the status.
@@ -133,6 +140,8 @@ class VolumesDialog final : public QDialog {
     // SURFACE DIFFERENCE run, and the surface lists reloaded so the map is
     // offered at once.
     bool makeCutFillMap();
+    // SURFACE ENVELOPE run, and the surface lists reloaded the same way.
+    bool makeEnvelope();
     // The table as tab-separated text with its header: what Copy puts on the
     // clipboard.
     [[nodiscard]] QString resultsText() const;
@@ -144,6 +153,12 @@ class VolumesDialog final : public QDialog {
     void showReply(const VerbOutcome& outcome);
     void setStatus(const QString& text, bool isError);
     void updateEnabled();
+    // The two surfaces the showing page has chosen (the Surface to Surface
+    // page's when it has one surface), as words of a line.
+    [[nodiscard]] katana::core::Result<std::pair<QString, QString>> surfacePair() const;
+    // A line that makes a surface run through the executor, reported and the
+    // lists reloaded so the new surface is offered at once.
+    bool runMaking(const katana::core::Result<QString>& line, const QString& done);
     [[nodiscard]] katana::core::Result<QString> boundaryWords(bool required, bool each) const;
     [[nodiscard]] QString factorWords() const;
 
@@ -190,6 +205,8 @@ class VolumesDialog final : public QDialog {
     QTableWidget* results_ = nullptr;
     QLineEdit* csvPath_ = nullptr;
     QLineEdit* mapName_ = nullptr;
+    QComboBox* envelopeSide_ = nullptr;
+    QLineEdit* envelopeName_ = nullptr;
     QLabel* status_ = nullptr;
     QPlainTextEdit* reply_ = nullptr;
     VolumeResultTable table_;

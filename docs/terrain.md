@@ -234,7 +234,8 @@ instead (*Background jobs*, below).
 The volumes - surface to surface, to a level, stockpiles and pits, along an
 alignment, on a grid, inside polygons - and the difference (cut/fill map)
 and envelope surfaces have their verbs, their dialog and their MCP route
-(`VOLUME`, `SURFACE DIFFERENCE`, Terrain > Volumes): `docs/volumes.md`.
+(`VOLUME`, `SURFACE DIFFERENCE`, `SURFACE ENVELOPE`, Terrain > Volumes, which
+has Make Cut/Fill Map and Make Envelope buttons): `docs/volumes.md`.
 Until 2026-10-15 `volumeToDatum` and `compareSurfaces` were exact and tested
 but reachable by no verb, and only the window's corridor quantities measured
 anything. The pair clipping above is now `terrain::visitOverlay`

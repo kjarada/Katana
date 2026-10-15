@@ -133,7 +133,7 @@ add_test(NAME cli.surface_difference_keeps_the_cut_fill_map_as_a_surface
             -c "SURFACE DIFFERENCE base top"
             -c "SURFACE LIST")
 set_tests_properties(cli.surface_difference_keeps_the_cut_fill_map_as_a_surface PROPERTIES
-    PASS_REGULAR_EXPRESSION "surface name=top-base triangles=[0-9]+ points=[0-9]+ bounds=0\\.000,0\\.000,10\\.000,10\\.000 zmin=1\\.000 zmax=1\\.000 .*style=\"Cut Fill\".*listed surfaces=3"
+    PASS_REGULAR_EXPRESSION "surface name=top-base triangles=[0-9]+ points=[0-9]+ bounds=0\\.000,0\\.000,10\\.000,10\\.000 zmin=1\\.000 zmax=1\\.000 .*style=\"Cut Fill\" visible=yes.*listed surfaces=3"
     FAIL_REGULAR_EXPRESSION "error")
 
 # A surface no one made is refused, and the session fails.

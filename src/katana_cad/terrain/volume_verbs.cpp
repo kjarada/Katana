@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include "katana/cad/code_edit.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
@@ -81,7 +83,7 @@ constexpr std::string_view kDatumUsage =
     "[csv=<file> [OVERWRITE]]";
 constexpr std::string_view kStockpileUsage =
     "VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH] "
-    "[csv=<file> [OVERWRITE]]";
+    "[bulk=<f>] [shrink=<f>] [csv=<file> [OVERWRITE]]";
 constexpr std::string_view kSectionsUsage =
     "VOLUME SECTIONS <base> <top> ALIGNMENT <name> [interval=10] [from=<s>] [to=<s>] "
     "[left=<m>] [right=<m>] [method=endarea|prismoidal|both] [bulk=<f>] [shrink=<f>] "
@@ -223,22 +225,7 @@ struct Table {
     std::vector<std::vector<std::string>> rows;
 };
 
-// RFC 4180: a field holding a comma, a quote or a line break is quoted, a
-// quote in it doubled; records end in CRLF.
-std::string csvField(std::string_view text)
-{
-    if (text.find_first_of(",\"\r\n") == std::string_view::npos) {
-        return std::string(text);
-    }
-    std::string out = "\"";
-    for (const char c : text) {
-        out += c;
-        if (c == '"') {
-            out += '"';
-        }
-    }
-    return out + "\"";
-}
+// Fields are quoted as RFC 4180 says (cad::csvField); records end in CRLF.
 
 // The table written to the file csv= names - replacing one only with
 // OVERWRITE, as every verb that writes a file does - and the reply's record.
@@ -1093,11 +1080,17 @@ Result<MakeWords> takeMakeWords(Words& words, std::string_view form)
 }
 
 // The new surface added to the drawing's - ONE undo step named after the
-// verb - or, with PREVIEW, only described.
+// verb - or, with PREVIEW, only described. The reply's surface line is
+// cad::surfaceRecord, the one record every reply that names a surface writes
+// (so it has visible=, and names the style the surface is drawn in, which is
+// the drawing's default when `style` is empty or no longer there). `style` is
+// the caller's: a difference is a cut/fill map and wants "Cut Fill", an
+// envelope holds real levels and must not have it.
 Result<std::string> addMadeSurface(Document& document, const MakeWords& made,
                                    const std::string& suggested, std::string source,
                                    katana::terrain::OverlaySurface madeSurface,
-                                   std::string firstRecord, std::string_view stepName)
+                                   std::string firstRecord, std::string_view stepName,
+                                   std::string style)
 {
     katana::terrain::SurfaceStore store = document.surfaces();
     std::string name = made.name ? *made.name : store.uniqueName(suggested);
@@ -1105,27 +1098,17 @@ Result<std::string> addMadeSurface(Document& document, const MakeWords& made,
         return makeError(ErrorCode::AlreadyExists,
                          "the drawing already has a surface named \"" + name + "\"", name);
     }
-    // The cut/fill style when the drawing still has it; otherwise its default.
-    const SurfaceDisplayStyle* cutFill = document.surfaceStyles().find("Cut Fill");
-    const std::string style = cutFill != nullptr ? cutFill->name : std::string();
-    const TinSurface& surface = madeSurface.surface;
-    std::string reply = std::move(firstRecord) + "\nsurface name=" + recordValue(name) +
-                        " triangles=" + std::to_string(surface.triangleCount()) +
-                        " points=" + std::to_string(surface.vertexCount()) +
-                        " bounds=" + boxText(surface.bounds()) +
-                        " zmin=" + fixed(surface.minElevation()) +
-                        " zmax=" + fixed(surface.maxElevation()) +
-                        " source=" + recordValue(source) +
-                        " style=" + (style.empty() ? std::string("default") : recordValue(style));
-    if (made.preview) {
-        return reply + " preview=yes";
-    }
     katana::terrain::NamedSurface named;
     named.name = name;
     named.surface = std::make_shared<const TinSurface>(std::move(madeSurface.surface));
     named.source = std::move(source);
-    named.style = style;
+    named.style = std::move(style);
     named.visible = true;
+    const std::string reply =
+        std::move(firstRecord) + "\n" + surfaceRecord(named, document.surfaceStyles());
+    if (made.preview) {
+        return reply + " preview=yes";
+    }
     if (auto added = store.add(std::move(named)); !added) {
         return added.error();
     }
@@ -1161,9 +1144,12 @@ Result<std::string> surfaceDifference(Document& document, Words words)
                          " top=" + recordValue(top->name) +
                          " pieces=" + std::to_string(difference->pieces) +
                          " retriangulated=" + (difference->retriangulated ? "yes" : "no");
+    // The cut/fill style when the drawing still has it; otherwise its default.
+    const SurfaceDisplayStyle* cutFill = document.surfaceStyles().find("Cut Fill");
     return addMadeSurface(document, *made, top->name + "-" + base->name,
                           "difference " + top->name + " minus " + base->name,
-                          std::move(*difference), std::move(record), "SURFACE DIFFERENCE");
+                          std::move(*difference), std::move(record), "SURFACE DIFFERENCE",
+                          cutFill != nullptr ? cutFill->name : std::string());
 }
 
 Result<std::string> surfaceEnvelope(Document& document, Words words)
@@ -1201,7 +1187,8 @@ Result<std::string> surfaceEnvelope(Document& document, Words words)
     return addMadeSurface(document, *made, first->name + "-" + second->name + "-" + side,
                           std::string("envelope ") + side + " of " + first->name + " and " +
                               second->name,
-                          std::move(*envelope), std::move(record), "SURFACE ENVELOPE");
+                          std::move(*envelope), std::move(record), "SURFACE ENVELOPE",
+                          std::string()); // real levels, not a difference about 0: the default style
 }
 
 } // namespace
@@ -1262,7 +1249,8 @@ VOLUME SURFACES <base> <top> [INSIDE <polygon> [EACH]] [bulk=<f>] [shrink=<f>] [
           it is below, net = fill - cut; inside the polygon its edges cut the triangles
 VOLUME DATUM <surface> <level> [INSIDE <polygon> [EACH]] [bulk=] [shrink=] [csv=]
           against a level: what stands above it is cut (above=), what lies below is fill
-VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH] [csv=]
+VOLUME STOCKPILE <surface> INSIDE <polygon> [base=boundary|lowest] [level=<z>] [EACH] [bulk=]
+          [shrink=] [csv=]
           a pile (above=, the cut that removes it) or a pit (below=) against a base made
           from its boundary: the boundary's heights (its own at every vertex, else the
           surface's), the lowest point of the surface along it, or level=<z>
@@ -1282,7 +1270,8 @@ SURFACE DIFFERENCE <base> <top> [NAME <new>] [PREVIEW]
           the top minus the base as a new surface (the cut/fill map), styled Cut Fill; one
           undo step
 SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
-          the higher (MAX) or lower (MIN) of the two as a new surface; one undo step
+          the higher (MAX) or lower (MIN) of the two as a new surface, in the default
+          style (it holds real levels, not a difference); one undo step
 
 <polygon>  #id [#id ...] (closed polylines, curve polylines, circles and ellipses) |
            x,y[,z] x,y[,z] x,y[,z] ... |
