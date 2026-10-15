@@ -945,6 +945,52 @@ The disk image is notarised as it is, and the ticket stapled to it
 (`xcrun stapler staple`), so Gatekeeper accepts `Katana.app` copied out of it
 without asking Apple's service, even offline.
 
+### Windows: why a download is warned about, and what stops it
+
+The owner downloaded `Katana-0.2.0-win64.exe` from the release on 2026-10-15
+and Edge said "isn't commonly downloaded. Make sure you trust it before you
+open it", offering only Keep. That is Microsoft Defender SmartScreen's
+reputation check on a file it has not seen before, and it shows for any file
+that is **new and unsigned**: v0.2.0 was published with no code-signing
+certificate (the repository holds no `WINDOWS_CERTIFICATE`; `gh secret list`
+and the `release` environment hold only `UPDATE_SIGNING_KEY`, which is the
+update key and has nothing to do with Windows). No change to the program or
+the installer makes Windows trust an unsigned file; what does:
+
+* **A signature from a publisher Windows trusts** - Authenticode over every
+  program and over the installer, time-stamped - so that the warning names
+  "Jarada" as a verified publisher and reputation follows the publisher, not
+  each new file's hash. Reputation is Microsoft's and is not published: a
+  certificate that is new may still show a milder prompt until enough people
+  have installed signed files from it, and the update helper's downloads do
+  not carry a mark of the web at all, so only the first download is warned
+  about.
+* **How the key is held.** Since 2023 a certificate authority issues a code
+  signing key only on a hardware token or in its cloud signing service, so a
+  certificate bought today cannot be exported as the `.pfx` that
+  `cmake/KatanaSign.cmake` and the workflow expect (`WINDOWS_CERTIFICATE`,
+  `osslsigncode`). The signing has to be done by a service from the job:
+  **Azure Trusted Signing** (Microsoft's own service, about US$10 a month, an
+  Azure account and an identity check that takes days; eligibility by country
+  and by individual or organisation is to be read on Azure's page when it is
+  applied for), or a certificate authority's cloud signer (DigiCert KeyLocker,
+  SSL.com eSigner, an Azure Key Vault HSM with AzureSignTool).
+* **Where it would go.** Sign the four programs in the build's `bin` before
+  CPack stages them, and the installer after it is made: CPack's pre-build
+  script already runs `KatanaSign.cmake` between the two, and a
+  provider-neutral `KATANA_SIGN_COMMAND` (a command with the file's place in
+  it, run for each file in place of `osslsigncode`) would let any of the
+  services above be named by the workflow without the CMake knowing which.
+  **Not written:** the choice of service is the owner's - money, an account and
+  an identity - and a workflow step for a service that has no account behind
+  it could not be run.
+* **Other ways round the browser's warning,** each a decision of its own: a
+  winget manifest (a pull request to microsoft/winget-pkgs; `winget install`
+  does not go through the browser's reputation check) and a Microsoft Store
+  listing (an MSIX, signed by Microsoft). Until then a download is kept
+  through the browser's `...` menu > Keep > Show more > Keep anyway, or
+  Properties > Unblock on the file.
+
 ### Update signing
 
 The update manifests carry a signature of another kind. Those above are for
@@ -1134,6 +1180,10 @@ not exist in it, and with the plain note "Katana X.Y.Z".
 
 ## Not done
 
+* **The Windows installer and programs are unsigned**, so a browser warns about
+  the download ("Windows: why a download is warned about", above): a
+  code-signing service has to be chosen and its secrets put in the workflow
+  (the owner's), and the signing through a service written.
 * **The workflow has run once, and has not yet published a release.** The
   first run, on 2026-10-14 for `v0.2.0`, passed the Version job (with the
   update keys pinned that day) and the whole Windows x86-64 job: build, suite,
