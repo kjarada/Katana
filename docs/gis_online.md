@@ -473,7 +473,10 @@ updater's exchanges (`gis::httpExchange` asks GDAL to set up its handle):
   failed with "unable to get local issuer certificate (20)" and, with the
   store turned on, reached the server (which answered 502, not a certificate
   error). The cost is the one a browser has: whoever can install a root in
-  the person's store can be trusted by Katana.
+  the person's store can be trusted by Katana. In time it is little: an `INFO`
+  of an https raster over `/vsicurl/` took 1.28 to 1.38 s without the store and
+  1.38 to 1.47 s with it (three runs each, network-dominated; one cold first
+  run of 10 s is left out).
   **Rejected:** `CURLSSLOPT_NATIVE_CA` on libcurl's handles. It does the same
   for a handle Katana makes itself (the updater's exchange) and nothing for
   the requests GDAL makes (Online Data, `/vsicurl/`), so the two would need
