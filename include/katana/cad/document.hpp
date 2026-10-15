@@ -587,6 +587,13 @@ class Document {
     // nothing.
     [[nodiscard]] katana::core::Status setRoadObjects(const road::RoadObjectSet& objects,
                                                       std::string stepName = "SET_ROAD_OBJECTS");
+    // The same change as a command, for a step that does more besides - a
+    // surface renamed with the corridors and objects that name it is ONE undo
+    // step. Null when `objects` equals the current set; the errors of
+    // setRoadObjects otherwise.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    roadObjectsCommand(const road::RoadObjectSet& objects,
+                       std::string stepName = "SET_ROAD_OBJECTS");
 
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.

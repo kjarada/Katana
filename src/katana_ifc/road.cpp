@@ -235,17 +235,97 @@ PartType partTypeOf(const std::string& part)
     return {upper, {}, "REGION"};
 }
 
-// A mesh as a face set writes it: each place once, in the order the faces
-// first name it; no face naming a place twice; closed, and then wound
-// outwards, when every edge is used once in each direction.
+// A mesh as a face set writes it. A mesh closed by its own indices is written
+// as it is (closedByIndex). Any other is face soup: each place once, in the
+// order the faces first name it, no face naming a place twice, and closed only
+// when, so merged, every edge is used once in each direction. Closed face
+// sets are wound outwards.
 struct Tessellation {
     std::vector<Vec3> points; // world
     std::vector<std::array<std::uint32_t, 3>> faces;
     bool closed = false;
 };
 
+// A closed face set is wound outwards: the signed volume (the divergence
+// theorem over the faces, about the first point to keep the products small) is
+// negative when the faces are wound inwards, and the winding is turned.
+void windOutwards(Tessellation& out)
+{
+    const Vec3 origin = out.points.front();
+    double volume = 0.0;
+    for (const auto& face : out.faces) {
+        const Vec3 p = out.points[face[0]] - origin;
+        const Vec3 q = out.points[face[1]] - origin;
+        const Vec3 r = out.points[face[2]] - origin;
+        volume += p.dot(q.cross(r));
+    }
+    if (volume < 0.0) {
+        for (auto& face : out.faces) {
+            std::swap(face[1], face[2]);
+        }
+    }
+}
+
+// The mesh as it is, when its own indices already close it: every edge used
+// once in each direction, no face naming a vertex twice. That is how the road
+// objects and the corridor's solids are built, and it is the only closure the
+// face set can claim - a consumer reads the topology from the indices. Places
+// at one position are NOT merged: several closed shells that meet (the cells of
+// a box culvert side by side, with no gap between their walls) share positions
+// without sharing an edge, and merging them would make four faces of an edge
+// and an open face set of a closed solid. nullopt for a mesh that is not
+// closed by its indices - face soup from another source - which tessellate
+// then merges by position.
+std::optional<Tessellation> closedByIndex(const geometry::TriangleMesh& mesh)
+{
+    if (mesh.faces.empty()) {
+        return std::nullopt;
+    }
+    std::map<std::pair<std::uint32_t, std::uint32_t>, int> edges;
+    for (const auto& face : mesh.faces) {
+        if (face[0] == face[1] || face[1] == face[2] || face[2] == face[0]) {
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (face[i] >= mesh.vertices.size()) {
+                return std::nullopt;
+            }
+            ++edges[{face[i], face[(i + 1) % 3]}];
+        }
+    }
+    for (const auto& edge : edges) {
+        const auto reverse = edges.find({edge.first.second, edge.first.first});
+        if (edge.second != 1 || reverse == edges.end() || reverse->second != 1) {
+            return std::nullopt;
+        }
+    }
+    Tessellation out;
+    out.closed = true;
+    // A vertex no face names is not written.
+    std::vector<std::uint32_t> renumbered(mesh.vertices.size(), 0);
+    std::vector<bool> seen(mesh.vertices.size(), false);
+    for (const auto& face : mesh.faces) {
+        std::array<std::uint32_t, 3> written{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            const std::uint32_t index = face[i];
+            if (!seen[index]) {
+                seen[index] = true;
+                renumbered[index] = static_cast<std::uint32_t>(out.points.size());
+                out.points.push_back(mesh.vertices[index]);
+            }
+            written[i] = renumbered[index];
+        }
+        out.faces.push_back(written);
+    }
+    windOutwards(out);
+    return out;
+}
+
 std::optional<Tessellation> tessellate(const geometry::TriangleMesh& mesh)
 {
+    if (auto shared = closedByIndex(mesh)) {
+        return shared;
+    }
     Tessellation out;
     std::map<std::array<double, 3>, std::uint32_t> placed;
     const auto indexOf = [&](const geometry::Point3& p) {
@@ -298,22 +378,7 @@ std::optional<Tessellation> tessellate(const geometry::TriangleMesh& mesh)
         return edge.second == 1 && reverse != edges.end() && reverse->second == 1;
     });
     if (out.closed) {
-        // The signed volume (the divergence theorem over the faces, about the
-        // first point to keep the products small): negative when the faces
-        // are wound inwards.
-        const Vec3 origin = out.points.front();
-        double volume = 0.0;
-        for (const auto& face : out.faces) {
-            const Vec3 p = out.points[face[0]] - origin;
-            const Vec3 q = out.points[face[1]] - origin;
-            const Vec3 r = out.points[face[2]] - origin;
-            volume += p.dot(q.cross(r));
-        }
-        if (volume < 0.0) {
-            for (auto& face : out.faces) {
-                std::swap(face[1], face[2]);
-            }
-        }
+        windOutwards(out);
     }
     return out;
 }
@@ -662,8 +727,12 @@ class RoadWriter {
         } else {
             const Accepted* under = surfaceUnder(item);
             if (under == nullptr) {
-                skip(element, "a surface feature adheres to an element, and no course, pavement "
-                              "or slab of its road lies under it");
+                skip(element,
+                     element.facility.empty()
+                         ? "a surface feature adheres to an element, and it names no road "
+                           "(facility=) and no course, pavement or slab of any road lies under it"
+                         : "a surface feature adheres to an element, and no course, pavement "
+                           "or slab of its road lies under it");
                 return;
             }
             host = under->product;
@@ -718,7 +787,11 @@ class RoadWriter {
     }
 
     // The course, pavement or slab of the marking's road under its first
-    // face's centre, the highest there; null when none is.
+    // face's centre, the highest there; null when none is. A marking that
+    // names no road is the site's, and lies on the surface of whichever road
+    // is under it: a road object's facility is empty unless it is given, and
+    // dropping every default marking from the file for want of a road it was
+    // never told would lose them all.
     const Accepted* surfaceUnder(const Accepted& item) const
     {
         const auto& face = item.body.faces.front();
@@ -731,7 +804,8 @@ class RoadWriter {
         for (const auto& entry : writtenInOrder()) {
             const Accepted* candidate = entry.second;
             const RoadElement& element = *candidate->element;
-            if (element.facility != item.element->facility ||
+            if ((!item.element->facility.empty() &&
+                 element.facility != item.element->facility) ||
                 !isSurfaceClass(element.ifcClass.entity)) {
                 continue;
             }

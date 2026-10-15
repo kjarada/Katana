@@ -600,6 +600,16 @@ void SurfaceCombineDialog::setMode(SurfaceCombineMode mode)
     pages_->setCurrentIndex(mode == SurfaceCombineMode::Merge   ? 0
                             : mode == SurfaceCombineMode::Paste ? 1
                                                                 : 2);
+    // The stack is as tall as the page shown, not as the tallest: a stacked
+    // layout keeps room for every page unless it is Ignored (as Volumes' method
+    // tabs are), and Clip's page carries the scope controls, which left Merge a
+    // list some 600 px tall.
+    for (int page = 0; page < pages_->count(); ++page) {
+        pages_->widget(page)->setSizePolicy(
+            QSizePolicy::Preferred,
+            page == pages_->currentIndex() ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+    }
+    pages_->updateGeometry();
     dz_->setEnabled(mode == SurfaceCombineMode::Offset);
     scope_->setEnabled(mode == SurfaceCombineMode::Clip);
     name_->setPlaceholderText(mode == SurfaceCombineMode::Paste

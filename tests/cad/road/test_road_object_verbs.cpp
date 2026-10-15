@@ -9,17 +9,22 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/road/corridor_model.hpp"
 #include "katana/cad/road/road_object_verbs.hpp"
 #include "katana/cad/road/road_objects.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
+#include "katana/geometry/primitives3d.hpp"
 #include "katana/geometry/profile.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "katana/terrain/tin_surface.hpp"
 
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
@@ -323,9 +328,34 @@ TEST(RoadObjectVerbs, ListJsonIsTheStoredSetAndListIsARecordAnObject)
     ASSERT_EQ(listing.size(), 3u);
     EXPECT_EQ(listing[0], "roadobjects count=2 problems=0");
     EXPECT_TRUE(listing[1].starts_with("object id=barrier-1")) << listing[1];
-    // Three poles, each a pole and a lantern.
+    // Three poles, at stations 0, 30 and 60, each a pole and a lantern: six
+    // solids, but a count of three - the lanterns hang from the poles and are
+    // not poles (this said 6, which counted each pole's lantern as well).
     EXPECT_TRUE(contains(listing[2], "objects=6")) << listing[2];
-    EXPECT_TRUE(contains(listing[2], "count=6")) << listing[2];
+    EXPECT_TRUE(contains(listing[2], " count=3 ")) << listing[2];
+}
+
+TEST(RoadObjectVerbs, AWallsRecordAndTotalGiveItsLengthOnceWithItsFootingsConcrete)
+{
+    // 50 m of the default wall (stem 0.25 x 2.0, footing 1.2 x 0.4): 50 m long
+    // - the footing runs the same 50 m - with a face of 50 x 2 = 100 m2 and
+    // 25 + 24 = 49 m3 of concrete. Two walls together are 100 m, not 150.
+    Site site;
+    const std::string added = site.ok("ROADOBJECT ADD wall ALIGNMENT Main station=10 to=60 "
+                                      "offset=5");
+    EXPECT_TRUE(contains(added, " objects=2 length=50 height=2 grossarea=100 grossvolume=49 "
+                                "width=1.2 depth=0.4"))
+        << added;
+    site.ok("ROADOBJECT ADD wall ALIGNMENT Main station=10 to=60 offset=-5 footing=0");
+    const std::string quantities = site.ok("ROADOBJECT QUANTITIES");
+    EXPECT_TRUE(contains(quantities, "total kind=wall objects=2 length=100 height=2 "
+                                     "grossarea=200 grossvolume=74 width=1.2 depth=0.4"))
+        << quantities;
+    // Each solid keeps its own: the footing says its length to IFC.
+    EXPECT_TRUE(contains(quantities, "part=object/wall-1/footing class=IfcFooting "
+                                     "type=STRIP_FOOTING length=50 width=1.2 depth=0.4 "
+                                     "grossvolume=24"))
+        << quantities;
 }
 
 TEST(RoadObjectVerbs, QuantitiesAreGivenPerSolidAndTotalledByKind)
@@ -384,4 +414,201 @@ TEST(RoadObjectVerbs, TheReportForAnAgentHoldsEachDefinitionAndWhatWasMadeOfIt)
     EXPECT_TRUE(contains(report, "\"ifc_class\": \"IfcPipeSegment\"")) << report;
     EXPECT_TRUE(contains(report, "\"closed\": true")) << report;
     EXPECT_FALSE(contains(report, "\"closed\": false")) << report;
+}
+
+// ---- the findings of the review of 2026-10-15 --------------------------------------------------
+
+TEST(RoadObjectVerbs, AnUndoneAddTakesAwayTheParentLayersItMadeAndKeepsThoseThatWereThere)
+{
+    // "road/objects/barrier" is made with "road" and "road/objects"; the layer
+    // table makes the parents of a layer it adds, and undoing the leaf alone
+    // left them behind - layers nobody asked for.
+    Site site;
+    const auto layers = [&site](const char* name) {
+        return site.document.model().layers.contains(name);
+    };
+    site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4");
+    EXPECT_TRUE(layers("road"));
+    EXPECT_TRUE(layers("road/objects"));
+    EXPECT_TRUE(layers("road/objects/barrier"));
+    site.ok("UNDO");
+    EXPECT_FALSE(layers("road"));
+    EXPECT_FALSE(layers("road/objects"));
+    EXPECT_FALSE(layers("road/objects/barrier"));
+    site.ok("REDO");
+    EXPECT_TRUE(layers("road"));
+    EXPECT_TRUE(layers("road/objects"));
+    EXPECT_TRUE(layers("road/objects/barrier"));
+    site.ok("UNDO");
+
+    // A layer of the person's own, three deep.
+    site.ok("ROADOBJECT ADD sign layer=signs/regulatory/stop ALIGNMENT Main station=50 offset=4");
+    EXPECT_TRUE(layers("signs"));
+    EXPECT_TRUE(layers("signs/regulatory"));
+    EXPECT_TRUE(layers("signs/regulatory/stop"));
+    site.ok("UNDO");
+    EXPECT_FALSE(layers("signs"));
+    EXPECT_FALSE(layers("signs/regulatory"));
+    EXPECT_FALSE(layers("signs/regulatory/stop"));
+
+    // A parent that was there is not the ADD's to take away.
+    site.ok("LAYER NEW road");
+    site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4");
+    EXPECT_TRUE(layers("road/objects/barrier"));
+    site.ok("UNDO");
+    EXPECT_TRUE(layers("road"));
+    EXPECT_FALSE(layers("road/objects"));
+    EXPECT_FALSE(layers("road/objects/barrier"));
+}
+
+TEST(RoadObjectVerbs, ACopyKeepsAnEndItWasGivenWhicheverOrderTheKeysAreTypedIn)
+{
+    // barrier-1 runs 10 to 60. station= alone moves the copy and keeps its
+    // 50 m; a to= given is the end, before or after the station.
+    Site site;
+    site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=10 to=60 offset=4");
+    const std::string station = site.ok("ROADOBJECT COPY barrier-1 station=30 PREVIEW");
+    EXPECT_TRUE(contains(station, "station=30 to=80")) << station;
+    const std::string endFirst = site.ok("ROADOBJECT COPY barrier-1 to=50 station=30 PREVIEW");
+    EXPECT_TRUE(contains(endFirst, "station=30 to=50")) << endFirst;
+    EXPECT_TRUE(contains(endFirst, "length=20")) << endFirst;
+    const std::string endLast = site.ok("ROADOBJECT COPY barrier-1 station=30 to=50 PREVIEW");
+    EXPECT_TRUE(contains(endLast, "station=30 to=50")) << endLast;
+    EXPECT_TRUE(contains(endLast, "length=20")) << endLast;
+    // An end before the new station is refused, whichever order it is typed in.
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT COPY barrier-1 to=20 station=30").message,
+                         "must be past station="));
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT COPY barrier-1 station=30 to=20").message,
+                         "must be past station="));
+    EXPECT_EQ(site.objects(), 1u);
+}
+
+TEST(RoadObjectVerbs, AnIdNamedTwiceIsOneObjectInQuantitiesAndTwiceOnAnAddIsRefused)
+{
+    Site site;
+    site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=10 to=60 offset=4");
+    // The 50 m barrier and its 28 posts once, however it is named.
+    const std::string once = site.ok("ROADOBJECT QUANTITIES barrier-1 BARRIER-1 barrier-1");
+    EXPECT_TRUE(contains(once, "total kind=barrier objects=1 length=50 ")) << once;
+    EXPECT_TRUE(contains(once, " count=28")) << once;
+
+    site.ok("LINE 0,20 10,20");
+    site.ok("SELECT 1");
+    site.ok("PROP SET elevation 2.5");
+    const auto error = site.fails("ROADOBJECT ADD fence ALONG #1 #1");
+    EXPECT_EQ(error.code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(error.message, "twice")) << error.describe();
+    EXPECT_EQ(site.objects(), 1u);
+    site.ok("ROADOBJECT ADD fence ALONG #1");
+    EXPECT_EQ(site.objects(), 2u);
+}
+
+TEST(RoadObjectVerbs, ListQuantitiesAndDeleteTakeNoScopeAndSayWhenAScopeIsGiven)
+{
+    // They act on ids, or on all: a LAYERS scope used to be answered by LIST
+    // with every object, and read by the other two as an id.
+    Site site;
+    site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4");
+    site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4");
+    for (const char* line :
+         {"ROADOBJECT LIST LAYERS road/objects/sign", "ROADOBJECT LIST JSON LAYERS road/objects/sign",
+          "ROADOBJECT LIST DRAWING", "ROADOBJECT QUANTITIES LAYERS road/objects/sign",
+          "ROADOBJECT QUANTITIES VIEW", "ROADOBJECT DELETE LAYERS road/objects/sign",
+          "ROADOBJECT DELETE AREA 0,0,10,10", "ROADOBJECT DELETE sign-1 WHERE LAYER=x"}) {
+        const auto error = site.fails(line);
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << line;
+        EXPECT_TRUE(contains(error.message, "takes no scope")) << line << ": " << error.describe();
+    }
+    // Anything else after LIST is a usage error, not an ignored word.
+    EXPECT_EQ(site.fails("ROADOBJECT LIST sign-1").code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(site.fails("ROADOBJECT LIST JSON sign-1").code, ErrorCode::InvalidArgument);
+    // Nothing was deleted by the refused lines, and the plain words go on.
+    EXPECT_EQ(site.objects(), 2u);
+    EXPECT_TRUE(contains(site.ok("ROADOBJECT LIST"), "roadobjects count=2 problems=0"));
+    EXPECT_EQ(site.ok("ROADOBJECT DELETE ALL"), "deleted count=2 ids=sign-1,barrier-2");
+}
+
+TEST(RoadObjectVerbs, InfoOnObjectsANewerKatanaWroteSaysSoAndNotThatTheObjectIsMissing)
+{
+    Site site;
+    auto metadata = site.document.metadata();
+    metadata.unknownKeys["road_objects"] =
+        R"({"format": "katana-road-objects", "version": 2, "next": 2, "objects": [{"id": "sign-1",
+           "kind": "sign", "placement": {"kind": "alignment", "alignment": "Main", "station": 50}}]})";
+    site.document.setMetadata(metadata);
+    const auto error = site.fails("ROADOBJECT INFO sign-1");
+    EXPECT_EQ(error.code, ErrorCode::Unsupported) << error.describe();
+    EXPECT_EQ(site.fails("ROADOBJECT LIST").code, ErrorCode::Unsupported);
+    EXPECT_EQ(site.fails("ROADOBJECT QUANTITIES").code, ErrorCode::Unsupported);
+}
+
+TEST(RoadObjectVerbs, ARenamedSurfaceIsFollowedByTheObjectsAndTheCorridorsThatStandOnIt)
+{
+    // The ground z = 100 + 0.01 x over x -10..110, y -10..10 (two triangles),
+    // as "ground" and as "dem". A corridor and a sign stand on "ground", and
+    // a second sign on "dem".
+    const auto z = [](double x) { return 100.0 + 0.01 * x; };
+    auto tin = katana::terrain::TinSurface::create(
+        {katana::geometry::Point3(-10, -10, z(-10)), katana::geometry::Point3(110, -10, z(110)),
+         katana::geometry::Point3(110, 10, z(110)), katana::geometry::Point3(-10, 10, z(-10))},
+        {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(tin.ok());
+    const auto shared = std::make_shared<const katana::terrain::TinSurface>(std::move(*tin));
+    Site site;
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store.add({"ground", shared, "test"}).ok());
+    ASSERT_TRUE(store.add({"dem", shared, "test"}).ok());
+    ASSERT_TRUE(site.document.setSurfaces(store).ok());
+    site.ok("ROADTEMPLATE DEFAULTS");
+    site.ok("CORRIDOR NEW c1 ALIGNMENT Main TEMPLATE \"rural two-lane\" surface=ground");
+    site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4 surface=ground");
+    site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=60 offset=4 surface=dem");
+
+    const std::string renamed = site.ok("SURFACE RENAME ground eg");
+    EXPECT_TRUE(contains(renamed, "renamed surface=ground name=eg corridors=1 roadobjects=1"))
+        << renamed;
+    EXPECT_EQ(site.document.corridors().find("c1")->surface, "eg");
+    EXPECT_EQ(site.document.roadObjects().find("sign-1")->placement.surface, "eg");
+    EXPECT_EQ(site.document.roadObjects().find("sign-2")->placement.surface, "dem");
+    // The sign still stands on its ground, and nothing is listed as a problem.
+    EXPECT_EQ(site.ok("ROADOBJECT PROBLEMS"), "problems=0");
+    const auto made = katana::cad::road::buildRoadObject(
+        katana::cad::road::placementContext(site.document),
+        *site.document.roadObjects().find("sign-1"));
+    ASSERT_TRUE(made.problems.empty());
+    ASSERT_EQ(made.objects.size(), 1u);
+    // (50, 4) on z = 100 + 0.01 x is 100.5.
+    EXPECT_NEAR(made.objects.front().mesh.bounds().min.z, 100.5, 1e-9);
+
+    // The rename, the corridor and the objects are ONE undo step.
+    site.ok("UNDO");
+    EXPECT_NE(site.document.surfaces().find("ground"), nullptr);
+    EXPECT_EQ(site.document.surfaces().find("eg"), nullptr);
+    EXPECT_EQ(site.document.corridors().find("c1")->surface, "ground");
+    EXPECT_EQ(site.document.roadObjects().find("sign-1")->placement.surface, "ground");
+    site.ok("REDO");
+    EXPECT_EQ(site.document.corridors().find("c1")->surface, "eg");
+    EXPECT_EQ(site.document.roadObjects().find("sign-1")->placement.surface, "eg");
+}
+
+TEST(RoadObjectVerbs, ARenamedSurfaceWithNothingStandingOnItRenamesOnlyTheSurface)
+{
+    const auto z = [](double x) { return 100.0 + 0.01 * x; };
+    auto tin = katana::terrain::TinSurface::create(
+        {katana::geometry::Point3(-10, -10, z(-10)), katana::geometry::Point3(110, -10, z(110)),
+         katana::geometry::Point3(110, 10, z(110)), katana::geometry::Point3(-10, 10, z(-10))},
+        {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(tin.ok());
+    Site site;
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(
+        store.add({"ground", std::make_shared<const katana::terrain::TinSurface>(std::move(*tin)),
+                   "test"})
+            .ok());
+    ASSERT_TRUE(site.document.setSurfaces(store).ok());
+    const std::string renamed = site.ok("SURFACE RENAME ground eg");
+    EXPECT_TRUE(contains(renamed, "renamed surface=ground name=eg corridors=0 roadobjects=0"))
+        << renamed;
+    site.ok("UNDO");
+    EXPECT_NE(site.document.surfaces().find("ground"), nullptr);
 }

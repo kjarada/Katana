@@ -644,9 +644,12 @@ makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
 the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain, BIM and GIS have a second row of
-their own (`addToolBarBreak`), because in one row they were squeezed to a button
-each behind overflow arrows. Draw and Annotate run down the LEFT edge, where
+Format run along the top; Survey, Terrain, Surface Edit, BIM and GIS have a
+second row of their own (`addToolBarBreak`), because in one row they were
+squeezed to a button each behind overflow arrows - and with the Surface Edit
+and BIM bars in it the second row is itself wider than 1360 pixels, so BIM and
+GIS show only their handle and arrow there ("Fitting the screen", Not done).
+Draw and Annotate run down the LEFT edge, where
 every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a
 row above it; Modify runs down the RIGHT edge, as in the classic CAD layout,

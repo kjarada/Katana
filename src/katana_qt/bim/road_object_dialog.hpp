@@ -29,6 +29,8 @@
 // Object names, which the widget tests and the headless --dialog, --fill and
 // --press steps drive it by:
 //   roadObjectDialog           the dialog (every Road Objects action's data)
+//   roadObjectBody             the scroll area of the pages, placement and heights;
+//                              the line, the buttons and the reply stay below it
 //   roadObjectKinds            a tab per kind, in cad's order
 //   roadObject_<kind>_<key>    a parameter: a field, or a choice whose first
 //                              item is the default ("roadObject_barrier_type")
@@ -47,7 +49,8 @@
 //                              roadObjectSourceLayers ...)
 //   roadObjectHeights          automatic, profile, surface or line
 //   roadObjectSurface          the surface (an editable choice)
-//   roadObjectCrossfall, roadObjectDz
+//   roadObjectCrossfall, roadObjectDz   (the crossfall only along an alignment,
+//                              standing on the profile: nothing else reads it)
 //   roadObjectName, roadObjectLayer, roadObjectColour, roadObjectMaterial,
 //   roadObjectFacility
 //   roadObjectLine             the exact line Add will run (read-only)
@@ -95,6 +98,9 @@ struct RoadObjectForm {
     // The scope's words (ScopeFilterWidget::verbWords), for Lines and
     // DrawnPoints.
     QString scope{};
+    // Why the scope's words could not be made (a colour that does not read, no
+    // layer ticked ...), when they could not: said in place of "say which part".
+    QString scopeError{};
     // "", profile, surface or line.
     QString heights{};
     QString surface{};

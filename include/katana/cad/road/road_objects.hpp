@@ -15,8 +15,9 @@
 // alignment and the barrier follows it.
 //
 // Every solid is closed and outward-oriented (road_object_mesh.hpp), so the
-// 3D view culls it, the IFC export writes it as a closed face set and its
-// volume is exact for the mesh.
+// IFC export writes it as a closed face set and its volume is exact for the
+// mesh. (The 3D view draws both faces of every triangle: the winding is for
+// the export and the volume, not the display.)
 //
 // Heights. An object stands on the ground of its placement:
 //   - Profile: along an alignment, the design profile's level at the
@@ -252,10 +253,14 @@ struct RoadObjectSet {
 // colour (#RRGGBB or a standard colour name; empty for the kind's), material,
 // facility - the placement's - alignment (an alignment placement's), station,
 // to, offset, spacing, heights, surface, crossfall, dz (to=, spacing= and
-// heights= empty clear them) - and the kind's own (parametersOf; empty
-// clears it back to the default). Refused, naming the key: a key neither
-// takes, a value that does not read, station=/to=/offset=/alignment= on a
-// placement that is not along an alignment.
+// heights= empty clear them; offset=, crossfall= and dz= empty go back to 0) -
+// and the kind's own (parametersOf; empty clears it back to the default).
+// Refused, naming the key: a key neither takes, a value that does not read,
+// station=/to=/offset=/alignment= on a placement that is not along an
+// alignment, spacing= on a kind that is not a point kind or a placement at
+// points, crossfall= on a placement that is not along an alignment, and
+// station= or alignment= given empty (a placement along an alignment has to
+// say where).
 [[nodiscard]] katana::core::Status applyKey(RoadObject& object, std::string_view key,
                                             std::string_view value);
 
@@ -277,8 +282,12 @@ struct PlacementContext {
                                             const RoadObject& object);
 
 // The quantities of `objects` together, by name in the order first met: the
-// lengths, areas, volumes, counts and weights summed, a height, width or
-// depth the largest.
+// volumes and weights summed, a height, width or depth the largest. A Length,
+// a Count and a GrossArea are those of the objects themselves, not of what
+// stands under or hangs from them: a wall's footing (IfcFooting) and a light
+// pole's luminaire (IfcLightFixture) say their own, as IFC reads them off the
+// element, but add nothing here - a 50 m wall is 50 m long however deep its
+// footing, and three poles are three however many lanterns they carry.
 [[nodiscard]] std::vector<bim::Quantity> totalQuantities(std::span<const bim::BimObject> objects);
 
 // A culvert's two ends, inlet first, at its inverts: where buildRoadObject

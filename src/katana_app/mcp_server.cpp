@@ -3,11 +3,12 @@
 // Every tool is a thin shape over Session::run: a tool builds command lines,
 // runs them, and hands back what the session printed. So there is one
 // implementation of every verb, the one katana_cli and its tests exercise, and
-// a tool can never do something the command line cannot. (Three tools run no
-// line and change nothing: katana_status and katana_customisation read the
-// Document through cad, for what no reply holds as structure, and
-// katana_check_update runs the UPDATE verbs' own CHECK and STATUS for an
-// agent's surface - the session refuses every UPDATE line here.)
+// a tool can never do something the command line cannot. (Five tools run no
+// line and change nothing: katana_status, katana_customisation,
+// katana_road_objects and katana_leaders read the Document through cad, for
+// what no reply holds as structure, and katana_check_update runs the UPDATE
+// verbs' own CHECK and STATUS for an agent's surface - the session refuses
+// every UPDATE line here.)
 
 #include "mcp_server.hpp"
 #include "mcp_tools.hpp"

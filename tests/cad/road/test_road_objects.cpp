@@ -636,3 +636,386 @@ TEST(RoadObjects, AnAlignmentKeyOnAnObjectPlacedAlongALineIsRefused)
     EXPECT_TRUE(katana::cad::road::applyKey(fence, "colour", "red").ok());
     EXPECT_FALSE(katana::cad::road::applyKey(fence, "layer", "a//b").ok());
 }
+
+// ---- totals, point objects round a closed line, caps, refusals -------------------------------
+
+namespace {
+
+const katana::cad::bim::Quantity* totalOf(const std::vector<katana::cad::bim::Quantity>& totals,
+                                          std::string_view name)
+{
+    const auto found = std::ranges::find(totals, name, &katana::cad::bim::Quantity::name);
+    return found == totals.end() ? nullptr : &*found;
+}
+
+double totalValue(const std::vector<katana::cad::bim::Quantity>& totals, std::string_view name)
+{
+    const auto* found = totalOf(totals, name);
+    EXPECT_NE(found, nullptr) << "no total " << name;
+    return found == nullptr ? std::nan("") : found->value;
+}
+
+// The centre of a mesh's plan bounds.
+Point2 centreOf(const BimObject& object)
+{
+    const auto box = object.mesh.bounds();
+    return Point2((box.min.x + box.max.x) / 2.0, (box.min.y + box.max.y) / 2.0);
+}
+
+// A 10 m square at level 5.5, drawn as a closed polyline: it is stored with its
+// first corner again at the end, five vertices for four corners.
+void drawClosedSquare(Site& site)
+{
+    site.ok("PLINE 0,0 10,0 10,10 0,10 CLOSE");
+    site.ok("SELECT ALL");
+    site.ok("PROP SET elevation 5.5");
+}
+
+} // namespace
+
+TEST(RoadObjects, ATotalCountsAWallsLengthOnceWhateverItsFootingAndALightsCountIsItsPoles)
+{
+    // 50 m of the default wall: the stem 50 m long, 0.25 x 2.0 x 50 = 25 m3 with
+    // a face of 50 x 2 = 100 m2, and under it the footing, also 50 m long,
+    // 1.2 x 0.4 x 50 = 24 m3. The wall is 50 m long, not 100, and holds
+    // 25 + 24 = 49 m3 of concrete.
+    Site site;
+    site.ok("ROADOBJECT ADD wall ALIGNMENT Main station=10 to=60 offset=5");
+    const BimModel wall = site.built("wall-1");
+    ASSERT_EQ(wall.objects.size(), 2u);
+    const auto totals = katana::cad::road::totalQuantities(wall.objects);
+    EXPECT_NEAR(totalValue(totals, "Length"), 50.0, 1e-9);
+    EXPECT_NEAR(totalValue(totals, "GrossArea"), 100.0, 1e-9);
+    EXPECT_NEAR(totalValue(totals, "GrossVolume"), 49.0, 1e-9);
+    EXPECT_NEAR(totalValue(totals, "Height"), 2.0, 1e-12);
+    EXPECT_NEAR(totalValue(totals, "Width"), 1.2, 1e-12);
+    EXPECT_NEAR(totalValue(totals, "Depth"), 0.4, 1e-12);
+    // The footing says its own length to IFC all the same.
+    EXPECT_NEAR(quantityValue(wall.objects[1], "Length"), 50.0, 1e-9);
+
+    // The same wall with no footing is the same 50 m.
+    site.ok("ROADOBJECT ADD wall ALIGNMENT Main station=10 to=60 offset=-5 footing=0");
+    const BimModel bare = site.built("wall-2");
+    ASSERT_EQ(bare.objects.size(), 1u);
+    EXPECT_NEAR(totalValue(katana::cad::road::totalQuantities(bare.objects), "Length"), 50.0,
+                1e-9);
+
+    // Poles at 0, 30 and 60 are three, with their three lanterns not counted
+    // among them.
+    site.ok("ROADOBJECT ADD light ALIGNMENT Main station=0 to=60 spacing=30 offset=6");
+    const BimModel lights = site.built("light-3");
+    ASSERT_EQ(lights.objects.size(), 6u);
+    const auto lit = katana::cad::road::totalQuantities(lights.objects);
+    EXPECT_EQ(totalValue(lit, "Count"), 3.0);
+    EXPECT_NEAR(totalValue(lit, "Height"), 10.0, 1e-12);
+    EXPECT_EQ(quantityValue(lights.objects[1], "Count"), 1.0) << "a luminaire counts itself";
+
+    // Signs, guide posts and the rest are what they were: one Count each.
+    site.ok("ROADOBJECT ADD guidepost ALIGNMENT Main station=0 to=40 spacing=20 offset=-4");
+    EXPECT_EQ(totalValue(katana::cad::road::totalQuantities(site.built("guidepost-4").objects),
+                         "Count"),
+              3.0);
+}
+
+TEST(RoadObjects, PointObjectsAlongAClosedLineStandOnceAtEachCornerAndNotAgainWhereItCloses)
+{
+    // The square is 40 m round, stored with five vertices.
+    Site site;
+    drawClosedSquare(site);
+
+    // One at each corner: four, not five.
+    site.ok("ROADOBJECT ADD guidepost ALONG #1");
+    const BimModel corners = site.built("guidepost-1");
+    ASSERT_EQ(corners.objects.size(), 4u);
+    const Point2 expected[] = {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)};
+    for (std::size_t i = 0; i < 4; ++i) {
+        EXPECT_NEAR(centreOf(corners.objects[i]).x, expected[i].x, 1e-9) << i;
+        EXPECT_NEAR(centreOf(corners.objects[i]).y, expected[i].y, 1e-9) << i;
+    }
+
+    // Every 10 m: at 0, 10, 20 and 30; 40 m is the start again.
+    site.ok("ROADOBJECT ADD guidepost ALONG #1 spacing=10");
+    EXPECT_EQ(site.built("guidepost-2").objects.size(), 4u);
+
+    // Every 15 m: 0, 15 and 30 m, and 45 is past the end - nothing to drop: at
+    // (0,0), (10,5) and (0,10).
+    site.ok("ROADOBJECT ADD guidepost ALONG #1 spacing=15");
+    const BimModel fifteen = site.built("guidepost-3");
+    ASSERT_EQ(fifteen.objects.size(), 3u);
+    EXPECT_NEAR(centreOf(fifteen.objects[1]).x, 10.0, 1e-9);
+    EXPECT_NEAR(centreOf(fifteen.objects[1]).y, 5.0, 1e-9);
+    EXPECT_NEAR(centreOf(fifteen.objects[2]).x, 0.0, 1e-9);
+    EXPECT_NEAR(centreOf(fifteen.objects[2]).y, 10.0, 1e-9);
+
+    // Every 20 m: 0, 20 and 40 m, which is the start again - two poles, each a
+    // pole and a lantern, so four solids and a Count of two.
+    site.ok("ROADOBJECT ADD light ALONG #1 spacing=20");
+    const BimModel lights = site.built("light-4");
+    ASSERT_EQ(lights.objects.size(), 4u);
+    EXPECT_EQ(totalValue(katana::cad::road::totalQuantities(lights.objects), "Count"), 2.0);
+    for (const BimObject& part : lights.objects) {
+        EXPECT_TRUE(isClosedMesh(part.mesh)) << part.id;
+    }
+}
+
+TEST(RoadObjects, ARepeatedVertexOrAClosingVertexTwiceMakesNoEmptySolid)
+{
+    // A node edited twice leaves two vertices in one place: the direction the
+    // second stands along is the zero vector, and its post, its sign's post
+    // or its pole's arm used to come out as nothing, counted and listed as
+    // closed. By triangles: a guide post is a box, 12; a sign a box and a
+    // plate, 12 + 12; a pole an 8-sided prism (6 + 6 cap triangles + 16
+    // sides = 28) and its arm (12), 40, and a lantern 12.
+    Site site;
+    const auto stand = [&site](RoadObjectKind kind, std::vector<PlacedVertex> vertices) {
+        RoadObject object;
+        object.id = "x-1";
+        object.kind = kind;
+        object.placement.kind = PlacementKind::Line;
+        object.placement.vertices = std::move(vertices);
+        return buildRoadObject(placementContext(site.document), object);
+    };
+    const std::vector<PlacedVertex> repeated{PlacedVertex{Point2(0, 0), 5.0},
+                                             PlacedVertex{Point2(10, 0), 5.0},
+                                             PlacedVertex{Point2(10, 0), 5.0},
+                                             PlacedVertex{Point2(20, 0), 5.0}};
+    const BimModel posts = stand(RoadObjectKind::GuidePost, repeated);
+    ASSERT_TRUE(posts.problems.empty());
+    ASSERT_EQ(posts.objects.size(), 3u);
+    for (const BimObject& part : posts.objects) {
+        EXPECT_EQ(part.mesh.triangleCount(), 12u) << part.id;
+        EXPECT_TRUE(isClosedMesh(part.mesh)) << part.id;
+    }
+    const BimModel signs = stand(RoadObjectKind::Sign, repeated);
+    ASSERT_TRUE(signs.problems.empty());
+    ASSERT_EQ(signs.objects.size(), 3u);
+    for (const BimObject& part : signs.objects) {
+        EXPECT_EQ(part.mesh.triangleCount(), 24u) << part.id;
+        EXPECT_TRUE(isClosedMesh(part.mesh)) << part.id;
+    }
+    const BimModel poles = stand(RoadObjectKind::LightPole, repeated);
+    ASSERT_TRUE(poles.problems.empty());
+    ASSERT_EQ(poles.objects.size(), 6u);
+    for (std::size_t i = 0; i < poles.objects.size(); ++i) {
+        EXPECT_EQ(poles.objects[i].mesh.triangleCount(), i % 2 == 0 ? 40u : 12u)
+            << poles.objects[i].id;
+        EXPECT_TRUE(isClosedMesh(poles.objects[i].mesh)) << poles.objects[i].id;
+    }
+
+    // A closed square that also repeats its first vertex at the end - a DXF
+    // writer's habit on top of the closing flag - has four corners, not six.
+    const std::vector<PlacedVertex> doubled{
+        PlacedVertex{Point2(0, 0), 5.0},  PlacedVertex{Point2(10, 0), 5.0},
+        PlacedVertex{Point2(10, 10), 5.0}, PlacedVertex{Point2(0, 10), 5.0},
+        PlacedVertex{Point2(0, 0), 5.0},  PlacedVertex{Point2(0, 0), 5.0}};
+    EXPECT_EQ(stand(RoadObjectKind::GuidePost, doubled).objects.size(), 4u);
+
+    // A line of one place has one object, facing the way a point does.
+    const BimModel alone = stand(RoadObjectKind::Sign, {PlacedVertex{Point2(3, 4), 5.0},
+                                                        PlacedVertex{Point2(3, 4), 5.0}});
+    ASSERT_EQ(alone.objects.size(), 1u);
+    EXPECT_EQ(alone.objects.front().mesh.triangleCount(), 24u);
+}
+
+TEST(RoadObjects, ACulvertOnASurfaceStandsOnItWhenAnEndOfItsSkewFallsOffTheAlignment)
+{
+    // Skewed 60 degrees and 20 m long at station 5: the inlet is 10 m along
+    // the axis (-sin 60, cos 60) back from (5, 0), at (13.660254, -5), and the
+    // outlet 10 m forward of it, at (-3.660254, 5). That end's STATION is 5 -
+    // 8.660254 = -3.66, before the alignment's start; the surface under it is
+    // z = 100 + 0.01 x, which covers it. The profile has no say on a surface:
+    // the ground there is 99.96339746, the inlet's 100.13660254, and each
+    // invert is the ground less 0.6 of cover less 1.0 (the pipe's 0.9 and its
+    // 0.1 wall).
+    Site site(false);
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store.add({"ground", slopingGround(), "test"}).ok());
+    ASSERT_TRUE(site.document.setSurfaces(store).ok());
+    site.ok("ROADOBJECT ADD culvert ALIGNMENT Main station=5 skew=60 surface=ground");
+    const RoadObject* culvert = site.document.roadObjects().find("culvert-1");
+    ASSERT_NE(culvert, nullptr);
+    const auto ends = culvertEnds(placementContext(site.document), *culvert);
+    ASSERT_TRUE(ends.ok()) << ends.error().describe();
+    const double along = std::sin(std::numbers::pi / 3.0) * 10.0;
+    EXPECT_NEAR(ends->inlet.x, 5.0 + along, 1e-9);
+    EXPECT_NEAR(ends->inlet.y, -5.0, 1e-9);
+    EXPECT_NEAR(ends->inlet.z, 100.0 + 0.01 * (5.0 + along) - 1.6, 1e-9);
+    EXPECT_NEAR(ends->outlet.x, 5.0 - along, 1e-9);
+    EXPECT_NEAR(ends->outlet.y, 5.0, 1e-9);
+    EXPECT_NEAR(ends->outlet.z, 100.0 + 0.01 * (5.0 - along) - 1.6, 1e-9);
+    ASSERT_TRUE(site.built("culvert-1").problems.empty());
+}
+
+TEST(RoadObjects, ACulvertOnTheProfileStillRefusesAnEndOffTheAlignmentNamingItsStation)
+{
+    Site site;
+    const auto error = site.fails("ROADOBJECT ADD culvert ALIGNMENT Main station=5 skew=60");
+    EXPECT_TRUE(contains(error.message, "station -3.66")) << error.describe();
+    EXPECT_TRUE(contains(error.message, "off alignment Main")) << error.describe();
+}
+
+TEST(RoadObjects, AnArcCarriesItsEndHeightsAlongItsChords)
+{
+    // A semicircle of radius 10: ARC takes its start, a point on it and its end.
+    Site site;
+    site.ok("ARC 10,0 0,10 -10,0");
+    site.ok("SELECT ALL");
+    // No height: refused, as any line with none is.
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT ADD fence ALONG #1").message, "no height"));
+    // One elevation: both ends at 5, so a level fence: the posts stand on 5 and
+    // are 1.2 tall.
+    site.ok("PROP SET elevation 5");
+    site.ok("ROADOBJECT ADD fence ALONG #1");
+    const BimModel level = site.built("fence-1");
+    ASSERT_EQ(level.objects.size(), 1u);
+    EXPECT_NEAR(level.objects.front().mesh.bounds().min.z, 5.0, 1e-9);
+    EXPECT_NEAR(level.objects.front().mesh.bounds().max.z, 6.2, 1e-9);
+    // Two: 5 at the start and 7 at the end, rising evenly with the sweep. The
+    // first post is on 5 and the last on 7, 1.2 above it, 8.2.
+    site.ok("PROP SET elevations \"5 7\"");
+    site.ok("ROADOBJECT ADD fence ALONG #1");
+    const BimModel graded = site.built("fence-2");
+    ASSERT_EQ(graded.objects.size(), 1u);
+    EXPECT_NEAR(graded.objects.front().mesh.bounds().min.z, 5.0, 1e-9);
+    EXPECT_NEAR(graded.objects.front().mesh.bounds().max.z, 8.2, 1e-9);
+}
+
+TEST(RoadObjects, ARunPastTheCapIsRefusedBeforeAnythingIsMadeAndOneAtItIsMade)
+{
+    // 99.99 m every 0.01 m is 9999 spacings and 10000 posts: the most a
+    // definition takes. The whole 100 m is 10001.
+    Site site;
+    const std::string atTheCap =
+        site.ok("ROADOBJECT ADD guidepost ALIGNMENT Main station=0 to=99.99 spacing=0.01");
+    EXPECT_TRUE(contains(atTheCap, "objects=10000")) << atTheCap.substr(0, 300);
+    const auto past = site.fails("ROADOBJECT ADD guidepost ALIGNMENT Main station=0 to=100 "
+                                 "spacing=0.01");
+    EXPECT_TRUE(contains(past.message, "more than the 10000")) << past.describe();
+    // A spacing that would be billions is refused as quickly.
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT ADD sign ALIGNMENT Main station=0 to=100 "
+                                    "spacing=0.0000001")
+                             .message,
+                         "more than the 10000"));
+    // Only the run at the cap was kept.
+    EXPECT_EQ(site.document.roadObjects().objects.size(), 1u);
+}
+
+TEST(RoadObjects, ADashShorterThanAMillimetreOrMoreMarksThanTheCapAreRefused)
+{
+    Site site;
+    const auto tiny = site.fails("ROADOBJECT ADD marking type=lane dash=0.0005 gap=1 ALIGNMENT "
+                                 "Main station=0 to=100 offset=1");
+    EXPECT_TRUE(contains(tiny.message, "shorter than the 0.001 m")) << tiny.describe();
+    // 1 mm dash and 1 mm gap over 100 m is 50000 marks.
+    const auto many = site.fails("ROADOBJECT ADD marking type=lane dash=0.001 gap=0.001 ALIGNMENT "
+                                 "Main station=0 to=100 offset=1");
+    EXPECT_TRUE(contains(many.message, "more than the 10000")) << many.describe();
+    EXPECT_TRUE(site.document.roadObjects().objects.empty());
+}
+
+TEST(RoadObjects, ALinesLastMarkTooShortToHaveASolidIsNotCountedOrMeasured)
+{
+    // 12.0004 m of the 3 m and 9 m pattern: a mark at 0 to 3, then the next at
+    // 12 would run 0.4 mm - less than the millimetre a sweep keeps - and made
+    // nothing while it was counted and measured. One mark, 3 m, 0.3 m2.
+    Site site;
+    site.ok("ROADOBJECT ADD marking type=lane ALIGNMENT Main station=0 to=12.0004 offset=1.75");
+    const BimModel model = site.built("marking-1");
+    ASSERT_EQ(model.objects.size(), 1u);
+    const BimObject& line = model.objects.front();
+    EXPECT_TRUE(isClosedMesh(line.mesh));
+    EXPECT_EQ(quantityValue(line, "Count"), 1.0);
+    EXPECT_NEAR(quantityValue(line, "Length"), 3.0, 1e-9);
+    EXPECT_NEAR(quantityValue(line, "GrossArea"), 0.3, 1e-9);
+    EXPECT_EQ(line.plan.size(), 1u);
+}
+
+TEST(RoadObjects, SpacingAndCrossfallWhereTheyApplyToNothingAreRefusedNotEchoed)
+{
+    Site site;
+    // A barrier's and a fence's posts have postspacing=; a wall, nothing.
+    const auto barrier = site.fails("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 "
+                                    "spacing=5");
+    EXPECT_TRUE(contains(barrier.message, "postspacing")) << barrier.describe();
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT ADD wall ALIGNMENT Main station=0 to=20 spacing=5")
+                             .message,
+                         "nothing to space"));
+    // At points one stands at each point.
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT ADD sign AT 5,5,1 spacing=5").message,
+                         "one stands at each point"));
+    // No profile to carry a crossfall out along a line or at points.
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT ADD sign AT 5,5,1 crossfall=-3").message,
+                         "no profile to carry"));
+    // Nor a surface.
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store.add({"ground", slopingGround(), "test"}).ok());
+    ASSERT_TRUE(site.document.setSurfaces(store).ok());
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4 "
+                                    "surface=ground crossfall=-3")
+                             .message,
+                         "stands on a surface"));
+    EXPECT_TRUE(site.document.roadObjects().objects.empty());
+
+    // On the profile it is carried, and SET cannot then put the object on a
+    // surface without letting the crossfall go.
+    site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4 crossfall=-3");
+    EXPECT_TRUE(contains(site.fails("ROADOBJECT SET sign-1 surface=ground").message,
+                         "stands on a surface"));
+    site.ok("ROADOBJECT SET sign-1 crossfall= surface=ground");
+    EXPECT_EQ(site.document.roadObjects().find("sign-1")->placement.crossfall, 0.0);
+    // A zero crossfall is no crossfall: accepted anywhere.
+    site.ok("ROADOBJECT ADD sign AT 5,5,1 crossfall=0");
+}
+
+TEST(RoadObjects, OffsetCrossfallAndDzGivenEmptyGoBackToZeroAndStationAndAlignmentNeedAValue)
+{
+    RoadObject sign;
+    sign.kind = RoadObjectKind::Sign;
+    sign.placement.alignment = "Main";
+    sign.placement.station = 50.0;
+    sign.placement.offset = 4.0;
+    sign.placement.crossfall = -3.0;
+    sign.placement.dz = 0.5;
+    ASSERT_TRUE(katana::cad::road::applyKey(sign, "offset", "").ok());
+    ASSERT_TRUE(katana::cad::road::applyKey(sign, "crossfall", "").ok());
+    ASSERT_TRUE(katana::cad::road::applyKey(sign, "dz", "").ok());
+    EXPECT_EQ(sign.placement.offset, 0.0);
+    EXPECT_EQ(sign.placement.crossfall, 0.0);
+    EXPECT_EQ(sign.placement.dz, 0.0);
+    // Where along the alignment is the point of the placement: no default.
+    const auto station = katana::cad::road::applyKey(sign, "station", "");
+    ASSERT_FALSE(station.ok());
+    EXPECT_EQ(station.error().code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(station.error().message, "needs a number"));
+    EXPECT_EQ(sign.placement.station, 50.0);
+    EXPECT_FALSE(katana::cad::road::applyKey(sign, "alignment", "").ok());
+    EXPECT_EQ(sign.placement.alignment, "Main");
+}
+
+TEST(RoadObjects, IdsAreNeverGivenTwiceEvenAfterAnUndoOrARedo)
+{
+    // barrier-1, barrier-2 (a copy), then the copy undone: the next number is
+    // 3, because 2 was given, not 2 again.
+    Site site;
+    site.ok("ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4");
+    site.ok("ROADOBJECT COPY barrier-1 station=30");
+    EXPECT_EQ(site.document.roadObjects().nextNumber, 3u);
+    site.ok("UNDO");
+    EXPECT_EQ(site.document.roadObjects().objects.size(), 1u);
+    EXPECT_EQ(site.document.roadObjects().nextNumber, 3u);
+    EXPECT_TRUE(contains(site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4"),
+                         "id=sign-3"));
+    // Everything undone: the first object ever placed too. 4 is next.
+    site.ok("UNDO");
+    site.ok("UNDO");
+    EXPECT_TRUE(site.document.roadObjects().objects.empty());
+    EXPECT_EQ(site.document.roadObjects().nextNumber, 4u);
+    EXPECT_TRUE(contains(site.ok("ROADOBJECT ADD sign ALIGNMENT Main station=60 offset=4"),
+                         "id=sign-4"));
+    // Undone and redone, the sign is sign-4 again and 5 is next: a redo does
+    // not take the counter back to what the step began with.
+    site.ok("UNDO");
+    site.ok("REDO");
+    EXPECT_NE(site.document.roadObjects().find("sign-4"), nullptr);
+    EXPECT_EQ(site.document.roadObjects().nextNumber, 5u);
+}

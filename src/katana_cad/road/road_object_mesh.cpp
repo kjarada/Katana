@@ -24,10 +24,14 @@ namespace {
 // station computed twice.
 constexpr double kSamePoint = 1e-3;
 
-// A mitre longer than this many times the section's half-width is cut short:
-// at a hairpin of the path the true mitre runs off to infinity. Four is the
-// limit SVG and PostScript draw a mitred join to (stroke-miterlimit's
-// default), for the same reason.
+// A mitre longer than this many times the section's half-width is not cut:
+// at a hairpin of the path the true mitre runs off to infinity. Past it the
+// joint is a bevel - the section ends square to the leg that arrives and
+// starts square to the leg that leaves, the two rings joined side to side -
+// as SVG and PostScript draw a join past the same limit (stroke-miterlimit's
+// default of four). Shortening the mitre instead would narrow the section
+// along the whole leg, because the leg's sides run from a full-width ring at
+// its far end to the narrowed one at the joint.
 constexpr double kMitreLimit = 4.0;
 
 double signedArea(std::span<const Point2> polygon)
@@ -71,51 +75,102 @@ std::vector<PathPoint> distinct(std::span<const PathPoint> path)
     return out;
 }
 
-// For each point of the path, the horizontal vector a section's u is
-// measured along: the left normal of the path there, mitred at a bend so
-// that a section u to the left of both segments stays u from each.
-std::vector<Vec2> sectionAxes(const std::vector<PathPoint>& path)
+// The path a sweep follows, cleaned: when it comes back to its start (the
+// same plan position and level, within kSamePoint) the closing point is
+// dropped and `loop` says so, so the last segment runs on to the first point
+// and the sweep wraps round with no ends. A fence, a wall or a line of
+// barrier round a closed polyline then has its start corner mitred like every
+// other, instead of two square end faces that leave a notch outside the
+// corner and overlap inside it - or, closed midway along a side, two
+// coincident caps.
+struct SweepPath {
+    std::vector<PathPoint> points;
+    bool loop = false;
+};
+
+SweepPath sweepPathOf(std::span<const PathPoint> path)
 {
-    std::vector<Vec2> normals;
-    normals.reserve(path.size() - 1);
-    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
-        normals.push_back((path[i + 1].position - path[i].position).normalized().perpendicular());
+    SweepPath out{distinct(path), false};
+    std::vector<PathPoint>& points = out.points;
+    // Four points at least: three distinct corners and the one that closes them.
+    if (points.size() >= 4) {
+        const PathPoint& first = points.front();
+        const PathPoint& last = points.back();
+        const PathPoint& before = points[points.size() - 2];
+        if (first.position.distanceTo(last.position) < kSamePoint &&
+            std::abs(first.z - last.z) < kSamePoint &&
+            first.position.distanceTo(before.position) >= kSamePoint) {
+            points.pop_back();
+            out.loop = true;
+        }
     }
-    std::vector<Vec2> axes;
-    axes.reserve(path.size());
-    for (std::size_t k = 0; k < path.size(); ++k) {
-        if (k == 0) {
-            axes.push_back(normals.front());
-            continue;
-        }
-        if (k + 1 == path.size()) {
-            axes.push_back(normals.back());
-            continue;
-        }
-        const Vec2 bisector = normals[k - 1] + normals[k];
-        const double length = bisector.length();
-        if (length < 1e-9) {
-            // The path doubles back on itself here; no mitre exists.
-            axes.push_back(normals[k]);
-            continue;
-        }
-        const Vec2 unit = bisector / length;
-        const double cosine = unit.dot(normals[k]);
-        axes.push_back(unit * std::min(1.0 / cosine, kMitreLimit));
-    }
-    return axes;
+    return out;
 }
 
-// Appends the rings of `profile` at each point of `path`, P vertices a ring;
-// returns the index of the first.
+// One ring of a swept section: the path point it stands at, and the
+// horizontal vector its u is measured along there.
+struct Ring {
+    std::size_t point = 0;
+    Vec2 axis{};
+};
+
+// The rings of a sweep, in order. A point of the path is one ring - its axis
+// the left normal of the path there, mitred at a bend so that a section u to
+// the left of both segments stays u from each - except where the bend is past
+// kMitreLimit (or the path doubles back): there it is two, one square to the
+// segment that arrives and one square to the segment that leaves, so each leg
+// keeps its full width right up to the joint. An open path's ends are square
+// to their one segment.
+std::vector<Ring> ringsOf(const std::vector<PathPoint>& path, bool loop)
+{
+    const std::size_t count = path.size();
+    const std::size_t segments = loop ? count : count - 1;
+    std::vector<Vec2> normals;
+    normals.reserve(segments);
+    for (std::size_t i = 0; i < segments; ++i) {
+        normals.push_back(
+            (path[(i + 1) % count].position - path[i].position).normalized().perpendicular());
+    }
+    std::vector<Ring> rings;
+    rings.reserve(count + 1);
+    for (std::size_t k = 0; k < count; ++k) {
+        if (!loop && k == 0) {
+            rings.push_back({k, normals.front()});
+            continue;
+        }
+        if (!loop && k + 1 == count) {
+            rings.push_back({k, normals.back()});
+            continue;
+        }
+        const Vec2& arriving = normals[(k + segments - 1) % segments];
+        const Vec2& leaving = normals[k % segments];
+        const Vec2 bisector = arriving + leaving;
+        const double length = bisector.length();
+        // Two unit normals sum to 2 cos(half the turn): the mitre's length
+        // over the half-width, 1 / cos, is within the limit exactly when the
+        // sum is at least 2 / limit. A path that doubles back sums to 0.
+        if (length >= 2.0 / kMitreLimit) {
+            const Vec2 unit = bisector / length;
+            rings.push_back({k, unit * (1.0 / unit.dot(leaving))});
+        } else {
+            rings.push_back({k, arriving});
+            rings.push_back({k, leaving});
+        }
+    }
+    return rings;
+}
+
+// Appends the rings of `profile` at each ring of the sweep, P vertices a
+// ring; returns the index of the first.
 std::uint32_t addRings(TriangleMesh& mesh, const std::vector<PathPoint>& path,
-                       const std::vector<Vec2>& axes, std::span<const Point2> profile)
+                       const std::vector<Ring>& rings, std::span<const Point2> profile)
 {
     const std::uint32_t first = index(mesh.vertices.size());
-    for (std::size_t k = 0; k < path.size(); ++k) {
+    for (const Ring& ring : rings) {
+        const PathPoint& at = path[ring.point];
         for (const Point2& corner : profile) {
-            const Point2 plan = path[k].position + axes[k] * corner.x;
-            mesh.vertices.emplace_back(plan.x, plan.y, path[k].z + corner.y);
+            const Point2 plan = at.position + ring.axis * corner.x;
+            mesh.vertices.emplace_back(plan.x, plan.y, at.z + corner.y);
         }
     }
     return first;
@@ -123,16 +178,19 @@ std::uint32_t addRings(TriangleMesh& mesh, const std::vector<PathPoint>& path,
 
 // The quads joining ring k to ring k + 1 round the whole profile, facing
 // out of a counter-clockwise profile - or into it, for the inside of a tube.
+// A loop's last ring joins the first.
 void addSides(TriangleMesh& mesh, std::uint32_t first, std::size_t rings, std::size_t corners,
-              bool facingIn)
+              bool facingIn, bool loop)
 {
-    for (std::size_t k = 0; k + 1 < rings; ++k) {
+    const std::size_t pairs = loop ? rings : rings - 1;
+    for (std::size_t k = 0; k < pairs; ++k) {
+        const std::size_t following = (k + 1) % rings;
         for (std::size_t j = 0; j < corners; ++j) {
             const std::size_t next = (j + 1) % corners;
             const std::uint32_t a = first + index(k * corners + j);
             const std::uint32_t b = first + index(k * corners + next);
-            const std::uint32_t c = first + index((k + 1) * corners + next);
-            const std::uint32_t d = first + index((k + 1) * corners + j);
+            const std::uint32_t c = first + index(following * corners + next);
+            const std::uint32_t d = first + index(following * corners + j);
             if (facingIn) {
                 mesh.faces.push_back({a, c, b});
                 mesh.faces.push_back({a, d, c});
@@ -266,7 +324,7 @@ void addExtrusion(TriangleMesh& mesh, std::span<const Point2> polygon, const Poi
         mesh.faces.push_back({first + face[0], first + face[2], first + face[1]});
         mesh.faces.push_back({top + face[0], top + face[1], top + face[2]});
     }
-    addSides(mesh, first, 2, profile.size(), false);
+    addSides(mesh, first, 2, profile.size(), false, false);
 }
 
 void addPrism(TriangleMesh& mesh, std::span<const Point2> outline, double bottom, double top)
@@ -292,7 +350,8 @@ void addBox(TriangleMesh& mesh, const Point3& baseCentre, const Vec2& along, dou
 
 void addSweep(TriangleMesh& mesh, std::span<const PathPoint> path, std::span<const Point2> profile)
 {
-    const std::vector<PathPoint> points = distinct(path);
+    const SweepPath swept = sweepPathOf(path);
+    const std::vector<PathPoint>& points = swept.points;
     if (points.size() < 2) {
         return;
     }
@@ -301,35 +360,42 @@ void addSweep(TriangleMesh& mesh, std::span<const PathPoint> path, std::span<con
     if (caps.empty()) {
         return;
     }
-    const std::uint32_t first = addRings(mesh, points, sectionAxes(points), section);
+    const std::vector<Ring> rings = ringsOf(points, swept.loop);
+    const std::uint32_t first = addRings(mesh, points, rings, section);
     const std::size_t corners = section.size();
-    // The end faces forward, along the path, which in the (t, u, v) frame
-    // is the side a counter-clockwise profile is seen counter-clockwise
-    // from; the start faces back.
-    const std::uint32_t last = first + index((points.size() - 1) * corners);
-    for (const Face& face : caps) {
-        mesh.faces.push_back({first + face[0], first + face[2], first + face[1]});
-        mesh.faces.push_back({last + face[0], last + face[1], last + face[2]});
+    if (!swept.loop) {
+        // The end faces forward, along the path, which in the (t, u, v) frame
+        // is the side a counter-clockwise profile is seen counter-clockwise
+        // from; the start faces back.
+        const std::uint32_t last = first + index((rings.size() - 1) * corners);
+        for (const Face& face : caps) {
+            mesh.faces.push_back({first + face[0], first + face[2], first + face[1]});
+            mesh.faces.push_back({last + face[0], last + face[1], last + face[2]});
+        }
     }
-    addSides(mesh, first, points.size(), corners, false);
+    addSides(mesh, first, rings.size(), corners, false, swept.loop);
 }
 
 void addHollowSweep(TriangleMesh& mesh, std::span<const PathPoint> path,
                     std::span<const Point2> outer, std::span<const Point2> inner)
 {
-    const std::vector<PathPoint> points = distinct(path);
+    const SweepPath swept = sweepPathOf(path);
+    const std::vector<PathPoint>& points = swept.points;
     if (points.size() < 2 || outer.size() != inner.size() || outer.size() < 3) {
         return;
     }
-    const std::vector<Vec2> axes = sectionAxes(points);
+    const std::vector<Ring> rings = ringsOf(points, swept.loop);
     const std::size_t corners = outer.size();
-    const std::uint32_t outside = addRings(mesh, points, axes, outer);
-    const std::uint32_t inside = addRings(mesh, points, axes, inner);
-    addSides(mesh, outside, points.size(), corners, false);
-    addSides(mesh, inside, points.size(), corners, true);
+    const std::uint32_t outside = addRings(mesh, points, rings, outer);
+    const std::uint32_t inside = addRings(mesh, points, rings, inner);
+    addSides(mesh, outside, rings.size(), corners, false, swept.loop);
+    addSides(mesh, inside, rings.size(), corners, true, swept.loop);
+    if (swept.loop) {
+        return; // a ring of tube with no ends
+    }
     // The ends: the ring between the outer and the inner loop, a quad an
     // edge, wound as the solid sweep's ends are.
-    const std::size_t lastRing = (points.size() - 1) * corners;
+    const std::size_t lastRing = (rings.size() - 1) * corners;
     for (std::size_t j = 0; j < corners; ++j) {
         const std::size_t next = (j + 1) % corners;
         const std::uint32_t o0 = outside + index(j);

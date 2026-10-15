@@ -539,8 +539,12 @@ SURFACESTYLE LIST [JSON] | INFO <style> | NEW <style> [FROM <style>] [key=value 
 A key per field of a style (HELP SURFACESTYLE lists them; colours take
 #RRGGBB or a colour name). Replies are records: `surface name= ... style=
 visible=`, `style name= default= surfaces= ...`, `renamed`, `copied`,
-`shown|hidden surfaces= changed=`. SURFACESTYLE INFO prints a style's
-`options` record, which typed back after SURFACESTYLE NEW gives the same
+`shown|hidden surfaces= changed=`. `SURFACE RENAME` carries the corridors that
+daylight on the surface and the road objects that stand on it to the new name,
+in its one undo step (`renamed surface= name= corridors= roadobjects=`); left
+behind they would find no surface and lose their earthworks and their level
+(`docs/road_objects.md`, "The drawing's record"). SURFACESTYLE INFO prints a
+style's `options` record, which typed back after SURFACESTYLE NEW gives the same
 style (`DrawingSurfaceVerbs.WhatInfoPrintsTypedBackMakesTheSameStyle`). SURFACE
 COPY shares the triangulation - a copy costs a pointer - so a copy kept
 before an edit costs nothing until the edit makes a new surface.
