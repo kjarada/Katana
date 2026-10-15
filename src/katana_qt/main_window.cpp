@@ -5629,7 +5629,8 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
         settings.center = view->viewTransform().center;
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = view->plotToPdf(path, settings);
+    std::vector<cad::SurfaceProblem> unplotted;
+    const auto status = view->plotToPdf(path, settings, &unplotted);
     QApplication::restoreOverrideCursor();
     if (!status) {
         return status;
@@ -5639,6 +5640,14 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
                    .arg(path, paperName(settings.paper), settings.landscape ? "landscape" : "portrait")
                    .arg(settings.scaleDenominator, 0, 'f', 0)
                    .arg(settings.dpi, 0, 'f', 0));
+    // What the plot is without of a surface's style - contours too fine to
+    // trace - is a warning, not a failure: the plot is written and the line
+    // is carried out, so these are logged as ordinary lines and do not count
+    // against it. One record each, naming the surface, its style and why,
+    // before the file record, which stays the reply's last line.
+    for (const cad::SurfaceProblem& problem : unplotted) {
+        logMessage(QString::fromStdString(problem.record()));
+    }
     // The same as a record, for a script or an agent to read: what PLOT and
     // --plot made, with the scale a fitted plot chose.
     const std::string_view style = cad::toString(settings.colourMode);

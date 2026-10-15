@@ -20,6 +20,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/preflight.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
+#include "katana/cad/terrain/surface_plan.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/geometry/alignment.hpp"
 
@@ -983,6 +984,102 @@ TEST(SheetPreflight, ASkippedCodeIsNotReported)
     EXPECT_EQ(codesOf(check(set, model, options)), "scale.non-standard");
 }
 
+// ---- plan.surface-style -------------------------------------------------------------------
+
+namespace {
+
+// A surface lying in `bounds` whose style "Fine" cannot trace its contours.
+katana::cad::SurfaceStyleProblem refusedSurface(const std::string& name, Box2 bounds)
+{
+    return katana::cad::SurfaceStyleProblem{
+        katana::cad::SurfaceProblem{name, "Fine",
+                                    "contours: an interval of 0.000001 crosses this surface's "
+                                    "triangles more than 4000000 times; not drawn - set a larger interval"},
+        bounds};
+}
+
+PreflightOptions withSurfaces(std::vector<katana::cad::SurfaceStyleProblem> problems)
+{
+    PreflightOptions options = knownLogo();
+    options.surfaceProblems = std::move(problems);
+    return options;
+}
+
+} // namespace
+
+TEST(SheetPreflight, APlanWhoseWindowReachesASurfaceItsStyleCannotDrawInWholeIsWarnedAndNamesIt)
+{
+    const Model model = drawing();
+    // The clean plan's window is 192.5 x 125 m about (50, 0): x from -46.25 to
+    // 146.25, y from -62.5 to 62.5. The surface lies 0..100 x 0..100, so the
+    // window reaches the lower part of it.
+    const auto found = withCode(
+        check(cleanSet(), model, withSurfaces({refusedSurface("ground", Box2(Point2(0.0, 0.0), Point2(100.0, 100.0)))})),
+        "plan.surface-style");
+    ASSERT_EQ(found.size(), 1u) << codesOf(found);
+    EXPECT_EQ(found[0].severity, Severity::Warning);
+    EXPECT_EQ(found[0].sheetIndex, 0u);
+    EXPECT_EQ(found[0].sheetId, "s1");
+    EXPECT_EQ(found[0].viewportId, "vp1");
+    EXPECT_EQ(found[0].subject, "ground");
+    // The surface, its style and the reason, as the painter reports them.
+    EXPECT_NE(found[0].message.find("the surface ground (style Fine) without part of its style: "
+                                    "contours: an interval of 0.000001"),
+              std::string::npos)
+        << found[0].message;
+    // The fix names the two verbs that mend it, with the style and the surface in them.
+    EXPECT_NE(found[0].fix.find("SURFACESTYLE SET \"Fine\" interval="), std::string::npos) << found[0].fix;
+    EXPECT_NE(found[0].fix.find("SURFACE STYLE \"ground\" <style>"), std::string::npos) << found[0].fix;
+}
+
+TEST(SheetPreflight, ASurfaceThePlansWindowDoesNotReachIsNotItsWarningNorIsAnythingWhenNothingIsKnown)
+{
+    const Model model = drawing();
+    // 150 starts 3.75 m past the window's east edge (146.25): not reached.
+    EXPECT_TRUE(withCode(check(cleanSet(), model,
+                               withSurfaces({refusedSurface("east", Box2(Point2(150.0, 0.0), Point2(250.0, 50.0)))})),
+                         "plan.surface-style")
+                    .empty());
+    // 140 starts 6.25 m inside it: reached, if only by a corner.
+    EXPECT_EQ(withCode(check(cleanSet(), model,
+                             withSurfaces({refusedSurface("corner", Box2(Point2(140.0, 0.0), Point2(250.0, 50.0)))})),
+                       "plan.surface-style")
+                  .size(),
+              1u);
+    // No problem known, none found: unknown (not asked) and known empty alike.
+    EXPECT_TRUE(withCode(check(cleanSet(), model, knownLogo()), "plan.surface-style").empty());
+    EXPECT_TRUE(withCode(check(cleanSet(), model, withSurfaces({})), "plan.surface-style").empty());
+    // And a caller who does not want it can skip the code.
+    PreflightOptions skipped = withSurfaces({refusedSurface("ground", Box2(Point2(0.0, 0.0), Point2(100.0, 100.0)))});
+    skipped.skip = {"plan.surface-style"};
+    EXPECT_TRUE(withCode(check(cleanSet(), model, skipped), "plan.surface-style").empty());
+}
+
+TEST(SheetPreflight, EachPlanThatShowsARefusedSurfaceIsWarnedOnceForEachSurfaceInTheOrderGiven)
+{
+    const Model model = drawing();
+    SheetSet set = cleanSet();
+    // s2 is a plan far from everything (it also shows nothing: plan.empty,
+    // which is not this test's); s3 is a plan over the same ground as s1.
+    set.sheets.push_back(sheetOf("s2", "FAR", {planAt("vp2", kTiling, 500.0, Point2(5000.0, 5000.0))}));
+    set.sheets.push_back(sheetOf("s3", "NEAR", {planAt("vp3", kTiling, 500.0, Point2(50.0, 0.0))}));
+    const auto found = withCode(
+        check(set, model,
+              withSurfaces({refusedSurface("first", Box2(Point2(0.0, 0.0), Point2(10.0, 10.0))),
+                            refusedSurface("second", Box2(Point2(20.0, 0.0), Point2(30.0, 10.0)))})),
+        "plan.surface-style");
+    // Sheet by sheet; on each plan, the surfaces in the order the store has them.
+    ASSERT_EQ(found.size(), 4u) << codesOf(found);
+    EXPECT_EQ(found[0].viewportId, "vp1");
+    EXPECT_EQ(found[0].subject, "first");
+    EXPECT_EQ(found[1].viewportId, "vp1");
+    EXPECT_EQ(found[1].subject, "second");
+    EXPECT_EQ(found[2].viewportId, "vp3");
+    EXPECT_EQ(found[2].subject, "first");
+    EXPECT_EQ(found[3].viewportId, "vp3");
+    EXPECT_EQ(found[3].subject, "second");
+}
+
 TEST(SheetPreflight, TheCatalogueNamesEveryCodeOnceAndTheirSeverities)
 {
     std::set<std::string_view> codes;
@@ -994,7 +1091,7 @@ TEST(SheetPreflight, TheCatalogueNamesEveryCodeOnceAndTheirSeverities)
          {"viewport.outside", "viewport.overlap", "plan.empty", "section.alignment-missing",
           "section.station-outside", "scale.non-standard", "field.empty", "logo.missing",
           "sheet.duplicate-name", "matchline.dangling", "text.too-small", "portrait.no-frame",
-          "viewport.unplaced", "sheet.empty"}) {
+          "viewport.unplaced", "sheet.empty", "plan.surface-style"}) {
         EXPECT_TRUE(codes.contains(code)) << code;
     }
     EXPECT_EQ(toString(Severity::Error), "error");

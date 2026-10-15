@@ -31,6 +31,10 @@
 //   plotDrawingCommand           the exact line Plot will run (read-only)
 //   plotDrawingPlot              run it
 //   plotDrawingStatus            what happened last
+//   plotDrawingWarnings          what the plot is without, one line each - the
+//                                `warning surface=... style=... reason=...`
+//                                records of the PLOT reply (a surface's
+//                                contours too fine to trace) - hidden when none
 //   plotDrawingClose             close
 
 #include <QDialog>
@@ -117,6 +121,7 @@ class PlotDrawingDialog final : public QDialog {
     QLineEdit* command_ = nullptr;
     QPushButton* plot_ = nullptr;
     QLabel* status_ = nullptr;
+    QLabel* warnings_ = nullptr;
 };
 
 } // namespace katana::qt

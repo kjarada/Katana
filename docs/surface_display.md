@@ -329,15 +329,39 @@ Contours whose tracing would make more than four million points
 (`kPlanMaximumContourPoints`, estimated from the levels crossing each
 triangle) are refused for the plan, saying why (`SurfacePlan::problem`): an
 interval a hundredth of what the relief wants would fill memory and the view
-with ink. The reason reaches a person in every place a surface is drawn from:
-`SURFACE PLAN` prints `problem=`; the plan view tells its error hook - the
-command log - once, and again if it goes and returns
-(`PlanPaintStats::surfaceProblems`, `ViewportWidget::reportSurfaceProblems`);
-and its headless report ends with ` problem="ground: contours: an interval of
-... not drawn - set a larger interval"` for each. A plot or sheet paints the
-same stats, but nothing reads them there yet ("Not done"). The refusal used to
-be thrown away on the way from the painter to the view, and the contours
-vanished with no word.
+with ink. The refusal is one function, `cad::contourRefusal`, which the paint
+and the preflight check below both ask, so they cannot disagree. A paint
+reports it as a `cad::SurfaceProblem` - the surface, its style and the reason -
+in `PlanPaintStats::surfaceProblems`, and the reason reaches a person or an
+agent in every place a surface is drawn from:
+
+* `SURFACE PLAN` prints `problem=`;
+* the plan view tells its error hook - the command log - once, and again if
+  it goes and returns (`ViewportWidget::reportSurfaceProblems`), and its
+  headless report ends with ` problem="ground (style Fine): contours: an
+  interval of ... not drawn - set a larger interval"` for each;
+* a sheet viewport adds the same line, `vp1: ground (style Fine): contours:
+  ...`, to the sheet's problems (`SheetPaintStats::problems`): the editor
+  shows it in the viewport's panel, and every plot reports it
+  (`PlotReport::problems`: the Plot dialogs, the editor's message, the lines
+  `PLOTSHEETS` logs). The plan is drawn, only without the contours, and the
+  plot is not refused for it;
+* `PLOT` (File > Plot to PDF, `--plot`) logs a record for each, `warning
+  surface="ground" style="Fine" reason="contours: ..."`, between its sentence
+  and its `file=` record, and the dialog shows them (`plotDrawingWarnings`);
+* and before any paint the preflight finds it: `plan.surface-style` of
+  `SHEETS CHECK` (the editor's Checks dock and the check before Plot Sheet),
+  fed by `cad::surfaceStyleProblems`, which needs no painter - so
+  `katana_cli` and `katana_mcp`, which cannot plot, have the warning with the
+  surface as `subject=` (`docs/plotting.md`, "Preflight checks").
+
+The refusal used to be thrown away on the way from the painter to the view,
+and then, on a plot or a sheet, which paint the same stats and read nothing
+from them: the contours vanished with no word. Rejected: a structured list on
+`SheetPaintStats` beside its text lines - the problems already reach three
+consumers as text, and the structured form an agent reads is the preflight
+finding; and refusing the plot, which wastes no paper that the warning does
+not already save.
 
 ### The legend
 
@@ -624,6 +648,15 @@ another build with `tools/compare_benchmarks.py --alternate`.
   and the surfaced problem in `test_surface_plan_painter.cpp`; the form's
   boxes and a refused name in `test_surface_style_manager.cpp`; the empty hint
   and the reported problem in `test_plan_view.cpp`.
+* Added with the follow-up of the same day (what each proves is named where it
+  is described above): `SurfaceProblems.*` in `test_surface_plan.cpp` (the
+  refusal at either side of the limit, an interval that is no number, a level
+  surface, the plan's and the check's one answer, the line and the record, the
+  styles of a drawing's surfaces without painting); `SheetPainter.*` problems,
+  `PlanPainter.ASinglePagePlotHandsBack...` and `PlotDrawingDialog.TheWarningRecords...`
+  in the widget tests; `plan.surface-style` in `test_preflight.cpp` and
+  `test_sheet_agent_verbs.cpp`; `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`,
+  `qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`.
 * `qt_a_surface_is_drawn_in_plan_in_its_style_headless` - the sample terrain
   in the real window in Standard, Triangles and Elevation Bands, each paint's
   report read against the first; `qt_the_surface_style_manager_runs_its_lines_headless`.
@@ -696,9 +729,9 @@ another build with `tools/compare_benchmarks.py --alternate`.
   own (`src/katana_app/geo/slope_verbs.cpp`), which is neither the aspect wheel
   a surface style uses (`aspectSectorColour`) nor a row of the ramp table: two
   palettes for aspect.
-* The contours refused for the plan are told to the plan view's log and its
-  headless report; a plot or a sheet viewport paints the same stats
-  (`PlanPaintStats::surfaceProblems`) and nothing there reads them, so a plot
-  of a style with too-fine contours is still silent.
+* `PLOTSHEETS` reports a surface style it could not draw as one of the
+  sheets' problem lines (`vp1: ground (style Fine): ...`), as every problem
+  of a sheet is, not as a `warning surface= style= reason=` record as `PLOT`
+  does; the record form of a sheet's problems is `SHEETS CHECK`'s finding.
 * Labels are not kept off each other or off the drawing's own labels (the
   label placer, `docs/annotation.md`, places entity labels only).

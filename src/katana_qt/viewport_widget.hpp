@@ -67,9 +67,11 @@ class ViewportWidget final : public QWidget {
 
     // Plots the drawing as this view shows it - its hidden layers and
     // reference layers - through plotPlanToPdf (plan_painter.hpp): the same
-    // painter as the screen, on paper. Fails as that does.
-    [[nodiscard]] katana::core::Status plotToPdf(const QString& path,
-                                                 const katana::cad::PlotSettings& settings);
+    // painter as the screen, on paper. Fails as that does. `problems`, when
+    // given, receives what the plot is without of a surface's style.
+    [[nodiscard]] katana::core::Status
+    plotToPdf(const QString& path, const katana::cad::PlotSettings& settings,
+              std::vector<katana::cad::SurfaceProblem>* problems = nullptr);
     // `settings` fitted to what this view draws (drawnBounds, as Zoom Extents
     // frames it): the first standard scale the drawing fits the printable
     // area at, centred on it; the sheet otherwise as given. What Plot's Fit
@@ -371,7 +373,7 @@ class ViewportWidget final : public QWidget {
     // drawn (SurfacePaintStats::problems): a refusal that only the SURFACE
     // PLAN verb said was a style whose contours vanished without a word.
     // Forgets a problem that has gone, so it is told again if it returns.
-    void reportSurfaceProblems(const std::vector<std::string>& problems);
+    void reportSurfaceProblems(const std::vector<katana::cad::SurfaceProblem>& problems);
 
     [[nodiscard]] QPointF toScreen(const Point2& world) const;
     [[nodiscard]] Point2 toWorld(const QPointF& screen) const;

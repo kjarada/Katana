@@ -2653,7 +2653,8 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
                                    const PlanSource& source,
                                    const katana::cad::LayerOverrides& layers,
                                    const std::set<std::uint64_t>& hiddenReferences,
-                                   PlanPaintCache& cache, const QString& title)
+                                   PlanPaintCache& cache, const QString& title,
+                                   std::vector<katana::cad::SurfaceProblem>* problems)
 {
     auto frame = sheetFrame(settings);
     if (!frame) {
@@ -2687,7 +2688,10 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
     // Paper-sized annotation at the plot's own scale (docs/annotation.md).
     options.annotationScale = settings.scaleDenominator;
     painter.setRenderHint(QPainter::Antialiasing, true);
-    (void)paintPlan(painter, source, *frame, options, cache);
+    const PlanPaintStats drawn = paintPlan(painter, source, *frame, options, cache);
+    if (problems != nullptr) {
+        *problems = drawn.surfaceProblems;
+    }
     if (!painter.end()) {
         return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
                                        "could not finish the PDF", path.toStdString());

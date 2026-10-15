@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "katana/core/task_pool.hpp"
+#include "katana/core/text.hpp"
 #include "katana/geometry/polygon.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/terrain/contours.hpp"
@@ -309,17 +310,8 @@ ContourSet traceContours(const TinSurface& surface, const SurfaceContours& setti
     set.interval = settings.interval;
     set.base = settings.base;
     set.majorEvery = settings.majorEvery;
-    if (!(settings.interval > tol::kGeometric) || !std::isfinite(settings.interval) ||
-        !std::isfinite(settings.base)) {
-        set.problem = "contours: the interval must be a finite number greater than zero";
-        return set;
-    }
-    const std::size_t estimate = estimateContourPoints(surface, settings.interval, settings.base);
-    if (estimate > kPlanMaximumContourPoints) {
-        set.problem = "contours: an interval of " + formatLegendValue(settings.interval, 6) +
-                      " crosses this surface's triangles more than " +
-                      std::to_string(kPlanMaximumContourPoints) +
-                      " times; not drawn - set a larger interval";
+    set.problem = contourRefusal(surface, settings);
+    if (!set.problem.empty()) {
         return set;
     }
     auto traced = katana::terrain::contours(surface, settings.interval, settings.base,
@@ -905,6 +897,55 @@ SurfacePlanImageGrid planImageGrid(const Box2& visible, const Box2& bounds, doub
         return grid;
     }
     return grid;
+}
+
+// ---- why a style could not be drawn ----------------------------------------------------------
+
+std::string contourRefusal(const TinSurface& surface, const SurfaceContours& contours)
+{
+    if (!(contours.interval > tol::kGeometric) || !std::isfinite(contours.interval) ||
+        !std::isfinite(contours.base)) {
+        return "contours: the interval must be a finite number greater than zero";
+    }
+    if (estimateContourPoints(surface, contours.interval, contours.base) > kPlanMaximumContourPoints) {
+        return "contours: an interval of " + formatLegendValue(contours.interval, 6) +
+               " crosses this surface's triangles more than " +
+               std::to_string(kPlanMaximumContourPoints) + " times; not drawn - set a larger interval";
+    }
+    return {};
+}
+
+std::string SurfaceProblem::text() const
+{
+    return surface + " (style " + style + "): " + reason;
+}
+
+std::string SurfaceProblem::record() const
+{
+    return "warning surface=" + katana::core::replyQuoted(surface) +
+           " style=" + katana::core::replyQuoted(style) + " reason=" + katana::core::replyQuoted(reason);
+}
+
+std::vector<SurfaceStyleProblem> surfaceStyleProblems(const katana::terrain::SurfaceStore& surfaces,
+                                                      const SurfaceStyleSet& styles)
+{
+    std::vector<SurfaceStyleProblem> found;
+    for (const katana::terrain::NamedSurface& named : surfaces.all()) {
+        // The painter's own conditions for drawing a surface at all.
+        if (!named.visible || named.surface == nullptr || named.surface->empty()) {
+            continue;
+        }
+        const SurfaceDisplayStyle& style = styleOf(styles, named);
+        if (!style.contours.show) {
+            continue;
+        }
+        std::string reason = contourRefusal(*named.surface, style.contours);
+        if (!reason.empty()) {
+            found.push_back({SurfaceProblem{named.name, style.name, std::move(reason)},
+                             named.surface->bounds()});
+        }
+    }
+    return found;
 }
 
 // ---- the plan --------------------------------------------------------------------------------

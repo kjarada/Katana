@@ -17,6 +17,8 @@
 #include <QVBoxLayout>
 
 #include "katana/cad/scene.hpp"
+#include "katana/cad/terrain/surface_plan.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "plotting/sheet_tables.hpp"
@@ -152,6 +154,17 @@ plotting::PreflightOptions preflightOptionsFor(const SheetSource& source)
         std::count_if(source.surfaces.begin(), source.surfaces.end(), [](const katana::cad::SceneSurface& s) {
             return s.visible && s.surface != nullptr;
         }));
+    // The surfaces the plan painter draws, and whether their styles can be
+    // drawn in whole: a plan the painter would draw without a surface's
+    // contours is warned about before the plot (plan.surface-style). With no
+    // surfaces to draw there is nothing to say, which is known.
+    static const katana::cad::SurfaceStyleSet kBuiltInStyles = katana::cad::builtInSurfaceStyles();
+    options.surfaceProblems = std::vector<katana::cad::SurfaceStyleProblem>{};
+    if (source.plan.surfaces != nullptr) {
+        options.surfaceProblems = katana::cad::surfaceStyleProblems(
+            *source.plan.surfaces,
+            source.plan.surfaceStyles != nullptr ? *source.plan.surfaceStyles : kBuiltInStyles);
+    }
     // The caller loads the logo once for every page; a null image is a file
     // missing or unreadable.
     options.logoReadable = !source.logo.isNull();

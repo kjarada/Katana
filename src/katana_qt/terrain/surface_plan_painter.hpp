@@ -91,8 +91,9 @@ struct SurfacePaintStats {
     std::size_t labels = 0;
     std::size_t imagePixels = 0;
     std::size_t pixelsCovered = 0;
-    // Why part of a style was not drawn, a line a surface; empty when all was.
-    std::vector<std::string> problems;
+    // Why part of a style was not drawn, one for each surface that has one
+    // (its name, its style and the reason); empty when all was.
+    std::vector<katana::cad::SurfaceProblem> problems;
     // The legends of the surfaces drawn whose styles colour their faces, in
     // the order drawn.
     std::vector<PaintedLegend> legends;

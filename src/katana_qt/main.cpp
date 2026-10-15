@@ -336,8 +336,8 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
         }
         // Why part of a surface's style was not drawn, one problem="..." each
         // (its text is what the window logged).
-        for (const std::string& problem : plan->lastPaintStats().surfaceProblems) {
-            text += QString(" problem=\"%1\"").arg(QString::fromStdString(problem));
+        for (const katana::cad::SurfaceProblem& problem : plan->lastPaintStats().surfaceProblems) {
+            text += QString(" problem=\"%1\"").arg(QString::fromStdString(problem.text()));
         }
     } else {
         std::fprintf(stderr,

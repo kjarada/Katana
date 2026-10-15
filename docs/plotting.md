@@ -665,7 +665,18 @@ editor shows exactly what plots. It reads no widget and keeps its caches
   title underlined in its bottom-left corner.
 - **Problems.** A viewport that cannot be drawn - no such alignment, no
   surface to cut - is outlined and left empty on paper, reported in
-  `SheetPaintStats::problems`, and explained inside it in the editor.
+  `SheetPaintStats::problems`, and explained inside it in the editor. A plan
+  that IS drawn but without part of a surface's style - the contours of a
+  style whose interval is too fine to trace are refused
+  (`docs/surface_display.md`, "In plan") - adds a line to the same list
+  (`vp1: ground (style Fine): contours: an interval of 0.000001 ... not drawn
+  - set a larger interval`), which the editor shows in the viewport's panel
+  and every plot reports (`PlotReport::problems`, so the Plot dialogs, the
+  editor's message and `PLOTSHEETS`' log). The plot is not refused for it,
+  as it is not for a finding of the checks; `plan.surface-style` finds it
+  before the paper ("Preflight checks"). A sheet that was silently without
+  its contours is what this replaces
+  (`SheetPainter.APlanDrawnWithoutASurfacesContoursSaysSoInTheSheetsProblemsAndStaysDrawn`).
 
 `plotSheetsToPdf` writes the whole set, or chosen sheets, to one vector PDF,
 each page the size of its sheet's paper. File > Plot Sheets to PDF and
@@ -1077,6 +1088,7 @@ viewport's in the order `preflightChecks()` lists them.
 | `scale.non-standard` | Info | a fixed scale not on `kSheetScales`; the fix names the steps either side |
 | `plan.alignment-missing` | Warning | a plan or key plan follows an alignment the drawing does not have |
 | `plan.empty` | Warning | nothing a plan or key plan draws is in its window |
+| `plan.surface-style` | Warning | a plan's window reaches a visible surface whose style cannot be drawn in whole: its contours are too fine to trace (`cad::surfaceStyleProblems`), so the plot would be without them; the subject is the surface, the message names it, its style and why |
 | `text.too-small` | Warning | drawing text in a plan prints under 1.8 mm at the plan's scale |
 | `grid.invalid` | Error | a plan's coordinate grid cannot be drawn at the window it is drawn at: its lines would be closer than `kGridMinimumSpacingMm` (`planGrid`) |
 | `grid.empty` | Info | a plan's grid interval is wider than its window, so no grid line prints |
@@ -1157,6 +1169,15 @@ How the harder checks decide:
   and `assets`. Each one left unset leaves its check out: no surface finding
   when the surfaces are unknown, no missing-image finding when there is no
   assets folder to look in.
+- `surfaceProblems`: the visible surfaces whose styles cannot be drawn in
+  whole, each with its plan box (`cad::surfaceStyleProblems`). A plan whose
+  window box meets one is warned (`plan.surface-style`), once for each such
+  surface, in the store's order. Unset when not known (nothing is checked);
+  `checkDocumentSheets` fills it from the document, so `SHEETS CHECK` in
+  `katana_cli` and `katana_mcp` has it, and the editor's `preflightOptionsFor`
+  from the painter's own source. The box is the window's bounding box against
+  the surface's, as the painter culls: a surface the box misses is not drawn
+  and says nothing.
 - `index`: a spatial index in step with the model, so a plan's window is
   searched rather than the whole drawing.
 
@@ -1194,6 +1215,10 @@ is not a whole number of zero or more.
   - visible imagery, point clouds and meshes are content;
   - only visible surfaces are cut, so a section over a hidden one is
     reported;
+  - the surfaces the painter draws are asked whether their styles can be
+    drawn in whole (`cad::surfaceStyleProblems`, the painter's own refusal
+    of contours too fine to trace), so a plan the painter would draw without
+    them is warned about before the plot (`plan.surface-style`);
   - a logo that did not decode is unreadable.
 - The **Checks** dock (`sheetChecksDock`) lists the last run's findings under
   the canvas: severity mark, sheet, view, problem and fix, with the code in
@@ -1220,7 +1245,13 @@ is not a whole number of zero or more.
 
 The tests are `tests/cad/plotting/test_preflight.cpp` (each check with the
 smallest set that trips it and the nearest that does not, the order, the
-options, the JSON) and `tests/qt_widgets/plotting/test_sheet_checks.cpp`.
+options, the JSON; `plan.surface-style` with a surface just inside and just
+outside the window), `tests/cad/plotting/test_sheet_agent_verbs.cpp`
+(`SHEETS CHECK` on a document with a too-fine style: the record and the JSON,
+mended and hidden), `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`
+and `TheSheetChecksWarnOfASurfaceWhoseContoursAreTooFineToPlot` in
+`tests/app/test_mcp_server.cpp`, and
+`tests/qt_widgets/plotting/test_sheet_checks.cpp`.
 
 ## Arranging a sheet
 

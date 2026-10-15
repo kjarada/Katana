@@ -264,7 +264,7 @@ SurfacePaintStats paintSurfacesInPlan(QPainter& painter, const katana::terrain::
         stats.imagePixels += drawn.stats.imagePixels;
         stats.pixelsCovered += drawn.stats.pixelsCovered;
         if (!drawn.problem.empty()) {
-            stats.problems.push_back(named.name + ": " + drawn.problem);
+            stats.problems.push_back({named.name, style.name, drawn.problem});
         }
         if (drawn.legend.has_value()) {
             stats.legends.push_back({named.name, style.name, *drawn.legend});

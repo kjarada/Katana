@@ -1336,6 +1336,27 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # A plot of a surface whose style's contours are too fine to trace says so
+    # in the PLOT verb's reply (docs/surface_display.md, "In plan"). An
+    # interval of 0.0005 crosses the sample terrain's triangles more than four
+    # million times (SURFACE PLAN reports the same refusal as problem=), so the
+    # plan painter refuses the contours. The plot is made all the same; the
+    # warning is a record naming the surface, its style and why, before the
+    # file record that is the reply's last line.
+    set(_fine_out "${CMAKE_CURRENT_BINARY_DIR}/qt_output")
+    file(MAKE_DIRECTORY "${_fine_out}")
+    add_test(NAME qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACESTYLE NEW Fine FROM Contours interval=0.0005|>SURFACE STYLE ground Fine|>PLOT \"${_fine_out}/fine_plot.pdf\" paper=A3"
+            "-DEXPECT=Plotted to [^\r\n]*fine_plot\\.pdf[^\r\n]*[\r\n]+warning surface=\"ground\" style=\"Fine\" reason=\"contours: an interval of 0\\.000500 crosses this surface's triangles more than 4000000 times; not drawn - set a larger interval\"[\r\n]+file=\"[^\"]*fine_plot\\.pdf\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_fine_contours_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Editing a surface is not gaining one. The window decided that a surface
     # was gained by the pointer of its TIN, and an edit - its undo and redo
     # too - puts a new TIN under the same name: it opened a 3D view in the middle
