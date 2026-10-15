@@ -67,3 +67,41 @@ add_test(NAME cli.a_refused_corridor_fails_the_script
             $<TARGET_FILE:katana_cli> -c "ALIGN NEW road 0,0 100,0" -c "ROADTEMPLATE DEFAULTS"
             -c "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"")
 set_tests_properties(cli.a_refused_corridor_fails_the_script PROPERTIES WILL_FAIL TRUE)
+
+# One line sets several components - and the Road Template Manager's Apply
+# sends one for its whole grid - so it is ONE undo step: the standard rural
+# two-lane's 3.5 m lanes (Austroads) are 3.25 m and 3.75 m, and a single UNDO
+# puts both back to 3.5.
+add_test(NAME cli.several_template_components_are_set_by_one_line_and_one_undo_step
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE SET \"rural two-lane\" left:lane width=3.25 right:lane width=3.75"
+            -c "UNDO" -c "ROADTEMPLATE INFO \"rural two-lane\"")
+set_tests_properties(cli.several_template_components_are_set_by_one_line_and_one_undo_step
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "side=left name=lane kind=lane width=3[.]25.*side=right name=lane kind=lane width=3[.]75.*1 undone.*side=left name=lane kind=lane width=3[.]5 .*side=right name=lane kind=lane width=3[.]5 "
+    FAIL_REGULAR_EXPRESSION "error")
+
+# A value the template refuses in any group refuses the line whole; the script
+# stops there.
+add_test(NAME cli.a_refused_template_component_value_stops_the_script
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE SET \"rural two-lane\" left:lane width=3.25 right:lane width=0"
+            -c "ROADTEMPLATE INFO NEVER REACHED")
+set_tests_properties(cli.a_refused_template_component_value_stops_the_script PROPERTIES
+    PASS_REGULAR_EXPRESSION "the width must be positive"
+    FAIL_REGULAR_EXPRESSION "NEVER REACHED")
+
+# The same for courses: a lane's 50 mm AC14 and 200 mm base become 60 mm and
+# 300 mm by one line, and one UNDO puts both back.
+add_test(NAME cli.several_template_courses_are_set_by_one_line_and_one_undo_step
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE COURSE \"rural two-lane\" left:lane SET AC14 thickness=0.06 base thickness=0.3"
+            -c "UNDO" -c "ROADTEMPLATE INFO \"rural two-lane\"")
+set_tests_properties(cli.several_template_courses_are_set_by_one_line_and_one_undo_step PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "component=left:lane name=AC14 thickness=0[.]06.*component=left:lane name=base thickness=0[.]3 .*1 undone.*component=left:lane name=AC14 thickness=0[.]05 .*component=left:lane name=base thickness=0[.]2 "
+    FAIL_REGULAR_EXPRESSION "error")

@@ -13,6 +13,15 @@
 // dialog and CORRIDOR INFO / PROBLEMS agree. Non-modal, kept by the window,
 // reloaded through a DocumentWatcher.
 //
+// THE FIELDS ARE A BUFFER, applied by Apply. Choosing a corridor fills them
+// from it; a reload (after any line, an undo, a redo, a new or opened
+// drawing) refills them only when the chosen corridor itself changed, so a
+// typed interval survives an unrelated command and a changed drawing is
+// shown as it is. The combos show the name the corridor holds - found
+// ignoring case, as the verbs find it, or, for a surface that was removed or
+// an alignment that lost its profile, as an extra item - so Apply cannot
+// re-point a corridor to whatever item happened to be showing.
+//
 // Object names:
 //   corridorDialog          the dialog (the action bimCorridors' data)
 //   corridorList            Corridor, Alignment, Template, Surface, Interval, From, To,

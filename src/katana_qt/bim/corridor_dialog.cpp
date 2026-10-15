@@ -20,6 +20,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/road/corridor_model.hpp"
 #include "katana/cad/road/road_template.hpp"
+#include "katana/core/text.hpp"
 #include "road_dialog_support.hpp"
 
 namespace katana::qt {
@@ -36,19 +37,64 @@ QString stationText(const std::optional<double>& station)
     return station ? exactNumber(*station) : QString();
 }
 
-// Refills a combo with `items`, keeping what it showed when that is still
-// one of them.
-void refill(QComboBox* combo, const QStringList& items)
+// Makes `combo` show `stored`: its item ignoring case - the verb finds a
+// template, an alignment or a surface that way (RoadTemplateSet::find,
+// SurfaceStore::find), so a corridor naming "URBAN STREET" is valid against a
+// template called "urban street" - or, when it has none (a surface since
+// removed, an alignment that lost its design profile), an extra item holding
+// the name. QComboBox::setCurrentText does neither: on a combo that is not
+// editable it keeps the item showing before, and Apply then wrote THAT item
+// over what the corridor names (docs/road_design.md, "In the window").
+void showStored(QComboBox* combo, const QString& stored)
 {
-    const QString keep = combo->currentText();
+    int at = combo->findText(stored);
+    if (at < 0) {
+        at = combo->findText(stored, Qt::MatchFixedString); // ignoring case
+    }
+    if (at < 0) {
+        combo->addItem(stored);
+        at = combo->count() - 1;
+        combo->setItemData(at, "The corridor names this, but the drawing has none of that name",
+                           Qt::ToolTipRole);
+    }
+    combo->setCurrentIndex(at);
+}
+
+// What a refilled combo keeps of what it showed.
+enum class Keep {
+    Nothing,   // the first item: the caller is about to say what to show
+    IfPresent, // what it showed, when that is still one of the items
+    Always,    // what it showed; a name no longer among the items stays, as an extra
+               // item, so that the combo never flips to some other item behind
+               // an unapplied edit or a name the corridor holds
+};
+
+// Refills a combo with `items`.
+void refill(QComboBox* combo, const QStringList& items, Keep keep)
+{
+    const QString shown = combo->currentText();
     combo->blockSignals(true);
     combo->clear();
     combo->addItems(items);
-    const int at = combo->findText(keep);
-    if (at >= 0) {
-        combo->setCurrentIndex(at);
+    if (!shown.isEmpty()) {
+        if (keep == Keep::Always) {
+            showStored(combo, shown);
+        } else if (const int at = combo->findText(shown); keep == Keep::IfPresent && at >= 0) {
+            combo->setCurrentIndex(at);
+        }
     }
     combo->blockSignals(false);
+}
+
+// What Apply writes for a name a combo shows: the spelling the corridor
+// already holds when it is the same name in another case, so that Apply
+// round-trips the stored text and re-points nothing.
+QString spelledAs(const QString& shown, const std::string* stored)
+{
+    if (stored != nullptr && katana::core::equalsIgnoringCase(shown.toStdString(), *stored)) {
+        return road_ui::qs(*stored);
+    }
+    return shown;
 }
 
 } // namespace
@@ -78,6 +124,12 @@ struct CorridorDialog::Impl {
     QLabel* problems = nullptr;
     QLabel* status = nullptr;
     bool loading = false;
+    // The stored corridor the definition fields were last filled from. The
+    // fields are a buffer, applied by Apply: a reload that found the chosen
+    // corridor as it was keeps what was typed, as the Road Template
+    // Manager's grids do; one that found it changed (an undo, a typed line,
+    // a new drawing) shows what the drawing holds.
+    std::optional<road::Corridor> filledFrom;
 
     [[nodiscard]] bool alive() const { return watcher != nullptr && watcher->documentAlive(); }
 
@@ -137,12 +189,17 @@ struct CorridorDialog::Impl {
     }
 
     // alignment= template= surface= interval= from= to=, from the fields.
-    std::optional<QString> definition(bool named)
+    // `stored` is the corridor being set, or null for a new one: a name the
+    // combos show in another case than the corridor holds it is written as
+    // the corridor holds it.
+    std::optional<QString> definition(bool named, const road::Corridor* stored)
     {
-        const auto alignmentWord =
-            road_ui::word(status, alignment->currentText(), "the alignment's name");
-        const auto templateWord =
-            road_ui::word(status, roadTemplate->currentText(), "the template's name");
+        const QString alignmentName =
+            spelledAs(alignment->currentText(), stored != nullptr ? &stored->alignment : nullptr);
+        const QString templateName = spelledAs(
+            roadTemplate->currentText(), stored != nullptr ? &stored->templateName : nullptr);
+        const auto alignmentWord = road_ui::word(status, alignmentName, "the alignment's name");
+        const auto templateWord = road_ui::word(status, templateName, "the template's name");
         if (!alignmentWord || !templateWord) {
             return std::nullopt;
         }
@@ -161,7 +218,9 @@ struct CorridorDialog::Impl {
             return std::nullopt;
         }
         const QString surfaceName =
-            surface->currentText() == kNoSurface ? QString() : surface->currentText();
+            surface->currentText() == kNoSurface
+                ? QString()
+                : spelledAs(surface->currentText(), stored != nullptr ? &stored->surface : nullptr);
         const auto surfaceOption = road_ui::option(status, "surface", surfaceName);
         if (!surfaceOption) {
             return std::nullopt;
@@ -186,9 +245,25 @@ struct CorridorDialog::Impl {
         return text;
     }
 
+    // The drawing's alignments with a design profile, road templates and
+    // surfaces, as reload last read them: what the combos are filled with.
+    QStringList alignmentItems;
+    QStringList templateItems;
+    QStringList surfaceItems;
+    void refillNamed(Keep keep)
+    {
+        refill(alignment, alignmentItems, keep);
+        refill(roadTemplate, templateItems, keep);
+        refill(surface, surfaceItems, keep);
+        // The region's template is a choice, not a name a corridor holds.
+        refill(regionTemplate, templateItems, Keep::IfPresent);
+    }
+
     void build();
     void reload();
-    void fillChosen();
+    // `force` fills the definition fields from the chosen corridor whatever
+    // they hold: a choice of another corridor, as against a reload.
+    void fillChosen(bool force);
 };
 
 void CorridorDialog::Impl::build()
@@ -337,14 +412,18 @@ void CorridorDialog::Impl::build()
 
     connect(list, &QTableWidget::itemSelectionChanged, [this] {
         if (!loading) {
-            fillChosen();
+            fillChosen(true);
         }
     });
+    // New and Rename take the name from the field BEFORE the line runs: the
+    // reload that follows it refills the field from the corridor still
+    // chosen, so reading it afterwards would choose that corridor again.
     connect(newButton, &QPushButton::clicked, [this] {
-        const auto word = road_ui::word(status, name->text().trimmed(), "the new name");
-        const auto rest = definition(true);
+        const QString newName = name->text().trimmed();
+        const auto word = road_ui::word(status, newName, "the new name");
+        const auto rest = definition(true, nullptr);
         if (word && rest && run("CORRIDOR NEW " + *word + " " + *rest)) {
-            dialog->selectCorridor(name->text().trimmed());
+            dialog->selectCorridor(newName);
         }
     });
     connect(applyButton, &QPushButton::clicked, [this] {
@@ -352,15 +431,16 @@ void CorridorDialog::Impl::build()
         if (!word) {
             return;
         }
-        if (const auto rest = definition(false)) {
+        if (const auto rest = definition(false, current())) {
             run("CORRIDOR SET " + *word + " " + *rest);
         }
     });
     connect(renameButton, &QPushButton::clicked, [this] {
+        const QString newName = name->text().trimmed();
         const auto word = corridorWord();
-        const auto newName = road_ui::word(status, name->text().trimmed(), "the new name");
-        if (word && newName && run("CORRIDOR RENAME " + *word + " " + *newName)) {
-            dialog->selectCorridor(name->text().trimmed());
+        const auto newWord = road_ui::word(status, newName, "the new name");
+        if (word && newWord && run("CORRIDOR RENAME " + *word + " " + *newWord)) {
+            dialog->selectCorridor(newName);
         }
     });
     connect(deleteButton, &QPushButton::clicked, [this] {
@@ -456,10 +536,12 @@ void CorridorDialog::Impl::reload()
     for (const auto& each : document.surfaces().all()) {
         surfaces << qs(each.name);
     }
-    refill(alignment, alignments);
-    refill(roadTemplate, templates);
-    refill(regionTemplate, templates);
-    refill(surface, surfaces);
+    alignmentItems = alignments;
+    templateItems = templates;
+    surfaceItems = surfaces;
+    // The three the corridor itself names keep a name the drawing no longer
+    // offers, as an extra item (showStored); the region's is only a choice.
+    refillNamed(Keep::Always);
 
     const QString chosen = dialog->currentCorridor();
     loading = true;
@@ -481,7 +563,7 @@ void CorridorDialog::Impl::reload()
         dialog->selectCorridor(chosen);
     }
     loading = false;
-    fillChosen();
+    fillChosen(false);
     if (alignments.isEmpty()) {
         road_ui::setStatus(status,
                            "No alignment has a design profile. Define one in Terrain > "
@@ -490,23 +572,29 @@ void CorridorDialog::Impl::reload()
     }
 }
 
-void CorridorDialog::Impl::fillChosen()
+void CorridorDialog::Impl::fillChosen(bool force)
 {
     regions->setRowCount(0);
     superelevation->setRowCount(0);
     problems->clear();
     const road::Corridor* corridor = current();
     if (corridor == nullptr) {
+        filledFrom.reset();
         return;
     }
-    name->setText(qs(corridor->name));
-    alignment->setCurrentText(qs(corridor->alignment));
-    roadTemplate->setCurrentText(qs(corridor->templateName));
-    surface->setCurrentText(corridor->surface.empty() ? QString(kNoSurface)
-                                                      : qs(corridor->surface));
-    interval->setText(exactNumber(corridor->interval));
-    from->setText(stationText(corridor->start));
-    to->setText(stationText(corridor->end));
+    if (force || !filledFrom || *filledFrom != *corridor) {
+        // From the drawing's own names, so an extra item for a name the last
+        // corridor held and this one does not is not left in the lists.
+        refillNamed(Keep::Nothing);
+        name->setText(qs(corridor->name));
+        showStored(alignment, qs(corridor->alignment));
+        showStored(roadTemplate, qs(corridor->templateName));
+        showStored(surface, corridor->surface.empty() ? QString(kNoSurface) : qs(corridor->surface));
+        interval->setText(exactNumber(corridor->interval));
+        from->setText(stationText(corridor->start));
+        to->setText(stationText(corridor->end));
+        filledFrom = *corridor;
+    }
     for (const road::TemplateRegion& region : corridor->regions) {
         const int row = regions->rowCount();
         regions->insertRow(row);

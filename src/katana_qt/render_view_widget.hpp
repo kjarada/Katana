@@ -66,6 +66,12 @@ class RenderViewWidget final : public QWidget {
         static const std::vector<katana::cad::SceneMesh> kNone;
         return context_.meshes != nullptr ? *context_.meshes : kNone;
     }
+    // meshes() less those on a layer THIS view hides (ViewState::layers): the
+    // window's list is one for every view, made with the drawing's own hidden
+    // layers, so a view that hid "road/kerb" for itself still drew the kerbs.
+    // The list itself when this view hides none of them, so the usual case
+    // copies nothing; the pointers into the meshes stay the window's.
+    [[nodiscard]] const std::vector<katana::cad::SceneMesh>& shownMeshes() const;
     [[nodiscard]] const std::vector<katana::cad::SceneSurface>& surfaces() const
     {
         static const std::vector<katana::cad::SceneSurface> kNone;
@@ -233,6 +239,8 @@ class RenderViewWidget final : public QWidget {
 
     katana::cad::SceneBuilder builder_;
     katana::cad::SceneLayers layers_;
+    // What shownMeshes() returns when this view hides some of the meshes.
+    mutable std::vector<katana::cad::SceneMesh> shownMeshes_;
     katana::render::Rasterizer rasterizer_;
     katana::render::Framebuffer framebuffer_;
     katana::render::RenderStats stats_;

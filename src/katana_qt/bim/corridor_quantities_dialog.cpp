@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "customisation/document_watcher.hpp"
+#include "katana/cad/bim/bim_object.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/road/corridor_model.hpp"
 #include "katana/core/text.hpp"
@@ -47,6 +48,11 @@ struct CorridorQuantitiesDialog::Impl {
     QLabel* totals = nullptr;
     QLineEdit* csvPath = nullptr;
     QLabel* status = nullptr;
+    // The road model the table and the totals were listed from: the object
+    // CORRIDOR QUANTITIES reads (bim::bimModel), which is the same object for
+    // as long as nothing in the road model changes. A different one means the
+    // listing is of a drawing that is no longer there.
+    std::shared_ptr<const katana::cad::bim::BimModel> listedFrom;
 
     [[nodiscard]] bool alive() const { return watcher != nullptr && watcher->documentAlive(); }
 
@@ -78,6 +84,7 @@ struct CorridorQuantitiesDialog::Impl {
             return;
         }
         table->setRowCount(0);
+        totals->clear();
         QStringList summary;
         for (const QString& text : outcome.reply.split('\n', Qt::SkipEmptyParts)) {
             const auto record = katana::core::readReplyRecord(text.toStdString());
@@ -114,8 +121,31 @@ struct CorridorQuantitiesDialog::Impl {
             }
         }
         totals->setText(summary.join('\n'));
+        // The line has run and read the road model; the model it read is the
+        // one the drawing holds now.
+        listedFrom = katana::cad::bim::bimModel(*context.document);
         const QStringList lines = outcome.reply.split('\n', Qt::SkipEmptyParts);
         road_ui::setStatus(status, lines.isEmpty() ? line : lines.back(), false);
+    }
+
+    // After a change to the drawing - an edit, an undo, a redo, a new or opened
+    // drawing - the listing is cleared and the status says to list again when
+    // the road model it was listed from is no longer the drawing's. It is not
+    // listed again by itself: that would be a CORRIDOR QUANTITIES line in the
+    // command log after every edit, and a change that left the road model as
+    // it was (a line drawn) leaves the listing alone. True when it cleared.
+    bool dropIfStale()
+    {
+        if (!alive() || listedFrom == nullptr ||
+            katana::cad::bim::bimModel(*context.document) == listedFrom) {
+            return false;
+        }
+        listedFrom.reset();
+        table->setRowCount(0);
+        totals->clear();
+        road_ui::setStatus(
+            status, "The drawing changed since the list: press List Quantities again.", true);
+        return true;
     }
 
     void reload()
@@ -219,6 +249,11 @@ void CorridorQuantitiesDialog::Impl::build()
         }
     });
     connect(copy, &QPushButton::clicked, [this] {
+        // The watcher's delivery may not have run yet: never hand out a
+        // listing of a road model the drawing no longer has.
+        if (dropIfStale()) {
+            return;
+        }
         QStringList rows;
         QStringList header;
         for (int column = 0; column < table->columnCount(); ++column) {
@@ -251,6 +286,7 @@ CorridorQuantitiesDialog::CorridorQuantitiesDialog(CorridorQuantitiesContext con
                                                            [this](const DocumentChanges& changes) {
                                                                if (changes.model) {
                                                                    impl_->reload();
+                                                                   impl_->dropIfStale();
                                                                }
                                                            });
     }

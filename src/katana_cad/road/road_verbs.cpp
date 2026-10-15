@@ -759,21 +759,42 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
             }
             return commitTemplates(document, set, "ROADTEMPLATE_REMOVE", reply);
         }
-        auto options = optionsFrom(args, 3);
-        if (!options) {
-            return options.error();
-        }
-        if (options->empty()) {
-            return usage("ROADTEMPLATE SET <template> <component> needs key=value");
-        }
-        for (const std::size_t i : *indices) {
-            for (const Option& option : *options) {
-                if (auto status = applyComponent(edited.components[i], option); !status) {
-                    return status.error();
-                }
+        // SET takes any number of groups, <component> key=value ..., and
+        // applies them all to the one copy before committing it: a grid of
+        // edited rows (the Road Template Manager's Apply) is ONE undo step, and
+        // a value that any group is refused for changes nothing.
+        std::size_t at = 2;
+        bool first = true;
+        while (at < args.size()) {
+            auto named = first ? std::move(indices) : componentsNamed(roadTemplate, args[at]);
+            first = false;
+            if (!named) {
+                return named.error();
             }
-            reply += (reply.empty() ? "" : "\n") + componentRecord(edited, edited.components[i]) +
-                     " updated";
+            std::size_t end = at + 1;
+            std::vector<Option> options;
+            while (end < args.size()) {
+                auto option = optionOf(args[end]);
+                if (!option) {
+                    break; // the next group's component
+                }
+                options.push_back(std::move(*option));
+                ++end;
+            }
+            if (options.empty()) {
+                return usage("ROADTEMPLATE SET <template> <component> needs key=value: " +
+                             args[at] + " has none");
+            }
+            for (const std::size_t i : *named) {
+                for (const Option& option : options) {
+                    if (auto status = applyComponent(edited.components[i], option); !status) {
+                        return status.error();
+                    }
+                }
+                reply += (reply.empty() ? "" : "\n") +
+                         componentRecord(edited, edited.components[i]) + " updated";
+            }
+            at = end;
         }
         return commitTemplates(document, set, "ROADTEMPLATE_SET", reply);
     }
@@ -787,6 +808,52 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
             return indices.error();
         }
         const std::string action = upper(args[3]);
+        if (action == "SET") {
+            // Any number of groups, <course> key=value ..., on the one copy:
+            // as ROADTEMPLATE SET <t> <component> ..., one undo step that a
+            // value refused anywhere leaves undone.
+            RoadTemplateSet set = current;
+            RoadTemplate& edited = set.templates[index];
+            std::string reply;
+            std::size_t at = 4;
+            while (at < args.size()) {
+                const std::string& setName = args[at];
+                std::size_t end = at + 1;
+                std::vector<Option> options;
+                while (end < args.size()) {
+                    auto option = optionOf(args[end]);
+                    if (!option) {
+                        break; // the next group's course
+                    }
+                    options.push_back(std::move(*option));
+                    ++end;
+                }
+                if (options.empty()) {
+                    return usage("ROADTEMPLATE COURSE ... SET <course> needs key=value: " +
+                                 setName + " has none");
+                }
+                for (const std::size_t i : *indices) {
+                    Component& component = edited.components[i];
+                    auto course = std::ranges::find_if(
+                        component.courses,
+                        [&](const PavementCourse& c) { return is(c.name, setName); });
+                    if (course == component.courses.end()) {
+                        return makeError(ErrorCode::NotFound,
+                                         std::string(toString(component.side)) + ":" +
+                                             component.name + " has no course " + setName);
+                    }
+                    for (const Option& option : options) {
+                        if (auto status = applyCourse(*course, option); !status) {
+                            return status.error();
+                        }
+                    }
+                    reply += (reply.empty() ? "" : "\n") + courseRecord(edited, component, *course) +
+                             " updated";
+                }
+                at = end;
+            }
+            return commitTemplates(document, set, "ROADTEMPLATE_COURSE", reply);
+        }
         const std::string& courseName = args[4];
         auto options = optionsFrom(args, 5);
         if (!options) {
@@ -850,19 +917,7 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
                 component.courses.erase(course);
                 continue;
             }
-            if (action != "SET") {
-                return usage("ROADTEMPLATE COURSE ... ADD, SET or REMOVE, not " + args[3]);
-            }
-            if (options->empty()) {
-                return usage("ROADTEMPLATE COURSE ... SET <course> needs key=value");
-            }
-            for (const Option& option : *options) {
-                if (auto status = applyCourse(*course, option); !status) {
-                    return status.error();
-                }
-            }
-            reply +=
-                (reply.empty() ? "" : "\n") + courseRecord(edited, component, *course) + " updated";
+            return usage("ROADTEMPLATE COURSE ... ADD, SET or REMOVE, not " + args[3]);
         }
         return commitTemplates(document, set, "ROADTEMPLATE_COURSE", reply);
     }
@@ -1767,14 +1822,16 @@ ROADTEMPLATE SET <t> description=<text>
 ROADTEMPLATE ADD <t> left|right|both <kind> [name=<word>] [at=<n>] [key=value ...]
   kinds: lane shoulder kerb footpath verge median drain batter. A component goes before
   the side's batter, or at=<n> (from 1, outward); a second of a name is name2.
-ROADTEMPLATE SET <t> <component> key=value ...  |  REMOVE <t> <component>
-  <component> is side:name (left:lane) or name (both sides that have it). Keys:
+ROADTEMPLATE SET <t> <component> key=value ... [<component> key=value ...]  |  REMOVE <t> <component>
+  <component> is side:name (left:lane) or name (both sides that have it). Several groups are
+  one undo step, and one refused value changes none of them. Keys:
   name= width= crossfall= (percent, outward: -3 falls) superelevated=on|off layer= colour=
   kerb: shape=barrier|mountable|kerbgutter|edgestrip height= depth= gutter= gutterfall=
         material= (width= is its top)   drain: depth= (its invert below its inner edge)
   batter: cut= fill= (run per rise: 2 is 1V:2H) maxwidth= benchheight= benchwidth=
 ROADTEMPLATE COURSE <t> <component> ADD <course> thickness=<m> [material=] [ifc=] [colour=]
-  [at=<n>]  |  SET <course> key=value ...  |  REMOVE <course>     courses are top down
+  [at=<n>]  |  SET <course> key=value ... [<course> key=value ...]  |  REMOVE <course>
+  courses are top down; SET of several courses is one undo step
   ifc=: ARMOUR BALLASTBED CORE FILTER PAVEMENT PROTECTION USERDEFINED NOTDEFINED
 
 CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
