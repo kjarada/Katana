@@ -71,6 +71,8 @@ add_executable(katana_qt_widget_tests
     # The footer of the terrain and road dialogs on a screen too small for them
     # (test_screen_fit_dialogs).
     test_screen_fit_dialogs.cpp
+    # An open section follows the drawing's surfaces (test_section_recut).
+    test_section_recut.cpp
     # Where File > Open and Save As start (test_project_folder).
     test_project_folder.cpp
     # The Properties panel's tree (test_property_panel).

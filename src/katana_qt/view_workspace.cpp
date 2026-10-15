@@ -944,7 +944,8 @@ void ViewWorkspace::setSceneOptions(const katana::cad::SceneOptions& options)
     }
 }
 
-bool ViewWorkspace::showSection(katana::cad::Section section)
+bool ViewWorkspace::showSection(katana::cad::Section section,
+                                std::optional<katana::cad::SectionDesign> design)
 {
     ViewState& state = ensureView(ViewKind::Section);
     SectionViewWidget* view = sectionView(state.id);
@@ -952,7 +953,37 @@ bool ViewWorkspace::showSection(katana::cad::Section section)
         return false;
     }
     view->setSection(std::move(section));
+    state.sectionDesign = std::move(design);
     return true;
+}
+
+ViewWorkspace::SectionRecut ViewWorkspace::recutSections(const SectionCutter& cutter)
+{
+    SectionRecut result;
+    const std::uint64_t generation = document_.surfacesGeneration();
+    for (ViewState* state : views_.views()) {
+        if (!state->section.has_value() || state->sectionSurfaces == generation) {
+            continue;
+        }
+        const katana::cad::SectionDesign* design =
+            state->sectionDesign.has_value() ? &*state->sectionDesign : nullptr;
+        // The alignment is read out of the section about to be replaced, so the
+        // cutter has finished with it before it is.
+        auto section = cutter(state->section->alignment, design);
+        if (!section) {
+            result.refused.emplace_back(state->id, section.error());
+            continue;
+        }
+        if (SectionViewWidget* widget = sectionView(state->id)) {
+            widget->replaceSection(std::move(*section));
+        } else {
+            // A section a view turned to another kind keeps, to show again.
+            state->section = std::move(*section);
+            state->sectionSurfaces = generation;
+        }
+        result.cut.push_back(state->id);
+    }
+    return result;
 }
 
 void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
@@ -1174,6 +1205,7 @@ void ViewWorkspace::drawingReplaced()
     // to show again when it turns back.
     for (ViewState* state : views_.views()) {
         state->section.reset();
+        state->sectionDesign.reset();
     }
     for (View& view : docks_) {
         if (view.render != nullptr) {

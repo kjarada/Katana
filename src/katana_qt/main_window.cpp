@@ -110,6 +110,7 @@
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
+#include "katana/cad/terrain/section_cut.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
@@ -436,6 +437,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     surfacesListener_ = document_.addListener([this](const cad::DocumentChange& change) {
         if (change.has(cad::DocumentChange::Surfaces | cad::DocumentChange::SurfaceStyles)) {
             syncSceneSurfaces(!change.has(cad::DocumentChange::Replaced));
+        }
+        // An open section is a picture of the surfaces as they were: cut again,
+        // from the event loop, once for all that changed in the turn (a
+        // replaced drawing has none: ViewWorkspace::drawingReplaced).
+        if (change.has(cad::DocumentChange::Surfaces) &&
+            !change.has(cad::DocumentChange::Replaced)) {
+            scheduleSectionRecut();
         }
     });
     refreshAll();
@@ -5487,49 +5495,49 @@ void MainWindow::cutSectionAlongSelection()
     cutSectionAlong(std::move(alignment), "the selection");
 }
 
+namespace {
+
+// Why a section could not be cut, in the window's words: the two refusals that
+// have a place to go (cad::cutDrawingSection says NotFound and InvalidState) name
+// it, and any other is the error as it came.
+QString sectionRefusal(const katana::core::Error& error)
+{
+    switch (error.code) {
+    case katana::core::ErrorCode::NotFound:
+        return "Build a surface first (Terrain > Surface From ...).";
+    case katana::core::ErrorCode::InvalidState:
+        return "Every surface is hidden: show one first (Terrain > Surfaces Panel, or "
+               "SURFACE SHOW <name>).";
+    default:
+        return QString::fromStdString(error.describe());
+    }
+}
+
+} // namespace
+
 void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along,
                                  const katana::geometry::SolvedProfile* profile,
                                  const std::string& profileName)
 {
-    // The drawing's shown surfaces: a section is a picture, and hiding a
-    // surface takes it out of every picture.
-    std::vector<cad::SectionSurfaceInput> inputs;
-    for (const katana::terrain::NamedSurface& named : document_.surfaces().all()) {
-        if (named.visible && named.surface) {
-            inputs.push_back(cad::SectionSurfaceInput{named.name, named.surface.get()});
-        }
-    }
-    if (inputs.empty()) {
-        logMessage(document_.surfaces().empty()
-                       ? "Build a surface first (Terrain > Surface From ...)."
-                       : "Every surface is hidden: show one first (Terrain > Surfaces Panel, or "
-                         "SURFACE SHOW <name>).",
-                   true);
-        return;
-    }
-
-    cad::SectionOptions options;
-    // Two thousand stations across the alignment, floored at 100 mm: fine
-    // enough to read off, and the surface breaks are added on top of it so the
-    // interval never decides the accuracy of a ridge or a toe.
-    options.interval = std::max(alignment.length() / 2000.0, 0.1);
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto section = cad::extractSection(alignment, inputs, &document_.model(), options);
-    QApplication::restoreOverrideCursor();
-    if (!section) {
-        logMessage(QString::fromStdString(section.error().describe()), true);
-        return;
-    }
+    std::optional<cad::SectionDesign> design;
     if (profile != nullptr) {
-        if (auto status = cad::appendDesignProfile(*section, *profile, profileName); !status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-            return;
-        }
+        design = cad::SectionDesign{*profile, profileName};
+    }
+    // The drawing's shown surfaces: a section is a picture, and hiding a
+    // surface takes it out of every picture (the open section is cut again
+    // when that changes, recutSections).
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto cut = cad::cutDrawingSection(document_, alignment, design ? &*design : nullptr);
+    QApplication::restoreOverrideCursor();
+    if (!cut) {
+        logMessage(sectionRefusal(cut.error()), true);
+        return;
     }
 
-    const double length = section->length;
-    const std::size_t crossings = section->crossings.size();
-    if (!views_->showSection(std::move(*section))) {
+    const double length = cut->section.length;
+    const std::size_t crossings = cut->section.crossings.size();
+    const double interval = cut->interval;
+    if (!views_->showSection(std::move(cut->section), std::move(design))) {
         logMessage("No viewport could show the section.", true);
         return;
     }
@@ -5537,8 +5545,50 @@ void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QS
     logMessage(QString("Section cut along %1: length %2, interval %3, %4 crossings.")
                    .arg(along)
                    .arg(length, 0, 'f', 3)
-                   .arg(options.interval, 0, 'f', 3)
+                   .arg(interval, 0, 'f', 3)
                    .arg(crossings));
+}
+
+void MainWindow::scheduleSectionRecut()
+{
+    if (sectionRecutPending_) {
+        return;
+    }
+    sectionRecutPending_ = true;
+    QTimer::singleShot(0, this, [this] {
+        sectionRecutPending_ = false;
+        recutSections();
+    });
+}
+
+void MainWindow::recutSections()
+{
+    if (views_ == nullptr) {
+        return;
+    }
+    const auto cutter = [this](const katana::geometry::Polyline2& alignment,
+                               const cad::SectionDesign* design)
+        -> katana::core::Result<cad::Section> {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        auto cut = cad::cutDrawingSection(document_, alignment, design);
+        QApplication::restoreOverrideCursor();
+        if (!cut) {
+            return cut.error();
+        }
+        return std::move(cut->section);
+    };
+    const ViewWorkspace::SectionRecut recut = views_->recutSections(cutter);
+    for (const katana::cad::ViewId id : recut.cut) {
+        logMessage(QString("Section in view %1 cut again: the drawing's surfaces changed.").arg(id));
+    }
+    // Not an error: the drawing is as the person left it, and the view says
+    // in its legend that it shows what it was cut from.
+    for (const auto& [id, error] : recut.refused) {
+        logMessage(QString("Section in view %1 is of surfaces that have changed and was not cut "
+                           "again: %2")
+                       .arg(id)
+                       .arg(sectionRefusal(error)));
+    }
 }
 
 void MainWindow::cutSectionAlongAlignment()

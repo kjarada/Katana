@@ -357,16 +357,41 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
 - **Hidden is a matter of the picture.** `NamedSurface::visible` says
   whether the views draw a surface: the plan and 3D views follow it as it
   changes, and a section - the section view, a sheet's sections - is cut
-  from the surfaces that were shown WHEN IT WAS CUT. An open section view is
-  not cut again by itself (Terrain > Cut Section is the person's decision, and
-  its alignment and design profile are not kept to repeat it with); when the
-  drawing's surfaces have changed since, it says so in its legend and its status
-  text (`SectionViewWidget::surfacesChanged`,
-  `SectionView.ASectionSaysItsSurfacesChangedSinceItWasCutAndCuttingAgainClearsIt`).
-  Any change to the surfaces says it, a style change included: the generation
-  it goes by does not tell which part of a surface changed. A hidden surface is
-  still read by every verb - sampled, draped, exported, a corridor's ground -
-  which is why the corridor and the IFC export list them all.
+  from the surfaces that were shown WHEN IT WAS CUT. An open section view
+  follows them: it keeps its recipe, the section's own alignment and the design
+  profile with its name (`ViewState::sectionDesign`), and when the drawing's
+  surfaces change - hidden, shown, edited, merged, removed, undone, redone - the
+  window cuts it again from the event loop, once for all that a command or a
+  script changed (`MainWindow::recutSections`, `ViewWorkspace::recutSections`,
+  `qt_an_open_section_is_cut_again_when_the_surfaces_change_headless`). The cut
+  is `cad::cutDrawingSection` (`cad/terrain/section_cut.hpp`), which Terrain >
+  Cut Section uses too, so the two cannot differ in which surfaces they take or
+  in the interval (`SectionCut.*`); the views are told by the surfaces'
+  generation, which moves for every change to the surfaces and never goes back
+  (`SectionRecut.*`). A person's pan and zoom stay: the station and elevation at
+  the middle of the plot keep their place, and a view they have not touched is
+  fitted to the new section as it was to the old
+  (`SectionViewWidget::replaceSection`). A view turned to another kind keeps its
+  section, and it is cut again in its state. When it cannot be cut again - the
+  last surface hidden, a surface removed from every way of cutting - the view
+  keeps the picture it had and says it is of surfaces that have changed, in its
+  legend and its status text (`SectionViewWidget::surfacesChanged`), and the log
+  says why ("... was not cut again: Every surface is hidden ..."); showing a
+  surface cuts it again. Any change to the surfaces moves the generation,
+  giving a surface another style included - it does not tell which part of a
+  surface changed - so that cuts again too, needlessly and harmlessly; editing a
+  style's own settings does not (`SurfaceStyles` is a change of its own, and a
+  section holds no style). A hidden surface is still read by every verb -
+  sampled, draped, exported, a corridor's ground - which is why the corridor and
+  the IFC export list them all.
+  *Rejected:* marking the section stale and leaving the cut to the person (the
+  finding's smaller alternative: Terrain > Cut Section again after every edit is
+  the work the window can do), and cutting at once inside the document's
+  notification (fifty edits of a script would cut fifty times, a section of two
+  thousand stations each). *Not followed:* an alignment or a design profile
+  edited after the cut - the recipe is what was cut; and the crossings an
+  entity edit moves, which a re-cut would refresh but no change to the entities
+  asks for.
 - **A surface's style is a name.** `NamedSurface::style` names one of the
   drawing's display styles (`include/katana/cad/terrain/surface_style.hpp`);
   empty is the drawing's default. A name the styles do not have is refused
@@ -611,11 +636,10 @@ column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
   cannot be read by a build before it, and that is the owner's decision (the
   alternative, an integrity pass at the open, would read tens of megabytes
   for a check no other table has).
-- **An open section view is not cut again when the surfaces change;** it says
-  they changed (see "Hidden is a matter of the picture"). Cutting it again by
-  itself needs the section's recipe kept with the view - its alignment polyline,
-  its design profile and that profile's name - and a re-cut that keeps the
-  person's framing; neither is built.
+- **An open section view is cut again when the surfaces change, not when the
+  alignment or the entities do** (see "Hidden is a matter of the picture"): the
+  recipe is the polyline and the design profile as they were cut, so an alignment
+  edited since is not followed, and the crossings are those of the cut.
 
 ## Surfaces on every front end
 

@@ -3259,6 +3259,26 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # An open section view follows the drawing's surfaces (docs/terrain.md, "Hidden is a
+    # matter of the picture"): in the real window, a section cut along the line and
+    # then a surface raised, one hidden, one shown, and every one hidden and shown again
+    # - each a change to the surfaces, so each cuts the section again from the recipe
+    # the view kept, except the one that leaves nothing to cut, which says it was not.
+    # Each recut is said in the log after the command's own reply (the window cuts it
+    # from the event loop, once for what a command changed).
+    add_test(NAME qt_an_open_section_is_cut_again_when_the_surfaces_change_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>SURFACE COPY ground design|>LINE 0,60 170,60|>SELECT ALL|*terrainSectionAlongSelection|>SURFACE EDIT design RAISE 3|>SURFACE HIDE design|>SURFACE HIDE ground|>SURFACE SHOW design"
+            "-DEXPECT=Section cut along the selection: length 170[.]000.*surface name=design operation=raise.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ is of surfaces that have changed and was not cut again: Every surface is hidden.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.]"
+            "-DFORBID=unknown command|does not take|InvalidArgument|Internal"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/section_recut_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_an_open_section_is_cut_again_when_the_surfaces_change_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 240)
     # The three edits that take the drawing's data by a scope, through the window
     # (docs/surface_editing.md, "In the window"): Add Points from the Drawing
     # takes the two vertices of a PLINE3D (20.3,20.3,50 and 25.3,25.3,50), Delete

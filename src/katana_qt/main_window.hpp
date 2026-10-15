@@ -491,14 +491,25 @@ class MainWindow final : public QMainWindow {
     // record logged (plotting/view_image_export.hpp).
     void snapshotView(const SnapshotRequest& request);
 
-    // The part both section commands share: gather the visible surfaces, cut
-    // along `alignment`, show the result. `along` names the source for the
-    // log line.
+    // The part both section commands share: cut the drawing's shown surfaces
+    // along `alignment` (cad::cutDrawingSection, the one cut), show the result.
+    // `along` names the source for the log line.
     // `profile`, when given, is added to the section as a design series named
-    // `profileName`, so the view shows design against ground.
+    // `profileName`, so the view shows design against ground. The view keeps
+    // the alignment and the profile as the recipe that cuts it again.
     void cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along,
                          const katana::geometry::SolvedProfile* profile = nullptr,
                          const std::string& profileName = {});
+    // Cuts again every open section whose drawing's surfaces have changed since
+    // it was cut - hidden, shown, edited, removed, undone - from its own
+    // alignment and design profile (ViewWorkspace::recutSections), keeping the
+    // pan and zoom a person made. Says, in the log, which it cut and which it
+    // could not (no surface left to cut): those keep the old picture, marked as
+    // of surfaces that have changed. Queued on the event loop by the surfaces
+    // listener, once however many changes came first, as scheduleRefresh is: a
+    // script of fifty surface edits cuts once.
+    void recutSections();
+    void scheduleSectionRecut();
     // View > Vertical Exaggeration: the factor asked for in a box, then the
     // EXAGGERATION line run through the one executor; headless, refused with
     // the line to type instead.
@@ -877,6 +888,7 @@ class MainWindow final : public QMainWindow {
     bool refreshingReferences_ = false; // ditto, for the reference table
     bool refreshingStyles_ = false;     // ditto, for the current-style choice
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
+    bool sectionRecutPending_ = false;  // a recutSections() is queued on the event loop
     bool headless_ = false;
     // What this session's host offers (set where the host is made,
     // loadDefaultCustomisation), for the Format workbench: the kept

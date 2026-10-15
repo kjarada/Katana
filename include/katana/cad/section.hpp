@@ -120,6 +120,15 @@ struct Section {
     [[nodiscard]] katana::geometry::Box2 extent() const;
 };
 
+// The design profile cut beside the ground in a section: the solved profile and the
+// name its series carries. An open section view keeps it, with the section's own
+// alignment, as the recipe that cuts the section again when the drawing's surfaces
+// change (cutDrawingSection, cad/terrain/section_cut.hpp).
+struct SectionDesign {
+    katana::geometry::SolvedProfile profile;
+    std::string name;
+};
+
 // Cuts `surfaces` along `alignment`.
 //
 // Fails with InvalidArgument for an alignment of fewer than two distinct

@@ -754,10 +754,15 @@ invalidation on every edit for no gain anyone has measured. The comment in
 `drawAlignments` says to measure before changing that.
 
 **One section routine for both callers.** "Cut Section Along Selection" and
-"Cut Section Along Alignment..." share `cutSectionAlong`, which gathers the
-visible surfaces, cuts and shows. The alignment path chords the centreline at
-10 mm: the section samples at most every 100 mm along it, so a finer polyline
-would cost time and change nothing the section reports.
+"Cut Section Along Alignment..." share `cutSectionAlong`, which cuts with
+`cad::cutDrawingSection` (`cad/terrain/section_cut.hpp`: the visible surfaces,
+`max(length / 2000, 0.1 m)` between stations, the design profile beside them
+when there is one) and shows. The open section view is cut again with the same
+function from the alignment and design it kept, when the drawing's surfaces
+change (`MainWindow::recutSections`; `docs/terrain.md`, "Hidden is a matter of
+the picture"), so there is still one routine. The alignment path chords the
+centreline at 10 mm: the section samples at most every 100 mm along it, so a
+finer polyline would cost time and change nothing the section reports.
 
 ## Design profiles
 
