@@ -61,12 +61,15 @@ add_test(NAME cli.roadobject_saved_with_the_project
 add_test(NAME cli.roadobject_opened_again_with_the_project
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "OPEN \"${_road_project}\"" -c "ROADOBJECT LIST")
-set_tests_properties(cli.roadobject_cleanup PROPERTIES FIXTURES_SETUP cli_road_project)
+# The fixtures are this family's own (cli_road_objects_*): a fixture of the road
+# model's tests under the same name made a failed save here skip that family's
+# read-back, and the reverse, and -R of one pulled in the other's setup.
+set_tests_properties(cli.roadobject_cleanup PROPERTIES FIXTURES_SETUP cli_road_objects_project)
 set_tests_properties(cli.roadobject_saved_with_the_project PROPERTIES
-    FIXTURES_REQUIRED cli_road_project FIXTURES_SETUP cli_road_saved
+    FIXTURES_REQUIRED cli_road_objects_project FIXTURES_SETUP cli_road_objects_saved
     FAIL_REGULAR_EXPRESSION "error")
 # Three poles at 0, 30 and 60, each a pole and a lantern.
 set_tests_properties(cli.roadobject_opened_again_with_the_project PROPERTIES
-    FIXTURES_REQUIRED cli_road_saved
+    FIXTURES_REQUIRED cli_road_objects_saved
     PASS_REGULAR_EXPRESSION "roadobjects count=1 problems=0[\r\n]+object id=light-1 kind=light placement=alignment alignment=Main station=0 to=60 offset=6 spacing=30 [^\r\n]*objects=6"
     FAIL_REGULAR_EXPRESSION "error")

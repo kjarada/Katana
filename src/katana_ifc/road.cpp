@@ -160,6 +160,28 @@ constexpr BaseQuantities kBaseQuantities[] = {
     {"IfcSign", "Qto_SignBaseQuantities", "Height=L Width=L Thickness=L Weight=W"},
 };
 
+// The road model names its quantities by one scheme for every object - GrossVolume
+// for any solid's volume, Depth for a course's thickness (cad/road/road_section.cpp)
+// - and the classes' base quantity sets name theirs. Where the model's name is not
+// the set's, and the set gives the name its type, the quantity is written under the
+// set's: an earthworks cut's GrossVolume is its UndisturbedVolume, a fill's its
+// CompactedVolume (the in-place volume the end areas measure), a kerb's its Volume,
+// a course's Depth its Thickness. Only when the element has no quantity of that
+// name already; the model's own names stay in its own reports.
+struct QuantityAlias {
+    std::string_view entity;
+    std::string_view from;
+    QuantityKind kind;
+    std::string_view to;
+};
+
+constexpr QuantityAlias kQuantityAliases[] = {
+    {"IfcCourse", "Depth", QuantityKind::Length, "Thickness"},
+    {"IfcKerb", "GrossVolume", QuantityKind::Volume, "Volume"},
+    {"IfcEarthworksCut", "GrossVolume", QuantityKind::Volume, "UndisturbedVolume"},
+    {"IfcEarthworksFill", "GrossVolume", QuantityKind::Volume, "CompactedVolume"},
+};
+
 const BaseQuantities* baseQuantitiesOf(std::string_view entity)
 {
     for (const BaseQuantities& row : kBaseQuantities) {
@@ -822,12 +844,27 @@ class RoadWriter {
                 ++invalidQuantities_; // the schema's WR: a quantity's value is not negative
                 continue;
             }
-            if (!named.insert(quantity.name).second) {
+            // The name the class's base quantity set gives it, where the model's own
+            // is not one of the set's.
+            std::string name = quantity.name;
+            if (base != nullptr && !templateDefines(*base, name, value->kind)) {
+                for (const QuantityAlias& alias : kQuantityAliases) {
+                    if (alias.entity == element.ifcClass.entity && alias.from == name &&
+                        alias.kind == value->kind &&
+                        std::ranges::none_of(element.quantities, [&alias](const RoadQuantity& each) {
+                            return each.name == alias.to;
+                        })) {
+                        name = std::string(alias.to);
+                        break;
+                    }
+                }
+            }
+            if (!named.insert(name).second) {
                 ++repeatedQuantities_; // UniqueQuantityNames, within the element
                 continue;
             }
             Args args;
-            args.string(b_.label(quantity.name, "a quantity of " + element.id)).null();
+            args.string(b_.label(name, "a quantity of " + element.id)).null();
             if (value->kind == QuantityKind::Weight) {
                 args.ref(b_.kilogram());
             } else {
@@ -835,7 +872,7 @@ class RoadWriter {
             }
             args.real(value->value).null();
             const Id id = b_.file().add(entityOf(value->kind), args);
-            (base != nullptr && templateDefines(*base, quantity.name, value->kind) ? standard : own)
+            (base != nullptr && templateDefines(*base, name, value->kind) ? standard : own)
                 .push_back(id);
         }
         const auto set = [&](std::string_view name, std::string_view method,
