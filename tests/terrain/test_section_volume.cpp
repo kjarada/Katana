@@ -678,3 +678,472 @@ TEST(VolumesAlongAlignment, AnAlignmentThatRunsClearOfTheCommonGroundIsRefusedBu
     EXPECT_NEAR(partly->sections[2].width, 10.0, 1e-9);
     EXPECT_NEAR(partly->sections[4].width, 10.0, 1e-9);
 }
+
+// ---- the first moments of a section ----------------------------------------------------------
+
+TEST(SignedTrapezoid, MomentsAreTheIntegralOfDepthTimesOffsetAndSplitWhereTheSidesDifferInSign)
+{
+    // A strip 2 wide whose first side is 5 from the line, the offset falling to 3
+    // at its far side, so o(u) = 5 - u. Depth 1 to 3, d(u) = 1 + u:
+    //   integral of (1 + u)(5 - u) = (5 + 4u - u^2) over [0, 2] = 10 + 8 - 8/3 = 46/3.
+    EXPECT_NEAR(signedTrapezoidMoments(1, 3, 2, 5).positive, 46.0 / 3.0, 1e-12);
+    EXPECT_EQ(signedTrapezoidMoments(1, 3, 2, 5).negative, 0.0);
+    // The same depths below zero are the same moment in the negative part, the
+    // depth taken as a magnitude.
+    EXPECT_NEAR(signedTrapezoidMoments(-1, -3, 2, 5).negative, 46.0 / 3.0, 1e-12);
+    EXPECT_EQ(signedTrapezoidMoments(-1, -3, 2, 5).positive, 0.0);
+    // Depth 2 to -2 crossing in the middle: the positive triangle is over u in
+    // [0, 1] with d = 2 - 2u:
+    //   (2 - 2u)(5 - u) = 10 - 12u + 2u^2, integrated over [0, 1]: 10 - 6 + 2/3 = 14/3;
+    // the negative one over [1, 2] with the magnitude 2u - 2:
+    //   (2u - 2)(5 - u) = -2u^2 + 12u - 10, integrated: [-2u^3/3 + 6u^2 - 10u] from
+    //   1 to 2 = (-16/3 + 24 - 20) - (-2/3 + 6 - 10) = -4/3 + 14/3 = 10/3.
+    EXPECT_NEAR(signedTrapezoidMoments(2, -2, 2, 5).positive, 14.0 / 3.0, 1e-12);
+    EXPECT_NEAR(signedTrapezoidMoments(2, -2, 2, 5).negative, 10.0 / 3.0, 1e-12);
+    // Mirrored, the parts swap sides: the negative one is first.
+    EXPECT_NEAR(signedTrapezoidMoments(-2, 2, 2, 5).negative, 14.0 / 3.0, 1e-12);
+    EXPECT_NEAR(signedTrapezoidMoments(-2, 2, 2, 5).positive, 10.0 / 3.0, 1e-12);
+    // Each moment over its area is a centroid between the part's sides: the
+    // positive triangle's is 1/3 of its base from the tall side, 5 - 1/3.
+    const SignedArea areas = signedTrapezoid(2, -2, 2);
+    EXPECT_NEAR(signedTrapezoidMoments(2, -2, 2, 5).positive / areas.positive, 5.0 - 1.0 / 3.0,
+                1e-12);
+    EXPECT_NEAR(signedTrapezoidMoments(2, -2, 2, 5).negative / areas.negative, 5.0 - 5.0 / 3.0,
+                1e-12);
+}
+
+TEST(SignedTrapezoid, AStripOnTheOtherSideOfTheLineHasANegativeMomentAndACentredOneNone)
+{
+    // Depth 2 all across a strip 2 wide that starts at offset -1 and falls to -3:
+    // integral of 2 (-1 - u) over [0, 2] = 2 (-2 - 2) = -8.
+    EXPECT_NEAR(signedTrapezoidMoments(2, 2, 2, -1).positive, -8.0, 1e-12);
+    // A strip centred on the line (first side at +1, last at -1) has no moment
+    // whatever it is deep, and neither has any nothing.
+    EXPECT_NEAR(signedTrapezoidMoments(1, 1, 2, 1).positive, 0.0, 1e-12);
+    EXPECT_EQ(signedTrapezoidMoments(0, 0, 2, 5).positive, 0.0);
+    EXPECT_EQ(signedTrapezoidMoments(0, 0, 2, 5).negative, 0.0);
+    // No width, no moment; a width that is not a number likewise.
+    EXPECT_EQ(signedTrapezoidMoments(2, 2, 0, 5).positive, 0.0);
+    EXPECT_EQ(signedTrapezoidMoments(2, 2, -1, 5).positive, 0.0);
+    EXPECT_EQ(signedTrapezoidMoments(2, 2, std::nan(""), 5).positive, 0.0);
+}
+
+TEST(SectionAreas, AreTheirFirstMomentsAboutTheLineTheOffsetIsMeasuredFrom)
+{
+    // A section 20 long from (0, 10) to (0, -10), so the offset of a point is
+    // its y when the first end is given 10 from the line. The base is flat at
+    // 0 and the design z = 0.1 y + 1: 2 deep at y = 10, 0 at y = -10. A triangle
+    // of base 20 and height 2: area 20, and its centroid 1/3 of the base from
+    // the deep end, y = 10 - 20/3 = 10/3, so the moment is 20 x 10/3 = 200/3.
+    // Also by the integral: (0.1 y + 1) y over [-10, 10] = 0.1 x 2000/3 = 200/3.
+    const TinSurface base = planeSurface(Plane{0, 0, 0}, 100.0, 60, 31, -50.0, -50.0);
+    const TinSurface top = planeSurface(Plane{0, 0.1, 1}, 100.0, 60, 32, -50.0, -50.0);
+    const SegmentProfiler under(base);
+    const SegmentProfiler over(top);
+    const Point2 from(0, 10);
+    const Point2 to(0, -10);
+    const SectionAreas areas = sectionAreas(under.along(from, to), over.along(from, to), 20.0, 10.0);
+    EXPECT_NEAR(areas.fill, 20.0, 1e-10);
+    EXPECT_NEAR(areas.fillMoment, 200.0 / 3.0, 1e-9);
+    EXPECT_EQ(areas.cut, 0.0);
+    EXPECT_EQ(areas.cutMoment, 0.0);
+    // With the offset measured from the first end itself (the default) the offset
+    // is -x along the section, and the centroid is 20/3 from the deep end, which is
+    // the first: the moment is 20 x (-20/3) = -400/3. By the integral:
+    // (2 - 0.1 x)(-x) over [0, 20] = -(400 - 0.1 x 8000/3) = -(400 - 800/3) = -400/3.
+    const SectionAreas fromTheEnd = sectionAreas(under.along(from, to), over.along(from, to), 20.0);
+    EXPECT_NEAR(fromTheEnd.fillMoment, -400.0 / 3.0, 1e-9);
+    // Swapped, the design is the lower: all cut, the same magnitudes in the cut.
+    const SectionAreas swapped = sectionAreas(over.along(from, to), under.along(from, to), 20.0, 10.0);
+    EXPECT_NEAR(swapped.cut, 20.0, 1e-10);
+    EXPECT_NEAR(swapped.cutMoment, 200.0 / 3.0, 1e-9);
+    EXPECT_EQ(swapped.fill, 0.0);
+    EXPECT_EQ(swapped.fillMoment, 0.0);
+}
+
+TEST(SectionAreas, ASectionWhereTheSurfacesCrossHasACutMomentOnOneSideAndAFillMomentOnTheOther)
+{
+    // The same section against z = 0.2 y: fill for y > 0 (depth 0.2 y, area
+    // 0.5 x 10 x 2 = 10, moment the integral of 0.2 y^2 over [0, 10] = 200/3)
+    // and cut for y < 0 (area 10 again; the magnitude 0.2 |y| times the offset
+    // y, negative: -200/3).
+    const TinSurface base = planeSurface(Plane{0, 0, 0}, 100.0, 60, 33, -50.0, -50.0);
+    const TinSurface top = planeSurface(Plane{0, 0.2, 0}, 100.0, 60, 34, -50.0, -50.0);
+    const SegmentProfiler under(base);
+    const SegmentProfiler over(top);
+    const Point2 from(0, 10);
+    const Point2 to(0, -10);
+    const SectionAreas areas = sectionAreas(under.along(from, to), over.along(from, to), 20.0, 10.0);
+    EXPECT_NEAR(areas.fill, 10.0, 1e-10);
+    EXPECT_NEAR(areas.cut, 10.0, 1e-10);
+    EXPECT_NEAR(areas.fillMoment, 200.0 / 3.0, 1e-9);
+    EXPECT_NEAR(areas.cutMoment, -200.0 / 3.0, 1e-9);
+}
+
+// ---- the curvature correction ---------------------------------------------------------------
+
+namespace {
+
+// Fifty metres of tangent east from (0, 0), a quarter circle of radius 50
+// turning left about the centre (50, 50), fifty metres of tangent north to
+// (100, 100): the PI is (100, 0), a 90 degree deflection, and the tangents
+// are 50 long on each side of the curve's own 25 pi = 78.540.
+SolvedAlignment quarterCircleLeft()
+{
+    return through({{Point2(0, 0), 0.0}, {Point2(100, 0), 50.0}, {Point2(100, 100), 0.0}});
+}
+
+// The same way back, from (100, 100) south and then west: it turns right about
+// the same centre, so its inside is on the right.
+SolvedAlignment quarterCircleRight()
+{
+    return through({{Point2(100, 100), 0.0}, {Point2(100, 0), 50.0}, {Point2(0, 0), 0.0}});
+}
+
+AlignmentVolumeOptions stripReach(double left, double right, double interval, bool curvature = true)
+{
+    AlignmentVolumeOptions options;
+    options.interval = interval;
+    options.left = left;
+    options.right = right;
+    options.curvature = curvature;
+    return options;
+}
+
+} // namespace
+
+TEST(VolumesAlongAlignment, AStripOnTheInsideOfAQuarterCircleIsTheAnnulusBetweenItsRadiiNotTheCentrelineArc)
+{
+    // A 1 m slab over [-50, 150]^2, sections reaching 10 m to the left (the
+    // inside: the centre is at (50, 50), on the left of the way) and none to the
+    // right: a strip 10 wide and 1 deep, so 10 m2 on every section, its centroid
+    // 5 m left of the centreline, its first moment 50 m3.
+    // Exactly: the tangents hold 50 x 10 = 500 m3 each, and between the radii 50
+    // and 40 the quarter circle holds (pi/4)(50^2 - 40^2) = 225 pi = 706.858:
+    // 1000 + 225 pi = 1706.858 in all. The centreline's arc is 25 pi = 78.540
+    // long, so the plain end area, 10 m2 over its length, is 500 + 250 pi + 500 =
+    // 1785.398 - 4.6 % over, since the strip's centroid travels (R - 5) theta and
+    // not R theta (Pappus). Corrected a panel on the arc is L (A - k M) = L (10 -
+    // 50/50) = 9 L, and 9 x 25 pi = 225 pi. The area is constant, so the end-area
+    // rule itself has nothing to discretise and the interval cannot matter: the
+    // sum is exact to the rounding of the areas, 1e-12 each.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    const SolvedAlignment alignment = quarterCircleLeft();
+    ASSERT_NEAR(alignment.length(), 100.0 + 25.0 * katana::math::kPi, 1e-9);
+    for (const double interval : {10.0, 1.0}) {
+        const auto on = volumesAlongAlignment(base, top, alignment, stripReach(10.0, 0.0, interval));
+        ASSERT_TRUE(on.ok()) << on.error().describe();
+        EXPECT_TRUE(on->curvature);
+        EXPECT_NEAR(on->endAreaFill, 1000.0 + 225.0 * katana::math::kPi, 1e-7) << interval;
+        EXPECT_NEAR(on->endAreaShift.fill, -25.0 * katana::math::kPi, 1e-7) << interval;
+        EXPECT_EQ(on->endAreaCut, 0.0);
+        EXPECT_EQ(on->endAreaShift.cut, 0.0);
+        for (const StationSection& section : on->sections) {
+            EXPECT_NEAR(section.fillArea, 10.0, 1e-9) << section.station;
+            EXPECT_NEAR(section.fillMoment, 50.0, 1e-9) << section.station;
+        }
+        // The curvature is the arc's 1/50 on the panels whose middle is between
+        // its ends (TS at station 50, ST at 50 + 25 pi), and 0 on the tangents.
+        bool onTheArc = false;
+        bool onATangent = false;
+        for (const SectionPanel& panel : on->panels) {
+            const double middle = 0.5 * (panel.fromStation + panel.toStation);
+            const bool arc = middle > 50.0 && middle < 50.0 + 25.0 * katana::math::kPi;
+            EXPECT_NEAR(panel.curvature, arc ? 0.02 : 0.0, 1e-12) << middle;
+            onTheArc = onTheArc || arc;
+            onATangent = onATangent || !arc;
+        }
+        EXPECT_TRUE(onTheArc);
+        EXPECT_TRUE(onATangent);
+
+        // Off: the plain figure along the centreline, nothing shifted.
+        const auto off =
+            volumesAlongAlignment(base, top, alignment, stripReach(10.0, 0.0, interval, false));
+        ASSERT_TRUE(off.ok()) << off.error().describe();
+        EXPECT_FALSE(off->curvature);
+        EXPECT_NEAR(off->endAreaFill, 1000.0 + 250.0 * katana::math::kPi, 1e-7) << interval;
+        EXPECT_EQ(off->endAreaShift.fill, 0.0);
+        for (const SectionPanel& panel : off->panels) {
+            EXPECT_EQ(panel.curvature, 0.0);
+        }
+    }
+}
+
+TEST(VolumesAlongAlignment, AStripOnTheOutsideOfAQuarterCircleIsLongerThanItsCentrelineArc)
+{
+    // The same slab and way, the strip on the right, the outside: radii 50 to 60.
+    // Exactly 1000 + (pi/4)(60^2 - 50^2) = 1000 + 275 pi = 1863.938, the plain
+    // 1785.398 4.2 % under. The strip's centroid is 5 m right, M = -50, so a
+    // panel on the arc is L (10 + 50/50) = 11 L, 11 x 25 pi = 275 pi.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    const auto outside =
+        volumesAlongAlignment(base, top, quarterCircleLeft(), stripReach(0.0, 10.0, 5.0));
+    ASSERT_TRUE(outside.ok()) << outside.error().describe();
+    EXPECT_NEAR(outside->endAreaFill, 1000.0 + 275.0 * katana::math::kPi, 1e-7);
+    EXPECT_NEAR(outside->endAreaShift.fill, 25.0 * katana::math::kPi, 1e-7);
+    for (const StationSection& section : outside->sections) {
+        EXPECT_NEAR(section.fillMoment, -50.0, 1e-9) << section.station;
+    }
+    // Prismoidal, with a section cut halfway between each pair, is the same
+    // constant area through Simpson's rule and takes the same correction.
+    AlignmentVolumeOptions both = stripReach(0.0, 10.0, 5.0);
+    both.prismoidal = true;
+    const auto prismoidal = volumesAlongAlignment(base, top, quarterCircleLeft(), both);
+    ASSERT_TRUE(prismoidal.ok()) << prismoidal.error().describe();
+    EXPECT_NEAR(prismoidal->prismoidalFill, 1000.0 + 275.0 * katana::math::kPi, 1e-7);
+    EXPECT_NEAR(prismoidal->prismoidalShift.fill, 25.0 * katana::math::kPi, 1e-7);
+}
+
+TEST(VolumesAlongAlignment, AStripSymmetricAboutTheCentrelineIsTheSameWithOrWithoutTheCorrection)
+{
+    // 10 m each side: 20 m2, centroid on the centreline, M = 0. The curve holds
+    // (pi/4)(60^2 - 40^2) = 500 pi, the tangents 50 x 20 = 1000 each: 2000 + 500 pi
+    // = 3570.796, which the centreline arc (25 pi x 20 = 500 pi) gives as well.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    const auto on = volumesAlongAlignment(base, top, quarterCircleLeft(), stripReach(10.0, 10.0, 5.0));
+    const auto off =
+        volumesAlongAlignment(base, top, quarterCircleLeft(), stripReach(10.0, 10.0, 5.0, false));
+    ASSERT_TRUE(on.ok()) << on.error().describe();
+    ASSERT_TRUE(off.ok()) << off.error().describe();
+    EXPECT_NEAR(on->endAreaFill, 2000.0 + 500.0 * katana::math::kPi, 1e-7);
+    EXPECT_NEAR(off->endAreaFill, 2000.0 + 500.0 * katana::math::kPi, 1e-7);
+    EXPECT_NEAR(on->endAreaShift.fill, 0.0, 1e-9);
+    for (const StationSection& section : on->sections) {
+        EXPECT_NEAR(section.fillMoment, 0.0, 1e-9) << section.station;
+    }
+}
+
+TEST(VolumesAlongAlignment, TheSameStripOnAWayThatTurnsRightHasItsInsideOnTheRight)
+{
+    // From (100, 100) south to the PI (100, 0) and west to (0, 0): the centre
+    // (50, 50) is on the right. The right strip is the inside, 1706.858, with its
+    // centroid at offset -5 (negative: right) and the curvature -1/50; the left
+    // strip is the outside, 1863.938.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    const auto inside = volumesAlongAlignment(base, top, quarterCircleRight(), stripReach(0.0, 10.0, 5.0));
+    ASSERT_TRUE(inside.ok()) << inside.error().describe();
+    EXPECT_NEAR(inside->endAreaFill, 1000.0 + 225.0 * katana::math::kPi, 1e-7);
+    for (const StationSection& section : inside->sections) {
+        EXPECT_NEAR(section.fillMoment, -50.0, 1e-9) << section.station;
+    }
+    const auto turning = std::count_if(inside->panels.begin(), inside->panels.end(),
+                                       [](const SectionPanel& panel) {
+                                           return std::abs(panel.curvature + 0.02) < 1e-12;
+                                       });
+    EXPECT_GT(turning, 5);
+    const auto outside =
+        volumesAlongAlignment(base, top, quarterCircleRight(), stripReach(10.0, 0.0, 5.0));
+    ASSERT_TRUE(outside.ok()) << outside.error().describe();
+    EXPECT_NEAR(outside->endAreaFill, 1000.0 + 275.0 * katana::math::kPi, 1e-7);
+}
+
+TEST(VolumesAlongAlignment, OnAStraightTheCorrectionChangesNoBitOfAnAsymmetricSection)
+{
+    // Curvature 0 everywhere: the panel is the plain expression, bit for bit, on
+    // an asymmetric reach and with the middle sections of the prismoidal formula.
+    const Wedge w = wedge();
+    const SolvedAlignment alignment = straight(Point2(0, 0), Point2(100, 0));
+    AlignmentVolumeOptions options;
+    options.interval = 10.0;
+    options.left = 5.0;
+    options.right = 20.0;
+    options.prismoidal = true;
+    const auto on = volumesAlongAlignment(w.ground, w.top, alignment, options);
+    options.curvature = false;
+    const auto off = volumesAlongAlignment(w.ground, w.top, alignment, options);
+    ASSERT_TRUE(on.ok()) << on.error().describe();
+    ASSERT_TRUE(off.ok()) << off.error().describe();
+    EXPECT_TRUE(sameBits(on->endAreaFill, off->endAreaFill));
+    EXPECT_TRUE(sameBits(on->endAreaCut, off->endAreaCut));
+    EXPECT_TRUE(sameBits(on->prismoidalFill, off->prismoidalFill));
+    EXPECT_EQ(on->endAreaShift.fill, 0.0);
+    EXPECT_EQ(on->prismoidalShift.fill, 0.0);
+    // The wedge's sections are s/5 wide about the centreline, but only 5 of it
+    // are reached to the left: the moments are real, the correction not applied.
+    EXPECT_NE(on->sections.back().fillMoment, 0.0);
+}
+
+TEST(VolumesAlongAlignment, AStripAlongSpiralsAndACircleLosesItsMomentTimesTheTurnWhateverTheSpiralsDo)
+{
+    // Tangent east, a spiral of 30 m into a circle of radius 100 and one out of it,
+    // tangent north: the alignment turns left by the deflection at the PI, 90 degrees,
+    // however it is shared between the spirals and the circle. A strip 10 wide on
+    // the inside (left), 1 m deep: A = 10, M = 50. The volume between two normals is
+    // the integral of A - k M, so over the alignment A L - M (the angle turned) =
+    // 10 L - 50 pi/2, and the plain figure less the corrected is M x pi/2 = 78.540
+    // - which does not need the length at all. A panel's curvature is taken at its
+    // middle, and curvature is linear on a spiral and constant on a circle, so
+    // k(middle) L is the angle the panel turns exactly: the sum is the turn.
+    HorizontalAlignment definition;
+    definition.pis = {AlignmentPI{Point2(0, 0)}, AlignmentPI{Point2(200, 0), 100.0, 30.0, 30.0},
+                      AlignmentPI{Point2(200, 200)}};
+    const auto alignment = katana::geometry::solveAlignment(definition);
+    ASSERT_TRUE(alignment.ok()) << alignment.error().describe();
+    const TinSurface base = slab(-50.0, -50.0, 300.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 300.0, 1.0);
+    AlignmentVolumeOptions options = stripReach(10.0, 0.0, 10.0);
+    options.prismoidal = true;
+    const auto on = volumesAlongAlignment(base, top, *alignment, options);
+    options.curvature = false;
+    const auto off = volumesAlongAlignment(base, top, *alignment, options);
+    ASSERT_TRUE(on.ok()) << on.error().describe();
+    ASSERT_TRUE(off.ok()) << off.error().describe();
+    const double turn = katana::math::kPi / 2.0;
+    EXPECT_NEAR(off->endAreaFill - on->endAreaFill, 50.0 * turn, 1e-6);
+    EXPECT_NEAR(on->endAreaShift.fill, -50.0 * turn, 1e-6);
+    EXPECT_NEAR(on->prismoidalShift.fill, -50.0 * turn, 1e-6);
+    EXPECT_NEAR(on->endAreaFill, 10.0 * alignment->length() - 50.0 * turn, 1e-6);
+}
+
+TEST(VolumesAlongAlignment, ASlopingSurfaceOnACurveIsCorrectedToItsExactVolumeAsTheIntervalShrinks)
+{
+    // The ground z = 0, the design z = 0.02 x, over the left strip 10 wide of
+    // the quarter circle. Exactly (integrating 0.02 x over the ground):
+    //   tangent east, x in [0, 50], y in [0, 10]: 0.02 x 10 x 1250 = 250;
+    //   tangent north, x in [90, 100], y in [50, 100]: 0.02 x 50 x 950 = 950;
+    //   the arc, x = 50 + r cos(phi), r in [40, 50], phi in [-pi/2, 0]:
+    //     per metre of station the corrected integrand is the integral over the
+    //     offset o in [0, 10] of 0.02 (50 + (50 - o) cos phi)(1 - o/50) do
+    //       = 0.02 (450 + 406.667 cos phi) = 9 + 8.1333 cos phi,
+    //     and ds = 50 dphi: 50 (9 pi/2 + 8.1333) = 1113.525.
+    // 2313.525 in all. The panel sum is the trapezoid rule on that integrand
+    // (the area is a function of station, so the end-area rule is an
+    // approximation): its error per panel of length h is h^3 F''/12, with
+    // |F''| = 8.1333/50^2 |cos phi| <= 0.003253 and the arc 78.540 long, so
+    // at most 78.540 x 0.003253 / 12 h^2 = 0.02129 h^2 over the whole arc;
+    // the tangents, where the area is linear or constant in station, are exact.
+    // Uncorrected, the integrand is the plain area 10 + 9 cos phi: 50 (5 pi + 9)
+    // = 1235.398 on the arc, 2435.398 in all, 5.3 % over, with the same bound
+    // (9/2500 for F'') 0.02356 h^2 about its own - and it never gets closer
+    // to the exact figure, which is what the correction is for.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = planeSurface(Plane{0.02, 0.0, 0.0}, 200.0, 40, 35, -50.0, -50.0);
+    const SolvedAlignment alignment = quarterCircleLeft();
+    const double exact = 250.0 + 950.0 + 50.0 * (4.5 * katana::math::kPi + 8.0 + 2.0 / 15.0);
+    EXPECT_NEAR(exact, 2313.525014, 1e-5); // the arithmetic above, 406.667 x 0.02 = 8 + 2/15
+    double previous = 1e9;
+    for (const double interval : {2.0, 1.0, 0.25}) {
+        const auto on = volumesAlongAlignment(base, top, alignment, stripReach(10.0, 0.0, interval));
+        ASSERT_TRUE(on.ok()) << on.error().describe();
+        const double error = std::abs(on->endAreaFill - exact);
+        EXPECT_LE(error, 0.0215 * interval * interval + 1e-8) << interval;
+        EXPECT_LT(error, previous) << interval; // shrinking, as the rule says
+        previous = error;
+        const auto off =
+            volumesAlongAlignment(base, top, alignment, stripReach(10.0, 0.0, interval, false));
+        ASSERT_TRUE(off.ok()) << off.error().describe();
+        EXPECT_LE(std::abs(off->endAreaFill - (1200.0 + 50.0 * (5.0 * katana::math::kPi + 9.0))),
+                  0.0236 * interval * interval + 1e-8)
+            << interval;
+        EXPECT_GT(off->endAreaFill - exact, 100.0) << interval;
+    }
+    // Simpson's rule is exact to the fourth derivative: 5 m panels are within
+    // 5^4 x 78.540 x (8.1333 / 50^4) / 2880 = 2.2e-5.
+    AlignmentVolumeOptions options = stripReach(10.0, 0.0, 5.0);
+    options.prismoidal = true;
+    const auto prismoidal = volumesAlongAlignment(base, top, alignment, options);
+    ASSERT_TRUE(prismoidal.ok()) << prismoidal.error().describe();
+    EXPECT_NEAR(prismoidal->prismoidalFill, exact, 1e-4);
+}
+
+// ---- stretches that run side by side ---------------------------------------------------------
+
+namespace {
+
+// East 100 m, north 15 m, west 100 m: a U-turn of two corners, whose legs are
+// 15 m apart. With a reach under 7.5 each way the strips of the two legs clear
+// one another.
+SolvedAlignment uTurn()
+{
+    return through({{Point2(0, 0), 0.0}, {Point2(100, 0), 0.0}, {Point2(100, 15), 0.0},
+                    {Point2(0, 15), 0.0}});
+}
+
+} // namespace
+
+TEST(VolumesAlongAlignment, TwoLegsOfAUTurnCloserThanTwiceTheReachAreRefusedNamingTheStretches)
+{
+    // The legs along y = 0 and y = 15, 15 apart; sections every 20 m with a
+    // reach of 10 each side, so the strips y in [-10, 10] and [5, 25] share
+    // y in [5, 10] over the 100 m they run alongside, 500 m2 swept twice. No
+    // section crosses another (the legs' are all parallel, and the corners'
+    // reach is under the interval), so this is the case the crossing test cannot
+    // see; the volume was the sum, with the shared 5 m counted for each leg.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    AlignmentVolumeOptions options;
+    options.interval = 20.0;
+    options.left = 10.0;
+    options.right = 10.0;
+    const auto refused = volumesAlongAlignment(base, top, uTurn(), options);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    const std::string& message = refused.error().message;
+    EXPECT_NE(message.find("side by side"), std::string::npos) << message;
+    // The first leg's stretch begins at the alignment's start and the second leg's
+    // runs to its end, 100 + 15 + 100 = 215.
+    EXPECT_NE(message.find("from station 0.000"), std::string::npos) << message;
+    EXPECT_NE(message.find("to 215.000"), std::string::npos) << message;
+    EXPECT_NE(message.find("left= and right="), std::string::npos) << message;
+    EXPECT_EQ(message.find("cross each other"), std::string::npos) << message;
+    EXPECT_EQ(refused.error().context, "left=,right=");
+    // The same pair named whatever the thread count.
+    katana::core::TaskPool serial(0);
+    katana::core::TaskPool many(4);
+    const auto onOne = volumesAlongAlignment(base, top, uTurn(), options, &serial);
+    const auto onMany = volumesAlongAlignment(base, top, uTurn(), options, &many);
+    ASSERT_FALSE(onOne.ok());
+    ASSERT_FALSE(onMany.ok());
+    EXPECT_EQ(onOne.error().message, message);
+    EXPECT_EQ(onMany.error().message, message);
+}
+
+TEST(VolumesAlongAlignment, StripsThatOnlyTouchOrClearOneAnotherAreMeasured)
+{
+    // Half the distance between the legs is 7.5. At 7 each way the strips are 1 m
+    // apart; at exactly 7.5 they touch along y = 7.5 and share no area; a hair
+    // over - 1e-6 each way, 2e-6 of overlap, above the 1e-7 of kGeometric - they
+    // overlap, and 1e-8 each way (2e-8) is under it and is touching.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    const auto with = [&](double reachEachWay) {
+        AlignmentVolumeOptions options;
+        options.interval = 20.0;
+        options.left = reachEachWay;
+        options.right = reachEachWay;
+        return volumesAlongAlignment(base, top, uTurn(), options);
+    };
+    EXPECT_TRUE(with(7.0).ok());
+    EXPECT_TRUE(with(7.5).ok());
+    EXPECT_TRUE(with(7.5 + 1e-8).ok());
+    const auto overlapping = with(7.5 + 1e-6);
+    ASSERT_FALSE(overlapping.ok());
+    EXPECT_NE(overlapping.error().message.find("side by side"), std::string::npos);
+    EXPECT_FALSE(with(8.0).ok());
+}
+
+TEST(VolumesAlongAlignment, LegsWhoseStripsAreAsymmetricAreRefusedOnlyWhenTheStripsMeet)
+{
+    // The first leg runs east along y = 0 and the last west along y = 15. The left
+    // of the first is north, toward the other leg, and the left of the last is
+    // south, toward the first: left=12 reaches y = 12 on the first and y = 3 on the
+    // last, which overlap in y = [3, 12]. The right of each is away from the other
+    // (south of the first, north of the last): right=12 gives strips y = [-12, 0]
+    // and [15, 27], apart.
+    const TinSurface base = slab(-50.0, -50.0, 200.0, 0.0);
+    const TinSurface top = slab(-50.0, -50.0, 200.0, 1.0);
+    AlignmentVolumeOptions towards;
+    towards.interval = 20.0;
+    towards.left = 12.0;
+    towards.right = 0.0;
+    EXPECT_FALSE(volumesAlongAlignment(base, top, uTurn(), towards).ok());
+    AlignmentVolumeOptions away;
+    away.interval = 20.0;
+    away.left = 0.0;
+    away.right = 12.0;
+    EXPECT_TRUE(volumesAlongAlignment(base, top, uTurn(), away).ok());
+}

@@ -18,6 +18,8 @@
 #include "katana/geometry/curves2d.hpp"
 #include "katana/math/numerics.hpp"
 
+#include "circle_spline.hpp"
+
 using namespace katana::cad;
 using katana::core::ErrorCode;
 using katana::entity::Entity;
@@ -470,8 +472,17 @@ struct DrawingShapesInADrawing : ::testing::Test {
         return created.empty() ? 0 : created.front();
     }
 
+    // An entity as given, its metadata and properties with it.
+    EntityId addEntity(Entity entity)
+    {
+        EXPECT_TRUE(document.execute(cmd::createEntities({std::move(entity)})).ok());
+        const auto created = document.lastCreatedEntities();
+        return created.empty() ? 0 : created.front();
+    }
+
     katana::core::Result<DrawingShapes> resolved(const std::string& line, ShapeKind kind,
-                                                 const ScopeViewProvider& views = {})
+                                                 const ScopeViewProvider& views = {},
+                                                 const ShapeOptions& options = {})
     {
         const auto words = wordsOf(line);
         std::size_t at = 0;
@@ -480,7 +491,7 @@ struct DrawingShapesInADrawing : ::testing::Test {
             return read.error();
         }
         EXPECT_EQ(at, words.size()) << line;
-        return resolveShapes(document, *read, kind, views);
+        return resolveShapes(document, *read, kind, views, options);
     }
 
     static std::string ids(std::initializer_list<EntityId> list)
@@ -649,4 +660,223 @@ TEST_F(DrawingShapesInADrawing, TheEntitiesNamedAreWhatAVerbReadingPointsTakes)
     EXPECT_EQ(named->missing, std::optional<EntityId>(999));
     EXPECT_EQ(named->ids, (std::vector<EntityId>{mark}));
     EXPECT_FALSE(named->scope.has_value());
+}
+
+// ---- a spline that returns to its start --------------------------------------------------------
+
+TEST(DrawingShapes, AClosedSplineIsAPolygonChordedWithinTheToleranceAtTheEntitysElevation)
+{
+    // A circle of radius 10 about (3, 4) as a rational spline, exactly: every
+    // corner of the walk is on it, and the polygon is its chords, whose area is
+    // pi 100 less at most the perimeter (2 pi 10) times the 1 mm a chord may stand
+    // off it - 0.063; 0.1 allows a chord's farthest point to be off its middle.
+    const Point2 centre(3, 4);
+    Entity circle = entityOf(katana::cad::testing::circleSpline(centre, 10.0));
+    circle.properties.insert_or_assign(std::string(katana::entity::kElevationProperty), 5.0);
+    const ShapeOf ring = shapeOf(circle, ShapeKind::Polygon);
+    ASSERT_TRUE(ring.shape.has_value());
+    const auto& corners = ring.shape->outline.vertices;
+    EXPECT_GE(corners.size(), 8u);
+    EXPECT_TRUE(ring.shape->chorded);
+    EXPECT_TRUE(ring.shape->outline.closed);
+    EXPECT_GT(corners.front().distanceTo(corners.back()), 1e-3); // the repeat is taken off
+    for (const Point2& corner : corners) {
+        EXPECT_NEAR(corner.distanceTo(centre), 10.0, 1e-9);
+    }
+    EXPECT_LE(std::abs(area(ring.shape->outline)), 100.0 * kPi);
+    EXPECT_GE(std::abs(area(ring.shape->outline)), 100.0 * kPi - 0.1);
+    // A spline holds no height; the entity's elevation is the one every corner has.
+    EXPECT_EQ(ring.shape->heights, Heights(corners.size(), 5.0));
+    EXPECT_EQ(ring.shape->entity, std::optional<EntityId>(7));
+    // As a line it is none: a line is a polyline, as before.
+    EXPECT_EQ(shapeOf(circle, ShapeKind::Line).why, NotAShape::NoOutline);
+    // No elevation, no height: absent is not zero.
+    const ShapeOf flat = shapeOf(entityOf(katana::cad::testing::circleSpline(centre, 10.0)),
+                                 ShapeKind::Polygon);
+    ASSERT_TRUE(flat.shape.has_value());
+    EXPECT_EQ(flat.shape->heights, Heights(flat.shape->outline.vertices.size()));
+}
+
+TEST(DrawingShapes, ASplineIsClosedWhenItsEndIsWithinTheGeometricToleranceOfItsStartAndNotOtherwise)
+{
+    // Through (0,0) (10,0) (10,10) (0,10) and back to x = endX, 0: the end 5e-8
+    // from the start is within kGeometric (1e-7) and the spline is closed; 5e-7
+    // away it is not, and is no outline, as every open spline always was. An
+    // open one made of control points is none either.
+    const auto through = [](double endX) {
+        auto spline = geometry::Spline2::throughPoints(
+            {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10), Point2(endX, 0)}, 3);
+        EXPECT_TRUE(spline.ok());
+        return spline.ok() ? std::move(*spline) : geometry::Spline2{};
+    };
+    const ShapeOf nearly = shapeOf(entityOf(through(5e-8)), ShapeKind::Polygon);
+    ASSERT_TRUE(nearly.shape.has_value());
+    EXPECT_TRUE(nearly.shape->outline.closed);
+    EXPECT_GE(nearly.shape->outline.vertices.size(), 8u);
+    EXPECT_TRUE(nearly.shape->chorded);
+    const ShapeOf apart = shapeOf(entityOf(through(5e-7)), ShapeKind::Polygon);
+    EXPECT_FALSE(apart.shape.has_value());
+    EXPECT_EQ(apart.why, NotAShape::NoOutline);
+    // Exactly back at its start: closed as well.
+    EXPECT_TRUE(shapeOf(entityOf(through(0.0)), ShapeKind::Polygon).shape.has_value());
+    // The whole outline of a closed spline is the same outline whichever way it
+    // is read: the first corner is the spline's own start.
+    EXPECT_NEAR(nearly.shape->outline.vertices.front().x, 0.0, 1e-9);
+    EXPECT_NEAR(nearly.shape->outline.vertices.front().y, 0.0, 1e-9);
+}
+
+// ---- tagged holes ----------------------------------------------------------------------------
+
+namespace {
+
+Polyline2 box(double x, double y, double side)
+{
+    return polyline({Point2(x, y), Point2(x + side, y), Point2(x + side, y + side),
+                     Point2(x, y + side)},
+                    true);
+}
+
+// A ring as IMPORT leaves it: the tag in the entity's metadata, and the feature
+// it came from when it has one.
+Entity tagged(Polyline2 ring, const char* tag, std::optional<std::string> part = std::nullopt)
+{
+    Entity entity = entityOf(std::move(ring));
+    entity.metadata["source.ring"] = std::string(tag);
+    if (part) {
+        entity.metadata["source.part"] = *part;
+    }
+    return entity;
+}
+
+ShapeOptions joining()
+{
+    ShapeOptions options;
+    options.joinTaggedHoles = true;
+    return options;
+}
+
+} // namespace
+
+TEST_F(DrawingShapesInADrawing, ATaggedRingJoinsThePolygonItLiesInWhenAskedAndIsAPolygonOfItsOwnWhenNot)
+{
+    // A lot of 100 x 100 with a hole of 20 x 20 in it, the hole drawn second.
+    const EntityId lot = addEntity(tagged(box(0, 0, 100), "exterior"));
+    const EntityId hole = addEntity(tagged(box(40, 40, 20), "hole"));
+
+    // Not asked: two rings, as the surface edits read them.
+    const auto plain = resolved(ids({lot, hole}), ShapeKind::Polygon);
+    ASSERT_TRUE(plain.ok());
+    ASSERT_EQ(plain->shapes.size(), 2u);
+    EXPECT_TRUE(plain->shapes[0].holes.empty());
+    EXPECT_EQ(plain->holesJoined, 0u);
+    EXPECT_EQ(plain->holesAlone, 0u);
+
+    // Asked: the lot, with the hole in it.
+    const auto joined = resolved(ids({lot, hole}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(joined.ok());
+    ASSERT_EQ(joined->shapes.size(), 1u);
+    EXPECT_EQ(joined->shapes[0].entity, std::optional<EntityId>(lot));
+    ASSERT_EQ(joined->shapes[0].holes.size(), 1u);
+    EXPECT_EQ(joined->shapes[0].holes[0].vertices, box(40, 40, 20).vertices);
+    EXPECT_TRUE(joined->shapes[0].holes[0].closed);
+    EXPECT_EQ(joined->shapes[0].holeEntities, (std::vector<EntityId>{hole}));
+    EXPECT_EQ(joined->holesJoined, 1u);
+    EXPECT_EQ(joined->holesAlone, 0u);
+
+    // The hole named first is joined all the same: the exteriors are all read
+    // before any hole is given to one.
+    const auto first = resolved(ids({hole, lot}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(first.ok());
+    ASSERT_EQ(first->shapes.size(), 1u);
+    EXPECT_EQ(first->shapes[0].entity, std::optional<EntityId>(lot));
+    EXPECT_EQ(first->shapes[0].holeEntities, (std::vector<EntityId>{hole}));
+
+    // By a scope, with another polygon in it that has no hole.
+    const EntityId pond = addEntity(entityOf(geometry::Circle2{Point2(300, 300), 4.0}));
+    const auto scoped = resolved("FROM DRAWING", ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(scoped.ok());
+    ASSERT_EQ(scoped->shapes.size(), 2u);
+    EXPECT_EQ(scoped->shapes[0].entity, std::optional<EntityId>(lot));
+    EXPECT_EQ(scoped->shapes[0].holes.size(), 1u);
+    EXPECT_EQ(scoped->shapes[1].entity, std::optional<EntityId>(pond));
+    EXPECT_TRUE(scoped->shapes[1].holes.empty());
+    EXPECT_EQ(scoped->scope->matched.size(), 3u);
+}
+
+TEST_F(DrawingShapesInADrawing, ARingNotTaggedAsAHoleIsNotOneHoweverItLies)
+{
+    // A building inside a lot is not a hole in the lot, and a ring tagged as an
+    // exterior is not a hole either.
+    const EntityId lot = addEntity(entityOf(box(0, 0, 100)));
+    const EntityId building = addEntity(entityOf(box(40, 40, 20)));
+    const EntityId other = addEntity(tagged(box(10, 10, 5), "exterior"));
+    const auto read = resolved(ids({lot, building, other}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(read.ok());
+    ASSERT_EQ(read->shapes.size(), 3u);
+    for (const DrawingShape& shape : read->shapes) {
+        EXPECT_TRUE(shape.holes.empty());
+    }
+    EXPECT_EQ(read->holesJoined, 0u);
+    EXPECT_EQ(read->holesAlone, 0u);
+}
+
+TEST_F(DrawingShapesInADrawing, ATaggedRingThatNoPolygonReadHoldsStaysAPolygonOfItsOwnAndIsCounted)
+{
+    const EntityId lot = addEntity(tagged(box(0, 0, 100), "exterior"));
+    const EntityId away = addEntity(tagged(box(200, 0, 20), "hole"));       // in no ring
+    const EntityId straddling = addEntity(tagged(box(90, 40, 20), "hole")); // half out of the lot
+    const auto read = resolved(ids({lot, away, straddling}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(read.ok());
+    ASSERT_EQ(read->shapes.size(), 3u);
+    EXPECT_TRUE(read->shapes[0].holes.empty());
+    EXPECT_EQ(read->holesJoined, 0u);
+    EXPECT_EQ(read->holesAlone, 2u);
+
+    // Named alone, a hole is the polygon asked for.
+    const auto alone = resolved(ids({away}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(alone.ok());
+    ASSERT_EQ(alone->shapes.size(), 1u);
+    EXPECT_EQ(alone->shapes[0].entity, std::optional<EntityId>(away));
+    EXPECT_EQ(alone->holesAlone, 1u);
+    EXPECT_FALSE(alone->refused.has_value());
+}
+
+TEST_F(DrawingShapesInADrawing, AHoleJoinsTheExteriorOfItsOwnFeatureThenTheSmallestThatHoldsIt)
+{
+    // The big lot (100 x 100) of feature "a" holds the small (60 x 60) of feature
+    // "b", and a hole of 10 x 10 lies in both. Of feature "a" it joins the big,
+    // of "b" the small, and of neither the smallest.
+    const EntityId big = addEntity(tagged(box(0, 0, 100), "exterior", std::string("a")));
+    const EntityId small = addEntity(tagged(box(20, 20, 60), "exterior", std::string("b")));
+    const EntityId ofA = addEntity(tagged(box(40, 40, 10), "hole", std::string("a")));
+    const auto a = resolved(ids({big, small, ofA}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(a.ok());
+    ASSERT_EQ(a->shapes.size(), 2u);
+    EXPECT_EQ(a->shapes[0].entity, std::optional<EntityId>(big));
+    EXPECT_EQ(a->shapes[0].holeEntities, (std::vector<EntityId>{ofA}));
+    EXPECT_TRUE(a->shapes[1].holes.empty());
+
+    const EntityId ofNone = addEntity(tagged(box(60, 60, 10), "hole", std::string("z")));
+    const auto none = resolved(ids({big, small, ofNone}), ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(none.ok());
+    ASSERT_EQ(none->shapes.size(), 2u);
+    EXPECT_TRUE(none->shapes[0].holes.empty());
+    EXPECT_EQ(none->shapes[1].holeEntities, (std::vector<EntityId>{ofNone}));
+}
+
+TEST_F(DrawingShapesInADrawing, LinesAndTypedCornersHaveNoHolesToJoin)
+{
+    const EntityId lot = addEntity(tagged(box(0, 0, 100), "exterior"));
+    const EntityId hole = addEntity(tagged(box(40, 40, 20), "hole"));
+    // As lines they are the two rings' vertices, joined to nothing.
+    const auto lines = resolved(ids({lot, hole}), ShapeKind::Line, {}, joining());
+    ASSERT_TRUE(lines.ok());
+    EXPECT_EQ(lines->shapes.size(), 2u);
+    EXPECT_EQ(lines->holesJoined, 0u);
+    // Typed corners are a polygon of their own.
+    const auto typed = resolved("0,0 10,0 10,10", ShapeKind::Polygon, {}, joining());
+    ASSERT_TRUE(typed.ok());
+    ASSERT_EQ(typed->shapes.size(), 1u);
+    EXPECT_TRUE(typed->shapes[0].holes.empty());
+    EXPECT_EQ(typed->holesJoined + typed->holesAlone, 0u);
 }

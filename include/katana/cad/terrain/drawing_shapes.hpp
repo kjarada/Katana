@@ -28,11 +28,18 @@
 //     none where an end has none (CurvePolyline2::tessellateWithHeights);
 //   - a circle, and a full ellipse: chorded within kCurveChordTolerance,
 //     every corner at the entity's elevation property when it has one;
+//   - a closed spline: one whose end returns to its start within
+//     kGeometric (Spline2::isClosedShape; Spline2 has no closed flag of its
+//     own), flattened as the ellipse is, by Spline2::tessellate within
+//     kCurveChordTolerance, so no chord's middle is more than 1 mm off the
+//     curve; every corner at the entity's elevation property when it has
+//     one, as the circle's are - a spline holds no height of its own;
 //   - none for fewer than three corners left (TooFew); for a line, an arc,
 //     an elliptical arc or another open polyline, which bound nothing
-//     (Open); and for a point, text, a spline, a dimension ..., which are no
-//     outline at all (NoOutline). A spline is never closed (Spline2 has no
-//     such flag), so it is no outline rather than an open one.
+//     (Open); and for a point, text, an open spline, a dimension ..., which
+//     are no outline at all (NoOutline). A spline that does not return to
+//     its start is no outline rather than an open one: it is not a line that
+//     was meant to close.
 // As a line, its vertices in order, closed when the entity is (and then
 // without the first repeated at the end):
 //   - a line; a polyline; a curve polyline, chorded as above; with the
@@ -43,6 +50,19 @@
 // TYPED CORNERS are x,y or x,y,z, each a finite number, the third the
 // corner's height. Typed as a polygon they are closed, the last dropped
 // when it repeats the first, and need three corners; as a line, two.
+//
+// TAGGED HOLES. A polygon the drawing has is one closed ring, and a ring
+// inside another is an area of its own. Only a ring that says it is a hole
+// (entity/ring_tags.hpp: `source.ring` or `gis.ring` saying `hole`) is one, and
+// with ShapeOptions::joinTaggedHoles resolveShapes takes such rings out of
+// the polygons it reads and gives each to the polygon it lies in as
+// DrawingShape::holes - by the one rule of the feature-table conversion,
+// which uses the same function: the exterior whose part it shares, else the
+// smallest that holds all of it, else the one made nearest before it. A
+// tagged ring that no polygon read in the same call holds stays a polygon of
+// its own and is counted (DrawingShapes::holesAlone), as the conversion
+// counts it. Off by default: SURFACE EDIT's polygons are rings, and a hole
+// there is not asked for.
 //
 // FROM <scope> is the one scope grammar (scope_verbs.hpp), resolved by the
 // one matcher; FROM with no scope word after it is the selection, as the
@@ -73,7 +93,7 @@ namespace katana::cad {
 // The kinds a polygon is made from, and a line, as a refusal names them, so
 // the sentence and the rule above are changed together.
 inline constexpr std::string_view kPolygonKinds =
-    "a closed polyline, curve polyline, circle or ellipse";
+    "a closed polyline, curve polyline or spline, a circle or an ellipse";
 inline constexpr std::string_view kLineKinds = "a line, polyline or curve polyline";
 
 // ---- typed corners ---------------------------------------------------------------------------
@@ -100,8 +120,13 @@ struct DrawingShape {
     katana::geometry::Polyline2 outline{};
     // One per vertex of `outline`; empty optional where a vertex has none.
     std::vector<std::optional<double>> heights{};
-    // An arc, a circle or an ellipse was chorded to make it.
+    // An arc, a circle, an ellipse or a spline was chorded to make it.
     bool chorded = false;
+    // A polygon read with ShapeOptions::joinTaggedHoles: the rings tagged as
+    // holes that lie in it, each closed and never repeating its first corner,
+    // and the entities they are. Empty otherwise, and for a line.
+    std::vector<katana::geometry::Polyline2> holes{};
+    std::vector<katana::entity::EntityId> holeEntities{};
 };
 
 // Why an entity, or the typed corners, are no shape of the kind asked for.
@@ -199,6 +224,16 @@ struct DrawingShapes {
     // #ids and typed corners: the first that is no shape, where the reading
     // stopped. A #id must be one, so the verb refuses the line.
     std::optional<ShapeRefusal> refused{};
+    // ShapeOptions::joinTaggedHoles: the tagged rings taken into the polygons
+    // they lie in (no longer in `shapes`), and those that lie in none of the
+    // polygons read and are left in `shapes` as polygons of their own.
+    std::size_t holesJoined = 0;
+    std::size_t holesAlone = 0;
+};
+
+struct ShapeOptions {
+    // See "TAGGED HOLES" above. Polygons only; a line has no hole.
+    bool joinTaggedHoles = false;
 };
 
 // The shapes `words` name as `kind`: each #id in turn, the typed corners as
@@ -207,6 +242,6 @@ struct DrawingShapes {
 // refuse before this is asked. Fails only as entitiesNamed fails.
 [[nodiscard]] katana::core::Result<DrawingShapes>
 resolveShapes(const Document& document, const ShapeWords& words, ShapeKind kind,
-              const ScopeViewProvider& views);
+              const ScopeViewProvider& views, const ShapeOptions& options = {});
 
 } // namespace katana::cad

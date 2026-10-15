@@ -24,7 +24,7 @@
 // volumesLevel; volumesStockpileSurface, volumesStockpileBase,
 // volumesStockpileLevel; volumesSectionsBase, volumesSectionsTop,
 // volumesAlignment, volumesInterval, volumesFrom, volumesTo, volumesLeft,
-// volumesRight, volumesSectionMethod, volumesMassHaul; volumesGridBase,
+// volumesRight, volumesSectionMethod, volumesCurvature, volumesMassHaul; volumesGridBase,
 // volumesGridTop, volumesCell; volumesBoundaryGroup, volumesBoundaryNone,
 // volumesBoundaryScope, volumesBoundaryCorners, volumesCorners, volumesEach
 // and the scope's controls with the prefix volumes (volumesScope,
@@ -194,6 +194,7 @@ class VolumesDialog final : public QDialog {
     QLineEdit* left_ = nullptr;
     QLineEdit* right_ = nullptr;
     QComboBox* sectionMethod_ = nullptr;
+    QCheckBox* curvature_ = nullptr;
     MassHaulChart* chart_ = nullptr;
     // Grid
     QComboBox* gridBase_ = nullptr;
