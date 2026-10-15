@@ -68,6 +68,14 @@ add_executable(katana_qt_widget_tests
     # The theme's style, stylesheet and fonts, and the icons (test_theme).
     test_theme.cpp
     test_screen_fit.cpp
+    # The footer of the terrain and road dialogs on a screen too small for them
+    # (test_screen_fit_dialogs).
+    test_screen_fit_dialogs.cpp
+    # An open section follows the drawing's surfaces (test_section_recut).
+    test_section_recut.cpp
+    # A view's Layers popup hands its changes to the command runner as VIEWS lines
+    # (test_view_layers_popup).
+    test_view_layers_popup.cpp
     # Where File > Open and Save As start (test_project_folder).
     test_project_folder.cpp
     # The Properties panel's tree (test_property_panel).

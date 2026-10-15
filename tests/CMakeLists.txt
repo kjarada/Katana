@@ -3096,6 +3096,19 @@ if(TARGET katana)
             "-DFORBID=unknown command|no layer '|does not take"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_ghosts_off_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The popup's Show All, by the mouse: view 2 hides the design layer (a typed
+    # line, whose reply is the record with hidden=design), and the button runs
+    # VIEWS SHOW 2 ALL through the one executor - nothing here types it - whose
+    # reply is the record with nothing hidden; the listing after says the same.
+    add_test(NAME qt_the_layers_popups_show_all_button_runs_the_views_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>VIEWS OPEN plan|>VIEWS HIDE 2 design|%View2|!ViewLayersButton|%ViewLayersPopup|!ViewLayersShowAll|>VIEWS"
+            "-DEXPECT=ghosts=on hidden=design[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+view=1 kind=plan[^\r\n]*[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+views=2"
+            "-DFORBID=unknown command|no layer '|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_show_all_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # And by the View menu, for the active view: the same line through the
     # same executor (its reply, view 2's record with its ghosts off), the
     # item's check set from the view, and view 1 untouched.
@@ -3262,6 +3275,44 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every toolbar along the top shows all its actions at a laptop's width and
+    # at a desktop's (--check-toolbar-fit, MainWindow::toolBarFit): 1366 is a
+    # 1366 x 768 laptop's screen, which the window fills; 1632 the 85% of a
+    # 1920 x 1080 screen that a first run opens at (MainWindow::fitToScreen);
+    # 1920 that screen maximised. The widths a toolbar needs are its size hint's,
+    # measured alone with the headless driver's grab (docs/desktop.md,
+    # "Fitting the screen"): Survey 565, Terrain 379, GIS 312, Surface Edit 692
+    # and BIM 384 px of ink, a handle (about 12 px) before each.
+    #  - on one row the five need 565 + 379 + 312 + 692 + 384 = 2,332 px and
+    #    five handles, some 2,400 px: more than 1,366, so Surface Edit, BIM and
+    #    GIS showed a handle and an arrow, and none of their buttons;
+    #  - the second row of Survey, Terrain and GIS needs 1,256 px and three
+    #    handles, about 1,290: it fits 1,366, where there is 76 to spare;
+    #  - the third, Surface Edit and BIM, needs 1,076 px and two handles, about
+    #    1,100;
+    #  - the first (File, Edit, Properties, View, Format) is about 1,180 px.
+    # Three rows therefore fit at every width asked for; the run prints each
+    # row's sum from the size hints beside the width the window has. Then, at
+    # 1366, the layouts older builds saved are restored: with Surface Edit and
+    # BIM on the second row (the check first proves that layout overflows, so
+    # it can fail), with neither of them, with BIM hidden (a layout of this
+    # version: it stays hidden) and with Surface Edit hidden in an older one
+    # (carried over: it stays hidden). None of those loses a toolbar or leaves
+    # an action behind an arrow.
+    set(_toolbar_fit "[0-9]+ toolbars along the top in 3 rows, none with an action behind its extension button")
+    add_test(NAME qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCHECK_TOOLBAR_FIT=1366x768,1632x918,1920x1080"
+            "-DEXPECT=toolbar fit 1366x768: ${_toolbar_fit}.*toolbar fit 1632x918: ${_toolbar_fit}.*toolbar fit 1920x1080: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout with Surface Edit and BIM on the second row: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout saved before Surface Edit and BIM existed: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout of this version with BIM hidden: [0-9]+ toolbars along the top in 3 rows, none.*toolbar fit 1366x768 after restoring an older layout with Surface Edit hidden: [0-9]+ toolbars along the top in 3 rows, none"
+            "-DFORBID=toolbar fit clash"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_fit_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Edit Surface > Raise, Lower or Set Level through the window
     # (docs/surface_editing.md): the dialog opened by its action, its line run
     # through the window's one executor. samples/gis/terrain.asc as a surface
@@ -3279,6 +3330,26 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # An open section view follows the drawing's surfaces (docs/terrain.md, "Hidden is a
+    # matter of the picture"): in the real window, a section cut along the line and
+    # then a surface raised, one hidden, one shown, and every one hidden and shown again
+    # - each a change to the surfaces, so each cuts the section again from the recipe
+    # the view kept, except the one that leaves nothing to cut, which says it was not.
+    # Each recut is said in the log after the command's own reply (the window cuts it
+    # from the event loop, once for what a command changed).
+    add_test(NAME qt_an_open_section_is_cut_again_when_the_surfaces_change_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>SURFACE COPY ground design|>LINE 0,60 170,60|>SELECT ALL|*terrainSectionAlongSelection|>SURFACE EDIT design RAISE 3|>SURFACE HIDE design|>SURFACE HIDE ground|>SURFACE SHOW design"
+            "-DEXPECT=Section cut along the selection: length 170[.]000.*surface name=design operation=raise.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ is of surfaces that have changed and was not cut again: Every surface is hidden.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.]"
+            "-DFORBID=unknown command|does not take|InvalidArgument|Internal"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/section_recut_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_an_open_section_is_cut_again_when_the_surfaces_change_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 240)
     # The three edits that take the drawing's data by a scope, through the window
     # (docs/surface_editing.md, "In the window"): Add Points from the Drawing
     # takes the two vertices of a PLINE3D (20.3,20.3,50 and 25.3,25.3,50), Delete
@@ -3435,6 +3506,7 @@ if(TARGET katana)
                          qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
                          qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
                          qt_the_layers_popups_box_turns_a_views_ghosts_off_headless
+                         qt_the_layers_popups_show_all_button_runs_the_views_line_headless
                          qt_the_view_menu_turns_the_active_views_ghosts_off_headless
                          qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless
                          qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless

@@ -30,8 +30,9 @@ namespace {
 
 constexpr const char* kViewsUsage =
     "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id | LINK id[,id...] [TO id] | "
-    "UNLINK id[,id...]|ALL | HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | "
-    "ISOLATE id layer | SET id ghosts=on|off";
+    "UNLINK id[,id...]|ALL | HIDE id layer[,layer...]|LAYER name...|REFERENCE ref[,ref...] | "
+    "SHOW id layer[,layer...]|LAYER name...|REFERENCE ref[,ref...]|ALL | "
+    "ISOLATE id layer|LAYER name | SET id ghosts=on|off";
 constexpr const char* kZoomUsage =
     "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s] | "
     "SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] "
@@ -123,23 +124,37 @@ Result<std::vector<ViewId>> parseIds(const std::vector<std::string>& args, std::
 // each a layer of the drawing or a node of the layer tree above one - what
 // the Layers popup lists. A name with a blank in it is quoted, as the
 // interpreter's words are.
+//
+// LAYER, first, and at least one word after it, turns the commas off: every
+// word after it is ONE layer's whole name. A comma is a legal character in a
+// layer's name, and a comma list cannot say such a name; this can, and the
+// Layers popup writes it for a name that is not plain. A line whose only word
+// is LAYER still names the layer called LAYER.
 Result<std::vector<std::string>> parseLayers(const Document& document,
                                              const std::vector<std::string>& args,
                                              std::size_t from)
 {
     std::vector<std::string> layers;
-    for (std::size_t at = from; at < args.size(); ++at) {
-        std::string_view word = args[at];
-        std::size_t start = 0;
-        while (start <= word.size()) {
-            const std::size_t comma = std::min(word.find(',', start), word.size());
-            if (comma > start) {
-                std::string layer(word.substr(start, comma - start));
-                if (!std::ranges::contains(layers, layer)) {
-                    layers.push_back(std::move(layer));
-                }
+    if (from + 1 < args.size() && uppered(args[from]) == "LAYER") {
+        for (std::size_t at = from + 1; at < args.size(); ++at) {
+            if (!args[at].empty() && !std::ranges::contains(layers, args[at])) {
+                layers.push_back(args[at]);
             }
-            start = comma + 1;
+        }
+    } else {
+        for (std::size_t at = from; at < args.size(); ++at) {
+            std::string_view word = args[at];
+            std::size_t start = 0;
+            while (start <= word.size()) {
+                const std::size_t comma = std::min(word.find(',', start), word.size());
+                if (comma > start) {
+                    std::string layer(word.substr(start, comma - start));
+                    if (!std::ranges::contains(layers, layer)) {
+                        layers.push_back(std::move(layer));
+                    }
+                }
+                start = comma + 1;
+            }
         }
     }
     const std::vector<std::string> names = document.model().layers.names();
@@ -156,17 +171,68 @@ Result<std::vector<std::string>> parseLayers(const Document& document,
     return layers;
 }
 
-// The layers a view hides of its own, for its record: none, or hidden=a,b.
+// The reference layers (REFERENCE ids, as the Reference Data panel and RASTER
+// and CLOUD words know them) of HIDE and SHOW: comma lists in one word or
+// several, each id once, each one the window has. cad cannot see Reference
+// Data, so the host says whether an id is one.
+Result<std::vector<std::uint64_t>> parseReferences(ViewVerbHost& host,
+                                                   const std::vector<std::string>& args,
+                                                   std::size_t from)
+{
+    std::vector<std::uint64_t> ids;
+    for (std::size_t at = from; at < args.size(); ++at) {
+        std::string_view word = args[at];
+        std::size_t start = 0;
+        while (start <= word.size()) {
+            const std::size_t comma = std::min(word.find(',', start), word.size());
+            if (comma > start) {
+                const std::string_view text = word.substr(start, comma - start);
+                const bool digits = std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; });
+                const auto value = digits ? katana::core::parseInteger(text) : std::nullopt;
+                if (!value || *value < 1) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "a reference layer is named by its id, a whole number from 1 "
+                                     "(the Reference Data panel lists them), not '" +
+                                         std::string(text) + "'",
+                                     std::string(text));
+                }
+                const auto id = static_cast<std::uint64_t>(*value);
+                if (!host.hasReference(id)) {
+                    return makeError(ErrorCode::NotFound,
+                                     "no reference layer " + std::to_string(id) +
+                                         " in the drawing (the Reference Data panel lists them)",
+                                     std::string(text));
+                }
+                if (!std::ranges::contains(ids, id)) {
+                    ids.push_back(id);
+                }
+            }
+            start = comma + 1;
+        }
+    }
+    return ids;
+}
+
+// The layers a view hides of its own, for its record: none, or hidden=a,b; and
+// the reference layers it hides, hiddenrefs=7,9, left out when it hides none.
 std::string hiddenOf(const ViewState& view)
 {
-    if (view.layers.empty()) {
-        return {};
-    }
     std::string text;
-    for (const std::string& layer : view.layers.hidden()) {
-        text += (text.empty() ? "" : ",") + layer;
+    if (!view.layers.empty()) {
+        std::string layers;
+        for (const std::string& layer : view.layers.hidden()) {
+            layers += (layers.empty() ? "" : ",") + layer;
+        }
+        text = " hidden=" + recordValue(layers);
     }
-    return " hidden=" + recordValue(text);
+    if (!view.hiddenReferences.empty()) {
+        std::string references;
+        for (const std::uint64_t id : view.hiddenReferences) {
+            references += (references.empty() ? "" : ",") + std::to_string(id);
+        }
+        text += " hiddenrefs=" + references;
+    }
+    return text;
 }
 
 // Where a view is looking, after its id, kind and (for VIEWS) title and
@@ -347,7 +413,33 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
             return notOpen(*id);
         }
         if (action == "SHOW" && args.size() == 3 && uppered(args[2]) == "ALL") {
+            // Everything the document shows: its layers and its reference layers.
             view->layers.clear();
+            view->hiddenReferences.clear();
+        } else if (args.size() > 3 && uppered(args[2]) == "REFERENCE") {
+            if (action == "ISOLATE") {
+                return makeError(ErrorCode::ParseFailure,
+                                 "VIEWS ISOLATE takes one layer, not a reference layer: VIEWS "
+                                 "ISOLATE <id> <layer>",
+                                 args[2]);
+            }
+            auto references = parseReferences(host, args, 3);
+            if (!references) {
+                return references.error();
+            }
+            if (references->empty()) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "VIEWS " + action + " REFERENCE names no reference layer in '" +
+                                     args[3] + "': VIEWS " + action + " <id> REFERENCE <ref>[,<ref>...]",
+                                 args[3]);
+            }
+            for (const std::uint64_t reference : *references) {
+                if (action == "HIDE") {
+                    view->hiddenReferences.insert(reference);
+                } else {
+                    view->hiddenReferences.erase(reference);
+                }
+            }
         } else {
             auto layers = parseLayers(document, args, 2);
             if (!layers) {

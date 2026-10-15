@@ -26,6 +26,14 @@
 //   VIEWS SHOW <id> <layer>[,<layer>...] | ALL
 //   VIEWS ISOLATE <id> <layer>            that layer, its parents and what lies
 //                                         beneath it, and nothing else
+//   VIEWS HIDE|SHOW|ISOLATE <id> LAYER <name>...
+//                                         each word after LAYER is ONE layer's
+//                                         name, commas and all
+//   VIEWS HIDE|SHOW <id> REFERENCE <ref>[,<ref>...]
+//                                         the reference layers (an imported
+//                                         raster or point cloud, by the id the
+//                                         Reference Data panel gives it) that
+//                                         view hides of its own
 //   VIEWS SET <id> ghosts=on|off          whether that view shows the selection
 //                                         faintly where it hides the layer
 //   ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
@@ -77,8 +85,13 @@
 // layer is a layer of the drawing or a node of the layer tree above one
 // ("design" when only "design/road" is a layer); one the drawing lacks is
 // refused, naming it, and nothing changes. SHOW of a layer beneath one the
-// view hides is refused, naming what holds it: it would stay hidden. The
-// reply is the view's record.
+// view hides is refused, naming what holds it: it would stay hidden. A comma
+// separates two layers, so a layer whose name holds one is named with LAYER,
+// which takes every word after it whole. SHOW ALL shows the reference layers
+// as well as the layers. A reference layer the window does not have (the Reference
+// Data panel lists them; cad cannot see them, the host answers) is refused, naming it.
+// The reply is the view's record, whose hiddenrefs= lists the reference layers
+// a view hides.
 //
 // Records, one per line, key=value, reals as core::formatExactReal writes
 // them and angles in degrees; ghosts= is the view's switch (VIEWS SET), and
@@ -207,6 +220,16 @@ class ViewVerbHost {
     // no document change, so nothing else hears of it. Redraw that view and
     // bring its Layers button up to date.
     virtual void settingsChanged(ViewId id) = 0;
+    // Whether `id` is a reference layer the window has - an imported raster or
+    // point cloud, by the id of the Reference Data panel - so that VIEWS HIDE
+    // and SHOW can refuse one it has not. cad holds the ids a view hides
+    // (ViewState::hiddenReferences) and cannot read the data; a host with none
+    // answers no, the default.
+    [[nodiscard]] virtual bool hasReference(std::uint64_t id)
+    {
+        (void)id;
+        return false;
+    }
 };
 
 // Asked at each VIEWS or ZOOM line, so a front end can hand over a host that

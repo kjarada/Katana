@@ -136,7 +136,8 @@ size, the toolbar icon size and whether the toolbars show their names; they
 are written when the window closes and read before it is shown. With nothing
 saved - the first run - or a layout from another version (`kLayoutVersion`,
 raised when a change to the toolbars or panels would make an old layout put
-them wrong), the window fits the screen it is on (`MainWindow::fitToScreen`):
+them wrong; the one before the third toolbar row is carried over, "Fitting the
+screen"), the window fits the screen it is on (`MainWindow::fitToScreen`):
 85% of the free area, centred, or maximised on a screen smaller than
 1440 x 900, where the drawing needs every pixel. View > Reset Window Layout
 puts the panels and toolbars back as a new window has them and leaves the
@@ -243,8 +244,8 @@ File had seventeen top-level items and has fifteen.
   dialog is a native modal one, which a headless run refuses
   (`refuseFileDialog`), so the folder it opens in has no seam to be read
   from.
-- **No toolbar changed**, so `kLayoutVersion` stays 1 and a saved layout
-  still fits: File's toolbar keeps New, Open, Save, Import Any File, Export
+- **No toolbar changed**, so `kLayoutVersion` was not raised and a saved layout
+  still fitted: File's toolbar keeps New, Open, Save, Import Any File, Export
   Drawing, Plot and Sheets.
 - **Settings is above Quit.** The action is the Format workbench's, which
   owns the dialog ("Settings", below), and is put in when the menus are
@@ -491,6 +492,22 @@ screen is one more that a smaller screen proves wrong.
     it lays out with it, so each control keeps its object name and stays a
     descendant of the dialog: whatever finds one by name finds it still. A
     scroll bar's width is left in the width when the height is cut;
+  * the dialog's own buttons are not scrolled with the rest. Its **footer**, a
+    widget called `screenFitFooter`, is kept below the scroll area, so Close,
+    Run and Add are on the dialog as it stands and do not move as the body
+    scrolls. The footer is the LAST row of buttons in a dialog laid out in a
+    vertical box, and every item laid out after it, because what the buttons
+    answered - a reply, a status line - is read under them and scrolling it
+    out of sight would look like the button had done nothing. A row of buttons
+    is a `QDialogButtonBox`, or a horizontal box layout that holds buttons,
+    spacing and read-only fields (the line the dialog will run, shown beside
+    Preview and Add) and nothing else. So a lone `QPushButton` laid into the
+    layout, a row with an editable field or a label in it (a path and its Browse
+    button), a row inside another layout, and a dialog laid out in a grid, a
+    form or a row have no footer and scroll as a whole, as before; of two rows
+    of buttons only the later one is the footer; and a footer that needs more
+    than half the room (a button row followed by a long list) is not lifted,
+    because it would leave too little to scroll;
   * a dialog that was moved by hand off the screen is brought back onto it;
     one that was not is centred by `QDialog` itself, inside the screen, with the
     size it now has;
@@ -506,7 +523,17 @@ screen is one more that a smaller screen proves wrong.
   has one scroll area; a dialog placed off the screen is brought back; a
   `QMessageBox` is not taken apart; and
   `VolumesDialog.IsNoTallerThanTheScreenAndStillReachesItsCloseButton` is the
-  real tallest dialog. The offscreen platform's screen is the machine's (2560
+  real tallest dialog, whose Close button is in the footer and does not move
+  as the body scrolls. The rule for a footer is held at its edges in the same
+  file: a button box, a row and the reply under it, a read-only line beside the
+  buttons, two rows of buttons (only the later is the footer), no row of
+  buttons, a row followed by a long list, a row with an editable field, a
+  grid, a dialog that fits (untouched), and one shown again (one footer).
+  `ScreenFitDialogs.*` (`tests/qt_widgets/test_screen_fit_dialogs.cpp`) gives
+  each real dialog a minimum height over the screen's, so that it scrolls
+  whatever its own layout needs, and holds its buttons and reply in the
+  footer, on the dialog and still as the body scrolls: Surface Edit's Heights
+  and Delete Points, Combine Surfaces, Volumes and Road Objects. The offscreen platform's screen is the machine's (2560
   x 1440 here under the headless driver, 800 x 800 under the widget tests), so
   a headless run of a dialog shows it as it was written unless the screen is
   made smaller: `QT_SCALE_FACTOR=2` in the environment of a
@@ -514,19 +541,78 @@ screen is one more that a smaller screen proves wrong.
   664 window with its scroll bar.
 * **Decided.** A scroll area for the whole dialog rather than a taller screen's
   worth of smaller pages: no dialog has to be redesigned, and a person with room
-  sees nothing different. *Rejected:* each dialog sizing itself (the sizes were
+  sees nothing different - and a footer found by a stated rule, not marked by
+  each dialog: the dialogs of the terrain and road work all end in a row of
+  buttons, and a rule that finds it needs no edit to a dialog, where an object
+  name or a property each dialog set would be one more thing the next dialog
+  forgets. *Rejected:* each dialog's buttons marked by name; the last layout
+  item only, which misses the Surface Edit dialogs (a reply box under their
+  buttons) and the Road Objects dialog (the line in its row); every button
+  found by class wherever it sits, which would lift a Browse button away from
+  its field. *Rejected:* each dialog sizing itself (the sizes were
   chosen for the developer's screen, and the next dialog would forget);
   `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that is
   too tall (it lets the window shrink and clips or overlaps what no longer
   fits, and nothing scrolls); a stylesheet's `menu-scrollable` (the style is
   where the combo popup's hint already is).
 
-Not done: a dialog's own buttons (Close, Apply) scroll with the rest, where a
-button row kept below the scroll area would stay in sight; the toolbars still
-overflow behind their arrow on a 1366-pixel screen (the second row, with Survey,
-Terrain, Surface Edit, BIM and GIS, does at 1360 even with small icons and no
-names), and no setting chooses a density from the screen; a floating dock is not
-fitted.
+**The toolbars along the top: three rows, measured.** A toolbar that has not
+the width for its buttons hides the last ones behind an extension arrow, so
+the arrangement is chosen by what each toolbar needs side by side, which is
+its `sizeHint().width()` (the width at which every action shows). Measured
+alone with the headless driver's grab, in px: Survey 565, Terrain 379, GIS
+312, Surface Edit 692 (13 buttons and the surface list), BIM 384; File to
+Format together, about 1,180. With a 12 px handle before each, the second row
+of Survey, Terrain and GIS needs about 1,290 px and the third, Surface Edit and
+BIM, about 1,100, against the 1,366 of a 1366 x 768 laptop: both fit. The five
+on one row need some 2,400, which no common screen has, so Surface Edit, BIM
+and GIS showed a handle and an arrow only.
+`MainWindow::toolBarFit` reads the result off the window (a shown toolbar
+along the top whose button is not visible is one behind its arrow) and
+`katana --check-toolbar-fit 1366x768,1632x918,1920x1080` fails a run that
+finds one, printing each row's size-hint sum beside the width it has:
+`qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless`.
+1632 x 918 is the 85% of a 1920 x 1080 screen that a first run opens at. The
+test is not a widget test, as the arrangement is `MainWindow`'s and the
+widget tests cannot build it (`docs/headless.md`); it is the same run as
+`--check-menus` and `--check-toolbars`.
+* **Decided: a third row.** A row costs a toolbar's height (about 45 px) of a
+  768 px laptop, where the drawing needs it, and the alternatives were each
+  weighed against that. *Rejected:* the bottom edge, beside the Drafting bar
+  (Ortho, Polar, Tracking ...), which has the room and costs no height, but
+  puts workflow tools among the drafting aids, away from the menus they
+  belong to; Surface Edit hidden until Terrain > Edit Surface asks for it, since
+  a toolbar that is not shown fails "every toolbar shows its actions" by
+  hiding, and the tool a person looks for is then not there; Terrain and
+  Surface Edit together on one row with Survey, BIM and GIS on the other
+  (1,100 and 1,300 px: it fits too, and it groups the surface tools, but it
+  is no narrower than the second row kept - 1,290 - and Survey, Terrain and GIS
+  there is what every saved layout of the older builds already has);
+  shrinking Surface Edit's buttons, which would not match its neighbours.
+* **A saved layout.** `kLayoutVersion` is 2 and `restoreLayout` is the one door
+  `restoreSession` takes. A layout of version 2 is restored as it is, a hidden
+  toolbar staying hidden. A layout of version 1 - every one saved before this
+  change, from builds with no Surface Edit and BIM, or with them squeezed on the
+  second row - is restored too, then `seatThirdToolBarRow` puts those two on a
+  third row (whether the person had hidden either is read first and kept), and
+  a toolbar the layout does not place at all is put along the top and shown:
+  what Qt's `restoreState` does with a toolbar its state never mentioned is not
+  documented, so the loop does not rely on either answer. *Rejected:* raising
+  the version with no carry-over, which would send every saved layout back to
+  the built one - the panels' places too - for the sake of two toolbars (the
+  reason the BIM toolbar did not raise it); keeping the version and testing for
+  overflow after the restore, which cannot tell a crowded row a person chose
+  from one the build made. Checked by the same run: a layout with the two bars
+  on the second row (it first proves that layout overflows, so the check can
+  fail), one saved before they existed, one of this version with BIM hidden,
+  and an older one with Surface Edit hidden. A layout saved by a build of
+  2026-10-15, with the bars on the second row, is repaired the same way.
+
+Not done: a window narrower
+than about 1,290 px (a 1280-px laptop) still overflows the second row, and
+larger icons or text widen every toolbar (a button is 41 px at Large Icons
+against 33); no setting chooses a density from the screen; a floating dock is
+not fitted.
 
 ## Failure modes
 
@@ -665,11 +751,15 @@ makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
 the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain, Surface Edit, BIM and GIS have a
-second row of their own (`addToolBarBreak`), because in one row they were
-squeezed to a button each behind overflow arrows - and with the Surface Edit
-and BIM bars in it the second row is itself wider than 1360 pixels, so BIM and
-GIS show only their handle and arrow there ("Fitting the screen", Not done).
+Format run along the top; Survey, Terrain and GIS have a second row of their
+own (`addToolBarBreak`), because in one row they were squeezed to a button each
+behind overflow arrows, and Surface Edit and BIM a third (`seatThirdToolBarRow`):
+Surface Edit (692 px), BIM (384) and the second row's three (1,256) are some
+2,400 px of toolbars with their handles, and the 1,366 of a laptop's screen
+holds the second row (about 1,290) and the third (about 1,100) but not both in
+one. For a day (2026-10-15) the five shared the second row, and Surface Edit,
+BIM and GIS showed a handle and an arrow and none of their buttons. "Fitting
+the screen" has how it is checked and what was rejected.
 Draw and Annotate run down the LEFT edge, where
 every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a
@@ -749,7 +839,7 @@ Vertex's icon, a plus on a polyline: the wrong tool, even the opposite one,
 named by the one sign the toolbar has for a tool running. Rejected: that
 frame; the running tool's icon on the button while it runs - the icon would
 name one tool while a click starts another; and the last tool chosen
-becoming the button's own ("Not done", below). The families are behind the
+becoming the button's own ("Decided", below). The families are behind the
 Draw toolbar's overflow arrow at the window's first size, and a tool running
 behind that arrow lights it (below).
 
@@ -953,10 +1043,15 @@ starts), `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_h
 and `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless`
 (after View > Toolbars > Large Icons, with Delete Vertex running).
 
-Not done: a family button does not remember the tool last chosen from it, as
-some CAD programs' flyouts do - that changes what a click does and wants its
-own decision; and the mark is not mirrored for a right-to-left layout, which
-the window does not use.
+Decided, 2026-10-15: a family button does not remember the tool last chosen
+from it, as some CAD programs' flyouts do. A click on it runs the family's FIRST
+tool, always, so a person who has learned where Circle is has learned what it
+does; a button that remembered would run one tool today and another tomorrow,
+and its icon - the default action's - would change with it, so the toolbar would
+not look the same from one session to the next, which `--check-toolbars` and every
+screenshot assume. It is a feature with a decision of the owner's in it (and a
+setting to turn it off), not a defect, so it stays as it is. The mark is not
+mirrored for a right-to-left layout, which the window does not use.
 
 **Every key reaches one thing.** `MainWindow::shortcutClashes` gathers every
 key a person can press - each action's key sequences, any `QShortcut`, each
@@ -1082,12 +1177,29 @@ and `VIEWS ISOLATE <id> <layer>` (`docs/cad.md`, "The window's views: VIEWS
 and ZOOM") - so an agent, a script and a test set up a design view hiding the
 as-built layers beside an as-built view hiding the design ones
 (`qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless`).
-Not done: the popup's rows still edit the view's state directly rather than
-run those lines, and a view's hidden reference layers have no line, since
-cad cannot name a reference layer. The rows wait on the verb, not only on
-the wiring: `VIEWS HIDE` reads a comma as the break between two layers, and
-a layer's name may hold one, so a line cannot yet name every layer the popup
-can - the verb needs a quoted name that is one layer whatever it holds first.
+**The popup runs those lines; it edits nothing itself.** Each box and button
+builds the VIEWS line a person would type (`viewLayersLine`,
+`viewReferencesLine`, pure functions of the layers' names, held in
+`ViewLayersLines.*`) and hands it to the window's one executor through
+`ViewWorkspace::setViewLayersShown`, `isolateLayerInView`, `showEverythingInView`
+and `setViewReferenceShown`, so a click is logged as a typed line is, takes the
+verb's own code path and is refused as the verb refuses; the popup then reads
+every box from the view, so a refused line leaves each where the view is
+(`LayersPopup.*`). A plain name is a word of the line; a name with a blank is
+quoted; a name with a comma, or one that is the verb's own word (ALL, LAYER,
+REFERENCE), goes after `LAYER`, which takes every word after it whole
+(`VIEWS HIDE 2 LAYER a,b`); the reference layers are `VIEWS HIDE|SHOW <id>
+REFERENCE <id>...`, and `SHOW ... ALL` shows them with the layers. Hide Others is
+two lines, VIEWS ISOLATE and then VIEWS HIDE of what the view had hidden
+beneath the layer; the view is not a document, so nothing is half-done in a way
+undo would have to know. *Rejected:* an `ISOLATE ... KEEP` word, to make Hide
+Others one line (a new word for one button, and the two lines each say what they
+do); a quote that makes one layer of a comma list (the verb is handed the words
+without their quotes, so it could not tell, and a `LAYER` keyword needs no change
+to the shared tokenizer); the popup keeping a direct path for the names no line can carry (a
+second way, which is what this removed). Not carried by any line: a layer whose
+name holds a double quote or a line break, which the tokenizer has no escape
+for - the popup then logs why and leaves the box as it was.
 
 ### Linked views: a design view and an as-built view that move together
 
@@ -1424,12 +1536,10 @@ from the checked Link's frame: the optional zoom tools keep `kTitleGap` (6
 px) clear of the title, and the tools always shown do not. Letting the
 Link drop off a narrow bar as the zoom tools do was rejected for now: the
 checked Link is what says a view is linked, and a linked view would not show
-it. The Layers popup's layer rows still set the view's layers directly
-rather than run `VIEWS HIDE` and `SHOW`: `VIEWS HIDE` reads a comma as a
-list separator, and a layer name may hold one, so a line cannot name every
-layer the popup lists - the scope widget refuses to build a line for such a
-layer, which a row the person clicked cannot do - until the verb takes one
-quoted name.
+it. Assessed again 2026-10-15 and left: linking a 3D or elevation view is a
+change to both renderers' camera units, not a small one. The Layers popup runs
+`VIEWS HIDE`, `SHOW` and `ISOLATE` for its rows now ("Per-view layers
+extend THE visibility rule", above).
 
 ### The selection in every view
 
@@ -1668,8 +1778,11 @@ each test shown failing without its fix. Not yet tested outside a
 hand-run harness, because `MainWindow` cannot be built into the widget test
 target: the four panels' bars, their exact minimise and restore, F9 from a
 floating panel, floating maximise across two screens. Not done: a Window
-menu; saving and restoring the layout (`minimisedNames` and `minimiseNamed`
-are the hooks, and `unmaximiseAll` must run before `saveState`); a floating
+menu; keeping the VIEWS between sessions - the panels' places and which are
+minimised ARE kept (`MainWindow::saveSession` and `restoreLayout`, with
+`minimisedNames` and `minimiseNamed`), and `MainWindow::saveState` does not see
+the views' docks, which are the workspace's own window's, so a maximised view
+needs no `unmaximiseAll` before it; a layout that kept the views would; a floating
 active view left minimised during an arrange stays hidden and active, since
 only the tray button (`DockChrome::restore`) raises `onRestored`. The Survey
 Point Manager dock (`SurveyPointsDock`) wears the chrome now that
