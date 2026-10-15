@@ -1172,12 +1172,29 @@ and `VIEWS ISOLATE <id> <layer>` (`docs/cad.md`, "The window's views: VIEWS
 and ZOOM") - so an agent, a script and a test set up a design view hiding the
 as-built layers beside an as-built view hiding the design ones
 (`qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless`).
-Not done: the popup's rows still edit the view's state directly rather than
-run those lines, and a view's hidden reference layers have no line, since
-cad cannot name a reference layer. The rows wait on the verb, not only on
-the wiring: `VIEWS HIDE` reads a comma as the break between two layers, and
-a layer's name may hold one, so a line cannot yet name every layer the popup
-can - the verb needs a quoted name that is one layer whatever it holds first.
+**The popup runs those lines; it edits nothing itself.** Each box and button
+builds the VIEWS line a person would type (`viewLayersLine`,
+`viewReferencesLine`, pure functions of the layers' names, held in
+`ViewLayersLines.*`) and hands it to the window's one executor through
+`ViewWorkspace::setViewLayersShown`, `isolateLayerInView`, `showEverythingInView`
+and `setViewReferenceShown`, so a click is logged as a typed line is, takes the
+verb's own code path and is refused as the verb refuses; the popup then reads
+every box from the view, so a refused line leaves each where the view is
+(`LayersPopup.*`). A plain name is a word of the line; a name with a blank is
+quoted; a name with a comma, or one that is the verb's own word (ALL, LAYER,
+REFERENCE), goes after `LAYER`, which takes every word after it whole
+(`VIEWS HIDE 2 LAYER a,b`); the reference layers are `VIEWS HIDE|SHOW <id>
+REFERENCE <id>...`, and `SHOW ... ALL` shows them with the layers. Hide Others is
+two lines, VIEWS ISOLATE and then VIEWS HIDE of what the view had hidden
+beneath the layer; the view is not a document, so nothing is half-done in a way
+undo would have to know. *Rejected:* an `ISOLATE ... KEEP` word, to make Hide
+Others one line (a new word for one button, and the two lines each say what they
+do); a quote that makes one layer of a comma list (the verb is handed the words
+without their quotes, so it could not tell, and a `LAYER` keyword needs no change
+to the shared tokenizer); the popup keeping a direct path for the names no line can carry (a
+second way, which is what this removed). Not carried by any line: a layer whose
+name holds a double quote or a line break, which the tokenizer has no escape
+for - the popup then logs why and leaves the box as it was.
 
 ### Linked views: a design view and an as-built view that move together
 

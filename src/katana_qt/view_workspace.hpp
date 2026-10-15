@@ -331,6 +331,21 @@ class ViewWorkspace final : public QMainWindow {
     // VIEWS SET <id> ghosts=on|off, through the command runner, so the change
     // is logged as a typed line is. The box is then set from the view.
     void setSelectionGhosts(katana::cad::ViewId id, bool on);
+    // The rest of what the Layers popup does to a view, each the VIEWS line a
+    // person would type (viewLayersLine, view_layers_popup.hpp), through the
+    // command runner: logged as a typed line is, and the line an agent writes
+    // for the same change. Nothing here edits a view's state itself; the popup
+    // reads its boxes from the view afterwards, so a refused line leaves each
+    // where it was. The outcome says why a line was refused.
+    //   setViewLayersShown   VIEWS SHOW|HIDE <id> <layers>
+    //   showEverythingInView VIEWS SHOW <id> ALL (the layers and the reference layers)
+    //   isolateLayerInView   VIEWS ISOLATE <id> <layer>
+    //   setViewReferenceShown VIEWS SHOW|HIDE <id> REFERENCE <ref>
+    VerbOutcome setViewLayersShown(katana::cad::ViewId id, const std::vector<std::string>& layers,
+                                   bool shown);
+    VerbOutcome showEverythingInView(katana::cad::ViewId id);
+    VerbOutcome isolateLayerInView(katana::cad::ViewId id, const std::string& layer);
+    VerbOutcome setViewReferenceShown(katana::cad::ViewId id, std::uint64_t reference, bool shown);
     // Drops per-view hidden layers that name no layer any more (after a delete
     // or a rename), in every view. See LayerOverrides::pruneMissing.
     void pruneViewLayers();

@@ -143,6 +143,24 @@ class ViewWorkspace::VerbHost final : public katana::cad::ViewVerbHost {
     }
     void changed(const std::vector<ViewId>& ids) override { workspace_.linkChanged(ids); }
     void settingsChanged(ViewId id) override { workspace_.viewSettingsChanged(id); }
+    bool hasReference(std::uint64_t id) override
+    {
+        const katana::interop::ReferenceData* reference = workspace_.referenceData();
+        if (reference == nullptr) {
+            return false;
+        }
+        for (const auto& raster : reference->rasters()) {
+            if (raster.id == id) {
+                return true;
+            }
+        }
+        for (const auto& cloud : reference->pointClouds()) {
+            if (cloud.id == id) {
+                return true;
+            }
+        }
+        return false;
+    }
 
   private:
     ViewWorkspace& workspace_;
@@ -1712,6 +1730,41 @@ void ViewWorkspace::viewSettingsChanged(ViewId id)
 void ViewWorkspace::setSelectionGhosts(ViewId id, bool on)
 {
     runViewLine(QString("VIEWS SET %1 ghosts=%2").arg(id).arg(on ? "on" : "off"));
+}
+
+namespace {
+
+// A line that could not be made is a refusal like one the interpreter makes.
+VerbOutcome refusal(const katana::core::Error& error)
+{
+    VerbOutcome outcome;
+    outcome.error = QString::fromStdString(error.describe());
+    return outcome;
+}
+
+} // namespace
+
+VerbOutcome ViewWorkspace::setViewLayersShown(ViewId id, const std::vector<std::string>& layers,
+                                              bool shown)
+{
+    const auto line = viewLayersLine(shown ? "SHOW" : "HIDE", id, layers);
+    return line ? runner_(*line) : refusal(line.error());
+}
+
+VerbOutcome ViewWorkspace::showEverythingInView(ViewId id)
+{
+    return runner_(QString("VIEWS SHOW %1 ALL").arg(id));
+}
+
+VerbOutcome ViewWorkspace::isolateLayerInView(ViewId id, const std::string& layer)
+{
+    const auto line = viewLayersLine("ISOLATE", id, {layer});
+    return line ? runner_(*line) : refusal(line.error());
+}
+
+VerbOutcome ViewWorkspace::setViewReferenceShown(ViewId id, std::uint64_t reference, bool shown)
+{
+    return runner_(viewReferencesLine(shown ? "SHOW" : "HIDE", id, {reference}));
 }
 
 void ViewWorkspace::pruneViewLayers()

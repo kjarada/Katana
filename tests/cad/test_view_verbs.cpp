@@ -9,7 +9,9 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -40,6 +42,8 @@ class RecordingHost final : public ViewVerbHost {
     std::vector<ZoomRequest> zooms;
     std::vector<std::vector<ViewId>> changes;
     std::vector<ViewId> settingChanges;
+    // The reference layers the window has, by id (VIEWS HIDE ... REFERENCE).
+    std::set<std::uint64_t> references;
 
     ViewSet& views() override { return set; }
     Result<ViewId> open(ViewKind kind) override
@@ -70,6 +74,7 @@ class RecordingHost final : public ViewVerbHost {
     }
     void changed(const std::vector<ViewId>& ids) override { changes.push_back(ids); }
     void settingsChanged(ViewId id) override { settingChanges.push_back(id); }
+    bool hasReference(std::uint64_t id) override { return references.contains(id); }
 };
 
 class ViewVerbsTest : public ::testing::Test {
@@ -631,6 +636,124 @@ TEST_F(ViewVerbsTest, ViewsSetRefusesWhatItDoesNotTakeAndChangesNothing)
     EXPECT_EQ(refused("VIEWS SET 1 ghosts=off ghosts=maybe").code, ErrorCode::ParseFailure);
     EXPECT_TRUE(view.selectionGhosts);
     EXPECT_TRUE(host.settingChanges.empty());
+}
+
+// ---- the Layers popup's lines ---------------------------------------------------------------
+//
+// The popup does nothing itself: each box and button hands one of these lines to the
+// command runner (docs/desktop.md, "Per-view layers"). A layer's name may hold a comma,
+// which a comma list reads as the break between two layers, so LAYER takes every word
+// after it whole; and the reference layers - an imported raster or point cloud, which
+// cad can only hold the id of - have their own word.
+
+TEST_F(ViewVerbsTest, LayerTakesEveryWordAfterItWholeSoALayerWhoseNameHoldsACommaCanBeNamed)
+{
+    addLayers(document, {"a,b", "a", "b", "x y"});
+    const ViewState& view = plan();
+
+    // Without LAYER, "a,b" is two layers: a and b, never the layer called a,b.
+    (void)ok("VIEWS HIDE 1 a,b");
+    EXPECT_EQ(view.layers.hidden(), (std::set<std::string, std::less<>>{"a", "b"}));
+    (void)ok("VIEWS SHOW 1 ALL");
+
+    // With it, the one layer: neither of its parts.
+    (void)ok("VIEWS HIDE 1 LAYER a,b");
+    EXPECT_EQ(view.layers.hidden(), (std::set<std::string, std::less<>>{"a,b"}));
+    EXPECT_FALSE(view.layers.hidesDirectly("a"));
+    (void)ok("VIEWS SHOW 1 LAYER a,b");
+    EXPECT_TRUE(view.layers.empty());
+
+    // Several words, each one layer, a quoted one with a blank in it as well.
+    (void)ok("VIEWS HIDE 1 LAYER a,b \"x y\" a");
+    EXPECT_EQ(view.layers.hidden(), (std::set<std::string, std::less<>>{"a", "a,b", "x y"}));
+    (void)ok("VIEWS SHOW 1 ALL");
+
+    // ISOLATE takes it too: the root's other layers are what it hides - the default
+    // layer 0, a, b and "x y".
+    (void)ok("VIEWS ISOLATE 1 LAYER a,b");
+    EXPECT_EQ(view.layers.hidden(), (std::set<std::string, std::less<>>{"0", "a", "b", "x y"}));
+}
+
+TEST_F(ViewVerbsTest, LayerThatNamesNoLayerOrTwoToIsolateIsRefusedAndChangesNothing)
+{
+    addLayers(document, {"a,b", "a"});
+    const ViewState& view = plan();
+    // A name the drawing lacks, whole: the comma is not split to find a and b.
+    const auto missing = refused("VIEWS HIDE 1 LAYER a,c");
+    EXPECT_EQ(missing.code, ErrorCode::NotFound);
+    EXPECT_EQ(missing.message, "no layer 'a,c' in the drawing (LAYER LIST lists them)");
+    EXPECT_EQ(refused("VIEWS ISOLATE 1 LAYER a,b a").code, ErrorCode::ParseFailure);
+    EXPECT_TRUE(view.layers.empty());
+    EXPECT_TRUE(host.settingChanges.empty());
+}
+
+TEST_F(ViewVerbsTest, ALineWhoseOnlyWordIsLayerOrReferenceNamesTheLayerCalledThat)
+{
+    // The keywords need a word after them: alone, each is a layer's name as it was.
+    addLayers(document, {"LAYER", "REFERENCE"});
+    const ViewState& view = plan();
+    (void)ok("VIEWS HIDE 1 LAYER");
+    EXPECT_TRUE(view.layers.hidesDirectly("LAYER"));
+    (void)ok("VIEWS HIDE 1 REFERENCE");
+    EXPECT_TRUE(view.layers.hidesDirectly("REFERENCE"));
+    EXPECT_TRUE(view.hiddenReferences.empty());
+}
+
+TEST_F(ViewVerbsTest, ReferenceHidesAndShowsTheReferenceLayersAViewHidesOfItsOwn)
+{
+    host.references = {7, 9, 12};
+    addLayers(document, {"asbuilt"});
+    const ViewState& view = plan();
+    const ViewState& other = plan();
+
+    EXPECT_TRUE(ok("VIEWS HIDE 1 REFERENCE 7").ends_with(" ghosts=on hiddenrefs=7"));
+    EXPECT_EQ(view.hiddenReferences, (std::set<std::uint64_t>{7}));
+    // In one word or several, each once, as the layers are.
+    EXPECT_TRUE(ok("VIEWS HIDE 1 REFERENCE 12,9 9 7").ends_with(" hiddenrefs=7,9,12"));
+    EXPECT_EQ(view.hiddenReferences, (std::set<std::uint64_t>{7, 9, 12}));
+    EXPECT_TRUE(other.hiddenReferences.empty()) << "that view alone";
+    EXPECT_EQ(host.settingChanges, (std::vector<ViewId>{1, 1}));
+
+    // Beside the layers it hides, in the same record.
+    (void)ok("VIEWS HIDE 1 asbuilt");
+    EXPECT_TRUE(ok("VIEWS SHOW 1 REFERENCE 9").ends_with(" hidden=asbuilt hiddenrefs=7,12"));
+    EXPECT_EQ(view.hiddenReferences, (std::set<std::uint64_t>{7, 12}));
+
+    // SHOW ALL shows everything the document shows: the layers and the references.
+    const std::string everything = ok("VIEWS SHOW 1 ALL");
+    EXPECT_EQ(everything.find("hidden"), std::string::npos) << everything;
+    EXPECT_TRUE(view.layers.empty());
+    EXPECT_TRUE(view.hiddenReferences.empty());
+}
+
+TEST_F(ViewVerbsTest, AReferenceTheWindowLacksOrANumberThatIsNoneIsRefusedWhole)
+{
+    host.references = {7};
+    const ViewState& view = plan();
+    // Read whole before any of it is applied: 7, which exists, is not hidden either.
+    const auto missing = refused("VIEWS HIDE 1 REFERENCE 7 8");
+    EXPECT_EQ(missing.code, ErrorCode::NotFound);
+    EXPECT_TRUE(contains(missing.message, "no reference layer 8")) << missing.message;
+    EXPECT_TRUE(view.hiddenReferences.empty());
+    EXPECT_TRUE(host.settingChanges.empty());
+
+    EXPECT_EQ(refused("VIEWS HIDE 1 REFERENCE seven").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(refused("VIEWS HIDE 1 REFERENCE 0").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(refused("VIEWS HIDE 1 REFERENCE -7").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(refused("VIEWS HIDE 1 REFERENCE ,").code, ErrorCode::ParseFailure)
+        << "commas alone name no reference";
+    EXPECT_EQ(refused("VIEWS ISOLATE 1 REFERENCE 7").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(refused("VIEWS HIDE 9 REFERENCE 7").code, ErrorCode::NotFound) << "no such view";
+    EXPECT_TRUE(view.hiddenReferences.empty());
+}
+
+TEST_F(ViewVerbsTest, ADriverThatHasNoReferenceDataRefusesEveryReference)
+{
+    // katana_cli and a plain test host answer no by default: nothing there to hide.
+    const ViewState& view = plan();
+    const auto none = refused("VIEWS HIDE 1 REFERENCE 1");
+    EXPECT_EQ(none.code, ErrorCode::NotFound);
+    EXPECT_TRUE(view.hiddenReferences.empty());
 }
 
 // ---- ZOOM on the shared scope -------------------------------------------------------------

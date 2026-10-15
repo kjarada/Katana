@@ -618,6 +618,10 @@ Views     the desktop window's views (katana_cli and katana_mcp have none, and r
           VIEWS UNLINK id[,id...] | ALL
           VIEWS HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | ISOLATE id layer
           the layers that view hides of its own, as its Layers button sets them
+          VIEWS HIDE|SHOW|ISOLATE id LAYER name...   each word after LAYER is one layer, commas
+          and all (a layer's name may hold one)
+          VIEWS HIDE|SHOW id REFERENCE ref[,ref...]   the imported rasters and point clouds
+          that view hides of its own, by the id the Reference Data panel gives them
           VIEWS SET id ghosts=on|off   whether that view shows the selection faintly where it
           hides the layer (on when a view opens)
 Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTENTS (E, ALL,

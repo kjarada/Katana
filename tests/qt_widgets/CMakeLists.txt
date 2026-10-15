@@ -73,6 +73,9 @@ add_executable(katana_qt_widget_tests
     test_screen_fit_dialogs.cpp
     # An open section follows the drawing's surfaces (test_section_recut).
     test_section_recut.cpp
+    # A view's Layers popup hands its changes to the command runner as VIEWS lines
+    # (test_view_layers_popup).
+    test_view_layers_popup.cpp
     # Where File > Open and Save As start (test_project_folder).
     test_project_folder.cpp
     # The Properties panel's tree (test_property_panel).

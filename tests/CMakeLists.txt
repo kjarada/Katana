@@ -3038,6 +3038,19 @@ if(TARGET katana)
             "-DFORBID=unknown command|no layer '|does not take"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_ghosts_off_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The popup's Show All, by the mouse: view 2 hides the design layer (a typed
+    # line, whose reply is the record with hidden=design), and the button runs
+    # VIEWS SHOW 2 ALL through the one executor - nothing here types it - whose
+    # reply is the record with nothing hidden; the listing after says the same.
+    add_test(NAME qt_the_layers_popups_show_all_button_runs_the_views_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>VIEWS OPEN plan|>VIEWS HIDE 2 design|%View2|!ViewLayersButton|%ViewLayersPopup|!ViewLayersShowAll|>VIEWS"
+            "-DEXPECT=ghosts=on hidden=design[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+view=1 kind=plan[^\r\n]*[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+views=2"
+            "-DFORBID=unknown command|no layer '|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_show_all_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # And by the View menu, for the active view: the same line through the
     # same executor (its reply, view 2's record with its ghosts off), the
     # item's check set from the view, and view 1 untouched.
@@ -3435,6 +3448,7 @@ if(TARGET katana)
                          qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
                          qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
                          qt_the_layers_popups_box_turns_a_views_ghosts_off_headless
+                         qt_the_layers_popups_show_all_button_runs_the_views_line_headless
                          qt_the_view_menu_turns_the_active_views_ghosts_off_headless
                          qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless
                          qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless

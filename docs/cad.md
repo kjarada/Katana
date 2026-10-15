@@ -1303,6 +1303,8 @@ VIEWS UNLINK <id>[,<id>...] | ALL     unlinked=1,2 linked=none
 VIEWS HIDE <id> <layer>[,<layer>...]  the layers that view hides of its own; its record
 VIEWS SHOW <id> <layer>[,<layer>...] | ALL
 VIEWS ISOLATE <id> <layer>
+VIEWS HIDE|SHOW|ISOLATE <id> LAYER <name>...      each word after LAYER is one layer, commas and all
+VIEWS HIDE|SHOW <id> REFERENCE <ref>[,<ref>...]   the imported rasters and point clouds a view hides
 VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
 ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
@@ -1443,9 +1445,25 @@ before any layer of the line is shown: `LayerOverrides::show` removes only
 an exact entry, so the layer stayed hidden and the reply was the unchanged
 record, a silent failure
 (`ViewVerbsTest.ShowingALayerBeneathOneTheViewHidesIsRefusedNamingWhatHoldsIt`).
-The popup's own rows still edit the state directly rather than run these
-lines; that and the reference layers, which cad cannot name, are
-`docs/desktop.md`'s "Not done".
+The Layers popup runs these lines for every box and button
+(`docs/desktop.md`, "The workspace"). Two words were added for it. `LAYER`,
+first and with a word after it, takes every word after it whole: a comma is a
+legal character in a layer's name, and a comma list cannot say one
+(`ViewVerbsTest.LayerTakesEveryWordAfterItWholeSoALayerWhoseNameHoldsACommaCanBeNamed`,
+`LayerThatNamesNoLayerOrTwoToIsolateIsRefusedAndChangesNothing`); a line whose
+only word is `LAYER` or `REFERENCE` still names the layer called that
+(`ALineWhoseOnlyWordIsLayerOrReferenceNamesTheLayerCalledThat`). `REFERENCE`
+names the reference layers a view hides, by the id the Reference Data panel and
+the `RASTER` and `CLOUD` words use: cad cannot read Reference Data, so it keeps
+the ids a view hides (`ViewState::hiddenReferences`) and asks the host whether
+one is the window's (`ViewVerbHost::hasReference`; the default answers no, so
+`katana_cli`, which has no views, and a bare test host refuse every reference).
+An id the window lacks, a word that is not a whole number from 1, and commas
+alone are refused whole, and `ISOLATE` takes no reference
+(`ReferenceHidesAndShowsTheReferenceLayersAViewHidesOfItsOwn`,
+`AReferenceTheWindowLacksOrANumberThatIsNoneIsRefusedWhole`,
+`ADriverThatHasNoReferenceDataRefusesEveryReference`). A record lists them as
+`hiddenrefs=7,9` after `hidden=`, and `SHOW ALL` shows them with the layers.
 
 **`SET <id> ghosts=on|off` is a view's switch for the selection's ghosts**
 (`ViewState::selectionGhosts`, on when a view opens): a selected entity the
