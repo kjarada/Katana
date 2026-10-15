@@ -805,7 +805,19 @@ namespace {
 double greatestCurvature(const SolvedAlignment& alignment, double from, double to)
 {
     double greatest = 0.0;
-    for (const katana::geometry::AlignmentElement& element : alignment.elements()) {
+    // From the element that holds `from` (they are in station order, end to
+    // end), so a corridor of a hundred thousand sections along an alignment of a
+    // thousand elements does not look at a thousand of them for each.
+    const auto& elements = alignment.elements();
+    auto at = std::upper_bound(elements.begin(), elements.end(), from,
+                               [](double station, const katana::geometry::AlignmentElement& e) {
+                                   return station < e.startStation;
+                               });
+    if (at != elements.begin()) {
+        --at;
+    }
+    for (; at != elements.end() && at->startStation < to; ++at) {
+        const katana::geometry::AlignmentElement& element = *at;
         const double begin = element.startStation;
         const double finish = begin + element.length;
         if (finish <= from || begin >= to) {
