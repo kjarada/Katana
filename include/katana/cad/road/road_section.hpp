@@ -177,6 +177,24 @@ roadSection(const RoadTemplate& roadTemplate, const katana::geometry::SolvedAlig
 [[nodiscard]] std::vector<double> sectionStations(double start, double end, double interval,
                                                   const std::vector<double>& keys);
 
+// The same, with sections added inside the curves of `alignment` so that no two
+// neighbouring ones turn through more than sqrt(6 x curveTolerance) radians
+// between them: a gap that turns through more is cut into the fewest equal
+// parts that do not. The stations of the plain list are all kept - the interval's
+// multiples and every key - and a straight adds none. Why that bound: the quads
+// a solid is lofted from are chords, and over a step of arc angle theta they
+// hold sin(theta) / theta of an annulus sector's area, 1 - theta^2 / 6 for small
+// theta, so theta = sqrt(6 x tolerance) keeps a course's area and volume within
+// `curveTolerance` of the curve's, and a kerb's length (1 - theta^2 / 24)
+// within a quarter of it (docs/road_design.md, "Building a corridor"). A spiral
+// is held to the curvature at its sharper end of the gap, so it errs on the
+// safe side. `curveTolerance` 0 (or not positive) adds none: the plain list.
+// InvalidArgument, saying what is asked, when the stations would be more than
+// 100 000 - a tolerance of 1e-12 on a long curve - before one is made.
+[[nodiscard]] katana::core::Result<std::vector<double>>
+sectionStations(double start, double end, double interval, const std::vector<double>& keys,
+                const katana::geometry::SolvedAlignment& alignment, double curveTolerance);
+
 // ---- a whole corridor -------------------------------------------------------------------
 
 // The stretch of a corridor built with one template: a region of its own,

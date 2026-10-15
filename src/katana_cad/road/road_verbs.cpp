@@ -978,7 +978,8 @@ std::string corridorRecord(const Corridor& corridor)
            " from=" + (corridor.start ? exact(*corridor.start) : std::string()) +
            " to=" + (corridor.end ? exact(*corridor.end) : std::string()) +
            " regions=" + std::to_string(corridor.regions.size()) +
-           " superelevation=" + std::to_string(corridor.superelevation.size());
+           " superelevation=" + std::to_string(corridor.superelevation.size()) +
+           " curvetol=" + exact(corridor.curveTolerance);
 }
 
 // The layers a corridor's objects are shown on that the drawing does not
@@ -1148,6 +1149,19 @@ Status applyCorridor(Corridor& corridor, const Option& option)
         corridor.interval = *value;
         return {};
     }
+    if (option.key == "curvetol") {
+        // "off" is 0, as the record writes it: no section is added in a curve.
+        if (is(option.value, "off")) {
+            corridor.curveTolerance = 0.0;
+            return {};
+        }
+        auto value = numberOf(option);
+        if (!value) {
+            return value.error();
+        }
+        corridor.curveTolerance = *value;
+        return {};
+    }
     if (option.key == "from") {
         return station(corridor.start);
     }
@@ -1155,7 +1169,7 @@ Status applyCorridor(Corridor& corridor, const Option& option)
         return station(corridor.end);
     }
     return usage("unknown corridor key " + option.key +
-                 "=; the keys are alignment template surface interval from to");
+                 "=; the keys are alignment template surface interval from to curvetol");
 }
 
 Result<double> stationWord(const std::string& word, const char* what)
@@ -1586,7 +1600,7 @@ Result<std::string> corridorVerb(Document& document, const Tokens& args)
         }
         if (made.alignment.empty() || made.templateName.empty()) {
             return usage("CORRIDOR NEW <corridor> ALIGNMENT <alignment> TEMPLATE <template> "
-                         "[surface=<name>] [interval=<m>] [from=<s>] [to=<s>]");
+                         "[surface=<name>] [interval=<m>] [from=<s>] [to=<s>] [curvetol=<e>]");
         }
         auto options = optionsFrom(args, at);
         if (!options) {
@@ -1978,9 +1992,12 @@ ROADTEMPLATE COURSE <t> <component> ADD <course> thickness=<m> [material=] [ifc=
 
 CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
 CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=<s>] [interval=<m>] [from=<s>] [to=<s>]
-  makes the layers its objects are on; road/earthworks/cut switched off
-CORRIDOR SET <c> alignment= template= surface= interval= from= to=   (surface= from= to=
-  empty clear them; a corridor always has an alignment, a template and an interval)
+  [curvetol=<e>]   makes the layers its objects are on; road/earthworks/cut switched off
+CORRIDOR SET <c> alignment= template= surface= interval= from= to= curvetol=   (surface= from=
+  to= empty clear them; a corridor always has an alignment, a template and an interval)
+  curvetol= is the relative error of a course's area and volume on a curve, at most (0.001
+  by default, up to 0.1; 0 or off adds no sections inside curves): sections are added
+  inside a curve until the chords between them are that close
 CORRIDOR DELETE <c> | RENAME <c> <new>
 CORRIDOR REGION <c> ADD <from> <to> <t> | REMOVE <from> | CLEAR    another template there
 CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR

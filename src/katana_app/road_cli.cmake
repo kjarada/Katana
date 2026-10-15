@@ -214,3 +214,22 @@ set_tests_properties(cli.quantities_csv_is_replaced_when_overwrite_is_given PROP
     FIXTURES_REQUIRED cli_road_csv_written
     PASS_REGULAR_EXPRESSION "csv file=[^\r\n]*cli-road-quantities[.]csv rows=20"
     FAIL_REGULAR_EXPRESSION "error")
+
+# Sections inside a curve (docs/road_design.md, "Building a corridor"): the
+# urban street round a quarter turn of R = 50 m (a 178.54 m alignment) has 36
+# sections, the 20 of the interval and the keys and two more in each of the
+# arc's eight gaps, and its left kerb - lip 5.6 m out, r = 44.4 m, 100 m of
+# tangent and pi/2 x 44.4 = 69.7434 m of arc, 169.7434 m exact - measures
+# 169.731 m. With curvetol=off the 20 alone and the chords: 169.631 m.
+add_test(NAME cli.a_corridor_round_a_curve_has_sections_inside_it_until_curvetol_is_met
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ALIGN NEW A 0,0 100,0 100,100" -c "ALIGN SET A 1 50"
+            -c "ALIGN DESIGN A 0,10 200,10" -c "ROADTEMPLATE DEFAULTS"
+            -c "CORRIDOR NEW Bend ALIGNMENT A TEMPLATE \"urban street\""
+            -c "CORRIDOR QUANTITIES Bend" -c "CORRIDOR SET Bend curvetol=off"
+            -c "CORRIDOR BUILD Bend" -c "CORRIDOR QUANTITIES Bend")
+set_tests_properties(cli.a_corridor_round_a_curve_has_sections_inside_it_until_curvetol_is_met
+    PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "built corridor=Bend from=0[.]000 to=178[.]540 runs=1 sections=36 .*object id=corridor/Bend/left/kerb/1 kind=kerb name=\"Bend left kerb\" Length=169[.]731 .*curvetol=0 updated.*built corridor=Bend from=0[.]000 to=178[.]540 runs=1 sections=20 .*object id=corridor/Bend/left/kerb/1 kind=kerb name=\"Bend left kerb\" Length=169[.]631 "
+    FAIL_REGULAR_EXPRESSION "error")

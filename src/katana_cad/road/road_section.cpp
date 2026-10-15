@@ -5,7 +5,9 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
@@ -790,6 +792,90 @@ std::vector<double> sectionStations(double start, double end, double interval,
     return stations;
 }
 
+namespace {
+
+// The greatest |curvature| of the alignment anywhere from `from` to `to`
+// (1/m): a tangent has none, an arc 1/radius, and a spiral's changes linearly,
+// so its greatest is at one end of the part inside the range. The elements are
+// asked rather than curvatureAtStation, which at a joint answers for the
+// element that begins there and so, at the end of a gap that stops where an arc
+// stops, would say the tangent after it.
+double greatestCurvature(const SolvedAlignment& alignment, double from, double to)
+{
+    double greatest = 0.0;
+    for (const katana::geometry::AlignmentElement& element : alignment.elements()) {
+        const double begin = element.startStation;
+        const double finish = begin + element.length;
+        if (finish <= from || begin >= to) {
+            continue;
+        }
+        const double low = std::max(from, begin) - begin;
+        const double high = std::min(to, finish) - begin;
+        const double here = std::visit(
+            [low, high](const auto& shape) -> double {
+                using Shape = std::decay_t<decltype(shape)>;
+                if constexpr (std::is_same_v<Shape, katana::geometry::Arc2>) {
+                    return 1.0 / std::abs(shape.radius);
+                } else if constexpr (std::is_same_v<Shape, katana::geometry::Spiral2>) {
+                    return std::max(std::abs(shape.curvatureAt(low)),
+                                    std::abs(shape.curvatureAt(high)));
+                } else {
+                    return 0.0;
+                }
+            },
+            element.shape);
+        greatest = std::max(greatest, here);
+    }
+    return greatest;
+}
+
+} // namespace
+
+Result<std::vector<double>> sectionStations(double start, double end, double interval,
+                                            const std::vector<double>& keys,
+                                            const SolvedAlignment& alignment,
+                                            double curveTolerance)
+{
+    std::vector<double> plain = sectionStations(start, end, interval, keys);
+    if (!(curveTolerance > 0.0) || !std::isfinite(curveTolerance) || plain.size() < 2) {
+        return plain;
+    }
+    // The turn one step may make: 1 - sin(t) / t is t^2 / 6 for small t.
+    const double turn = std::sqrt(6.0 * curveTolerance);
+    std::vector<double> stations;
+    stations.reserve(plain.size());
+    for (std::size_t i = 0; i + 1 < plain.size(); ++i) {
+        const double a = plain[i];
+        const double b = plain[i + 1];
+        stations.push_back(a);
+        // The fewest equal parts that each turn through no more than `turn`,
+        // counted as a real first: a tolerance of 1e-300 asks for more parts
+        // than a size_t holds. kRelative keeps a gap that turns through exactly
+        // `turn` from being cut for the rounding of the quotient.
+        const double parts = std::ceil(greatestCurvature(alignment, a, b) * (b - a) / turn -
+                                       tol::kRelative);
+        if (!(parts > 1.0)) {
+            continue;
+        }
+        // What the list would hold: those made, the parts' new ones, the rest.
+        const double total =
+            static_cast<double>(stations.size() + plain.size() - i - 1) + (parts - 1.0);
+        if (total > static_cast<double>(kMaximumSections)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a curve tolerance of " + number(curveTolerance) +
+                                 " needs more than " + std::to_string(kMaximumSections) +
+                                 " sections along this alignment: not built",
+                             "stations " + number(start) + " to " + number(end));
+        }
+        const auto count = static_cast<std::size_t>(parts);
+        for (std::size_t j = 1; j < count; ++j) {
+            stations.push_back(a + (b - a) * static_cast<double>(j) / static_cast<double>(count));
+        }
+    }
+    stations.push_back(plain.back());
+    return stations;
+}
+
 // ---- a corridor -------------------------------------------------------------------------
 
 CorridorRange corridorRange(const Corridor& corridor, const SolvedAlignment& alignment,
@@ -852,9 +938,6 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
                                  std::to_string(kMaximumSections) + " sections: not built");
         return built;
     }
-    built.start = start;
-    built.end = end;
-    built.hasRange = true;
 
     // Every key station: where the geometry, the grade, the superelevation
     // or the template changes character, which a schedule must not step over.
@@ -869,7 +952,19 @@ BuiltCorridor buildCorridor(const Corridor& corridor, const RoadTemplateSet& tem
         keys.push_back(region.start);
         keys.push_back(region.end);
     }
-    const std::vector<double> stations = sectionStations(start, end, corridor.interval, keys);
+    // And the stations a curve needs for its quantities to be within the
+    // corridor's tolerance. Refused, like an interval that makes too many, before
+    // any section is made, and with no range: nothing was built.
+    auto sectioned = sectionStations(start, end, corridor.interval, keys, alignment,
+                                     corridor.curveTolerance);
+    if (!sectioned) {
+        built.problems.push_back(sectioned.error().message);
+        return built;
+    }
+    const std::vector<double> stations = std::move(*sectioned);
+    built.start = start;
+    built.end = end;
+    built.hasRange = true;
 
     // The runs: the regions in station order, and the corridor's template
     // before, between and after them.

@@ -1167,3 +1167,110 @@ TEST(RoadVerbs, HelpListsEveryRoadVerb)
     }
     EXPECT_TRUE(contains(CommandInterpreter::helpText(), "ROADTEMPLATE"));
 }
+
+TEST(RoadVerbs, ACorridorsCurveToleranceIsKeptSetAndRefusedOutsideItsRange)
+{
+    Session session;
+    session.road();
+    session.ok("ROADTEMPLATE DEFAULTS");
+    const std::string made = session.ok(
+        "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" curvetol=0.002");
+    EXPECT_TRUE(contains(made, "interval=10 from= to= regions=0 superelevation=0 curvetol=0.002"))
+        << made;
+    EXPECT_EQ(session.document.corridors().corridors.front().curveTolerance, 0.002);
+    // A corridor that does not say has the default, written as it is.
+    session.ok("CORRIDOR NEW Plain ALIGNMENT road TEMPLATE \"urban street\"");
+    EXPECT_TRUE(contains(session.ok("CORRIDOR INFO Plain"), "curvetol=0.001"));
+    EXPECT_EQ(katana::cad::road::kDefaultCurveTolerance, 0.001);
+    // 0 and off are the same: no section is added in a curve.
+    const std::size_t steps = session.steps();
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Main curvetol=off"), "curvetol=0 "))
+        << "off is written as the 0 it is";
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Main curvetol=0.05"), "curvetol=0.05"));
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Main curvetol=0"), "curvetol=0"));
+    EXPECT_EQ(session.steps(), steps + 3) << "each a step of its own";
+    session.ok("CORRIDOR SET Main curvetol=0.1");
+    EXPECT_EQ(session.document.corridors().corridors.front().curveTolerance, 0.1);
+
+    // The range is 0 to a tenth; a word that is not a number is a parse error.
+    const std::size_t before = session.steps();
+    for (const char* line :
+         {"CORRIDOR SET Main curvetol=-0.001", "CORRIDOR SET Main curvetol=0.1001",
+          "CORRIDOR SET Main curvetol=1", "CORRIDOR NEW Bad ALIGNMENT road TEMPLATE \"urban street\" "
+                                          "curvetol=2"}) {
+        EXPECT_EQ(session.refused(line).code, ErrorCode::InvalidArgument) << line;
+    }
+    for (const char* line : {"CORRIDOR SET Main curvetol=abc", "CORRIDOR SET Main curvetol=",
+                             "CORRIDOR SET Main curvetol=nan", "CORRIDOR SET Main curvetol=inf"}) {
+        EXPECT_EQ(session.refused(line).code, ErrorCode::ParseFailure) << line;
+    }
+    EXPECT_EQ(session.steps(), before) << "a refused value changes nothing";
+    EXPECT_EQ(session.document.corridors().corridors.front().curveTolerance, 0.1);
+    EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "curvetol="));
+}
+
+TEST(RoadVerbs, ACorridorsCurveToleranceSurvivesTheProjectsJsonAndAnOldCorridorReadsAsTheDefault)
+{
+    using katana::cad::road::Corridor;
+    using katana::cad::road::CorridorSet;
+    CorridorSet set;
+    Corridor corridor;
+    corridor.name = "Main";
+    corridor.alignment = "road";
+    corridor.templateName = "t";
+    corridor.curveTolerance = 0.0023;
+    set.corridors = {corridor};
+    corridor.name = "Other";
+    corridor.curveTolerance = 0.0;
+    set.corridors.push_back(corridor);
+    const auto text = katana::cad::road::corridorsToJson(set);
+    ASSERT_TRUE(text.ok());
+    const auto back = katana::cad::road::corridorsFromJson(*text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    EXPECT_EQ(*back, set);
+    EXPECT_EQ(back->corridors[0].curveTolerance, 0.0023);
+    EXPECT_EQ(back->corridors[1].curveTolerance, 0.0) << "0 is kept, not read as absent";
+
+    // A corridor saved before the tolerance existed has no member: the default.
+    const auto old = katana::cad::road::corridorsFromJson(
+        R"({"format":"katana-corridors","version":1,"corridors":[)"
+        R"({"name":"Old","alignment":"road","template":"t","interval":10}]})");
+    ASSERT_TRUE(old.ok()) << old.error().describe();
+    EXPECT_EQ(old->corridors.front().curveTolerance, katana::cad::road::kDefaultCurveTolerance);
+    // A member that is not a sensible tolerance is refused as a corridor is.
+    const auto wrong = [](const char* member) {
+        return katana::cad::road::corridorsFromJson(
+            std::string(R"({"format":"katana-corridors","version":1,"corridors":[)"
+                        R"({"name":"Bad","alignment":"road","template":"t","interval":10,)") +
+            member + "}]}");
+    };
+    EXPECT_EQ(wrong(R"("curveTolerance":5)").error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(wrong(R"("curveTolerance":-1)").error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(wrong(R"("curveTolerance":"fine")").error().code, ErrorCode::ParseFailure);
+}
+
+TEST(RoadVerbs, ACurvedCorridorHasTheSectionsItsToleranceNeedsAndAStraightOneHasNoMore)
+{
+    // The quarter turn at 50 m (alignment A, 178.5398 m long): 20 stations of
+    // the interval and the keys, and two more in each of the arc's eight gaps
+    // (10 m is 0.2 radians, over the 0.0775 a tolerance of 0.001 allows, and
+    // three parts do), 36. Off, the 20 alone. The straight road is 11 either way.
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    session.ok("ALIGN NEW A 0,0 100,0 100,100");
+    session.ok("ALIGN SET A 1 50");
+    session.ok("ALIGN DESIGN A 0,10 200,10");
+    const std::string curved =
+        session.ok("CORRIDOR NEW Bend ALIGNMENT A TEMPLATE \"urban street\"");
+    EXPECT_TRUE(contains(curved, "runs=1 sections=36 ")) << curved;
+    EXPECT_TRUE(contains(session.ok("CORRIDOR BUILD Bend"), "runs=1 sections=36 "));
+    EXPECT_TRUE(contains(session.ok("CORRIDOR SET Bend curvetol=off"), "curvetol=0"));
+    EXPECT_TRUE(contains(session.ok("CORRIDOR BUILD Bend"), "runs=1 sections=20 "));
+    session.road();
+    int which = 0;
+    for (const char* tolerance : {"curvetol=0.001", "curvetol=0"}) {
+        const std::string line = "CORRIDOR NEW Road" + std::to_string(++which) +
+                                 " ALIGNMENT road TEMPLATE \"urban street\" " + tolerance;
+        EXPECT_TRUE(contains(session.ok(line), "runs=1 sections=11 ")) << tolerance;
+    }
+}

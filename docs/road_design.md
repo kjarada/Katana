@@ -148,7 +148,8 @@ shoulder, batter; its profile is the median's top).
 A corridor names its alignment (with a design profile), its road template
 and its TARGET SURFACE, and holds what is its own: a station range (each end
 absent is the alignment and profile's overlap), the interval it is sectioned
-at (10 m by default), REGIONS where another template applies, and the
+at (10 m by default), the CURVE TOLERANCE its quantities on a curve are held
+to (0.001 by default), REGIONS where another template applies, and the
 SUPERELEVATION table.
 
 **Superelevation** is a table of stations, each with the crossfall of the
@@ -182,6 +183,42 @@ ends - because the road changes character there and a schedule that stepped
 over them could not be checked (`road::sectionStations`). More than 100 000
 sections is refused before one is made, as ALIGN STATIONS refuses as many
 rows.
+
+**Sections inside a curve.** A solid is lofted from one section to the next with
+flat quads, so round a curve its plan area and volume are those of CHORDS: over a
+step of arc angle theta, `sin(theta)/theta` of an annulus sector's, short by
+about theta^2/6 (0.65 % for 10 m on R = 50 m), and a kerb's length, the sum of the
+chords of its lip line, short by about theta^2/24 (0.16 %). The corridor therefore
+adds sections inside a curve, and no step is left that turns through more than
+`sqrt(6 x curvetol)`: 0.0775 radians at the default of 0.001, 3.9 m on R = 50 m
+and 15.5 m on R = 200 m, where the interval's 10 m already does it
+(`road::sectionStations` with the alignment). A gap that turns through more is cut
+into the fewest EQUAL parts that do not, so every station of the plain list is
+still there, a straight gets none, and the same stations serve the strings, the
+surfaces, the solids, the quantities and the IFC export: this is the one engine.
+A spiral is held to the curvature at the sharper end of each gap, which errs the
+safe way. Round the 90 degree curve of R = 50 m the left lane's 50 mm AC14 (3.3 m
+wide, r = 46.7 to 50 m, 12.5314 m3 exact: pi/4 x (50^2 - 46.7^2) x 0.05) comes out
+12.4505 m3 with no sections added (`curvetol=0`: 0.65 % short) and 12.5224 m3 at
+the default (0.07 % short, inside the 0.1 % asked), at the cost of 16 sections
+more than the 20 the interval and the keys give over its 178.5 m
+(`StationsInsideACurveAreCutUntilNoStepTurnsThroughMoreThanTheTolerancesAngle`,
+`ACoursesVolumeRoundAQuarterCircleIsTheAnnulusSectorsToTheCurveTolerance`). The
+EARTHWORKS get those sections too, which can only bring
+their end-area volume nearer the true one. `curvetol=` is a relative error from 0
+(off, or the word `off`) to 0.1; one so small that the curve needs more than
+100 000 sections (4e-11 round a quarter turn) is refused as an interval that
+makes too many is, naming the tolerance. A corridor saved before it existed has
+none written and reads as the default, so its quantities on a curve change, for
+the better, the next time it is built. *Rejected:* correcting the quantities by the annulus sector's formula
+and leaving the sections where they were - the solid drawn and the number would
+then disagree, the model and its quantity agreeing being the point of measuring
+the solid, and spirals, superelevation and an offset kerb would each need a
+formula. *Rejected:* a smaller default interval - a straight would pay for the
+bend. *Rejected:* a tolerance in metres of sagitta, as a drawing's polyline is
+chorded (`SolvedAlignment::toPolyline`): what a quantity cares about is the
+angle a step turns through, and the same sagitta is a different relative error
+on every radius.
 
 **A section** (`road::roadSection`) sets each side's components out in turn
 from the centreline at the design level; a lane or shoulder at its crossfall
@@ -386,7 +423,8 @@ their hull.
 
 A course's volume is the SOLID'S, so the model and its quantity agree and a
 course on the outside of a curve - longer than the centreline - is measured
-as the longer thing it is (to the chords between its sections: Not done). The earthworks' is the END AREA, the measurement
+as the longer thing it is (to the chords between its sections, which the
+curve tolerance holds to a thousandth: "Sections inside a curve"). The earthworks' is the END AREA, the measurement
 standard, as above; the solid drawn for them differs from it by the corners
 its 41 columns cut, which the tests work out by hand
 (`CorridorObjects.TheEarthworksAreTheEndAreasTheOldAssemblyMeasured`).
@@ -468,7 +506,7 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     ROADTEMPLATE COURSE <t> <component> ADD <course> thickness= [material=] [ifc=] [colour=] [at=]
     ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... [<course> key=value ...] | REMOVE <course>
     CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
-    CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=]
+    CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=] [curvetol=]
     CORRIDOR SET <c> key=value ... | DELETE <c> | RENAME <c> <new>
     CORRIDOR REGION <c> ADD <from> <to> <t> | REMOVE <from> | CLEAR
     CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR
@@ -608,7 +646,7 @@ person's unapplied edits only while what they were made on is as it was:
   where it was left with one; a dialog taller than the screen is fitted to it
   by the application, so no scroll area of its own.
 - *Corridors.* The definition fields (name, alignment, template, surface,
-  interval, from, to) are a buffer, refilled from the corridor when it is
+  interval, curve tolerance, from, to) are a buffer, refilled from the corridor when it is
   chosen and when its stored definition changes, and kept across any other
   reload: a typed interval survives a line drawn. New and Rename read the name
   BEFORE the line runs (the reload refilled the field from the corridor still
@@ -621,7 +659,10 @@ person's unapplied edits only while what they were made on is as it was:
   to whatever item was showing; Apply now also writes a name in the case the
   corridor already holds it.
   `CorridorDialog.ApplyKeepsTheTemplateAndSurfaceACorridorNamesInAnotherCase` and
-  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`.
+  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`. The curve
+  tolerance is in the line only when it is not what the corridor already has
+  (a new corridor has the default), so the lines stay as short as they were
+  (`TheCurveToleranceIsInTheLineOnlyWhenItIsNotWhatTheCorridorHolds`).
 - *Corridor Quantities.* The table and the totals are the records of the
   last line it ran, so when the road model that line read (`bim::bimModel`'s
   object) is no longer the drawing's - an edit, an undo, a redo, New, Open -
@@ -685,13 +726,18 @@ class, layer, quantities and properties, and every problem
   the middle of its transition (and of an edge strip and a drain), batters
   daylighting on a plane in cut, fill and on sidelong ground, a side of a
   batter alone, a limit that is not a multiple of a step, the pavement box
-  cut, benches, the divided road's kerb, refusals.
+  cut, benches, the divided road's kerb, refusals; the stations inside a
+  curve, measured from the alignment's directions and not from the curvature
+  they were cut by (an arc, a spiral, a straight, an unusable tolerance, one
+  that needs too many).
 - `tests/cad/road/test_corridor_objects.cpp`: course volumes on a straight as
   width x thickness x length, every solid closed and turned outward, stable
   ids and IFC classes, a kerb's length and volume, the earthworks against the
   old assembly's end areas and their footprints (a side with cut and fill, a
   fill that ends along the road, pieces and their ids, no sliver of the other
-  kind), regions, problems, strings and surfaces.
+  kind), regions, problems, strings and surfaces; a course and a kerb round a
+  quarter circle against the annulus sector's area and the arc's length, with
+  the curve tolerance on and off.
 - `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache (the
   same object after an edit that left the model as it was), the RoadModel
@@ -731,18 +777,6 @@ class, layer, quantities and properties, and every problem
   triangle would still object. Every course is closed. The piece should end in
   a real closed taper (a wedge welded to a line), and a section with a gap
   should be two stretches across.
-- **Course areas and volumes and kerb lengths on a curve are chord
-  approximations.** A course is lofted between sections with flat quads and a
-  kerb's Length sums the chords between sections, so on an arc of radius R a
-  step of arc angle theta (the interval over R) makes areas and volumes short
-  by about theta^2 / 6 and a kerb's length by about theta^2 / 24: 0.65 % and
-  0.16 % for a 10 m interval on R = 50 m (a 90 degree curve, left lane AC14
-  12.450 m3 against 12.531 exact; the interval of 1 m gives 12.531), 0.04 % on
-  R = 200 m. The error is always low and falls with the interval, which the
-  person shortens on a curve as for the volumes (`docs/volumes.md`); the
-  sections could be added inside curves to a stated tolerance
-  (R x sqrt(6 x tolerance)) but that adds earthworks sections too, which the
-  existing station-count tests would have to be reviewed for.
 - Superelevation by design speed and radius: the table is entered by hand.
 - Shoulder rollover on the high side of a superelevated section: a
   superelevated shoulder takes the lane's crossfall.

@@ -67,6 +67,12 @@ Status checkCorridor(const Corridor& corridor)
     if (!std::isfinite(corridor.interval) || !(corridor.interval > 0.0)) {
         return refuse(corridor, "the interval must be positive");
     }
+    if (!std::isfinite(corridor.curveTolerance) || corridor.curveTolerance < 0.0 ||
+        corridor.curveTolerance > kLargestCurveTolerance) {
+        return refuse(corridor, "the curve tolerance is 0 (none) or a relative error of at most " +
+                                    number(kLargestCurveTolerance) + ", not " +
+                                    number(corridor.curveTolerance));
+    }
     if ((corridor.start && !std::isfinite(*corridor.start)) ||
         (corridor.end && !std::isfinite(*corridor.end))) {
         return refuse(corridor, "a station is not a finite number");
@@ -155,6 +161,7 @@ Result<std::string> corridorsToJson(const CorridorSet& set)
                  {"template", corridor.templateName},
                  {"surface", corridor.surface},
                  {"interval", corridor.interval},
+                 {"curveTolerance", corridor.curveTolerance},
                  {"regions", std::move(regions)},
                  {"superelevation", std::move(table)}};
         // Absent stays absent: no key, not a zero.
@@ -197,6 +204,10 @@ Result<CorridorSet> corridorsFromJson(std::string_view text)
             corridor.templateName = value.at("template").get<std::string>();
             corridor.surface = value.value("surface", std::string{});
             corridor.interval = value.at("interval").get<double>();
+            // A corridor saved before the curve tolerance existed has none
+            // written, and reads as the default: its quantities on a curve come
+            // out as the tolerance says now, not as the chords did.
+            corridor.curveTolerance = value.value("curveTolerance", kDefaultCurveTolerance);
             if (value.contains("start")) {
                 corridor.start = value.at("start").get<double>();
             }

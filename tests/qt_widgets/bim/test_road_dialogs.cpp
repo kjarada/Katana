@@ -1052,3 +1052,72 @@ TEST(RoadWorkbench, TheCorridorDialogsOpenForCorridorsWhoseAlignmentLostItsProfi
     ASSERT_FALSE(logged.empty());
     EXPECT_TRUE(logged.back().startsWith("No alignment has a design profile"));
 }
+
+// The curve tolerance (docs/road_design.md, "Building a corridor") is a field of
+// the definition, in the buffer with the others: said in the line only when it
+// is not what the corridor has, so the lines stay the short ones they were.
+TEST(CorridorDialog, TheCurveToleranceIsInTheLineOnlyWhenItIsNotWhatTheCorridorHolds)
+{
+    Document document;
+    Executor executor(document);
+    road(executor);
+    katana::qt::CorridorDialog dialog({&document, executor.runner()});
+    EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.001");
+
+    fill(dialog, "corridorName", "Main");
+    choose(dialog, "corridorAlignment", "road");
+    choose(dialog, "corridorTemplate", "urban street");
+    choose(dialog, "corridorSurface", "(none)");
+    click(dialog, "corridorNew");
+    EXPECT_EQ(executor.last(), "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" "
+                               "interval=10")
+        << "the default is not said";
+    EXPECT_EQ(document.corridors().find("Main")->curveTolerance, 0.001);
+
+    // A new one with another tolerance says it, after the interval.
+    fill(dialog, "corridorName", "Second");
+    fill(dialog, "corridorCurveTolerance", "0.005");
+    click(dialog, "corridorNew");
+    EXPECT_EQ(executor.last(), "CORRIDOR NEW Second ALIGNMENT road TEMPLATE \"urban street\" "
+                               "interval=10 curvetol=0.005");
+    ASSERT_NE(document.corridors().find("Second"), nullptr);
+    EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.005);
+    ASSERT_EQ(dialog.currentCorridor().toStdString(), "Second");
+    // The field shows what the chosen corridor holds, and so does the list.
+    EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.005");
+    auto* list = child<QTableWidget>(dialog, "corridorList");
+    ASSERT_EQ(list->columnCount(), 10);
+    EXPECT_EQ(list->horizontalHeaderItem(9)->text().toStdString(), "Curve tolerance");
+    EXPECT_EQ(list->item(1, 9)->text().toStdString(), "0.005");
+    EXPECT_EQ(list->item(0, 9)->text().toStdString(), "0.001");
+
+    // Apply with the field as it was filled says nothing of it; with it edited,
+    // it does - and 0 is how the verb is told to add no sections.
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.last(),
+              "CORRIDOR SET Second alignment=road template=\"urban street\" surface= interval=10 "
+              "from= to=");
+    fill(dialog, "corridorCurveTolerance", "0");
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.last(),
+              "CORRIDOR SET Second alignment=road template=\"urban street\" surface= interval=10 "
+              "from= to= curvetol=0");
+    EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.0);
+
+    // Not one number: said on the status line, and no line runs. One the
+    // corridor refuses (over a tenth) is the corridor's refusal, shown, and the
+    // field keeps what was typed for the person to correct.
+    const std::size_t lines = executor.lines.size();
+    fill(dialog, "corridorCurveTolerance", "tiny");
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.lines.size(), lines);
+    EXPECT_TRUE(label(dialog, "corridorStatus").contains("curve tolerance"))
+        << label(dialog, "corridorStatus").toStdString();
+    fill(dialog, "corridorCurveTolerance", "0.5");
+    click(dialog, "corridorApply");
+    EXPECT_EQ(executor.lines.size(), lines + 1);
+    EXPECT_TRUE(label(dialog, "corridorStatus").contains("curve tolerance"))
+        << label(dialog, "corridorStatus").toStdString();
+    EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.0);
+    EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.5");
+}

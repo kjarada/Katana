@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <map>
+#include <numbers>
 #include <string>
 #include <utility>
 #include <vector>
@@ -753,4 +755,138 @@ TEST(CorridorObjects, TheSolidsLoftAtTheSectionsAndRefuseTooFewOfThem)
     EXPECT_EQ(box->vertices.size(), 8u);
     EXPECT_EQ(box->faces.size(), 12u);
     EXPECT_NEAR(meshVolume(*box), 10.0, 1e-12);
+}
+
+// ---- courses and kerbs round a curve (the chord error, docs/road_design.md) ------------------
+
+namespace {
+
+// (0,0) to (100,0) to (100,100), the corner rounded at 50 m: a quarter turn to
+// the left, 100 m of tangent and the arc from station 50 to 50 + 25 pi =
+// 128.5398 between them, 178.5398 in all.
+katana::geometry::SolvedAlignment quarterTurn()
+{
+    katana::geometry::HorizontalAlignment definition;
+    definition.pis = {katana::geometry::AlignmentPI{katana::geometry::Point2(0, 0)},
+                      katana::geometry::AlignmentPI{katana::geometry::Point2(100, 0), 50.0},
+                      katana::geometry::AlignmentPI{katana::geometry::Point2(100, 100)}};
+    auto solved = katana::geometry::solveAlignment(definition);
+    EXPECT_TRUE(solved.ok()) << solved.error().describe();
+    return *solved;
+}
+
+// The AC14 course (50 mm) of the 3.5 m lanes round the quarter turn, with the
+// corridor's curve tolerance as given: the left lane's volume, then the right's.
+std::pair<double, double> laneVolumesOnTheQuarterTurn(double curveTolerance,
+                                                      std::size_t* sections = nullptr)
+{
+    Corridor corridor = corridorOf("lanes");
+    corridor.curveTolerance = curveTolerance;
+    const auto built = buildCorridor(corridor, setOf({lanes()}), quarterTurn(),
+                                     level(10.0, 0.0, 300.0), nullptr);
+    EXPECT_TRUE(built.problems.empty()) << built.problems.front();
+    if (sections != nullptr) {
+        *sections = built.sections;
+    }
+    const BimModel model = corridorSolids(built);
+    const BimObject* left = objectWithId(model, "corridor/Main/left/lane/AC14/1");
+    const BimObject* right = objectWithId(model, "corridor/Main/right/lane/AC14/1");
+    if (left == nullptr || right == nullptr) {
+        ADD_FAILURE() << "a lane's AC14 is missing";
+        return {};
+    }
+    // The solid's own volume and the plan outline's area say the same: the
+    // volume is that area at a thickness of 0.05.
+    EXPECT_NEAR(quantityOf(*left, "GrossVolume"), quantityOf(*left, "GrossArea") * 0.05, 1e-9);
+    EXPECT_NEAR(quantityOf(*right, "GrossVolume"), quantityOf(*right, "GrossArea") * 0.05, 1e-9);
+    return {quantityOf(*left, "GrossVolume"), quantityOf(*right, "GrossVolume")};
+}
+
+} // namespace
+
+TEST(CorridorObjects, ACoursesVolumeRoundAQuarterCircleIsTheAnnulusSectorsToTheCurveTolerance)
+{
+    // The left lane is on the inside of a left turn: 3.5 m wide, from r = 46.5
+    // to r = 50; the right lane from 50 to 53.5. Each AC14 is 50 mm thick and
+    // lies over 100 m of tangent (3.5 x 100 x 0.05 = 17.5 m3) and a quarter of
+    // an annulus, pi/4 (R2^2 - R1^2) x 0.05:
+    //   left   pi/4 (2500 - 2162.25) = pi/4 x 337.75 = 265.268 m2   13.2634 m3
+    //   right  pi/4 (2862.25 - 2500) = pi/4 x 362.25 = 284.510 m2   14.2255 m3
+    // 30.7634 and 31.7255 m3 in all.
+    const double pi = std::numbers::pi;
+    const double leftArc = pi / 4.0 * (50.0 * 50.0 - 46.5 * 46.5) * 0.05;
+    const double rightArc = pi / 4.0 * (53.5 * 53.5 - 50.0 * 50.0) * 0.05;
+    const double leftExact = 17.5 + leftArc;
+    const double rightExact = 17.5 + rightArc;
+    std::size_t sections = 0;
+    const auto [left, right] = laneVolumesOnTheQuarterTurn(kDefaultCurveTolerance, &sections);
+    // A tolerance of 0.001 holds the arc's part to a thousandth - the chords
+    // are short by theta^2 / 6 at most, theta = 0.0775 - and it is always
+    // short, never over. (Without it the same arc is 0.7 % short: below.)
+    EXPECT_LE(left, leftExact);
+    EXPECT_LE(right, rightExact);
+    EXPECT_GE(left, leftExact - 0.001 * leftArc);
+    EXPECT_GE(right, rightExact - 0.001 * rightArc);
+    // The sections: 20 the interval and the keys give (0, 10, ..., 120,
+    // 128.5398, 130, ..., 170, 178.5398) and two more in each of the arc's
+    // eight gaps (three parts each: 10 m turns 0.2 radians, over the 0.0775
+    // allowed), 36.
+    EXPECT_EQ(sections, 36u);
+}
+
+TEST(CorridorObjects, ACoursesVolumeRoundAQuarterCircleWithNoToleranceIsTheChordsOfTheIntervalStations)
+{
+    // curveTolerance 0 adds no section: the 20 of the interval and the keys,
+    // and the quads between them. Round the arc the stations are 50, 60, ...,
+    // 120 (seven steps of 10 m, theta = 0.2) and 128.5398 (8.5398 m, theta =
+    // 0.17080). An annulus sector's chord quad is 0.5 sin(theta) (R2^2 - R1^2),
+    // so the arc holds
+    //   left   0.5 (7 sin 0.2 + sin 0.17080) 337.75 = 263.555 m2  13.1778 m3
+    //   right  0.5 (7 sin 0.2 + sin 0.17080) 362.25 = 282.673 m2  14.1337 m3
+    // against the exact 265.268 and 284.510: 0.65 % short, theta^2 / 6.
+    const double pi = std::numbers::pi;
+    double sines = 7.0 * std::sin(10.0 / 50.0);
+    sines += std::sin((25.0 * pi - 70.0) / 50.0);
+    const double leftChords = 17.5 + 0.5 * sines * (50.0 * 50.0 - 46.5 * 46.5) * 0.05;
+    const double rightChords = 17.5 + 0.5 * sines * (53.5 * 53.5 - 50.0 * 50.0) * 0.05;
+    std::size_t sections = 0;
+    const auto [left, right] = laneVolumesOnTheQuarterTurn(0.0, &sections);
+    EXPECT_NEAR(left, leftChords, 1e-9);
+    EXPECT_NEAR(right, rightChords, 1e-9);
+    EXPECT_EQ(sections, 20u);
+    // And they are short of the curve by far more than the default allows.
+    const double leftArc = pi / 4.0 * (50.0 * 50.0 - 46.5 * 46.5) * 0.05;
+    EXPECT_LT(left, 17.5 + leftArc - 0.001 * leftArc);
+}
+
+TEST(CorridorObjects, AKerbsLengthRoundAQuarterCircleIsItsArcToAQuarterOfTheCurveTolerance)
+{
+    // The urban street's left kerb has its lip 3.3 + 2.3 = 5.6 m from the
+    // centreline, r = 44.4 m on the inside of the turn: 100 m of tangent and
+    // pi/2 x 44.4 = 69.7434 m of arc, 169.7434 in all. A chord holds
+    // sin(theta/2)/(theta/2) of its arc, theta^2 / 24 short, so with
+    // theta = 0.0775 the length is within 0.001/4 of the arc's 69.74: 0.0174 m.
+    // Without the added sections the same kerb is 69.6306 m on the arc (the
+    // 7 x 10 m and 8.5398 m chords, 2 r sin(theta/2) each), 0.113 short.
+    RoadTemplateSet templates;
+    templates.templates = standardTemplates();
+    const double exact = 100.0 + std::numbers::pi / 2.0 * 44.4;
+    Corridor corridor = corridorOf("urban street");
+    const auto built = buildCorridor(corridor, templates, quarterTurn(), level(10.0, 0.0, 300.0),
+                                     nullptr);
+    const BimModel model = corridorSolids(built);
+    const BimObject* kerb = objectWithId(model, "corridor/Main/left/kerb/1");
+    ASSERT_NE(kerb, nullptr);
+    const double length = quantityOf(*kerb, "Length");
+    EXPECT_LE(length, exact);
+    EXPECT_GE(length, exact - 0.001 / 4.0 * (std::numbers::pi / 2.0 * 44.4));
+    corridor.curveTolerance = 0.0;
+    const BimModel chords = corridorSolids(
+        buildCorridor(corridor, templates, quarterTurn(), level(10.0, 0.0, 300.0), nullptr));
+    const BimObject* chorded = objectWithId(chords, "corridor/Main/left/kerb/1");
+    ASSERT_NE(chorded, nullptr);
+    // 100 + the seven 10 m chords at theta = 0.2 and the 8.5398 m one.
+    double arc = 7.0 * 2.0 * 44.4 * std::sin(0.1);
+    arc += 2.0 * 44.4 * std::sin((25.0 * std::numbers::pi - 70.0) / 100.0);
+    EXPECT_NEAR(quantityOf(*chorded, "Length"), 100.0 + arc, 1e-9);
 }
