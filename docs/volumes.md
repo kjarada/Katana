@@ -81,9 +81,10 @@ PREVIEW they say what they would add and add nothing.
 **Refused, saying why:** a surface or an alignment the drawing has not got
 (NotFound); surfaces with no ground in common, or polygons with nothing of
 it inside (InvalidGeometry, naming both surfaces' extents); an `#id` that is
-not a closed polyline or a circle (InvalidGeometry, saying what it is); fewer
-than three typed corners; EACH without INSIDE; a factor that is not more
-than 0; polygons that overlap without EACH. A scope that takes no closed
+no polygon - not a closed polyline, curve polyline, circle or ellipse
+(InvalidGeometry, saying what it is); fewer than three typed corners; EACH
+without INSIDE; a factor that is not more than 0; polygons that overlap
+without EACH. A scope that takes no closed
 polygon is said - `polygons used=0` and `ran=no` - not refused (`docs/cad.md`, "Scope and filter").
 
 ## One overlay
@@ -142,12 +143,30 @@ whose edges cross both surfaces' diagonals measures the triangle's shoelace
 area, 2088.635 m3
 (`VolumeInsidePolygon.TheEdgesOfAPolygonCutTrianglesWhereTheyLieNotByWholeTriangles`).
 
-- **The polygon** is an `#id` (a closed polyline, a closed curve polyline, a
-  circle), typed corners, or what a scope takes (`readVolumePolygons`): the
-  closed outlines are used; lines, arcs and open polylines are counted as
-  `skipped.open`, and points, text, ellipses and splines as `skipped.other`.
-  An arc and a circle are chorded within `geometry::kCurveChordTolerance`
-  (1 mm sagitta), and the record says `chorded=yes`.
+- **The polygon** is an `#id`, typed corners, or what a scope takes, read
+  by the one reader of the drawing's polygons that the surface edits use too
+  (`include/katana/cad/terrain/drawing_shapes.hpp`, which says what each kind
+  of entity gives); `readVolumePolygons` only words its refusals. A closed
+  polyline or curve polyline, one drawn back to its first vertex without
+  being closed, a circle and a full ellipse are polygons, each at its
+  heights; lines, arcs, elliptical arcs, open polylines and outlines of
+  fewer than three corners are counted as `skipped.open` (they bound no
+  area), and points, text and splines as `skipped.other`. An arc, a circle
+  and an ellipse are chorded within `geometry::kCurveChordTolerance` (1 mm
+  sagitta), and the record says `chorded=yes`.
+- **One reader, the more capable rule.** The volumes and the surface edits
+  were written side by side with a reader each, and the two had come to
+  disagree: these verbs refused a full ellipse and a polyline drawn back to
+  its start that the edits took, and the edits dropped a polygon's heights
+  and refused FROM with no scope word, which these took as the selection.
+  Where they differed the shared rule is the one that takes more, since each
+  refusal was an accident of which reader was written, not a reason: so a
+  polygon here may now be an ellipse or a polyline drawn back to its start
+  (`VolumeVerbs.AFullEllipseAndAPolylineDrawnBackToItsStartAreVolumePolygons`).
+  A closed outline of fewer than three corners, which used to be taken and
+  then refused by the overlay, is now counted with what bounds no area.
+  Rejected: keeping `VolumePolygon` as a thin adapter over the shared shape,
+  which would have kept a second representation of the same polygon.
 - **A volume to a level inside a polygon** compares the surface with the
   region made flat at the level (`OverlayRegion::atLevel`): the same
   overlay, so the same exactness.
@@ -316,8 +335,13 @@ records do not carry.
   curved alignment; every refusal; and the same bits at any thread count.
 - The verbs (`tests/cad/terrain/test_volume_verbs.cpp`, the `VolumeVerbs`
   suite): every form through `CommandInterpreter::run`, EACH per polygon with
-  an open line skipped, overlapping polygons, the factors, the CSV, the
-  difference as one undo step, the envelope, the refusals.
+  an open line skipped, an ellipse and a polyline drawn back to its start as
+  polygons, overlapping polygons, the factors, the CSV, the difference as one
+  undo step, the envelope, the refusals.
+- The polygons' reader (`tests/cad/terrain/test_drawing_shapes.cpp`, the
+  `DrawingShapes` suites, shared with the surface edits): what each kind of
+  entity gives and why one gives none, typed corners with and without
+  heights, the words, and a scope that takes nothing.
 - The window (`tests/qt_widgets/terrain/test_volumes_dialog.cpp`): each
   page's line by object name; Measure with the interpreter as the executor,
   filling the table and the mass haul diagram; Make Cut/Fill Map; Save CSV.
@@ -380,7 +404,8 @@ records do not carry.
   (`OverlayRegion::fromPolygon`), but the verbs take each closed outline as a
   polygon of its own: a tagged hole joining its area, as the GIS conversion
   reads it, is not read here yet.
-- **Ellipses and splines** are not taken as polygons (`skipped.other`).
+- **Splines** are not taken as polygons (`skipped.other`): `Spline2` has no
+  closed flag, and a spline drawn back to its start is not read as one.
 - **A background job.** The verbs run on the thread that runs the line; on
   the window's that is the GUI thread, and a difference of two 200 000
   triangle surfaces takes a second or two. SURFACE FROM's job pattern is the

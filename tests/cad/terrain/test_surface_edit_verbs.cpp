@@ -118,6 +118,26 @@ TEST_F(SurfaceEditVerbs, AHoleFromAClosedPolylineByIdRemovesItsArea)
     EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 88.0, 1e-9);
 }
 
+TEST_F(SurfaceEditVerbs, FromWithNoScopeWordIsTheSelectionAsTheScopeGrammarHasIt)
+{
+    // The same hole, the polyline taken from the selection: 88.
+    putSurface(document, "ground", flatGridSurface(10, 1.0, 4.0));
+    const EntityId id =
+        polyline({Point2(3, 3), Point2(6, 3), Point2(6, 7), Point2(3, 7)}, true);
+    document.selection().set({id});
+    const std::string text = reply("SURFACE EDIT ground HOLE FROM");
+    EXPECT_TRUE(text.starts_with("scope=selection matched=1 polygons=1 skipped=0\n")) << text;
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 88.0, 1e-9);
+}
+
+TEST_F(SurfaceEditVerbs, ATypedPolygonClosedOnItsFirstCornerIsThatPolygon)
+{
+    // [3,6] x [3,7] typed back to its first corner: the same 12 out, 88 left.
+    putSurface(document, "ground", flatGridSurface(10, 1.0, 4.0));
+    reply("SURFACE EDIT ground HOLE 3,3 6,3 6,7 3,7 3,3");
+    EXPECT_NEAR(surfaceOf(document, "ground").planArea(), 88.0, 1e-9);
+}
+
 TEST_F(SurfaceEditVerbs, ABoundaryFromAScopeSaysWhatTheScopeTook)
 {
     // The pyramid clipped to [2,8]^2: 36. The scope takes the polyline and a

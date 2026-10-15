@@ -16,6 +16,7 @@
 //   SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
 //
 //   <polygon> := #id [#id ...] | x,y[,z] x,y[,z] x,y[,z] ... | FROM <scope> [WHERE k=v ...]
+//                (read as drawing_shapes.hpp reads it)
 //
 // Words are case-insensitive; a surface or alignment name with a blank is
 // quoted. The key=value options are read wherever they stand - none of them
@@ -36,16 +37,14 @@
 // the drawing - ONE undo step - and with PREVIEW say what they would add.
 
 #include <cstddef>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/terrain/drawing_shapes.hpp"
 #include "katana/core/error.hpp"
-#include "katana/entity/entity.hpp"
-#include "katana/geometry/primitives2d.hpp"
 
 namespace katana::cad {
 
@@ -67,43 +66,16 @@ runVolumeVerb(Document& document, const std::vector<std::string>& tokens,
 
 // ---- the pieces the verbs are made of, for front ends and tests -----------------------------
 
-// A closed boundary a volume is measured inside.
-struct VolumePolygon {
-    // The entity it is, when it is one.
-    std::optional<katana::entity::EntityId> entity{};
-    // Its corners, not repeating the first at the end. An arc of a curve
-    // polyline and a circle are chorded within geometry::kCurveChordTolerance
-    // (1 mm), and `chorded` says so.
-    katana::geometry::Polyline2 ring{};
-    // A height for each corner where it has one: an entity's (its elevation
-    // or elevations property, or a curve polyline's own), or the third
-    // number of a typed corner. What STOCKPILE base=boundary uses.
-    std::vector<std::optional<double>> heights{};
-    bool chorded = false;
-};
-
-struct VolumePolygons {
-    std::vector<VolumePolygon> polygons;
-    // FROM: what the scope took.
-    std::optional<ScopeMatch> scope{};
-    // FROM: what it took that bounds no area - lines, arcs, open polylines -
-    // and what is no outline at all (points, text, an ellipse or a spline).
-    std::size_t skippedOpen = 0;
-    std::size_t skippedOther = 0;
-};
-
-// The polygon entity `entity` is: a closed polyline or curve polyline, or a
-// circle. InvalidGeometry naming it for anything else - an open one says it
-// is not closed.
-[[nodiscard]] katana::core::Result<VolumePolygon>
-volumePolygonOf(const katana::entity::Entity& entity);
-
 // Reads a <polygon> from `words` at `at` and leaves `at` after it: one or
-// more #ids, three or more typed corners x,y[,z], or FROM and a scope. A
+// more #ids, three or more typed corners x,y[,z], or FROM and a scope - the
+// drawing's polygons as the surface edits read them too (drawing_shapes.hpp,
+// which says what each kind of entity gives), with these verbs' refusals. A
 // scope that takes no closed outline gives no polygon - said, not refused;
 // an #id that is no entity is NotFound, one that is no polygon
-// InvalidGeometry; fewer than three corners ParseFailure.
-[[nodiscard]] katana::core::Result<VolumePolygons>
+// InvalidGeometry; fewer than three corners ParseFailure. A polygon's
+// heights are what STOCKPILE base=boundary uses, and `chorded` what EACH's
+// chorded=yes says.
+[[nodiscard]] katana::core::Result<DrawingShapes>
 readVolumePolygons(const Document& document, const std::vector<std::string>& words,
                    std::size_t& at, const ScopeViewProvider& views);
 

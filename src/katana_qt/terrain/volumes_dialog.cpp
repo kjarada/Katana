@@ -374,8 +374,8 @@ VolumesDialog::VolumesDialog(VolumesDialogContext context, QWidget* parent)
     boundaryScope_ = new QRadioButton(QStringLiteral("The polygons below"), boundary_);
     boundaryScope_->setObjectName(QStringLiteral("volumesBoundaryScope"));
     boundaryScope_->setToolTip(QStringLiteral(
-        "The closed polylines and circles the scope takes; lines and points are counted, "
-        "not used"));
+        "The closed polylines, curve polylines, circles and ellipses the scope takes; lines "
+        "and points are counted, not used"));
     boundaryCorners_ = new QRadioButton(QStringLiteral("Typed corners"), boundary_);
     boundaryCorners_->setObjectName(QStringLiteral("volumesBoundaryCorners"));
     boundaryCorners_->setToolTip(QStringLiteral("One polygon, its corners typed"));

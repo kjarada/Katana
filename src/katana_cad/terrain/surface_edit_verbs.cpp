@@ -6,13 +6,11 @@
 #include <numbers>
 #include <set>
 #include <utility>
-#include <variant>
 
 #include "katana/cad/geo/surface_input.hpp"
+#include "katana/cad/terrain/drawing_shapes.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/entity.hpp"
-#include "katana/geometry/chording.hpp"
-#include "katana/geometry/curves2d.hpp"
 #include "katana/terrain/tin_edit.hpp"
 
 namespace katana::cad {
@@ -39,48 +37,14 @@ std::string number(double value) { return katana::core::formatExactReal(value); 
 
 // ---- typed coordinates -----------------------------------------------------------------
 
-struct TypedPoint {
-    Point2 at;
-    std::optional<double> z;
-};
-
-// x,y or x,y,z, each a finite number.
-std::optional<TypedPoint> parseTypedPoint(std::string_view word)
-{
-    std::vector<double> parts;
-    std::size_t start = 0;
-    while (true) {
-        const std::size_t comma = word.find(',', start);
-        const auto part = katana::core::parseFiniteDouble(
-            word.substr(start, comma == std::string_view::npos ? std::string_view::npos
-                                                                : comma - start));
-        if (!part) {
-            return std::nullopt;
-        }
-        parts.push_back(*part);
-        if (comma == std::string_view::npos) {
-            break;
-        }
-        start = comma + 1;
-    }
-    if (parts.size() != 2 && parts.size() != 3) {
-        return std::nullopt;
-    }
-    TypedPoint point{Point2(parts[0], parts[1]), std::nullopt};
-    if (parts.size() == 3) {
-        point.z = parts[2];
-    }
-    return point;
-}
-
 std::string describe(const Point2& at) { return number(at.x) + "," + number(at.y); }
 
-Result<TypedPoint> requirePoint(const Words& words, std::size_t& at, std::string_view what)
+Result<TypedCorner> requirePoint(const Words& words, std::size_t& at, std::string_view what)
 {
     if (at >= words.size()) {
         return makeError(ErrorCode::ParseFailure, std::string(what) + " needs a point x,y");
     }
-    const auto point = parseTypedPoint(words[at]);
+    const auto point = parseTypedCorner(words[at]);
     if (!point) {
         return makeError(ErrorCode::ParseFailure,
                          std::string(what) + " needs a point x,y, not this word", words[at]);
@@ -115,285 +79,144 @@ std::optional<std::pair<std::string, std::string>> option(std::string_view word)
 }
 
 // ---- the drawing's data: <polygon>, <line>, <points> ---------------------------------------
+//
+// Read by the one reader of the drawing's shapes (drawing_shapes.hpp), which
+// the volumes read their polygons with too, so an entity is the same polygon
+// to both; the replies and refusals here are this family's own words.
 
-enum class ShapeKind { Polygon, Line, Points };
+enum class DataKind { Polygon, Line, Points };
 
-const char* nameOf(ShapeKind kind)
+const char* nameOf(DataKind kind)
 {
     switch (kind) {
-    case ShapeKind::Polygon:
+    case DataKind::Polygon:
         return "a polygon";
-    case ShapeKind::Line:
+    case DataKind::Line:
         return "a line";
-    case ShapeKind::Points:
+    case DataKind::Points:
         return "points";
     }
     return "data";
 }
 
-struct GeometryWords {
-    std::optional<ScopeWords> scope;
-    std::vector<katana::entity::EntityId> ids;
-    std::vector<TypedPoint> points;
-};
-
-Result<GeometryWords> readGeometryWords(const Words& words, std::size_t& at, ShapeKind kind)
+Result<ShapeWords> readGeometryWords(const Words& words, std::size_t& at, DataKind kind)
 {
     const std::string expected = std::string(nameOf(kind)) +
                                  " is #id, coordinates x,y[,z] ... or FROM <scope> [WHERE ...]";
     if (at >= words.size()) {
         return makeError(ErrorCode::ParseFailure, "expected " + expected);
     }
-    GeometryWords geometry;
-    if (is(words[at], "FROM")) {
-        ++at;
-        if (at >= words.size()) {
-            return makeError(ErrorCode::ParseFailure, "FROM needs a scope: " + expected);
-        }
-        auto scope = parseScopeWords(words, at);
-        if (!scope) {
-            return scope.error();
-        }
-        geometry.scope = std::move(scope).value();
-        return geometry;
+    const std::size_t first = at;
+    auto read = readShapeWords(words, at);
+    if (!read) {
+        return read.error();
     }
-    if (words[at].starts_with('#')) {
-        while (at < words.size() && words[at].starts_with('#')) {
-            const auto id = katana::core::parseInteger(std::string_view(words[at]).substr(1));
-            if (!id || *id <= 0) {
-                return makeError(ErrorCode::ParseFailure, "an entity id is # and a number",
-                                 words[at]);
-            }
-            geometry.ids.push_back(static_cast<katana::entity::EntityId>(*id));
-            ++at;
-        }
-        return geometry;
+    if (read->badId) {
+        return makeError(ErrorCode::ParseFailure, "an entity id is # and a number", *read->badId);
     }
-    while (at < words.size()) {
-        const auto point = parseTypedPoint(words[at]);
-        if (!point) {
-            break;
-        }
-        geometry.points.push_back(*point);
-        ++at;
+    if (read->empty()) {
+        return makeError(ErrorCode::ParseFailure, "expected " + expected, words[first]);
     }
-    if (geometry.points.empty()) {
-        return makeError(ErrorCode::ParseFailure, "expected " + expected, words[at]);
-    }
-    return geometry;
+    return read;
 }
-
-struct Shape {
-    std::vector<Point2> points;
-    std::vector<std::optional<double>> z;
-    bool closed = false;
-};
 
 struct ResolvedGeometry {
-    std::vector<Shape> shapes;
-    std::string record; // what a FROM scope took; empty otherwise
+    std::vector<DrawingShape> shapes; // a <polygon>'s or a <line>'s
+    std::vector<Point3> points;       // <points>'
+    std::string record;               // what a FROM scope took; empty otherwise
 };
 
-void dropClosingRepeat(Shape& shape)
-{
-    if (shape.points.size() > 1 &&
-        shape.points.front().distanceTo(shape.points.back()) <= katana::math::tolerance::kGeometric) {
-        shape.points.pop_back();
-        if (!shape.z.empty()) {
-            shape.z.pop_back();
-        }
-    }
-}
-
-std::optional<Shape> polygonOf(const katana::entity::Entity& entity)
-{
-    using namespace katana::geometry;
-    Shape shape;
-    shape.closed = true;
-    if (const auto* polyline = std::get_if<Polyline2>(&entity.geometry)) {
-        shape.points = polyline->vertices;
-        const bool repeats = shape.points.size() > 3 &&
-                             shape.points.front().distanceTo(shape.points.back()) <=
-                                 katana::math::tolerance::kGeometric;
-        if (!polyline->closed && !repeats) {
-            return std::nullopt;
-        }
-    } else if (const auto* curve = std::get_if<CurvePolyline2>(&entity.geometry)) {
-        if (!curve->closed) {
-            return std::nullopt;
-        }
-        shape.points = curve->tessellate(kCurveChordTolerance);
-    } else if (const auto* circle = std::get_if<Circle2>(&entity.geometry)) {
-        shape.points = chordCircle(*circle, kCurveChordTolerance);
-    } else if (const auto* ellipse = std::get_if<Ellipse2>(&entity.geometry)) {
-        if (!ellipse->isFull()) {
-            return std::nullopt;
-        }
-        shape.points = ellipse->tessellate(kCurveChordTolerance);
-    } else {
-        return std::nullopt;
-    }
-    dropClosingRepeat(shape);
-    if (shape.points.size() < 3) {
-        return std::nullopt;
-    }
-    return shape;
-}
-
-std::optional<Shape> lineOf(const katana::entity::Entity& entity)
-{
-    using namespace katana::geometry;
-    Shape shape;
-    if (const auto* segment = std::get_if<Segment2>(&entity.geometry)) {
-        shape.points = {segment->start, segment->end};
-        shape.z = katana::entity::heightsOf(entity.properties, 2);
-    } else if (const auto* polyline = std::get_if<Polyline2>(&entity.geometry)) {
-        shape.points = polyline->vertices;
-        shape.z = katana::entity::heightsOf(entity.properties, polyline->vertices.size());
-        shape.closed = polyline->closed;
-    } else if (const auto* curve = std::get_if<CurvePolyline2>(&entity.geometry)) {
-        for (const auto& point : curve->tessellateWithHeights(kCurveChordTolerance)) {
-            shape.points.push_back(point.position);
-            shape.z.push_back(point.height);
-        }
-        shape.closed = curve->closed;
-        if (shape.closed) {
-            dropClosingRepeat(shape);
-        }
-    } else {
-        return std::nullopt;
-    }
-    if (shape.z.size() != shape.points.size()) {
-        shape.z.assign(shape.points.size(), std::nullopt);
-    }
-    if (shape.points.size() < 2) {
-        return std::nullopt;
-    }
-    return shape;
-}
-
-Result<ResolvedGeometry> resolveGeometry(const Document& document, const GeometryWords& words,
-                                         ShapeKind kind, const ScopeViewProvider& views)
+// <points>: typed points, each with its level, or the points and levelled
+// vertices of the entities named - what a surface is built from
+// (geo::surfaceInput), not a shape.
+Result<ResolvedGeometry> resolvePoints(const Document& document, const ShapeWords& words,
+                                       const ScopeViewProvider& views)
 {
     ResolvedGeometry resolved;
-    if (!words.points.empty()) {
-        Shape shape;
-        for (const TypedPoint& point : words.points) {
-            if (kind == ShapeKind::Points && !point.z) {
+    if (!words.scope && words.ids.empty()) {
+        for (const TypedCorner& corner : words.corners) {
+            if (!corner.z) {
                 return makeError(ErrorCode::InvalidArgument,
                                  "a point added to a surface needs its level: x,y,z",
-                                 describe(point.at));
+                                 describe(corner.at));
             }
-            shape.points.push_back(point.at);
-            shape.z.push_back(point.z);
+            resolved.points.emplace_back(corner.at.x, corner.at.y, *corner.z);
         }
-        if (kind == ShapeKind::Polygon && shape.points.size() < 3) {
-            return makeError(ErrorCode::InvalidArgument,
-                             "a polygon typed in needs at least three corners",
-                             "corners=" + std::to_string(shape.points.size()));
-        }
-        if (kind == ShapeKind::Line && shape.points.size() < 2) {
-            return makeError(ErrorCode::InvalidArgument,
-                             "a line typed in needs at least two vertices");
-        }
-        shape.closed = kind == ShapeKind::Polygon;
-        resolved.shapes.push_back(std::move(shape));
         return resolved;
     }
-
-    std::vector<katana::entity::EntityId> ids = words.ids;
-    std::optional<ScopeMatch> match;
-    if (words.scope) {
-        auto matched = matchScope(document, *words.scope, views);
-        if (!matched) {
-            return matched.error();
-        }
-        ids = matched->matched;
-        match = std::move(matched).value();
-    } else {
-        for (const auto id : ids) {
-            if (document.model().entities.find(id) == nullptr) {
-                return makeError(ErrorCode::NotFound, "no entity of that id in the drawing",
-                                 "#" + std::to_string(id));
-            }
-        }
+    auto named = entitiesNamed(document, words, views);
+    if (!named) {
+        return named.error();
     }
-
+    if (named->missing) {
+        return makeError(ErrorCode::NotFound, "no entity of that id in the drawing",
+                         "#" + std::to_string(*named->missing));
+    }
+    const auto input = geo::surfaceInput(document.model(), named->ids);
+    resolved.points = input.input.points;
+    for (const auto& line : input.input.breaklines) {
+        resolved.points.insert(resolved.points.end(), line.vertices.begin(), line.vertices.end());
+    }
     std::size_t skipped = 0;
-    if (kind == ShapeKind::Points) {
-        const auto input = geo::surfaceInput(document.model(), ids);
-        Shape shape;
-        for (const Point3& point : input.input.points) {
-            shape.points.emplace_back(point.x, point.y);
-            shape.z.emplace_back(point.z);
-        }
-        for (const auto& line : input.input.breaklines) {
-            for (const Point3& point : line.vertices) {
-                shape.points.emplace_back(point.x, point.y);
-                shape.z.emplace_back(point.z);
-            }
-        }
-        for (const auto& [reason, count] : input.skipped) {
-            skipped += count;
-        }
-        if (match) {
-            resolved.record = scopeRecord(*match) + " points=" +
-                              std::to_string(shape.points.size()) +
-                              " skipped=" + std::to_string(skipped) +
-                              " heightless_vertices=" + std::to_string(input.heightlessVertices);
-        }
-        if (shape.points.empty()) {
-            return makeError(ErrorCode::InvalidArgument,
-                             "nothing taken has a level to add as a point",
-                             resolved.record.empty() ? std::string("entities=") +
-                                                           std::to_string(ids.size())
-                                                     : resolved.record);
-        }
-        resolved.shapes.push_back(std::move(shape));
-        return resolved;
+    for (const auto& [reason, count] : input.skipped) {
+        skipped += count;
     }
-
-    for (const auto id : ids) {
-        const auto* entity = document.model().entities.find(id);
-        if (entity == nullptr) {
-            continue;
-        }
-        auto shape = kind == ShapeKind::Polygon ? polygonOf(*entity) : lineOf(*entity);
-        if (!shape) {
-            if (!match) {
-                return makeError(ErrorCode::InvalidArgument,
-                                 kind == ShapeKind::Polygon
-                                     ? "the entity is not a closed polyline, curve polyline, "
-                                       "circle or ellipse"
-                                     : "the entity is not a line, polyline or curve polyline",
-                                 "#" + std::to_string(id));
-            }
-            ++skipped;
-            continue;
-        }
-        resolved.shapes.push_back(std::move(*shape));
+    if (named->scope) {
+        resolved.record = scopeRecord(*named->scope) + " points=" +
+                          std::to_string(resolved.points.size()) +
+                          " skipped=" + std::to_string(skipped) +
+                          " heightless_vertices=" + std::to_string(input.heightlessVertices);
     }
-    if (match) {
-        resolved.record = scopeRecord(*match) +
-                          (kind == ShapeKind::Polygon ? " polygons=" : " lines=") +
-                          std::to_string(resolved.shapes.size()) +
-                          " skipped=" + std::to_string(skipped);
-    }
-    if (resolved.shapes.empty()) {
-        return makeError(ErrorCode::InvalidArgument,
-                         std::string("the scope took no ") +
-                             (kind == ShapeKind::Polygon ? "polygon" : "line"),
-                         resolved.record);
+    if (resolved.points.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "nothing taken has a level to add as a point",
+                         resolved.record.empty()
+                             ? std::string("entities=") + std::to_string(named->ids.size())
+                             : resolved.record);
     }
     return resolved;
 }
 
-Polyline2 ringOf(const Shape& shape)
+Result<ResolvedGeometry> resolveGeometry(const Document& document, const ShapeWords& words,
+                                         DataKind kind, const ScopeViewProvider& views)
 {
-    Polyline2 ring;
-    ring.vertices = shape.points;
-    ring.closed = true;
-    return ring;
+    if (kind == DataKind::Points) {
+        return resolvePoints(document, words, views);
+    }
+    const bool polygon = kind == DataKind::Polygon;
+    auto taken =
+        resolveShapes(document, words, polygon ? ShapeKind::Polygon : ShapeKind::Line, views);
+    if (!taken) {
+        return taken.error();
+    }
+    if (const auto& refused = taken->refused) {
+        if (!refused->entity) {
+            return polygon ? makeError(ErrorCode::InvalidArgument,
+                                       "a polygon typed in needs at least three corners",
+                                       "corners=" + std::to_string(words.corners.size()))
+                           : makeError(ErrorCode::InvalidArgument,
+                                       "a line typed in needs at least two vertices");
+        }
+        const std::string id = "#" + std::to_string(*refused->entity);
+        if (refused->why == NotAShape::NoEntity) {
+            return makeError(ErrorCode::NotFound, "no entity of that id in the drawing", id);
+        }
+        return makeError(ErrorCode::InvalidArgument,
+                         "the entity is not " + std::string(polygon ? kPolygonKinds : kLineKinds),
+                         id);
+    }
+    ResolvedGeometry resolved;
+    resolved.shapes = std::move(taken->shapes);
+    if (taken->scope) {
+        resolved.record = scopeRecord(*taken->scope) + (polygon ? " polygons=" : " lines=") +
+                          std::to_string(resolved.shapes.size()) +
+                          " skipped=" + std::to_string(taken->skipped.total());
+    }
+    if (resolved.shapes.empty()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         std::string("the scope took no ") + (polygon ? "polygon" : "line"),
+                         resolved.record);
+    }
+    return resolved;
 }
 
 // The one polygon an edit takes.
@@ -404,7 +227,7 @@ Result<Polyline2> onePolygon(const ResolvedGeometry& geometry, std::string_view 
                          std::string(what) + " takes one polygon",
                          "polygons=" + std::to_string(geometry.shapes.size()));
     }
-    return ringOf(geometry.shapes.front());
+    return geometry.shapes.front().outline;
 }
 
 // ---- the edits --------------------------------------------------------------------------
@@ -534,11 +357,11 @@ Result<std::optional<Polyline2>> readInside(const Document& document, const Word
         return std::optional<Polyline2>{};
     }
     ++at;
-    auto geometryWords = readGeometryWords(words, at, ShapeKind::Polygon);
+    auto geometryWords = readGeometryWords(words, at, DataKind::Polygon);
     if (!geometryWords) {
         return geometryWords.error();
     }
-    auto geometry = resolveGeometry(document, *geometryWords, ShapeKind::Polygon, views);
+    auto geometry = resolveGeometry(document, *geometryWords, DataKind::Polygon, views);
     if (!geometry) {
         return geometry.error();
     }
@@ -551,7 +374,7 @@ Result<std::optional<Polyline2>> readInside(const Document& document, const Word
 }
 
 Result<ResolvedGeometry> readGeometry(const Document& document, const Words& words,
-                                      std::size_t& at, ShapeKind kind,
+                                      std::size_t& at, DataKind kind,
                                       const ScopeViewProvider& views)
 {
     auto geometryWords = readGeometryWords(words, at, kind);
@@ -620,14 +443,14 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             }
             const bool inside = is(words[at++], "INSIDE");
             edit.operation = inside ? "delete_triangles_inside" : "delete_triangles_outside";
-            auto geometry = readGeometry(document, words, at, ShapeKind::Polygon, views);
+            auto geometry = readGeometry(document, words, at, DataKind::Polygon, views);
             if (!geometry) {
                 return geometry.error();
             }
             edit.record = geometry->record;
             std::vector<std::vector<std::uint32_t>> sets;
-            for (const Shape& shape : geometry->shapes) {
-                sets.push_back(tin::trianglesByPolygon(surface, ringOf(shape), true));
+            for (const DrawingShape& shape : geometry->shapes) {
+                sets.push_back(tin::trianglesByPolygon(surface, shape.outline, true));
             }
             std::vector<std::uint32_t> chosen = unionOf(sets);
             if (!inside) {
@@ -703,14 +526,14 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             }
             ++at;
             edit.operation = "delete_points_inside";
-            auto geometry = readGeometry(document, words, at, ShapeKind::Polygon, views);
+            auto geometry = readGeometry(document, words, at, DataKind::Polygon, views);
             if (!geometry) {
                 return geometry.error();
             }
             edit.record = geometry->record;
             std::vector<std::vector<std::uint32_t>> sets;
-            for (const Shape& shape : geometry->shapes) {
-                sets.push_back(tin::verticesInside(surface, ringOf(shape)));
+            for (const DrawingShape& shape : geometry->shapes) {
+                sets.push_back(tin::verticesInside(surface, shape.outline));
             }
             const auto chosen = unionOf(sets);
             if (chosen.empty()) {
@@ -748,7 +571,7 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
         std::vector<Point3> points;
         if (typed) {
             while (at < words.size()) {
-                const auto point = parseTypedPoint(words[at]);
+                const auto point = parseTypedCorner(words[at]);
                 if (!point) {
                     break;
                 }
@@ -764,23 +587,19 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
                 return makeError(ErrorCode::ParseFailure, "ADD POINT needs x,y,z");
             }
         } else {
-            auto geometry = readGeometry(document, words, at, ShapeKind::Points, views);
+            auto geometry = readGeometry(document, words, at, DataKind::Points, views);
             if (!geometry) {
                 return geometry.error();
             }
             edit.record = geometry->record;
-            for (const Shape& shape : geometry->shapes) {
-                for (std::size_t i = 0; i < shape.points.size(); ++i) {
-                    points.emplace_back(shape.points[i].x, shape.points[i].y, *shape.z[i]);
-                }
-            }
+            points = std::move(geometry->points);
         }
         if (Status s = take(one(tin::addPoints(surface, points))); !s) {
             return s.error();
         }
     } else if (op == "BREAKLINE") {
         edit.operation = "breakline";
-        auto geometry = readGeometry(document, words, at, ShapeKind::Line, views);
+        auto geometry = readGeometry(document, words, at, DataKind::Line, views);
         if (!geometry) {
             return geometry.error();
         }
@@ -788,12 +607,12 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
         Outcome outcome;
         tin::TinSurface current = surface;
         bool first = true;
-        for (const Shape& shape : geometry->shapes) {
+        for (const DrawingShape& shape : geometry->shapes) {
             std::vector<tin::BreaklineVertex> vertices;
-            for (std::size_t i = 0; i < shape.points.size(); ++i) {
-                vertices.push_back({shape.points[i], shape.z[i]});
+            for (std::size_t i = 0; i < shape.outline.vertices.size(); ++i) {
+                vertices.push_back({shape.outline.vertices[i], shape.heights[i]});
             }
-            auto step = tin::addBreakline(current, vertices, shape.closed);
+            auto step = tin::addBreakline(current, vertices, shape.outline.closed);
             if (!step) {
                 return step.error();
             }
@@ -805,7 +624,7 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
     } else if (op == "BOUNDARY" || op == "HOLE") {
         const bool boundary = op == "BOUNDARY";
         edit.operation = boundary ? "boundary" : "hole";
-        auto geometry = readGeometry(document, words, at, ShapeKind::Polygon, views);
+        auto geometry = readGeometry(document, words, at, DataKind::Polygon, views);
         if (!geometry) {
             return geometry.error();
         }
@@ -822,8 +641,8 @@ Result<EditOutcome> runEdit(const Document& document, const tin::TinSurface& sur
             Outcome outcome;
             tin::TinSurface current = surface;
             bool first = true;
-            for (const Shape& shape : geometry->shapes) {
-                auto step = tin::cutHole(current, ringOf(shape));
+            for (const DrawingShape& shape : geometry->shapes) {
+                auto step = tin::cutHole(current, shape.outline);
                 if (!step) {
                     return step.error();
                 }
@@ -1087,7 +906,7 @@ Result<SurfaceEditPlan> planSurfaceEdit(const Document& document,
         at = 3;
         Result<tin::TinEditResult> made = makeError(ErrorCode::Internal, "not made");
         if (verb == "CLIP") {
-            auto geometry = readGeometry(document, words, at, ShapeKind::Polygon, views);
+            auto geometry = readGeometry(document, words, at, DataKind::Polygon, views);
             if (!geometry) {
                 return geometry.error();
             }

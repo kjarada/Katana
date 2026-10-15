@@ -40,8 +40,21 @@ every verb on drawing data takes it (`docs/cad.md`, "Scope and filter"): `#id
 ...`, coordinates typed in (`x,y[,z] ...`), or `FROM <scope> [WHERE k=v ...]`
 through the one scope parser (`include/katana/cad/scope_verbs.hpp`), the
 reply's first record saying what the scope took (`scope=drawing matched=3
-polygons=2 skipped=1`). `PREVIEW`, anywhere after the surface's name, works
-the edit out and changes nothing. The reply is one `surface` record:
+polygons=2 skipped=1`). A `<polygon>` and a `<line>` are read by the one
+reader of the drawing's polygons that the volumes use too
+(`include/katana/cad/terrain/drawing_shapes.hpp`, which says what each kind
+of entity gives): a polygon is a closed polyline or curve polyline, one
+drawn back to its first vertex, a circle or a full ellipse; a line a line,
+polyline or curve polyline. Where the two readers had differed, the shared
+rule is the one that takes more (`docs/volumes.md`, "Inside a polygon"):
+for these verbs that made `FROM` with no scope word the selection, as the
+scope grammar says of no scope word, where it was refused
+(`SurfaceEditVerbs.FromWithNoScopeWordIsTheSelectionAsTheScopeGrammarHasIt`),
+and a polygon typed back to its first corner that corner once
+(`DrawingShapes.TypedCornersMakeAPolygonWithAndWithoutHeights`). The
+words of the replies and refusals stay this family's own. `PREVIEW`,
+anywhere after the surface's name, works the edit out and changes nothing.
+The reply is one `surface` record:
 
 ```
 surface name=ground operation=hole triangles_before=200 triangles_after=188 vertices_before=121
@@ -287,7 +300,10 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   paste's seam on the top's rim - and every refusal.
 - `tests/cad/terrain/test_surface_edit_verbs.cpp`: the verbs through the
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
-  refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`.
+  refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`;
+  `test_drawing_shapes.cpp`: the polygons' and lines' reader these verbs
+  share with the volumes - each kind of entity, typed corners with and
+  without heights, the words, a scope that takes nothing.
 - `tests/qt_widgets/terrain/test_surface_edit_dialogs.cpp`: the lines, the
   dialogs and the toolbar by object name;
   `qt_the_surface_heights_dialog_raises_the_surface_headless`: the real window,
@@ -312,10 +328,6 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   natural addition.
 - **Moving a vertex in plan**, and editing a vertex's level by dragging in
   the window: only ADD POINT at an existing vertex relevels it.
-- **The polygon parser is this module's.** The volumes verbs take `<polygon>`
-  the same way and were written beside these; the two readers of `#id`,
-  coordinates and `FROM <scope>` into polygons should become one shared
-  function in `katana_cad`.
 - **PASTE with a top whose rim touches itself** (a hole touching the outer
   rim) is handled, but a top with two rim vertices closer than
   `tolerance::kGeometric` is refused by `TinSurface::create` with a message

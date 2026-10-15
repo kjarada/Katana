@@ -29,12 +29,15 @@
 //                                 - or the x,y,z of points);
 //   FROM <scope> [WHERE k=v ...]  what the shared scope takes (scope_verbs.hpp),
 //                                 the reply saying what it took (scope= matched=).
-// A polygon is a closed polyline, a closed curve polyline (its arcs chorded)
-// or a circle; a line a line, polyline or curve polyline (closed ones are
-// closed breaklines), its levels its `elevation`/`elevations`; points are
-// what a surface is built from (cad::geo::surfaceInput): points and the
-// vertices of levelled lines, a heightless one left out and counted. BOUNDARY,
-// CLIP and an INSIDE take one polygon; HOLE takes each it is given in turn;
+// A polygon and a line are read as the volumes read their polygons, by the
+// one reader (drawing_shapes.hpp, which says what each kind gives): a
+// polygon is a closed polyline or curve polyline (its arcs chorded), one
+// drawn back to its start, a circle or a full ellipse; a line a line,
+// polyline or curve polyline (closed ones are closed breaklines), its levels
+// its `elevation`/`elevations`. FROM with no scope word is the selection.
+// Points are what a surface is built from (cad::geo::surfaceInput): points
+// and the vertices of levelled lines, a heightless one left out and counted.
+// BOUNDARY, CLIP and an INSIDE take one polygon; HOLE takes each it is given in turn;
 // DELETE ... INSIDE|OUTSIDE takes the union. The verb's own options come
 // before FROM, since everything after FROM is the scope's.
 //

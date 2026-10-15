@@ -322,7 +322,7 @@ struct Reading {
 
 // One area: none (the whole of the surfaces) or a polygon and its region.
 using Measurer =
-    std::function<Result<Measure>(const VolumePolygon* polygon, const OverlayRegion* region)>;
+    std::function<Result<Measure>(const DrawingShape* polygon, const OverlayRegion* region)>;
 
 std::string measureFields(const Reading& reading, const Measure& measure, const Factors& factors)
 {
@@ -356,7 +356,7 @@ std::vector<std::string> csvRow(std::string kind, std::string index, std::string
     return row;
 }
 
-std::string polygonName(const VolumePolygon& polygon, std::size_t index)
+std::string polygonName(const DrawingShape& polygon, std::size_t index)
 {
     return polygon.entity ? "#" + std::to_string(*polygon.entity)
                           : "polygon " + std::to_string(index + 1);
@@ -386,7 +386,7 @@ Result<double> sharedArea(const OverlayRegion& a, const OverlayRegion& b)
 // counted twice in a total, so without EACH they are refused; with EACH each
 // is its own record and the total says it counts the overlap twice.
 Result<std::string> measureAreas(const Reading& reading,
-                                 const std::optional<VolumePolygons>& polygons, bool each,
+                                 const std::optional<DrawingShapes>& polygons, bool each,
                                  const Factors& factors, const Measurer& measure,
                                  const Options& options, bool overwrite)
 {
@@ -413,10 +413,13 @@ Result<std::string> measureAreas(const Reading& reading,
             // scope says it: a record of its own, its kind first.
             lines.push_back("boundary " + scopeRecord(*polygons->scope));
         }
-        lines.push_back("polygons used=" + std::to_string(polygons->polygons.size()) +
-                        " skipped.open=" + std::to_string(polygons->skippedOpen) +
-                        " skipped.other=" + std::to_string(polygons->skippedOther));
-        if (polygons->polygons.empty()) {
+        // skipped.open= is what bounds no area: an open outline, and a
+        // closed one of fewer than three corners.
+        lines.push_back("polygons used=" + std::to_string(polygons->shapes.size()) +
+                        " skipped.open=" +
+                        std::to_string(polygons->skipped.open + polygons->skipped.tooFew) +
+                        " skipped.other=" + std::to_string(polygons->skipped.noOutline));
+        if (polygons->shapes.empty()) {
             // A scope that takes no closed outline is said, not refused.
             lines.push_back(reading.head + " ran=no reason=" +
                             recordValue("the scope took no closed polygon"));
@@ -428,12 +431,12 @@ Result<std::string> measureAreas(const Reading& reading,
             return reply;
         }
         std::vector<OverlayRegion> regions;
-        regions.reserve(polygons->polygons.size());
-        for (std::size_t i = 0; i < polygons->polygons.size(); ++i) {
-            auto region = OverlayRegion::fromPolygon(polygons->polygons[i].ring);
+        regions.reserve(polygons->shapes.size());
+        for (std::size_t i = 0; i < polygons->shapes.size(); ++i) {
+            auto region = OverlayRegion::fromPolygon(polygons->shapes[i].outline);
             if (!region) {
                 return makeError(region.error().code,
-                                 polygonName(polygons->polygons[i], i) + ": " +
+                                 polygonName(polygons->shapes[i], i) + ": " +
                                      region.error().message,
                                  region.error().context);
             }
@@ -453,8 +456,8 @@ Result<std::string> measureAreas(const Reading& reading,
                     if (!each) {
                         return makeError(
                             ErrorCode::InvalidGeometry,
-                            polygonName(polygons->polygons[i], i) + " and " +
-                                polygonName(polygons->polygons[j], j) + " overlap by " +
+                            polygonName(polygons->shapes[i], i) + " and " +
+                                polygonName(polygons->shapes[j], j) + " overlap by " +
                                 fixed(*shared) +
                                 " m2, which one total would count twice; give EACH for a record "
                                 "per polygon");
@@ -471,7 +474,7 @@ Result<std::string> measureAreas(const Reading& reading,
         katana::math::CompensatedSum polygonArea;
         std::size_t cells = 0;
         for (std::size_t i = 0; i < regions.size(); ++i) {
-            const VolumePolygon& polygon = polygons->polygons[i];
+            const DrawingShape& polygon = polygons->shapes[i];
             auto measured = measure(&polygon, &regions[i]);
             if (!measured) {
                 return makeError(measured.error().code,
@@ -504,8 +507,8 @@ Result<std::string> measureAreas(const Reading& reading,
         for (const auto& [i, j] : overlaps) {
             lines.push_back("warning overlap=" + std::to_string(i + 1) + "," +
                             std::to_string(j + 1) + " message=" +
-                            recordValue(polygonName(polygons->polygons[i], i) + " and " +
-                                        polygonName(polygons->polygons[j], j) +
+                            recordValue(polygonName(polygons->shapes[i], i) + " and " +
+                                        polygonName(polygons->shapes[j], j) +
                                         " overlap: the total counts the ground they share "
                                         "twice"));
         }
@@ -543,7 +546,7 @@ Result<std::string> measureAreas(const Reading& reading,
 // INSIDE <polygon> [EACH] after the positional words at `at`, and nothing
 // after them.
 struct Inside {
-    std::optional<VolumePolygons> polygons{};
+    std::optional<DrawingShapes> polygons{};
     bool each = false;
 };
 
@@ -634,7 +637,7 @@ Result<std::string> volumeSurfaces(const Document& document, Words words,
     reading.nothing = "the surfaces have no ground in common there";
     const TinSurface& existing = *base->surface;
     const TinSurface& design = *top->surface;
-    const Measurer measure = [&](const VolumePolygon*,
+    const Measurer measure = [&](const DrawingShape*,
                                  const OverlayRegion* region) -> Result<Measure> {
         auto comparison = region == nullptr
                               ? katana::terrain::compareSurfaces(existing, design)
@@ -691,7 +694,7 @@ Result<std::string> volumeDatum(const Document& document, Words words,
     reading.nothing = "the polygons are off the surface";
     const TinSurface& ground = *surface->surface;
     const double datum = *level;
-    const Measurer measure = [&](const VolumePolygon*,
+    const Measurer measure = [&](const DrawingShape*,
                                  const OverlayRegion* region) -> Result<Measure> {
         auto volume = region == nullptr ? katana::terrain::volumeToDatum(ground, datum)
                                         : katana::terrain::volumeToDatum(ground, datum, *region);
@@ -764,11 +767,11 @@ Result<std::string> volumeStockpile(const Document& document, Words words,
     reading.levelReading = true;
     reading.nothing = "the polygons are off the surface";
     const TinSurface& ground = *surface->surface;
-    const Measurer measure = [&](const VolumePolygon* polygon,
+    const Measurer measure = [&](const DrawingShape* polygon,
                                  const OverlayRegion*) -> Result<Measure> {
         katana::terrain::StockpileOptions these = stockpile;
         these.boundaryHeights = polygon->heights;
-        auto volume = katana::terrain::stockpileVolume(ground, polygon->ring, these);
+        auto volume = katana::terrain::stockpileVolume(ground, polygon->outline, these);
         if (!volume) {
             return volume.error();
         }
@@ -836,7 +839,7 @@ Result<std::string> volumeGrid(const Document& document, Words words,
     const TinSurface& existing = *base->surface;
     const TinSurface& design = *top->surface;
     const double side = **cell;
-    const Measurer measure = [&](const VolumePolygon*,
+    const Measurer measure = [&](const DrawingShape*,
                                  const OverlayRegion* region) -> Result<Measure> {
         auto grid = katana::terrain::gridVolume(existing, design, side, region);
         if (!grid) {
@@ -1254,7 +1257,8 @@ SURFACE DIFFERENCE <base> <top> [NAME <new>] [PREVIEW]
 SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
           the higher (MAX) or lower (MIN) of the two as a new surface; one undo step
 
-<polygon>  #id [#id ...] (closed polylines and circles) | x,y[,z] x,y[,z] x,y[,z] ... |
+<polygon>  #id [#id ...] (closed polylines, curve polylines, circles and ellipses) |
+           x,y[,z] x,y[,z] x,y[,z] ... |
            FROM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
            [WHERE k=v ...]; several polygons give one total, refused if they overlap,
            and EACH a record per polygon as well

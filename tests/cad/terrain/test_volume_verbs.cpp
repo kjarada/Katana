@@ -22,8 +22,10 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/terrain/volume_verbs.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_builder.hpp"
 
@@ -196,6 +198,42 @@ TEST_F(VolumeVerbs, EachPolygonAScopeTakesHasItsOwnRecordAndAnOpenLineIsCountedN
     EXPECT_TRUE(each[0].value("entity").has_value());
     EXPECT_EQ(each[1].value("fill").value_or(""), "200.000");
     EXPECT_EQ(value(record(reply, "volume"), "fill"), "300.000");
+}
+
+TEST_F(VolumeVerbs, AFullEllipseAndAPolylineDrawnBackToItsStartAreVolumePolygons)
+{
+    // The slab is 1 m thick, so the fill inside a polygon is its area. The
+    // square [10, 20]^2 drawn back to its first corner but not closed: 100.
+    // The ellipse of semi-axes 20 and 10 about (50, 50): pi 200 = 628.319,
+    // less what its chords cut off - each within 1 mm of the curve, so at
+    // most its perimeter (Ramanujan: pi (90 - sqrt 3500) = 96.9) x 1 mm,
+    // 0.097; 0.15 allows a chord's farthest point to be off its middle.
+    addParallelPlanes();
+    katana::geometry::Polyline2 drawnBack;
+    drawnBack.vertices = {{10, 10}, {20, 10}, {20, 20}, {10, 20}, {10, 10}};
+    ASSERT_TRUE(document.execute(katana::commands::createPolyline(drawnBack)).ok());
+    const auto square = lastId();
+    katana::geometry::Ellipse2 whole;
+    whole.center = {50, 50};
+    whole.majorAxis = {20, 0};
+    whole.ratio = 0.5;
+    katana::entity::Entity ellipse;
+    ellipse.geometry = whole;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({ellipse})).ok());
+    const auto basin = lastId();
+
+    const std::string reply = ran("VOLUME SURFACES ground design INSIDE #" +
+                                  std::to_string(square) + " #" + std::to_string(basin) + " EACH");
+    const auto each = records(reply, "polygon");
+    ASSERT_EQ(each.size(), 2u) << reply;
+    EXPECT_EQ(each[0].value("fill").value_or(""), "100.000");
+    EXPECT_FALSE(each[0].value("chorded").has_value());
+    const auto fill = katana::core::parseFiniteDouble(each[1].value("fill").value_or(""));
+    ASSERT_TRUE(fill.has_value()) << reply;
+    const double ellipseArea = 200.0 * katana::math::kPi;
+    EXPECT_LE(*fill, ellipseArea + 0.0005); // the reply rounds to the millimetre
+    EXPECT_GE(*fill, ellipseArea - 0.15);
+    EXPECT_EQ(each[1].value("chorded").value_or(""), "yes");
 }
 
 TEST_F(VolumeVerbs, OverlappingPolygonsAreRefusedForOneTotalAndWarnedOfWithEach)
