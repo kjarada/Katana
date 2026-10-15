@@ -42,9 +42,31 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/terrain/surface_colouring.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::cad {
+
+// What a SURFACE LEGEND reply says, as plain data: whose legend it is, which
+// view it is read for, and the legend. The verb fills it from the drawing;
+// surfaceLegendJson writes it, so a caller can hand it a name the drawing
+// would never hold (a byte that is not UTF-8) and see what the JSON does.
+struct SurfaceLegendReply {
+    std::string surface;
+    std::string style;
+    bool threeD = false;
+    SurfaceFaces faces = SurfaceFaces::None;
+    SurfaceLegend legend;
+};
+
+// The reply as JSON, one object (the JSON word of SURFACE LEGEND): surface,
+// style, view, faces, kind, title, entries. A byte of a name or label that is
+// not UTF-8 is written U+FFFD and never throws: a verb's reply has nothing up
+// its call chain to catch nlohmann's exception, and the names are checked
+// where they enter (SurfaceStore::checkName), but this is the line behind
+// that one.
+[[nodiscard]] std::string surfaceLegendJson(const SurfaceLegendReply& reply);
 
 // SURFACE followed by LEGEND or PLAN (any case): this module's lines. The
 // other SURFACE words are other modules'.

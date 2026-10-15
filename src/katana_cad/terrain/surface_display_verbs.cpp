@@ -103,26 +103,7 @@ katana::core::Result<std::string> legendVerb(const Document& document,
     const SurfaceLegend legend = surfaceLegend(colouring);
 
     if (json) {
-        nlohmann::ordered_json out;
-        out["surface"] = named->name;
-        out["style"] = style.name;
-        out["view"] = threeD ? "3d" : "plan";
-        out["faces"] = std::string(surfaceFacesWord(faces));
-        out["kind"] = kindOf(legend);
-        out["title"] = legend.title;
-        out["entries"] = nlohmann::ordered_json::array();
-        for (const SurfaceLegendEntry& entry : legend.entries) {
-            nlohmann::ordered_json item;
-            item["colour"] = entry.colour.toHex();
-            item["from"] = entry.from.has_value() ? nlohmann::ordered_json(*entry.from) : nullptr;
-            item["to"] = entry.to.has_value() ? nlohmann::ordered_json(*entry.to) : nullptr;
-            item["label"] = entry.label;
-            out["entries"].push_back(std::move(item));
-        }
-        // A reply: U+FFFD for a byte that is not UTF-8, as the other JSON
-        // replies do, never nlohmann's default exception (nothing up the call
-        // chain of a verb catches it).
-        return out.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
+        return surfaceLegendJson(SurfaceLegendReply{named->name, style.name, threeD, faces, legend});
     }
 
     std::string reply = "legend surface=" + replyQuoted(named->name) +
@@ -322,6 +303,30 @@ katana::core::Result<std::string> planVerb(const Document& document, std::span<c
 }
 
 } // namespace
+
+std::string surfaceLegendJson(const SurfaceLegendReply& reply)
+{
+    nlohmann::ordered_json out;
+    out["surface"] = reply.surface;
+    out["style"] = reply.style;
+    out["view"] = reply.threeD ? "3d" : "plan";
+    out["faces"] = std::string(surfaceFacesWord(reply.faces));
+    out["kind"] = kindOf(reply.legend);
+    out["title"] = reply.legend.title;
+    out["entries"] = nlohmann::ordered_json::array();
+    for (const SurfaceLegendEntry& entry : reply.legend.entries) {
+        nlohmann::ordered_json item;
+        item["colour"] = entry.colour.toHex();
+        item["from"] = entry.from.has_value() ? nlohmann::ordered_json(*entry.from) : nullptr;
+        item["to"] = entry.to.has_value() ? nlohmann::ordered_json(*entry.to) : nullptr;
+        item["label"] = entry.label;
+        out["entries"].push_back(std::move(item));
+    }
+    // A reply: U+FFFD for a byte that is not UTF-8, as the other JSON replies
+    // do, never nlohmann's default exception (nothing up the call chain of a
+    // verb catches it).
+    return out.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
+}
 
 bool isSurfaceDisplayVerb(std::string_view verb, std::span<const std::string> args)
 {

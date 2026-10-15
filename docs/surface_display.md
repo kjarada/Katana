@@ -478,7 +478,14 @@ handler, as the other JSON replies are, so a surface or style name with a byte
 that is not UTF-8 is U+FFFD in the reply and not an exception that ends
 katana_cli (`SurfaceStore::checkName` and `checkSurfaceStyle` refuse such a
 name where it enters; this is for one that got past; `docs/headless.md`, "Text
-and names").
+and names"). The guard is reached through a seam: the reply is made of a
+plain-data `SurfaceLegendReply` and written by `cad::surfaceLegendJson`, so a
+test hands it the name the store would refuse and reads back U+FFFD and no
+exception (`SurfaceDisplayVerbs.LegendJsonWritesABadByteOfANameOrLabelAsU_FFFDAndDoesNotThrow`).
+A mutation check of 2026-10-15 had put the strict `dump` back and every test
+of the verb still passed, because no API puts such a name into a Document; the
+strict `dump` throws on these bytes (nlohmann's type_error 316), which the
+test's `EXPECT_NO_THROW` would report.
 
 ## Speed
 
@@ -626,13 +633,13 @@ another build with `tools/compare_benchmarks.py --alternate`.
 
 ## Not done
 
-* `SURFACE LEGEND JSON` (and `LEADER LIST JSON`, docs/annotation.md) write
+* `LEADER LIST JSON` (docs/annotation.md) writes
   U+FFFD for a byte of a name that is not UTF-8 instead of throwing, as a second
   line behind `SurfaceStore::checkName` and the repair on open. No test reaches
   that guard: nothing puts such a name into a Document any more. A mutation check
-  (2026-10-15) put the strict `dump` back in both and every test still passed, so
-  those two verbs are protected at the door only; a test needs a seam that skips
-  `SurfaceStore::add`.
+  (2026-10-15) put the strict `dump` back and every test still passed, so
+  that verb is protected at the door only; a test needs a seam that skips
+  the door (`SURFACE LEGEND JSON` has one, "On the command line").
 * A legend on a plot or sheet (a sheet's title-block legend), and a View
   menu switch to hide the screen legend (today: a style without faces has
   none).
