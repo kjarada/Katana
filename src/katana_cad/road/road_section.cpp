@@ -226,6 +226,15 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
             corner.out -= std::min(kFaceRun, previousWidth / 4.0);
             out.formation.push_back(hinge);
         }
+    } else {
+        // A side of a batter alone (a ramp's edge, an embankment of nothing
+        // but its slopes): nothing has put a point on the formation, and the
+        // batter would start at its first bench or its daylight, so the line
+        // would run straight from there to the other side's first point and
+        // lose the triangle under the batter. The hinge - here the centreline
+        // at the design level - is where it starts. buildSection joins it
+        // with the other side's first point at the centreline.
+        out.formation.push_back(OutPoint{batterPrefix + "/hinge", hinge.out, hinge.level});
     }
     if (!haveGround) {
         return out;

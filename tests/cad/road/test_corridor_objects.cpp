@@ -258,6 +258,49 @@ TEST(CorridorObjects, TheEarthworksAreTheEndAreasTheOldAssemblyMeasured)
     EXPECT_NEAR(meshVolume(left->mesh), 999.75, 1e-6);
 }
 
+TEST(CorridorObjects, AnEmbankmentOfBattersAloneIsTheTrianglesUnderTheirSlopesAndItsSubgradeRises)
+{
+    // Ground at 9, design 10, a 1 in 4 fill batter each side and nothing
+    // between: a triangle 0.5 x 4 x 1 = 2 m2 a side a section, over 100 m
+    // 200 m3 a side and 400 in all. The subgrade is the batters' own line, so
+    // it reaches the design level at the centreline and falls 1 over 4 m
+    // either side: 9.5 two metres out.
+    const auto low = planeGround(0.0, 0.0, 9.0);
+    Corridor corridor = corridorOf("batters");
+    corridor.surface = "ground";
+    const auto built = buildCorridor(corridor, setOf({battersAlone(2.0, 4.0)}), straight(100.0),
+                                     level(10.0, 0.0, 100.0), &low);
+    EXPECT_TRUE(built.problems.empty()) << built.problems.front();
+    EXPECT_NEAR(built.fill, 400.0, 1e-6);
+    EXPECT_NEAR(built.cut, 0.0, 1e-9);
+    const BimModel model = corridorSolids(built);
+    for (const std::string side : {"left", "right"}) {
+        const BimObject* fill = objectWithId(model, "corridor/Main/" + side + "/earthworks/fill/1");
+        ASSERT_NE(fill, nullptr) << side;
+        EXPECT_NEAR(quantityOf(*fill, "GrossVolume"), 200.0, 1e-6);
+        EXPECT_NEAR(meshVolume(fill->mesh), 200.0, 1e-6); // a straight batter needs no columns
+    }
+    const auto subgrade = sectionsSurface(corridorSections(built), *built.alignment, true, false);
+    ASSERT_TRUE(subgrade.ok()) << subgrade.error().describe();
+    EXPECT_NEAR(*subgrade->surface.elevationAt(50.0, 0.0), 10.0, 1e-9);
+    EXPECT_NEAR(*subgrade->surface.elevationAt(50.0, 2.0), 9.5, 1e-9);
+    EXPECT_NEAR(*subgrade->surface.elevationAt(50.0, -2.0), 9.5, 1e-9);
+
+    // The same in cut: ground at 11, a 1 in 2 cut batter climbs 1 over 2 m,
+    // 0.5 x 2 x 1 = 1 m2 a side, 100 m3 a side; the subgrade is 10 at the
+    // centreline and 10.5 one metre out, and not the flat 11 it read when the
+    // line ran from daylight to daylight.
+    const auto high = planeGround(0.0, 0.0, 11.0);
+    const auto dug = buildCorridor(corridor, setOf({battersAlone(2.0, 4.0)}), straight(100.0),
+                                   level(10.0, 0.0, 100.0), &high);
+    EXPECT_NEAR(dug.cut, 200.0, 1e-6);
+    EXPECT_NEAR(dug.fill, 0.0, 1e-9);
+    const auto trench = sectionsSurface(corridorSections(dug), *dug.alignment, true, false);
+    ASSERT_TRUE(trench.ok());
+    EXPECT_NEAR(*trench->surface.elevationAt(50.0, 0.0), 10.0, 1e-9);
+    EXPECT_NEAR(*trench->surface.elevationAt(50.0, 1.0), 10.5, 1e-9);
+}
+
 TEST(CorridorObjects, ARegionIsARunOfItsOwnNumberedInStationOrder)
 {
     // The lanes template, with a region of the textbook cut template from 40

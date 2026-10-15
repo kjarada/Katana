@@ -247,6 +247,98 @@ TEST(RoadSection, ThePavementBoxIsCutAndTheBatterStartsAtTheFinishedEdge)
     EXPECT_NEAR(section->cutArea, 12.3997, 1e-9);
 }
 
+TEST(RoadSection, ASideOfABatterAloneStartsItsFormationAtTheHingeAndMeasuresTheTriangleUnderIt)
+{
+    // Fill: ground at 9, design 10, a 1 in 4 fill batter. From the hinge on
+    // the centreline (0, 10) it falls 1 over 4 m to the ground: daylight at
+    // +-4, level 9. Each side is the triangle 0.5 x 4 x 1 = 2 m2 between the
+    // batter and the ground; 4 m2 in all, and nothing in cut.
+    const auto low = planeGround(0.0, 0.0, 9.0);
+    const auto fill = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), &low, 100.0);
+    ASSERT_TRUE(fill.ok()) << fill.error().describe();
+    EXPECT_TRUE(fill->complete);
+    expectPoint(fill->top, "left/batter/daylight", 4.0, 9.0);
+    expectPoint(fill->top, "right/batter/daylight", -4.0, 9.0);
+    EXPECT_NEAR(fill->fillArea, 4.0, 1e-9);
+    EXPECT_NEAR(fill->leftFill, 2.0, 1e-9);
+    EXPECT_NEAR(fill->rightFill, 2.0, 1e-9);
+    EXPECT_NEAR(fill->cutArea, 0.0, 1e-9);
+    // The formation is the batters' own line, through the hinge: the two
+    // hinges are one point at the centreline.
+    ASSERT_EQ(fill->formation.size(), 3u);
+    EXPECT_NEAR(fill->formation[0].offset, 4.0, 1e-9);
+    EXPECT_NEAR(fill->formation[1].offset, 0.0, 1e-12);
+    EXPECT_NEAR(fill->formation[1].level, 10.0, 1e-12);
+    EXPECT_NEAR(fill->formation[2].offset, -4.0, 1e-9);
+
+    // Cut: ground at 11, a 1 in 2 cut batter climbs 1 over 2 m: daylight at
+    // +-2, level 11, a triangle 0.5 x 2 x 1 = 1 m2 a side.
+    const auto high = planeGround(0.0, 0.0, 11.0);
+    const auto cut = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), &high, 100.0);
+    ASSERT_TRUE(cut.ok());
+    expectPoint(cut->top, "left/batter/daylight", 2.0, 11.0);
+    EXPECT_NEAR(cut->cutArea, 2.0, 1e-9);
+    EXPECT_NEAR(cut->leftCut, 1.0, 1e-9);
+    EXPECT_NEAR(cut->rightCut, 1.0, 1e-9);
+    EXPECT_NEAR(cut->fillArea, 0.0, 1e-9);
+
+    // At grade the batter has no area to measure and the section is complete.
+    const auto level10 = planeGround(0.0, 0.0, 10.0);
+    const auto flat = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), &level10, 100.0);
+    ASSERT_TRUE(flat.ok());
+    EXPECT_TRUE(flat->complete);
+    EXPECT_NEAR(flat->cutArea, 0.0, 1e-9);
+    EXPECT_NEAR(flat->fillArea, 0.0, 1e-9);
+
+    // No ground at all: the formation is the hinge alone, and nothing breaks.
+    const auto bare = roadSection(battersAlone(2.0, 4.0), straight(), level(10.0), nullptr, 100.0);
+    ASSERT_TRUE(bare.ok());
+    EXPECT_FALSE(bare->complete);
+    ASSERT_EQ(bare->formation.size(), 1u);
+    EXPECT_NEAR(bare->formation[0].level, 10.0, 1e-12);
+}
+
+TEST(RoadSection, ABatterAloneBesideACoursedLaneKeepsItsOwnHingeAndItsOwnArea)
+{
+    // Left: a 4 m lane at 0 % with 0.1 + 0.2 m of courses, then a 1 in 4 fill
+    // batter; right: the batter alone. Ground at 9, design 10.
+    // Left formation: 9.7 under the lane to 3.999 (the corner stepped 1 mm
+    // back), up to the hinge (4, 10), the batter down to the ground at 8.
+    //   3.999 x 0.7 = 2.7993, the 1 mm step 0.001 x 0.85 = 0.00085, the
+    //   triangle 0.5 x 4 x 1 = 2: 4.80015 m2.
+    // Right: the hinge (0, 10) is higher than the lane's 9.7 at the centreline,
+    // so it is the shallower corner and steps 1 mm out to -0.001: the step
+    // 0.001 x 0.85 = 0.00085, the batter 0.5 x 3.999 x 1 = 1.9995: 2.00035 m2.
+    // Taking the right batter from the lane's f0 (0, 9.7) to its daylight
+    // (-4, 9) instead - the line without the hinge - gives 0.5 x 4 x 0.7 =
+    // 1.4 m2, 0.6 m2 short.
+    RoadTemplate made;
+    made.name = "ramp";
+    Component lane = defaultComponent(ComponentKind::Lane, Side::Left);
+    lane.width = 4.0;
+    lane.crossfall = 0.0;
+    lane.courses = {makeCourse("AC", 0.1, "asphalt"), makeCourse("base", 0.2, "rock")};
+    Component leftBatter = defaultComponent(ComponentKind::Batter, Side::Left);
+    leftBatter.fillSlope = 4.0;
+    Component rightBatter = defaultComponent(ComponentKind::Batter, Side::Right);
+    rightBatter.fillSlope = 4.0;
+    made.components = {lane, leftBatter, rightBatter};
+    const auto ground = planeGround(0.0, 0.0, 9.0);
+    const auto section = roadSection(made, straight(), level(10.0), &ground, 100.0);
+    ASSERT_TRUE(section.ok()) << section.error().describe();
+    EXPECT_TRUE(section->complete);
+    expectPoint(section->top, "left/batter/daylight", 8.0, 9.0);
+    expectPoint(section->top, "right/batter/daylight", -4.0, 9.0);
+    EXPECT_NEAR(section->leftFill, 4.80015, 1e-9);
+    EXPECT_NEAR(section->rightFill, 2.00035, 1e-9);
+    EXPECT_NEAR(section->fillArea, 6.8005, 1e-9);
+    EXPECT_NEAR(section->cutArea, 0.0, 1e-9);
+    // The formation keeps its function of offset: strictly falling across.
+    for (std::size_t i = 0; i + 1 < section->formation.size(); ++i) {
+        EXPECT_GT(section->formation[i].offset, section->formation[i + 1].offset) << i;
+    }
+}
+
 TEST(RoadSection, ABenchedBatterHasItsBenchesAndDaylightsWhereTheyLeadIt)
 {
     // 3 m of cut, a 2:1 batter benched 2 m wide every 1 m of rise: up 1 over

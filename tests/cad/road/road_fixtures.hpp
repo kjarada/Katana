@@ -72,4 +72,18 @@ inline RoadTemplate laneTemplate(double width, double crossfall,
     return made;
 }
 
+// Nothing but a batter on each side: the hinge is the centreline.
+inline RoadTemplate battersAlone(double cut, double fill)
+{
+    RoadTemplate made;
+    made.name = "batters";
+    for (const Side side : {Side::Left, Side::Right}) {
+        Component batter = defaultComponent(ComponentKind::Batter, side);
+        batter.cutSlope = cut;
+        batter.fillSlope = fill;
+        made.components.push_back(batter);
+    }
+    return made;
+}
+
 } // namespace katana::cad::road::testing

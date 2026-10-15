@@ -26,7 +26,8 @@
 // kerb's base, the top of what has no courses, then the batter. Where two
 // neighbours' bottoms differ, or the courses end at the hinge, the line steps:
 // the shallower corner is set kFaceRun into its own component, so the line
-// stays a function of offset - which a TIN of it, and the end areas, need.
+// stays a function of offset - which a TIN of it, and the end areas, need. A
+// side of a batter alone starts its line at the hinge, the centreline.
 //
 // EARTHWORKS are between the formation and the ground across the section:
 // cut where the ground is above, fill where it is below - the pavement box

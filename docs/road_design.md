@@ -165,6 +165,18 @@ metre-deep pavement, and the tests work it in by hand
 the subgrade surface then lies below the shallower courses for the whole of
 its width.
 
+A side that is nothing but its batter (a ramp's open edge, an embankment of
+two slopes) has no component to put a point on the line, so its formation
+starts at the hinge - the centreline at the design level, coded
+`<side>/batter/hinge` - and meets the other side's first point at the
+centreline as two components meet: one point when the levels agree, else the
+shallower corner stepped 1 mm. Before this the line ran straight from that
+side's daylight to the other side's first point and the triangle under the
+batter was left out of the cut and fill, the earthworks solids and the
+subgrade
+(`RoadSection.ASideOfABatterAloneStartsItsFormationAtTheHingeAndMeasuresTheTriangleUnderIt`,
+`CorridorObjects.AnEmbankmentOfBattersAloneIsTheTrianglesUnderTheirSlopesAndItsSubgradeRises`).
+
 **Earthworks** are between the formation and the ground across the section:
 CUT where the ground is above it - the pavement box is cut - and FILL where
 it is below, each side's split at the centreline. Along the run they are
