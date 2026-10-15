@@ -304,6 +304,11 @@ struct PlanPaintStats {
     std::size_t surfaceImagePixels = 0;
     std::size_t surfacePixelsCovered = 0;
     std::size_t surfaceLegends = 0;
+    // Why part of a surface's style was not drawn, a line a surface (contours
+    // too fine to trace are refused, naming the interval): empty when all of
+    // every style was. The plan view tells the person once; the headless
+    // report and a plot's checks read it here.
+    std::vector<std::string> surfaceProblems;
 };
 
 // Sizes of the marks the painter draws that are not the drawing's own: on

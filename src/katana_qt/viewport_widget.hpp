@@ -111,6 +111,9 @@ class ViewportWidget final : public QWidget {
     // stroked and the triangles tinted, contour runs, labels, the pixels
     // their faces cover and the legends - for the headless report.
     [[nodiscard]] const PlanPaintStats& lastPaintStats() const { return lastStats_; }
+    // Whether the last paint laid the "Nothing drawn yet" hint over the view:
+    // for a drawing with nothing in it (drawingIsEmpty), no tool running.
+    [[nodiscard]] bool emptyHintShown() const { return emptyHintShown_; }
     // The grips this view offers on the selection as its last paint built
     // them: none on an entity on a layer this view hides, however selected.
     [[nodiscard]] std::size_t gripCount() const { return grips_.grips().size(); }
@@ -361,9 +364,14 @@ class ViewportWidget final : public QWidget {
     // the "nothing drawn yet" hint for an empty drawing.
     void frameOnFirstPaint();
     void drawEmptyHint(QPainter& painter) const;
-    // True when nothing at all is loaded: no entity, alignment, reference
-    // layer or mesh. What the empty-drawing hint is shown for.
+    // True when nothing at all is loaded: no entity, alignment, surface,
+    // reference layer or mesh. What the empty-drawing hint is shown for.
     [[nodiscard]] bool drawingIsEmpty() const;
+    // Tells the person, once each, why part of a surface's style is not
+    // drawn (SurfacePaintStats::problems): a refusal that only the SURFACE
+    // PLAN verb said was a style whose contours vanished without a word.
+    // Forgets a problem that has gone, so it is told again if it returns.
+    void reportSurfaceProblems(const std::vector<std::string>& problems);
 
     [[nodiscard]] QPointF toScreen(const Point2& world) const;
     [[nodiscard]] Point2 toWorld(const QPointF& screen) const;
@@ -471,6 +479,8 @@ class ViewportWidget final : public QWidget {
     mutable std::size_t lastDrawnEntities_ = 0;
     mutable std::size_t lastGhosts_ = 0;
     mutable PlanPaintStats lastStats_{};
+    bool emptyHintShown_ = false;
+    std::vector<std::string> reportedSurfaceProblems_;
     // Declared after document_ and destroyed before anything else here: the
     // listener it owns captures this widget.
     katana::cad::Document::ListenerHandle documentListener_;

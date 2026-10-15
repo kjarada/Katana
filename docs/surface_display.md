@@ -290,21 +290,40 @@ Contours whose tracing would make more than four million points
 (`kPlanMaximumContourPoints`, estimated from the levels crossing each
 triangle) are refused for the plan, saying why (`SurfacePlan::problem`): an
 interval a hundredth of what the relief wants would fill memory and the view
-with ink.
+with ink. The reason reaches a person in every place a surface is drawn from:
+`SURFACE PLAN` prints `problem=`; the plan view tells its error hook - the
+command log - once, and again if it goes and returns
+(`PlanPaintStats::surfaceProblems`, `ViewportWidget::reportSurfaceProblems`);
+and its headless report ends with ` problem="ground: contours: an interval of
+... not drawn - set a larger interval"` for each. A plot or sheet paints the
+same stats, but nothing reads them there yet ("Not done"). The refusal used to
+be thrown away on the way from the painter to the view, and the contours
+vanished with no word.
 
 ### The legend
 
 On screen, over everything in the view's top-right corner, the legend of each
 drawn surface whose style colours its faces - at most three, stacked
-(`PlanPaintOptions::surfaceLegends`). It is drawn into the kept drawing, so a
-mouse move costs nothing more. A plot carries none: a sheet's legend belongs
-with its title block.
+(`PlanPaintOptions::surfaceLegends`). Each is measured before it is drawn
+(`measureSurfaceLegend`, the one layout `paintSurfaceLegend` draws): the first
+is drawn whatever its height, and a later one that would not fit above the
+view's foot is left out and not counted - a key with its lowest rows cut off
+by the edge reads as a key that ends there (`SurfacePlanPainter.ALegendTooTallForTheViewBelowTheOnesAlreadyDrawnIsLeftOutNotCutOff`;
+three 10-band legends are about 500 px). It is drawn into the kept drawing,
+so a mouse move costs nothing more. A plot carries none: a sheet's legend
+belongs with its title block.
+
+A drawing that holds only surfaces is not empty: the "Nothing drawn yet"
+hint is not laid over it (`ViewportWidget::drawingIsEmpty` counts the
+document's surfaces, hidden or not, as the 3D view's does;
+`PlanView.ADrawingOfNothingButASurfaceIsNotSaidToBeEmpty`).
 
 The plan view's headless report says what it drew of the surfaces, after the
 entities, ghosts and grips, when it drew any - `PlanView1: drawn=N ghosts=N
 grips=N surfaces=N triangles=N edges=N tinted=N contours=N labels=N
-covered=N legends=N`, the counts of `PlanPaintStats` - and reads as it always
-did when it drew none (`docs/headless.md`).
+covered=N legends=N`, the counts of `PlanPaintStats`, then a `problem="..."`
+for each part of a style it could not draw - and reads as it always did when
+it drew none (`docs/headless.md`).
 
 ## In 3D
 
@@ -384,6 +403,17 @@ a colour name the drawing knows (`cad::resolveColour`), and the line always
 carries `#RRGGBB`. A field that does not read (an interval that is no number,
 a colour that is neither) stops Apply and the line label says why. A reload - a `SURFACESTYLE` typed, an undo - keeps
 the form's unapplied edits while the style they were made to is unchanged.
+The form changes nothing it was not asked to: a field a box cannot show
+(a major every 2 000 000 intervals, past the box's 1 000 000; a project's
+`faces3d=none`, which the list shows as flat) keeps the style's own value
+until the box is moved, as the opacity already did, so the line names "only
+the fields the form changed" truly
+(`SurfaceStyleManager.AStyleHoldingMoreThanTheFormsBoxesShowIsLeftAloneUntilTheBoxIsMoved`).
+The bands box is 2 to `kMaximumSurfaceBands`, the same number the check holds.
+A refused New, Copy or Rename (a name that is taken) leaves the style being
+edited chosen with its unapplied edits: the row a line names is chosen only if
+the line is accepted (`ARefusedNameLeavesTheStyleBeingEditedChosenWithItsUnappliedEdits`);
+it used to jump to the style that holds the name and replace the form with it.
 Every widget's object name is in the dialog's header; the Surfaces panel's
 Edit Styles... button triggers the same action.
 
@@ -530,6 +560,19 @@ another build with `tools/compare_benchmarks.py --alternate`.
   line word for word, Apply naming only what changed, a bad field stopping
   Apply, the preview drawing the form's style, and the lines changing the
   drawing through the interpreter, undone as one step, the dialog following.
+* Added with the review of 2026-10-15 (what each proves is named where it is
+  described above): the band maximum in `test_surface_style.cpp` and
+  `cli.surfacestyle_with_more_bands_than_the_maximum_is_refused_naming_bands`;
+  the collapsed range, open end bands and one stop in
+  `test_surface_colouring.cpp`; vertex ownership and the uncapped cache in
+  `test_surface_plan.cpp`; VIEW at its own frame, a point AREA and a wireframe's
+  legend in `test_surface_display_verbs.cpp`
+  (`cli.surface_plan_of_an_area_that_is_a_point_is_refused_not_answered_with_zeros`);
+  the 3D wireframe, collapsed and level-slope colours in
+  `test_scene_surface_style.cpp`; the gradient legend by value, the stacking
+  and the surfaced problem in `test_surface_plan_painter.cpp`; the form's
+  boxes and a refused name in `test_surface_style_manager.cpp`; the empty hint
+  and the reported problem in `test_plan_view.cpp`.
 * `qt_a_surface_is_drawn_in_plan_in_its_style_headless` - the sample terrain
   in the real window in Standard, Triangles and Elevation Bands, each paint's
   report read against the first; `qt_the_surface_style_manager_runs_its_lines_headless`.

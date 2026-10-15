@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <QColor>
+#include <QFont>
+#include <QFontMetricsF>
 #include <QImage>
 #include <QPainter>
 
@@ -15,11 +17,13 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
+#include "katana/cad/terrain/surface_colouring.hpp"
 #include "katana/cad/terrain/surface_style.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "plan_painter.hpp"
+#include "terrain/surface_plan_painter.hpp"
 
 namespace {
 
@@ -266,4 +270,127 @@ TEST(SurfacePlanPainter, TheDocumentsSurfacesAndStylesAreWhatPlanSourceOfHands)
     const PlanSource source = katana::qt::planSourceOf(document);
     EXPECT_EQ(source.surfaces, &document.surfaces());
     EXPECT_EQ(source.surfaceStyles, &document.surfaceStyles());
+}
+
+namespace {
+
+// The part of a pixel's colour that is not alpha, as a QColor.
+QColor inkAt(const QImage& image, int x, int y) { return QColor(image.pixel(x, y)); }
+
+int channelGap(const QColor& a, const QColor& b)
+{
+    return std::max({std::abs(a.red() - b.red()), std::abs(a.green() - b.green()),
+                     std::abs(a.blue() - b.blue())});
+}
+
+} // namespace
+
+TEST(SurfacePlanPainter, ASmoothLegendPlacesEachStopAtItsValueNotAtItsPlaceInTheList)
+{
+    // The built-in Cut Fill style: stops at -2, -1, -0.5, 0, 0.5, 1 and 2,
+    // not evenly spaced, drawn as one bar labelled -2 at the foot and 2 at the
+    // head. A stop is at (value + 2) / 4 of the way up: -1 a quarter, 0 half,
+    // +1 three quarters. Placed by its place in the list (i / 6) the -1 stop
+    // was at 0.167 and the +1 at 0.833: a reader of the labelled ends took a
+    // 1 m fill (#EF8A62) for 1.33 m.
+    const auto set = katana::cad::builtInSurfaceStyles();
+    const katana::cad::SurfaceDisplayStyle* cutFill = set.find("Cut Fill");
+    ASSERT_NE(cutFill, nullptr);
+    const auto colouring = katana::cad::surfaceColouring(*cutFill, katana::cad::SurfaceFaces::Elevation, -2.0, 2.0);
+    const katana::cad::SurfaceLegend legend = katana::cad::surfaceLegend(colouring);
+    ASSERT_TRUE(legend.gradient);
+    ASSERT_EQ(legend.entries.size(), 7u);
+
+    QFont font;
+    font.setPixelSize(11);
+    QImage image(240, 240, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::black);
+    QPainter painter(&image);
+    const QRectF panel = katana::qt::paintSurfaceLegend(painter, legend, "diff - Cut Fill", QPointF(230.0, 10.0),
+                                                        font, Qt::white, QColor(0, 0, 0));
+    painter.end();
+    // The bar, as paintSurfaceLegend lays it: 6 px in from the panel's left,
+    // below the caption and the title and 4 px; six lines tall; as wide as a
+    // swatch.
+    const QFontMetricsF metrics(font);
+    const double line = metrics.height();
+    const double swatch = std::max(10.0, line * 0.8);
+    const double barTop = panel.top() + 6.0 + 2.0 * line + 4.0;
+    const double barHeight = 6.0 * line;
+    const int x = static_cast<int>(panel.left() + 6.0 + 0.5 * swatch);
+    // The pixel row whose centre is nearest `fraction` of the way up the bar.
+    const auto at = [&](double fraction) {
+        return inkAt(image, x, static_cast<int>(std::floor(barTop + barHeight - fraction * barHeight)));
+    };
+    // The stops' own colours (the style's, ColorBrewer's seven-class RdBu):
+    // -1 #67A9CF, 0 #F7F7F7, +1 #EF8A62. A pixel centre is within half a pixel
+    // of the stop's place and the gradient moves about ten levels a pixel
+    // here, so fourteen levels is the width of "at" - and the old place, a
+    // sixth of the bar from the stop, was fifty levels off.
+    EXPECT_LE(channelGap(at(0.25), QColor(0x67, 0xA9, 0xCF)), 14) << at(0.25).name().toStdString();
+    EXPECT_LE(channelGap(at(0.50), QColor(0xF7, 0xF7, 0xF7)), 14) << at(0.50).name().toStdString();
+    EXPECT_LE(channelGap(at(0.75), QColor(0xEF, 0x8A, 0x62)), 14) << at(0.75).name().toStdString();
+    // The ends: -2 #2166AC at the foot, +2 #B2182B at the head.
+    EXPECT_LE(channelGap(at(0.02), QColor(0x21, 0x66, 0xAC)), 14) << at(0.02).name().toStdString();
+    EXPECT_LE(channelGap(at(0.98), QColor(0xB2, 0x18, 0x2B)), 14) << at(0.98).name().toStdString();
+}
+
+TEST(SurfacePlanPainter, ALegendTooTallForTheViewBelowTheOnesAlreadyDrawnIsLeftOutNotCutOff)
+{
+    // Three surfaces in a style with a five-band legend of height h, stacked
+    // down from the top-right corner with 10 px between them. The view is 2 h
+    // + 50 tall: the first legend ends at 10 + h, the second starts at 20 + h
+    // and ends at 20 + 2 h, and a third would start at 30 + 2 h inside the
+    // view (its foot margin is at 2 h + 40) and end at 30 + 3 h, far past it.
+    // It was drawn, counted and its lowest rows lost.
+    const SurfaceStyleSet set = styles();
+    SurfaceStore store;
+    for (const char* name : {"a", "b", "c"}) {
+        ASSERT_TRUE(store.add(NamedSurface{name, square(), "test", "Bands", true}).ok());
+    }
+    QFont font(PlanPaintOptions{}.fontFamily);
+    font.setPixelSize(11);
+    const auto colouring = katana::cad::surfaceColouring(*set.find("Bands"), katana::cad::SurfaceFaces::Elevation, 0.0, 10.0);
+    const double h = katana::qt::measureSurfaceLegend(katana::cad::surfaceLegend(colouring), "a - Bands", font).height();
+    ASSERT_GT(h, 40.0);
+    const double height = 2.0 * h + 50.0;
+    PlanFrame f;
+    f.transform.resize(300.0, height);
+    f.transform.scale = 8.0;
+    f.transform.center = Point2(5.0, 5.0);
+    static const katana::entity::Model empty;
+    PlanSource source;
+    source.model = &empty;
+    source.surfaces = &store;
+    source.surfaceStyles = &set;
+    QImage image(300, static_cast<int>(height), QImage::Format_ARGB32_Premultiplied);
+    image.fill(kBlack);
+    PlanPaintCache cache;
+    QPainter painter(&image);
+    const PlanPaintStats stats = katana::qt::paintPlan(painter, source, f, PlanPaintOptions{}, cache);
+    painter.end();
+    EXPECT_EQ(stats.surfacesDrawn, 3u);
+    EXPECT_EQ(stats.surfaceLegends, 2u);
+}
+
+TEST(SurfacePlanPainter, AStyleWhoseContoursAreRefusedSaysWhyInTheStatisticsNotNowhere)
+{
+    // An interval of a millionth over 10 units of relief crosses each
+    // triangle ten million times, past the four million points the plan
+    // allows: the contours are not drawn, and the paint's statistics say so -
+    // the plan view logs it once, the headless report prints it.
+    SurfaceStyleSet set = styles();
+    SurfaceDisplayStyle fine = bare("Fine");
+    fine.contours.show = true;
+    fine.contours.interval = 1.0e-6;
+    set.styles.push_back(fine);
+    const SurfaceStore refused = storeIn("Fine");
+    const Painted painted = paint(&refused, set);
+    ASSERT_EQ(painted.stats.surfaceProblems.size(), 1u);
+    EXPECT_NE(painted.stats.surfaceProblems.front().find("ground: contours"), std::string::npos)
+        << painted.stats.surfaceProblems.front();
+    EXPECT_NE(painted.stats.surfaceProblems.front().find("interval"), std::string::npos);
+    // A style whose contours are drawn says nothing.
+    const SurfaceStore fine1 = storeIn("Contours");
+    EXPECT_TRUE(paint(&fine1, set).stats.surfaceProblems.empty());
 }

@@ -4,11 +4,17 @@
 
 #include <gtest/gtest.h>
 
+#include <QStringList>
 #include <QWheelEvent>
 
+#include <memory>
+
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/interop/reference_data.hpp"
+#include "katana/terrain/surface_store.hpp"
+#include "katana/terrain/tin_surface.hpp"
 #include "widget_harness.hpp"
 
 using katana::cad::Document;
@@ -20,6 +26,20 @@ using katana::qt::ViewportWidget;
 using katana::qt::test::paint;
 
 namespace {
+
+// The 10 x 10 square z = x as a surface named "ground", drawn in `style`.
+katana::terrain::SurfaceStore groundIn(const std::string& style = {})
+{
+    auto tin = katana::terrain::TinSurface::create(
+        {{0.0, 0.0, 0.0}, {10.0, 0.0, 10.0}, {10.0, 10.0, 10.0}, {0.0, 10.0, 0.0}}, {{0, 1, 2}, {0, 2, 3}});
+    EXPECT_TRUE(tin.ok());
+    katana::terrain::SurfaceStore store;
+    EXPECT_TRUE(store
+                    .add(katana::terrain::NamedSurface{
+                        "ground", std::make_shared<const katana::terrain::TinSurface>(std::move(*tin)), "test", style})
+                    .ok());
+    return store;
+}
 
 // True when `world` lands inside a `width` x `height` view.
 bool onScreen(const ViewState& state, const Point2& world, double width, double height)
@@ -137,4 +157,78 @@ TEST(PlanView, AnImageHiddenInTheViewIsLeftOutOfItsExtents)
     drawn = view.drawnBounds();
     EXPECT_EQ(drawn.min, Point2(0.0, 0.0));
     EXPECT_EQ(drawn.max, Point2(100.0, 50.0));
+}
+
+TEST(PlanView, ADrawingOfNothingButASurfaceIsNotSaidToBeEmpty)
+{
+    // The view draws the surface, frames it and counts it in its extents, and
+    // laid "Nothing drawn yet ... Bring data in with File > Import" over it,
+    // nearly opaque: the 3D view's own rule counts surfaces.
+    Document document;
+    ViewSet views;
+    ViewState& state = views.add(ViewKind::Plan);
+    ViewportWidget view(document, state);
+    view.resize(400, 300);
+    paint(view);
+    ASSERT_TRUE(view.emptyHintShown()) << "an empty drawing shows the hint (the control)";
+
+    ASSERT_TRUE(document.setSurfaces(groundIn()).ok());
+    view.resize(401, 300);
+    paint(view);
+    EXPECT_FALSE(view.emptyHintShown());
+    EXPECT_EQ(view.lastPaintStats().surfacesDrawn, 1u);
+    // A hidden surface is still in the drawing: not empty either.
+    katana::terrain::SurfaceStore hidden = groundIn();
+    ASSERT_TRUE(hidden.setVisible("ground", false).ok());
+    ASSERT_TRUE(document.setSurfaces(hidden).ok());
+    view.resize(400, 300);
+    paint(view);
+    EXPECT_FALSE(view.emptyHintShown());
+}
+
+TEST(PlanView, ContoursTooFineToDrawAreReportedOncePerChangeNotLostInSilence)
+{
+    // An interval of a millionth over 10 units of relief is refused for the
+    // plan (more than four million points): the view draws the outline alone,
+    // and told the person nothing. It tells the error hook once - not on every
+    // repaint - and again when the problem comes back after it went.
+    Document document;
+    katana::cad::SurfaceStyleSet set = katana::cad::builtInSurfaceStyles();
+    katana::cad::SurfaceDisplayStyle fine;
+    fine.name = "Fine";
+    fine.contours.show = true;
+    fine.contours.interval = 1.0e-6;
+    set.styles.push_back(fine);
+    ASSERT_TRUE(document.setSurfaceStyles(set).ok());
+    ASSERT_TRUE(document.setSurfaces(groundIn("Fine")).ok());
+
+    ViewSet views;
+    ViewState& state = views.add(ViewKind::Plan);
+    ViewportWidget view(document, state);
+    QStringList errors;
+    view.onError = [&errors](const QString& text) { errors << text; };
+    int width = 400;
+    const auto repaint = [&] {
+        view.resize(++width, 300); // a new size: the kept drawing is stale
+        paint(view);
+    };
+    repaint();
+    ASSERT_EQ(errors.size(), 1);
+    EXPECT_TRUE(errors.front().contains("ground: contours")) << errors.front().toStdString();
+    EXPECT_TRUE(errors.front().contains("interval")) << errors.front().toStdString();
+    ASSERT_EQ(view.lastPaintStats().surfaceProblems.size(), 1u);
+    repaint();
+    repaint();
+    EXPECT_EQ(errors.size(), 1) << "the same problem is said once";
+
+    // The interval mended: nothing to say. Broken again: said again.
+    set.styles.back().contours.interval = 1.0;
+    ASSERT_TRUE(document.setSurfaceStyles(set).ok());
+    repaint();
+    EXPECT_EQ(errors.size(), 1);
+    EXPECT_TRUE(view.lastPaintStats().surfaceProblems.empty());
+    set.styles.back().contours.interval = 1.0e-6;
+    ASSERT_TRUE(document.setSurfaceStyles(set).ok());
+    repaint();
+    EXPECT_EQ(errors.size(), 2);
 }

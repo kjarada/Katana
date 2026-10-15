@@ -766,6 +766,8 @@ void PlanPainter::drawSurfaces()
     stats_.surfaceLabels += drawn.labels;
     stats_.surfaceImagePixels += drawn.imagePixels;
     stats_.surfacePixelsCovered += drawn.pixelsCovered;
+    stats_.surfaceProblems.insert(stats_.surfaceProblems.end(), drawn.problems.begin(),
+                                  drawn.problems.end());
     surfaceLegends_ = drawn.legends;
 }
 
@@ -792,15 +794,21 @@ void PlanPainter::drawSurfaceLegends()
         const PaintedLegend& legend = surfaceLegends_[i];
         const QString caption = QString::fromStdString(legend.surface) + QStringLiteral(" - ") +
                                 QString::fromStdString(legend.style);
-        const QRectF drawn = paintSurfaceLegend(painter_, legend.legend, caption, corner, font, text, backing);
-        if (drawn.isEmpty()) {
+        // Measured first: a key with its lowest rows cut off by the view's
+        // edge reads as a key that ends there. The first is drawn whatever
+        // its height (it is the only one, and a view too short for it clips
+        // it as it clips anything); a later one that does not fit below the
+        // others is left out, and not counted.
+        const QSizeF size = measureSurfaceLegend(legend.legend, caption, font);
+        if (size.isEmpty()) {
             continue;
         }
-        ++stats_.surfaceLegends;
-        corner.setY(drawn.bottom() + kMargin);
-        if (corner.y() > view_.heightPixels - kMargin) {
+        if (stats_.surfaceLegends > 0 && corner.y() + size.height() > view_.heightPixels - kMargin) {
             break;
         }
+        const QRectF drawn = paintSurfaceLegend(painter_, legend.legend, caption, corner, font, text, backing);
+        ++stats_.surfaceLegends;
+        corner.setY(drawn.bottom() + kMargin);
     }
 }
 

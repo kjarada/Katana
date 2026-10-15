@@ -1427,6 +1427,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
         lastDrawnEntities_ = stats.entitiesDrawn;
         lastGhosts_ = stats.ghostsDrawn;
         lastStats_ = stats;
+        reportSurfaceProblems(stats.surfaceProblems);
         drawingKey_ = std::move(key);
         ++drawingPaints_;
         lastDrawingMs_ = static_cast<double>(drawingTimer.nsecsElapsed()) / 1.0e6;
@@ -1438,7 +1439,8 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     painter.setRenderHint(QPainter::Antialiasing, true);
     const bool snapDrawn = drawPreview(painter);
     drawGrips(painter);
-    if (drawingIsEmpty() && !tools_.active()) {
+    emptyHintShown_ = drawingIsEmpty() && !tools_.active();
+    if (emptyHintShown_) {
         drawEmptyHint(painter);
     }
 
@@ -1472,9 +1474,21 @@ void ViewportWidget::paintEvent(QPaintEvent*)
 bool ViewportWidget::drawingIsEmpty() const
 {
     const auto& model = document_.model();
-    return model.entities.empty() && model.alignments.empty() &&
+    // Surfaces count, hidden or not as the layers are: the plan view draws
+    // them, and the 3D view's own rule says the same.
+    return model.entities.empty() && model.alignments.empty() && document_.surfaces().empty() &&
            (reference_ == nullptr || reference_->empty()) &&
            (meshes_ == nullptr || meshes_->empty());
+}
+
+void ViewportWidget::reportSurfaceProblems(const std::vector<std::string>& problems)
+{
+    for (const std::string& problem : problems) {
+        if (onError && std::ranges::find(reportedSurfaceProblems_, problem) == reportedSurfaceProblems_.end()) {
+            onError(QString::fromStdString(problem));
+        }
+    }
+    reportedSurfaceProblems_ = problems;
 }
 
 // A blank grid gives a new user nothing to go on, so an empty drawing says
