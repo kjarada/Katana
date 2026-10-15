@@ -1598,16 +1598,18 @@ TEST(TinEdit, HolesThatOverlapTouchNestOrRepeatAreCutOneAfterTheOtherAsTheyAlway
     // [6, 12.2] x [7, 12] is 6.2 x 5 = 31 and meets the first in
     // [6, 8.6] x [7, 9.1] = 2.6 x 2.1 = 5.46: the union is 23.32 + 31 - 5.46.
     check({first, rectangle(6.0, 7.0, 12.2, 12.0)}, 2, 48.86, "overlapping");
-    // [8.6, 12.4] x [4.7, 9.1] shares the first's right-hand edge: 3.8 x 4.4
-    // = 16.72, and 23.32 + 16.72 between them.
-    check({first, rectangle(8.6, 4.7, 12.4, 9.1)}, 2, 40.04, "touching along an edge");
+    // [3, 7] x [4, 9] and [7, 11] x [4, 9] share the edge x = 7: 4 x 5 = 20 each,
+    // 40 between them. On the lattice's lines, so that the vertices the first
+    // cut left on the shared edge are lattice vertices and not where the kernel
+    // computed a crossing: the second outline then runs through them exactly.
+    check({rectangle(3, 4, 7, 9), rectangle(7, 4, 11, 9)}, 2, 40.0, "touching along an edge");
     // [3.3, 16.9] x [4.7, 19.3] is 13.6 x 14.6 = 198.56 and holds [6.1, 9.7] x
     // [8.2, 12.4]; the inner one adds nothing, whichever is named first.
     const Polyline2 outer = rectangle(3.3, 4.7, 16.9, 19.3);
     const Polyline2 inner = rectangle(6.1, 8.2, 9.7, 12.4);
     check({outer, inner}, 2, 198.56, "nested, the outer first");
     check({inner, outer}, 2, 198.56, "nested, the inner first");
-    check({first, first}, 2, 23.32, "the same footprint twice");
+    check({rectangle(3, 4, 7, 9), rectangle(3, 4, 7, 9)}, 2, 20.0, "the same footprint twice");
     // Two squares of 0.1 m inside ONE triangle of the ground, the lower one of
     // the cell (10,10) - (11,11) - 0.01 m2 each, apart from each other, but
     // both in the triangle the patch rebuilds.

@@ -591,7 +591,11 @@ geoprocessing executor keeps SURFACE LIST, INFO, REMOVE, FROM and EXPORT and
 hands every other SURFACE line to the interpreter (`docs/terrain.md`). No MCP
 tool of its own: the replies are records, and what an agent needs to choose
 a surface is `katana_terrain_list`'s, which reads the edited surface
-(`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads`).
+(`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads`). DELETE
+BREAKLINE and MOVE POINT are lines like the rest and need no tool either: an
+agent clears a breakline and moves a vertex of it by `katana_run_commands` and
+reads `edges_cleared=` and `moved=` in the records
+(`McpServer.AnAgentClearsABreaklineAndMovesAVertexByTheSurfaceEditLines`).
 
 ## Tests
 
@@ -651,7 +655,13 @@ a surface is `katana_terrain_list`'s, which reads the edited surface
   level, a clip along a breakline, a breakline ending on a cut rim, a hole that
   crosses itself, a point that fills a hole, two abutting clips merged, a
   breakline through lattice vertices straight in 3D, crossing lines refused, a
-  scope that takes nothing reported with the session going on
+  scope that takes nothing reported with the session going on, a breakline of
+  the sample's lattice row cleared (66 edges) and its middle vertex deleted
+  (`cli.surface_edit_delete_breakline_clears_the_edges_and_the_vertex_can_go`),
+  a line along nothing reported, a vertex moved with the sample's 10 800 vertices
+  and its levels kept and a rim vertex refused
+  (`cli.surface_edit_move_point_keeps_the_vertex_count_and_the_levels`,
+  `cli.surface_edit_move_point_of_a_rim_vertex_is_refused`)
   (`src/katana_app/geo/cli/surface_edit.cmake`).
 
 ## Measured performance
