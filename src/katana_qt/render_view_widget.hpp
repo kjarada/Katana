@@ -32,6 +32,7 @@
 #include "katana/cad/scene.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/render/rasterizer.hpp"
+#include "terrain/surface_plan_painter.hpp"
 
 namespace katana::qt {
 
@@ -96,6 +97,13 @@ class RenderViewWidget final : public QWidget {
     }
     // The scene as last built, by layer.
     [[nodiscard]] const katana::cad::SceneLayers& sceneLayers() const { return layers_; }
+    // The legends the last paint stacked down the top-right corner - one for
+    // each visible surface drawn in a style that colours its faces, in drawing
+    // order, as many as the view has room for - each with its caption
+    // ("surface - style") and where its panel lies. Empty when none was
+    // drawn, and then the one elevation ramp's bar is, if a surface has it.
+    // What --report RenderView<id> prints, and what a test reads.
+    [[nodiscard]] const std::vector<DrawnLegend>& drawnLegends() const { return drawnLegends_; }
     // How many times each layer has been built: the proof that a selection
     // click rebuilds the overlay and nothing under it.
     [[nodiscard]] int terrainBuilds() const { return terrainBuilds_; }
@@ -222,8 +230,11 @@ class RenderViewWidget final : public QWidget {
     // pixels. False when it could not.
     bool resizeTarget();
     [[nodiscard]] double pixelRatio() const;
-    // The elevation ramp's legend, when a surface is coloured by it.
-    void drawLegend(QPainter& painter) const;
+    // The legends of the surfaces drawn in a display style, stacked down the
+    // corner; or the one elevation ramp's bar, when a surface is coloured by
+    // it and none has a legend of its own. Records what it drew
+    // (drawnLegends_).
+    void drawLegend(QPainter& painter);
     // Registers with the context's document, or ends the registration when
     // there is none; a no-op when it is the document already listened to.
     void listenTo(katana::cad::Document* document);
@@ -261,6 +272,8 @@ class RenderViewWidget final : public QWidget {
     bool refitOnResize_ = false;
     bool sceneEmpty_ = true;
     bool emptyMessageShown_ = false;
+    // What the last paint stacked as legends (drawnLegends).
+    std::vector<DrawnLegend> drawnLegends_;
     // The first paint frames the scene unless the camera was framed already
     // (ViewState::cameraFramed): the constructor sets this from the state.
     bool framed_ = false;

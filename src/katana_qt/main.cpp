@@ -304,6 +304,15 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
                         camera.projection() == katana::render::Projection::Perspective
                             ? QStringLiteral("perspective")
                             : QStringLiteral("orthographic"));
+        // Surface display (docs/surface_display.md, "In 3D"): the legends it
+        // stacked, one legend="surface - style" each in the order drawn, only
+        // when it drew any, so a view without them reads as it always did.
+        if (!shown->drawnLegends().empty()) {
+            text += QString(" legends=%1").arg(shown->drawnLegends().size());
+            for (const katana::qt::DrawnLegend& legend : shown->drawnLegends()) {
+                text += QString(" legend=\"%1\"").arg(legend.caption);
+            }
+        }
     } else if (const auto* button = qobject_cast<const QAbstractButton*>(widget)) {
         // A button: the name a screen reader gives it and, when it can be
         // checked, whether it is - a view bar's Link button says the link.

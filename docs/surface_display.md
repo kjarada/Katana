@@ -23,8 +23,8 @@ document is what is DONE with a style.
 | `include/katana/cad/terrain/surface_colouring.hpp` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
 | `include/katana/cad/terrain/surface_plan.hpp` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surfacePlan`, `SurfacePlanCache`) |
 | `include/katana/cad/terrain/surface_display_verbs.hpp` | `SURFACE LEGEND` and `SURFACE PLAN` |
-| `include/katana/cad/scene.hpp` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `applySurfaceDisplay`, `SceneLayers::legend`) |
-| `src/katana_qt/terrain/surface_plan_painter.hpp` | the plan painter's surface layer, and the legend panel both views draw |
+| `include/katana/cad/scene.hpp` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `applySurfaceDisplay`, `SceneLayers::legends`) |
+| `src/katana_qt/terrain/surface_plan_painter.hpp` | the plan painter's surface layer, and the legend panel and the stack of them (`paintSurfaceLegendStack`) both views draw |
 | `src/katana_qt/plan_painter.hpp` | `PlanSource::surfaces`, `PlanPaintOptions::surfaces`, the statistics |
 | `src/katana_qt/terrain/surface_style_manager.hpp` | Terrain > Surface Styles... |
 | `src/katana_qt/terrain/main_window_surface_display.cpp` | the window's wiring: the action, the dialog, the 3D views restyled |
@@ -368,8 +368,9 @@ not already save.
 On screen, over everything in the view's top-right corner, the legend of each
 drawn surface whose style colours its faces - at most three, stacked
 (`PlanPaintOptions::surfaceLegends`). Each is measured before it is drawn
-(`measureSurfaceLegend`, the one layout `paintSurfaceLegend` draws): the first
-is drawn whatever its height, and a later one that would not fit above the
+(`measureSurfaceLegend`, the one layout `paintSurfaceLegend` draws, and
+`paintSurfaceLegendStack`, the stack the 3D view's legends go through too):
+the first is drawn whatever its height, and a later one that would not fit above the
 view's foot is left out and not counted - a key with its lowest rows cut off
 by the edge reads as a key that ends there (`SurfacePlanPainter.ALegendTooTallForTheViewBelowTheOnesAlreadyDrawnIsLeftOutNotCutOff`;
 three 10-band legends are about 500 px). It is drawn into the kept drawing,
@@ -427,10 +428,26 @@ along it (`SceneSurfaceStyle.AWireframeColoursNothingSoItsHeightsStretchNoRampAn
 
 A style on the terrain ramp draws exactly what the scene drew before
 (`SceneSurfaceStyle.AStyleOnTheTerrainRampColoursASurfaceAsTheSceneAlwaysDid`).
-`SceneLayers::legend` is the legend of the first drawable surface whose style
-colours its faces by value or aspect, as drawn; `RenderViewWidget` draws it
-with the plan view's legend panel, and the old elevation bar for surfaces with
-no style.
+`SceneLayers::legends` are the legends of the drawable surfaces whose styles
+colour their faces by value or aspect, in drawing order, each as drawn
+(`SurfaceLegendCard`: the surface, its style, the legend). A hidden surface, a
+wireframe and a surface with no style have none. `RenderViewWidget` stacks
+them down the top-right corner with the plan view's own stack
+(`paintSurfaceLegendStack`, one function for both views, so they measure, fit
+and leave out alike), each captioned "surface - style"; with none, the old
+elevation bar is drawn for surfaces with no style. It used to draw the first
+styled surface's legend only, so a second styled surface's colours could not
+be read. The plan view keeps its three, over the drawing a person is editing;
+the 3D view is limited by room alone: a later legend that would not fit above
+the foot of the view is left out whole and ends the stack
+(`SurfaceLegend3D.MoreLegendsThanTheViewHoldsAreLeftOutWholeNotCutOffOrOverlapped`),
+and the scene keeps them all (`SceneLayers::legends`). Rejected: the plan
+view's cap of three here too, which would leave a fourth styled surface
+unreadable in a view with the room for it. The headless report of a 3D view
+says what it stacked, after its camera: `legends=2 legend="ground - Elevation
+Bands" legend="second - Slope Bands"`, nothing when it drew none
+(`RenderViewWidget::drawnLegends`,
+`qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless`).
 
 The window styles its 3D surfaces from the drawing's styles
 (`MainWindow::styleSceneSurfaces`) when it rebuilds them
@@ -656,7 +673,14 @@ another build with `tools/compare_benchmarks.py --alternate`.
   `PlanPainter.ASinglePagePlotHandsBack...` and `PlotDrawingDialog.TheWarningRecords...`
   in the widget tests; `plan.surface-style` in `test_preflight.cpp` and
   `test_sheet_agent_verbs.cpp`; `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`,
-  `qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`.
+  `qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`; the 3D
+  legends: `SceneSurfaceStyle.EveryVisibleSurfaceInAColouringStyleHasALegendInDrawingOrderAndNoOtherHasOne`
+  (two styled, one hidden, one unstyled, one wireframe), `SurfaceLegend3D.*`
+  (stacked in order and not overlapping; none styled keeps the bar; more than fit
+  are left out whole) and the headless report; the one ramp table:
+  `ColourRamps.*` in `tests/terrain/test_colour_ramps.cpp`,
+  `ColourRamps.TheShadingsRampsAreTheSurfaceStylesRampsStopForStop` and the
+  `ShadeVerb` tests that read the table's colours.
 * `qt_a_surface_is_drawn_in_plan_in_its_style_headless` - the sample terrain
   in the real window in Standard, Triangles and Elevation Bands, each paint's
   report read against the first; `qt_the_surface_style_manager_runs_its_lines_headless`.
@@ -724,7 +748,6 @@ another build with `tools/compare_benchmarks.py --alternate`.
   slope of each face could be kept with the surface.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
   batters and flat pads they go from the flats when the batters crowd them.
-* The 3D view's legend shows the first styled surface only.
 * `RASTER ASPECT` colours the eight compass directions with a constant of its
   own (`src/katana_app/geo/slope_verbs.cpp`), which is neither the aspect wheel
   a surface style uses (`aspectSectorColour`) nor a row of the ramp table: two

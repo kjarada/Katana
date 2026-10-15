@@ -476,4 +476,30 @@ QRectF paintSurfaceLegend(QPainter& painter, const cad::SurfaceLegend& legend, c
     return panel;
 }
 
+std::vector<DrawnLegend> paintSurfaceLegendStack(QPainter& painter,
+                                                 std::span<const cad::SurfaceLegendCard> cards,
+                                                 const LegendStack& stack)
+{
+    std::vector<DrawnLegend> drawn;
+    QPointF corner = stack.topRight;
+    for (std::size_t i = 0; i < cards.size() && i < stack.maximum; ++i) {
+        const cad::SurfaceLegendCard& card = cards[i];
+        const QString caption = QString::fromStdString(card.surface) + QStringLiteral(" - ") +
+                                QString::fromStdString(card.style);
+        // Measured first, so that a panel that would not fit is never drawn.
+        const QSizeF size = measureSurfaceLegend(card.legend, caption, stack.font);
+        if (size.isEmpty()) {
+            continue;
+        }
+        if (!drawn.empty() && corner.y() + size.height() > stack.bottom) {
+            break;
+        }
+        const QRectF panel = paintSurfaceLegend(painter, card.legend, caption, corner, stack.font,
+                                                stack.text, stack.backing);
+        drawn.push_back({caption, panel});
+        corner.setY(panel.bottom() + stack.gap);
+    }
+    return drawn;
+}
+
 } // namespace katana::qt

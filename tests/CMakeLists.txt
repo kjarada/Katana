@@ -1357,6 +1357,23 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # The 3D view stacks a legend for each visible surface drawn in a style
+    # that colours its faces (docs/surface_display.md, "In 3D"): two copies of
+    # the sample terrain, one in Elevation Bands and one in Slope Bands, and
+    # the first 3D view's report names both legends, in drawing order. The
+    # first was the only one shown.
+    add_test(NAME qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME second|>SURFACE STYLE ground \"Elevation Bands\"|>SURFACE STYLE second \"Slope Bands\"|?RenderView2"
+            "-DEXPECT=RenderView2: painted=[1-9][0-9]* [^\r\n]*projection=perspective legends=2 legend=\"ground - Elevation Bands\" legend=\"second - Slope Bands\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/the_3d_view_legends_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Editing a surface is not gaining one. The window decided that a surface
     # was gained by the pointer of its TIN, and an edit - its undo and redo
     # too - puts a new TIN under the same name: it opened a 3D view in the middle

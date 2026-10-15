@@ -13,6 +13,7 @@
 // upright.
 
 #include <cstddef>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -75,12 +76,9 @@ struct SurfacePaintOptions {
     QColor halo = QColor(0x1e, 0x23, 0x29);
 };
 
-// A legend the surfaces drawn would show: whose, and what it says.
-struct PaintedLegend {
-    std::string surface;
-    std::string style;
-    katana::cad::SurfaceLegend legend;
-};
+// A legend the surfaces drawn would show: whose, and what it says. The 3D
+// scene's are the same card (cad::SceneLayers::legends).
+using PaintedLegend = katana::cad::SurfaceLegendCard;
 
 struct SurfacePaintStats {
     std::size_t surfacesDrawn = 0; // visible, with something in view
@@ -133,5 +131,40 @@ inline constexpr int kLegendRows = 16;
 QRectF paintSurfaceLegend(QPainter& painter, const katana::cad::SurfaceLegend& legend,
                           const QString& caption, const QPointF& topRight, const QFont& font,
                           const QColor& text, const QColor& backing);
+
+// What a stack of legends drew: each panel's caption and rectangle, in the
+// order drawn.
+struct DrawnLegend {
+    QString caption;
+    QRectF panel;
+};
+
+// Where and how a stack of legends goes down a view's corner.
+struct LegendStack {
+    // The top-right corner of the first panel, in the painter's units.
+    QPointF topRight;
+    // A later panel whose foot would pass this is left out and ends the stack:
+    // a key with its lowest rows cut off by the view's edge reads as a key that
+    // ends there. The first is drawn whatever its height (a view too short for
+    // it clips it as it clips anything).
+    double bottom = 0.0;
+    // The gap between one panel's foot and the next one's top.
+    double gap = 10.0;
+    // At most this many cards are considered (more would cover the drawing
+    // they explain); one that is empty counts against it and is not drawn.
+    std::size_t maximum = 3;
+    QFont font;
+    QColor text;
+    QColor backing;
+};
+
+// The legends of `cards` stacked down from `stack.topRight`, each captioned
+// "surface - style", in order: the one stack the plan view and the 3D view
+// draw their legends through, so that they stack, fit and leave out alike.
+// Each is measured before it is drawn (measureSurfaceLegend), so none is cut
+// by the edge and none overlaps another. Returns what was drawn.
+std::vector<DrawnLegend> paintSurfaceLegendStack(QPainter& painter,
+                                                 std::span<const katana::cad::SurfaceLegendCard> cards,
+                                                 const LegendStack& stack);
 
 } // namespace katana::qt
