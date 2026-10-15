@@ -550,8 +550,17 @@ package's by the rehearsal that follows. Then:
 
 * `katana_cli -c "RECT 0,0 30,20" -c "SAVE ..."` must write a project;
 * `INFO samples/gis/terrain.asc` must name its coordinate system as
-  `EPSG:32630`: GDAL reads the `.prj` and PROJ names it from `proj.db`, so this
-  fails unless the packaged PROJ data is found;
+  `EPSG:32630`: that shows GDAL reads the `.prj`, and **nothing about PROJ's
+  data**: GDAL recognises a WGS 84 UTM zone from its parameters
+  (`AutoIdentifyEPSG`, `gdal_adapter.cpp`) and names it with `proj.db` missing.
+  It was once taken for the check of the packaged PROJ data; shown on a copy
+  of the package with `share/proj` hidden, it still names `EPSG:32630`.
+  `CRS SET EPSG:7856` is the check: it reads the code from the database and
+  exits 1 without it ("PROJ resource database (proj.db) not found"), and must
+  reply `crs id=EPSG:7856`. (`CRS FIND` was rejected as the check: it is
+  answered from a list built into the program and passes on a broken
+  package.) The deploy scripts also fail, rather than warn, when the tree they
+  make has no `share/proj`;
 * `IMPORT` of `samples/gis/survey_scan.las` (PDAL) and `parcels.geojson`
   (GDAL's vector drivers) must succeed;
 * `katana <project> --screenshot out.png`, offscreen, must write the window's
@@ -586,7 +595,7 @@ the bundle's seal before the programs in `Contents/MacOS` run.
 **The installers.** Each Windows installer is then run as a deployment script
 runs it, as the user the job runs as (the installer asks for no administrator
 rights): `/S /D=<folder>`, silently, into a folder of its own. The installed
-`katana_cli` must name `EPSG:32630` as above, and the uninstaller
+`katana_cli` must name `EPSG:32630` and read `EPSG:7856` as above, and the uninstaller
 (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
 remove `bin\katana_cli.exe`.
 

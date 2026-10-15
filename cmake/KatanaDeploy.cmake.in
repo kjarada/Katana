@@ -233,11 +233,21 @@ endif()
 foreach(_data proj gdal)
     if(IS_DIRECTORY "${_toolchain_bin}/../share/${_data}")
         file(COPY "${_toolchain_bin}/../share/${_data}" DESTINATION "${_prefix}/share")
+    elseif(_data STREQUAL "proj" AND NOT _build_tree)
+        # A package without proj.db cannot name a coordinate system, and the smoke
+        # test of INFO on a UTM raster would not notice (docs/release.md): a package
+        # is not made without it. The build tree only warns, as it always did.
+        message(FATAL_ERROR "Katana deploy: ${_toolchain_bin}/../share/proj was not found; "
+                            "a package without PROJ's database cannot be made")
     else()
         message(WARNING "Katana deploy: ${_toolchain_bin}/../share/${_data} was not found; "
                         "the bundle will lack it")
     endif()
 endforeach()
+if(NOT _build_tree AND NOT EXISTS "${_prefix}/share/proj/proj.db")
+    message(FATAL_ERROR "Katana deploy: ${_prefix}/share/proj/proj.db is not in the package; "
+                        "the toolchain's share/proj holds no proj.db")
+endif()
 # The certificates every HTTPS request is checked against. libcurl - which
 # GDAL fetches through: GIS > Online Data, /vsicurl/ - reads them from a file
 # found, like proj.db, RELATIVE TO ITS OWN DLL: <bin>/../etc/ssl/certs/
