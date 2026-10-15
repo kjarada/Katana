@@ -656,6 +656,81 @@ TEST_F(McpServer, TheLeadersToolGivesWhatEachLeaderSaysAndThePresets)
     EXPECT_TRUE(call("katana_leaders", Json{{"ids", {"two"}}})["isError"].get<bool>());
 }
 
+// katana_leaders takes the one scope and filter grammar as parameters
+// (CLAUDE.md 1.1), reads the leaders the scope took, and says how many. By
+// hand: points 1 (0,0) and 2 (50,50); on layer notes the leaders 3 (0,0)-(5,5)
+// and 4 (50,50)-(55,55); on layer 0 the leader 5 (100,100)-(110,110).
+TEST_F(McpServer, TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"LAYER NEW notes", "POINT 0,0", "POINT 50,50", "LAYER SET notes",
+                                  "LEADER 0,0 5,5 text=A", "LEADER 50,50 55,55 text=B",
+                                  "LAYER SET 0", "LEADER 100,100 110,110 text=C"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::size_t steps = session.document().history().undoCount();
+    const auto idsOf = [](const Json& reply) {
+        std::vector<long long> ids;
+        for (const Json& leader : reply["structuredContent"]["leaders"]) {
+            ids.push_back(leader["id"].get<long long>());
+        }
+        return ids;
+    };
+
+    // A layer: the two on notes, and the scope says so.
+    const Json layers =
+        call("katana_leaders", Json{{"scope", "layers"}, {"scope_layers", {"notes"}}});
+    ASSERT_FALSE(layers["isError"].get<bool>()) << textOf(layers);
+    EXPECT_EQ(idsOf(layers), (std::vector<long long>{3, 4}));
+    EXPECT_EQ(layers["structuredContent"]["scope"]["matched"], 2);
+    EXPECT_EQ(layers["structuredContent"]["scope"]["record"],
+              "scope=layers layers=notes sublayers=yes matched=2");
+
+    // An area given alone is the scope: -1,-1,10,10 overlaps only leader 3.
+    const Json area = call("katana_leaders", Json{{"area", {-1, -1, 10, 10}}});
+    ASSERT_FALSE(area["isError"].get<bool>()) << textOf(area);
+    EXPECT_EQ(idsOf(area), (std::vector<long long>{3}));
+    EXPECT_EQ(area["structuredContent"]["scope"]["record"], "scope=area area=-1,-1,10,10 matched=1");
+
+    // The whole drawing, with a filter: the leaders on layer 0 are leader 5.
+    const Json where = call("katana_leaders", Json{{"scope", "drawing"},
+                                                   {"scope_where", {"LAYER=0"}}});
+    EXPECT_EQ(idsOf(where), (std::vector<long long>{5}));
+
+    // A scope that takes no leader gives none - not all of them.
+    const Json none = call("katana_leaders", Json{{"scope", "drawing"},
+                                                  {"scope_where", {"TYPE=point"}}});
+    ASSERT_FALSE(none["isError"].get<bool>()) << textOf(none);
+    EXPECT_TRUE(none["structuredContent"]["leaders"].empty()) << none.dump();
+    EXPECT_EQ(none["structuredContent"]["scope"]["matched"], 0);
+    // A filter alone filters the selection, which is empty.
+    const Json selection = call("katana_leaders", Json{{"scope_where", {"TYPE=point"}}});
+    EXPECT_TRUE(selection["structuredContent"]["leaders"].empty());
+    EXPECT_EQ(selection["structuredContent"]["scope"]["matched"], 0);
+
+    // No scope: all three, and no scope member.
+    const Json all = call("katana_leaders");
+    EXPECT_EQ(idsOf(all), (std::vector<long long>{3, 4, 5}));
+    EXPECT_FALSE(all["structuredContent"].contains("scope"));
+    // target narrows a scope too: none of these three is on an entity.
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "drawing"}, {"target", 1}})
+                    ["structuredContent"]["leaders"]
+                        .empty());
+
+    // The refusals: ids and a scope; a layer that is not there; VIEW, which is
+    // the window's; an area that is not four numbers.
+    EXPECT_TRUE(call("katana_leaders", Json{{"ids", {3}}, {"scope", "drawing"}})["isError"]
+                    .get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "layers"}, {"scope_layers", {"nowhere"}}})
+                    ["isError"]
+                        .get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "view"}})["isError"].get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"scope", "area"}, {"area", {1, 2}}})["isError"]
+                    .get<bool>());
+    EXPECT_EQ(session.document().history().undoCount(), steps) << "a read is no step";
+}
+
 TEST_F(McpServer, AScriptsIndentedNoteRunsNothing)
 {
     // A line whose first non-blank is '#' is a note, as File > Run Script

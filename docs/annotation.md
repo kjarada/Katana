@@ -580,6 +580,34 @@ Decisions:
 * **A smart leader's tip is still on an entity.** A surface's level at a
   bare place is not a leader's: a note reads what it points at, and the
   surface beneath it. "Not yet" has the free tip.
+* **A surface or an alignment is read by name, and the name follows a
+  rename.** `SURFACE RENAME` rewrites the leaders whose own template names the
+  surface - `{surface.NAME}`, `{dsurface.NAME}`, `{cut.NAME}`, `{fill.NAME}`,
+  found ignoring case as the store finds a surface - to the new name in the
+  SAME undo step as the rename and the corridors and road objects it already
+  carries (`annotation::renameLeaderReads`; the steps, the literal text, the
+  line breaks and the doubled braces of a template are kept,
+  `entity::renameTemplateFields`). A preset leader so still reads the surface
+  and `recognisePreset` still knows it. The reply says `leaders=N`. Two kinds
+  of leader are left reading the old name, counted in a `warning` record and
+  not hidden: one whose new name no template can write (empty, or holding
+  `:`, `{` or `}`, as `presetTemplate` refuses the same), and one on a locked
+  layer, because a single leader in the way would have refused the whole
+  rename, which is worth more than they are
+  (`LeaderScope.ANameANoteCannotWriteLeavesTheReadersAndSaysSoInAWarning`,
+  `LeaderScope.ALeaderOnALockedLayerIsLeftReadingTheOldNameAndTheRenameStillRuns`).
+  A label style's template cannot name a surface (`checkLabelTemplate`), so
+  none is rewritten. `SURFACE REMOVE` and `ALIGN DELETE` do not refuse while a
+  leader reads the thing: they say, in a `warning` record, how many leaders
+  will read nothing (`annotation::leadersReading`) and go on, and UNDO brings
+  the thing back with its readers. Rejected: refusing the removal while a
+  leader reads it - the choice the road objects made too (`docs/road_objects.md`:
+  a removal that is refused makes a surface that was meant to go stay) - and
+  a quiet removal, which leaves a leader drawn bare with nobody told. There
+  is no alignment rename (no `ALIGN RENAME`, no command), so there is nothing
+  for the readers of an alignment to follow yet: `renameLeaderReads` takes
+  `ReadKind::Alignment` and is tested, for the verb that will call it
+  (`LeaderScope.RenameLeaderReadsFollowsAnAlignmentByTheFunctionTheRenameWillUse`).
 
 ### Presets
 
@@ -633,7 +661,7 @@ replies with the note as it now reads; `LEADER PROP id DELETE key` removes it
 
 ### Many at once
 
-`LEADER FOR id... | SELECTION [template= | labelstyle= | text=]` makes a
+`LEADER FOR id... | <scope> [template= | labelstyle= | text=]` makes a
 leader to each entity as ONE step: its tip at a point's or a text's position,
 the middle of a line or an arc, halfway along an open polyline, inside a
 closed one, and on a circle on the side the note goes; the note `length=` mm
@@ -653,7 +681,7 @@ refused rather than make a number that would be given again
 
 ### Arranging them
 
-`LEADER ALIGN id id... | SELECTION [x=] [spacing=mm]` lines the notes up in a
+`LEADER ALIGN id id... | <scope> [x=] [spacing=mm]` lines the notes up in a
 column, as AutoCAD's MLEADERALIGN does: each leader's last vertex - where its
 note hangs - goes to one x (the topmost note's, or `x=`), and with `spacing=`
 the notes are stacked that many paper millimetres apart from the top down, in
@@ -664,17 +692,79 @@ order they were made, across the sheet by their tips, or down it; a smart
 balloon is left alone (`RenumberingNumbersTheBalloonsInTheOrderAsked`). Each
 is one step, and none when nothing moves.
 
+### Scope and filter
+
+Every verb that reads or changes a SET of drawing data takes the one grammar
+Global Modify, `MODIFY`, `EXPORT` and the UTILITY verbs take (the contributors'
+contract, "Every tool acts on a scope and a filter"; `docs/cad.md`), in place of ids:
+
+    [SELECTION | VIEW [id] [EXTENTS] | DRAWING | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]]
+    [WHERE TYPE=.. LAYER=.. STYLE=.. COLOUR=.. PROP=.. TEXT=.. DRAWN]
+
+It is read by `cad::parseScopeWords` and resolved by `cad::matchScope` -
+`annotation::matchLeaders` narrows what that matched to the leaders, so the
+`matched=` it reports counts leaders - and there is no second reader of a
+scope here. `LEADER LIST [JSON]`, `VALUES`, `SET`, `FREEZE`, `DETACH`,
+`PROP`, `ALIGN` and `BALLOON RENUMBER` act on the leaders it takes; `LEADER
+FOR` and `BALLOON FOR` on the entities it takes - of any kind, those with no
+place for a leader counted in `skipped=` as before. `ATTACH` puts one tip on
+one place and stays an id. Decisions:
+
+* **The reply leads with the scope's record**, as the other verbs' do:
+  `scope=layers layers=notes sublayers=yes matched=4`, then the verb's own
+  reply (`frozen leaders=3`). `VALUES` adds `skipped=` (leaders whose tip is on
+  nothing have no values), `PROP` adds `entities=` and `skipped=` (two leaders
+  on one pit set it once, in one step). Ids carry no record.
+* **A scope that takes nothing is said, not refused, and never means
+  "all"**: `matched=0`, `updated leaders=0`, no step; `LEADER LIST DRAWING
+  WHERE TYPE=point JSON` is `"leaders": []`, not every leader
+  (`LeaderScope.AScopeThatTakesNoLeaderListsNoneAndNeverAll`: an empty id list
+  means "all" to `leadersJson`, so the scope's goes through `leadersReport`,
+  which tells none from all). The one exception is MODIFY's: an EDIT of
+  `SELECTION` with no leader selected (nothing, for `FOR`) is refused as it was -
+  "no leader is selected; use SELECT first" - since forgetting to select is a
+  mistake a script should stop at. Rejected: `matched=0` there, which lets a
+  script that selected nothing go on as if it had worked.
+* **Ids or a scope, never both**: "name the entities by id or by a scope".
+  Rejected: their intersection, which makes `LEADER FREEZE 5 DRAWING` mean
+  something nobody typed on purpose. With neither, a verb is as it was: `LEADER
+  LIST` lists every leader, `BALLOON RENUMBER` numbers every numbered balloon.
+  Any scope or `WHERE` word makes the grammar's rule apply, `WHERE` alone
+  being the selection's filter. A scoped `RENUMBER` numbers the balloons it
+  takes from `start=` and leaves the others, so it can give a number another
+  balloon has; no scope numbers them all again.
+* **The verb's own options go before `WHERE`**: after it a key that is a WHERE
+  key (`TYPE LAYER STYLE COLOUR PROP TEXT`) is the condition and not the
+  option, which matters for `text=` and `style=` (the note, the text style),
+  so `LEADER FOR DRAWING text=NOTE WHERE TYPE=point LAYER=plan`
+  (`LeaderScope.AWhereKeyAfterWhereIsTheConditionAndNotTheVerbsOwnOption`).
+  Any other option (`preset=`, `arrow=`) may stand after it. Rejected: reading
+  `style=` after `WHERE` as the option, which would make the same word two
+  things in one line. `PROP` takes the scope before `SET` or `DELETE`, which
+  end it (the word after `LAYERS` is a layer, even one called `set`).
+* **`VIEW` is the window's plan view**, with its own hidden layers and its area
+  (`VIEW <id>` another view, `VIEW EXTENTS` without the area); headless it is
+  refused in favour of `AREA`, as everywhere (`ScopeViewProvider`).
+* **MCP**: `katana_leaders` takes `scope`, `area`, `scope_layers`, `only` and
+  `scope_where` (the names `katana_import` uses, read by the same
+  `scopeWordsOf`), reads the leaders the scope took from the Document - still no
+  line in the history - and adds `scope: {record, matched}` to its object; with
+  `ids` too it is refused. `LEADER LIST ... JSON` prints the same object.
+
 ### One set of edits
 
 `include/katana/cad/annotation/leader_edit.hpp` is every leader edit - the
 note and look (`changeLeaders`, `applyLeaderChange`), attaching, freezing
-and detaching, an attribute through the leader, one per entity
-(`leadersFor`), aligning, renumbering - each checked against the model and
+and detaching, an attribute through the leader (`setLeadersTargetProperty`,
+for many at once), one per entity (`leadersFor`), aligning, renumbering (of
+the balloons a scope took, `renumberBalloons`), and the notes that read a
+renamed surface (`renameLeaderReads`) - each checked against the model and
 returned as ONE command or refused - a template that does not check, a
 style not in the drawing, a size below 0 mm (`paper=-3` included; 0 is the
 text style's height, or no landing) - never half made. The verbs parse their
 words into it, and the window's Leaders manager ("In the window" below)
-fills it from its form, so a verb typed and a button pressed cannot differ.
+writes the line a person would type and hands it to the same verbs, so a verb
+typed and a button pressed are one code path.
 
 ### Freezing and letting go
 
@@ -706,13 +796,13 @@ as a reply writes it (`core::unescapeTyped`, the sheet verbs' reader too;
 | `LEADER p p... text= \| template= \| labelstyle= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="IL 10.500" associative=yes target=12 anchor=position template="IL {prop.invert:.3f}"` |
 | `LEADER p p... preset=level\|surface\|cutfill\|name\|code\|details\|station [surface=\|alignment=]`, also on `LEADER FOR` and `LEADER SET` | `created leader id=27 text=+4.000 associative=yes target=12 anchor=position template={dsurface.ground:+.3f} preset=surface surface=ground chosen="first visible surface"` |
 | `LEADER PRESETS` | `preset=surface title="Surface Difference" reads=surface template={dsurface.NAME:+.3f} tool=annotate.leader.surface`, one a preset |
-| `LEADER LIST [id...] [target=id] JSON` | `{"leaders": [{"id": 27, ..., "preset": "surface", "reads": "ground", "text": "+4.000", "lines": ["+4.000"]}], "presets": [...], "surfaces": ["ground"], "alignments": []}` - MCP's `katana_leaders`. Written with nlohmann's `replace` handler (U+FFFD for a byte that is not UTF-8, never an exception, as `docs/cad.md` says of the other replies): a surface name typed at katana_cli in the ANSI code page ended it here, and the window with it (`docs/headless.md`, "Text and names") |
+| `LEADER LIST [id... \| <scope>] [target=id] JSON` | `{"leaders": [{"id": 27, ..., "preset": "surface", "reads": "ground", "text": "+4.000", "lines": ["+4.000"]}], "presets": [...], "surfaces": ["ground"], "alignments": []}`, and `"scope": {"record": ..., "matched": N}` when a scope chose the leaders - MCP's `katana_leaders`. Written with nlohmann's `replace` handler (U+FFFD for a byte that is not UTF-8, never an exception, as `docs/cad.md` says of the other replies): a surface name typed at katana_cli in the ANSI code page ended it here, and the window with it (`docs/headless.md`, "Text and names") |
 | `DIMSTYLE LIST \| INFO name \| NEW name [field value ...] \| SET name field value [field value ...] \| DELETE name` | `dimension style site updated`; `INFO`: `name=site text=3.5 gap=0.625 ... paper=on layers=1 reads=10.000` |
-| `LEADER VALUES id \| #id[.point\|@x,y]` | `target=12 type=Point` and a `value=rl text=12.500` line each |
-| `LEADER LIST [id...] [target=id]`, `SET id... tip= at= ...`, `ATTACH id p`, `DETACH`, `FREEZE` | `id=26 layer=0 vertices=2 tip=10,10 target=12 anchor=position smart=yes template=... arrow=ClosedFilled callout=none text=...` |
-| `LEADER PROP id SET key value [type] \| DELETE key` | `leader=26 target=12 property=invert text="IL 10.500"` |
-| `LEADER FOR id... \| SELECTION`, `BALLOON FOR` | `created leaders=4 ids=7,8,9,10 skipped=1` |
-| `LEADER ALIGN id... [x= spacing=mm]`, `BALLOON RENUMBER [start= order=id\|x\|y]` | `aligned leaders=3 x=22 spacing=4`, `balloons=3 renumbered=3` |
+| `LEADER VALUES id \| #id[.point\|@x,y] \| <scope>` | `target=12 type=Point` and a `value=rl text=12.500` line each; over a scope `scope=layers layers=notes sublayers=yes matched=4 skipped=1`, then a `leader=26 target=12 type=Point` block for each leader on an entity |
+| `LEADER LIST [id... \| <scope>] [target=id]`, `SET id... \| <scope> tip= at= ...`, `ATTACH id p`, `DETACH`, `FREEZE` (ids or a scope) | `id=26 layer=0 vertices=2 tip=10,10 target=12 anchor=position smart=yes template=... arrow=ClosedFilled callout=none text=...` |
+| `LEADER PROP id \| <scope> SET key value [type] \| DELETE key` | `leader=26 target=12 property=invert text="IL 10.500"`; over a scope its record adds `entities=2 skipped=1` |
+| `LEADER FOR id... \| <scope>`, `BALLOON FOR` | `created leaders=4 ids=7,8,9,10 skipped=1` (led by `scope=... matched=N` over a scope) |
+| `LEADER ALIGN id... \| <scope> [x= spacing=mm]`, `BALLOON RENUMBER [<scope>] [start= order=id\|x\|y]` | `aligned leaders=3 x=22 spacing=4`, `balloons=3 renumbered=3` |
 
 `TS`, `LS`, `MT` and `LE` are aliases. `LABEL` of many entities, `AUTOLABEL
 RUN` and `DIM BASELINE` are each ONE undo step (`ManyLabelsAreOneStep`). A
@@ -864,10 +954,60 @@ the dialog `leaderManagerDialog`) on one of its tabs: **Leaders...**
 (`annotateLeadersForSelection`) and **Arrange Leaders and Balloons...**
 (`annotateArrangeLeaders`), each given a menu letter the tools have not taken
 (`AnnotationWorkbench::addLeaderActions`). It is the smart leaders' front end
-and decides nothing of its own: every button is an edit of
-`include/katana/cad/annotation/leader_edit.hpp`, the same the LEADER and
-BALLOON verbs make, one undo step each, and a refusal is said in the
-dialog's problem line in the command's words.
+and changes NOTHING itself: every button builds the `LEADER` or `BALLOON` line a
+person would type - shown as it ran in the read-only `leaderLine` - and hands
+it to the window's one executor (`docs/desktop.md`, "One executor: the command
+runner"), so the edit is echoed in the command log, kept in the history, ONE
+undo step like a typed line, and a refusal is said in the dialog's problem
+line in the verb's own words. It still calls the read-only helpers of
+`leader_edit.hpp` (what a note would say, the place a leader goes on an
+entity, the value rows) to preview; none of them edits. The lines are built by
+pure functions of plain data (`leaderOptionWords`, `leaderSetLine`,
+`leadersForLine`), so a test reads the very line:
+
+| Button | Line |
+|---|---|
+| Apply | `LEADER SET id [id...]` and only the options the form changed - `text=` / `template=` / `labelstyle=`, `arrow=`, `callout=`, `style=`, `paper=`, `arrowsize=`, `landing=`, `tip=#id.alongN:T` - the numbers written exactly (`core::formatExactReal`: a height of 2.3456 is not sent as 2.346). An untouched form runs no line |
+| Freeze Note, Detach Tip | `LEADER FREEZE id...`, `LEADER DETACH id...` |
+| Attach to Selected | `LEADER ATTACH id #id.along0:0.25` (`command_words.hpp`, `anchorWord`, the place written so the verb reads it back exactly) |
+| Set, Remove (attribute) | `LEADER PROP id SET key value [type]`, `LEADER PROP id DELETE key` |
+| Make for Selection | `LEADER FOR <options> angle=45 length=10 <scope>`, `BALLOON FOR ...` |
+| Align Selected Leaders | `LEADER ALIGN [x=] [spacing=] <scope>` |
+| Renumber Balloons | `BALLOON RENUMBER start= order=` and, ticked, the scope |
+
+A note the line cannot carry is refused in the problem line, naming the field,
+and nothing runs: a double quote (`the note: a double quote cannot be written
+on a command line`), in a note, a text style, a label style or an attribute.
+A line break is written as the two characters the verbs read back as one, and
+a backslash twice (`core::unescapeTyped`), so a note holding `C:
+ew` goes
+through whole - which the other annotation dialogs, using
+`annotationTextWord`, refuse. Rejected: sending the single leader the form
+shows as `LEADER SET ... ` with every field, which would rewrite a value the
+widgets cannot hold exactly.
+
+The **Which leaders...** button above the list, **For Selection** and
+**Arrange** each carry the shared Apply to / Only those that match controls
+(`customisation/scope_filter_widget.hpp`, the very widget of Global Modify and
+the utilities dialog; object names `leaderList...`, `leaderFor...` and
+`leaderArrange...`, `Scope`, `Layers`, `FilterLayer`, `TypePoint` and so on).
+On the Leader tab pressing the button shows the controls and the list then
+holds the leaders the scope takes (`cad::matchEntities`, the matcher the verbs
+resolve a scope with), the whole drawing and no filter to begin with, so
+unpressed and pressed-with-defaults list the same; a scope that cannot be read
+(no layer ticked) says why under the button and lists none. Apply, Freeze and
+Detach act on the shown leader or the selected ones, as before: they name ids,
+which stay the other way to name leaders. On For Selection the controls choose
+the entities the leaders are made for - the selected ones to begin with, and
+the tab then says "2 entities selected" as it did - and the line ends in the
+scope's words; the scope's own record (`scope=layers layers=plan sublayers=yes
+matched=2`) is shown beside the report (`leaderForScopeReport`). On Arrange
+they choose the leaders to line up, and **Only the balloons Apply to takes**
+(`balloonRenumberScoped`, unticked to begin with) the balloons to number
+again; unticked, every numbered balloon is, as it always was. The tab is still
+named For Selection and its menu item "Leaders for Selection..."
+(`annotateLeadersForSelection`): the selection is what it begins with, and the
+names are what the headless tests and shortcuts know it by.
 
 * **Leader**: every leader in the drawing, by what it says, and a form for the
   chosen one, which follows the drawing's selection. The form says what the
@@ -1108,8 +1248,11 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/qt_widgets/annotation/test_leader_manager_presets.cpp` | the Leaders manager's Preset boxes by object name: a preset's template written and applied in one step, a named surface and refusals, a leader shown as its preset until typed away, For Selection, the surfaces' values |
 | `tests/geometry/test_alignment.cpp` | (`StationOffset...`) the station and offset of a point on a straight alignment, a curve, outside a kink, beyond the ends, and undoing `pointAtStationOffset` on spirals |
 | `src/katana_app/geo/cli/leaders.cmake` | `cli.a_surface_leader_says_how_far_a_point_is_above_the_ground`: a surface from the sample terrain, a point at RL 30, surface, cut/fill and level leaders and LIST; one on no surface failing the script |
-| `tests/app/test_mcp_server.cpp` | `McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets` |
+| `tests/app/test_mcp_server.cpp` | `McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`, and `McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`: a layer, an area given alone, a filter, a scope that takes none giving none, a filter alone on the selection, and the refusals (ids with a scope, a layer that is not there, VIEW, an area that is not four numbers) |
+| `tests/cad/annotation/test_leader_scope.cpp` | the leader verbs over the shared scope and filter, each value worked out by hand: LIST (a layer, an area, a filter, the selection, the window's view with its hidden layers), VALUES, SET, FREEZE, DETACH, PROP (two leaders on one pit set it once), ALIGN, FOR and BALLOON FOR and RENUMBER; a scope that takes nothing is said and never means "all"; the refusals (ids with a scope, two scopes, a missing layer, VIEW headless, an edit of an empty selection); a WHERE key after WHERE is the condition; `SURFACE RENAME` rewriting the notes that read the surface in its one undo step (any case, steps and doubled braces kept, a locked layer or an unwritable name left and warned), `ALIGN DELETE`'s warning, `renameLeaderReads` for an alignment, `renameTemplateFields`; the anchor words the dialog writes read back as the same place; and the JSON writer handed a byte that is not UTF-8 |
+| `src/katana_app/CMakeLists.txt` | `cli.leaders_take_a_scope_and_say_how_many_they_took`, `cli.leaders_named_by_id_and_by_scope_are_refused`, `cli.balloons_of_one_layer_are_numbered_again_by_scope`; `src/katana_app/geo/cli/leaders.cmake` adds `cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns` |
 | `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name and its widgets' own signals: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
+| `tests/qt_widgets/annotation/test_leader_manager_lines.cpp` | the Leaders manager hands lines to the executor and changes nothing itself: the options of a change written exactly (2.3456 not cut), a note's line break and backslash, a double quote refused with a sentence naming the field and nothing run, an untouched form running no line, no executor said, each button's line (SET of only what changed, FREEZE, DETACH, ATTACH along, PROP, FOR, BALLOON FOR, ALIGN, RENUMBER), the list and the For Selection and Arrange tabs taking a layer, a filter or the whole drawing from the shared controls, and the reply's report |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_leader_preview.cpp` | a smart leader painted as a preview or a grip drag with the drawing it reads says its note, a plain one and one whose target is gone are as they were |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
@@ -1130,20 +1273,22 @@ it skipped dimensions, and so does the archive exporter.
   thousands of labels.
 * **Zoom Extents** frames an annotation by its entity's box, which for a
   paper-sized note or leader does not include its text: a note beyond the
-  drawing can be cut off at the edge.
+  drawing can be cut off at the edge. The fix is in the plan painter's
+  `planDrawnBounds` (and the plot's fit), which would add each note's measured
+  box at the annotation scale - the painter's font metrics, not anything of
+  the annotation code - so it was left to the view code's owner.
 * **The Linear Dimension tool** still stores the aligned projection for an
   unsnapped horizontal or vertical dimension outside the origins' levels
   (`docs/tools.md`).
 * **Edit Text works on one text.** A selection of several texts is not
   edited together; `MODIFY` changes their layers and styles, and `TEXTEDIT`
   is one text a line.
-* **Leader options** are for the leader being drawn. No dialog edits a
-  leader or a balloon already drawn: erase it and draw it again, or type
-  `LEADER`/`BALLOON` with its options.
 * **Labels are not picked by their text**: a label is selected at its
   anchor, and moved off its placed position with Annotate > Edit Label
   (`LABEL SET id at=x,y`) rather than by dragging its text.
-* **PURGE** does not purge unused text or label styles.
+* **PURGE** does not purge unused text or label styles. It wants them in
+  `entity::tableUsage`, `commands::TableItems` (with the undo of a deleted
+  style) and `cad::planPurge` - the table commands, not the annotation code.
 * **No style is renamed.** No verb or command renames a text, label or
   dimension style, so the managers offer no Rename; New names a style as it
   is made instead.
@@ -1160,11 +1305,11 @@ it skipped dimensions, and so does the archive exporter.
   to Selected do). An arc's or a circle's centre is reached only by typing
   (`#id.centre`). DXF export writes the note as it reads, not a field a CAD
   reader could update.
-* **A surface or an alignment is read by NAME.** Renamed or deleted, the
-  template still names the old one and its lines say nothing (a leader whose
-  every line read it is drawn bare); nothing guards a surface or an
-  alignment a leader reads, and `SURFACE RENAME` does not follow into
-  templates. As an alignment has had no in-use guard (`docs/geometry.md`).
+* **A surface or an alignment is read by name.** A surface renamed is
+  followed ("What a leader reads of the drawing"); one removed leaves the
+  leaders that read it drawn bare, with a warning saying how many, and an
+  alignment has no rename to follow (no `ALIGN RENAME` exists; `renameLeaderReads`
+  is ready for it) and no in-use guard (`docs/geometry.md`).
 * **A tip on nothing reads no surface.** The ground level at a bare click -
   a leader to a place, not a point - would need a smart leader with no
   target, which the model refuses; put a point there.
@@ -1182,35 +1327,7 @@ it skipped dimensions, and so does the archive exporter.
 * **A double quote** cannot be typed in a note, a template, a style's name
   or an attribute: the command line has no escape for one inside quotes, so
   what the window and the Leader tool can put in a note, a script cannot.
-  The project-wide limit, as for sheets (`docs/plotting.md`).
-* **The Leaders manager edits through `leader_edit.hpp` directly**, not by
-  handing a `LEADER` or `BALLOON` line to the window's command line, which
-  the contributors' contract now asks of a dialog (the Subsurface Utilities
-  dialog is the model). It was built before that contract came back to main,
-  as the Text
-  and Label Style managers beside it were, and each of its edits is still
-  the one the verb makes and one undo step - but it is not echoed to the
-  command log or kept in the command history. Every edit now has an exact
-  spelling to hand over - `LEADER SET id ...` with only the changed options
-  and numbers written exactly (`core::formatExactReal`), `tip=#id.alongN:T`,
-  `LEADER ATTACH id #id.inside|#id.alongN:T`, `LEADER FREEZE|DETACH`,
-  `LEADER PROP`, `LEADER|BALLOON FOR SELECTION`, `LEADER ALIGN`, `BALLOON
-  RENUMBER` - save a note holding a double quote (above); the change is an
-  executor handed to the dialog, as the utilities dialog is given one, and
-  its tests driving lines.
-* **Scope and filter.** `LEADER FOR`, `LEADER ALIGN`, `LEADER LIST` (and its
-  `JSON` form), `LEADER FREEZE` and `DETACH`, `BALLOON FOR` and `BALLOON
-  RENUMBER`, the MCP tool `katana_leaders` (its `ids` and `target` are all it
-  narrows by) and the Leaders manager's For Selection and Arrange tabs act on
-  ids, the selection or every balloon - not yet on the Global Modify scope and
-  filter (a view, layers, an area; only those that match) that the
-  contributors' contract asks of every tool. The shared grammar and widget
-  exist and have since 2026-09-26 (`cad::parseScopeWords`, `matchScope` and
-  `scopeRecord`, `ScopeFilterWidget`; MODIFY, EXPORT, the UTILITY and surface
-  verbs take them) - this entry said until 2026-10-15 that they "are not built
-  yet", which was true when it was written and not a day later. What is not
-  done is moving these verbs onto them: the scope words before the `key=value`
-  options (a `WHERE` key would be read as an unknown option today, and a scope
-  word as an entity id), the scope record in each reply, `scope`, `area`,
-  `layers` and `where` arguments on `katana_leaders`, and the manager's "Apply
-  to" box. Until then an agent lists the leaders and filters them itself.
+  The project-wide limit, as for sheets (`docs/plotting.md`). The Leaders
+  manager says so in its problem line, naming the field, rather than send a
+  line that sets something else.
+

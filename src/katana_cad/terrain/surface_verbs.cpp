@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/road/corridor_model.hpp"
 #include "katana/cad/road/road_objects.hpp"
 #include "katana/cad/scope_verbs.hpp"
@@ -133,6 +134,10 @@ Result<std::string> renameSurface(Document& document, const Tokens& tokens)
             ++followingObjects;
         }
     }
+    // A leader's note names the surface it reads the same way
+    // ({dsurface.NAME}), and a note left reading the old name says nothing.
+    annotation::LeaderReadsRenamed leaders = annotation::renameLeaderReads(
+        document.model(), annotation::ReadKind::Surface, old, tokens[3]);
     auto surfacesStep = document.surfacesCommand(std::move(next), "SURFACE RENAME");
     if (!surfacesStep) {
         return surfacesStep.error();
@@ -155,15 +160,27 @@ Result<std::string> renameSurface(Document& document, const Tokens& tokens)
     if (*objectsStep) {
         transaction->add(std::move(*objectsStep));
     }
+    if (leaders.command) {
+        transaction->add(std::move(leaders.command));
+    }
     if (transaction->size() > 0) {
         if (auto status = document.execute(std::move(transaction)); !status) {
             return status.error();
         }
     }
-    return "renamed surface=" + recordValue(old) + " name=" + recordValue(tokens[3]) +
-           " corridors=" + std::to_string(followingCorridors) +
-           " roadobjects=" + std::to_string(followingObjects) + "\n" +
-           surfaceRecord(*document.surfaces().find(tokens[3]), document.surfaceStyles());
+    std::string reply = "renamed surface=" + recordValue(old) + " name=" + recordValue(tokens[3]) +
+                        " corridors=" + std::to_string(followingCorridors) +
+                        " roadobjects=" + std::to_string(followingObjects) +
+                        " leaders=" + std::to_string(leaders.followed) + "\n";
+    if (leaders.unfollowed > 0) {
+        // Said, not refused: the rename is what was asked for, and these
+        // notes now read nothing, as they would had the surface been removed.
+        reply += "warning leaders=" + std::to_string(leaders.unfollowed) +
+                 " still read surface " + recordValue(old) +
+                 ": the new name cannot be written in a note (empty, or holding ':', '{' or '}') "
+                 "or the leader is on a locked layer\n";
+    }
+    return reply + surfaceRecord(*document.surfaces().find(tokens[3]), document.surfaceStyles());
 }
 
 Result<std::string> styleSurface(Document& document, const Tokens& tokens)

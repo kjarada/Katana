@@ -1159,6 +1159,9 @@ one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
 words, read by one parser and resolved by the one matcher,
 `cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
 and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them, and
+the leader verbs (since 2026-10-15: `LEADER LIST`, `VALUES`, `SET`, `FREEZE`,
+`DETACH`, `PROP`, `ALIGN`, `FOR`, `BALLOON FOR`, `BALLOON RENUMBER`:
+`docs/annotation.md`, "Scope and filter"), and
 `ROADOBJECT LIST`, `QUANTITIES` and `DELETE` for objects that are definitions
 and not entities (`cad::road::matchRoadObjects`, built from the pieces
 `matchEntities` shares - `docs/road_objects.md`, "Scope and filter"); the

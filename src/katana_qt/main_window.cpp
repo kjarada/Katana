@@ -1546,6 +1546,12 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction)
                                                        *formatBar);
     annotation_ = std::make_unique<AnnotationWorkbench>(*this, document_, formatMenu, *formatBar);
     annotation_->setCommandRunner(commandRunner());
+    // The Leaders manager's Apply to controls list the views open when they
+    // are asked, which is after the workspace exists.
+    annotation_->setScopeViews([this] {
+        return views_ != nullptr ? scopeFilterViews(views_->viewSet())
+                                 : std::vector<ScopeFilterView>{};
+    });
 }
 
 void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu)

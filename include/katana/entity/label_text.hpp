@@ -97,6 +97,17 @@ checkTemplate(std::string_view templateText,
 // not balance names none.
 [[nodiscard]] std::vector<std::string> templateFields(std::string_view templateText);
 
+// `templateText` with each field's value name passed through `rename`, which
+// answers the name to write in its place or nullopt to keep it; the field's
+// steps, the literal text, the line breaks and the doubled braces are kept
+// as they were. A template whose braces do not balance is returned as it is:
+// it names nothing, so there is nothing to follow. What a surface or an
+// alignment renamed does to the leaders whose notes read it
+// (cad/annotation/leader_edit.hpp, renameLeaderReads).
+[[nodiscard]] std::string
+renameTemplateFields(std::string_view templateText,
+                     const std::function<std::optional<std::string>(std::string_view)>& rename);
+
 // The label's text: each template line with its fields filled, a line with
 // an absent value dropped, the lines joined by '\n'. Empty when every line was
 // dropped. A malformed template (which a stored style cannot have) prints its

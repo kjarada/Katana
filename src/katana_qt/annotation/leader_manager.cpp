@@ -17,19 +17,23 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "annotation/form_widgets.hpp"
 #include "customisation/document_watcher.hpp"
+#include "katana/cad/annotation/command_words.hpp"
 #include "katana/cad/annotation/leader_presets.hpp"
-#include "katana/cad/command_interpreter.hpp"
+#include "katana/cad/global_modify.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -40,6 +44,7 @@ namespace katana::qt {
 namespace ann = katana::cad::annotation;
 using katana::core::ErrorCode;
 using katana::core::makeError;
+using katana::core::Result;
 using katana::core::Status;
 using katana::entity::EntityId;
 using katana::entity::LeaderGeometry;
@@ -326,15 +331,232 @@ double shownBy(const QDoubleSpinBox* box, double value)
     return std::clamp(rounded, box->minimum(), box->maximum());
 }
 
-Status runCommand(katana::cad::Document& document, katana::commands::CommandPtr command)
+// A name or a value as one word, or a refusal that names the field: the
+// command line has no way to carry a double quote.
+Result<std::string> plainWord(const char* field, const std::string& text)
 {
-    return command ? document.execute(std::move(command)) : Status{};
+    auto word = ann::commandWord(text);
+    if (!word) {
+        return makeError(word.error().code, std::string("the ") + field + ": " + word.error().message,
+                         word.error().context);
+    }
+    return *word;
+}
+
+// A note (text or template) as one word of a LEADER line. The verbs read a
+// backslash and an n as a line break and two backslashes as one
+// (core::unescapeTyped), so a line break is written as that pair and a
+// backslash twice: a note holding a backslash before an n, which
+// annotationTextWord refuses, is carried whole. Only a double quote, which no
+// word can hold, is refused - with a sentence that names the field, as the
+// dialog's other fields do.
+Result<std::string> noteWord(const char* field, const std::string& text)
+{
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (const char c : text) {
+        if (c == '\\') {
+            escaped += "\\\\";
+        } else if (c == '\n') {
+            escaped += "\\n";
+        } else if (c != '\r') { // a Windows line end is one break, not two
+            escaped += c;
+        }
+    }
+    return plainWord(field, escaped);
+}
+
+// The first record of a reply, one line each, that has the field `key`.
+std::optional<katana::core::ReplyRecord> recordWith(const QString& reply, const char* key)
+{
+    for (const QString& line : reply.split(QLatin1Char('\n'))) {
+        if (auto record = katana::core::readReplyRecord(line.toStdString());
+            record && record->value(key)) {
+            return record;
+        }
+    }
+    return std::nullopt;
+}
+
+// The "scope=... matched=N" line of a reply: what the scope took.
+QString scopeLineOf(const QString& reply)
+{
+    for (const QString& line : reply.split(QLatin1Char('\n'))) {
+        if (line.startsWith(QStringLiteral("scope="))) {
+            return line;
+        }
+    }
+    return {};
+}
+
+// What LEADER FOR replied, as the For Selection tab reports it:
+// "made=2 skipped=1: id=5 (a Dimension) has no place ...".
+QString forReportOf(const QString& reply)
+{
+    const auto record = recordWith(reply, "skipped");
+    if (!record) {
+        return reply;
+    }
+    const std::string made = record->value("leaders").value_or(record->value("balloons").value_or("0"));
+    QString text = QStringLiteral("made=") + QString::fromStdString(made) +
+                   QStringLiteral(" skipped=") +
+                   QString::fromStdString(record->value("skipped").value_or("0"));
+    if (const auto reason = record->value("firstskip")) {
+        text += QStringLiteral(": ") + QString::fromStdString(*reason);
+    }
+    return text;
+}
+
+// The ids of leaders as the words of a line.
+std::string idWords(const std::vector<EntityId>& ids)
+{
+    std::string words;
+    for (const EntityId id : ids) {
+        words += " " + std::to_string(id);
+    }
+    return words;
+}
+
+// Every leader of the drawing, ascending.
+std::vector<EntityId> allLeaders(const katana::cad::Document& document)
+{
+    std::vector<EntityId> ids;
+    document.model().entities.forEach([&ids](const katana::entity::Entity& entity) {
+        if (std::holds_alternative<LeaderGeometry>(entity.geometry)) {
+            ids.push_back(entity.id);
+        }
+    });
+    return ids;
+}
+
+QString errorText(const katana::core::Error& error)
+{
+    return QString::fromStdString(error.message +
+                                  (error.context.empty() ? std::string() : ": " + error.context));
+}
+
+// The leaders the shared controls take (cad::matchEntities, which is what
+// the verbs' scope is resolved by too), ascending. None, with `why` saying
+// what in the controls cannot be read, when they cannot be: no layer ticked,
+// a colour that is not a colour.
+std::vector<EntityId> leadersTaken(const katana::cad::Document& document,
+                                   const ScopeFilterWidget& controls, QString* why)
+{
+    auto scope = controls.scope();
+    auto filter = controls.filter();
+    if (!scope || !filter) {
+        if (why != nullptr) {
+            *why = errorText(!scope ? scope.error() : filter.error());
+        }
+        return {};
+    }
+    auto matched = katana::cad::matchEntities(document, *scope, *filter);
+    if (!matched) {
+        if (why != nullptr) {
+            *why = errorText(matched.error());
+        }
+        return {};
+    }
+    std::erase_if(*matched, [&document](EntityId id) {
+        const katana::entity::Entity* entity = document.model().entities.find(id);
+        return entity == nullptr || !std::holds_alternative<LeaderGeometry>(entity->geometry);
+    });
+    return std::move(*matched);
 }
 
 } // namespace
 
-LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidget* parent)
-    : QDialog(parent), document_(document)
+Result<std::string> leaderOptionWords(const ann::LeaderChange& change)
+{
+    std::string words;
+    const auto add = [&words](const char* key, const std::string& value) {
+        words += std::string(" ") + key + "=" + value;
+    };
+    if (change.note) {
+        const char* const field = change.note->kind == Kind::LabelStyle ? "label style" : "note";
+        auto word = change.note->kind == Kind::LabelStyle ? plainWord(field, change.note->text)
+                                                          : noteWord(field, change.note->text);
+        if (!word) {
+            return word.error();
+        }
+        add(change.note->kind == Kind::Text       ? "text"
+            : change.note->kind == Kind::Template ? "template"
+                                                  : "labelstyle",
+            *word);
+    }
+    if (change.arrow) {
+        add("arrow", std::string(katana::entity::toString(*change.arrow)));
+    }
+    if (change.callout) {
+        add("callout", std::string(katana::entity::toString(*change.callout)));
+    }
+    if (change.textStyle) {
+        auto word = plainWord("text style", *change.textStyle);
+        if (!word) {
+            return word.error();
+        }
+        add("style", *word);
+    }
+    if (change.paperHeight) {
+        add("paper", katana::core::formatExactReal(*change.paperHeight));
+    }
+    if (change.arrowSize) {
+        add("arrowsize", katana::core::formatExactReal(*change.arrowSize));
+    }
+    if (change.landing) {
+        add("landing", katana::core::formatExactReal(*change.landing));
+    }
+    if (change.tip) {
+        add("tip", ann::anchorWord(change.tip->ref));
+    }
+    if (change.hang) {
+        add("at", katana::core::formatExactReal(change.hang->x) + "," +
+                      katana::core::formatExactReal(change.hang->y));
+    }
+    return words;
+}
+
+Result<QString> leaderSetLine(const std::vector<EntityId>& ids, const ann::LeaderChange& change)
+{
+    if (ids.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "no leader to change");
+    }
+    auto words = leaderOptionWords(change);
+    if (!words) {
+        return words.error();
+    }
+    if (words->empty()) {
+        return QString();
+    }
+    return QString::fromStdString("LEADER SET" + idWords(ids) + *words);
+}
+
+Result<QString> leadersForLine(bool balloon, const QString& scope, const ann::LeaderChange& change,
+                               double angleDegrees, double lengthMillimetres)
+{
+    if (scope.trimmed().isEmpty()) {
+        return makeError(ErrorCode::InvalidArgument, "say which entities to make leaders for");
+    }
+    if (change.tip || change.hang) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a leader made for an entity has its tip on it: tip and at do not apply");
+    }
+    auto words = leaderOptionWords(change);
+    if (!words) {
+        return words.error();
+    }
+    // The options first: a WHERE in the scope's words takes every key=value
+    // after it as a condition.
+    return QString::fromStdString(std::string(balloon ? "BALLOON FOR" : "LEADER FOR") + *words +
+                                  " angle=" + katana::core::formatExactReal(angleDegrees) +
+                                  " length=" + katana::core::formatExactReal(lengthMillimetres) +
+                                  " " + scope.trimmed().toStdString());
+}
+
+LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document,
+                                         LeaderManagerContext context, QWidget* parent)
+    : QDialog(parent), document_(document), run_(std::move(context.run)),
+      views_(std::move(context.views))
 {
     setObjectName(QStringLiteral("leaderManagerDialog"));
     setWindowTitle(QStringLiteral("Leaders"));
@@ -348,6 +570,29 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     list_ = new QListWidget(leaderTab);
     list_->setObjectName(QStringLiteral("leaderList"));
     list_->setMinimumWidth(200);
+    // "Which leaders...": the list shows every leader, or - pressed - those
+    // the shared Apply to / Only those that match controls take.
+    listScopeToggle_ = new QToolButton(leaderTab);
+    listScopeToggle_->setObjectName(QStringLiteral("leaderListScopeToggle"));
+    listScopeToggle_->setText(QStringLiteral("Which leaders..."));
+    listScopeToggle_->setCheckable(true);
+    listScopeToggle_->setToolTip(QStringLiteral(
+        "List only the leaders a scope and a filter take: the selection, what a view shows, "
+        "layers, an area or the whole drawing, and only those that match (as Global Modify "
+        "chooses what to change)"));
+    auto* listScopeScroll = new QScrollArea(leaderTab);
+    listScopeScroll->setObjectName(QStringLiteral("leaderListScopeArea"));
+    listScopeScroll->setWidgetResizable(true);
+    listScopeScroll->setMinimumWidth(340);
+    listScopeScroll->setMaximumHeight(300);
+    listScope_ = new ScopeFilterWidget(QStringLiteral("leaderList"), listScopeScroll);
+    listScope_->views = views_;
+    // Every leader to begin with: the whole drawing, no filter.
+    listScope_->setChoice(ScopeChoice::Drawing);
+    listScopeScroll->setWidget(listScope_);
+    listScopeArea_ = listScopeScroll;
+    listScopeArea_->setVisible(false);
+    listScopeProblem_ = problemLine(leaderTab, "leaderListScopeProblem");
     scope_ = new QLabel(leaderTab);
     scope_->setObjectName(QStringLiteral("leaderScope"));
     scope_->setWordWrap(true);
@@ -454,8 +699,13 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     leaderRight->addLayout(middle, 1);
     leaderRight->addWidget(attribute);
     leaderRight->addLayout(leaderButtons);
+    auto* listColumn = new QVBoxLayout;
+    listColumn->addWidget(listScopeToggle_, 0, Qt::AlignLeft);
+    listColumn->addWidget(listScopeArea_);
+    listColumn->addWidget(listScopeProblem_);
+    listColumn->addWidget(list_, 1);
     auto* leaderLayout = new QHBoxLayout(leaderTab);
-    leaderLayout->addWidget(list_, 1);
+    leaderLayout->addLayout(listColumn, 1);
     leaderLayout->addLayout(leaderRight, 3);
     tabs_->addTab(leaderTab, QStringLiteral("Leader"));
 
@@ -542,10 +792,31 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     auto* forMiddle = new QHBoxLayout;
     forMiddle->addWidget(forValues_, 3);
     forMiddle->addWidget(forLook, 2);
+    // Which entities: the shared Apply to / Only those that match controls,
+    // the selected ones to begin with (LEADER FOR <scope>, BALLOON FOR <scope>).
+    auto* forScopeScroll = new QScrollArea(forTab);
+    forScopeScroll->setObjectName(QStringLiteral("leaderForScopeArea"));
+    forScopeScroll->setWidgetResizable(true);
+    forScopeScroll->setMinimumWidth(340);
+    forScope_ = new ScopeFilterWidget(QStringLiteral("leaderFor"), forScopeScroll);
+    forScope_->views = views_;
+    forScopeScroll->setWidget(forScope_);
+    forScopeReport_ = new QLabel(forTab);
+    forScopeReport_->setObjectName(QStringLiteral("leaderForScopeReport"));
+    forScopeReport_->setWordWrap(true);
+    forScopeReport_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto* forLeft = new QVBoxLayout;
+    forLeft->addLayout(forForm);
+    forLeft->addLayout(forMiddle, 1);
+    forLeft->addWidget(forReport_);
+    auto* forRight = new QVBoxLayout;
+    forRight->addWidget(forScopeScroll, 1);
+    forRight->addWidget(forScopeReport_);
+    auto* forColumns = new QHBoxLayout;
+    forColumns->addLayout(forLeft, 3);
+    forColumns->addLayout(forRight, 2);
     auto* forLayout = new QVBoxLayout(forTab);
-    forLayout->addLayout(forForm);
-    forLayout->addLayout(forMiddle, 1);
-    forLayout->addWidget(forReport_);
+    forLayout->addLayout(forColumns, 1);
     forLayout->addWidget(makeButton, 0, Qt::AlignRight);
     tabs_->addTab(forTab, QStringLiteral("For Selection"));
 
@@ -582,26 +853,50 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
                             static_cast<int>(ann::BalloonOrder::Y));
     auto* renumberButton =
         button(arrangeTab, "balloonRenumber", QStringLiteral("Renumber Balloons"));
+    renumberScoped_ = check(arrangeTab, "balloonRenumberScoped",
+                            QStringLiteral("Only the balloons Apply to takes"));
+    renumberScoped_->setToolTip(QStringLiteral(
+        "Unticked, every numbered balloon in the drawing is numbered again, as it always was; "
+        "ticked, only those the Apply to / Only those that match controls take - and the "
+        "others keep their numbers"));
     auto* renumberForm = new QFormLayout;
     renumberForm->addRow(QStringLiteral("From"), renumberStart_);
     renumberForm->addRow(QStringLiteral("Order"), renumberOrder_);
+    renumberForm->addRow(renumberScoped_);
     renumberForm->addRow(renumberButton);
     auto* renumberBox = new QGroupBox(QStringLiteral("Number the balloons again"), arrangeTab);
     renumberBox->setLayout(renumberForm);
     arrangeReport_ = new QLabel(arrangeTab);
     arrangeReport_->setObjectName(QStringLiteral("leaderArrangeReport"));
     arrangeReport_->setWordWrap(true);
-    auto* arrangeLayout = new QVBoxLayout(arrangeTab);
-    arrangeLayout->addWidget(alignBox);
-    arrangeLayout->addWidget(renumberBox);
-    arrangeLayout->addWidget(arrangeReport_);
-    arrangeLayout->addStretch();
+    // Which leaders: the shared controls, the selected ones to begin with
+    // (LEADER ALIGN <scope>, BALLOON RENUMBER <scope>).
+    auto* arrangeScopeScroll = new QScrollArea(arrangeTab);
+    arrangeScopeScroll->setObjectName(QStringLiteral("leaderArrangeScopeArea"));
+    arrangeScopeScroll->setWidgetResizable(true);
+    arrangeScopeScroll->setMinimumWidth(340);
+    arrangeScope_ = new ScopeFilterWidget(QStringLiteral("leaderArrange"), arrangeScopeScroll);
+    arrangeScope_->views = views_;
+    arrangeScopeScroll->setWidget(arrangeScope_);
+    auto* arrangeLeft = new QVBoxLayout;
+    arrangeLeft->addWidget(alignBox);
+    arrangeLeft->addWidget(renumberBox);
+    arrangeLeft->addWidget(arrangeReport_);
+    arrangeLeft->addStretch();
+    auto* arrangeLayout = new QHBoxLayout(arrangeTab);
+    arrangeLayout->addLayout(arrangeLeft, 3);
+    arrangeLayout->addWidget(arrangeScopeScroll, 2);
     tabs_->addTab(arrangeTab, QStringLiteral("Arrange"));
 
+    // The line the last action handed to the command line, as it ran.
+    line_ = edit(this, "leaderLine");
+    line_->setReadOnly(true);
+    line_->setToolTip(QStringLiteral("The command the last action ran, as you could type it"));
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(tabs_, 1);
+    layout->addWidget(line_);
     layout->addWidget(problem_);
-    resize(960, 680);
+    resize(1000, 700);
 
     lender_.textStyle = textStyle_;
     lender_.paperHeight = paperHeight_;
@@ -696,6 +991,14 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     connect(alignUseSpacing_, &QCheckBox::toggled, alignSpacing_, &QWidget::setEnabled);
     alignX_->setEnabled(false);
     alignSpacing_->setEnabled(false);
+    // The scopes: the list follows its controls while "Which leaders..." is
+    // pressed; the For Selection tab previews for what its controls take.
+    connect(listScopeToggle_, &QToolButton::toggled, this, [this](bool on) {
+        listScopeArea_->setVisible(on);
+        fillList();
+    });
+    listScope_->onChanged = [this] { fillList(); };
+    forScope_->onChanged = [this] { updateForPreview(); };
 
     // Only a flag, never a widget touched: the watcher's delivery does the work.
     replacedListener_ = document_.addListener([this](const katana::cad::DocumentChange& change) {
@@ -716,6 +1019,10 @@ LeaderManagerDialog::~LeaderManagerDialog() = default;
 
 void LeaderManagerDialog::showTab(Tab tab)
 {
+    // The views open now: they come and go without the drawing changing.
+    for (ScopeFilterWidget* scope : {listScope_, forScope_, arrangeScope_}) {
+        scope->reloadViews();
+    }
     tabs_->setCurrentIndex(static_cast<int>(tab));
 }
 
@@ -770,6 +1077,10 @@ void LeaderManagerDialog::refresh(const DocumentChanges& delivered)
     if (changes.model) {
         const QString chosen = labelStyle_->currentText();
         const QString forChosen = forLabelStyle_->currentText();
+        // The layers the scopes offer, and the views, as the drawing has them.
+        for (ScopeFilterWidget* scope : {listScope_, forScope_, arrangeScope_}) {
+            scope->reload(document_.model());
+        }
         fillStyles();
         fillList();
         // A surface or an alignment made or gone is offered, or no longer.
@@ -792,13 +1103,10 @@ void LeaderManagerDialog::refresh(const DocumentChanges& delivered)
         if (!selected.empty() && std::ranges::find(selected, shown_) == selected.end()) {
             (void)showLeader(selected.front());
         }
-        const std::size_t count = document_.selection().size();
-        forSelection_->setText(count == 0
-                                   ? QStringLiteral("Nothing is selected: select the "
-                                                    "entities to put leaders on.")
-                                   : QString::number(count) +
-                                         (count == 1 ? QStringLiteral(" entity selected")
-                                                     : QStringLiteral(" entities selected")));
+        // The list is of the selection while its scope says so.
+        if (!changes.model && listScopeToggle_->isChecked()) {
+            fillList();
+        }
     }
     if (changes.model || changes.selection) {
         const LeaderGeometry* current = leader();
@@ -835,22 +1143,37 @@ void LeaderManagerDialog::fillStyles()
     fillTextStyles(forTextStyle_, document_.model(), QStringLiteral("(default: Standard)"));
 }
 
+std::vector<EntityId> LeaderManagerDialog::listedLeaders() const
+{
+    return listScopeToggle_->isChecked() ? leadersTaken(document_, *listScope_, nullptr)
+                                         : allLeaders(document_);
+}
+
 void LeaderManagerDialog::fillList()
 {
     const QSignalBlocker blocker(list_);
     list_->clear();
     const auto& model = document_.model();
     const katana::entity::LeaderContext context = readContext();
-    model.entities.forEach([&](const katana::entity::Entity& entity) {
-        if (const auto* shape = std::get_if<LeaderGeometry>(&entity.geometry)) {
-            auto* item = new QListWidgetItem(
-                listText(entity.id, ann::leaderSays(model, *shape, context)), list_);
-            item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entity.id));
-            if (entity.id == shown_) {
-                list_->setCurrentItem(item);
-            }
+    QString why;
+    const std::vector<EntityId> ids = listScopeToggle_->isChecked()
+                                          ? leadersTaken(document_, *listScope_, &why)
+                                          : allLeaders(document_);
+    listScopeProblem_->setText(why);
+    for (const EntityId id : ids) {
+        const katana::entity::Entity* entity = model.entities.find(id);
+        const auto* shape =
+            entity != nullptr ? std::get_if<LeaderGeometry>(&entity->geometry) : nullptr;
+        if (shape == nullptr) {
+            continue;
         }
-    });
+        auto* item =
+            new QListWidgetItem(listText(id, ann::leaderSays(model, *shape, context)), list_);
+        item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(id));
+        if (id == shown_) {
+            list_->setCurrentItem(item);
+        }
+    }
 }
 
 bool LeaderManagerDialog::showLeader(EntityId id)
@@ -1349,6 +1672,38 @@ bool LeaderManagerDialog::chooseForPreset(const QString& word, const QString& re
     return pickPreset(true, word, reads);
 }
 
+bool LeaderManagerDialog::submit(const Result<QString>& line, VerbOutcome* outcome)
+{
+    if (!line) {
+        report(line.error());
+        return false;
+    }
+    if (line->isEmpty()) {
+        // The line of an edit that changes nothing: no line, no step.
+        problem_->clear();
+        return true;
+    }
+    lastLine_ = *line;
+    line_->setText(*line);
+    if (!run_) {
+        problem_->setText(QStringLiteral("no command line to run on"));
+        return false;
+    }
+    const VerbOutcome result = run_(*line);
+    if (outcome != nullptr) {
+        *outcome = result;
+    }
+    problem_->setText(result.ok ? QString()
+                                : (result.error.isEmpty() ? QStringLiteral("The line was refused.")
+                                                          : result.error));
+    return result.ok;
+}
+
+QString LeaderManagerDialog::lastLine() const
+{
+    return lastLine_;
+}
+
 bool LeaderManagerDialog::apply()
 {
     if (shown_ == 0) {
@@ -1367,14 +1722,8 @@ bool LeaderManagerDialog::apply()
                              " %"));
         return false;
     }
-    auto command = ann::changeLeaders(document_.model(), ids, change, readContext());
-    if (!command) {
-        report(command.error());
-        return false;
-    }
-    const Status status = runCommand(document_, std::move(*command));
-    report(status);
-    return static_cast<bool>(status);
+    // LEADER SET with only what changed; an untouched form is no line.
+    return submit(leaderSetLine(ids, change));
 }
 
 bool LeaderManagerDialog::freeze()
@@ -1391,14 +1740,7 @@ bool LeaderManagerDialog::freeze()
                          "again"));
         return false;
     }
-    auto release = ann::releaseLeaders(document_.model(), targets(), false, readContext());
-    if (!release) {
-        report(release.error());
-        return false;
-    }
-    const Status status = runCommand(document_, std::move(release->command));
-    report(status);
-    return static_cast<bool>(status);
+    return submit(QString::fromStdString("LEADER FREEZE" + idWords(targets())));
 }
 
 bool LeaderManagerDialog::detach()
@@ -1413,14 +1755,7 @@ bool LeaderManagerDialog::detach()
                          "again"));
         return false;
     }
-    auto release = ann::releaseLeaders(document_.model(), targets(), true, readContext());
-    if (!release) {
-        report(release.error());
-        return false;
-    }
-    const Status status = runCommand(document_, std::move(release->command));
-    report(status);
-    return static_cast<bool>(status);
+    return submit(QString::fromStdString("LEADER DETACH" + idWords(targets())));
 }
 
 bool LeaderManagerDialog::attachToSelected()
@@ -1463,14 +1798,9 @@ bool LeaderManagerDialog::attachToSelected()
                          "id=" + std::to_string(first->id)));
         return false;
     }
-    auto command = ann::attachLeader(document_.model(), shown_, *place, readContext());
-    if (!command) {
-        report(command.error());
-        return false;
-    }
-    const Status status = runCommand(document_, std::move(*command));
-    report(status);
-    return static_cast<bool>(status);
+    // The place as a word the verb reads back exactly (#12.along1:0.25).
+    return submit(QString::fromStdString("LEADER ATTACH " + std::to_string(shown_) + " " +
+                                         ann::anchorWord(place->ref)));
 }
 
 bool LeaderManagerDialog::setAttribute()
@@ -1479,22 +1809,21 @@ bool LeaderManagerDialog::setAttribute()
         report(makeError(ErrorCode::InvalidState, "no leader is shown"));
         return false;
     }
-    const std::string type = attributeType_->currentData().toString().toStdString();
-    auto value = katana::cad::CommandInterpreter::propertyValue(
-        attributeValue_->text().toStdString(), type.empty() ? nullptr : &type);
+    auto key = plainWord("attribute name", attributeName_->text().trimmed().toStdString());
+    if (!key) {
+        report(key.error());
+        return false;
+    }
+    auto value = plainWord("attribute value", attributeValue_->text().toStdString());
     if (!value) {
         report(value.error());
         return false;
     }
-    auto command = ann::setLeaderTargetProperty(
-        document_.model(), shown_, attributeName_->text().trimmed().toStdString(), *value);
-    if (!command) {
-        report(command.error());
-        return false;
-    }
-    const Status status = runCommand(document_, std::move(*command));
-    report(status);
-    return static_cast<bool>(status);
+    // The value is read as PROP SET reads one - its type guessed - unless a
+    // type is chosen.
+    const std::string type = attributeType_->currentData().toString().toStdString();
+    return submit(QString::fromStdString("LEADER PROP " + std::to_string(shown_) + " SET " + *key +
+                                         " " + *value + (type.empty() ? "" : " " + type)));
 }
 
 bool LeaderManagerDialog::removeAttribute()
@@ -1503,15 +1832,13 @@ bool LeaderManagerDialog::removeAttribute()
         report(makeError(ErrorCode::InvalidState, "no leader is shown"));
         return false;
     }
-    auto command = ann::setLeaderTargetProperty(
-        document_.model(), shown_, attributeName_->text().trimmed().toStdString(), std::nullopt);
-    if (!command) {
-        report(command.error());
+    auto key = plainWord("attribute name", attributeName_->text().trimmed().toStdString());
+    if (!key) {
+        report(key.error());
         return false;
     }
-    const Status status = runCommand(document_, std::move(*command));
-    report(status);
-    return static_cast<bool>(status);
+    return submit(
+        QString::fromStdString("LEADER PROP " + std::to_string(shown_) + " DELETE " + *key));
 }
 
 // ---- For Selection ------------------------------------------------------------------------
@@ -1568,10 +1895,21 @@ ann::LeadersForOptions LeaderManagerDialog::forOptions() const
     return options;
 }
 
+std::vector<EntityId> LeaderManagerDialog::forTargets() const
+{
+    auto scope = forScope_->scope();
+    auto filter = forScope_->filter();
+    if (!scope || !filter) {
+        return {};
+    }
+    auto matched = katana::cad::matchEntities(document_, *scope, *filter);
+    return matched ? std::move(*matched) : std::vector<EntityId>{};
+}
+
 const katana::entity::Entity* LeaderManagerDialog::forTarget() const
 {
     const double angle = forAngle_->value() * katana::math::kDegToRad;
-    for (const EntityId id : document_.selection().ids()) {
+    for (const EntityId id : forTargets()) {
         const katana::entity::Entity* entity = document_.model().entities.find(id);
         if (entity != nullptr && ann::leaderPlaceOn(*entity, angle)) {
             return entity;
@@ -1583,12 +1921,48 @@ const katana::entity::Entity* LeaderManagerDialog::forTarget() const
 void LeaderManagerDialog::updateForPreview()
 {
     forValues_->setRowCount(0);
+    // Controls that cannot be read - no layer ticked, a colour that is none -
+    // say why, instead of a scope that quietly takes nothing.
+    {
+        const auto scope = forScope_->scope();
+        const auto filter = forScope_->filter();
+        if (!scope || !filter) {
+            forSelection_->setText(QStringLiteral("Apply to cannot be read."));
+            forCheck_->setStyleSheet(QStringLiteral("color: #d9534f"));
+            forCheck_->setText(errorText(!scope ? scope.error() : filter.error()));
+            forPreview_->clear();
+            return;
+        }
+    }
+    // What the controls take: the selected entities to begin with, said as
+    // it always was; any other scope or a filter is said by its count.
+    const std::vector<EntityId> taken = forTargets();
+    const auto filter = forScope_->filter();
+    const bool plainSelection =
+        forScope_->choice() == ScopeChoice::Selection && filter && filter->empty();
+    const qsizetype count = static_cast<qsizetype>(taken.size());
+    if (plainSelection) {
+        forSelection_->setText(count == 0
+                                   ? QStringLiteral("Nothing is selected: select the "
+                                                    "entities to put leaders on.")
+                                   : QString::number(count) +
+                                         (count == 1 ? QStringLiteral(" entity selected")
+                                                     : QStringLiteral(" entities selected")));
+    } else {
+        forSelection_->setText(count == 0 ? QStringLiteral("The scope takes no entity.")
+                                          : QString::number(count) +
+                                                (count == 1 ? QStringLiteral(" entity taken")
+                                                            : QStringLiteral(" entities taken")) +
+                                                QStringLiteral(" by Apply to"));
+    }
     const katana::entity::Entity* target = forTarget();
     if (target == nullptr) {
         forCheck_->setStyleSheet(QString());
-        forCheck_->setText(document_.selection().empty()
-                               ? QStringLiteral("Select the entities to put leaders on.")
-                               : QStringLiteral("Nothing selected offers a place for a leader "
+        forCheck_->setText(taken.empty()
+                               ? (plainSelection ? QStringLiteral("Select the entities to put "
+                                                                  "leaders on.")
+                                                 : QStringLiteral("Apply to takes no entity."))
+                               : QStringLiteral("Nothing taken offers a place for a leader "
                                                 "(a dimension, a label or a leader does not)."));
         forPreview_->clear();
         return;
@@ -1652,37 +2026,33 @@ void LeaderManagerDialog::insertForValue(const QString& name)
 
 bool LeaderManagerDialog::makeForSelection()
 {
-    if (document_.selection().empty()) {
-        report(makeError(ErrorCode::InvalidState,
-                         "nothing is selected: select the entities to put leaders on"));
-        forReport_->clear();
+    forReport_->clear();
+    forScopeReport_->clear();
+    auto scope = forScope_->verbWords();
+    if (!scope) {
+        report(scope.error());
         return false;
     }
-    auto made = ann::leadersFor(document_.model(), document_.selection().ids(), forOptions(),
-                                document_.annotationScale(), document_.currentAttributes(),
-                                readContext());
-    if (!made) {
-        report(made.error());
-        forReport_->clear();
+    const ann::LeadersForOptions options = forOptions();
+    // The options first, then the scope: a WHERE takes every key=value after it.
+    VerbOutcome outcome;
+    if (!submit(leadersForLine(options.balloon, *scope, options.change, forAngle_->value(),
+                               forLength_->value()),
+                &outcome)) {
         return false;
     }
-    const std::size_t count = made->made;
-    const std::size_t skipped = made->skipped;
-    const std::string firstSkip = made->firstSkip;
-    const Status status = runCommand(document_, std::move(made->command));
-    report(status);
-    if (!status) {
-        return false;
-    }
+    forScopeReport_->setText(scopeLineOf(outcome.reply));
+    forReport_->setText(forReportOf(outcome.reply));
     // What was made is selected, so the Leader tab shows it and Arrange can
-    // line it up next.
-    document_.selection().set(document_.lastCreatedEntities());
-    QString text = QStringLiteral("made=") + QString::number(count) + QStringLiteral(" skipped=") +
-                   QString::number(skipped);
-    if (skipped > 0) {
-        text += QStringLiteral(": ") + QString::fromStdString(firstSkip);
+    // line it up next. Only when something was: after a scope that took
+    // nothing the last creations are some other command's.
+    const auto record = recordWith(outcome.reply, "skipped");
+    const std::string made =
+        record ? record->value("leaders").value_or(record->value("balloons").value_or("0"))
+               : std::string("0");
+    if (made != "0") {
+        document_.selection().set(document_.lastCreatedEntities());
     }
-    forReport_->setText(text);
     return true;
 }
 
@@ -1695,48 +2065,65 @@ QString LeaderManagerDialog::forReport() const
 
 bool LeaderManagerDialog::alignSelection()
 {
-    const auto ids = selectedLeaders();
-    if (ids.empty()) {
-        report(makeError(ErrorCode::InvalidState, "no leader is selected: select the leaders to "
-                                                  "line up"));
+    auto scope = arrangeScope_->verbWords();
+    if (!scope) {
+        report(scope.error());
         return false;
     }
-    std::optional<double> x;
+    std::string line = "LEADER ALIGN";
     if (alignUseX_->isChecked()) {
-        x = alignX_->value();
+        line += " x=" + katana::core::formatExactReal(alignX_->value());
     }
-    std::optional<double> spacing;
     if (alignUseSpacing_->isChecked()) {
-        spacing = katana::entity::annotationModelSize(alignSpacing_->value(),
-                                                      document_.annotationScale());
+        // Paper millimetres, as the verb takes them (it applies the scale).
+        line += " spacing=" + katana::core::formatExactReal(alignSpacing_->value());
     }
-    auto alignment = ann::alignLeaders(document_.model(), ids, x, spacing);
-    if (!alignment) {
-        report(alignment.error());
+    VerbOutcome outcome;
+    if (!submit(QString::fromStdString(line + " " + scope->toStdString()), &outcome)) {
         return false;
     }
-    const std::size_t count = alignment->count;
-    const Status status = runCommand(document_, std::move(alignment->command));
-    report(status);
-    if (status) {
-        arrangeReport_->setText(QStringLiteral("aligned=") + QString::number(count));
+    if (const auto record = recordWith(outcome.reply, "leaders")) {
+        arrangeReport_->setText(QStringLiteral("aligned=") +
+                                QString::fromStdString(record->value("leaders").value_or("0")));
     }
-    return static_cast<bool>(status);
+    return true;
 }
 
 bool LeaderManagerDialog::renumberBalloons()
 {
-    auto renumbering = ann::renumberBalloons(
-        document_.model(), renumberStart_->value(),
-        static_cast<ann::BalloonOrder>(renumberOrder_->currentData().toInt()));
-    const Status status = runCommand(document_, std::move(renumbering.command));
-    report(status);
-    if (status) {
-        arrangeReport_->setText(
-            QStringLiteral("balloons=") + QString::number(renumbering.balloons) +
-            QStringLiteral(" renumbered=") + QString::number(renumbering.renumbered));
+    const char* const order = [this] {
+        switch (static_cast<ann::BalloonOrder>(renumberOrder_->currentData().toInt())) {
+        case ann::BalloonOrder::X:
+            return "x";
+        case ann::BalloonOrder::Y:
+            return "y";
+        case ann::BalloonOrder::Id:
+            break;
+        }
+        return "id";
+    }();
+    std::string line = "BALLOON RENUMBER start=" + std::to_string(renumberStart_->value()) +
+                       " order=" + order;
+    if (renumberScoped_->isChecked()) {
+        auto scope = arrangeScope_->verbWords();
+        if (!scope) {
+            report(scope.error());
+            return false;
+        }
+        line += " " + scope->toStdString();
     }
-    return static_cast<bool>(status);
+    VerbOutcome outcome;
+    if (!submit(QString::fromStdString(line), &outcome)) {
+        return false;
+    }
+    if (const auto record = recordWith(outcome.reply, "renumbered")) {
+        arrangeReport_->setText(
+            QStringLiteral("balloons=") +
+            QString::fromStdString(record->value("balloons").value_or("0")) +
+            QStringLiteral(" renumbered=") +
+            QString::fromStdString(record->value("renumbered").value_or("0")));
+    }
+    return true;
 }
 
 QString LeaderManagerDialog::arrangeReport() const

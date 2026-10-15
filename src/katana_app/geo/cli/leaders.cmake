@@ -40,3 +40,21 @@ add_test(NAME cli.a_surface_leader_on_no_surface_fails_the_script
             -c "LEADER #1 30,30 preset=surface surface=ground")
 set_tests_properties(cli.a_surface_leader_on_no_surface_fails_the_script PROPERTIES
     PASS_REGULAR_EXPRESSION "property elevation set on 1.*error: NotFound: the drawing has no surface of that name|error: NotFound: the drawing has no surface of that name.*property elevation set on 1")
+
+# A surface a leader reads is read by NAME (docs/annotation.md): renamed, the
+# leader's template follows it in the same step; removed, the reply carries a
+# warning record saying how many leaders will read nothing - and the removal
+# stands (UNDO puts it back). The point at RL 30 is 2.782 above the ground, as
+# above.
+add_test(NAME cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "POINT 25.75,24.25" -c "SELECT 1" -c "PROP SET elevation 30"
+            -c "SURFACE FROM FILE \"${_leader_samples}/terrain.asc\" NAME ground"
+            -c "LEADER #1 30,30 preset=surface surface=ground"
+            -c "SURFACE RENAME ground dem"
+            -c "LEADER LIST"
+            -c "SURFACE REMOVE dem")
+set_tests_properties(cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns PROPERTIES
+    PASS_REGULAR_EXPRESSION "renamed surface=ground name=dem corridors=0 roadobjects=0 leaders=1.*template=\{dsurface\.dem:\+\.3f\} preset=surface surface=dem .*text=\+2\.782.*removed surface=dem surfaces=0[\r\n]+warning text=\"leaders=1 read surface dem and will read nothing now\""
+    FAIL_REGULAR_EXPRESSION "error")

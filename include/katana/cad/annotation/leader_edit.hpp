@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/cad/annotation/dimension_build.hpp"
@@ -143,6 +144,25 @@ setLeaderTargetProperty(const katana::entity::Model& model, katana::entity::Enti
                         const std::string& key,
                         const std::optional<katana::entity::PropertyValue>& value);
 
+// The same for many leaders (LEADER PROP over a scope): the attribute set, or
+// removed, on the entity each of `ids`' tips is on, as ONE command, each
+// entity once - two leaders on one pit set it once. A leader whose tip is on
+// no entity, or on one that is gone, is skipped and counted; when NO leader
+// has an entity to set it on the edit is refused with the reason the first
+// gave, which for one leader is setLeaderTargetProperty's.
+struct LeadersProperty {
+    katana::commands::CommandPtr command{};
+    // The leaders whose entity was set, and the distinct entities they name.
+    std::size_t leaders = 0;
+    std::size_t entities = 0;
+    // The leaders left out for want of an entity.
+    std::size_t skipped = 0;
+};
+[[nodiscard]] katana::core::Result<LeadersProperty>
+setLeadersTargetProperty(const katana::entity::Model& model,
+                         std::vector<katana::entity::EntityId> ids, const std::string& key,
+                         const std::optional<katana::entity::PropertyValue>& value);
+
 // A leader to each of `targets` as ONE command ("CREATE_LEADERS" or
 // "CREATE_BALLOONS"): the tip at a point's or a text's position, the middle
 // of a line or an arc, halfway along an open polyline, inside a closed one,
@@ -214,9 +234,14 @@ struct BalloonRenumbering {
     std::size_t renumbered = 0;
 };
 // `start` is an int, as start= and the window's box are, so the numbers
-// counted on from it cannot pass what a long long holds.
-[[nodiscard]] BalloonRenumbering renumberBalloons(const katana::entity::Model& model, int start,
-                                                  BalloonOrder order);
+// counted on from it cannot pass what a long long holds. `within` limits it
+// to the numbered balloons among those ids (a scope's matches); unset, every
+// numbered balloon in the drawing, and empty, none - the count then 0. The
+// balloons outside it keep their numbers, so a renumbering of some can give a
+// number another balloon has: the caller says so.
+[[nodiscard]] BalloonRenumbering
+renumberBalloons(const katana::entity::Model& model, int start, BalloonOrder order,
+                 const std::optional<std::vector<katana::entity::EntityId>>& within = std::nullopt);
 
 // One more than the highest numbered balloon; refused when the highest is
 // the largest number there is (n= can give one), which has no next - the
@@ -247,5 +272,34 @@ leaderTargetValues(const katana::entity::Model& model,
 [[nodiscard]] std::string leaderSays(const katana::entity::Model& model,
                                      const katana::entity::LeaderGeometry& leader,
                                      const katana::entity::LeaderContext& context = {});
+
+// ---- the surfaces and alignments a note reads, by name -------------------------------------
+//
+// A note names a surface or an alignment as the drawing spells it
+// ({dsurface.Existing Ground:+.3f}), so the name is what ties them. These
+// keep the tie when the thing is renamed, and say how many leaders lose it
+// when the thing goes (docs/annotation.md, "A surface or an alignment is read
+// by name").
+enum class ReadKind { Surface, Alignment };
+
+// How many leaders have a template of their own naming `name`: a surface
+// ignoring case, as the store finds one, an alignment exactly, as ALIGN does.
+[[nodiscard]] std::size_t leadersReading(const katana::entity::Model& model, ReadKind kind,
+                                         std::string_view name);
+
+// The leaders reading `from` rewritten to read `to`, as ONE command
+// ("RENAME_LEADER_READS") for the step that renames it to run with; null when
+// none reads it. `followed` is how many were rewritten. A name a template
+// cannot write - empty, or holding ':', '{' or '}' (presetTemplate refuses
+// the same) - cannot be followed to: those leaders are left reading the old
+// name and counted in `unfollowed`, for the caller to say.
+struct LeaderReadsRenamed {
+    katana::commands::CommandPtr command{};
+    std::size_t followed = 0;
+    std::size_t unfollowed = 0;
+};
+[[nodiscard]] LeaderReadsRenamed renameLeaderReads(const katana::entity::Model& model,
+                                                   ReadKind kind, std::string_view from,
+                                                   std::string_view to);
 
 } // namespace katana::cad::annotation

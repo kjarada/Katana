@@ -16,12 +16,15 @@
 // could not do the same way. Stable object names throughout, for the
 // headless driver and the tests.
 
+#include <functional>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include <QPointer>
 
 #include "command_runner.hpp"
+#include "customisation/scope_filter_widget.hpp"
 
 class QAction;
 class QComboBox;
@@ -78,6 +81,14 @@ class AnnotationWorkbench {
     // gives none.
     void setCommandRunner(CommandRunner run) { run_ = std::move(run); }
     [[nodiscard]] const CommandRunner& commandRunner() const { return run_; }
+    // The open views, for the Leaders manager's Apply to controls ("What a
+    // view shows"). Set by the window once its workspace exists; empty until
+    // then, and in a test that gives none: the controls then offer one "Whole
+    // drawing view".
+    void setScopeViews(std::function<std::vector<ScopeFilterView>()> views)
+    {
+        views_ = std::move(views);
+    }
 
     // Annotate > Edit Label... (annotateEditLabel) and Label Layout
     // Report... (annotateLabelLayout), put after the menu's tools by the
@@ -112,6 +123,7 @@ class AnnotationWorkbench {
     QPointer<LabelEditDialog> editLabel_;
     QPointer<LabelLayoutReportDialog> labelLayout_;
     CommandRunner run_;
+    std::function<std::vector<ScopeFilterView>()> views_;
     QPointer<LeaderManagerDialog> leaders_;
     struct Listener;
     std::unique_ptr<Listener> listener_;

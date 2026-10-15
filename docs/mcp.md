@@ -79,7 +79,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids` and `target` narrow it, and nothing else does - no scope or filter yet (`docs/annotation.md`, "Presets" and "Not yet") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJson`) |
+| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids`, or a `scope` (`selection`, `drawing`, `area` with `area`, `layers` with `scope_layers` and `only`) with `scope_where` conditions - the shared grammar, `matched` counting the leaders it took, a scope that takes none giving none - and `target` narrow it (`docs/annotation.md`, "Scope and filter") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJsonOf`), with a `scope` member `{record, matched}` when a scope chose the leaders |
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the drawing's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
@@ -111,7 +111,10 @@ alignment=MC01` its station and offset - and read with `katana_leaders`, whose
 description lists the presets and the values a template may name, so an
 agent needs no `HELP` first. It reads the Document, as `katana_status` does:
 a read is no line in the session's history
-(`McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`).
+(`McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`). It takes the shared
+scope and filter under the names `katana_import` uses (`scope`, `area`,
+`scope_layers`, `only`, `scope_where`) and says how many leaders the scope took
+(`McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`).
 
 An entity's attributes are read a level at a time through
 `katana_run_commands` with `PROP TREE` (`docs/cad.md`, "Properties as a tree:

@@ -901,6 +901,43 @@ if(KATANA_BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "NEVER_REACHED")
     set_tests_properties(cli.a_leader_that_would_say_nothing_fails_the_script PROPERTIES
         WILL_FAIL TRUE)
+
+    # The leader verbs over the shared scope and filter (docs/annotation.md,
+    # "Scope and filter"): two leaders on layer notes and one on layer 0. By
+    # hand, LAYERS notes takes two (matched=2) and ALIGN puts their notes at
+    # x = 70; a scope that takes nothing (a layer filter nothing passes) is
+    # said, matched=0, and the script goes on.
+    add_test(NAME cli.leaders_take_a_scope_and_say_how_many_they_took
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "LAYER NEW notes" -c "LAYER SET notes"
+                -c "LEADER 0,0 5,5 text=A" -c "LEADER 50,50 55,55 text=B"
+                -c "LAYER SET 0" -c "LEADER 100,100 110,110 text=C"
+                -c "LEADER LIST LAYERS notes" -c "LEADER ALIGN LAYERS notes x=70"
+                -c "LEADER FREEZE DRAWING WHERE LAYER=nowhere")
+    set_tests_properties(cli.leaders_take_a_scope_and_say_how_many_they_took PROPERTIES
+        PASS_REGULAR_EXPRESSION "scope=layers layers=notes sublayers=yes matched=2.*aligned leaders=2 x=70.*scope=drawing where=.LAYER=nowhere. matched=0.*frozen leaders=0"
+        FAIL_REGULAR_EXPRESSION "error")
+    # Ids and a scope together are refused by name, and the script stops.
+    add_test(NAME cli.leaders_named_by_id_and_by_scope_are_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "LEADER 0,0 5,5 text=A" -c "LEADER FREEZE 1 DRAWING"
+                -c "LEADER 9,9 9,9 text=NEVER_REACHED")
+    set_tests_properties(cli.leaders_named_by_id_and_by_scope_are_refused PROPERTIES
+        PASS_REGULAR_EXPRESSION "by id or by a scope"
+        FAIL_REGULAR_EXPRESSION "NEVER_REACHED")
+    # Balloons numbered again by scope: the layer notes' two become 10 and 11,
+    # the one on layer 0 keeps its 1.
+    add_test(NAME cli.balloons_of_one_layer_are_numbered_again_by_scope
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "LAYER NEW notes" -c "BALLOON 0,0 5,5" -c "LAYER SET notes"
+                -c "BALLOON 10,0 15,5" -c "BALLOON 20,0 25,5"
+                -c "BALLOON RENUMBER LAYERS notes start=10" -c "LEADER LIST")
+    set_tests_properties(cli.balloons_of_one_layer_are_numbered_again_by_scope PROPERTIES
+        PASS_REGULAR_EXPRESSION "scope=layers layers=notes sublayers=yes matched=2[\r\n]+balloons=2 renumbered=2.*text=1[\r\n]+.*text=10[\r\n]+.*text=11"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()
 
 # UTILITY on the sample investigation (samples/utilities, worked by hand in
