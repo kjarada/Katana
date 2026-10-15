@@ -144,13 +144,19 @@ SideBuild buildSide(const RoadTemplate& roadTemplate, Side side, double designLe
                 surface.push_back(
                     ShapeColumn{atOut + column.out, atLevel + column.top, atLevel + column.bottom});
             }
+            // The points after the first, which is where the previous component
+            // ended. A kerb facing outward is the other way round: its top
+            // first (the face's crest), then down the face to the lip.
+            const bool outward = component.faces == KerbFacing::Outward;
             switch (component.shape) {
             case KerbShape::Barrier:
             case KerbShape::Mountable:
-                codes = {"face", "back"};
+                codes = outward ? std::vector<std::string>{"face", "lip"}
+                                : std::vector<std::string>{"face", "back"};
                 break;
             case KerbShape::KerbAndGutter:
-                codes = {"invert", "face", "back"};
+                codes = outward ? std::vector<std::string>{"face", "invert", "lip"}
+                                : std::vector<std::string>{"invert", "face", "back"};
                 break;
             case KerbShape::EdgeStrip:
                 codes = {"outer"};

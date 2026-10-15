@@ -43,6 +43,11 @@ constexpr std::array<std::pair<KerbShape, std::string_view>, 4> kShapes{{
     {KerbShape::EdgeStrip, "edgestrip"},
 }};
 
+constexpr std::array<std::pair<KerbFacing, std::string_view>, 2> kFacings{{
+    {KerbFacing::Inward, "inward"},
+    {KerbFacing::Outward, "outward"},
+}};
+
 constexpr Color rgb(std::uint8_t r, std::uint8_t g, std::uint8_t b)
 {
     return Color{r, g, b, 255};
@@ -104,6 +109,26 @@ std::string_view toString(KerbShape shape)
 std::optional<KerbShape> kerbShapeFrom(std::string_view text)
 {
     for (const auto& [value, word] : kShapes) {
+        if (katana::core::equalsIgnoringCase(word, text)) {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string_view toString(KerbFacing facing)
+{
+    for (const auto& [value, word] : kFacings) {
+        if (value == facing) {
+            return word;
+        }
+    }
+    return "inward";
+}
+
+std::optional<KerbFacing> kerbFacingFrom(std::string_view text)
+{
+    for (const auto& [value, word] : kFacings) {
         if (katana::core::equalsIgnoringCase(word, text)) {
             return value;
         }
@@ -346,17 +371,21 @@ std::vector<RoadTemplate> standardTemplates()
              defaultComponent(ComponentKind::Batter, Side::Left)}));
     }
     {
+        // A raised median: the kerb is highest against the median, whose top
+        // is the profile, and falls to its lip at the carriageway, so the lanes
+        // start 100 mm under the profile and the face looks out to the traffic.
         Component kerb = defaultComponent(ComponentKind::Kerb, Side::Left);
         kerb.shape = KerbShape::Mountable;
         kerb.height = 0.100;
+        kerb.faces = KerbFacing::Outward;
         Component inner = named(defaultComponent(ComponentKind::Lane, Side::Left), "lane1");
         Component outer = named(defaultComponent(ComponentKind::Lane, Side::Left), "lane2");
         Component shoulder = defaultComponent(ComponentKind::Shoulder, Side::Left);
         shoulder.width = 2.5;
         made.push_back(mirrored(
             "divided road",
-            "A 4 m median with mountable kerbs, two 3.5 m lanes each way, 2.5 m shoulders and "
-            "batters",
+            "A 4 m median (the profile is its top) with mountable kerbs, two 3.5 m lanes each way, "
+            "2.5 m shoulders and batters",
             {defaultComponent(ComponentKind::Median, Side::Left), kerb, inner, outer, shoulder,
              defaultComponent(ComponentKind::Batter, Side::Left)}));
     }
@@ -510,6 +539,11 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
                 if (component.shape != KerbShape::EdgeStrip && !(component.height > 0.0)) {
                     return refuse(component, "a kerb's face height must be positive");
                 }
+                if (component.shape == KerbShape::EdgeStrip &&
+                    component.faces != KerbFacing::Inward) {
+                    return refuse(component,
+                                  "an edge strip is flush: it has no face to turn outward");
+                }
                 if (component.shape == KerbShape::KerbAndGutter &&
                     (!(component.gutterWidth > 0.0) || std::abs(component.gutterFall) > 100.0)) {
                     return refuse(component,
@@ -565,19 +599,41 @@ Status checkTemplate(const RoadTemplate& roadTemplate)
 
 // ---- the kerb's shape --------------------------------------------------------------------
 
+namespace {
+
+// The kerb as seen from its other end: the columns in reverse, `out` measured
+// from the far end and every level from the far end's top, so a kerb that rose
+// going outward falls going outward, from its back to its lip.
+std::vector<ShapeColumn> reversedKerb(const std::vector<ShapeColumn>& columns)
+{
+    std::vector<ShapeColumn> out;
+    out.reserve(columns.size());
+    const double width = columns.back().out;
+    const double top = columns.back().top;
+    for (auto it = columns.rbegin(); it != columns.rend(); ++it) {
+        out.push_back(ShapeColumn{width - it->out, it->top - top, it->bottom - top});
+    }
+    return out;
+}
+
+} // namespace
+
 std::vector<ShapeColumn> kerbShape(const Component& kerb)
 {
     const double base = -kerb.depth;
+    std::vector<ShapeColumn> inward;
     switch (kerb.shape) {
     case KerbShape::Barrier: {
         const double face = kerb.height * kBarrierFaceBatter;
-        return {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
-                ShapeColumn{face + kerb.width, kerb.height, base}};
+        inward = {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
+                  ShapeColumn{face + kerb.width, kerb.height, base}};
+        break;
     }
     case KerbShape::Mountable: {
         const double face = kerb.height * kMountableFaceRun;
-        return {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
-                ShapeColumn{face + kerb.width, kerb.height, base}};
+        inward = {ShapeColumn{0.0, 0.0, base}, ShapeColumn{face, kerb.height, base},
+                  ShapeColumn{face + kerb.width, kerb.height, base}};
+        break;
     }
     case KerbShape::KerbAndGutter: {
         // The channel falls outward to the face, where the water runs; its
@@ -585,17 +641,22 @@ std::vector<ShapeColumn> kerbShape(const Component& kerb)
         const double invert = -kerb.gutterWidth * kerb.gutterFall / 100.0;
         const double face = kerb.height * kBarrierFaceBatter;
         const double bottom = invert - kerb.depth;
-        return {ShapeColumn{0.0, 0.0, -kerb.depth}, ShapeColumn{kerb.gutterWidth, invert, bottom},
-                ShapeColumn{kerb.gutterWidth + face, invert + kerb.height, bottom},
-                ShapeColumn{kerb.gutterWidth + face + kerb.width, invert + kerb.height, bottom}};
+        inward = {ShapeColumn{0.0, 0.0, -kerb.depth}, ShapeColumn{kerb.gutterWidth, invert, bottom},
+                  ShapeColumn{kerb.gutterWidth + face, invert + kerb.height, bottom},
+                  ShapeColumn{kerb.gutterWidth + face + kerb.width, invert + kerb.height, bottom}};
+        break;
     }
     case KerbShape::EdgeStrip: {
+        // Flush, with no face to turn.
         const double rise = kerb.width * kerb.crossfall / 100.0;
         return {ShapeColumn{0.0, 0.0, -kerb.depth},
                 ShapeColumn{kerb.width, rise, rise - kerb.depth}};
     }
     }
-    return {};
+    if (inward.empty()) {
+        return {};
+    }
+    return kerb.faces == KerbFacing::Outward ? reversedKerb(inward) : inward;
 }
 
 double kerbWidth(const Component& kerb)
@@ -663,6 +724,7 @@ Json componentJson(const Component& component)
     }
     if (component.kind == ComponentKind::Kerb) {
         out["shape"] = std::string(toString(component.shape));
+        out["faces"] = std::string(toString(component.faces));
         out["height"] = component.height;
         out["depth"] = component.depth;
         out["gutterWidth"] = component.gutterWidth;
@@ -719,6 +781,14 @@ Component componentFrom(const Json& value)
             throw BadValue{"unknown kerb shape \"" + shapeText + "\""};
         }
         component.shape = *shape;
+    }
+    if (value.contains("faces")) {
+        const std::string facesText = value.at("faces").get<std::string>();
+        const auto facing = kerbFacingFrom(facesText);
+        if (!facing) {
+            throw BadValue{"a kerb faces inward or outward: \"" + facesText + "\""};
+        }
+        component.faces = *facing;
     }
     component.height = value.value("height", component.height);
     component.depth = value.value("depth", component.depth);

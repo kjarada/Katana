@@ -203,6 +203,42 @@ TEST(RoadVerbs, ABareNameIsRemovedFromBothSidesWhicheverSideWasMadeFirst)
     EXPECT_EQ(session.document.roadTemplates().find("mixed")->components.size(), 1u);
 }
 
+TEST(RoadVerbs, AKerbFacesInwardOrOutwardAndTheDividedRoadsMedianKerbFallsOutward)
+{
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    // The divided road's lanes sit 100 mm under the median's top (the profile):
+    // hand-worked in RoadSection.TheDividedRoadsLanesSit...
+    const std::string section = session.ok("ROADTEMPLATE SECTION \"divided road\"");
+    EXPECT_TRUE(contains(section, "point code=left/kerb/lip offset=2.300 level=-0.100")) << section;
+    EXPECT_TRUE(contains(section, "point code=left/lane1/outer offset=5.800 level=-0.205"))
+        << section;
+    EXPECT_TRUE(contains(section, "point code=right/shoulder/outer offset=-11.800 level=-0.385"))
+        << section;
+    const std::string info = session.ok("ROADTEMPLATE INFO \"divided road\"");
+    EXPECT_TRUE(contains(info, "name=kerb kind=kerb shape=mountable faces=outward")) << info;
+
+    // The facing is a key, a word, and refused when it is neither.
+    const std::size_t steps = session.steps();
+    const auto sideways = session.refused("ROADTEMPLATE SET \"divided road\" kerb faces=sideways");
+    EXPECT_EQ(sideways.code, ErrorCode::ParseFailure);
+    EXPECT_TRUE(contains(sideways.message, "inward")) << sideways.message;
+    EXPECT_EQ(session.steps(), steps);
+    const std::string turned = session.ok("ROADTEMPLATE SET \"divided road\" kerb faces=inward");
+    EXPECT_TRUE(contains(turned, "faces=inward")) << turned;
+    EXPECT_EQ(session.steps(), steps + 1);
+    EXPECT_TRUE(contains(session.ok("ROADTEMPLATE SECTION \"divided road\""),
+                         "point code=left/kerb/back offset=2.300 level=0.100"));
+    // A flush strip takes no facing; turning a kerb to one needs it inward.
+    session.ok("ROADTEMPLATE SET \"divided road\" kerb faces=outward");
+    const auto strip = session.refused("ROADTEMPLATE SET \"divided road\" kerb shape=edgestrip");
+    EXPECT_EQ(strip.code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(strip.message, "no face")) << strip.message;
+    session.ok("ROADTEMPLATE SET \"divided road\" kerb faces=inward shape=edgestrip");
+    EXPECT_TRUE(contains(session.ok("ROADTEMPLATE INFO \"divided road\""),
+                         "name=kerb kind=kerb shape=edgestrip width="));
+}
+
 TEST(RoadVerbs, RefusalsNameWhatIsWrongAndChangeNothing)
 {
     Session session;

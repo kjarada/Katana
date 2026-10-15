@@ -222,6 +222,33 @@ TEST(CorridorObjects, ObjectIdsAreStableAndNameTheirDefinition)
     EXPECT_EQ(std::ranges::adjacent_find(ids), ids.end()) << "two objects share an id";
 }
 
+TEST(CorridorObjects, ADividedRoadsKerbAndLanesAreSetOutUnderTheMedianNotAboveIt)
+{
+    // The median kerb's cross-section, by hand: the top 0.15 wide and 0.25 thick
+    // (level 0 on a base of -0.25) 0.0375 m2, and the face falling over 0.15 m
+    // from 0.25 to 0.15 thick, 0.15 x 0.2 = 0.03 m2: 0.0675 m2, 6.75 m3 in 100
+    // m, 0.3 m wide. Lane 1 starts under the profile (10): its top reaches 10 -
+    // 0.1 = 9.9 at the inner edge, not 10.1.
+    RoadTemplateSet templates;
+    templates.templates = standardTemplates();
+    const BimModel model = corridorSolids(buildCorridor(corridorOf("divided road"), templates,
+                                                        straight(100.0), level(10.0, 0.0, 100.0),
+                                                        nullptr));
+    for (const std::string side : {"left", "right"}) {
+        const BimObject* kerb = objectWithId(model, "corridor/Main/" + side + "/kerb/1");
+        ASSERT_NE(kerb, nullptr) << side;
+        EXPECT_NEAR(quantityOf(*kerb, "Width"), 0.3, 1e-12);
+        EXPECT_NEAR(quantityOf(*kerb, "GrossVolume"), 6.75, 1e-9);
+        EXPECT_GT(meshVolume(kerb->mesh), 0.0) << "turned outward";
+        EXPECT_NE(std::ranges::find(kerb->properties,
+                                    std::pair<std::string, std::string>{"mountable", "true"}),
+                  kerb->properties.end());
+        const BimObject* lane = objectWithId(model, "corridor/Main/" + side + "/lane1/AC14/1");
+        ASSERT_NE(lane, nullptr) << side;
+        EXPECT_NEAR(lane->mesh.bounds().max.z, 9.9, 1e-12);
+    }
+}
+
 TEST(CorridorObjects, AKerbsLengthIsItsLipLineAndItsShapeIsItsWidth)
 {
     RoadTemplateSet templates;

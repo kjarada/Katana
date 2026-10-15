@@ -220,8 +220,11 @@ std::string componentRecord(const RoadTemplate& roadTemplate, const Component& c
                " benchwidth=" + exact(component.benchWidth);
         break;
     case ComponentKind::Kerb:
-        out += " shape=" + std::string(toString(component.shape)) +
-               " width=" + exact(component.width) + " height=" + exact(component.height) +
+        out += " shape=" + std::string(toString(component.shape));
+        if (component.shape != KerbShape::EdgeStrip) {
+            out += " faces=" + std::string(toString(component.faces));
+        }
+        out += " width=" + exact(component.width) + " height=" + exact(component.height) +
                " depth=" + exact(component.depth);
         if (component.shape == KerbShape::KerbAndGutter) {
             out += " gutter=" + exact(component.gutterWidth) +
@@ -375,14 +378,25 @@ Status applyComponent(Component& component, const Option& option)
         component.shape = *shape;
         return {};
     }
+    if (key == "faces") {
+        const auto facing = kerbFacingFrom(option.value);
+        if (!facing) {
+            return usage("faces= is inward (a kerb on the outer edge of a carriageway: it rises "
+                         "going outward) or outward (a median's or island's: it falls going "
+                         "outward), not \"" +
+                         option.value + "\"");
+        }
+        component.faces = *facing;
+        return {};
+    }
     if (key == "material") {
         component.material = option.value;
         return {};
     }
     return usage("unknown component key " + key +
                  "=; the keys are name width crossfall superelevated layer colour, a kerb's "
-                 "shape height depth gutter gutterfall material, a drain's depth, a batter's "
-                 "cut fill maxwidth benchheight benchwidth");
+                 "shape faces height depth gutter gutterfall material, a drain's depth, a "
+                 "batter's cut fill maxwidth benchheight benchwidth");
 }
 
 Status applyCourse(PavementCourse& course, const Option& option)
@@ -1776,8 +1790,10 @@ ROADTEMPLATE ADD <t> left|right|both <kind> [name=<word>] [at=<n>] [key=value ..
 ROADTEMPLATE SET <t> <component> key=value ...  |  REMOVE <t> <component>
   <component> is side:name (left:lane) or name (both sides that have it). Keys:
   name= width= crossfall= (percent, outward: -3 falls) superelevated=on|off layer= colour=
-  kerb: shape=barrier|mountable|kerbgutter|edgestrip height= depth= gutter= gutterfall=
-        material= (width= is its top)   drain: depth= (its invert below its inner edge)
+  kerb: shape=barrier|mountable|kerbgutter|edgestrip faces=inward|outward height= depth=
+        gutter= gutterfall= material= (width= is its top)   faces=outward is a median's
+        or island's kerb, which falls going outward   drain: depth= (its invert below its
+        inner edge)
   batter: cut= fill= (run per rise: 2 is 1V:2H) maxwidth= benchheight= benchwidth=
 ROADTEMPLATE COURSE <t> <component> ADD <course> thickness=<m> [material=] [ifc=] [colour=]
   [at=<n>]  |  SET <course> key=value ...  |  REMOVE <course>     courses are top down

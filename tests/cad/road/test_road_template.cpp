@@ -120,6 +120,103 @@ TEST(RoadTemplate, AMountableKerbsFaceRunsOneAndAHalfTimesItsHeight)
     EXPECT_NEAR(kerbWidth(kerb), 0.25, 1e-15);
 }
 
+TEST(RoadTemplate, AKerbFacingOutwardIsTheSameKerbFromItsLipBackToItsBack)
+{
+    // A mountable kerb 100 mm high with a 150 mm top and 150 mm base depth:
+    // the face runs 1.5 x 0.1 = 0.15 m, so 0.3 m in all. Facing outward it
+    // starts at its back at level 0, the top runs 0.15 m flat, and the face
+    // falls 0.1 m over the next 0.15 m to the lip; the base is 0.15 m under the
+    // lip at -0.1, so -0.25 throughout.
+    Component kerb = defaultComponent(ComponentKind::Kerb, Side::Left);
+    kerb.shape = KerbShape::Mountable;
+    kerb.height = 0.1;
+    kerb.faces = KerbFacing::Outward;
+    const auto shape = kerbShape(kerb);
+    ASSERT_EQ(shape.size(), 3u);
+    const std::vector<ShapeColumn> expected{ShapeColumn{0.0, 0.0, -0.25},
+                                            ShapeColumn{0.15, 0.0, -0.25},
+                                            ShapeColumn{0.30, -0.1, -0.25}};
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_NEAR(shape[i].out, expected[i].out, 1e-15) << i;
+        EXPECT_NEAR(shape[i].top, expected[i].top, 1e-15) << i;
+        EXPECT_NEAR(shape[i].bottom, expected[i].bottom, 1e-15) << i;
+    }
+    EXPECT_NEAR(kerbWidth(kerb), 0.3, 1e-15);
+    // The same kerb facing inward is as wide.
+    kerb.faces = KerbFacing::Inward;
+    EXPECT_NEAR(kerbWidth(kerb), 0.3, 1e-15);
+
+    // A barrier: a 150 mm face battered 1 in 6 is 25 mm out; 150 mm of top
+    // first, then down 0.15 over 0.025 to the lip; its base 0.15 under the lip.
+    Component barrier = defaultComponent(ComponentKind::Kerb, Side::Left);
+    barrier.faces = KerbFacing::Outward;
+    const auto fall = kerbShape(barrier);
+    ASSERT_EQ(fall.size(), 3u);
+    EXPECT_NEAR(fall[1].out, 0.15, 1e-15);
+    EXPECT_NEAR(fall[1].top, 0.0, 1e-15);
+    EXPECT_NEAR(fall[2].out, 0.175, 1e-15);
+    EXPECT_NEAR(fall[2].top, -0.15, 1e-15);
+    for (const ShapeColumn& column : fall) {
+        EXPECT_NEAR(column.bottom, -0.30, 1e-15);
+    }
+
+    // Kerb and gutter, 300 mm at 6 % (the invert 18 mm below the lip), a 150
+    // mm face: facing inward the lip is 0, the invert -0.018, the top 0.132.
+    // Facing outward everything is measured from that top: the face crest
+    // 0.15 out at 0, the invert at 0.175 and -0.15, the lip at 0.475 and
+    // -0.132 (the channel rises 18 mm back to it); the base 0.15 under the
+    // channel throughout: -0.30 to the invert, -0.282 under the lip.
+    Component channel = defaultComponent(ComponentKind::Kerb, Side::Left);
+    channel.shape = KerbShape::KerbAndGutter;
+    channel.faces = KerbFacing::Outward;
+    const auto gutter = kerbShape(channel);
+    ASSERT_EQ(gutter.size(), 4u);
+    const std::vector<ShapeColumn> wanted{ShapeColumn{0.0, 0.0, -0.30},
+                                          ShapeColumn{0.15, 0.0, -0.30},
+                                          ShapeColumn{0.175, -0.15, -0.30},
+                                          ShapeColumn{0.475, -0.132, -0.282}};
+    for (std::size_t i = 0; i < wanted.size(); ++i) {
+        EXPECT_NEAR(gutter[i].out, wanted[i].out, 1e-15) << i;
+        EXPECT_NEAR(gutter[i].top, wanted[i].top, 1e-15) << i;
+        EXPECT_NEAR(gutter[i].bottom, wanted[i].bottom, 1e-15) << i;
+    }
+}
+
+TEST(RoadTemplate, TheDividedRoadsMedianKerbFallsToTheCarriagewayAndAnEdgeStripTakesNoFacing)
+{
+    const auto templates = standardTemplates();
+    const RoadTemplate& divided = templates[2];
+    ASSERT_EQ(divided.name, "divided road");
+    for (const Side side : {Side::Left, Side::Right}) {
+        const auto kerb = divided.find(side, "kerb");
+        ASSERT_TRUE(kerb.has_value());
+        EXPECT_EQ(divided.components[*kerb].faces, KerbFacing::Outward);
+    }
+    // The other standard templates' kerbs are on the carriageway's outer edge.
+    for (const Component& each : templates[1].components) {
+        if (each.kind == ComponentKind::Kerb) {
+            EXPECT_EQ(each.faces, KerbFacing::Inward);
+        }
+    }
+    // A flush strip has no face to turn.
+    RoadTemplate strip = twoLanes();
+    Component edge = defaultComponent(ComponentKind::Kerb, Side::Left);
+    edge.shape = KerbShape::EdgeStrip;
+    edge.faces = KerbFacing::Outward;
+    strip.components.insert(strip.components.begin() + 1, edge);
+    const auto refused = checkTemplate(strip);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(refused.error().message.find("no face"), std::string::npos)
+        << refused.error().message;
+    EXPECT_NE(refused.error().message.find("left:kerb"), std::string::npos);
+    strip.components[1].faces = KerbFacing::Inward;
+    EXPECT_TRUE(checkTemplate(strip).ok());
+    EXPECT_EQ(toString(KerbFacing::Outward), "outward");
+    EXPECT_TRUE(kerbFacingFrom("INWARD") == KerbFacing::Inward);
+    EXPECT_FALSE(kerbFacingFrom("sideways").has_value());
+}
+
 TEST(RoadTemplate, AnEdgeStripIsFlushAtItsCrossfall)
 {
     Component strip = defaultComponent(ComponentKind::Kerb, Side::Left);
@@ -312,6 +409,30 @@ TEST(RoadTemplate, TheJsonRoundTripsEveryValueExactly)
     ASSERT_TRUE(read.ok()) << read.error().describe();
     EXPECT_EQ(*read, set);
     EXPECT_NE(json->find("\"format\":\"katana-road-templates\""), std::string::npos);
+}
+
+TEST(RoadTemplate, AKerbsFacingIsKeptInTheJsonAndAnOlderFileWithoutOneReadsInward)
+{
+    RoadTemplateSet set;
+    set.templates = standardTemplates();
+    const auto json = roadTemplatesToJson(set);
+    ASSERT_TRUE(json.ok());
+    EXPECT_NE(json->find("\"faces\":\"outward\""), std::string::npos);
+    EXPECT_NE(json->find("\"faces\":\"inward\""), std::string::npos);
+    const auto read = roadTemplatesFromJson(*json);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(*read, set);
+
+    // A file written before kerbs had a facing: its kerb reads as it always did.
+    const auto older = roadTemplatesFromJson(
+        R"({"format":"katana-road-templates","version":1,"templates":[{"name":"t","components":[{"name":"kerb","kind":"kerb","side":"left","shape":"mountable","width":0.15,"height":0.1,"depth":0.15}]}]})");
+    ASSERT_TRUE(older.ok()) << older.error().describe();
+    EXPECT_EQ(older->templates.front().components.front().faces, KerbFacing::Inward);
+    // A word that is neither is a parse failure naming it.
+    const auto bad = roadTemplatesFromJson(
+        R"({"format":"katana-road-templates","version":1,"templates":[{"name":"t","components":[{"name":"kerb","kind":"kerb","side":"left","faces":"sideways"}]}]})");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_EQ(bad.error().code, ErrorCode::ParseFailure);
 }
 
 TEST(RoadTemplate, TheJsonOfANewerVersionIsRefusedAsUnsupported)

@@ -45,15 +45,26 @@ namespace katana::cad::road {
 
 enum class ComponentKind { Lane, Shoulder, Kerb, Footpath, Verge, Median, Drain, Batter };
 enum class KerbShape { Barrier, Mountable, KerbAndGutter, EdgeStrip };
+// Which way a kerb's face looks. INWARD, the default, is a kerb on the outer
+// edge of a carriageway: its lip is on the carriageway side, nearer the
+// centreline, and it rises going outward to its top - the face looks in, to
+// the traffic. OUTWARD is a kerb on the inner edge of a carriageway, a median's
+// or an island's: the kerb is highest where it starts, against the median, and
+// falls going outward to its lip, so the carriageway beyond it is lower and
+// the face looks out, to the traffic on that side.
+enum class KerbFacing { Inward, Outward };
 enum class Side { Left, Right };
 
 // The words the verbs and the JSON use: "lane", "shoulder", "kerb",
 // "footpath", "verge", "median", "drain", "batter"; "barrier", "mountable",
-// "kerbgutter", "edgestrip"; "left", "right". Read in any case.
+// "kerbgutter", "edgestrip"; "inward", "outward"; "left", "right". Read in any
+// case.
 [[nodiscard]] std::string_view toString(ComponentKind kind);
 [[nodiscard]] std::optional<ComponentKind> componentKindFrom(std::string_view text);
 [[nodiscard]] std::string_view toString(KerbShape shape);
 [[nodiscard]] std::optional<KerbShape> kerbShapeFrom(std::string_view text);
+[[nodiscard]] std::string_view toString(KerbFacing facing);
+[[nodiscard]] std::optional<KerbFacing> kerbFacingFrom(std::string_view text);
 [[nodiscard]] std::string_view toString(Side side);
 [[nodiscard]] std::optional<Side> sideFrom(std::string_view text);
 
@@ -98,6 +109,9 @@ struct Component {
 
     // ---- a kerb ---------------------------------------------------------------
     KerbShape shape = KerbShape::Barrier;
+    // Which way the face looks (KerbFacing). An edge strip has no face and
+    // takes only the default.
+    KerbFacing faces = KerbFacing::Inward;
     // The face's height above the lip (the pavement edge), metres. An edge
     // strip is flush and has none.
     double height = 0.150;
@@ -225,17 +239,23 @@ struct ShapeColumn {
     friend bool operator==(const ShapeColumn&, const ShapeColumn&) = default;
 };
 
-// The kerb's cross-section from its lip (out 0, level 0) outward, a column
-// at each change of its top: the lip, the gutter's invert, the top of the
-// face, the back. Its base is level, `depth` below the lip (an edge strip:
-// below its top). The last column is the back of the kerb, where the next
-// component starts.
+// The kerb's cross-section from where the previous component ends (out 0,
+// level 0) outward, a column at each change of its top. For a kerb facing
+// INWARD that is its lip (the pavement's edge): the lip, the gutter's invert,
+// the top of the face, the back. For one facing OUTWARD it is the same kerb
+// mirrored: the back, the top of the face, the gutter's invert, the lip - its
+// levels measured from the back, so the kerb falls to its lip. The base is
+// `depth` below the lip (an edge strip: below its top), level under a barrier
+// or a mountable kerb and following the channel under a gutter. The last
+// column is where the next component starts: the back of the kerb, or its
+// lip.
 //
 //   barrier      face `height` high, battered 1 in 6, then `width` of top
 //   mountable    face rising `height` over 1.5 x height out, then `width`
 //   kerbgutter   the gutter, `gutterWidth` falling `gutterFall` %, then a
 //                barrier face and top
-//   edgestrip    flush: `width` at the component's crossfall, `depth` thick
+//   edgestrip    flush: `width` at the component's crossfall, `depth` thick;
+//                it has no face and takes no facing
 //
 // The face is never vertical: a vertical face gives the finished surface two
 // levels at one point, which a TIN cannot hold.

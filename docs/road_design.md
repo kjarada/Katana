@@ -68,6 +68,28 @@ The face is never vertical: a vertical face gives the finished surface two
 levels at one point, which a TIN cannot hold, and the 1 in 6 batter reads as
 upright at any scale a road is drawn at.
 
+**A kerb faces one way** (`Component::faces`, `faces=inward|outward`, inward
+by default). The shapes above are a kerb on the outer edge of a carriageway:
+the lip is on the carriageway's side and the kerb rises going outward, so its
+face looks in, at the traffic. A median's or an island's kerb is the other
+way round - highest against the median, falling going outward to its lip at
+the carriageway - and is the same shape seen from its other end
+(`faces=outward`): its columns run from the back, its levels are measured
+from the back's top, and its base stays `depth` under the lip. The divided
+road's median kerb faces outward, so its lanes start 100 mm under the median's
+top and the profile is the top of the median. (Facing the way a roadside kerb
+does, the lanes started 100 mm ABOVE the profile and the kerb's face looked
+into a depressed median; the solid, the IfcKerb and every level outside the
+median were wrong with it. The offsets and levels, worked by hand, are
+`RoadSection.TheDividedRoadsLanesSitUnderTheMedianAndItsKerbFacesTheTraffic`.)
+An outward kerb's points are `<side>/<kerb>/face` (the crest of the face), `invert` for a
+kerb and gutter, and `lip`, where an inward kerb's are `face`, `invert` and
+`back`. An edge strip has no face and is refused with `faces=outward`.
+*Rejected:* lifting the median by the kerb's height so the lanes sit on the
+profile - a component cannot start above the design level its side starts at;
+and a negative `height` for a falling kerb - one number for two things, and
+the base would need its own sign rule.
+
 **Limits.** `road::checkTemplate` refuses what would make a section cost the
 session: a width, depth, thickness or maximum batter width over 1 000 m
 (`road::kMaximumComponentLength`), and a batter that would make more than 100
@@ -112,8 +134,8 @@ edits them. Each is of the order the guide named gives, not a design:
 each side the mirror of the other: **rural two-lane** (3.5 m lane, 2 m sealed
 shoulder, table drain, batter), **urban street** (3.3 m lane, 2.3 m parking
 lane, kerb and gutter, 1.5 m footpath, 1 m verge, batter) and **divided road**
-(2 m median each side, mountable kerb, two 3.5 m lanes, 2.5 m shoulder,
-batter).
+(2 m median each side, mountable kerb facing outward, two 3.5 m lanes, 2.5 m
+shoulder, batter; its profile is the median's top).
 
 ## Corridors
 

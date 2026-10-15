@@ -95,6 +95,48 @@ TEST(RoadSection, AStreetIsSetOutAtItsHandWorkedOffsetsAndLevels)
     EXPECT_EQ(section->cutArea, 0.0);
 }
 
+TEST(RoadSection, TheDividedRoadsLanesSitUnderTheMedianAndItsKerbFacesTheTraffic)
+{
+    // The divided road on a level road at 0: the median 2 m wide at 0 % (its
+    // top is the profile), then the mountable kerb facing outward: 0.15 m of
+    // top at level 0, the face falling 0.1 m over 1.5 x 0.1 = 0.15 m to the lip
+    // at 2.3, -0.1. The carriageway starts at the lip: lane 1 3.5 m at -3 %
+    // falls 0.105 to 5.8 at -0.205, lane 2 to 9.3 at -0.31, the 2.5 m shoulder
+    // 0.075 more to 11.8 at -0.385. (Facing the other way the kerb rose to 0.1
+    // and the lanes started 100 mm ABOVE the profile, with a drop to the median.)
+    RoadTemplate divided;
+    for (const RoadTemplate& each : standardTemplates()) {
+        if (each.name == "divided road") {
+            divided = each;
+        }
+    }
+    ASSERT_EQ(divided.name, "divided road");
+    const auto section = templateSection(divided);
+    ASSERT_TRUE(section.ok()) << section.error().describe();
+    ASSERT_EQ(section->top.size(), 13u); // the centreline and six points a side
+    for (const double sign : {1.0, -1.0}) {
+        const std::string side = sign > 0.0 ? "left" : "right";
+        expectPoint(section->top, side + "/median/outer", sign * 2.0, 0.0);
+        expectPoint(section->top, side + "/kerb/face", sign * 2.15, 0.0);
+        expectPoint(section->top, side + "/kerb/lip", sign * 2.3, -0.1);
+        expectPoint(section->top, side + "/lane1/outer", sign * 5.8, -0.205);
+        expectPoint(section->top, side + "/lane2/outer", sign * 9.3, -0.31);
+        expectPoint(section->top, side + "/shoulder/outer", sign * 11.8, -0.385);
+    }
+    EXPECT_EQ(pointCoded(section->top, "left/kerb/back"), nullptr) << "the back is the median's edge";
+    // The kerb's base is 0.15 under its lip at -0.1: -0.25 throughout, and it
+    // is one solid of three columns that ends where the lane starts.
+    const auto kerb = std::ranges::find(section->solids, std::string("left/kerb"),
+                                        &SectionSolid::key);
+    ASSERT_NE(kerb, section->solids.end());
+    ASSERT_EQ(kerb->columns.size(), 3u);
+    EXPECT_NEAR(kerb->columns.front().offset, 2.0, 1e-12);
+    EXPECT_NEAR(kerb->columns.back().offset, 2.3, 1e-12);
+    for (const SolidColumn& column : kerb->columns) {
+        EXPECT_NEAR(column.bottom, -0.25, 1e-12);
+    }
+}
+
 TEST(RoadSection, EachCourseAndKerbIsASolidUnderItsComponent)
 {
     const auto section = roadSection(street(), straight(), level(10.0), nullptr, 100.0);
