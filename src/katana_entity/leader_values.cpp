@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iterator>
 
+#include "katana/core/text.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/math/numerics.hpp"
 #include "value_parts.hpp"
@@ -37,18 +38,6 @@ bool isSurfaceKind(std::string_view kind)
 {
     return std::find(std::begin(kSurfaceKinds), std::end(kSurfaceKinds), kind) !=
            std::end(kSurfaceKinds);
-}
-
-// ASCII case folded: a surface is found ignoring case (terrain::SurfaceStore),
-// so a refusal must not say there is no "Ground" when there is a "ground".
-bool sameIgnoringCase(std::string_view a, std::string_view b)
-{
-    const auto lower = [](char c) {
-        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-    };
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [&](char x, char y) {
-               return lower(x) == lower(y);
-           });
 }
 
 void put(LabelValues& values, std::string_view name, LabelQuantity quantity, double number)
@@ -431,7 +420,12 @@ void addContextValues(LabelValues& values, const Point2& at, const LeaderContext
             if (!level) {
                 continue;
             }
-            const double above = *level - *ground;
+            // On the surface is a fill of nothing, and "on" is within the
+            // geometric tolerance: the surface's level is interpolated, so a
+            // point exactly on it differs from it in the last bits, and some
+            // of them would read as a cut of 4e-15 (docs/annotation.md).
+            const double above =
+                katana::math::lengthsEqual(*level, *ground) ? 0.0 : *level - *ground;
             if (parsed->kind == "dsurface") {
                 put(values, value, LabelQuantity::Number, above);
             } else if (parsed->kind == "cut" && above < 0.0) {
@@ -471,9 +465,11 @@ std::string whyAbsent(std::string_view name, const LabelValues& values, const Po
         if (!context.surfaceLevel) {
             return "no surfaces were given to read here";
         }
+        // The matcher terrain::SurfaceStore::find uses, so a refusal never
+        // says there is no "Ground" when the store finds "ground".
         if (std::none_of(context.surfaces.begin(), context.surfaces.end(),
                          [&](const std::string& surface) {
-                             return sameIgnoringCase(surface, what);
+                             return katana::core::equalsIgnoringCase(surface, what);
                          })) {
             return "the drawing has no surface " + what;
         }

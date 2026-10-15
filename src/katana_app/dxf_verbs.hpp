@@ -14,6 +14,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -52,6 +53,18 @@ applyDxfImport(katana::cad::Document& document, katana::dxf::DxfImport&& importe
 writeDxfExport(const katana::entity::Model& model, double annotationScale,
                const std::filesystem::path& file,
                const katana::entity::LeaderContext& leaders = {});
+
+// The same for the entities `only` of `model` (an EXPORT's scope): the
+// annotation is drawn from the WHOLE of `model` first - a smart leader reads
+// the entity its tip is on, a label the entity it labels, and drawn after the
+// scope had taken that entity away each said nothing, a bare arrow in the
+// file - and then `model` is cut to `only` IN PLACE and written with the
+// annotation of the entities that stay. `model` is the caller's copy to cut:
+// it is not the Document's.
+[[nodiscard]] katana::core::Result<katana::dxf::DxfExport>
+writeDxfExport(katana::entity::Model& model, double annotationScale,
+               const std::filesystem::path& file, const katana::entity::LeaderContext& leaders,
+               const std::set<katana::entity::EntityId>& only);
 
 // The records of a DXF written: exported, then the writer's warnings.
 // `file` is the name it is known by, which a staged write is not written to.

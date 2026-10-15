@@ -81,6 +81,37 @@ void clipToLevel(std::array<Point3, 5>& polygon, std::size_t& count, double leve
     count = kept;
 }
 
+// Which side of a collapsed range's point a value is on: -1 below, +1 above,
+// 0 at it (within tolerance::kGeometric).
+int sideOfPoint(const SurfaceColouring& colouring, double value)
+{
+    if (value < colouring.low - tol::kGeometric) {
+        return -1;
+    }
+    if (value > colouring.high + tol::kGeometric) {
+        return 1;
+    }
+    return 0;
+}
+
+// Where along the ramp, 0 to 1, a value on that side of a collapsed range
+// lies. At the point a level surface is the ramp's middle; slope's point is a
+// face with no steepness, the ramp's start.
+double collapsedPosition(const SurfaceColouring& colouring, int side)
+{
+    if (side != 0) {
+        return side < 0 ? 0.0 : 1.0;
+    }
+    return colouring.faces == SurfaceFaces::Slope ? 0.0 : 0.5;
+}
+
+std::size_t collapsedBand(const SurfaceColouring& colouring, int side)
+{
+    const std::size_t count = colouring.bandCount();
+    const double position = collapsedPosition(colouring, side);
+    return position < 0.5 ? 0 : (position > 0.5 ? count - 1 : count / 2);
+}
+
 } // namespace
 
 // ---- aspect ----------------------------------------------------------------------------
@@ -130,6 +161,8 @@ std::size_t SurfaceColouring::bandCount() const
     return static_cast<std::size_t>(std::max(bands, 1));
 }
 
+bool SurfaceColouring::collapsed() const { return stops.empty() && !(high - low > tol::kGeometric); }
+
 std::size_t SurfaceColouring::bandOf(double value) const
 {
     const std::size_t count = bandCount();
@@ -144,7 +177,7 @@ std::size_t SurfaceColouring::bandOf(double value) const
     }
     const double span = high - low;
     if (!(span > tol::kGeometric)) {
-        return count / 2;
+        return collapsedBand(*this, sideOfPoint(*this, value));
     }
     const double scaled = (value - low) / span * static_cast<double>(count);
     if (!(scaled > 0.0)) {
@@ -171,7 +204,10 @@ std::optional<double> SurfaceColouring::bandLow(std::size_t band) const
     const std::size_t count = bandCount();
     const std::size_t k = std::min(band, count - 1);
     if (!stops.empty()) {
-        return k == 0 && count > 1 ? std::optional<double>{} : std::optional<double>{stops[k].value};
+        return k == 0 ? std::optional<double>{} : std::optional<double>{stops[k].value};
+    }
+    if (k == 0 && openBelow) {
+        return std::nullopt;
     }
     return low + (high - low) * static_cast<double>(k) / static_cast<double>(count);
 }
@@ -186,7 +222,7 @@ std::optional<double> SurfaceColouring::bandHigh(std::size_t band) const
     // The last band's top is `high` itself, not low + span * count / count,
     // which rounding could leave a hair short of it.
     if (k + 1 == count) {
-        return high;
+        return openAbove ? std::optional<double>{} : std::optional<double>{high};
     }
     return low + (high - low) * static_cast<double>(k + 1) / static_cast<double>(count);
 }
@@ -213,7 +249,10 @@ Color SurfaceColouring::colourAt(double value) const
         return width > 0.0 ? mix(a.colour, b.colour, (value - a.value) / width) : b.colour;
     }
     const double span = high - low;
-    return surfaceRampColour(ramp, span > tol::kGeometric ? (value - low) / span : 0.5);
+    if (!(span > tol::kGeometric)) {
+        return surfaceRampColour(ramp, collapsedPosition(*this, sideOfPoint(*this, value)));
+    }
+    return surfaceRampColour(ramp, (value - low) / span);
 }
 
 SurfaceColouring surfaceColouring(const SurfaceDisplayStyle& style, SurfaceFaces faces,
@@ -238,6 +277,11 @@ SurfaceColouring surfaceColouring(const SurfaceDisplayStyle& style, SurfaceFaces
     if (!std::isfinite(colouring.high) || colouring.high < colouring.low) {
         colouring.high = colouring.low;
     }
+    // The data runs past an end the style fixed: its end band takes it in.
+    colouring.openBelow =
+        style.rangeMin.has_value() && std::isfinite(defaultLow) && *style.rangeMin > defaultLow;
+    colouring.openAbove =
+        style.rangeMax.has_value() && std::isfinite(defaultHigh) && *style.rangeMax < defaultHigh;
     return colouring;
 }
 
@@ -332,6 +376,32 @@ std::string formatLegendValue(double value, int decimals)
 }
 
 
+namespace {
+
+// A range too narrow to cut into bands or stretch a ramp over is one point,
+// and a value is below it, at it or above it. Entries for the colours those
+// three really are - not N swatches of a "40 - 40" nobody can tell apart.
+// Slope is never below its point, which is 0 or a steepness the surface did
+// not reach.
+void collapsedEntries(const SurfaceColouring& colouring, SurfaceLegend& legend)
+{
+    const double point = colouring.low;
+    const double values[1] = {point};
+    const std::string text = formatLegendValue(point, legendDecimals(values));
+    const auto colourOn = [&colouring](int side) {
+        return colouring.banded
+                   ? colouring.bandColour(collapsedBand(colouring, side))
+                   : surfaceRampColour(colouring.ramp, collapsedPosition(colouring, side));
+    };
+    if (!(colouring.faces == SurfaceFaces::Slope && point <= 0.0)) {
+        legend.entries.push_back({colourOn(-1), std::nullopt, point, "< " + text});
+    }
+    legend.entries.push_back({colourOn(0), point, point, text});
+    legend.entries.push_back({colourOn(1), point, std::nullopt, "> " + text});
+}
+
+} // namespace
+
 SurfaceLegend surfaceLegend(const SurfaceColouring& colouring)
 {
     SurfaceLegend legend;
@@ -357,6 +427,10 @@ SurfaceLegend surfaceLegend(const SurfaceColouring& colouring)
     }
     legend.title = colouring.faces == SurfaceFaces::Slope ? "Slope %" : "Elevation";
 
+    if (colouring.collapsed()) {
+        collapsedEntries(colouring, legend);
+        return legend;
+    }
     if (colouring.banded) {
         const std::size_t count = colouring.bandCount();
         std::vector<double> edges;
@@ -380,6 +454,8 @@ SurfaceLegend surfaceLegend(const SurfaceColouring& colouring)
                 entry.label = "< " + formatLegendValue(*entry.to, decimals);
             } else if (entry.from) {
                 entry.label = formatLegendValue(*entry.from, decimals) + " +";
+            } else {
+                entry.label = "all"; // one stop: every value is in it
             }
             legend.entries.push_back(std::move(entry));
         }

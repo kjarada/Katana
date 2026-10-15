@@ -11,6 +11,7 @@
 
 #include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/entity/text_block.hpp"
@@ -58,17 +59,6 @@ constexpr std::array kPresets = {
 };
 
 constexpr std::string_view kName = "NAME";
-
-std::string lowerCase(std::string_view text)
-{
-    std::string lower(text);
-    for (char& c : lower) {
-        if (c >= 'A' && c <= 'Z') {
-            c = static_cast<char>(c - 'A' + 'a');
-        }
-    }
-    return lower;
-}
 
 // `pattern` with each NAME replaced by `name`.
 std::string instantiate(std::string_view pattern, std::string_view name)
@@ -202,7 +192,7 @@ const LeaderPresetInfo& presetInfo(LeaderPreset preset)
 
 Result<LeaderPreset> leaderPresetNamed(std::string_view word)
 {
-    const std::string lower = lowerCase(word);
+    const std::string lower = katana::core::lowered(word);
     std::string words;
     for (const LeaderPresetInfo& info : kPresets) {
         if (info.word == lower) {

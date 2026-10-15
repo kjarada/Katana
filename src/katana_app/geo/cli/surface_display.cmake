@@ -38,9 +38,31 @@ set_tests_properties(cli.surface_plan_says_what_the_plan_view_draws_of_a_surface
     PASS_REGULAR_EXPRESSION "plan surface=\"ground\" style=\"Contours\" visible=yes pixels=1600,1000 [^\r\n]* levels=14 [^\r\n]*[\r\n]+scope=surface"
     FAIL_REGULAR_EXPRESSION "error")
 
-# A surface the drawing has not got is refused, and the session fails.
+# A surface the drawing has not got is refused, and the session fails: named,
+# not a bare WILL_FAIL, which passed on any failure (docs/testing.md).
 add_test(NAME cli.surface_plan_of_no_such_surface_is_refused
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli>
             -c "SURFACE PLAN nothing")
-set_tests_properties(cli.surface_plan_of_no_such_surface_is_refused PROPERTIES WILL_FAIL TRUE)
+set_tests_properties(cli.surface_plan_of_no_such_surface_is_refused PROPERTIES
+    PASS_REGULAR_EXPRESSION "error: NotFound: no surface of that name; SURFACE LIST lists them \\[nothing\\]")
+
+# A point is not a view: an AREA with no width and no height cannot be framed,
+# and was answered with every count 0 - the reply of a point the surface does
+# not cover. The terrain covers (5, 5): -4.25 to 174.25 across, -4.25 to 129.25 up.
+add_test(NAME cli.surface_plan_of_an_area_that_is_a_point_is_refused_not_answered_with_zeros
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACE FROM FILE \"${_display_samples}/terrain.asc\" NAME ground"
+            -c "SURFACE PLAN ground AREA 5,5,5,5")
+set_tests_properties(cli.surface_plan_of_an_area_that_is_a_point_is_refused_not_answered_with_zeros PROPERTIES
+    PASS_REGULAR_EXPRESSION "error: InvalidArgument: AREA has no width and no height")
+
+# The most bands a style may have is 100 (kMaximumSurfaceBands); the verb took
+# a million, and the 3D view built 643 triangles a band on this terrain.
+add_test(NAME cli.surfacestyle_with_more_bands_than_the_maximum_is_refused_naming_bands
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "SURFACESTYLE NEW Many FROM \"Elevation Bands\" bands=101")
+set_tests_properties(cli.surfacestyle_with_more_bands_than_the_maximum_is_refused_naming_bands PROPERTIES
+    PASS_REGULAR_EXPRESSION "error: InvalidArgument: [^\r\n]*bands must be 2 to 100")

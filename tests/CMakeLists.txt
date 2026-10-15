@@ -1370,6 +1370,25 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # SURFACE PLAN <name> VIEW is what the plan view drew, at the view's own
+    # size and scale: the sample terrain in Triangles at ZOOM EXTENTS in a
+    # view a few hundred pixels across, where every triangle's edges are under
+    # four pixels - so the view reports edges=0 and every triangle tinted, and
+    # so must the verb. It was framed in 1600 x 1000 whatever the view was,
+    # and said all 31 981 edges stroked and none tinted. The pixels it names
+    # are the view's, three digits or fewer, not the default frame's four.
+    add_test(NAME qt_surface_plan_of_the_view_says_what_the_plan_view_drew_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_surface_view"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE STYLE ground Triangles|>ZOOM EXTENTS view=1|?PlanView1|>SURFACE PLAN ground VIEW"
+            "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=[1-9][0-9]* .*plan surface=\"ground\" style=\"Triangles\" visible=yes pixels=[0-9][0-9]?[0-9]?,[0-9][0-9]?[0-9]? unitsPerPixel=[0-9.e-]+ triangles=[1-9][0-9]* inView=[1-9][0-9]* edges=0 tinted=[1-9][0-9]* "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_plan_of_the_view_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_surface_plan_of_the_view_says_what_the_plan_view_drew_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Surface Styles, by its object names: a style's contour
     # interval edited and applied, then a copy of it made under a new name -
     # each the SURFACESTYLE line the dialog shows and runs through the

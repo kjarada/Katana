@@ -9,8 +9,8 @@
 // The value a face is coloured by is its ELEVATION in drawing units, or its
 // SLOPE IN PERCENT (rise over run times 100: 100 is 45 degrees), or the
 // direction it faces (aspect, in eight sectors). The ramps themselves are in
-// surface_ramps.cpp: THE ramp table, which the 3D scene's own elevation and
-// slope colours are read from too.
+// surface_ramps.cpp: the surface styles' ramp table, which the 3D scene's own
+// elevation and slope colours are read from too.
 
 #include <array>
 #include <cstddef>
@@ -83,6 +83,13 @@ struct SurfaceColouring {
     int bands = 10;
     double low = 0.0;
     double high = 0.0;
+    // The data runs past an end of the range the style set: min= above the
+    // lowest value (openBelow), max= below the highest (openAbove). A banded
+    // ramp's end band then takes in everything past its edge, and says so
+    // (bandLow, bandHigh) rather than naming a closed range its colour also
+    // covers. surfaceColouring sets them.
+    bool openBelow = false;
+    bool openAbove = false;
     // Flat faces, a flat (level) face under Aspect, and a value that is not
     // finite.
     katana::entity::Color flat{170, 170, 160, 255};
@@ -95,9 +102,13 @@ struct SurfaceColouring {
     }
 
     // The colour of `value` (an elevation, or a slope in percent):
-    //   smooth ramp   the ramp at (value - low) / (high - low), clamped; a
-    //                 range narrower than tolerance::kGeometric is the
-    //                 ramp's middle, as the scene's one ramp always was;
+    //   smooth ramp   the ramp at (value - low) / (high - low), clamped. A
+    //                 range narrower than tolerance::kGeometric is a point
+    //                 (collapsed): below it is the ramp's start and above it
+    //                 its end, as for any range; at it the ramp's middle, as
+    //                 the scene's one ramp always was for a level surface -
+    //                 or, for slope, its start, because the point is a face
+    //                 with no steepness;
     //   smooth stops  blended between the two stops either side, the first
     //                 below them all and the last above;
     //   banded        its band's colour (bandOf, bandColour).
@@ -109,16 +120,23 @@ struct SurfaceColouring {
     //                 below low is the first, above high the last. Band k is
     //                 the ramp at k / (bands - 1), so the first and last
     //                 bands are the ramp's two ends (one band: its middle).
+    //                 A collapsed range is one point, and takes the same
+    //                 sides: below it the first band, above it the last, at
+    //                 it the middle (slope: the first).
     //   stops         one a stop: band k runs from stop k's value up to the
     //                 next stop's, in stop k's colour; below the first stop
     //                 is the first band, from the last stop up is the last.
     [[nodiscard]] std::size_t bandCount() const;
+    // A ramp (no stops) whose range is narrower than tolerance::kGeometric: a
+    // point, not something to stretch a ramp or cut bands over.
+    [[nodiscard]] bool collapsed() const;
     [[nodiscard]] std::size_t bandOf(double value) const;
     [[nodiscard]] katana::entity::Color bandColour(std::size_t band) const;
-    // Where band k starts and ends; absent at an open end (the first band of
-    // stops starts nowhere below, the last ends nowhere above). A ramp's
-    // bands are closed at low and high, though values past them are taken
-    // into the end bands.
+    // Where band k starts and ends; absent at an open end: the first band of
+    // stops starts nowhere below and the last ends nowhere above (one stop is
+    // open both ways), and a ramp's end bands are open where the data runs
+    // past the range (openBelow, openAbove). Where it does not they are
+    // closed at low and high.
     [[nodiscard]] std::optional<double> bandLow(std::size_t band) const;
     [[nodiscard]] std::optional<double> bandHigh(std::size_t band) const;
 };
@@ -126,7 +144,7 @@ struct SurfaceColouring {
 // `style`'s rule for `faces` (its planFaces or its faces3d), the ramp
 // stretched over the style's range - each end the style gives - else over
 // [defaultLow, defaultHigh]. A range given back to front is taken as the
-// point at its low end. An unknown ramp name is the first ramp, as
+// point at its low end (collapsed). An unknown ramp name is the first ramp, as
 // surfaceRampColour takes it.
 [[nodiscard]] SurfaceColouring surfaceColouring(const SurfaceDisplayStyle& style, SurfaceFaces faces,
                                                 double defaultLow, double defaultHigh);
@@ -147,7 +165,9 @@ struct BandPiece {
     std::size_t count = 0;
 };
 // Appends `a`, `b`, `c`'s pieces to `out`, lowest band first. A colouring
-// that is not banded by value gives the whole triangle in band 0.
+// that is not banded by value gives the whole triangle in band 0. A banded
+// style has at most kMaximumSurfaceBands bands (checkSurfaceStyle), so a
+// triangle is cut into that many pieces at the most.
 void bandPieces(const SurfaceColouring& colouring, const katana::geometry::Point3& a,
                 const katana::geometry::Point3& b, const katana::geometry::Point3& c,
                 std::vector<BandPiece>& out);
@@ -170,8 +190,10 @@ struct SurfaceLegend {
     // "Elevation", "Slope %", "Aspect", "Flat".
     std::string title{};
     // A smooth ramp or smooth stops: `entries` are colours from the lowest
-    // value to the highest, to be blended into one bar, labelled at its ends.
-    // Otherwise one swatch an entry, lowest first.
+    // value to the highest, to be blended into one bar, labelled at its ends
+    // (each at its own value: `from`, which need not be evenly spaced).
+    // Otherwise one swatch an entry, lowest first. A collapsed range is not a
+    // gradient: it has the swatches below, at and above its point.
     bool gradient = false;
     std::vector<SurfaceLegendEntry> entries{};
 };

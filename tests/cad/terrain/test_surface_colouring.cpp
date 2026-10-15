@@ -334,3 +334,188 @@ TEST(SurfaceLegend, DecimalsAreTheFewestThatWriteEveryValue)
     EXPECT_EQ(katana::cad::formatLegendValue(26.284699999999997, 3), "26.285");
     EXPECT_EQ(katana::cad::formatLegendValue(-0.0, 1), "0.0");
 }
+
+TEST(SurfaceColouring, ACollapsedRangeIsAPointAndAValueKeepsTheSideOfItItIsOn)
+{
+    // low = high = 40: below the point is the first band (the ramp's start),
+    // above it the last (its end), and at it the middle - band 5 / 2 = 2,
+    // the ramp at 1/2. One middle for every value, whichever side it was on,
+    // painted a terrain wholly below min=40 in the middle band.
+    SurfaceColouring colouring = bandedRamp(40.0, 40.0, 5);
+    ASSERT_TRUE(colouring.collapsed());
+    EXPECT_EQ(colouring.bandOf(30.0), 0u);
+    EXPECT_EQ(colouring.bandOf(50.0), 4u);
+    EXPECT_EQ(colouring.bandOf(40.0), 2u);
+    // Within the geometric tolerance (1e-7) is at it; past it is a side.
+    EXPECT_EQ(colouring.bandOf(40.0 + 1.0e-9), 2u);
+    EXPECT_EQ(colouring.bandOf(40.0 + 1.0e-6), 4u);
+    EXPECT_EQ(colouring.bandOf(40.0 - 1.0e-6), 0u);
+    EXPECT_EQ(colouring.colourAt(30.0), rgb(40, 70, 140));
+    EXPECT_EQ(colouring.colourAt(50.0), rgb(245, 245, 245));
+    EXPECT_EQ(colouring.colourAt(40.0), rgb(235, 220, 130));
+    // The same for a smooth ramp.
+    colouring.banded = false;
+    EXPECT_EQ(colouring.colourAt(30.0), rgb(40, 70, 140));
+    EXPECT_EQ(colouring.colourAt(50.0), rgb(245, 245, 245));
+    EXPECT_EQ(colouring.colourAt(40.0), rgb(235, 220, 130));
+    // Not finite is still flat; a range that is not collapsed is not one.
+    EXPECT_EQ(colouring.colourAt(std::nan("")), colouring.flat);
+    EXPECT_FALSE(bandedRamp(0.0, 10.0, 5).collapsed());
+}
+
+TEST(SurfaceColouring, ALevelFaceUnderSlopeIsTheRampsStartForSlopeIsNeverBelowItsPoint)
+{
+    // Slope's range is 0 to the steepest face: for a level surface the point
+    // 0. A face with no steepness is the slope ramp's start, green (0, 255,
+    // 38) = what the 3D view drew it before styles - not the middle, yellow
+    // (255, 255, 38), which reads as half way to the steep end.
+    auto level = katana::terrain::TinSurface::create(
+        {{0.0, 0.0, 5.0}, {10.0, 0.0, 5.0}, {10.0, 10.0, 5.0}, {0.0, 10.0, 5.0}}, {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(level.ok());
+    ASSERT_EQ(katana::cad::steepestSlopePercent(*level), 0.0);
+    SurfaceDisplayStyle style;
+    style.ramp = "slope";
+    SurfaceColouring smooth = katana::cad::surfaceColouring(style, SurfaceFaces::Slope, *level);
+    ASSERT_TRUE(smooth.collapsed());
+    EXPECT_EQ(smooth.colourAt(0.0), rgb(0, 255, 38));
+    // A face steeper than the point (a surface edited since, or a range
+    // given) is the end.
+    EXPECT_EQ(smooth.colourAt(10.0), rgb(255, 0, 38));
+    style.banded = true;
+    style.bands = 4;
+    const SurfaceColouring banded = katana::cad::surfaceColouring(style, SurfaceFaces::Slope, *level);
+    EXPECT_EQ(banded.bandOf(0.0), 0u);
+    EXPECT_EQ(banded.colourAt(0.0), rgb(0, 255, 38));
+    EXPECT_EQ(banded.bandOf(10.0), 3u);
+}
+
+TEST(SurfaceLegend, ACollapsedRangeSaysBelowAtAndAboveItsPointNotNBandsOfZeroWidth)
+{
+    // Five swatches labelled "40 - 40" in five colours, none saying which one
+    // is drawn, was the legend of min=40 over a terrain wholly below it.
+    const auto banded = katana::cad::surfaceLegend(bandedRamp(40.0, 40.0, 5));
+    EXPECT_FALSE(banded.gradient);
+    ASSERT_EQ(banded.entries.size(), 3u);
+    EXPECT_EQ(banded.entries[0].label, "< 40");
+    EXPECT_EQ(banded.entries[1].label, "40");
+    EXPECT_EQ(banded.entries[2].label, "> 40");
+    EXPECT_EQ(banded.entries[0].colour, rgb(40, 70, 140));    // the first band
+    EXPECT_EQ(banded.entries[1].colour, rgb(235, 220, 130));  // the middle band
+    EXPECT_EQ(banded.entries[2].colour, rgb(245, 245, 245));  // the last
+    EXPECT_FALSE(banded.entries[0].from.has_value());
+    EXPECT_EQ(banded.entries[0].to, 40.0);
+    EXPECT_EQ(banded.entries[1].from, 40.0);
+    EXPECT_EQ(banded.entries[1].to, 40.0);
+    EXPECT_EQ(banded.entries[2].from, 40.0);
+    EXPECT_FALSE(banded.entries[2].to.has_value());
+    // A smooth ramp says the same three, not nine of one colour.
+    SurfaceColouring smooth = bandedRamp(40.0, 40.0, 5);
+    smooth.banded = false;
+    const auto gradient = katana::cad::surfaceLegend(smooth);
+    EXPECT_FALSE(gradient.gradient);
+    ASSERT_EQ(gradient.entries.size(), 3u);
+    EXPECT_EQ(gradient.entries[0].colour, rgb(40, 70, 140));
+    EXPECT_EQ(gradient.entries[2].colour, rgb(245, 245, 245));
+    // Slope is never below its point 0: a level pad has the point and above.
+    SurfaceColouring slope = bandedRamp(0.0, 0.0, 4);
+    slope.faces = SurfaceFaces::Slope;
+    slope.ramp = katana::cad::surfaceRampStops("slope");
+    const auto level = katana::cad::surfaceLegend(slope);
+    ASSERT_EQ(level.entries.size(), 2u);
+    EXPECT_EQ(level.title, "Slope %");
+    EXPECT_EQ(level.entries[0].label, "0");
+    EXPECT_EQ(level.entries[0].colour, rgb(0, 255, 38));
+    EXPECT_EQ(level.entries[1].label, "> 0");
+    EXPECT_EQ(level.entries[1].colour, rgb(255, 0, 38));
+}
+
+TEST(SurfaceLegend, ABandedRampTheDataRunsPastTakesThoseValuesInItsEndBandsAndSaysSo)
+{
+    // min=30 max=35 over a terrain of 24.892 to 38.819, five bands: the first
+    // band is drawn on everything below 31 and the last on everything above
+    // 34, so "30 - 31" and "34 - 35" misread the colours that cover 24.9 to
+    // 30 and 35 to 38.8.
+    SurfaceDisplayStyle style;
+    style.banded = true;
+    style.bands = 5;
+    style.rangeMin = 30.0;
+    style.rangeMax = 35.0;
+    const SurfaceColouring open =
+        katana::cad::surfaceColouring(style, SurfaceFaces::Elevation, 24.892, 38.819);
+    EXPECT_TRUE(open.openBelow);
+    EXPECT_TRUE(open.openAbove);
+    EXPECT_FALSE(open.bandLow(0).has_value());
+    EXPECT_FALSE(open.bandHigh(4).has_value());
+    EXPECT_EQ(open.bandHigh(0), 31.0);
+    EXPECT_EQ(open.bandLow(4), 34.0);
+    const auto legend = katana::cad::surfaceLegend(open);
+    ASSERT_EQ(legend.entries.size(), 5u);
+    EXPECT_EQ(legend.entries[0].label, "< 31");
+    EXPECT_EQ(legend.entries[1].label, "31 - 32");
+    EXPECT_EQ(legend.entries[3].label, "33 - 34");
+    EXPECT_EQ(legend.entries[4].label, "34 +");
+    EXPECT_FALSE(legend.entries[0].from.has_value());
+    EXPECT_FALSE(legend.entries[4].to.has_value());
+    // The picture is unchanged by what the legend says: bandOf still puts
+    // 25 in the first band and 38 in the last.
+    EXPECT_EQ(open.bandOf(25.0), 0u);
+    EXPECT_EQ(open.bandOf(38.0), 4u);
+    // A range the data lies inside leaves both ends closed, as before: the
+    // sample terrain's own bands read "20 - 26" ... "44 - 50".
+    style.rangeMin = 20.0;
+    style.rangeMax = 50.0;
+    const SurfaceColouring closed =
+        katana::cad::surfaceColouring(style, SurfaceFaces::Elevation, 24.892, 38.819);
+    EXPECT_FALSE(closed.openBelow);
+    EXPECT_FALSE(closed.openAbove);
+    const auto wide = katana::cad::surfaceLegend(closed);
+    ASSERT_EQ(wide.entries.size(), 5u);
+    EXPECT_EQ(wide.entries[0].label, "20 - 26");
+    EXPECT_EQ(wide.entries[4].label, "44 - 50");
+    // An end the style leaves to the surface is closed whatever the other does.
+    style.rangeMin = std::nullopt;
+    style.rangeMax = 35.0;
+    const SurfaceColouring half =
+        katana::cad::surfaceColouring(style, SurfaceFaces::Elevation, 24.892, 38.819);
+    EXPECT_FALSE(half.openBelow);
+    EXPECT_TRUE(half.openAbove);
+}
+
+TEST(SurfaceLegend, OneBandedStopIsEveryValueNotAnythingFromItUp)
+{
+    // bandOf puts every value in the only band, so "30 +" claimed what the
+    // colour does not mean: ground below 30 is drawn in it as well.
+    SurfaceColouring colouring = bandedRamp(0.0, 100.0, 10);
+    colouring.stops = {{30.0, rgb(255, 0, 0)}};
+    EXPECT_EQ(colouring.bandCount(), 1u);
+    EXPECT_FALSE(colouring.bandLow(0).has_value());
+    EXPECT_FALSE(colouring.bandHigh(0).has_value());
+    EXPECT_EQ(colouring.colourAt(10.0), rgb(255, 0, 0));
+    const auto legend = katana::cad::surfaceLegend(colouring);
+    ASSERT_EQ(legend.entries.size(), 1u);
+    EXPECT_EQ(legend.entries[0].label, "all");
+    EXPECT_FALSE(legend.entries[0].from.has_value());
+    EXPECT_FALSE(legend.entries[0].to.has_value());
+    EXPECT_EQ(legend.entries[0].colour, rgb(255, 0, 0));
+}
+
+TEST(SurfaceBandPieces, ATriangleAcrossTheMaximumNumberOfBandsIsAtMostThatManyPieces)
+{
+    // The 3D view's geometry is the pieces: a triangle crossing every one of
+    // the style's bands is that many pieces and no more, so the maximum the
+    // style check allows (100) bounds a surface's pieces at 100 a triangle,
+    // however fine the bands. z runs 0 to 10 across the triangle (0, 0, 0)
+    // (10, 0, 10) (0, 10, 5), 0.1 a band: all 100 bands are crossed and the
+    // pieces, being a partition of the triangle, add up to its area, 50.
+    const SurfaceColouring colouring = bandedRamp(0.0, 10.0, katana::cad::kMaximumSurfaceBands);
+    std::vector<BandPiece> pieces;
+    katana::cad::bandPieces(colouring, {0.0, 0.0, 0.0}, {10.0, 0.0, 10.0}, {0.0, 10.0, 5.0}, pieces);
+    EXPECT_EQ(pieces.size(), 100u);
+    double area = 0.0;
+    for (const BandPiece& piece : pieces) {
+        EXPECT_GE(piece.count, 3u);
+        EXPECT_LE(piece.count, 5u);
+        area += pieceArea(piece);
+    }
+    EXPECT_NEAR(area, 50.0, 1e-9);
+}

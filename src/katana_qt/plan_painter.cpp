@@ -766,6 +766,8 @@ void PlanPainter::drawSurfaces()
     stats_.surfaceLabels += drawn.labels;
     stats_.surfaceImagePixels += drawn.imagePixels;
     stats_.surfacePixelsCovered += drawn.pixelsCovered;
+    stats_.surfaceProblems.insert(stats_.surfaceProblems.end(), drawn.problems.begin(),
+                                  drawn.problems.end());
     surfaceLegends_ = drawn.legends;
 }
 
@@ -792,15 +794,21 @@ void PlanPainter::drawSurfaceLegends()
         const PaintedLegend& legend = surfaceLegends_[i];
         const QString caption = QString::fromStdString(legend.surface) + QStringLiteral(" - ") +
                                 QString::fromStdString(legend.style);
-        const QRectF drawn = paintSurfaceLegend(painter_, legend.legend, caption, corner, font, text, backing);
-        if (drawn.isEmpty()) {
+        // Measured first: a key with its lowest rows cut off by the view's
+        // edge reads as a key that ends there. The first is drawn whatever
+        // its height (it is the only one, and a view too short for it clips
+        // it as it clips anything); a later one that does not fit below the
+        // others is left out, and not counted.
+        const QSizeF size = measureSurfaceLegend(legend.legend, caption, font);
+        if (size.isEmpty()) {
             continue;
         }
-        ++stats_.surfaceLegends;
-        corner.setY(drawn.bottom() + kMargin);
-        if (corner.y() > view_.heightPixels - kMargin) {
+        if (stats_.surfaceLegends > 0 && corner.y() + size.height() > view_.heightPixels - kMargin) {
             break;
         }
+        const QRectF drawn = paintSurfaceLegend(painter_, legend.legend, caption, corner, font, text, backing);
+        ++stats_.surfaceLegends;
+        corner.setY(drawn.bottom() + kMargin);
     }
 }
 
@@ -2393,8 +2401,9 @@ void PlanPainter::drawText(const Point2& position, const std::string& text, doub
 
 const katana::entity::Model& PlanPainter::annotationModel() const
 {
-    // A tool's preview is painted with no model; its text is resolved against
-    // an empty one, which has the Standard text style and nothing else.
+    // A tool's preview is painted with no model unless it is given one
+    // (paintPlanGeometry): its text is resolved against an empty one, which
+    // has the Standard text style and nothing else.
     static const katana::entity::Model empty;
     return source_.model != nullptr ? *source_.model : empty;
 }
@@ -2515,10 +2524,10 @@ PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source, const Plan
 
 void paintPlanGeometry(QPainter& painter, const PlanFrame& frame, const PlanPaintOptions& options,
                        PlanPaintCache& cache, const katana::entity::Geometry& geometry,
-                       const katana::entity::DimensionStyle& dimensionStyle)
+                       const katana::entity::DimensionStyle& dimensionStyle, const PlanSource* source)
 {
     const PlanSource nothing;
-    PlanPainter planPainter(painter, nothing, frame, options, cache);
+    PlanPainter planPainter(painter, source != nullptr ? *source : nothing, frame, options, cache);
     planPainter.geometry(geometry, dimensionStyle);
 }
 

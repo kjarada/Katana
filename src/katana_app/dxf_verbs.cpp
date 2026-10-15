@@ -1,8 +1,10 @@
 #include "dxf_verbs.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "import_records.hpp"
@@ -11,6 +13,40 @@
 #include "katana/dxf/import_command.hpp"
 
 namespace katana::app {
+
+namespace {
+
+// A smart leader that came out with no note at all - the entity its tip is on
+// is not in the drawing, or has none of the values its template names - is
+// written as a bare arrow. The file is what it is; the export says so rather
+// than leave a callout silently blank. `only`: just those entities' leaders.
+std::vector<std::string> blankLeaders(const katana::entity::Model& model,
+                                      const katana::cad::annotation::DrawnAnnotation& drawn,
+                                      const std::set<katana::entity::EntityId>* only)
+{
+    std::vector<std::string> said;
+    model.entities.forEach([&](const katana::entity::Entity& entity) {
+        const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+        if (leader == nullptr || !katana::entity::isSmart(*leader) ||
+            (only != nullptr && !only->contains(entity.id))) {
+            return;
+        }
+        const auto found = drawn.find(entity.id);
+        const bool hasNote =
+            found != drawn.end() &&
+            std::ranges::any_of(found->second, [](const katana::entity::Geometry& shape) {
+                return std::holds_alternative<katana::entity::TextGeometry>(shape);
+            });
+        if (!hasNote) {
+            said.push_back("leader #" + std::to_string(entity.id) +
+                           " is written without its note: the entity its tip is on is not in the "
+                           "drawing, or has none of the values its template names");
+        }
+    });
+    return said;
+}
+
+} // namespace
 
 katana::core::Result<katana::dxf::DxfImport> readDxfImport(const std::filesystem::path& file,
                                                            std::optional<katana::geometry::Vec2> shift)
@@ -68,7 +104,43 @@ writeDxfExport(const katana::entity::Model& model, double annotationScale,
     const auto drawn = katana::cad::annotation::drawAnnotationForExport(
         model, annotationScale, katana::cad::annotation::estimatedMeasure(), leaders);
     options.drawn = &drawn;
-    return katana::dxf::writeDxfFile(model, file, options);
+    auto written = katana::dxf::writeDxfFile(model, file, options);
+    if (written) {
+        for (std::string& blank : blankLeaders(model, drawn, nullptr)) {
+            written->warnings.push_back(std::move(blank));
+        }
+    }
+    return written;
+}
+
+katana::core::Result<katana::dxf::DxfExport>
+writeDxfExport(katana::entity::Model& model, double annotationScale, const std::filesystem::path& file,
+               const katana::entity::LeaderContext& leaders,
+               const std::set<katana::entity::EntityId>& only)
+{
+    katana::dxf::ExportOptions options;
+    options.annotationScale = annotationScale;
+    auto drawn = katana::cad::annotation::drawAnnotationForExport(
+        model, annotationScale, katana::cad::annotation::estimatedMeasure(), leaders);
+    // Only then the scope: what it left out is not written, and neither is
+    // the drawing of an annotation it left out.
+    const std::vector<std::string> blank = blankLeaders(model, drawn, &only);
+    std::vector<katana::entity::EntityId> left;
+    for (const katana::entity::EntityId id : model.entities.ids()) {
+        if (!only.contains(id)) {
+            left.push_back(id);
+        }
+    }
+    for (const katana::entity::EntityId id : left) {
+        (void)model.entities.remove(id);
+        drawn.erase(id);
+    }
+    options.drawn = &drawn;
+    auto written = katana::dxf::writeDxfFile(model, file, options);
+    if (written) {
+        written->warnings.insert(written->warnings.end(), blank.begin(), blank.end());
+    }
+    return written;
 }
 
 std::string dxfExportRecords(const katana::dxf::DxfExport& written,

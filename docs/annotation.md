@@ -556,7 +556,16 @@ Decisions:
 * **On the surface is a fill of nothing**: `fill` holds when the target is at
   or above it, `cut` when below. Rejected: neither at exactly nothing, which
   would make a cut/fill note vanish - and the leader be refused - for a point
-  that is exactly on grade.
+  that is exactly on grade. "On" is within the geometric tolerance
+  (`math::tolerance::kGeometric`, 1e-7), not exactly equal: a surface's level
+  is interpolated, so a point whose RL is the plane's to the last digit comes
+  out a few bits either side of it, and below it was "a cut of 4e-15" - `CUT
+  0.000` for one on-grade point and `FILL 0.000` for its neighbour (61 of 342
+  on a plane TIN), and a fill-only leader refused as "below". `dsurface` is 0
+  there too. A micrometre under the surface is a cut
+  (`LeaderContextValues.APointOnTheSurfaceWithinTheToleranceIsAFillOfNothingNotACutOfTheRoundingError`,
+  `LeaderPresets.EveryPointOnTheSurfaceInsideATriangleIsAFillOfNothingNeverACut`).
+  Rejected: a looser tolerance of its own - the project has one.
 * **Absent stays absent**: a tip off the surface (outside it, in a hole),
   beyond an alignment's ends (no perpendicular reaches it: a station is never
   clamped to the end), at a station the profile does not reach, or a target
@@ -961,7 +970,13 @@ asked for each in one click. Their names leave the Annotate menu's letters
 room: each takes one of its own and Text keeps T - and Edit Text now takes X
 only while no tool has it, since a tool short of letters is moved onto any
 letter of its name and Text was one rename from being given X
-(`AnnotationWorkbench::addEditTextAction`).
+(`AnnotationWorkbench::addEditTextAction`). The tool's preview is painted with
+the drawing it reads - the model and the surfaces and alignments, through
+`paintPlanGeometry`'s `source` (the window gives it for a leader shape only) -
+so while the person chooses where the note goes the preview already says "RL
+30.250", and so does a smart leader's grip drag; painted with none it was a
+bare arrow and landing, and the note appeared only once the leader was made
+(`LeaderPreview.ASmartLeaderIsPaintedWithItsNoteReadOffTheDrawingItsTipIsOn`).
 
 The Leaders manager's **Preset** boxes (`leaderPreset` and
 `leaderPresetReads` on the Leader tab, `leaderForPreset` and
@@ -1032,6 +1047,24 @@ dropped, never written as nothing.
 A label with no room at the scale is left out and said so. A mask, a width
 factor and a slant do not reach the file.
 
+A scoped export (`EXPORT file.dxf LAYERS notes`, a selection, an area, a
+filter - the window's Export Drawing dialog builds the same line) draws the
+annotation from the WHOLE drawing and only then writes the entities the scope
+took (`writeDxfExport` with the scope, `src/katana_app/dxf_verbs.cpp`): a
+smart leader reads the entity its tip is on, a label the entity it labels, and
+the writer was handed a copy of the drawing with everything the scope left out
+already removed - a scope that took the leader and not its point wrote a bare
+arrow, the note missing, `skipped=0` and no word, and every preset leader is
+associative, so it was most of them
+(`ExportOptions.AScopedDxfExportKeepsTheNoteOfALeaderWhoseTargetTheScopeLeftOut`).
+A smart leader whose note comes out empty even so - the entity its tip is on
+is not in the drawing at all, or has none of the values its template names -
+is written as the arrow it is and the export says which, a warning record:
+`leader #12 is written without its note: ...`
+(`ALeaderWhoseNoteCannotBeReadIsWrittenAndTheExportSaysItHasNoNote`). A
+12d archive has no drawn annotation (it counts leaders and labels as
+annotation not exported), so its scope still cuts the copy first.
+
 DXF import is unchanged: a file's texts and dimensions come in as texts and
 aligned dimensions. The GIS vector export skips annotation with a count, as
 it skipped dimensions, and so does the archive exporter.
@@ -1076,6 +1109,7 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/app/test_mcp_server.cpp` | `McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets` |
 | `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name and its widgets' own signals: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
+| `tests/qt_widgets/annotation/test_leader_preview.cpp` | a smart leader painted as a preview or a grip drag with the drawing it reads says its note, a plain one and one whose target is gone are as they were |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
 | `qt_the_label_style_manager_runs_chosen_rules_headless` (`tests/CMakeLists.txt`) | the real window: a label style named with its kind, a rule with its type previewed and run as the one chosen |
 | `tests/qt_widgets/annotation/test_text_edit_dialog.cpp` | Edit Text by object name: the selection followed, one `TEXTEDIT` of the changed keys, a value no line can carry refused |
@@ -1162,12 +1196,19 @@ it skipped dimensions, and so does the archive exporter.
   RENUMBER` - save a note holding a double quote (above); the change is an
   executor handed to the dialog, as the utilities dialog is given one, and
   its tests driving lines.
-* **Scope and filter.** `LEADER FOR`, `LEADER ALIGN`, `LEADER LIST`,
-  `LEADER FREEZE` and `DETACH`, `BALLOON FOR` and `BALLOON RENUMBER`, and the
-  Leaders manager's For Selection and Arrange tabs, act on ids, the
-  selection or every balloon - not yet on the Global Modify scope and filter
-  (a view, layers, an area; only those that match) that the contributors'
-  contract now asks of every tool. The shared verb grammar and the shared
-  "Apply to" widget it names are not built yet, and a second scope reader
-  here would be the second implementation the contract forbids; once they
-  are, these take them.
+* **Scope and filter.** `LEADER FOR`, `LEADER ALIGN`, `LEADER LIST` (and its
+  `JSON` form), `LEADER FREEZE` and `DETACH`, `BALLOON FOR` and `BALLOON
+  RENUMBER`, the MCP tool `katana_leaders` (its `ids` and `target` are all it
+  narrows by) and the Leaders manager's For Selection and Arrange tabs act on
+  ids, the selection or every balloon - not yet on the Global Modify scope and
+  filter (a view, layers, an area; only those that match) that the
+  contributors' contract asks of every tool. The shared grammar and widget
+  exist and have since 2026-09-26 (`cad::parseScopeWords`, `matchScope` and
+  `scopeRecord`, `ScopeFilterWidget`; MODIFY, EXPORT, the UTILITY and surface
+  verbs take them) - this entry said until 2026-10-15 that they "are not built
+  yet", which was true when it was written and not a day later. What is not
+  done is moving these verbs onto them: the scope words before the `key=value`
+  options (a `WHERE` key would be read as an unknown option today, and a scope
+  word as an entity id), the scope record in each reply, `scope`, `area`,
+  `layers` and `where` arguments on `katana_leaders`, and the manager's "Apply
+  to" box. Until then an agent lists the leaders and filters them itself.

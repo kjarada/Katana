@@ -393,3 +393,66 @@ TEST(LeaderPresets, ListAndTheExportSayTheNoteTheSurfaceGivesIt)
     EXPECT_EQ(texts(ann::leaderContext(s.document)), (std::vector<std::string>{"+4.000"}));
     EXPECT_TRUE(texts({}).empty());
 }
+
+TEST(LeaderPresets, EveryPointOnTheSurfaceInsideATriangleIsAFillOfNothingNeverACut)
+{
+    // The plane z = 10 + 0.1 x + 0.2 y, and points whose RL is that to the
+    // last digit the arithmetic gives. The TIN interpolates by barycentric
+    // weights, which is not the same rounding, so about one such point in six
+    // came out a few bits BELOW the surface and read as a cut of 4e-15: of a
+    // 19 x 19 grid, 61 "CUT 0.000" beside 281 "FILL 0.000". Hand-worked: at
+    // (5.4, 5) the plane is 10 + 0.54 + 1.0 = 11.54.
+    Session s;
+    s.ground();
+    const EntityId first = s.point(Point2(5.4, 5.0), 11.54);
+    EXPECT_TRUE(contains(s.run("LEADER #" + id(first) + " 20,20 preset=cutfill"), "text=\"FILL 0.000\""));
+    // A leader that says only the fill is accepted on a point on grade.
+    EXPECT_TRUE(contains(s.run("LEADER #" + id(first) + " 25,25 template=\"FILL {fill.ground:.3f}\""),
+                         "created leader"));
+    const LeaderContext context = ann::leaderContext(s.document);
+    int onGrade = 0;
+    for (int i = 0; i < 20; ++i) {
+        for (int j = 0; j < 20; ++j) {
+            const double x = 1.7 * i + 0.3;
+            const double y = 2.3 * j + 0.7;
+            const EntityId point = s.point(Point2(x, y), 10.0 + 0.1 * x + 0.2 * y);
+            const Entity* entity = s.document.model().entities.find(point);
+            ASSERT_NE(entity, nullptr);
+            const LabelValues values =
+                anchorValues(*entity, AnchorRef{point, AnchorPoint::Position}, Point2(x, y), {}, context);
+            EXPECT_FALSE(values.contains("cut.ground")) << "(" << x << ", " << y << ") read as a cut";
+            EXPECT_TRUE(values.contains("fill.ground")) << "(" << x << ", " << y << ")";
+            ++onGrade;
+        }
+    }
+    EXPECT_EQ(onGrade, 400);
+    // A point a micrometre under the surface is under it, by more than the
+    // tolerance: a cut of a micrometre, not a fill.
+    const EntityId below = s.point(Point2(5.4, 5.0), 11.54 - 1.0e-6);
+    const Entity* entity = s.document.model().entities.find(below);
+    ASSERT_NE(entity, nullptr);
+    const LabelValues cut =
+        anchorValues(*entity, AnchorRef{below, AnchorPoint::Position}, Point2(5.4, 5.0), {}, context);
+    EXPECT_TRUE(cut.contains("cut.ground"));
+    EXPECT_FALSE(cut.contains("fill.ground"));
+}
+
+TEST(LeaderPresets, TheUsageOfLeaderSetNamesThePresetOptionsAndHelpReadsAsSentences)
+{
+    // LEADER SET accepts preset= surface= and alignment=; its usage line, said
+    // when no option is typed, listed only the older ones, and HELP ran the
+    // new paragraph on from "...ends in a dot" with a lower-case "also".
+    Session s;
+    const EntityId pit = s.point(Point2(10, 10), 5.0);
+    s.run("LEADER #" + id(pit) + " 20,20 text=A");
+    const std::string usage = s.refusal("LEADER SET " + id(s.last()));
+    EXPECT_TRUE(contains(usage, "usage: LEADER SET")) << usage;
+    EXPECT_TRUE(contains(usage, "preset=")) << usage;
+    EXPECT_TRUE(contains(usage, "surface=name")) << usage;
+    EXPECT_TRUE(contains(usage, "alignment=name")) << usage;
+    const std::string help = CommandInterpreter::helpText();
+    EXPECT_TRUE(contains(help, "(#id.inside) ends in a dot.")) << "the sentence ends";
+    EXPECT_FALSE(contains(help, "ends in a dot\n")) << "and does not run on";
+    EXPECT_FALSE(contains(help, "ends in a dot\r"));
+    EXPECT_TRUE(contains(help, "A note may also read the drawing's surfaces and alignments at the tip"));
+}
