@@ -806,27 +806,30 @@ records do not carry.
   triangle surfaces takes a second or two. SURFACE FROM's job pattern is the
   way to move it, through the window's executor: one mechanism for every verb
   that is slow, and a second one for the volumes is not built.
-- **Not measured: the refusal tests on a very long run.** Both the crossing test
-  and the side-by-side test index boxes and test the pairs whose boxes overlap,
-  on the task pool. On an alignment along an axis no boxes overlap; on a
-  diagonal one each section pairs with every section within a reach of it, so
-  a diagonal alignment cut every 0.1 m over 10 km (100 000 sections, a 14 km
-  default reach) would test about 5e9 pairs of each - extrapolated from the
-  count, not timed: `BM_VolumeSectionsAlongADiagonal` and
-  `BM_VolumeSectionsAlongAnAxis` (`benchmarks/bench_volumes.cpp`) take the same
-  run at 1250 to 10 000 sections and fit the growth (`Complexity`), and the
-  figure for 100 000 is the fitted n^2 coefficient times 1e10, to be written
-  here from the run. At a road's usual 10 to 20 m interval it is a few hundred
-  sections. The side-by-side test is a separating-axis test of up to four
+- **The refusal tests on a very long run, measured and extrapolated.** Both the
+  crossing test and the side-by-side test index boxes and test the pairs whose
+  boxes overlap, on the task pool. On an alignment along an axis no boxes
+  overlap; on a diagonal one each section pairs with every section within a
+  reach of it. Measured on 2026-10-16 (Release, a 24-thread machine,
+  `BM_VolumeSectionsAlongAnAxis` and `BM_VolumeSectionsAlongADiagonal`,
+  `benchmarks/bench_volumes.cpp`, the whole VOLUME SECTIONS run): along an
+  axis 1250 / 2500 / 5000 / 10 000 sections take 2.6 / 7.7 / 27 / 99 ms; along
+  a diagonal 23 / 94 / 360 / 1566 ms. Both grow as n^2 (the fitted
+  coefficients: 1.0 ns and 15.6 ns times n^2), so a diagonal alignment cut
+  every 0.1 m over 10 km (100 000 sections, a 14 km default reach) would take
+  about 156 s and an axis one about 10 s - extrapolated from the fit, not
+  timed. At a road's usual 10 to 20 m interval it is a few hundred sections,
+  well under a millisecond. The side-by-side test is a separating-axis test of up to four
   triangle pairs where the crossing test's is one cross product, so it is
   the dearer of the two per pair; a cheaper whole-strip reject before the four
   would be the first thing to try if the figure is large.
-- **Not measured: the difference surface's join.** The overlay it is made of
-  is (`compareSurfaces`, "One overlay" above); the cost of joining its pieces
-  into one surface on a large pair is the difference of
-  `BM_VolumesDifferenceSurfaceOfALargePair` and `BM_VolumesOverlayOfALargePair`
-  (`benchmarks/bench_volumes.cpp`, two scatters of 100 000 points, about 200 000
-  triangles each, that cross), to be written here from the run.
+- **The difference surface's join, measured.** The overlay it is made of is
+  (`compareSurfaces`, "One overlay" above); on two scatters of 100 000 points,
+  about 200 000 triangles each, that cross (`benchmarks/bench_volumes.cpp`,
+  2026-10-16, Release) the overlay takes 66 ms and the whole difference
+  surface 1.45 s, of 1.87 million pieces: the join of the pieces into one
+  surface is about 1.4 s, twenty times the measuring. It runs on the thread
+  that runs the line, as the background-job item above says.
 - **The corridor quantities do not take the curvature correction.** The road
   engine's end areas (`docs/road_design.md`, `road::roadSection`) are sections
   cut by a template, not by a pair of surfaces, so they do not go through

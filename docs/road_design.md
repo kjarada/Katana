@@ -549,8 +549,15 @@ one way a placed object reads a surface is `placement.surface`; a new way
 would need its name in that key (`placedGrounds`). What it costs is measured by
 `benchmarks/bench_road.cpp` (`BM_RoadModelUnchanged`,
 `BM_RoadModelAfterAnUnrelatedSurface` against `...AfterTheTargetedSurface`):
-not yet run - the corridors of a kilometre of the urban street are the work an
-unrelated surface edit no longer repeats.
+measured on 2026-10-16 (Release): the model asked for again with nothing moved
+takes 0.4 microseconds; after an edit of a surface no corridor or object names
+1 microsecond and neither half is made again (`corridors_made=0`,
+`placed_made=0`); after an edit of the surface a corridor targets 6.1 ms, the
+corridor half made again once; after one a placed object names 0.067 ms, the
+placed half made again once. The fixture is a kilometre of the urban street
+sectioned every 10 m on a tilted grid, with a sign standing on a second surface:
+the 6.1 ms of the targeted case is what an edit of ANY surface used to cost
+the next paint, and an unrelated edit costs a microsecond now.
 
 ## The verbs
 
@@ -940,8 +947,8 @@ class, layer, quantities and properties, and every problem
 - Both halves of the road model read the whole alignment set's revision, so an
   alignment no corridor or object uses makes them again (the model comes out
   the same object).
-- The cost of that cache (benchmarks/bench_road.cpp) and of the sections a
-  curve adds is not measured: the benchmark has not been run.
+- The cost of the sections a curve adds is not measured (the cache's is,
+  above).
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
 - Corridor Quantities clears its listing when the road model changes and does

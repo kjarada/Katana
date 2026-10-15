@@ -684,19 +684,28 @@ footprints that can be cut together are cut in one patch (above).
 
 | Case | Benchmark | Before: the review, wall time of a whole `katana_cli` run (the surface's load, 1.2 to 1.9 s, included) | Now: Release, `katana_benchmarks` |
 |---|---|---|---|
-| BOUNDARY, polygon of 8 / 500 / 5000 corners | `BM_EditBoundary` | 1.4 to 2.2 s / 4.5 s / 20.7 s | not measured |
-| DELETE TRIANGLES INSIDE, 8 / 500 / 5000 | `BM_EditDeleteTrianglesInside` | 1.2 to 1.8 s / 4.9 s / 22.2 s | not measured |
-| RAISE 1 INSIDE, 8 / 500 / 5000 | `BM_EditRaiseInside` | 2.3 s / - / 10.9 s | not measured |
-| HOLE of 100 footprints, one at a time | `BM_EditHolesOneByOne` (`patches` 100) | 33.4 s (1.6 s of it the load) | not measured |
-| HOLE of the same 100 footprints | `BM_EditHolesTogether` (`patches` 1) | - | not measured |
-| THIN, tolerance 10 mm / 100 mm | `BM_EditThin` | "seconds", not measured | not measured |
+| BOUNDARY, polygon of 8 / 500 / 5000 corners | `BM_EditBoundary` | 1.4 to 2.2 s / 4.5 s / 20.7 s | 101 / 106 / 127 ms |
+| DELETE TRIANGLES INSIDE, 8 / 500 / 5000 | `BM_EditDeleteTrianglesInside` | 1.2 to 1.8 s / 4.9 s / 22.2 s | 138 / 135 / 135 ms |
+| RAISE 1 INSIDE, 8 / 500 / 5000 | `BM_EditRaiseInside` | 2.3 s / - / 10.9 s | 61 / 62 / 66 ms |
+| HOLE of 100 footprints, one at a time | `BM_EditHolesOneByOne` (`patches` 100) | 33.4 s (1.6 s of it the load) | 24.5 s |
+| HOLE of the same 100 footprints | `BM_EditHolesTogether` (`patches` 1) | - | 270 ms |
+| THIN, tolerance 10 mm / 100 mm | `BM_EditThin` | "seconds", not measured | 1.55 s / 1.66 s |
 
-The last column is empty because this change was written without a build, as
-the owner's standing instruction for a session that edits asks: the
-integration build measures it, and the figures go in the table with the commit
-that records them. `BM_EditHolesOneByOne` is the
-loop `HOLE FROM <scope>` was, kept in the same binary so that the two cases
-are measured on one machine in one run.
+The last column was measured on 2026-10-16 by the integration build
+(Release, `katana_benchmarks --benchmark_filter=BM_Edit --benchmark_min_time=0.05s`,
+a 24-thread 2.5 GHz machine, one iteration each): the edit alone, with the
+surface already loaded, where the "before" column is the wall time of a whole
+`katana_cli` run that loads it first (1.2 to 1.9 s) - so the ratios of the three
+polygon edits (20.7 s to 127 ms for 5000 corners, 22.2 s to 135 ms, 10.9 s to
+66 ms) are not like for like, and the edits are now independent of the polygon's
+corners to within the noise of one iteration (8 to 5000: 101 to 127 ms). The
+two HOLE rows are like for like, on the same binary and run: 100 footprints in
+one patch cost 270 ms against 24.5 s one at a time, 91 times less, with the
+same surface (`patches` 1 against 100; the triangles are 395 818 in both).
+`BM_EditHolesOneByOne` is the loop `HOLE FROM <scope>` was, kept in the same
+binary so that the two cases are measured on one machine in one run. THIN on
+200 704 vertices takes 1.6 s and removes 131 039 / 163 383 of them; it runs
+on the GUI thread from the window (Not done).
 
 ## Not done
 
