@@ -88,12 +88,28 @@ std::string stepNameOf(const Tokens& tokens)
 }
 
 // A copy of the drawing's surfaces for the phase about to run; its revision,
-// to tell afterwards whether the phase changed it.
-std::uint64_t stage(Context& context)
-{
-    context.surfaces = context.document.surfaces();
-    return context.surfaces.revision();
-}
+// to tell afterwards whether the phase changed it. Dropped when the phase
+// ends, on every path out of it (geo_verbs.hpp: "nothing keeps it between
+// phases"): the copy holds a shared_ptr to every surface, and the Context
+// lives as long as the window or the session, so a copy left behind kept the
+// previous drawing's surfaces in memory after NEW until the next geo line.
+class Staging {
+  public:
+    explicit Staging(Context& context) : context_(context)
+    {
+        context_.surfaces = context_.document.surfaces();
+        revision_ = context_.surfaces.revision();
+    }
+    ~Staging() { context_.surfaces = katana::terrain::SurfaceStore{}; }
+    Staging(const Staging&) = delete;
+    Staging& operator=(const Staging&) = delete;
+
+    [[nodiscard]] std::uint64_t revision() const { return revision_; }
+
+  private:
+    Context& context_;
+    std::uint64_t revision_ = 0;
+};
 
 // What the phase changed, committed as one step. Nothing when it changed
 // nothing, or when the drawing's surfaces already are the staged ones (an
@@ -133,13 +149,13 @@ Result<Prepared> prepare(Context& context, std::string_view line)
                          std::string(katana::core::trimmed(line)));
     }
     const std::string step = stepNameOf(*tokens);
-    const std::uint64_t staged = stage(context);
+    const Staging staging(context);
     auto prepared = entry->prepare(context, *tokens, line);
     if (!prepared) {
         return prepared;
     }
     // A line answered here may have changed the surfaces (SURFACE REMOVE).
-    if (auto status = commit(context, staged, step); !status) {
+    if (auto status = commit(context, staging.revision(), step); !status) {
         return status.error();
     }
     if (prepared->work) {
@@ -156,12 +172,12 @@ Result<Prepared> prepare(Context& context, std::string_view line)
             }
             return Apply([apply = std::move(apply).value(),
                           step](Context& ctx) -> Result<std::string> {
-                const std::uint64_t before = stage(ctx);
+                const Staging applyStaging(ctx);
                 auto reply = apply(ctx);
                 if (!reply) {
                     return reply;
                 }
-                if (auto status = commit(ctx, before, step); !status) {
+                if (auto status = commit(ctx, applyStaging.revision(), step); !status) {
                     return status.error();
                 }
                 return reply;

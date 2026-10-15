@@ -9,6 +9,7 @@
 #include <cfloat>
 #include <cmath>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -549,6 +550,98 @@ TEST_F(SurfaceVerbs, ARefusedLineChangesNoSurfaceAndMakesNoStep)
     EXPECT_FALSE(run("SURFACE FROM FILE \"" + kPlane + "\" NAME ground").ok());
     EXPECT_FALSE(run("SURFACE REMOVE nothing").ok());
     EXPECT_EQ(document.history().undoCount(), steps);
+    EXPECT_EQ(surfaces.all().size(), 1u);
+}
+
+// geo_verbs.hpp: the executor's copy of the drawing's surfaces is "never a
+// second store: nothing keeps it between phases". It holds a shared_ptr to
+// every surface of the drawing, in a Context that lives as long as the window
+// or the session, so a copy left behind after a line kept the previous
+// drawing's surfaces in memory after NEW until the next geo line.
+TEST_F(SurfaceVerbs, TheStagingCopyIsDroppedWhenTheLineEndsWhateverItAnswered)
+{
+    (void)ran("SURFACE FROM FILE \"" + kPlane + "\" NAME ground");
+    EXPECT_TRUE(context.surfaces.empty()) << "a line that changed the surfaces left its copy";
+    (void)ran("SURFACE LIST");
+    EXPECT_TRUE(context.surfaces.empty()) << "a line that changed nothing left its copy";
+    EXPECT_FALSE(run("SURFACE FROM FILE \"" + kPlane + "\" NAME ground").ok());
+    EXPECT_TRUE(context.surfaces.empty()) << "a refused line left its copy";
+    EXPECT_FALSE(run("SURFACE REMOVE nothing").ok());
+    EXPECT_TRUE(context.surfaces.empty());
+
+    // So a new drawing is the only holder's end of the old one's surface.
+    std::weak_ptr<const katana::terrain::TinSurface> old = surfaces.find("ground")->surface;
+    ASSERT_FALSE(old.expired());
+    document.newDocument();
+    EXPECT_TRUE(old.expired()) << "the previous drawing's surface is still held by the executor";
+}
+
+// A line is previewed to learn whether it would run: PREVIEW answered
+// "valid=yes" for a scope the run refused for having fewer than three points
+// with a height (and for a cloud's classes that match nothing).
+TEST_F(SurfaceVerbs, APreviewOfAScopeTheRunRefusesIsRefusedAsTheRunIs)
+{
+    ASSERT_TRUE(interpreter.run("LAYER NEW empty").ok());
+    const auto emptyRun = run("SURFACE FROM LAYERS empty ONLY");
+    const auto emptyPreview = run("SURFACE FROM LAYERS empty ONLY PREVIEW");
+    ASSERT_FALSE(emptyRun.ok());
+    ASSERT_FALSE(emptyPreview.ok()) << "a preview of a line the run refuses said it was valid";
+    EXPECT_EQ(emptyPreview.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(emptyPreview.error().message, emptyRun.error().message);
+    EXPECT_NE(emptyPreview.error().message.find("fewer than three points"), std::string::npos);
+
+    // A lone point with no height: matched, but nothing to triangulate.
+    draw({levelled(0, 0, std::nullopt)});
+    const auto lonePreview = run("SURFACE FROM DRAWING PREVIEW");
+    ASSERT_FALSE(lonePreview.ok());
+    EXPECT_NE(lonePreview.error().message.find("matched=1 used=0"), std::string::npos)
+        << lonePreview.error().message;
+    EXPECT_FALSE(run("SURFACE FROM DRAWING").ok());
+
+    // Enough heighted points: the preview is valid, and so is the run.
+    draw({levelled(0, 0, 100.0), levelled(10, 0, 101.0), levelled(10, 10, 102.0)});
+    const std::string valid = ran("SURFACE FROM DRAWING PREVIEW");
+    EXPECT_NE(valid.find("preview valid=yes changed=no"), std::string::npos) << valid;
+    EXPECT_TRUE(surfaces.empty()) << "a preview makes nothing";
+    EXPECT_TRUE(run("SURFACE FROM DRAWING").ok());
+}
+
+TEST_F(SurfaceVerbs, APreviewOfACloudWithTooFewPointsInTheClassesIsRefusedAsTheRunIs)
+{
+    // Four ground returns and two roof returns (ASPRS 6): classes=6 leaves
+    // two points, under the three a triangle needs.
+    katana::interop::PointCloudLayer cloud;
+    cloud.name = "scan";
+    const auto add = [&](double x, double y, double z, std::uint8_t cls) {
+        katana::pointcloud::PointCloudPoint point;
+        point.x = x;
+        point.y = y;
+        point.z = z;
+        point.classification = cls;
+        cloud.points.push_back(point);
+    };
+    add(0, 0, 10, 2);
+    add(10, 0, 11, 2);
+    add(10, 10, 12, 2);
+    add(0, 10, 11, 2);
+    add(5, 5, 18, 6);
+    add(4, 4, 18, 6);
+    (void)reference.add(std::move(cloud));
+
+    for (const char* classes : {"classes=6", "classes=99"}) {
+        const auto preview = run(std::string("SURFACE FROM CLOUD scan ") + classes + " PREVIEW");
+        ASSERT_FALSE(preview.ok()) << classes << " previewed as valid";
+        EXPECT_EQ(preview.error().code, ErrorCode::InvalidArgument) << classes;
+        EXPECT_NE(preview.error().message.find("fewer than three points"), std::string::npos)
+            << classes;
+        const auto real = run(std::string("SURFACE FROM CLOUD scan ") + classes);
+        ASSERT_FALSE(real.ok()) << classes;
+        EXPECT_EQ(real.error().code, ErrorCode::InvalidArgument);
+    }
+    const std::string valid = ran("SURFACE FROM CLOUD scan classes=2 PREVIEW");
+    EXPECT_NE(valid.find("preview valid=yes changed=no"), std::string::npos) << valid;
+    EXPECT_TRUE(surfaces.empty());
+    EXPECT_TRUE(run("SURFACE FROM CLOUD scan classes=2").ok());
     EXPECT_EQ(surfaces.all().size(), 1u);
 }
 

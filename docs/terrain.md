@@ -341,7 +341,12 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   when the phase ends the executor commits what it changed as one step named
   after the verb, and a phase that fails commits nothing
   (`SurfaceVerbs.SurfaceFromIsOneUndoStepAndUndoLeavesNone`,
-  `SurfaceVerbs.RemoveIsOneUndoStepAndUndoPutsTheSameSurfaceBack`). An apply
+  `SurfaceVerbs.RemoveIsOneUndoStepAndUndoPutsTheSameSurfaceBack`). The copy is
+  dropped when the phase ends, on every path out of it (`Staging`): it holds a
+  pointer to every surface and the Context lives as long as the window or the
+  session, so a copy left behind kept the previous drawing's surfaces in
+  memory after New until the next geoprocessing line
+  (`SurfaceVerbs.TheStagingCopyIsDroppedWhenTheLineEndsWhateverItAnswered`). An apply
   that commits in a step of its own (an IMPORT) leaves an equal store, and
   the executor's commit then records nothing. *Rejected:* each verb calling
   `Document::setSurfaces` itself - twenty-odd verbs bind a surface, and one
@@ -507,6 +512,13 @@ SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog] [format=<dr
 ```
 
 Every form takes PREVIEW, which says what would be read and makes nothing.
+PREVIEW refuses what the run would refuse, for a scope or a cloud's classes
+that leave fewer than three points with a height to triangulate, with the
+same message (`SurfaceVerbs.APreviewOfAScopeTheRunRefusesIsRefusedAsTheRunIs`,
+`SurfaceVerbs.APreviewOfACloudWithTooFewPointsInTheClassesIsRefusedAsTheRunIs`):
+the Surface From dialog previews through this line, and a preview that said
+`valid=yes` was followed by a refusal. A raster's points are not counted by a
+preview, which does not read it.
 A reply is key=value records: how the source was read (`sampled stride=
 pixels= nodata= points=`, `thinned from= step= points=`, the drawing's
 `scope` record), `merged duplicates=` when coincident points were averaged,
