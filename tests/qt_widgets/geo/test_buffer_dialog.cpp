@@ -202,7 +202,6 @@ struct Window {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
     QStringList logged;
     QStringList errors;
     QMainWindow main;
@@ -214,7 +213,6 @@ struct Window {
         services.document = &document;
         services.interpreter = &interpreter;
         services.reference = &reference;
-        services.surfaces = &surfaces;
         services.scratch = std::filesystem::temp_directory_path() / "katana-gis-dialog-test";
         services.log = [this](const QString& text, bool isError) {
             (isError ? errors : logged) << text;

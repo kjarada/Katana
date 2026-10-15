@@ -240,7 +240,6 @@ struct Window {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
     QStringList logged;
     QMainWindow main;
     std::unique_ptr<katana::qt::GeoWorkbench> workbench;
@@ -251,7 +250,6 @@ struct Window {
         services.document = &document;
         services.interpreter = &interpreter;
         services.reference = &reference;
-        services.surfaces = &surfaces;
         std::error_code error;
         std::filesystem::remove_all(scratch, error);
         services.scratch = scratch;

@@ -615,6 +615,47 @@ TEST_F(McpServer, DescribeEntityNamesTheEntityWhateverFilesTheWorkingDirectoryHo
         << textOf(described);
 }
 
+// ---- leaders (docs/mcp.md, "Leaders") ---------------------------------------------------
+//
+// katana_leaders: what each leader says now, and the presets, read from the
+// Document as katana_status is - LEADER LIST JSON's object. A point at RL 25
+// with a level leader on it says "RL 25.000".
+TEST_F(McpServer, TheLeadersToolGivesWhatEachLeaderSaysAndThePresets)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"POINT 30,40", "SELECT 1", "PROP SET elevation 25",
+                                              "LEADER #1 40,50 preset=level"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::size_t steps = session.document().history().undoCount();
+
+    const Json all = call("katana_leaders");
+    ASSERT_FALSE(all["isError"].get<bool>()) << textOf(all);
+    const Json& leaders = all["structuredContent"]["leaders"];
+    ASSERT_EQ(leaders.size(), 1U) << all.dump();
+    EXPECT_EQ(leaders[0]["id"], 2);
+    EXPECT_EQ(leaders[0]["target"], 1);
+    EXPECT_EQ(leaders[0]["preset"], "level");
+    EXPECT_TRUE(leaders[0]["reads"].is_null());
+    EXPECT_EQ(leaders[0]["template"], "RL {rl:.3f}");
+    EXPECT_EQ(leaders[0]["text"], "RL 25.000");
+    EXPECT_EQ(leaders[0]["lines"], Json::array({"RL 25.000"}));
+    const Json& presets = all["structuredContent"]["presets"];
+    ASSERT_EQ(presets.size(), 7U);
+    EXPECT_EQ(presets[1]["name"], "surface");
+    EXPECT_EQ(presets[1]["reads"], "surface");
+    EXPECT_EQ(presets[1]["tool"], "annotate.leader.surface");
+    EXPECT_TRUE(all["structuredContent"]["surfaces"].empty());
+    EXPECT_EQ(session.document().history().undoCount(), steps) << "a read is no step";
+
+    // Only the leaders on an entity, or of given ids.
+    EXPECT_EQ(call("katana_leaders", Json{{"target", 1}})["structuredContent"]["leaders"].size(),
+              1U);
+    EXPECT_TRUE(call("katana_leaders", Json{{"ids", {99}}})["structuredContent"]["leaders"].empty());
+    EXPECT_TRUE(call("katana_leaders", Json{{"target", 0}})["isError"].get<bool>());
+    EXPECT_TRUE(call("katana_leaders", Json{{"ids", {"two"}}})["isError"].get<bool>());
+}
+
 TEST_F(McpServer, AScriptsIndentedNoteRunsNothing)
 {
     // A line whose first non-blank is '#' is a note, as File > Run Script
@@ -1188,18 +1229,22 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
     // The help, the status and - one more than there were, since 2026-10-06 -
     // the customisation (McpServer.TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource):
     // that one added resource is the whole reason each count below went up
-    // by one, from 3 and 2.
+    // by one, from 3 and 2. And one more again since 2026-10-15 for each of the
+    // surface display styles (McpServer.TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem)
+    // and the road model (McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt):
+    // from 4 and 3 to 6 and 5.
 #if defined(KATANA_TEST_WITH_INTEROP)
     // And the formats GDAL reads and writes (McpServer.FormatsReturnsStructuredDrivers).
-    ASSERT_EQ(list.size(), 4U);
+    ASSERT_EQ(list.size(), 6U);
 #else
-    ASSERT_EQ(list.size(), 3U);
+    ASSERT_EQ(list.size(), 5U);
 #endif
     std::vector<std::string> uris;
     for (const Json& resource : list) {
         uris.push_back(resource["uri"].get<std::string>());
     }
-    for (const char* uri : {"katana://help", "katana://status", "katana://customisation"}) {
+    for (const char* uri : {"katana://help", "katana://status", "katana://customisation",
+                            "katana://surface-styles", "katana://road-model"}) {
         EXPECT_NE(std::find(uris.begin(), uris.end(), uri), uris.end()) << uri;
     }
     const Json help = request("resources/read", Json{{"uri", "katana://help"}});
@@ -1210,6 +1255,65 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
               0);
     EXPECT_EQ(request("resources/read", Json{{"uri", "katana://nothing"}})["error"]["code"],
               -32002);
+}
+
+// katana://surface-styles is SURFACESTYLE LIST JSON (docs/mcp.md): the
+// Document's own form, so an agent reads the styles without a line in the
+// history, and a style made through the command tool is there the next read.
+TEST_F(McpServer, TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem)
+{
+    initialize();
+    const auto read = [this] {
+        const Json resource = request("resources/read", Json{{"uri", "katana://surface-styles"}});
+        EXPECT_EQ(resource["result"]["contents"][0]["mimeType"], "application/json");
+        return resource["result"]["contents"][0]["text"].get<std::string>();
+    };
+    const Json styles = Json::parse(read());
+    EXPECT_EQ(styles["format"], "katana-surface-styles");
+    EXPECT_EQ(styles["default"], "Standard");
+    // The seven built-in styles (cad/terrain/surface_style.hpp).
+    EXPECT_EQ(styles["styles"].size(), 7U);
+    const Json made = runLine("SURFACESTYLE NEW Fine FROM Contours interval=0.5");
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json listed = runLine("SURFACESTYLE LIST JSON");
+    const std::string json = listed["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_EQ(read(), json);
+    EXPECT_EQ(Json::parse(json)["styles"].size(), 8U);
+}
+
+// ---- road model (docs/road_design.md) ----
+// katana://road-model is ROADMODEL JSON: what an agent reads the road model
+// by. A corridor of the urban street on a 100 m straight with no surface: its
+// courses and kerbs, each side, the problem that there is no surface for the
+// batters, and the kerb's class as IFC names it.
+TEST_F(McpServer, TheRoadModelIsAResourceAsRoadModelJsonGivesIt)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"ALIGN NEW road 0,0 100,0", "ALIGN DESIGN road 0,10 100,10",
+                                  "ROADTEMPLATE DEFAULTS",
+                                  "CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"",
+                                  "ROADMODEL JSON"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string verb =
+        made["structuredContent"]["commands"][4]["output"].get<std::string>();
+    const Json resource = request("resources/read", Json{{"uri", "katana://road-model"}});
+    const std::string text = resource["result"]["contents"][0]["text"].get<std::string>();
+    EXPECT_EQ(text, verb);
+    const Json model = Json::parse(text);
+    bool sawKerb = false;
+    for (const Json& object : model["objects"]) {
+        if (object["id"] == "corridor/Main/left/kerb/1") {
+            sawKerb = true;
+            EXPECT_EQ(object["ifcClass"], "IfcKerb");
+            EXPECT_EQ(object["layer"], "road/kerb");
+        }
+    }
+    EXPECT_TRUE(sawKerb);
+    ASSERT_FALSE(model["problems"].empty());
+    EXPECT_NE(model["problems"][0]["message"].get<std::string>().find("no target surface"),
+              std::string::npos);
 }
 
 // katana_status and katana://status are the STATUS verb's (cad/document_status.hpp),
@@ -2361,6 +2465,22 @@ TEST_F(McpServer, TerrainListGivesTheSessionsSurfacesAndRasters)
     EXPECT_EQ(content["rasters"][0]["width"], 120);
     EXPECT_EQ(content["rasters"][0]["cell"], 1.5);
     EXPECT_NE(textOf(listed).find("surface ground: "), std::string::npos) << textOf(listed);
+    // The style it is drawn in - the drawing's default, Standard, as it has
+    // none of its own - and whether the views draw it.
+    EXPECT_EQ(content["surfaces"][0]["style"], "Standard");
+    EXPECT_EQ(content["surfaces"][0]["visible"], true);
+    const Json styled = call("katana_run_commands",
+                             Json{{"commands", {"SURFACE STYLE ground Contours",
+                                                "SURFACE HIDE ground"}}});
+    ASSERT_FALSE(styled["isError"].get<bool>()) << textOf(styled);
+    const Json again = call("katana_terrain_list")["structuredContent"];
+    EXPECT_EQ(again["surfaces"][0]["style"], "Contours");
+    EXPECT_EQ(again["surfaces"][0]["visible"], false);
+    // Each of those was one undo step on the drawing, and the surface itself
+    // one more: three UNDOs leave none.
+    const Json undone = call("katana_run_commands", Json{{"commands", {"UNDO 3"}}});
+    ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    EXPECT_TRUE(call("katana_terrain_list")["structuredContent"]["surfaces"].empty());
 }
 
 // T1: CONTOUR is a session line, so the command tool draws contours as the
@@ -2456,6 +2576,33 @@ TEST_F(McpServer, ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen)
               std::string::npos)
         << reply;
 }
+
+// The surface edits through the command tool (docs/surface_editing.md): no
+// tool of their own, the lines are the session's. terrain.asc's heights span
+// 24.892 to 38.819 over 120 x 90 cells, every cell centre a vertex (10 800):
+// RAISE 1 moves every one by 1, and katana_terrain_list then reads the
+// drawing's surface at 25.892 to 39.819.
+TEST_F(McpServer, ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json edited = call("katana_run_commands",
+                             Json{{"commands", {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                                                "SURFACE EDIT ground RAISE 1"}}});
+    ASSERT_FALSE(edited["isError"].get<bool>()) << textOf(edited);
+    const std::string reply =
+        edited["structuredContent"]["commands"][1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("surface name=ground operation=raise"), std::string::npos) << reply;
+    EXPECT_NE(reply.find("moved=10800 held=0 crossings=0 largest_change=1 changed=yes"),
+              std::string::npos)
+        << reply;
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& surfaces = listed["structuredContent"]["surfaces"];
+    ASSERT_EQ(surfaces.size(), 1U) << surfaces.dump();
+    EXPECT_NEAR(surfaces[0]["zmin"].get<double>(), 25.892, 1e-6);
+    EXPECT_NEAR(surfaces[0]["zmax"].get<double>(), 39.819, 1e-6);
+}
 #endif
 
 // IFC through the one door an agent has: the lines File > Export IFC and
@@ -2499,6 +2646,31 @@ TEST_F(McpServer, AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines)
     EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 1);
 }
 
+// ifc (docs/ifc.md, "Road model"): the road model goes out with the drawing
+// unless the line says NOROADMODEL, File > Export IFC's "Road model" box -
+// a word an agent types as the dialog writes it; given twice, refused.
+TEST_F(McpServer, AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord)
+{
+    initialize();
+    const TempDir dir("ifc-road");
+    const std::string file = dir.file("roadless.ifc");
+    const Json previewed = call(
+        "katana_run_commands",
+        Json{{"commands", {"LAYER NEW Survey/Kerb", "LAYER SET Survey/Kerb", "PL 0,0 10,0 20,5",
+                           "EXPORT \"" + file + "\" NOROADMODEL PREVIEW"}}});
+    ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
+    EXPECT_NE(textOf(previewed).find("ifc previewed file=\"roadless.ifc\" schema=IFC4X3_ADD2"),
+              std::string::npos)
+        << textOf(previewed);
+    // No road model was given, so the reply has no road record.
+    EXPECT_EQ(textOf(previewed).find("road elements="), std::string::npos);
+    EXPECT_TRUE(call("katana_run_commands",
+                     Json{{"commands", {"EXPORT \"" + file + "\" NOROADMODEL NOROADMODEL"}}})
+                    ["isError"]
+                        .get<bool>());
+    EXPECT_FALSE(std::filesystem::exists(file));
+}
+
 #if defined(KATANA_TEST_WITH_INTEROP)
 // katana_export of an .ifc hands its records as objects under their whole
 // kind: "ifc exported", with a file field - read as the kind "ifc" and a
@@ -2518,3 +2690,79 @@ TEST_F(McpServer, AnIfcExportsRecordIsItsWholeKindWithItsFields)
     EXPECT_FALSE(records[0].contains("exported file")) << records.dump();
 }
 #endif
+
+// ---- volumes (docs/volumes.md) ----
+#if defined(KATANA_TEST_WITH_INTEROP)
+// VOLUME is a session line, so the command tool measures between two
+// surfaces as the window's Terrain > Volumes does. The two are closed 3D
+// strings round the square [0, 10]^2 at 10 and at 11, each made a surface of
+// two triangles: a 1 m slab, so 4 x 4 x 1 = 16 m^3 inside the typed square.
+TEST_F(McpServer, AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool)
+{
+    initialize();
+    const Json ran = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LAYER NEW base", "LAYER SET base", "PLINE3D 0,0,10 10,0,10 10,10,10 0,10,10 CLOSE",
+               "LAYER NEW top", "LAYER SET top", "PLINE3D 0,0,11 10,0,11 10,10,11 0,10,11 CLOSE",
+               "SURFACE FROM LAYERS base ONLY NAME base", "SURFACE FROM LAYERS top ONLY NAME top",
+               "VOLUME SURFACES base top INSIDE 2,2 6,2 6,6 2,6"}}});
+    ASSERT_FALSE(ran["isError"].get<bool>()) << textOf(ran);
+    const Json& lines = ran["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 9U);
+    const std::string reply = lines[8]["output"].get<std::string>();
+    EXPECT_NE(reply.find("volume method=exact base=base top=top polygons=1 polygon.area=16.000 "
+                         "cut=0.000 fill=16.000 net=16.000 area=16.000"),
+              std::string::npos)
+        << reply;
+}
+#endif
+// ---- end of volumes ----
+// ---- road objects (docs/road_objects.md) ----------------------------------------------------
+//
+// katana_road_objects: the road objects as structured data, read from the
+// Document. The barrier is the cad tests' own: 20 m along a straight
+// alignment, so its length is 20 by hand.
+TEST_F(McpServer, TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    Json listed;
+    for (const Json& tool : tools) {
+        if (tool["name"] == "katana_road_objects") {
+            listed = tool;
+        }
+    }
+    ASSERT_TRUE(listed.is_object()) << "katana_road_objects is not listed";
+    EXPECT_NE(listed["description"].get<std::string>().find("ROADOBJECT ADD"), std::string::npos);
+    EXPECT_EQ(listed["annotations"]["readOnlyHint"], true);
+
+    const Json placed = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"ALIGN NEW Main 0,0 100,0", "ALIGN DESIGN Main 0,10 100,10",
+               "ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4"}}});
+    ASSERT_FALSE(placed["isError"].get<bool>()) << textOf(placed);
+    const Json result = call("katana_road_objects");
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& report = result["structuredContent"];
+    ASSERT_EQ(report["objects"].size(), 1U) << report.dump();
+    const Json& barrier = report["objects"][0];
+    EXPECT_EQ(barrier["id"], "barrier-1");
+    EXPECT_EQ(barrier["kind"], "barrier");
+    EXPECT_EQ(barrier["placement"]["alignment"], "Main");
+    ASSERT_EQ(barrier["made"].size(), 1U);
+    EXPECT_EQ(barrier["made"][0]["ifc_class"], "IfcRailing");
+    EXPECT_EQ(barrier["made"][0]["closed"], true);
+    EXPECT_NEAR(barrier["made"][0]["quantities"]["Length"].get<double>(), 20.0, 1e-9);
+    EXPECT_TRUE(report["problems"].empty());
+
+    // With its alignment gone the barrier is made of nothing, and says why.
+    (void)call("katana_run_commands", Json{{"commands", {"ALIGN DELETE Main"}}});
+    const Json after = call("katana_road_objects")["structuredContent"];
+    EXPECT_TRUE(after["objects"][0]["made"].empty());
+    ASSERT_EQ(after["problems"].size(), 1U);
+    EXPECT_NE(after["problems"][0]["message"].get<std::string>().find("does not exist"),
+              std::string::npos);
+}
+// ---- end road objects ----

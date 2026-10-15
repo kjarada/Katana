@@ -229,6 +229,22 @@ the triangles along every seam, so it is a different surface, not a faster
 route to the same one. The TIN build is therefore taken off the GUI thread
 instead (*Background jobs*, below).
 
+## Volumes on every front end
+
+The volumes - surface to surface, to a level, stockpiles and pits, along an
+alignment, on a grid, inside polygons - and the difference (cut/fill map)
+and envelope surfaces have their verbs, their dialog and their MCP route
+(`VOLUME`, `SURFACE DIFFERENCE`, Terrain > Volumes): `docs/volumes.md`.
+Until 2026-10-15 `volumeToDatum` and `compareSurfaces` were exact and tested
+but reachable by no verb, and only the window's corridor quantities measured
+anything. The pair clipping above is now `terrain::visitOverlay`
+(`include/katana/terrain/overlay.hpp`), which `compareSurfaces` visits with
+the same arithmetic in the same order, so its answers are the bits they were;
+the region, stockpile, difference and envelope work cut the ground through the
+same clipper. `volume.hpp` said the overlay "merges both triangulations into
+one constrained triangulation"; that was the design before the fix above, and
+the header now says what it does.
+
 ## Section crossings
 
 `extractSection` intersected every alignment segment with every segment of
@@ -266,30 +282,217 @@ drawing, so the box tests reject nothing) is 2.6-3x faster from the same-side
 test. The first A/B, run before the side test existed, showed the diagonal
 unchanged (30.8 before, 31.4 after, 31.7 again).
 
-## One store of named surfaces
+## Surfaces in the drawing
 
-`terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`) holds
-the surfaces a session works with, by name: one in the window, one in each
-headless session. The geoprocessing verbs' `SURFACE <name>` finds a surface
-by the same name on every front end (`docs/geoprocessing.md`).
+The drawing's TIN surfaces are the Document's: `Document::surfaces()`
+(`include/katana/cad/document.hpp`, implemented in
+`src/katana_cad/terrain/surface_document.cpp`) holds the one
+`terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), every
+change to it is one undo step, and it is saved with the project. Until
+2026-10-15 the store was session data - one in the window, one in each
+headless session - not undoable
+and not saved, so a surface made from an hour's point cloud was gone at the
+next open, and an UNDO after SURFACE FROM undid the line before it.
 
-- **Names are compared case-insensitively.** A name already in use is
-  refused, AlreadyExists, and `uniqueName` gives "name (2)", "name (3)"...
-  The window names a second import of a surface so, as the session names a
-  second alignment.
-- **A surface is a `shared_ptr<const TinSurface>`,** so a background job
-  reads one while the views draw it, and nothing moves it.
-- **Every change bumps `revision()`.** That is how the window knows to
-  rebuild what its views draw (`MainWindow::syncSceneSurfaces`) without
-  being told what changed.
+- **One store, and nothing keeps a second.** The geoprocessing verbs, the
+  surface verbs below, the window's Surfaces panel, an import's TINs, the
+  corridor surface, the section view, the sheets' sections, the 3D view, the
+  IFC export and the dialogs' surface lists all read the Document's. The
+  window's `sceneSurfaces_` is the 3D scene's list made FROM it
+  (`MainWindow::syncSceneSurfaces`), and holds the shared surfaces it
+  points at, so an undo that drops the last step holding one cannot free it
+  under a view.
+- **A change is made on a copy and committed.** `Document::setSurfaces`
+  takes a whole store and makes it the drawing's as one undo step named by
+  the caller ("SURFACE FROM", "SURFACE RENAME"). A copy costs a pointer per
+  surface - every surface is a `shared_ptr<const TinSurface>`, immutable -
+  so the step keeps both stores whole and undo puts back the exact one
+  before, the very surfaces
+  (`SurfaceDocument.SettingTheSurfacesIsOneUndoStepAndUndoPutsBackTheExactStore`).
+  A store equal to the drawing's - the same surfaces by pointer, names,
+  sources, styles and visibility - records no step.
+  *Rejected:* an inverse command per kind of change (add, remove, rename):
+  a snapshot cannot undo to anything but what was there, and costs no more.
+- **A view keys on the generation, not on the store's revision.**
+  `surfacesGeneration()` and `surfaceStylesGeneration()` count every
+  change, undo and redo included, and never fall
+  (`SurfaceDocument.TheGenerationRisesOnEveryChangeUndoAndRedoIncludedAndNeverFalls`);
+  an undo puts back a store with the revision it had then. A step reports
+  `DocumentChange::Surfaces` or `SurfaceStyles` (both in `kDrawing`), from
+  the stack's listener comparing the generations, as `tablesChanged` compares
+  the tables'. The window rebuilds its scene list AT ONCE on that
+  notification, not on the deferred refresh the panels use: the list points
+  at surfaces, and a deferred rebuild would leave it pointing at a replaced
+  store until the event loop ran.
+- **An import is one step.** `Document::surfacesCommand` is the same change
+  as a command, for a transaction that does more: an archive IMPORT puts its
+  TINs in the transaction with its entities, and an IFC import goes through
+  `cad::importSurfaces` (`include/katana/cad/terrain/surface_verbs.hpp`) on
+  both front ends (`SurfaceDocument.AnImportOfEntitiesAndSurfacesIsOneStepThroughTheCommand`,
+  `GisVerbs.ImportOfAnArchiveAddsItsSurfacesToTheDrawingInTheImportsOneStep`).
+  A taken name is "name (2)" (`uniqueName`). katana_cli's IFC import once
+  counted a file's terrain and dropped it; it keeps it now, and its IFC
+  export writes the drawing's surfaces.
+- **The geoprocessing executor stages.** `geo::Context::surfaces`
+  (`src/katana_app/geo/geo_verbs.hpp`) is a copy of the drawing's store the
+  executor makes as prepare begins and again as apply begins - for the
+  window's background job, when the job ends, from the store as it is then.
+  The verbs read and change the copy as they changed the session's store;
+  when the phase ends the executor commits what it changed as one step named
+  after the verb, and a phase that fails commits nothing
+  (`SurfaceVerbs.SurfaceFromIsOneUndoStepAndUndoLeavesNone`,
+  `SurfaceVerbs.RemoveIsOneUndoStepAndUndoPutsTheSameSurfaceBack`). An apply
+  that commits in a step of its own (an IMPORT) leaves an equal store, and
+  the executor's commit then records nothing. *Rejected:* each verb calling
+  `Document::setSurfaces` itself - twenty-odd verbs bind a surface, and one
+  that forgot would change the drawing outside undo; and handing the verbs
+  the Document's store by reference - a mutable store outside the Document
+  is the second store this replaced.
+- **Hidden is a matter of the picture.** `NamedSurface::visible` says
+  whether the views draw a surface: the plan and 3D views, the section view,
+  a sheet's sections. A hidden surface is still read by every verb - sampled,
+  draped, exported, a corridor's ground - which is why the corridor and the
+  IFC export list them all.
+- **A surface's style is a name.** `NamedSurface::style` names one of the
+  drawing's display styles (`include/katana/cad/terrain/surface_style.hpp`);
+  empty is the drawing's default. A name the styles do not have is refused
+  by `setSurfaces` - unless a surface already named it: a project whose
+  styles a newer Katana wrote names styles this build cannot read, and they
+  must not block every later change of its surfaces; `styleOf` draws such a
+  surface in the default.
 
-Surfaces are still session data, not saved in the project: saving them is a
-storage-schema decision of its own.
+### Saved with the project
+
+Storage schema 13 (`docs/model.md`) adds a `surfaces` table of OPAQUE
+records, `storage::SurfaceRecord {name, source, style, visible, data}`, saved
+and loaded in the same transaction as the rest. The storage layer may not see
+the terrain layer, so a record's `data` is the surface's bytes in the terrain
+layer's own form, `terrain/tin_codec.hpp`, which the Document writes at a
+save and reads at an open.
+
+- **Exact.** Version 1 is a header (magic "KTIN", the version, the two
+  counts), every vertex as the bit patterns of its three doubles, the
+  triangles' indices and their constraint masks: 24 + 24 V + 13 T bytes, so a
+  surface at SURFACE FROM's 400 000-point cap - some 800 000 triangles - is
+  about 20 MB. A negative zero stays negative and a breakline stays a
+  breakline (`TinCodec.ASurfaceComesBackBitForBitWithItsConstrainedEdges`).
+  The adjacency is not stored: `TinSurface::create` derives it, and is what
+  checks the bytes on the way in, so a damaged record is refused with a
+  sentence (`TinCodec.DamagedBytesAreRefusedNotRead`) and a newer version
+  with Unsupported (`TinCodec.ANewerVersionIsRefusedAsUnsupported`).
+  *Rejected:* a text form (the size, and the doubles' exactness), and storing
+  the adjacency (derivable, and it would have to be checked anyway).
+- **A surface that cannot be read refuses the open.** Dropping it would open
+  a drawing whose next save deleted it from the project; the open is refused
+  with the surface named, before anything is installed
+  (`SurfaceDocument.ASurfaceTheProjectCannotReadRefusesTheOpenAndLeavesTheDrawing`).
+- **Size.** A surface's row may take at most
+  `ProjectStore::kMaxSurfaceBytes` (900 MB), the survey jobs' figure and for
+  their reason - SQLite refuses a BLOB over its 1 GB limit, and a surface no
+  save could write would fail every save after it. `save()` refuses it before
+  a byte is written, naming it and saying to make it from fewer points.
+- **One transaction.** *Rejected:* the surfaces as files in the project's
+  `terrain/` folder, which the directory layout was made for. A save is one
+  SQLite transaction (`project_store.hpp`, "Atomic save"); files beside it
+  would be written outside it, and a crash between the two would leave a
+  database naming surfaces whose files are older, newer or gone.
+- **A project from before schema 13** migrates with no surfaces
+  (`SurfaceStorage.ASchemaTwelveProjectMigratesToThirteenWithNoSurfaces`).
+
+### The display styles
+
+The styles a surface is drawn in are the drawing's too
+(`Document::surfaceStyles`): the built-in set until the project saves its
+own - Standard (the default), Triangles, Contours, Elevation Bands, Slope
+Bands, Cut Fill and Outline (`builtInSurfaceStyles`; how each draws is
+`docs/surface_display.md`'s). They are kept under the metadata key
+`surface_styles` as versioned JSON (`surfaceStylesToJson`), the sheets'
+arrangement, so they need no schema change.
+
+- **Written by every save, empty for the built-ins.** An empty value is
+  what a project with the built-ins holds. (It was also how the key avoided
+  coming back from an earlier save when the Document stopped writing it -
+  the metadata table was only ever REPLACEd into. A save now deletes a key
+  of the drawing's own it no longer writes: `kDrawingMetadataKeys`,
+  `docs/model.md`, "Metadata a newer build wrote".)
+- **The Document's, not the metadata's.** The key is taken out of the
+  metadata at an open and written into what a save writes, so
+  `Document::metadata` never carries it and `setMetadata` cannot overwrite
+  the styles.
+- **Styles a newer Katana wrote are kept.** They are left in the metadata to
+  be written back as they were, the built-ins stand in meanwhile,
+  `surfaceStylesStatus` says why, and every change of the styles is refused
+  (CommandRejected) rather than overwrite them
+  (`SurfaceDocument.StylesANewerKatanaWroteAreKeptAndNotOverwritten`). A
+  damaged set is replaced by the first set given.
+- **Checked whole.** `checkSurfaceStyleSet`: every style drawable
+  (`checkSurfaceStyle` names the field), no two of one name without case, a
+  default among them. A style a surface is drawn in, and the default, are
+  not deleted; renaming a style moves the surfaces drawn in it in the same
+  step (`Document::setSurfacesAndStyles`).
+
+### On every front end
+
+The interpreter runs the drawing's own SURFACE words and SURFACESTYLE
+(`src/katana_cad/terrain/surface_verbs.cpp`), so the window's command line,
+katana_cli and katana_mcp have them; the geoprocessing table's SURFACE row
+takes only LIST, INFO, REMOVE, FROM and EXPORT (`takesSurface`), and every
+other SURFACE line - these, the surface edits', the volumes' - reaches the
+interpreter.
+
+```
+SURFACE RENAME <name> <new> | STYLE <name> <style> ("" for the default)
+SURFACE SHOW <name>...|ALL | HIDE <name>...|ALL | COPY <name> <new>
+SURFACESTYLE LIST [JSON] | INFO <style> | NEW <style> [FROM <style>] [key=value ...]
+             | SET <style> key=value ... | DELETE <style> | RENAME <style> <new>
+             | DEFAULT <style>
+```
+
+A key per field of a style (HELP SURFACESTYLE lists them; colours take
+#RRGGBB or a colour name). Replies are records: `surface name= ... style=
+visible=`, `style name= default= surfaces= ...`, `renamed`, `copied`,
+`shown|hidden surfaces= changed=`. SURFACESTYLE INFO prints a style's
+`options` record, which typed back after SURFACESTYLE NEW gives the same
+style (`DrawingSurfaceVerbs.WhatInfoPrintsTypedBackMakesTheSameStyle`). SURFACE
+COPY shares the triangulation - a copy costs a pointer - so a copy kept
+before an edit costs nothing until the edit makes a new surface.
+`SURFACE LIST`, `INFO` and `LIST JSON` say each surface's `style` and
+`visible`, and so does katana_terrain_list; `katana://surface-styles` is
+SURFACESTYLE LIST JSON (`docs/mcp.md`).
+
+**The Surfaces panel** (`src/katana_qt/terrain/surfaces_panel.hpp`; Terrain
+> Surfaces Panel, View > Panels > Surfaces, hidden until asked for): a row a
+surface - its name with a check box for shown, a style combo, its source and
+triangles - and Rename, Copy, Remove, Zoom To and Edit Styles (which opens
+Terrain > Surface Styles, `terrainSurfaceStyles`). Every change is the verb
+line a person would type, through the window's one executor. It reads the
+drawing again on the event loop, never inside the document's notification
+(`docs/desktop.md`, "Panels refresh on the event loop, never inside their own
+signal"): the change may come from its own check box or combo
+(`qt_widgets.SurfacesPanelWidget.AChangeMadeElsewhereIsShownOnTheEventLoopNotInsideTheNotification`).
+The window's scene list is the one thing rebuilt inside the notification,
+for the pointer reason above; it rebuilds no widget. The name is the first
+column, holding the check box: a headless `--fill` picks a row by the first
+column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
+
+### Not done
+
+- **STATUS does not count the surfaces**, nor does katana_status: an agent
+  asks katana_terrain_list.
+- **A surface has no layer.** It is shown and hidden by SURFACE SHOW and HIDE
+  and the panel, not by a layer's switch, and is drawn in its style's
+  colours, not a layer's.
+- **A surface too large for a project is refused at the save,** not when it
+  is made: the limit is 900 MB a surface, far above what SURFACE FROM makes,
+  but an import of a very large archive could make one.
+- **The panel's Remove asks nothing.** Removing is one undo step, so it is
+  not confirmed, as deleting an entity is not.
 
 ## Surfaces on every front end
 
 The SURFACE verb (`src/katana_app/geo/surface_verbs.cpp`) makes, lists and
-writes out the store's surfaces. It runs through the one geoprocessing
+writes out the drawing's surfaces ("Surfaces in the drawing", above, for
+what it changes and how that is undone). It runs through the one geoprocessing
 executor (`docs/geoprocessing.md`), so `katana_cli`, `katana_mcp` and the
 window's command line run the same code, and the window's Terrain > Surface
 From and GIS > Export Surface as DEM only build its lines:
@@ -307,7 +510,9 @@ Every form takes PREVIEW, which says what would be read and makes nothing.
 A reply is key=value records: how the source was read (`sampled stride=
 pixels= nodata= points=`, `thinned from= step= points=`, the drawing's
 `scope` record), `merged duplicates=` when coincident points were averaged,
-then `surface name= triangles= points= bounds= zmin= zmax= source=`.
+then `surface name= triangles= points= bounds= zmin= zmax= source= style=
+visible=` (`cad::surfaceRecord`, the one surface record, which the
+interpreter's SURFACE words write too).
 `SURFACE LIST` lists the surfaces and, as `raster id= name= kind= width=
 height= cell= file=` records, the rasters a terrain verb reads as `RASTER
 <id|name>`; `SURFACE LIST JSON` is what `katana_terrain_list` hands an agent
@@ -410,10 +615,6 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
   ends with the run, so a raster kept as a surface is triangulated when the
   job's result is applied - on the window's GUI thread, up to 1.7 s at the
   400 000-point cap. SURFACE FROM triangulates in its work.
-- **A .12da archive's tins are still dropped by katana_cli's IMPORT.** The
-  session has a store now, and IMPORT's move into the one GIS executor (I0)
-  is where they are to be kept in it.
-- **Surfaces are not saved** with the project, as above.
 
 ## Contours
 

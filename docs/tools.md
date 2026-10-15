@@ -96,7 +96,7 @@ spellings of the same verbs, so a word means one thing whichever reads it:
 | Draw > Curves (`draw_curves.cpp`) | Circle (`CIRCLE`, `C`) and its Centre Diameter, 2 Points, 3 Points and Tangent Tangent Radius variants; Arc (`ARC`, `A`, three points) and its Start Centre End, Centre Start End and Start End Radius variants - a variant has no verb, being an option of the general tool, as drafters expect |
 | Modify > Transform (`modify_transform.cpp`) | Move (`MOVE`, `M`), Copy (`COPY`, `CO`, `CP`), Rotate (`ROTATE`, `RO`), Scale (`SCALE`, `SC`), Mirror (`MIRROR`, `MI`), Stretch (`STRETCH`, `S`), Rectangular Array (`ARRAYRECT`, `ARRAY`, `AR`), Polar Array (`ARRAYPOLAR`), Erase (`ERASE`, `E`, `DELETE`, `DEL`) |
 | Modify > Edit (`modify_edit*.cpp`) | Trim (`TRIM`, `TR`), Extend (`EXTEND`, `EX`), Offset (`OFFSET`, `O`), Fillet (`FILLET`, `F`), Chamfer (`CHAMFER`, `CHA`), Break (`BREAK`, `BR`), Break at Point (`BREAKATPOINT`), Join (`JOIN`, `J`), Explode (`EXPLODE`, `X`) |
-| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Baseline Dimension (`DIMBASELINE`, `DBA`), Continue Dimension (`DIMCONTINUE`, `DCO`), Leader (`LEADER`, `LEAD`, `LE`), Balloon (`BALLOON`), Label Objects (`LABELOBJECTS`, `LBL`, `LABEL`) |
+| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Baseline Dimension (`DIMBASELINE`, `DBA`), Continue Dimension (`DIMCONTINUE`, `DCO`), Leader (`LEADER`, `LEAD`, `LE`), Balloon (`BALLOON`), Level Leader (`LEADERLEVEL`), Surface Difference Leader (`LEADERSURFACE`), Cut/Fill Leader (`LEADERCUTFILL`), Point Name Leader (`LEADERNAME`), Code Leader (`LEADERCODE`), Station Leader (`LEADERSTATION`), Label Objects (`LABELOBJECTS`, `LBL`, `LABEL`) |
 
 **The Annotate tools and the annotation system** (`docs/annotation.md`,
 2026-09-25). The Leader tool makes ONE leader entity (`LeaderGeometry`) -
@@ -164,6 +164,20 @@ program: the newest dimension to go on from, the newest ordinate's datum,
 the highest balloon, the newest hand-placed label's style. Each of these
 tools is tested against the verb line that makes the same entities.
 
+**The preset leaders** (2026-10-15, `annotate_leader_presets.cpp`; the
+owner's request for a leader showing a point's level, its difference to a
+TIN and its name, each one click on the Annotate toolbar). Six tools, one a
+preset of `LEADER preset=` (`docs/annotation.md`, "Presets"): click the point
+the note reads, then the note's place - or Enter for where `LEADER FOR`
+puts one - and the leader `LEADER #id@x,y x,y preset=...` makes is made
+through the same `resolveLeaderPreset` and `newLeader`, as one command, and
+the tool starts again. `S` (`A` for a station) names the surface (the
+alignment); the one offered is what the drawing's newest leader of the
+preset reads. A point with nothing to say is refused at the first click.
+Each is a tool of its own, not a "Leader, ..." family, so each is a toolbar
+button and not one behind a drop-down, and `--check-toolbars` is unchanged.
+Tested against the verb line (`tests/cad/tools/test_leader_preset_tools.cpp`).
+
 The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
 List), is listed and empty. The drawing system added Draw > Vertices
 (`modify_vertex.cpp`, eighteen tools gathered into a Vertices submenu of
@@ -173,6 +187,16 @@ Freehand Sketch, Revision Cloud, Spline, the Ellipse submenu, Circle Tangent
 Tangent Tangent and Arc Start End Direction); `docs/drawing.md` has their
 tables. The Survey menu's tools (`docs/survey.md`) are
 dialogs, not catalogue tools.
+
+**Terrain > Edit Surface** (`terrain_edit.cpp`, 2026-10-15) is the first
+family of another category, Terrain: Delete Triangle, Flip Edge, Add Point,
+Delete Point, Delete Triangles Inside, Add Breakline, Boundary and Hole, each
+acting on the active surface. The window hands `tools::fillToolMenus` the
+Edit Surface submenu and the Surface Edit toolbar as the category's targets,
+so the category gets no menu of its own. A tool does not edit the surface: it
+writes the `SURFACE EDIT` line, plans it with the verb's own planner and
+returns the command the verb would commit (`docs/surface_editing.md`, "In the
+window").
 
 **One command per tool session.** A tool that completes returns ONE command,
 so one undo removes the whole operation: a chain of Line segments, every copy

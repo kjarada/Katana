@@ -28,11 +28,15 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
+#include "katana/cad/road/road_object_verbs.hpp"
+#include "katana/cad/bim/bim_object.hpp" // road model
+#include "katana/cad/road/road_verbs.hpp" // road model
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
@@ -741,6 +745,66 @@ const std::vector<Tool>& tools()
                  objectSchema(Json::object()), hints(true, false, true),
                  [](Session& session, const Json&) { return oneLine(session, "LIST"); }});
 
+        // ---- leaders (docs/annotation.md, "Presets"; docs/mcp.md, "Leaders") ----
+        list.push_back(Tool{
+            "katana_leaders", "Leaders and what they say",
+            "The drawing's leaders as structured data, each with what its note says NOW - read "
+            "live off the entity its tip is on and, for a preset or a template naming them, off "
+            "the drawing's surfaces and alignments: leaders [{id, layer, tip [x, y], vertices, "
+            "target (the entity id the tip is on, or null), anchor, smart, template, labelstyle, "
+            "preset (level, surface, cutfill, name, code, details or station when the template "
+            "is that preset's), reads (the surface or alignment it reads), arrow, callout, text, "
+            "lines}], presets [{name, title, reads (target, surface or alignment), template, "
+            "tool, says}], surfaces [...], alignments [...]. What LEADER LIST JSON prints. It "
+            "reads only. To MAKE one use katana_run_commands: LEADER #<id> <x,y> "
+            "preset=level makes a leader saying the point's level (RL); preset=surface "
+            "[surface=<name>] its height above (+) or below (-) a surface; preset=cutfill the "
+            "cut or the fill to a surface; preset=name its name (point number); preset=code its "
+            "survey code; preset=details all three; preset=station [alignment=<name>] its "
+            "station and offset (left positive). A surface or alignment not named is the first "
+            "visible surface or the first alignment, said as chosen= in the reply. LEADER FOR "
+            "<ids>|SELECTION preset=... makes one to each entity in one undo step. A template "
+            "may name {surface.NAME} {dsurface.NAME} {cut.NAME} {fill.NAME} {station.NAME} "
+            "{offset.NAME} {profile.NAME} {dprofile.NAME} itself (katana_help, under Leader).",
+            objectSchema(
+                Json{{"ids",
+                      {{"type", "array"},
+                       {"items", {{"type", "integer"}, {"minimum", 1}}},
+                       {"description", "Only these leaders (by entity id); all when left out."}}},
+                     {"target",
+                      {{"type", "integer"},
+                       {"minimum", 1},
+                       {"description", "Only the leaders whose tip is on this entity."}}}}),
+            hints(true, false, true), [](Session& session, const Json& arguments) {
+                std::vector<katana::entity::EntityId> ids;
+                if (arguments.contains("ids")) {
+                    const Json& given = arguments.at("ids");
+                    if (!given.is_array()) {
+                        throw ToolRefusal{"\"ids\" must be a list of entity ids"};
+                    }
+                    for (const Json& id : given) {
+                        if (!id.is_number_integer() || id.get<long long>() < 1) {
+                            throw ToolRefusal{"every entry of \"ids\" must be a positive "
+                                              "whole number"};
+                        }
+                        ids.push_back(static_cast<katana::entity::EntityId>(id.get<long long>()));
+                    }
+                }
+                std::optional<katana::entity::EntityId> target;
+                if (arguments.contains("target")) {
+                    const Json& id = arguments.at("target");
+                    if (!id.is_number_integer() || id.get<long long>() < 1) {
+                        throw ToolRefusal{"\"target\" must be a positive whole number"};
+                    }
+                    target = static_cast<katana::entity::EntityId>(id.get<long long>());
+                }
+                // From the Document, as katana_status is: a read leaves no
+                // line in the session's history.
+                const std::string json =
+                    katana::cad::annotation::leadersJson(session.document(), ids, target);
+                return ToolReply{json, Json::parse(json)};
+            }});
+
         list.push_back(Tool{
             "katana_describe_entity", "Describe an entity",
             "Everything about one entity: its geometry, layer, attributes and properties.",
@@ -1084,6 +1148,31 @@ const std::vector<Tool>& tools()
         // (mcp_customisation.cpp).
         list.push_back(customisationTool());
 
+        // ---- road objects (docs/road_objects.md) ----
+        // Read from the Document, as the customisation is, so asking leaves
+        // no line in the history of a session nobody typed into; placing and
+        // editing are katana_run_commands' ROADOBJECT lines.
+        list.push_back(Tool{
+            "katana_road_objects", "Road objects",
+            "The drawing's road objects - safety barriers, guide posts, signs, light poles, "
+            "culverts, walls, fences and line markings placed along an alignment, along lines or "
+            "at points - as structured data: each definition as the drawing keeps it (id, kind, "
+            "placement, the parameters given), the 3D objects made of it (id, IFC class and "
+            "predefined type, layer, material, triangles, whether closed, and quantities such as "
+            "Length, Height, Count, GrossArea and GrossVolume), and what could not be made and "
+            "why. Place and edit them with katana_run_commands: ROADOBJECT ADD barrier "
+            "ALIGNMENT Main station=0 to=120 offset=4, ROADOBJECT ADD sign AT x,y,z code=R1-1, "
+            "ROADOBJECT ADD fence ALONG FROM LAYERS boundary, ROADOBJECT SET id key=value, "
+            "ROADOBJECT DELETE id; ROADOBJECT KINDS <kind> lists a kind's keys, units, ranges "
+            "and defaults (HELP ROADOBJECT).",
+            objectSchema(Json::object()), hints(true, false, true),
+            [](Session& session, const Json&) {
+                const std::string report =
+                    katana::cad::road::roadObjectsReport(session.document());
+                return ToolReply{report, Json::parse(report)};
+            }});
+        // ---- end road objects ----
+
 #if defined(KATANA_WITH_INTEROP)
         // The geoprocessing tools, from their own file (geo/mcp_geo_tools.cpp).
         for (Tool& tool : geoTools()) {
@@ -1116,6 +1205,22 @@ constexpr std::array kResources{
              "their notices, counts, linework codes, automation, colours, what is wrong with "
              "its rules, what this drawing uses of it, and what went wrong when the session "
              "started.",
+             "application/json"},
+    // ---- the drawing's surface display styles (docs/terrain.md, docs/mcp.md) ----
+    // SURFACESTYLE LIST JSON: the styles a surface is drawn in, read from the
+    // Document as the customisation is.
+    Resource{"katana://surface-styles", "Surface display styles",
+             "The drawing's surface display styles - what each shows in plan and in 3D, its "
+             "colours, contours, ramp, bands and stops - and which is the default: what "
+             "SURFACESTYLE LIST JSON gives, in the form SURFACESTYLE NEW and SET change.",
+             "application/json"},
+    // ---- road model (docs/road_design.md) ----
+    // ROADMODEL JSON: every 3D object of the road model - id, class, layer,
+    // quantities, properties - and what could not be built.
+    Resource{"katana://road-model", "Road model",
+             "The road model's 3D objects - each course, kerb and earthworks solid of every "
+             "corridor and every placed road object - with their IFC class, layer, quantities "
+             "and properties, and the problems that kept anything from being built.",
              "application/json"},
 #if defined(KATANA_WITH_INTEROP)
     // FORMATS JSON (docs/interop.md, "Formats"), as katana_formats lists it.
@@ -1541,6 +1646,17 @@ std::optional<std::string> Server::handle(std::string_view message)
                 // a line would answer the same and leave a CUSTOMISE JSON in
                 // the history of a session nobody had typed into.
                 text = katana::cad::customisationJson(session_.document());
+                mimeType = "application/json";
+            } else if (uri == "katana://surface-styles") {
+                // The Document's own form, as SURFACESTYLE LIST JSON gives it.
+                text = katana::cad::surfaceStylesToJson(session_.document().surfaceStyles());
+                mimeType = "application/json";
+            } else if (uri == "katana://road-model") {
+                // ROADMODEL JSON, read from the Document as the status is:
+                // the road model is made from the drawing's definitions, and
+                // a line would leave a ROADMODEL in a history nobody typed.
+                text = katana::cad::road::roadModelJson(
+                    *katana::cad::bim::bimModel(session_.document()));
                 mimeType = "application/json";
 #if defined(KATANA_WITH_INTEROP)
             } else if (uri == "katana://formats") {

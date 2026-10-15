@@ -69,13 +69,11 @@ TEST(GeoMenus, EveryItemTheLanesAddHasALetterOfItsOwn)
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
     QMainWindow main;
     GeoServices services;
     services.document = &document;
     services.interpreter = &interpreter;
     services.reference = &reference;
-    services.surfaces = &surfaces;
     services.scratch = std::filesystem::temp_directory_path() / "katana-geo-menus-test";
     services.makeAction = [&main](katana::qt::Icon, const QString& text, const QString& tip,
                                   const QKeySequence& shortcut, const QString& name) {

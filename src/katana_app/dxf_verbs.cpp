@@ -7,6 +7,7 @@
 
 #include "import_records.hpp"
 #include "katana/cad/annotation/export_annotation.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/dxf/import_command.hpp"
 
 namespace katana::app {
@@ -56,15 +57,16 @@ katana::core::Result<std::string> applyDxfImport(katana::cad::Document& document
     return reply;
 }
 
-katana::core::Result<katana::dxf::DxfExport> writeDxfExport(const katana::entity::Model& model,
-                                                            double annotationScale,
-                                                            const std::filesystem::path& file)
+katana::core::Result<katana::dxf::DxfExport>
+writeDxfExport(const katana::entity::Model& model, double annotationScale,
+               const std::filesystem::path& file, const katana::entity::LeaderContext& leaders)
 {
     // Labels and every dimension kind drawn out as the plan view draws them,
     // at the drawing's annotation scale (cad/annotation/export_annotation.hpp).
     katana::dxf::ExportOptions options;
     options.annotationScale = annotationScale;
-    const auto drawn = katana::cad::annotation::drawAnnotationForExport(model, annotationScale);
+    const auto drawn = katana::cad::annotation::drawAnnotationForExport(
+        model, annotationScale, katana::cad::annotation::estimatedMeasure(), leaders);
     options.drawn = &drawn;
     return katana::dxf::writeDxfFile(model, file, options);
 }
@@ -113,7 +115,8 @@ std::optional<bool> runDxfVerb(katana::cad::Document& document, std::string_view
         }
         reply = applyDxfImport(document, std::move(*imported), file, placement, placed);
     } else {
-        auto written = writeDxfExport(document.model(), document.annotationScale(), file);
+        auto written = writeDxfExport(document.model(), document.annotationScale(), file,
+                                      katana::cad::annotation::leaderContext(document));
         if (!written) {
             std::cerr << "error: " << written.error().describe() << '\n';
             return false;

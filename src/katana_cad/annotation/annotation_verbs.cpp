@@ -33,6 +33,7 @@
 #include "katana/cad/annotation/dimension_build.hpp"
 #include "katana/cad/annotation/label_layout.hpp"
 #include "katana/cad/annotation/leader_edit.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/annotation/text_layout.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/dimension_draw.hpp"
@@ -571,12 +572,19 @@ Leader    LEADER p p [p...] [text= | template= | labelstyle=] [arrow=closed|open
           time it is drawn: template="IL {prop.invert:.3f}\n{length:.2f} m" (the label
           template language), or labelstyle=name (that style's template); a line naming a
           value the entity lacks is dropped. A tip inside an outline (#id.inside) ends in a dot
+          also the drawing's surfaces and alignments at the tip: {surface.NAME} the level,
+          {dsurface.NAME} the target's z above it, {cut.NAME} {fill.NAME} (one is present),
+          {station.NAME} {offset.NAME} (left +), {profile.NAME} {dprofile.NAME}; NAME as the
+          drawing has it, blanks and all; +.Nf writes a + before a value above nothing
+          preset=level|surface|cutfill|name|code|details|station [surface=name|alignment=name]
+          a ready template (LEADER PRESETS lists them); with none named, the first visible
+          surface or the first alignment, said as chosen= in the reply
           LEADER VALUES id | #id[.point|@x,y]   every value a note there can name
-          LEADER LIST [id...] [target=id] | SET id...|SELECTION [text= template= labelstyle=
-          arrow= callout= style= paper= arrowsize= landing= tip=p at=p]
+          LEADER LIST [id...] [target=id] [JSON] | PRESETS | SET id...|SELECTION [text= template=
+          labelstyle= preset= arrow= callout= style= paper= arrowsize= landing= tip=p at=p]
           LEADER ATTACH id #id[.point|@x,y] | DETACH id...|SELECTION | FREEZE id...|SELECTION
           LEADER PROP id SET key value [type] | PROP id DELETE key   the tip entity's attribute
-          LEADER FOR id...|SELECTION [text=|template=|labelstyle=] [angle=deg length=mm ...]
+          LEADER FOR id...|SELECTION [text=|template=|labelstyle=|preset=] [angle=deg length=mm]
           a leader to each entity, one undo step (a point, mid-line, mid-arc, inside a lot)
           LEADER ALIGN id id...|SELECTION [x=] [spacing=mm]   the notes in a column
           BALLOON p p [p...] [n=number | template= | labelstyle=] [style= paper=]   a numbered
@@ -1168,7 +1176,8 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
         // this reply is where a view at this scale puts them.
         if (options.avoidCollisions) {
             options.linework = ann::labelKeepOut(model, options.scale, options.measure,
-                                                 kLayoutLineworkLimit);
+                                                 kLayoutLineworkLimit,
+                                                 ann::leaderContext(document_));
         }
         const ann::LabelLayout layout = ann::layoutLabels(model, ann::labelEntities(model), options);
         std::ostringstream out;
@@ -1636,9 +1645,9 @@ CommandInterpreter::Reply CommandInterpreter::dimension(const Tokens& args)
 namespace {
 
 constexpr const char* kLeaderUsage =
-    "LEADER p p [p...] [text= | template= | labelstyle=] [arrow= callout= style= paper= "
-    "arrowsize= landing=] | LEADER LIST | VALUES | SET | ATTACH | DETACH | FREEZE | PROP | FOR "
-    "| ALIGN (HELP says each)";
+    "LEADER p p [p...] [text= | template= | labelstyle= | preset= [surface= | alignment=]] "
+    "[arrow= callout= style= paper= arrowsize= landing=] | LEADER LIST | PRESETS | VALUES | SET "
+    "| ATTACH | DETACH | FREEZE | PROP | FOR | ALIGN (HELP says each)";
 
 // The long names and the short ones a person types.
 Result<katana::entity::ArrowHead> arrowOf(const std::string& value)
@@ -1674,12 +1683,12 @@ Result<ann::LeaderChange> leaderChangeOf(const Arguments& args)
 {
     ann::LeaderChange change;
     int given = 0;
-    for (const char* key : {"text", "template", "labelstyle", "n"}) {
+    for (const char* key : {"text", "template", "labelstyle", "n", "preset"}) {
         given += args.has(key) ? 1 : 0;
     }
     if (given > 1) {
         return makeError(ErrorCode::InvalidArgument,
-                         "a leader's note is one of text=, template= or labelstyle=");
+                         "a leader's note is one of text=, template=, labelstyle= or preset=");
     }
     for (const char* key : {"text", "n"}) {
         if (const std::string* text = args.find(key)) {
@@ -1723,8 +1732,59 @@ Result<ann::LeaderChange> leaderChangeOf(const Arguments& args)
     return change;
 }
 
+// preset= - with the surface= or alignment= it reads - made the note of
+// `change`: the preset's template for this drawing (leader_presets.hpp), so
+// a typed line and a preset tool make one leader. Null without preset=;
+// refused for surface= or alignment= without one.
+Result<std::optional<ann::ResolvedPreset>>
+presetOf(const Arguments& args, const katana::cad::Document& document, ann::LeaderChange& change)
+{
+    const std::string* word = args.find("preset");
+    const std::string* surface = args.find("surface");
+    const std::string* alignment = args.find("alignment");
+    if (word == nullptr) {
+        if (surface != nullptr || alignment != nullptr) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "surface= and alignment= say what a preset= reads: give the preset");
+        }
+        return std::optional<ann::ResolvedPreset>{};
+    }
+    auto preset = ann::leaderPresetNamed(*word);
+    if (!preset) {
+        return preset.error();
+    }
+    auto resolved = ann::resolveLeaderPreset(
+        document, *preset, surface != nullptr ? std::optional(*surface) : std::nullopt,
+        alignment != nullptr ? std::optional(*alignment) : std::nullopt);
+    if (!resolved) {
+        return resolved.error();
+    }
+    change.note = ann::LeaderNote{ann::LeaderNote::Kind::Template, resolved->templateText};
+    return std::optional(std::move(*resolved));
+}
+
+// What a reply adds for a preset made: which, what it reads, and - when
+// nobody named it - that it was chosen.
+std::string presetReply(const std::optional<ann::ResolvedPreset>& preset)
+{
+    if (!preset) {
+        return {};
+    }
+    const ann::LeaderPresetInfo& info = ann::presetInfo(preset->preset);
+    std::string reply = " preset=" + std::string(info.word);
+    if (!preset->reads.empty()) {
+        reply += (info.reads == ann::PresetReads::Surface ? " surface=" : " alignment=") +
+                 field(preset->reads);
+    }
+    if (!preset->chosen.empty()) {
+        reply += " chosen=" + field(preset->chosen);
+    }
+    return reply;
+}
+
 // One leader as a record: where it is, what it is on, what it says.
-std::string describeLeader(const katana::entity::Model& model, const Entity& entity)
+std::string describeLeader(const katana::entity::Model& model, const Entity& entity,
+                           const katana::entity::LeaderContext& context)
 {
     const auto& leader = std::get<katana::entity::LeaderGeometry>(entity.geometry);
     const Point2& tip = leader.vertices.front();
@@ -1738,13 +1798,22 @@ std::string describeLeader(const katana::entity::Model& model, const Entity& ent
     line << " smart=" << (katana::entity::isSmart(leader) ? "yes" : "no");
     if (leader.fields) {
         line << " template=" << field(leader.text);
+        // A preset's template says which: what the window shows it as.
+        if (const auto preset = ann::recognisePreset(leader.text)) {
+            const ann::LeaderPresetInfo& info = ann::presetInfo(preset->preset);
+            line << " preset=" << info.word;
+            if (!preset->reads.empty()) {
+                line << (info.reads == ann::PresetReads::Surface ? " surface=" : " alignment=")
+                     << field(preset->reads);
+            }
+        }
     }
     if (!leader.labelStyle.empty()) {
         line << " labelstyle=" << field(leader.labelStyle);
     }
     line << " arrow=" << katana::entity::toString(leader.arrow)
          << " callout=" << katana::entity::toString(leader.callout)
-         << " text=" << field(ann::leaderSays(model, leader));
+         << " text=" << field(ann::leaderSays(model, leader, context));
     return line.str();
 }
 
@@ -1798,18 +1867,44 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     const bool balloon = verb == "BALLOON";
     const auto& model = document_.model();
     const std::string action = args.empty() ? std::string() : upperCase(args.front());
+    // The drawing's surfaces and alignments, which a note may read: no verb
+    // here changes them, so one made now serves the whole line.
+    const katana::entity::LeaderContext context = ann::leaderContext(document_);
     // Runs `command` when there is one: an edit that changes nothing is no step.
     const auto run = [&](katana::commands::CommandPtr command) -> Status {
         return command ? document_.execute(std::move(command)) : Status{};
     };
+
+    if (!balloon && action == "PRESETS") {
+        if (args.size() != 1) {
+            return usageOf("LEADER PRESETS");
+        }
+        std::string out;
+        for (const ann::LeaderPresetInfo& info : ann::leaderPresets()) {
+            out += out.empty() ? "" : "\n";
+            out += "preset=" + std::string(info.word) + " title=" + field(info.title) +
+                   " reads=" +
+                   (info.reads == ann::PresetReads::Target
+                        ? "target"
+                        : (info.reads == ann::PresetReads::Surface ? "surface" : "alignment")) +
+                   " template=" + field(info.pattern) +
+                   " tool=" + (info.tool.empty() ? std::string("none") : std::string(info.tool));
+        }
+        return out;
+    }
 
     if (!balloon && action == "LIST") {
         auto parsed = splitArguments(args, 1, {"target"});
         if (!parsed) {
             return parsed.error();
         }
+        bool json = false;
         std::set<EntityId> only;
         for (const std::string& token : parsed->positional) {
+            if (upperCase(token) == "JSON") {
+                json = true;
+                continue;
+            }
             auto id = idOf(token);
             if (!id) {
                 return id.error();
@@ -1824,6 +1919,10 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             }
             target = *id;
         }
+        if (json) {
+            return ann::leadersJson(document_, std::vector<EntityId>(only.begin(), only.end()),
+                                    target);
+        }
         std::string out;
         model.entities.forEach([&](const Entity& entity) {
             const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
@@ -1832,7 +1931,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
                 return;
             }
             out += out.empty() ? "" : "\n";
-            out += describeLeader(model, entity);
+            out += describeLeader(model, entity, context);
         });
         return out;
     }
@@ -1853,7 +1952,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
                                  "that leader's tip is on no entity (LEADER ATTACH puts it on one)",
                                  "id=" + std::to_string(named->id));
             }
-            auto read = ann::leaderTargetValues(model, leader);
+            auto read = ann::leaderTargetValues(model, leader, context);
             if (!read) {
                 return makeError(ErrorCode::NotFound, "the entity the leader's tip is on is gone",
                                  "id=" + std::to_string(leader.tipRef.entity));
@@ -1868,7 +1967,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             }
             const Entity* target = model.entities.find(place->ref.entity);
             values = katana::entity::anchorValues(*target, place->ref, place->point,
-                                                  codePropertyCandidates());
+                                                  codePropertyCandidates(), context);
             out << "target=" << target->id;
         }
         out << " type=" << values.at("type").text;
@@ -1880,8 +1979,9 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
 
     if (!balloon && action == "SET") {
         auto parsed = splitArguments(args, 1,
-                                     {"text", "template", "labelstyle", "arrow", "callout", "style",
-                                      "paper", "arrowsize", "landing", "tip", "at"});
+                                     {"text", "template", "labelstyle", "preset", "surface",
+                                      "alignment", "arrow", "callout", "style", "paper",
+                                      "arrowsize", "landing", "tip", "at"});
         if (!parsed) {
             return parsed.error();
         }
@@ -1897,6 +1997,10 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         if (!change) {
             return change.error();
         }
+        auto preset = presetOf(*parsed, document_, *change);
+        if (!preset) {
+            return preset.error();
+        }
         if (const std::string* value = parsed->find("tip")) {
             auto point = parseAnchoredPoint(*value);
             if (!point) {
@@ -1911,17 +2015,17 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             }
             change->hang = *point;
         }
-        auto command = ann::changeLeaders(model, *ids, *change);
+        auto command = ann::changeLeaders(model, *ids, *change, context);
         if (!command) {
             return command.error();
         }
         if (auto status = run(std::move(*command)); !status) {
             return status.error();
         }
-        std::string out = "updated leaders=" + std::to_string(ids->size());
+        std::string out = "updated leaders=" + std::to_string(ids->size()) + presetReply(*preset);
         for (const EntityId id : *ids) {
             if (const Entity* entity = model.entities.find(id)) {
-                out += "\n" + describeLeader(model, *entity);
+                out += "\n" + describeLeader(model, *entity, context);
             }
         }
         return out;
@@ -1939,7 +2043,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         if (!place) {
             return place.error();
         }
-        auto command = ann::attachLeader(model, ids->front(), *place);
+        auto command = ann::attachLeader(model, ids->front(), *place, context);
         if (!command) {
             return makeError(command.error().code, command.error().message,
                              command.error().context.empty() ? args[2] : command.error().context);
@@ -1947,7 +2051,8 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         if (auto status = run(std::move(*command)); !status) {
             return status.error();
         }
-        return "attached leader " + describeLeader(model, *model.entities.find(ids->front()));
+        return "attached leader " +
+               describeLeader(model, *model.entities.find(ids->front()), context);
     }
 
     if (!balloon && (action == "DETACH" || action == "FREEZE")) {
@@ -1960,7 +2065,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         if (!ids) {
             return ids.error();
         }
-        auto release = ann::releaseLeaders(model, *ids, detach);
+        auto release = ann::releaseLeaders(model, *ids, detach, context);
         if (!release) {
             return release.error();
         }
@@ -2008,7 +2113,8 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         const auto& leader =
             std::get<katana::entity::LeaderGeometry>(model.entities.find(id)->geometry);
         return "leader=" + std::to_string(id) + " target=" + std::to_string(leader.tipRef.entity) +
-               " property=" + field(key) + " text=" + field(ann::leaderSays(model, leader));
+               " property=" + field(key) +
+               " text=" + field(ann::leaderSays(model, leader, context));
     }
 
     if (!balloon && action == "ALIGN") {
@@ -2088,8 +2194,9 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
 
     if (action == "FOR") {
         auto parsed = splitArguments(args, 1,
-                                     {"text", "template", "labelstyle", "n", "arrow", "callout",
-                                      "style", "paper", "arrowsize", "landing", "angle", "length"});
+                                     {"text", "template", "labelstyle", "n", "preset", "surface",
+                                      "alignment", "arrow", "callout", "style", "paper",
+                                      "arrowsize", "landing", "angle", "length"});
         if (!parsed) {
             return parsed.error();
         }
@@ -2097,7 +2204,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             return usageOf(balloon ? "BALLOON FOR id [id...] | SELECTION [n= template= "
                                      "labelstyle= angle=deg length=mm ...]"
                                    : "LEADER FOR id [id...] | SELECTION [text= template= "
-                                     "labelstyle= angle=deg length=mm ...]");
+                                     "labelstyle= preset= angle=deg length=mm ...]");
         }
         auto targets = idsOf(parsed->positional, document_, false);
         if (!targets) {
@@ -2106,6 +2213,10 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         auto change = leaderChangeOf(*parsed);
         if (!change) {
             return change.error();
+        }
+        auto preset = presetOf(*parsed, document_, *change);
+        if (!preset) {
+            return preset.error();
         }
         ann::LeadersForOptions options;
         options.change = std::move(*change);
@@ -2126,7 +2237,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             options.length = *number;
         }
         auto made = ann::leadersFor(model, *targets, options, document_.annotationScale(),
-                                    document_.currentAttributes());
+                                    document_.currentAttributes(), context);
         if (!made) {
             return made.error();
         }
@@ -2136,13 +2247,14 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         const auto ids = document_.lastCreatedEntities();
         return std::string("created ") + (balloon ? "balloons=" : "leaders=") +
                std::to_string(ids.size()) + " ids=" + idList(ids) +
-               " skipped=" + std::to_string(made->skipped);
+               " skipped=" + std::to_string(made->skipped) + presetReply(*preset);
     }
 
     // Making one: LEADER p p [p...] / BALLOON p p [p...].
     auto parsed = splitArguments(args, 0,
-                                 {"text", "template", "labelstyle", "arrow", "callout", "style",
-                                  "paper", "arrowsize", "landing", "n"});
+                                 {"text", "template", "labelstyle", "preset", "surface",
+                                  "alignment", "arrow", "callout", "style", "paper", "arrowsize",
+                                  "landing", "n"});
     if (!parsed) {
         return parsed.error();
     }
@@ -2163,7 +2275,11 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     if (!change) {
         return change.error();
     }
-    auto made = ann::newLeader(model, points, *change, balloon);
+    auto preset = presetOf(*parsed, document_, *change);
+    if (!preset) {
+        return preset.error();
+    }
+    auto made = ann::newLeader(model, points, *change, balloon, context);
     if (!made) {
         return made.error();
     }
@@ -2186,7 +2302,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     }
     const auto ids = document_.lastCreatedEntities();
     std::string reply = std::string(balloon ? "created balloon id=" : "created leader id=") +
-                        idList(ids) + " text=" + field(ann::leaderSays(model, leader)) +
+                        idList(ids) + " text=" + field(ann::leaderSays(model, leader, context)) +
                         " associative=" + (leader.tipRef.associated() ? "yes" : "no");
     if (leader.tipRef.associated()) {
         reply += " target=" + std::to_string(leader.tipRef.entity) +
@@ -2198,7 +2314,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     if (!leader.labelStyle.empty()) {
         reply += " labelstyle=" + field(leader.labelStyle);
     }
-    return reply;
+    return reply + presetReply(*preset);
 }
 
 } // namespace katana::cad

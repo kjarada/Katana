@@ -75,8 +75,9 @@ class GeoExecutor : public ::testing::Test {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    geo::Context context{document, interpreter, reference, surfaces, scratch.path(), {}, {}};
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
+    geo::Context context{document, interpreter, reference, scratch.path(), {}, {}};
 
     katana::core::Result<std::string> run(const std::string& line)
     {
@@ -572,10 +573,12 @@ TEST_F(GeoExecutor, ASurfaceIsSampledAtItsCellCentres)
     auto tin = katana::terrain::TinSurface::create(
         {{0, 0, 100}, {40, 0, 102}, {40, 30, 102}, {0, 30, 100}}, {{0, 1, 2}, {0, 2, 3}});
     ASSERT_TRUE(tin.ok());
-    ASSERT_TRUE(surfaces.add({"ground", std::make_shared<const katana::terrain::TinSurface>(
-                                            std::move(tin).value()),
-                              "test"})
+    katana::terrain::SurfaceStore store;
+    ASSERT_TRUE(store.add({"ground", std::make_shared<const katana::terrain::TinSurface>(
+                                         std::move(tin).value()),
+                           "test"})
                     .ok());
+    ASSERT_TRUE(document.setSurfaces(std::move(store)).ok());
     auto reply = run("GDAL raster slope --unit=percent FROM SURFACE ground CELL 1 TO REFERENCE s");
     ASSERT_TRUE(reply.ok()) << reply.error().describe();
     EXPECT_NE(reply->find("input arg=input source=surface name=ground cell=1"), std::string::npos);

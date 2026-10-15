@@ -13,6 +13,10 @@ namespace katana::app::geo {
 // surface_verbs.cpp (terrain_verbs.hpp).
 katana::core::Result<Prepared> prepareSurface(Context& context, const Tokens& tokens,
                                               std::string_view line);
+// Only those five words (and SURFACE alone, for its usage): every other
+// SURFACE line - RENAME, STYLE, SHOW, HIDE, COPY, the edits, the volumes' -
+// is the interpreter's (cad/terrain/surface_verbs.hpp, docs/terrain.md).
+bool takesSurface(const Tokens& tokens);
 // ---- T1: CONTOUR ----
 // contour_verbs.cpp (terrain_verbs.hpp).
 katana::core::Result<Prepared> prepareContour(Context& context, const Tokens& tokens,
@@ -117,14 +121,15 @@ const std::vector<VerbEntry>& verbTable()
         // ---- T0: Terrain session ----
         rows.push_back(
             {"SURFACE", "", &prepareSurface,
-             "SURFACE LIST [JSON] | INFO <name> | REMOVE <name>  the session's surfaces\n"
+             "SURFACE LIST [JSON] | INFO <name> | REMOVE <name>  the drawing's surfaces\n"
              "          SURFACE FROM RASTER <id|name> | FILE <path> [max=<points>]\n"
              "          [AREA x0,y0,x1,y1] | CLOUD <id|name> [classes=2,...] [max=<points>]\n"
              "          | <scope>  [NAME <n>] [PREVIEW]  triangulate a surface from a DEM's\n"
              "          true values, a cloud's ground or the drawing's levelled points and lines\n"
              "          SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog]\n"
              "          [format=<driver>] [co=K=V]... [OVERWRITE] [PREVIEW]  write it as a DEM\n"
-             "          (tiled, compressed)"});
+             "          (tiled, compressed)",
+             &takesSurface});
         // ---- T1: CONTOUR ----
         rows.push_back(
             {"CONTOUR", "", &prepareContour,

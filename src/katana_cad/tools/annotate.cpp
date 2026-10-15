@@ -181,6 +181,93 @@ void addAnnotateTools(ToolCatalog& catalog, const Report& report)
                "balloon: pick the tip and where the circle sits, then press Enter.",
         .make = annotate::makeBalloonTool,
     }));
+    // The preset leaders (annotate_leader_presets.cpp): one tool a preset, so
+    // each is one click on the toolbar - not a "Leader, ..." family, whose
+    // toolbar button hides all but the first behind a drop-down. Each makes
+    // what LEADER #id@x,y x,y preset=... makes; the word is the preset's.
+    // The names leave the Annotate menu's letters room: each has one of its
+    // own (V, U, F, P, O, S) and Text keeps T, not the X Edit Text takes
+    // (tools/tool_menus.cpp, assignMnemonics; annotation_workbench.cpp).
+    const auto preset = [](katana::cad::annotation::LeaderPreset which) {
+        return [which](const ToolContext& context) {
+            return annotate::makePresetLeaderTool(context, which);
+        };
+    };
+    using katana::cad::annotation::LeaderPreset;
+    report(catalog.add(ToolInfo{
+        .id = "annotate.leader.level",
+        .name = "Level Leader",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 3,
+        .aliases = {"LEADERLEVEL"},
+        .shortcut = {},
+        .tip = "A leader that says a point's level, RL to the millimetre, read live off the point: "
+               "click the point, then where the note goes (LEADER preset=level).",
+        .make = preset(LeaderPreset::Level),
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.leader.surface",
+        .name = "Surface Difference Leader",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 4,
+        .aliases = {"LEADERSURFACE"},
+        .shortcut = {},
+        .tip = "A leader that says how far a point is above (+) or below (-) a surface: click the "
+               "point, then where the note goes; S chooses the surface (LEADER preset=surface).",
+        .make = preset(LeaderPreset::Surface),
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.leader.cutfill",
+        .name = "Cut/Fill Leader",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 5,
+        .aliases = {"LEADERCUTFILL"},
+        .shortcut = {},
+        .tip = "A leader that says the cut down to a point below a surface, or the fill up to one "
+               "above it: click the point, then where the note goes; S chooses the surface "
+               "(LEADER preset=cutfill).",
+        .make = preset(LeaderPreset::CutFill),
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.leader.name",
+        .name = "Point Name Leader",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 6,
+        .aliases = {"LEADERNAME"},
+        .shortcut = {},
+        .tip = "A leader that says a point's name (its point number): click the point, then where "
+               "the note goes (LEADER preset=name).",
+        .make = preset(LeaderPreset::Name),
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.leader.code",
+        .name = "Code Leader",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 7,
+        .aliases = {"LEADERCODE"},
+        .shortcut = {},
+        .tip = "A leader that says the survey code of what it points at: click the point or the "
+               "line, then where the note goes (LEADER preset=code).",
+        .make = preset(LeaderPreset::Code),
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.leader.station",
+        .name = "Station Leader",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 8,
+        .aliases = {"LEADERSTATION"},
+        .shortcut = {},
+        .tip = "A leader that says the station along an alignment and the offset from it, left "
+               "positive: click the point, then where the note goes; A chooses the alignment "
+               "(LEADER preset=station).",
+        .make = preset(LeaderPreset::Station),
+    }));
     // A bare LABEL starts it, as a bare LEADER starts the Leader tool; with
     // arguments LABEL is the interpreter's verb, which makes the same labels
     // (annotate_label.cpp).

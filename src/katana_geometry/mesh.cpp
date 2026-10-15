@@ -5,8 +5,29 @@
 
 #include "katana/geometry/point_batch.hpp"
 #include "katana/geometry/polygon.hpp"
+#include "katana/math/summation.hpp"
 
 namespace katana::geometry {
+
+double meshVolume(const TriangleMesh& mesh)
+{
+    if (mesh.vertices.empty()) {
+        return 0.0;
+    }
+    const Point3 origin = mesh.vertices.front();
+    katana::math::CompensatedSum volume;
+    for (const auto& face : mesh.faces) {
+        if (face[0] >= mesh.vertices.size() || face[1] >= mesh.vertices.size() ||
+            face[2] >= mesh.vertices.size()) {
+            continue;
+        }
+        const Point3 a = mesh.vertices[face[0]] - origin;
+        const Point3 b = mesh.vertices[face[1]] - origin;
+        const Point3 c = mesh.vertices[face[2]] - origin;
+        volume.add(a.dot(b.cross(c)) / 6.0);
+    }
+    return volume.value();
+}
 
 using katana::core::ErrorCode;
 using katana::core::makeError;

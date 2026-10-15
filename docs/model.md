@@ -219,7 +219,7 @@ second.)
 history and its reference: each entry's comment says why the change was made
 and why no existing row needed repairing. The file is marked as a Katana
 project by `PRAGMA application_id` ("KTNA") and versioned by
-`PRAGMA user_version`. At schema 12 it holds nineteen tables:
+`PRAGMA user_version`. At schema 13 it holds twenty tables:
 
 | Migration | Adds |
 |---|---|
@@ -235,6 +235,7 @@ project by `PRAGMA application_id` ("KTNA") and versioned by
 | 10 | `survey_jobs` and `survey_job_files`: each imported field file kept whole, with its settings, report and the entities it made |
 | 11 | `text_styles`, `label_styles` (name, kind and the rest as versioned JSON) and `label_rules`, and a dimension style's `paper_sized` (`docs/annotation.md`, "Stored with the project") |
 | 12 | no table: the drawing system's geometry kinds - curve polyline 9, ellipse 10, spline 11 - in the existing geometry blob (`docs/drawing.md`). The version moves so a schema-11 build refuses the project up front as one from a newer Katana ("schema=12 supported=11") rather than failing row by row with "unknown geometry kind in blob". Every project a schema-12 build opens is raised to 12, whether or not it holds one of the kinds; writing 11 or 12 by what a save contained was rejected as a second versioning rule beside `kMigrations` |
+| 13 | `surfaces`: the drawing's TIN surfaces (`storage::SurfaceRecord` - name, source, display style, shown, and the surface as one BLOB in the terrain layer's own versioned form, `include/katana/terrain/tin_codec.hpp`, which storage keeps without reading, since it may not see the terrain layer). An ordinary rowid table, as the survey jobs' is, for rows of megabytes; saved and loaded in the one transaction, refused before a byte is written when a load could not give it back (no name, no bytes, two of one name without case, over `ProjectStore::kMaxSurfaceBytes`). A project from before it opens with none. Files in the project's `terrain/` folder were rejected: they would be written outside the save's one transaction (`docs/terrain.md`, "Surfaces in the drawing") |
 
 A new table or column is a new entry at the end, never an edit of a released
 one, and each default is chosen so that a project written before it draws
@@ -247,7 +248,16 @@ empty. A key this build does not read is carried in
 `ProjectMetadata::unknownKeys` on load and written back as it was, and `save`
 writes the keys it knows with `INSERT OR REPLACE` - so opening and saving a
 project in an OLDER build no longer strips what a newer one recorded, and
-Save As keeps it too. `save` refuses an unknown key that names a field this
+Save As keeps it too. The drawing keeps data of its own the same way, as text
+storage does not read - the sheets, the annotation scale, the surface styles,
+the road templates, corridors and road objects - and those keys are listed in
+`kDrawingMetadataKeys`: one the drawing no longer writes was removed by this
+build, and `save` deletes its row. Only REPLACEing let an emptied sheet set
+or a reset annotation scale come back from the last save when the project
+was opened again
+(`ProjectStoreRoundTrip.AKeyOfTheDrawingsOwnThatItStopsWritingIsGoneAfterTheNextSave`).
+A module that adds such a key adds it to that list; a key in neither list is
+a newer build's and is never deleted. `save` refuses an unknown key that names a field this
 build writes itself, rather than let it overwrite the field. The keys this
 build reads are listed once, in `kMetadataKeys` (`project_store.cpp`); a key
 added to that list and not to the writer would be read back as unknown, or

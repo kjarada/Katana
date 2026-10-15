@@ -1214,6 +1214,23 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "IMPORT \"${_ifc}\" LOCAL TAKECRS")
     set_tests_properties(cli.ifc_takecrs_with_local_is_refused PROPERTIES WILL_FAIL TRUE)
+    # ifc: the road model (docs/ifc.md, "Road model") goes out with the drawing;
+    # NOROADMODEL - File > Export IFC's "Road model" box - leaves it out, and is
+    # refused given twice. The scenario has no corridor, so the reply has no
+    # road record and is the scenario's own.
+    add_test(NAME cli.ifc_noroadmodel_is_a_word_of_the_export_line
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL PREVIEW")
+    set_tests_properties(cli.ifc_noroadmodel_is_a_word_of_the_export_line PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "ifc previewed file=\"cli roadless\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+\ncounts alignments=1 services=0 segments=0 segments_3d=0 located_points=0 entities_written=5 entities_skipped=0 surfaces=0\nclass name="
+        FAIL_REGULAR_EXPRESSION "road elements=")
+    add_test(NAME cli.ifc_noroadmodel_given_twice_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL NOROADMODEL")
+    set_tests_properties(cli.ifc_noroadmodel_given_twice_is_refused PROPERTIES WILL_FAIL TRUE)
 
     # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
     # EXPRESS rules, no proxy, and the alignment's geometry against its
@@ -2249,4 +2266,18 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0 preview=yes${_eol}string name=BT4 key=BT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"?${_eol}string name=BU3 key=BU\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"?${_eol}string name=KB2 key=KB\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"?${_eol}linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0${_eol}string name=BT4 key=BT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"? entity=11${_eol}string name=BU3 key=BU\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"? entity=12${_eol}string name=KB2 key=KB\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"? entity=13${_eol}13 entities${_eol}.*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=buildings/outline/wall +vertices=4 +closed +length=30 +area=50${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=7 +open +length=31[.]05828[0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# ---- road objects (docs/road_objects.md) ----
+# The ROADOBJECT verbs' cli.* tests, in their own file beside this one, so the
+# family's tests are kept with each other. Included here, where katana_cli and
+# the test variables are.
+if(KATANA_BUILD_TESTS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/road_objects_cli.cmake")
+endif()
+# ---- end road objects ----
+# ---- road model (docs/road_design.md) ----
+# The road verbs' cli.* tests, in road_cli.cmake beside this one.
+if(KATANA_BUILD_TESTS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/road_cli.cmake")
 endif()

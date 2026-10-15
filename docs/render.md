@@ -10,7 +10,8 @@ code comments say the same things next to the lines they govern.
 ## What draws what
 
 * The **plan view** (`katana_qt/viewport_widget.cpp`) paints with `QPainter`
-  straight from the model. It is not on the DrawList path.
+  straight from the model, and the drawing's surfaces in their styles
+  (`docs/surface_display.md`). It is not on the DrawList path.
 * The **3D and Elevation views** are docks of the view workspace
   (`katana_qt/view_workspace.cpp`), each a `RenderViewWidget`. The widget owns a
   camera (in the view's `cad::ViewState`) and a framebuffer and nothing else:
@@ -668,7 +669,16 @@ the z the build uses; the widget frames what it built.
 * **One elevation ramp** spans the lowest to the highest of every visible
   surface coloured by elevation, so a height is one colour everywhere; the
   widget draws a small legend of it with its two heights
-  (`elevationRampColor` is what both use).
+  (`elevationRampColor` is what both use). Its colours, and the slope
+  colours, are the ramp table's (`src/katana_cad/terrain/surface_ramps.cpp`):
+  the elevation ramp to the bit, the slope colours at their stops.
+* **A surface in a display style** (`SceneSurface::display`) is coloured by
+  its style - smooth or banded elevation, stops, slope, aspect or flat, on
+  any ramp of the table, its range open ends taken from the one ramp - and
+  shaded as the style says; banded faces are cut at their band edges. The
+  view's legend is then the style's. The rules and the measurements are
+  `docs/surface_display.md`; a surface with no style is drawn exactly as
+  above.
 * Surface vertices are **shared** (one per TIN vertex, one transform each);
   slope colouring, a property of the facet, keeps private copies.
 

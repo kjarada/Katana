@@ -12,6 +12,8 @@ katana_add_test_suite(app
         test_session.cpp
         # SURVEY IMPORT's SETTINGS and SET, read on the document they leave.
         test_survey_verbs.cpp
+        # The road model as the IFC export takes it (ifc_verbs.hpp, roadModelInput).
+        test_ifc_verbs.cpp
         ${_app_update_tests}
 )
 # The sample GIS data an import is tried on; the survey fixtures, the

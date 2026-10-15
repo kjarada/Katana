@@ -22,6 +22,7 @@
 #include "katana/cad/customisation_state.hpp"
 #include "katana/cad/drawing/drafting.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/cad/terrain/surface_style.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/error.hpp"
@@ -31,10 +32,25 @@
 #include "katana/entity/survey_map.hpp"
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/storage/project_store.hpp"
+#include "katana/terrain/surface_store.hpp"
 
 namespace katana::cad::plotting {
 struct SheetSet;
 }
+// Road objects (docs/road_objects.md): see Document::roadObjects.
+namespace katana::cad::road {
+struct RoadObjectSet;
+}
+
+// ---- road model (docs/road_design.md) ----
+namespace katana::cad::road {
+struct RoadTemplateSet;
+struct CorridorSet;
+} // namespace katana::cad::road
+namespace katana::cad::bim {
+class BimCacheAccess;
+}
+// ---- end road model ----
 
 namespace katana::cad {
 
@@ -111,6 +127,15 @@ struct DocumentChange {
         // listener that shows the origin tests those two bits as well, or
         // compares customisationGeneration().
         Customisation = 1u << 18,
+        // The drawing's surfaces (Document::surfaces): one added, removed,
+        // edited, renamed, restyled, shown or hidden.
+        Surfaces = 1u << 19,
+        // The surface display styles (Document::surfaceStyles).
+        SurfaceStyles = 1u << 20,
+        // The road model's definitions - road templates, corridors, objects
+        // placed along an alignment (cad/bim/bim_object.hpp) - whose 3D
+        // objects are made again from them.
+        RoadModel = 1u << 21,
     };
 
     // Every table bit.
@@ -118,9 +143,11 @@ struct DocumentChange {
                                              HatchPatterns | Alignments | PropertyDefinitions |
                                              AnnotationStyles;
     // What a drawing is DRAWN from - its entities, the tables that say how
-    // they look, the customisation - as against what is only highlighted
-    // (the selection) or only bookkeeping (history, saved, metadata).
-    static constexpr std::uint32_t kDrawing = Entities | kTables | StyleLibrary | SurveyMap;
+    // they look, the customisation, its surfaces and road model - as against
+    // what is only highlighted (the selection) or only bookkeeping (history,
+    // saved, metadata).
+    static constexpr std::uint32_t kDrawing =
+        Entities | kTables | StyleLibrary | SurveyMap | Surfaces | SurfaceStyles | RoadModel;
 
     std::uint32_t parts = 0;
     // The entity-level detail of a command, undo or redo, in the order the
@@ -425,6 +452,91 @@ class Document {
     // isModified() honest the way any other command does.
     [[nodiscard]] katana::core::Status setSheetSet(const plotting::SheetSet& sheets,
                                                    std::string stepName = "SET_SHEETS");
+    // ---- surfaces (docs/terrain.md, "Surfaces in the drawing") -----------------
+    //
+    // The drawing's TIN surfaces, by name: made by SURFACE FROM, an import
+    // or a corridor, edited by the surface edits, read by the volumes, the
+    // views and a leader's surface values, and saved with the project. A
+    // change is made on a COPY of the store - a copy costs a pointer per
+    // surface, every surface being shared and immutable - and committed
+    // here as ONE undoable step named `stepName`; undo puts the exact store
+    // before it back. Committing a store equal to the current one records
+    // nothing. Cleared by newDocument(), replaced by open().
+    [[nodiscard]] const katana::terrain::SurfaceStore& surfaces() const;
+    // Counts every change to the surfaces, undo and redo included, and never
+    // goes back: a view compares it with the generation it last drew.
+    [[nodiscard]] std::uint64_t surfacesGeneration() const;
+    // InvalidArgument for a surface whose style is not in surfaceStyles().
+    [[nodiscard]] katana::core::Status setSurfaces(katana::terrain::SurfaceStore surfaces,
+                                                   std::string stepName = "SET_SURFACES");
+    // The same change as a command, for a step that does more besides - an
+    // IMPORT that brings entities and surfaces is ONE undo step. Null when
+    // `surfaces` equals the current store. Const: it builds the command and
+    // changes nothing until the command is executed through execute(), so a
+    // tool holding a const Document can make one.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    surfacesCommand(katana::terrain::SurfaceStore surfaces,
+                    std::string stepName = "SET_SURFACES") const;
+
+    // The display styles (cad/terrain/surface_style.hpp): the project's, or
+    // builtInSurfaceStyles() when it saved none. Replaced as ONE undoable
+    // step; checkSurfaceStyle refuses a style that cannot be drawn, and a
+    // style a surface uses cannot be removed (InvalidArgument naming it).
+    [[nodiscard]] const SurfaceStyleSet& surfaceStyles() const;
+    [[nodiscard]] katana::core::Status setSurfaceStyles(SurfaceStyleSet styles,
+                                                        std::string stepName = "SET_SURFACE_STYLES");
+    // Counts every change to the styles, undo and redo included, and never
+    // goes back: what a view's cache of a style's drawing keys on.
+    [[nodiscard]] std::uint64_t surfaceStylesGeneration() const;
+    // Why the project's styles could not be read when it was opened - a
+    // newer Katana's (Unsupported), or damaged (ParseFailure) - while the
+    // built-ins stand in for them; success otherwise. Styles a newer Katana
+    // wrote are kept as they were and written back by a save, and
+    // setSurfaceStyles refuses (CommandRejected) to overwrite them; damaged
+    // ones are replaced by the first set given.
+    [[nodiscard]] katana::core::Status surfaceStylesStatus() const;
+    // The surfaces and the styles as ONE undoable step, checked together:
+    // what renaming a style a surface uses needs, the style renamed in the
+    // set and in every surface that names it at once.
+    [[nodiscard]] katana::core::Status setSurfacesAndStyles(katana::terrain::SurfaceStore surfaces,
+                                                            SurfaceStyleSet styles,
+                                                            std::string stepName);
+
+    // ---- the road model (docs/road_design.md) -----------------------------------
+    //
+    // The drawing's road templates and corridors, each kept as versioned JSON
+    // under a project metadata key of its own ("road_templates",
+    // "corridors"), as the sheets are - the storage layer carries a key it
+    // does not read, so no schema change - and parsed once per change. Empty
+    // when the project has none, or when what it has cannot be read; the
+    // status then says why, and the setters refuse to overwrite what a newer
+    // Katana wrote. Each is replaced as ONE undoable step named `stepName`;
+    // InvalidArgument for a set checkTemplate or checkCorridor refuses, or
+    // two of one name. A set equal to the current one records nothing.
+    //
+    // Every change of the road model's keys - these two and the placed
+    // objects' "road_objects" - is reported as DocumentChange::RoadModel with
+    // the step that made it (src/katana_cad/road/road_document.cpp).
+    [[nodiscard]] const road::RoadTemplateSet& roadTemplates() const;
+    [[nodiscard]] katana::core::Status roadTemplatesStatus() const;
+    [[nodiscard]] katana::core::Status
+    setRoadTemplates(const road::RoadTemplateSet& templates,
+                     std::string stepName = "SET_ROAD_TEMPLATES");
+    // As a command, for a step that does more besides (a template renamed
+    // with the corridors that name it); null when nothing changes.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    roadTemplatesCommand(const road::RoadTemplateSet& templates,
+                         std::string stepName = "SET_ROAD_TEMPLATES");
+    [[nodiscard]] const road::CorridorSet& corridors() const;
+    [[nodiscard]] katana::core::Status corridorsStatus() const;
+    [[nodiscard]] katana::core::Status setCorridors(const road::CorridorSet& corridors,
+                                                    std::string stepName = "SET_CORRIDORS");
+    // The same change as a command, for a step that does more besides -
+    // CORRIDOR NEW makes the layers its objects are shown on in the same
+    // step. Null when `corridors` equals the current set.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    corridorsCommand(const road::CorridorSet& corridors, std::string stepName = "SET_CORRIDORS");
+
     // ---- annotation (docs/annotation.md) ---------------------------------------
     //
     // The scale the plan view draws paper-sized annotation at: text, labels,
@@ -454,6 +566,27 @@ class Document {
     [[nodiscard]] const katana::storage::SurveyJob* findSurveyJob(std::string_view id) const;
     // Counts every change to the job list, for a panel that lists the jobs.
     [[nodiscard]] std::uint64_t surveyJobsGeneration() const { return surveyJobsGeneration_; }
+
+    // ---- road objects (docs/road_objects.md) ------------------------------------
+    //
+    // The objects placed along an alignment or a line - barriers, guide
+    // posts, signs, light poles, culverts, walls, fences, line markings
+    // (cad/road/road_objects.hpp) - kept as versioned JSON under the metadata
+    // key "road_objects", the sheets' pattern: carried by the storage layer
+    // as a key it does not read, parsed once per change. Their 3D objects are
+    // made from them every time (bim::placedObjects). An empty set when there
+    // are none or they cannot be read; roadObjectsStatus() then says why, and
+    // setRoadObjects refuses to overwrite objects a newer Katana wrote.
+    // Kept in src/katana_cad/road/road_object_store.cpp.
+    [[nodiscard]] const road::RoadObjectSet& roadObjects() const;
+    [[nodiscard]] katana::core::Status roadObjectsStatus() const;
+    // Replaces the set as ONE undoable step named `stepName`, which also
+    // makes any layer an object names that the drawing lacks; the step, its
+    // undo and its redo are reported as DocumentChange::RoadModel, as every
+    // change of a road-model key is. A set equal to the current one records
+    // nothing.
+    [[nodiscard]] katana::core::Status setRoadObjects(const road::RoadObjectSet& objects,
+                                                      std::string stepName = "SET_ROAD_OBJECTS");
 
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
@@ -493,6 +626,29 @@ class Document {
     void rememberTables();
     // True when it removed anything from the selection.
     bool pruneSelection();
+    // ---- the surfaces' share of new, open and save (surface_document.cpp) ----
+    //
+    // The surfaces and their styles as one value: what open() reads out of a
+    // project and checks before it installs anything, and what newDocument()
+    // installs empty.
+    struct SurfaceState {
+        katana::terrain::SurfaceStore surfaces;
+        SurfaceStyleSet styles = builtInSurfaceStyles();
+        katana::core::Status stylesStatus{};
+    };
+    // Decodes the project's surface records and reads its styles' metadata
+    // key, taking the key out of `metadata` when it was read (it is the
+    // Document's to write) and leaving it when it could not be (written back
+    // as it was). Fails, and the open with it, on a surface it cannot decode.
+    [[nodiscard]] static katana::core::Result<SurfaceState>
+    readSurfaceState(std::vector<katana::storage::SurfaceRecord>& records,
+                     katana::storage::ProjectMetadata& metadata);
+    void installSurfaceState(SurfaceState state);
+    // The surfaces and the styles into what a save writes.
+    void writeSurfaceState(katana::storage::ProjectContents& contents) const;
+    // DocumentChange::Surfaces and SurfaceStyles for what moved since the
+    // last call; the stack's listener adds them to a step's notification.
+    [[nodiscard]] std::uint32_t surfacePartsChanged();
     void notify(const DocumentChange& change);
     void notify(std::uint32_t parts) { notify(DocumentChange{.parts = parts}); }
 
@@ -541,8 +697,40 @@ class Document {
     // a pointer instead of parsing the set again.
     struct SheetCache;
     mutable std::shared_ptr<const SheetCache> sheetCache_;
+    // The parsed road objects and their JSON (road/road_object_store.cpp),
+    // shared by the undo steps as the sheet cache is.
+    struct RoadObjectCache;
+    mutable std::shared_ptr<const RoadObjectCache> roadObjectCache_;
     std::vector<katana::storage::SurveyJob> surveyJobs_;
     std::uint64_t surveyJobsGeneration_ = 0;
+    // The surfaces and their display styles (surfaces(), surfaceStyles()).
+    // Their implementation, persistence and undo are in
+    // src/katana_cad/terrain/surface_document.cpp.
+    katana::terrain::SurfaceStore surfaces_;
+    std::uint64_t surfacesGeneration_ = 0;
+    SurfaceStyleSet surfaceStyles_ = builtInSurfaceStyles();
+    std::uint64_t surfaceStylesGeneration_ = 0;
+    katana::core::Status surfaceStylesStatus_{};
+    // The generations the last notification reported (surfacePartsChanged).
+    std::uint64_t surfacesNotified_ = 0;
+    std::uint64_t surfaceStylesNotified_ = 0;
+    // ---- road model (src/katana_cad/road/road_document.cpp) ----
+    // The parsed road templates and corridors and the JSON each was parsed
+    // from, shared by an undo step as the sheet set's are.
+    struct RoadTemplateCache;
+    struct CorridorCache;
+    mutable std::shared_ptr<const RoadTemplateCache> roadTemplateCache_;
+    mutable std::shared_ptr<const CorridorCache> corridorCache_;
+    // The road model's metadata keys as the last command's notification saw
+    // them: what roadModelChanged compares, to report RoadModel.
+    std::vector<std::optional<std::string>> roadModelSeen_;
+    [[nodiscard]] std::uint32_t roadModelChanged();
+    // The road model's 3D objects, made once per change of what they are
+    // made from (bim::bimModel, src/katana_cad/bim/bim_object.cpp).
+    friend class bim::BimCacheAccess;
+    struct BimCache;
+    mutable std::shared_ptr<BimCache> bimCache_;
+    // ---- end road model ----
 };
 
 } // namespace katana::cad

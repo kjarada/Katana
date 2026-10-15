@@ -22,6 +22,7 @@
 #include "katana/core/error.hpp"
 #include "katana/dxf/reader.hpp"
 #include "katana/dxf/writer.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
@@ -42,12 +43,15 @@ applyDxfImport(katana::cad::Document& document, katana::dxf::DxfImport&& importe
                const katana::cad::ImportShift& placed);
 
 // Writes `model` to `file`, its annotation drawn at `annotationScale` as the
-// plan view draws it (cad/annotation/export_annotation.hpp). Pure: reads only
-// `model`, so a front end may hand it a copy of its drawing to write on
-// another thread.
+// plan view draws it (cad/annotation/export_annotation.hpp), a leader's note
+// reading the drawing's surfaces and alignments through `leaders`
+// (cad/annotation/leader_presets.hpp, leaderContext). Pure: reads only
+// `model` and the context, which holds copies, so a front end may hand it a
+// copy of its drawing to write on another thread.
 [[nodiscard]] katana::core::Result<katana::dxf::DxfExport>
 writeDxfExport(const katana::entity::Model& model, double annotationScale,
-               const std::filesystem::path& file);
+               const std::filesystem::path& file,
+               const katana::entity::LeaderContext& leaders = {});
 
 // The records of a DXF written: exported, then the writer's warnings.
 // `file` is the name it is known by, which a staged write is not written to.

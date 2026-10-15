@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <functional>
@@ -27,6 +28,8 @@
 #include <QTransform>
 
 #include "customisation/style_painter.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
+#include "katana/cad/bim/bim_view.hpp" // road model
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/document.hpp"
@@ -41,6 +44,10 @@
 #include "katana/geometry/chording.hpp"
 #include "katana/geometry/polygon.hpp"
 #include "plotting/plot_style.hpp"
+// Surface display (docs/surface_display.md): the drawing's surfaces in plan.
+#include "drawing/feedback_painter.hpp"
+#include "terrain/surface_plan_painter.hpp"
+#include "theme.hpp"
 
 // The annotation system (docs/annotation.md): laid out in katana_cad, painted here.
 #include "annotation/annotation_painter.hpp"
@@ -119,7 +126,9 @@ QColor toQColor(const katana::entity::Color& color)
 bool isShown(const katana::cad::SceneMesh& item)
 {
     return item.visible && item.mesh != nullptr && !item.mesh->empty() &&
-           item.style != katana::cad::SurfaceStyle::Hidden;
+           item.style != katana::cad::SurfaceStyle::Hidden &&
+           // The road model's objects draw their own outlines (drawRoadModel).
+           item.planFootprint;
 }
 
 bool hiddenReference(const PlanFrame& frame, std::uint64_t id)
@@ -375,6 +384,7 @@ void PlanPaintCache::clear()
     rasterCrops_.clear();
     clouds_.clear();
     sprites_.clear();
+    surfaces_.clear();
     spriteScale_ = 0.0;
     spritePaperScale_ = 0.0;
     spriteDeviceRatio_ = 0.0;
@@ -504,6 +514,13 @@ class PlanPainter {
     void splatOnPaper(const katana::interop::PointCloudLayer& cloud,
                       const katana::geometry::SplatCloud& splat);
     void drawMeshFootprints();
+    // The road model's plan outlines (road model, docs/road_design.md).
+    void drawRoadModel();
+    // Surface display (docs/surface_display.md): every visible surface in its
+    // style, beneath the entities; then, over everything on screen, the
+    // legends of those whose styles colour their faces.
+    void drawSurfaces();
+    void drawSurfaceLegends();
     void drawEntities();
     // The selection on layers this frame hides and the document shows, as
     // ghosts (PlanPaintOptions::selectionGhosts): over the selection's ids
@@ -539,6 +556,8 @@ class PlanPainter {
     // The model a text or leader is resolved against: the source's, or an
     // empty one for a preview drawn with no model.
     [[nodiscard]] const katana::entity::Model& annotationModel() const;
+    // What a leader's note reads beyond its target: the source's, or none.
+    [[nodiscard]] const katana::entity::LeaderContext& leaderContext() const;
 
     QPainter& painter_;
     const PlanSource& source_;
@@ -603,6 +622,8 @@ class PlanPainter {
     AnnotationFonts annotationFonts_;
     std::vector<Segment2> linework_;
     bool collectLinework_ = false;
+    // The legends of the surfaces drawn this paint (drawSurfaces).
+    std::vector<PaintedLegend> surfaceLegends_;
 };
 
 const QFont& PlanPainter::fontFor(double pixels)
@@ -692,6 +713,12 @@ PlanPaintStats PlanPainter::paint()
     if (options_.meshFootprints) {
         drawMeshFootprints();
     }
+    // Surface display (docs/surface_display.md): beneath the entities, over
+    // the imagery and the mesh footprints, as context for what is drawn.
+    if (options_.surfaces) {
+        drawSurfaces();
+    }
+    drawRoadModel(); // road model, beneath the drawing as a footprint is
     if (source_.model != nullptr) {
         drawEntities();
         drawSelectionGhosts();
@@ -702,8 +729,79 @@ PlanPaintStats PlanPainter::paint()
             drawAlignments();
         }
     }
+    if (options_.surfaceLegends && !paper()) {
+        drawSurfaceLegends();
+    }
     painter_.restore();
     return stats_;
+}
+
+// ---- surface display (docs/surface_display.md) ------------------------------------------
+
+void PlanPainter::drawSurfaces()
+{
+    // An empty store is still painted: the cache lets go of what it kept.
+    if (source_.surfaces == nullptr) {
+        return;
+    }
+    static const katana::cad::SurfaceStyleSet builtIn = katana::cad::builtInSurfaceStyles();
+    SurfacePaintOptions surface;
+    surface.paper = paper();
+    surface.pixelsPerMillimetre = options_.pixelsPerMillimetre;
+    surface.deviceRatio = deviceRatio_;
+    surface.imageryShare = imageryShare();
+    surface.imagePixelCap = options_.rasterPixelCap;
+    surface.plot = options_.plot;
+    surface.rotation = frame_.rotation;
+    surface.fontFamily = options_.fontFamily;
+    surface.halo = paper() ? QColor(Qt::white) : options_.screenBackground;
+    const SurfacePaintStats drawn = paintSurfacesInPlan(
+        painter_, *source_.surfaces, source_.surfaceStyles != nullptr ? *source_.surfaceStyles : builtIn,
+        view_, visible_, surface, cache_.surfaces_);
+    stats_.surfacesDrawn += drawn.surfacesDrawn;
+    stats_.surfaceTrianglesInView += drawn.trianglesInView;
+    stats_.surfaceEdgesStroked += drawn.edgesStroked;
+    stats_.surfaceTrianglesTinted += drawn.trianglesTinted;
+    stats_.surfaceContourRuns += drawn.contourRuns;
+    stats_.surfaceLabels += drawn.labels;
+    stats_.surfaceImagePixels += drawn.imagePixels;
+    stats_.surfacePixelsCovered += drawn.pixelsCovered;
+    surfaceLegends_ = drawn.legends;
+}
+
+void PlanPainter::drawSurfaceLegends()
+{
+    // Screen furniture in the view's own pixels: only where the frame is not
+    // turned (the plan view never is; a turned frame is a sheet's, on paper).
+    if (surfaceLegends_.empty() || frame_.rotation != 0.0) {
+        return;
+    }
+    // Three at most, stacked down from the top-right corner: more would
+    // cover the drawing they explain.
+    constexpr std::size_t kMaximumLegends = 3;
+    constexpr double kMargin = 10.0;
+    QFont font(options_.fontFamily);
+    font.setPixelSize(11);
+    // On the overlay's ground, as a caption or the prompt band is, mostly
+    // opaque, in the chrome's text colour: a legend is the view's furniture.
+    QColor backing = drawing::overlay::ground();
+    backing.setAlpha(215);
+    const QColor text = theme::text();
+    QPointF corner(view_.widthPixels - kMargin, kMargin);
+    for (std::size_t i = 0; i < surfaceLegends_.size() && i < kMaximumLegends; ++i) {
+        const PaintedLegend& legend = surfaceLegends_[i];
+        const QString caption = QString::fromStdString(legend.surface) + QStringLiteral(" - ") +
+                                QString::fromStdString(legend.style);
+        const QRectF drawn = paintSurfaceLegend(painter_, legend.legend, caption, corner, font, text, backing);
+        if (drawn.isEmpty()) {
+            continue;
+        }
+        ++stats_.surfaceLegends;
+        corner.setY(drawn.bottom() + kMargin);
+        if (corner.y() > view_.heightPixels - kMargin) {
+            break;
+        }
+    }
 }
 
 void PlanPainter::drawRasters()
@@ -1191,6 +1289,57 @@ void PlanPainter::drawMeshFootprints()
     }
 }
 
+// ---- road model (docs/road_design.md) ----
+// The road model in plan: each object shown (bim::isShown, with this view's
+// hidden layers) as its outline in its own colour, beneath the drawing, as a
+// mesh's footprint is - the road model is context for what is drawn over it.
+// Earthworks dashed, being the ground's and not the road's. Its pen is a
+// mesh footprint's, on screen and on paper.
+void PlanPainter::drawRoadModel()
+{
+    if (source_.roadModel == nullptr || source_.model == nullptr) {
+        return;
+    }
+    const katana::cad::LayerOverrides& overrides =
+        frame_.layers != nullptr ? *frame_.layers : noOverrides();
+    for (const katana::cad::bim::BimObject& object : source_.roadModel->objects) {
+        if (object.plan.empty() ||
+            !katana::cad::bim::isShown(object, *source_.model, overrides)) {
+            continue;
+        }
+        katana::entity::Color colour = object.colour;
+        if (paper() && options_.plot != nullptr) {
+            colour = cad::paperColour(colour, *options_.plot);
+        }
+        QPen pen(toQColor(colour), markSize(1.0, kMeshOutlinePaperMillimetres));
+        if (object.kind == "earthworks") {
+            pen.setStyle(Qt::DashLine);
+        }
+        painter_.setPen(pen);
+        QColor fill = toQColor(colour);
+        fill.setAlpha(30);
+        for (const katana::geometry::Polyline2& line : object.plan) {
+            const Box2 box = line.boundingBox();
+            if (box.empty() || box.max.x < visible_.min.x || box.min.x > visible_.max.x ||
+                box.max.y < visible_.min.y || box.min.y > visible_.max.y) {
+                continue;
+            }
+            QPolygonF polygon;
+            polygon.reserve(static_cast<int>(line.vertices.size()) + 1);
+            for (const Point2& vertex : line.vertices) {
+                polygon << toScreen(vertex);
+            }
+            if (line.closed) {
+                painter_.setBrush(object.kind == "earthworks" ? QBrush(Qt::NoBrush) : QBrush(fill));
+                painter_.drawPolygon(polygon);
+                painter_.setBrush(Qt::NoBrush);
+            } else {
+                painter_.drawPolyline(polygon);
+            }
+        }
+    }
+}
+
 const PlanPainter::Resolved& PlanPainter::resolve(const Entity& entity)
 {
     const DisplayKey key = displayKeyOf(entity);
@@ -1405,7 +1554,8 @@ void PlanPainter::drawEntities()
             } else if (const auto* leader =
                            std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
                 annotation = cad::annotation::buildLeader(model, *leader, options_.annotationScale,
-                                                          annotationFonts_.measure());
+                                                          annotationFonts_.measure(),
+                                                          leaderContext());
             }
             Box2 drawn;
             std::optional<cad::DimensionDrawing> dimensionDrawing;
@@ -1889,7 +2039,7 @@ void PlanPainter::drawSelectionGhosts()
                                 .extent;
         } else if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&geometry)) {
             outline = cad::annotation::buildLeader(model, *leader, options_.annotationScale,
-                                                   annotationFonts_.measure())
+                                                   annotationFonts_.measure(), leaderContext())
                           .extent;
         } else if (const auto* dimension =
                        std::get_if<katana::entity::DimensionGeometry>(&geometry)) {
@@ -2000,9 +2150,9 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
         void operator()(const katana::entity::LabelGeometry&) const {}
         void operator()(const katana::entity::LeaderGeometry& g) const
         {
-            self.drawAnnotation(cad::annotation::buildLeader(self.annotationModel(), g,
-                                                             self.options_.annotationScale,
-                                                             self.annotationFonts_.measure()));
+            self.drawAnnotation(cad::annotation::buildLeader(
+                self.annotationModel(), g, self.options_.annotationScale,
+                self.annotationFonts_.measure(), self.leaderContext()));
         }
         void operator()(const katana::entity::DimensionGeometry& g) const
         {
@@ -2249,6 +2399,12 @@ const katana::entity::Model& PlanPainter::annotationModel() const
     return source_.model != nullptr ? *source_.model : empty;
 }
 
+const katana::entity::LeaderContext& PlanPainter::leaderContext() const
+{
+    static const katana::entity::LeaderContext none;
+    return source_.leaders != nullptr ? *source_.leaders : none;
+}
+
 AnnotationPaintTarget PlanPainter::annotationTarget(const QPen& pen) const
 {
     AnnotationPaintTarget target;
@@ -2330,8 +2486,25 @@ PlanSource planSourceOf(const katana::cad::Document& document)
     source.colours = &document.customisationState().colours;
     source.index = &document.spatialIndex();
     source.selection = &document.selection();
+    source.leaders = std::make_shared<const katana::entity::LeaderContext>(
+        katana::cad::annotation::leaderContext(document));
+    if (roadModelShown()) {
+        source.roadModel = katana::cad::bim::bimModel(document); // road model
+    }
+    // Surface display (docs/surface_display.md): the drawing's surfaces.
+    source.surfaces = &document.surfaces();
+    source.surfaceStyles = &document.surfaceStyles();
     return source;
 }
+
+// ---- road model (docs/road_design.md) ----
+namespace {
+std::atomic<bool> roadModelOn{true};
+}
+
+void setRoadModelShown(bool shown) { roadModelOn.store(shown); }
+
+bool roadModelShown() { return roadModelOn.load(); }
 
 PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source, const PlanFrame& frame,
                          const PlanPaintOptions& options, PlanPaintCache& cache)
@@ -2396,6 +2569,10 @@ Box2 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides
             }
         }
     }
+    // The road model's outlines, as they are drawn (road model).
+    if (source.roadModel != nullptr) {
+        bounds.expand(katana::cad::bim::planBounds(*source.roadModel, *source.model, layers));
+    }
     // A mesh is drawn in plan as its footprint, so it is seen and counts. A
     // drawing that is nothing but meshes framed an empty box before.
     if (source.meshes != nullptr) {
@@ -2406,6 +2583,16 @@ Box2 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides
                     bounds.expand(Point2(space.min.x, space.min.y));
                     bounds.expand(Point2(space.max.x, space.max.y));
                 }
+            }
+        }
+    }
+    // Surface display (docs/surface_display.md): a visible surface is drawn,
+    // so it is seen and counts - a drawing of nothing but a surface framed
+    // an empty box.
+    if (source.surfaces != nullptr) {
+        for (const katana::terrain::NamedSurface& named : source.surfaces->all()) {
+            if (named.visible && named.surface != nullptr && !named.surface->empty()) {
+                bounds.expand(named.surface->bounds());
             }
         }
     }

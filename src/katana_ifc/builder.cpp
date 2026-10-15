@@ -396,8 +396,9 @@ std::string Builder::label(std::string_view text, std::string_view what)
     return clipCharacters(text, kLabelLimit);
 }
 
-Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
-                    std::string_view description, Id representation, std::string_view tag)
+Id Builder::writeProduct(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+                         std::string_view description, Id representation, std::string_view tag,
+                         Id placement)
 {
     const ProductLayout layout = productLayout(ifcClass.entity);
     const std::string of = ifcClass.entity + " " + std::string(key);
@@ -407,7 +408,7 @@ Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_
         .stringOrNull(label(name, of + ": its name"))
         .stringOrNull(description)
         .stringOrNull(label(ifcClass.objectType, of + ": its object type"))
-        .ref(elementPlacement_)
+        .ref(placement)
         .refOrNull(representation);
     if (layout.hasTag) {
         args.stringOrNull(label(tag, of + ": its tag"));
@@ -416,9 +417,72 @@ Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_
         args.enumerationOrNull(ifcClass.predefinedType);
     }
     const Id id = file_.add(ifcClass.entity, args);
-    contained_.push_back(id);
     ++report_.classes[ifcClass.entity];
     return id;
+}
+
+Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+                    std::string_view description, Id representation, std::string_view tag)
+{
+    const Id id =
+        writeProduct(ifcClass, key, name, description, representation, tag, elementPlacement_);
+    contained_.push_back(id);
+    return id;
+}
+
+Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+                    std::string_view description, Id representation, std::string_view tag,
+                    const Container& container)
+{
+    if (container.element == site_) {
+        return product(ifcClass, key, name, description, representation, tag);
+    }
+    const Id id = writeProduct(ifcClass, key, name, description, representation, tag,
+                               container.elementPlacement);
+    containedIn_[container.element].push_back(id);
+    containerKeys_[container.element] = container.key;
+    return id;
+}
+
+Id Builder::feature(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+                    std::string_view description, Id representation, std::string_view tag,
+                    Id placement)
+{
+    return writeProduct(ifcClass, key, name, description, representation, tag, placement);
+}
+
+Id Builder::placementIn(Id relativeTo)
+{
+    return file_.add("IfcLocalPlacement", Args().ref(relativeTo).ref(identity3()));
+}
+
+Container Builder::siteContainer() const
+{
+    return Container{site_, sitePlacement_, elementPlacement_, "site"};
+}
+
+void Builder::aggregate(Id whole, std::string_view key, const std::vector<Id>& parts)
+{
+    if (parts.empty()) {
+        return;
+    }
+    file_.add("IfcRelAggregates", Args()
+                                      .string(guid("aggregates/" + std::string(key)))
+                                      .null()
+                                      .null()
+                                      .null()
+                                      .ref(whole)
+                                      .refs(parts));
+}
+
+Id Builder::kilogram()
+{
+    if (kilogram_ == 0) {
+        kilogram_ = file_.add(
+            "IfcSIUnit", Args().derived().enumeration("MASSUNIT").enumeration("KILO").enumeration(
+                             "GRAM"));
+    }
+    return kilogram_;
 }
 
 void Builder::tally(std::string_view source, const IfcClass& ifcClass, std::string_view system,
@@ -609,6 +673,18 @@ void Builder::finish()
         file_.add(
             "IfcRelContainedInSpatialStructure",
             Args().string(guid("contained/site")).null().null().null().refs(contained_).ref(site_));
+    }
+    // The road model's facilities and their parts, each holding its own
+    // (road.cpp): one relationship a container, in the order written.
+    for (const auto& [container, products] : containedIn_) {
+        file_.add("IfcRelContainedInSpatialStructure",
+                  Args()
+                      .string(guid("contained/" + containerKeys_[container]))
+                      .null()
+                      .null()
+                      .null()
+                      .refs(products)
+                      .ref(container));
     }
     if (!referenced_.empty()) {
         file_.add("IfcRelReferencedInSpatialStructure", Args()

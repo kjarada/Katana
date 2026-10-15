@@ -52,6 +52,14 @@ target_sources(katana_cad PRIVATE ${_cad_plotting_sources})
 # same reason, written beside the annotation and plotting work.
 file(GLOB _cad_drawing_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
 target_sources(katana_cad PRIVATE ${_cad_drawing_sources})
+# The drawing's surfaces - their styles, edits and volumes (terrain/,
+# docs/terrain.md, docs/surface_display.md, docs/surface_editing.md,
+# docs/volumes.md) - and the road model (road/ and bim/, docs/road_design.md,
+# docs/road_objects.md): globbed for the same reason, written side by side.
+file(GLOB _cad_terrain_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.cpp")
+file(GLOB _cad_road_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/road/*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_terrain_sources} ${_cad_road_sources})
 # The built-in plot frame is compiled in with #embed (plotting/frame.cpp) from
 # the committed resources/plot_frames/, so the frame is part of the program and
 # a missing file is a build error, not a blank title block.

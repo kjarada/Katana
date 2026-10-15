@@ -27,6 +27,7 @@
 
 #include "annotation/form_widgets.hpp"
 #include "customisation/document_watcher.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/entity/anchor.hpp"
@@ -86,6 +87,89 @@ QComboBox* noteKindBox(QWidget* parent, const char* name)
                  static_cast<int>(Kind::Template));
     box->addItem(QStringLiteral("Label style's template"), static_cast<int>(Kind::LabelStyle));
     return box;
+}
+
+QString viewText(std::string_view view)
+{
+    return QString::fromUtf8(view.data(), static_cast<qsizetype>(view.size()));
+}
+
+// The presets (cad/annotation/leader_presets.hpp): a first entry that is
+// none - the note is what is typed - then each by its title, its word
+// (preset=) as its data and what it says as its tip.
+QComboBox* presetBox(QWidget* parent, const char* name)
+{
+    auto* box = new QComboBox(parent);
+    box->setObjectName(QString::fromLatin1(name));
+    box->addItem(QStringLiteral("(none: the note as typed)"), QString());
+    for (const ann::LeaderPresetInfo& info : ann::leaderPresets()) {
+        box->addItem(viewText(info.title), viewText(info.word));
+        box->setItemData(box->count() - 1, viewText(info.says), Qt::ToolTipRole);
+    }
+    box->setToolTip(QStringLiteral(
+        "A ready note, read live off what the tip is on: its level, its height above a surface, "
+        "the cut or fill to one, its name, its code, its station (LEADER preset=)"));
+    return box;
+}
+
+QComboBox* presetReadsBox(QWidget* parent, const char* name)
+{
+    auto* box = new QComboBox(parent);
+    box->setObjectName(QString::fromLatin1(name));
+    box->setToolTip(QStringLiteral(
+        "The surface or the alignment the preset reads (surface= or alignment=)"));
+    box->setEnabled(false);
+    return box;
+}
+
+// What the preset `presets` shows reads, into `reads`: after a first entry
+// leaving the choice to the preset (the first visible surface, the first
+// alignment), the drawing's surfaces or alignments by name; empty and off
+// for a preset that reads only its target. The choice is kept where it can
+// be.
+void fillPresetReads(QComboBox* reads, const QComboBox* presets,
+                     const katana::cad::Document& document)
+{
+    const QString keep = reads->currentData().toString();
+    const QSignalBlocker blocker(reads);
+    reads->clear();
+    const QString word = presets->currentData().toString();
+    const auto preset = ann::leaderPresetNamed(word.toStdString());
+    const ann::PresetReads what =
+        word.isEmpty() || !preset ? ann::PresetReads::Target : ann::presetInfo(*preset).reads;
+    if (what == ann::PresetReads::Surface) {
+        reads->addItem(QStringLiteral("(first visible surface)"), QString());
+        for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
+            reads->addItem(QString::fromStdString(named.name), QString::fromStdString(named.name));
+        }
+    } else if (what == ann::PresetReads::Alignment) {
+        reads->addItem(QStringLiteral("(first alignment)"), QString());
+        for (const std::string& name : document.model().alignments.names()) {
+            reads->addItem(QString::fromStdString(name), QString::fromStdString(name));
+        }
+    }
+    reads->setEnabled(what != ann::PresetReads::Target && presets->isEnabled());
+    reads->setCurrentIndex(std::max(0, reads->findData(keep)));
+}
+
+// The Preset boxes made to say what `note` - a template, or empty for a
+// note that is none - is: the preset whose template it is, and what it
+// reads, else none. Shown, never chosen, so nothing is written into the
+// note; what the user types away from a preset's template is no preset.
+void showPresetOf(QComboBox* presets, QComboBox* reads, const QString& note,
+                  const katana::cad::Document& document)
+{
+    const auto recognised = ann::recognisePreset(note.toStdString());
+    const QSignalBlocker blockers[] = {QSignalBlocker(presets), QSignalBlocker(reads)};
+    presets->setCurrentIndex(
+        recognised
+            ? std::max(0, presets->findData(viewText(ann::presetInfo(recognised->preset).word)))
+            : 0);
+    fillPresetReads(reads, presets, document);
+    if (recognised && !recognised->reads.empty()) {
+        reads->setCurrentIndex(
+            std::max(0, reads->findData(QString::fromStdString(recognised->reads))));
+    }
 }
 
 QPlainTextEdit* noteEdit(QWidget* parent, const char* name, const QString& placeholder)
@@ -275,6 +359,8 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
         "How far along what it is on the tip is: of the line or the arc from its start, of "
         "the polyline segment, of a turn of the circle (LEADER SET id tip=#on.alongN:T)"));
     noteKind_ = noteKindBox(leaderTab, "leaderNoteKind");
+    preset_ = presetBox(leaderTab, "leaderPreset");
+    presetReads_ = presetReadsBox(leaderTab, "leaderPresetReads");
     note_ = noteEdit(leaderTab, "leaderNote", QStringLiteral("IL {prop.invert:.3f}"));
     labelStyle_ = new QComboBox(leaderTab);
     labelStyle_->setObjectName(QStringLiteral("leaderLabelStyle"));
@@ -318,6 +404,10 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     noteForm->addRow(QStringLiteral("On"), onRow);
     noteForm->addRow(QStringLiteral("Along"), along_);
     noteForm->addRow(QStringLiteral("Note is"), noteKind_);
+    auto* presetRow = new QHBoxLayout;
+    presetRow->addWidget(preset_, 1);
+    presetRow->addWidget(presetReads_, 1);
+    noteForm->addRow(QStringLiteral("Preset"), presetRow);
     noteForm->addRow(QStringLiteral("Note"), note_);
     noteForm->addRow(QStringLiteral("Label style"), labelStyle_);
     noteForm->addRow(check_);
@@ -375,6 +465,8 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     forSelection_ = new QLabel(forTab);
     forSelection_->setObjectName(QStringLiteral("leaderForSelection"));
     forNoteKind_ = noteKindBox(forTab, "leaderForNoteKind");
+    forPreset_ = presetBox(forTab, "leaderForPreset");
+    forPresetReads_ = presetReadsBox(forTab, "leaderForPresetReads");
     forNote_ = noteEdit(forTab, "leaderForNote", QStringLiteral("{type} {id}"));
     forLabelStyle_ = new QComboBox(forTab);
     forLabelStyle_->setObjectName(QStringLiteral("leaderForLabelStyle"));
@@ -427,6 +519,10 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     auto* forForm = new QFormLayout;
     forForm->addRow(forSelection_);
     forForm->addRow(QStringLiteral("Note is"), forNoteKind_);
+    auto* forPresetRow = new QHBoxLayout;
+    forPresetRow->addWidget(forPreset_, 1);
+    forPresetRow->addWidget(forPresetReads_, 1);
+    forForm->addRow(QStringLiteral("Preset"), forPresetRow);
     forForm->addRow(QStringLiteral("Note"), forNote_);
     forForm->addRow(QStringLiteral("Label style"), forLabelStyle_);
     forForm->addRow(forCheck_);
@@ -537,7 +633,28 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
         lendStyleLook();
         updatePreview();
     });
-    connect(note_, &QPlainTextEdit::textChanged, this, [this] { updatePreview(); });
+    connect(note_, &QPlainTextEdit::textChanged, this, [this] {
+        showPresetOf(preset_, presetReads_,
+                     static_cast<Kind>(noteKind_->currentData().toInt()) == Kind::Template
+                         ? plainText(note_)
+                         : QString(),
+                     document_);
+        updatePreview();
+    });
+    // A preset chosen writes its template into the note, as typing it would;
+    // only Apply or Make stores it. showForm holds these while it fills them.
+    connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
+        fillPresetReads(presetReads_, preset_, document_);
+        (void)usePreset(false);
+    });
+    connect(presetReads_, &QComboBox::currentIndexChanged, this,
+            [this] { (void)usePreset(false); });
+    connect(forPreset_, &QComboBox::currentIndexChanged, this, [this] {
+        fillPresetReads(forPresetReads_, forPreset_, document_);
+        (void)usePreset(true);
+    });
+    connect(forPresetReads_, &QComboBox::currentIndexChanged, this,
+            [this] { (void)usePreset(true); });
     for (QComboBox* box : {arrow_, callout_, textStyle_}) {
         connect(box, &QComboBox::currentIndexChanged, this, [this] { updatePreview(); });
     }
@@ -556,7 +673,14 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     for (QComboBox* box : {forArrow_, forCallout_, forTextStyle_}) {
         connect(box, &QComboBox::currentIndexChanged, this, [this] { updateForPreview(); });
     }
-    connect(forNote_, &QPlainTextEdit::textChanged, this, [this] { updateForPreview(); });
+    connect(forNote_, &QPlainTextEdit::textChanged, this, [this] {
+        showPresetOf(forPreset_, forPresetReads_,
+                     static_cast<Kind>(forNoteKind_->currentData().toInt()) == Kind::Template
+                         ? plainText(forNote_)
+                         : QString(),
+                     document_);
+        updateForPreview();
+    });
     connect(forAngle_, &QDoubleSpinBox::valueChanged, this, [this] { updateForPreview(); });
     connect(forBalloon_, &QCheckBox::toggled, this, [this] { updateForPreview(); });
     connect(apply_, &QPushButton::clicked, this, [this] { (void)apply(); });
@@ -648,6 +772,9 @@ void LeaderManagerDialog::refresh(const DocumentChanges& delivered)
         const QString forChosen = forLabelStyle_->currentText();
         fillStyles();
         fillList();
+        // A surface or an alignment made or gone is offered, or no longer.
+        fillPresetReads(presetReads_, preset_, document_);
+        fillPresetReads(forPresetReads_, forPreset_, document_);
         // The style chosen is gone, or the first one came: the box names
         // another now, which lends its look as choosing it does (showForm,
         // below, puts the leader's own back where the leader changed).
@@ -713,10 +840,11 @@ void LeaderManagerDialog::fillList()
     const QSignalBlocker blocker(list_);
     list_->clear();
     const auto& model = document_.model();
+    const katana::entity::LeaderContext context = readContext();
     model.entities.forEach([&](const katana::entity::Entity& entity) {
         if (const auto* shape = std::get_if<LeaderGeometry>(&entity.geometry)) {
-            auto* item =
-                new QListWidgetItem(listText(entity.id, ann::leaderSays(model, *shape)), list_);
+            auto* item = new QListWidgetItem(
+                listText(entity.id, ann::leaderSays(model, *shape, context)), list_);
             item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entity.id));
             if (entity.id == shown_) {
                 list_->setCurrentItem(item);
@@ -754,11 +882,15 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
     stash_.reset();
     lender_.forget();
     for (QWidget* field : std::initializer_list<QWidget*>{
-             noteKind_, note_, values_, arrow_, callout_, textStyle_, paperHeight_, arrowSize_,
-             landing_, attributeName_, attributeValue_, attributeType_}) {
+             noteKind_, preset_, note_, values_, arrow_, callout_, textStyle_, paperHeight_,
+             arrowSize_, landing_, attributeName_, attributeValue_, attributeType_}) {
         field->setEnabled(any);
     }
     const ann::LeaderNote note = ann::noteOf(shape);
+    // The preset the note is, if it is one's, and what it reads.
+    showPresetOf(preset_, presetReads_,
+                 note.kind == Kind::Template ? QString::fromStdString(note.text) : QString(),
+                 document_);
     {
         const QSignalBlocker blockers[] = {QSignalBlocker(noteKind_),    QSignalBlocker(note_),
                                            QSignalBlocker(labelStyle_),  QSignalBlocker(arrow_),
@@ -828,7 +960,7 @@ void LeaderManagerDialog::showValues()
     if (current == nullptr) {
         return;
     }
-    if (const auto values = ann::leaderTargetValues(document_.model(), *current)) {
+    if (const auto values = ann::leaderTargetValues(document_.model(), *current, readContext())) {
         fillValues(values_, ann::leaderValueRows(*values));
     }
 }
@@ -1027,7 +1159,9 @@ void LeaderManagerDialog::updatePreview()
         return;
     }
     LeaderGeometry would = *current;
-    const Status status = ann::applyLeaderChange(document_.model(), formChange(), would, shown_);
+    const katana::entity::LeaderContext context = readContext();
+    const Status status =
+        ann::applyLeaderChange(document_.model(), formChange(), would, shown_, context);
     if (!status) {
         check_->setStyleSheet(QStringLiteral("color: #d9534f"));
         check_->setText(describe(status));
@@ -1037,7 +1171,8 @@ void LeaderManagerDialog::updatePreview()
         check_->setText(katana::entity::isSmart(would)
                             ? QStringLiteral("Read off the entity whenever it is drawn.")
                             : QStringLiteral("Plain text: the note says exactly this."));
-        preview_->setText(QString::fromStdString(ann::leaderSays(document_.model(), would)));
+        preview_->setText(
+            QString::fromStdString(ann::leaderSays(document_.model(), would, context)));
     }
     updateButtons();
 }
@@ -1123,6 +1258,97 @@ void LeaderManagerDialog::insertValue(const QString& name)
     insertField(noteKind_, note_, name);
 }
 
+katana::entity::LeaderContext LeaderManagerDialog::readContext() const
+{
+    return ann::leaderContext(document_);
+}
+
+bool LeaderManagerDialog::usePreset(bool forTab)
+{
+    QComboBox* presets = forTab ? forPreset_ : preset_;
+    QComboBox* reads = forTab ? forPresetReads_ : presetReads_;
+    const QString word = presets->currentData().toString();
+    if (word.isEmpty()) {
+        return true; // none chosen: the note is what is typed
+    }
+    if (!forTab && shown_ == 0) {
+        report(makeError(ErrorCode::InvalidState, "no leader is shown"));
+        return false;
+    }
+    const auto preset = ann::leaderPresetNamed(word.toStdString());
+    if (!preset) {
+        report(preset.error());
+        return false;
+    }
+    // The name chosen, or none: the preset's own choice, said in the
+    // problem line's place as the verb's reply says it.
+    std::optional<std::string> surface;
+    std::optional<std::string> alignment;
+    if (const QString name = reads->currentData().toString(); !name.isEmpty()) {
+        (ann::presetInfo(*preset).reads == ann::PresetReads::Surface ? surface : alignment) =
+            name.toStdString();
+    }
+    const auto resolved = ann::resolveLeaderPreset(document_, *preset, surface, alignment);
+    if (!resolved) {
+        report(resolved.error());
+        return false;
+    }
+    QComboBox* kind = forTab ? forNoteKind_ : noteKind_;
+    // Through the box's own signal, so a label style's look lent is put back
+    // as choosing Template by hand puts it back.
+    kind->setCurrentIndex(kind->findData(static_cast<int>(Kind::Template)));
+    setNoteText(forTab ? forNote_ : note_, QString::fromStdString(resolved->templateText));
+    if (forTab) {
+        updateForPreview();
+    } else {
+        updatePreview();
+    }
+    problem_->setText(resolved->chosen.empty()
+                          ? QString()
+                          : QStringLiteral("Reads ") + QString::fromStdString(resolved->reads) +
+                                QStringLiteral(", the ") +
+                                QString::fromStdString(resolved->chosen) + QStringLiteral("."));
+    return true;
+}
+
+bool LeaderManagerDialog::pickPreset(bool forTab, const QString& word, const QString& reads)
+{
+    QComboBox* presets = forTab ? forPreset_ : preset_;
+    QComboBox* names = forTab ? forPresetReads_ : presetReads_;
+    const int index = presets->findData(word.toLower());
+    if (word.isEmpty() || index < 0) {
+        report(ann::leaderPresetNamed(word.toStdString()).error());
+        return false;
+    }
+    {
+        const QSignalBlocker blocker(presets);
+        presets->setCurrentIndex(index);
+    }
+    fillPresetReads(names, presets, document_);
+    const int named = reads.isEmpty() ? 0 : names->findData(reads);
+    if (named < 0) {
+        report(makeError(ErrorCode::NotFound,
+                         "the drawing has no surface or alignment of that name to read",
+                         reads.toStdString()));
+        return false;
+    }
+    {
+        const QSignalBlocker blocker(names);
+        names->setCurrentIndex(named);
+    }
+    return usePreset(forTab);
+}
+
+bool LeaderManagerDialog::choosePreset(const QString& word, const QString& reads)
+{
+    return pickPreset(false, word, reads);
+}
+
+bool LeaderManagerDialog::chooseForPreset(const QString& word, const QString& reads)
+{
+    return pickPreset(true, word, reads);
+}
+
 bool LeaderManagerDialog::apply()
 {
     if (shown_ == 0) {
@@ -1141,7 +1367,7 @@ bool LeaderManagerDialog::apply()
                              " %"));
         return false;
     }
-    auto command = ann::changeLeaders(document_.model(), ids, change);
+    auto command = ann::changeLeaders(document_.model(), ids, change, readContext());
     if (!command) {
         report(command.error());
         return false;
@@ -1165,7 +1391,7 @@ bool LeaderManagerDialog::freeze()
                          "again"));
         return false;
     }
-    auto release = ann::releaseLeaders(document_.model(), targets(), false);
+    auto release = ann::releaseLeaders(document_.model(), targets(), false, readContext());
     if (!release) {
         report(release.error());
         return false;
@@ -1187,7 +1413,7 @@ bool LeaderManagerDialog::detach()
                          "again"));
         return false;
     }
-    auto release = ann::releaseLeaders(document_.model(), targets(), true);
+    auto release = ann::releaseLeaders(document_.model(), targets(), true, readContext());
     if (!release) {
         report(release.error());
         return false;
@@ -1237,7 +1463,7 @@ bool LeaderManagerDialog::attachToSelected()
                          "id=" + std::to_string(first->id)));
         return false;
     }
-    auto command = ann::attachLeader(document_.model(), shown_, *place);
+    auto command = ann::attachLeader(document_.model(), shown_, *place, readContext());
     if (!command) {
         report(command.error());
         return false;
@@ -1369,9 +1595,10 @@ void LeaderManagerDialog::updateForPreview()
     }
     const auto options = forOptions();
     const auto place = ann::leaderPlaceOn(*target, options.angle);
-    fillValues(forValues_,
-               ann::leaderValueRows(katana::entity::anchorValues(
-                   *target, place->ref, place->point, katana::cad::codePropertyCandidates())));
+    const katana::entity::LeaderContext context = readContext();
+    fillValues(forValues_, ann::leaderValueRows(katana::entity::anchorValues(
+                               *target, place->ref, place->point,
+                               katana::cad::codePropertyCandidates(), context)));
     LeaderGeometry would;
     would.vertices = {place->point, place->point + katana::geometry::Vec2(1.0, 1.0)};
     would.tipRef = place->ref;
@@ -1397,7 +1624,8 @@ void LeaderManagerDialog::updateForPreview()
     }
     const QString first = QString::fromUtf8(katana::entity::toString(target->type())) +
                           QStringLiteral(" ") + QString::number(target->id);
-    if (const Status status = ann::applyLeaderChange(document_.model(), change, would); !status) {
+    if (const Status status = ann::applyLeaderChange(document_.model(), change, would, 0, context);
+        !status) {
         forCheck_->setStyleSheet(QStringLiteral("color: #d9534f"));
         forCheck_->setText(first + QStringLiteral(": ") + describe(status));
         forPreview_->clear();
@@ -1405,7 +1633,7 @@ void LeaderManagerDialog::updateForPreview()
     }
     forCheck_->setStyleSheet(QString());
     forCheck_->setText(QStringLiteral("For ") + first + QStringLiteral(", the first selected:"));
-    const std::string says = ann::leaderSays(document_.model(), would);
+    const std::string says = ann::leaderSays(document_.model(), would, context);
     forPreview_->setText(says.empty() ? QStringLiteral("(a bare leader)")
                                       : QString::fromStdString(says));
 }
@@ -1431,7 +1659,8 @@ bool LeaderManagerDialog::makeForSelection()
         return false;
     }
     auto made = ann::leadersFor(document_.model(), document_.selection().ids(), forOptions(),
-                                document_.annotationScale(), document_.currentAttributes());
+                                document_.annotationScale(), document_.currentAttributes(),
+                                readContext());
     if (!made) {
         report(made.error());
         forReport_->clear();

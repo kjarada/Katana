@@ -1,7 +1,8 @@
 # IFC 4.3 exchange
 
-`katana_ifc` writes the drawing, its alignments, its surfaces and an AS 5488
-subsurface utility investigation as an IFC 4.3 file (IFC4X3_ADD2), and reads
+`katana_ifc` writes the drawing, its alignments, its surfaces, its road model
+(corridors and road objects as `IfcRoad`, its parts and their elements) and an
+AS 5488 subsurface utility investigation as an IFC 4.3 file (IFC4X3_ADD2), and reads
 IFC2X3, IFC4 and IFC4X3 files back into the drawing. It needs no third-party
 library, like `katana_dxf` and `katana_archive12d`: IFC is ISO 10303-21 text,
 and what matters is the mapping, not a model library
@@ -29,7 +30,7 @@ dialogs do (each writes its line and runs it):
 ```
 EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>] [RULES <rules.csv>]
                   [SPACING <m>] [NODRAWING] [NOENTITIES] [SELECTED] [NOALIGNMENTS]
-                  [NOSURFACES] [PREVIEW]
+                  [NOSURFACES] [NOROADMODEL] [PREVIEW]
 IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES] [TOLERANCE <m>]
                   [TAKECRS | KEEPCRS]
 INFO <file.ifc>
@@ -54,15 +55,15 @@ quote opened before the .ifc and never closed is refused rather than read as
 part of the path. Words are matched in any case, each once: a word given twice
 is refused, since the second would silently repeat or undo the first.
 
-EXPORT writes the drawing's entities and alignments and the window's
-surfaces, georeferenced by the project's coordinate system (`CRS SET`).
-UTILITIES adds an investigation in the schedule format of
+EXPORT writes the drawing's entities, alignments and surfaces and its road
+model ("Road model", below), georeferenced by the project's coordinate
+system (`CRS SET`). UTILITIES adds an investigation in the schedule format of
 `docs/subsurface_utilities.md`; SCHEMA names the delivery schema it was
 written to (`UTILITY CHECK`'s schema file); RULES a project's classification
 rules ("Classification rules", below); SPACING is the longest detected
-spacing that keeps QL-B (10 m by default). NOENTITIES, NOALIGNMENTS and
-NOSURFACES leave those out - NODRAWING is all three, the investigation alone -
-and SELECTED writes only the selected entities, refusing when nothing is
+spacing that keeps QL-B (10 m by default). NOENTITIES, NOALIGNMENTS,
+NOSURFACES and NOROADMODEL leave those out - NODRAWING is all four, the
+investigation alone - and SELECTED writes only the selected entities, refusing when nothing is
 selected rather than writing them all (an empty list is every entity to the
 writer, `ExportOptions::entities`). PREVIEW writes nothing: it answers what
 the file would hold.
@@ -76,8 +77,10 @@ a chorded curve may stand from the true one (`ImportOptions::curveTolerance`,
 1 mm by default). TAKECRS gives a project with no coordinate system the
 file's, as its own undoable step; KEEPCRS does not; with neither, the line
 says how (`CRS SET`), and File > Import asks. TAKECRS with LOCAL is refused:
-data moved to the origin is in no system. `katana_cli` holds no surfaces, so
-a terrain in the file is counted and not kept there; the window keeps it.
+data moved to the origin is in no system. A terrain in the file joins the
+drawing's surfaces in the import's one undo step, on every front end
+(`cad::importSurfaces`; `docs/terrain.md`, "Surfaces in the drawing"), and
+EXPORT writes the drawing's surfaces unless NOSURFACES.
 INFO describes a file without importing it; IFC RULES writes the default
 classification rules, for a project to edit into its own.
 `src/katana_app/ifc_verbs.cpp` is the whole of `katana_cli`'s side.
@@ -96,6 +99,7 @@ read back by `core::readReplyRecord`; the formats are written in one place
 ```
 ifc exported file="site.ifc" schema=IFC4X3_ADD2 instances=1097 bytes=82906
 counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5 entities_skipped=0 surfaces=0
+road elements=8 skipped=0 roads=1 parts=2        (only when a road model was given)
 class name=IfcKerb count=1
 object from="layer Survey/Kerb" count=1 class="IfcKerb" predefined="NOTDEFINED" object_type="" system="" why="rule kerb"
 object from="service E1" count=3 class="IfcCableCarrierSegment" predefined="CONDUITSEGMENT" object_type="" system="ELECTRICAL" why="a graded segment: configuration \"4 x 100 mm conduits\""
@@ -110,23 +114,33 @@ ifc described file="site.ifc" ... layers=15
 alignment name="MC01" pis=4 pvis=4
 ```
 
-PREVIEW's head is `ifc previewed`, with no `bytes`. A front end adds `note`
+PREVIEW's head is `ifc previewed`, with no `bytes`. The `road` record is
+written only when the export was given a road model, so that the reply of an
+export without one is the record it always was; a road element is an
+`object` record like any other (`from="road Main"`, or `"road model"` for an
+object of no corridor; `why="the road model's pavement"`), and one left out is
+one with no class, its `why` saying why. A front end adds `note`
 records of its own after the reply - the coordinate system taken or how to
 take it, a shift - and an import's reply is written after the undoable
 command, whose renames of an alignment the file shares a name with are among
 its warnings. `IfcFrontEnd.EveryChoiceOfTheDialogsIsAWordOfTheLine`,
 `IfcFrontEnd.ContradictoryOrRepeatedWordsAreRefused`,
 `IfcFrontEnd.TheLineADialogWritesReadsBackAsItsArguments` and
-`cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line` pin the grammar;
-`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` is
-an agent doing all of it through `katana_mcp`.
+`cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line` pin the grammar,
+`IfcFrontEnd.NoRoadModelIsAWordAndNoDrawingLeavesTheRoadModelOutToo`,
+`cli.ifc_noroadmodel_is_a_word_of_the_export_line` and
+`cli.ifc_noroadmodel_given_twice_is_refused` its road model word;
+`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` and
+`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord` are an agent
+doing it through `katana_mcp`.
 
 ### In the window
 
 File > Export IFC is a dialog (`src/katana_qt/ifc_dialogs.hpp`, `docs/desktop.md`)
 of the verb's choices, with what the window knows beside them: the file; the
-drawing's entities (or only the selected ones), its alignments and the
-session's surfaces, each with its count; the utility schedule, its delivery
+drawing's entities (or only the selected ones), its alignments, its surfaces
+and its road model (`ifcExportRoadModel`, "Road model (N objects)"; unticked,
+the line says NOROADMODEL), each with its count; the utility schedule, its delivery
 schema and the detected spacing; a rules file, which Save Default Rules starts
 from the defaults (`IFC RULES`); and whether the file will be georeferenced,
 from the project's coordinate system. It writes the EXPORT line its fields
@@ -154,7 +168,7 @@ table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`).
 The table is the file the choices made when Preview was pressed: changing any
 of them but the file's name clears it, and a problem found since replaces the
 last result. The window's counts - entities, the selection, alignments,
-surfaces, the coordinate system - are read again as the drawing changes and
+surfaces, the road model's objects, the coordinate system - are read again as the drawing changes and
 before each preview and export, so "Selected entities only" with nothing
 selected is refused ("select what to export, or untick it") rather than
 writing the whole drawing or none of it.
@@ -168,8 +182,8 @@ drawing - its entities, alignments and surfaces - is shifted alongside or
 kept, as every import asks; declining is a cancel, which the dialog says as
 one. File > Import and a path given to the window, whose line says neither,
 ask about the coordinate system; a typed IMPORT or a headless session asks no
-one and says how (`CRS SET`). Terrain comes in as surfaces of the session,
-which Export IFC writes out again.
+one and says how (`CRS SET`). Terrain comes in as surfaces of the drawing,
+in the import's one undo step, which Export IFC writes out again.
 
 
 ## Export: what goes where
@@ -450,7 +464,188 @@ as a starting point.
 ### Surfaces
 
 Each surface passed in is an `IfcGeographicElement` TERRAIN whose `Body` is an
-`IfcTriangulatedFaceSet`, with `Katana_Surface`.
+`IfcTriangulatedFaceSet`, with `Katana_Surface`. Both front ends pass the
+drawing's surfaces (`Document::surfaces`), unless NOSURFACES.
+
+### Road model
+
+Horizontal BIM: the 3D objects of the drawing's corridors - pavement courses,
+kerbs, footpaths, verges, batters - and of the road objects placed along an
+alignment or a line - barriers, guide posts, signs, light poles, culverts,
+walls, fences, line markings - which `cad::bim::bimModel` makes from their
+definitions every time (`include/katana/cad/bim/bim_object.hpp`; the road
+design and road objects documents say how). The export writes them unless the
+line says NOROADMODEL (the window's "Road model" box). Section numbers below
+are those of buildingSMART's IFC 4.3.2.0 documentation, the IFC4X3_ADD2
+schema the file declares.
+
+**How it reaches the writer.** `katana_ifc` may not see `katana_cad`, so the
+model comes in as plain data: `ifc::RoadElement`, field for field what
+`cad::bim::BimObject` is, in an `ifc::RoadModelInput` with the model's
+problems. `app::roadModelInput` (`src/katana_app/ifc_verbs.hpp`) converts one
+into the other, and both front ends call it - `katana_cli`'s EXPORT and the
+window's (`src/katana_qt/main_window_ifc.cpp`) - so a corridor's elements are
+the same objects whichever wrote the file. Three of an object's properties
+say what its fields cannot, matched in any letter case: `ObjectType`, what a
+USERDEFINED class is (without it, the object's kind in capitals, since every
+class's CorrectPredefinedType rule requires one); `Host`, the id of the
+element a feature is on; and `Ground` (or `Surface`, `Target Surface`), the
+surface a cut is taken from. The road and road-object builders set the class
+and predefined type of each object; the export takes them as given, checks
+them against the schema, and does not second-guess them.
+
+**The spatial structure.** An `IfcRoad` (7.9.3.3) per facility - a corridor
+- aggregated into the site, and an `IfcRoadPart` (7.9.3.4) per part of it,
+aggregated into its road, in the order the model first names them; each
+element contained in its part, in its road when it names no part, in the site
+when it names no road (a sign of no corridor). The road is an ELEMENT and its
+parts PARTIAL: between facilities IfcRoad asks for a COMPLEX parent over an
+ELEMENT child, an ELEMENT over a PARTIAL. A part's UsageType (mandatory on
+IfcFacilityPart; IfcFacilityUsageEnum, 5.4.2.11) is LATERAL for the parts of
+the cross-section - CARRIAGEWAY, TRAFFICLANE, the shoulders, SIDEWALK,
+ROADSIDE, ROADSIDEPART, CENTRALRESERVE, ROADWAYPLATEAU, most of them a
+"lateral part" in IfcRoadPartTypeEnum's own definitions (7.9.2.2) and the rest
+beside one (a footpath along the side of the road, a part of the roadside) - LONGITUDINAL for a
+ROADSEGMENT, REGION for the bounded areas (an INTERSECTION, a ROUNDABOUT, a
+LAYBY ...), and NOTDEFINED for a part the enumeration does not list, which is
+written USERDEFINED with its name as its ObjectType. Every placement is
+relative to its container's, as IfcLocalPlacement (8.7.3.14) has it: the road
+to the site, a part to its road, an element to its part, a feature to its
+host. All are unmoved: the coordinates are the drawing's, from the file's
+local origin, which takes the road model into account.
+
+**Which class each object is.** What the builders are asked to write, and
+why; the export writes any class in its list (`src/katana_ifc/product_layout.hpp`)
+whose predefined type the schema has:
+
+| Object | Class and predefined type | Why |
+|---|---|---|
+| pavement course | `IfcCourse` PAVEMENT | a structural layer of a pavement build-up (IfcCourseTypeEnum, 6.6.2.1); a course is processed granular material, bound or not (6.6.3.2) |
+| a whole pavement | `IfcPavement` FLEXIBLE, RIGID | "usually comprising several courses" (6.6.3.12); written as given, the courses not aggregated into it (Not done) |
+| kerb | `IfcKerb` | the raised edge along a carriageway or footway (7.9.3.1); its enumeration has nothing more particular |
+| footpath | `IfcSlab` SIDEWALK, or its courses as `IfcCourse` in a SIDEWALK part | IfcSlabTypeEnum (6.1.2.19) |
+| fill batter, embankment, verge | `IfcEarthworksFill` SLOPEFILL, EMBANKMENT; a verge USERDEFINED "VERGE" | SLOPEFILL is fill forming a batter beside the road structure (6.6.2.3); topsoil is soil, so earthworks rather than a course (6.6.3.2) |
+| cut batter, excavation | `IfcEarthworksCut` CUT | the void left by excavating existing terrain (6.6.3.4) |
+| safety barrier (W-beam, thrie-beam, wire rope, concrete) | `IfcRailing` GUARDRAIL | a guardrail can also restrain errant road vehicles beside a road or on its central reserve (IfcRailingTypeEnum, 6.1.2.14); IfcWall PARAPET is for falls from edges and was rejected |
+| guide post | `IfcSign` MARKER | a post-style sign (IfcSignTypeEnum, 6.6.2.8) |
+| sign | `IfcSign` PICTORAL | a flat panel of text or symbols (6.6.2.8) |
+| light pole | `IfcMember` POST; its luminaire, as an object of its own, `IfcLightFixture` DIRECTIONSOURCE | a post is a usually vertical member supporting something (IfcMemberTypeEnum, 6.1.2.12); IfcColumn's STANDCOLUMN is a column under an arch (6.1.2.6) and was rejected; a road lantern emits in a direction (7.4.2.17) |
+| culvert | `IfcPipeSegment` CULVERT | "A covered channel or large pipe that forms a watercourse below ground level, usually under a road or railway" (7.5.2.26), box or pipe alike |
+| retaining wall, headwall | `IfcWall` RETAININGWALL | a wall holding back soil, headwalls and wing walls among its examples (6.1.2.22) |
+| noise wall | `IfcWall` USERDEFINED "NOISEBARRIER" | no enumerator of IfcWallTypeEnum is a noise barrier |
+| footing | `IfcFooting` STRIP_FOOTING | 7.11.3.5 |
+| fence | `IfcRailing` FENCE | 6.1.2.14 |
+| line marking | `IfcSurfaceFeature` LINEMARKING | painted lines marking boundaries, centre lines and edges (7.11.2.8) |
+
+The classes these need were added to the export's list - `IfcCourse`,
+`IfcEarthworksCut`, `IfcEarthworksFill`, `IfcFooting`, `IfcLightFixture`,
+`IfcSlab`, `IfcSurfaceFeature` beside `IfcPavement`, `IfcKerb`, `IfcRailing`,
+`IfcSign`, `IfcWall`, `IfcColumn`, `IfcMember` and `IfcPipeSegment`, which it
+had - each an IfcElement of nine attributes, the Tag eighth and the optional
+PredefinedType ninth (checked against each class's page). A project's rules
+file may name the new element classes too; not the two features
+(`IfcRulesFile.ARuleMayNotNameAFeatureClass`), since a line on a layer has
+nothing to be a feature of.
+
+**The body** is an `IfcTriangulatedFaceSet` (8.8.3.47) in the `Body` context,
+Closed when every edge of the mesh is used once in each direction - which is
+what a closed face set asserts: each edge used by exactly two faces, the
+normals pointing out of the material. A closed mesh wound inwards (its signed
+volume negative) is written wound outwards; vertices at exactly the same
+place are written once, so a mesh that repeats each corner for each face is
+still closed; a face naming one place twice is dropped; a mesh that is not
+closed is written open, and the count of those said once. None of that moves
+a coordinate. Its colour is a surface style (`Builder::colourSurface`), its
+layer the object's. **Rejected:** `IfcPolygonalFaceSet` - the meshes are
+triangles already, merging coplanar ones would only save bytes, and the
+triangulated set is the one the surfaces write, inside the Alignment-based
+view the file declares; and a profile swept along the alignment (a course's
+section along its `IfcGradientCurve`) - truer to the design, but beyond what
+every viewer draws, and not what the 3D view shows or the quantities were
+measured on. The element also has a `FootPrint` (`Curve2D`): the object's plan
+outline, else its mesh's plan hull - what a plan-only reader, Katana's own
+import among them, draws of it.
+
+**Features.** An `IfcEarthworksCut` is an IfcFeatureElementSubtraction: its
+IfcRelVoidsElement is a mandatory inverse, and a feature "shall have no
+independent containment relationship to the spatial structure" (5.4.3.30). An
+`IfcSurfaceFeature` adheres to an element through IfcRelAdheresToElement
+(5.4.3.45), also a mandatory inverse, and is not contained either. So each is
+written on its host and contained nowhere, placed relative to the host:
+
+- a cut voids the element its `Host` names; else the surface it was taken
+  from, when the file holds it (NOSURFACES not given); else an
+  `IfcGeographicElement` TERRAIN that stands for that ground - named after it,
+  "Existing ground" when unnamed - with no shape of its own, since the void
+  the schema requires needs an element to be in;
+- a marking adheres to the element its `Host` names; else to the course,
+  pavement or slab of its road that lies under the middle of its first face,
+  the highest there - the wearing course over the base; with none, it is not
+  written, said, since a marking on nothing would be an invalid file.
+
+A cut takes no material: IfcRelAssociatesMaterial's NoVoidElement rule
+refuses a void. Its material is said in its `Katana_RoadElement`.
+
+**Material** is an `IfcMaterial` of the object's material's name, written
+once and associated with every element of it by one `IfcRelAssociatesMaterial`.
+
+**Quantities** are an `IfcElementQuantity` (5.4.3.21) of `IfcQuantityLength`,
+`IfcQuantityArea`, `IfcQuantityVolume`, `IfcQuantityWeight` and
+`IfcQuantityCount`, by the quantity's unit: m, m2, m3, kg or t (written in
+kilograms, under an `IfcSIUnit` KILO GRAM of its own, since the project's
+units have no mass), or none for a count. Those a class's base quantity set
+names, with the quantity type it gives them, go in that set, whose
+MethodOfMeasurement is 'BaseQuantities': `Qto_CourseBaseQuantities` (6.6.5.2:
+Length, Width, Thickness, Volume, GrossVolume, Weight),
+`Qto_EarthworksCutBaseQuantities` (6.6.5.3), `Qto_EarthworksFillBaseQuantities`
+(6.6.5.4), `Qto_KerbBaseQuantities` (6.6.5.6), `Qto_PavementBaseQuantities`
+(6.6.5.8), `Qto_SignBaseQuantities` (6.6.5.11), `Qto_RailingBaseQuantities`
+(6.1.5.10). The rest go in `Katana_Quantities`, so a take-off tool finds a
+course's volume where it looks, and nothing is claimed to be a base quantity
+its template does not define. **Rejected:** every quantity in the class's
+Qto_ set (a set holding names its template lacks), and every quantity in
+Katana's own (a take-off tool would find none). A quantity in another unit, a
+negative or non-finite one (each quantity's WR: not negative) and a second of
+one name on an element (UniqueQuantityNames) are left out, each kind said
+once.
+
+**Properties.** `Katana_RoadElement`: the object's id, kind, facility, part,
+layer, material and whether its body is a closed solid. `Katana_RoadProperties`:
+the object's own properties, as it has them, the first of each name.
+
+**What is left out**, each said by the object's id in the warnings and in the
+account as not written: an object with no id (its GlobalId would not be
+stable) or the id of one before it; no class, a class the export does not
+write or IfcAnnotation; a predefined type the class's enumeration lacks;
+USERDEFINED with no object type; a mesh with a non-finite vertex or a face
+naming a vertex it lacks, or no face at all; a plan outline with a non-finite
+vertex; a feature with no host to be on. The rest of the model is written.
+What the model could not build (`BimModel::problems`) is among the warnings,
+"the road model: corridor Main: ...", since a file missing a corridor's kerbs
+must say why.
+
+**GlobalIds** are made from the object's id ("road/element/<id>"), a road's
+from its name ("road/facility/Main"), a part's from both, so an object keeps
+its GlobalId when others are added before it
+(`IfcExportRoad.GlobalIdsComeFromTheIdsAndAreStableAcrossExports`).
+
+The tests export a synthetic corridor of boxes whose volumes are worked out by
+hand - two courses, a kerb, a fill and a cut batter, a marking, a sign, a
+noise wall - and read the file back instance by instance
+(`tests/ifc/test_road.cpp`): the structure and its placements
+(`IfcExportRoad.EveryElementIsContainedInItsPartItsRoadOrTheSiteAndPlacedRelativeToIt`),
+closed face sets enclosing 17.5 m3 and 4.5 m3
+(`IfcExportRoad.ABodyIsAClosedTriangulatedFaceSetEnclosingTheMeshesVolume`),
+the features on their hosts
+(`IfcExportRoad.ACutVoidsTheGroundItIsTakenFromAndIsContainedNowhere`,
+`IfcExportRoad.AMarkingAdheresToTheHighestCourseUnderItAndIsContainedNowhere`),
+the base quantities against their templates
+(`IfcExportRoad.QuantitiesTheTemplateNamesAreBaseQuantitiesAndTheRestKatanas`)
+and every refusal (`IfcExportRoad.WhatWouldMakeAnInvalidFileIsLeftOutAndSaid`);
+`tests/app/test_ifc_verbs.cpp` the conversion
+(`IfcRoadModelInput.EveryFieldOfABimObjectReachesTheElement`); and the window's
+box `qt_widgets.IfcExportDialog.TheRoadModelBoxCountsItsObjectsAndUntickedTheLineSaysNoRoadModel`
+and `qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless`.
 
 ### GlobalIds, and the same file every time
 
@@ -541,6 +736,18 @@ mistake in the writer and the same mistake in the reader cannot agree:
   too - 1097, 1097 and 58 instances - and
   `qt_ifc_the_windows_export_is_valid_to_ifcopenshell` checks the first where
   IfcOpenShell is installed.
+- **The road model's file** - the synthetic corridor of `tests/ifc/test_road.cpp`
+  with its ground, georeferenced - is written by
+  `IfcExportRoad.TheRoadModelIsWrittenForTheValidator` and judged by
+  `tools/check_ifc.py` in `ifc.the_road_model_export_is_valid_to_ifcopenshell`,
+  registered beside the others where IfcOpenShell is installed
+  (`tests/ifc/CMakeLists.txt`). It has **not yet been run**: IfcOpenShell is
+  not installed on the machine the road model was written on (2026-10-15),
+  nor have buildingSMART's rules been run on it. What the schema asks that
+  IfcOpenShell checks was worked through by hand from each class's page -
+  the attribute counts, the features' mandatory inverses, NoVoidElement,
+  each quantity's WR, UniqueQuantityNames - and the tests pin it; the first
+  run where IfcOpenShell is installed is what settles it.
 - **Import**: all 46 files of buildingSMART's IFC 4.3 sample models
   (`IFC4.3.x-sample-models` at 50e6c5c) import without error by hand; the
   railway sample's alignment is reconstructed to 4 PIs, and the UTM and
@@ -555,20 +762,41 @@ mistake in the writer and the same mistake in the reader cannot agree:
   drawing, and leaves out entities, alignments or surfaces; it does not yet
   take `VIEW`, `AREA`, `LAYERS a,b [ONLY]` or `WHERE k=v`, nor does the
   export dialog carry the "Apply to" and "Only those that match" controls.
-  The rule asks for one shared scope parser in katana_cad and one shared
-  "Apply to" widget in the window, neither of which exists yet (2026-09-26):
-  the scope and filter words are read inside
-  `CommandInterpreter::modify`, and a second reading of them here is what the
-  rule forbids. When the shared parser exists, both front ends resolve the
-  scope with `cad::matchEntities` and pass the entities as
+  When this was written (2026-09-26) the shared scope parser and "Apply to"
+  widget did not exist; both do now (`include/katana/cad/scope_verbs.hpp`,
+  `src/katana_qt/customisation/scope_filter_widget.hpp`), so what remains is
+  the wiring: both front ends read the words with the shared parser, resolve
+  the scope with `cad::matchEntities` and pass the entities as
   `ExportOptions::entities`, which the writer already takes, and the reply
-  says what the scope took.
+  says what the scope took. The road model is not an entity and would be
+  scoped by its own objects' layers, which no scope reads yet.
 - **Solids** are not read beyond swept disks and triangulated surfaces:
   Katana has no solid entity, so an extruded wall or a B-rep comes in as a
   point at its placement with its properties.
-- **Export of 3D solids** other than swept disks (a pit as a box, a culvert as
-  its section) is not attempted; a pit is its footprint and, from a .12da
-  archive, a cylinder from invert to top.
+- **Export of 3D solids** other than swept disks and the road model's meshes
+  (a drawn pit as a box) is not attempted; a pit is its footprint and, from a
+  .12da archive, a cylinder from invert to top.
+- **The road model** ("Road model", above), as far as it goes:
+  - its file has not been judged by IfcOpenShell or buildingSMART's rules
+    yet ("Validation"), and whether IFC431, the Alignment-based view's scope,
+    lists IfcRoad, IfcRoadPart and the road elements is unknown - its
+    warnings, if any, are the first run's to report;
+  - courses are elements of their part, not aggregated into an `IfcPavement`
+    (IfcPavement's page does not model that aggregation), and they are not
+    an `IfcMaterialLayerSet`; there are no type objects (`IfcCourseType` ...);
+  - placement is Cartesian and unmoved, not linear along the alignment
+    (`IfcLinearPlacement`), and a course is its mesh, not its section swept
+    along the alignment;
+  - base quantities are matched only for the seven classes whose templates
+    were checked (Course, EarthworksCut, EarthworksFill, Kerb, Pavement,
+    Railing, Sign); every other class's quantities are Katana's;
+  - a cut voids the whole surface it was taken from, which a viewer may
+    take as a boolean of a large TIN and a long solid; cutting the ground's
+    face set instead is not done;
+  - the import reads a road element back as its FootPrint outline, not its
+    body (Katana has no solid entity), and `katana_cli`'s IMPORT counts a
+    file's terrain without keeping it in the drawing's surfaces;
+  - the road model is not scoped (above): it is all written, or none.
 - **Cant**, IFC4X1-form alignments, and transitions other than the clothoid
   have no Katana equivalent, so they come in as exact polylines.
 - **Labels** are not exported (above), and the delivery schema's conditional

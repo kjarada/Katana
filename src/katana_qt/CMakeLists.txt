@@ -156,6 +156,26 @@ target_sources(katana_qt_ui PRIVATE ${_katana_geo_ui})
 file(GLOB _katana_drawing_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.hpp")
 target_sources(katana_qt_ui PRIVATE ${_katana_drawing_ui})
+# The surfaces' front end - the Surfaces panel, the style manager, the edit
+# tools, the volumes (docs/terrain.md, docs/surface_display.md,
+# docs/surface_editing.md, docs/volumes.md) - and the BIM menu's road model
+# (docs/road_design.md, docs/road_objects.md). Globbed, one directory each,
+# written side by side by several authors.
+file(GLOB _katana_terrain_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.hpp")
+file(GLOB _katana_bim_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/bim/*.hpp")
+# A main_window_*.cpp there defines MainWindow's own members, so it is the
+# window's alone (added to `katana` below): in katana_qt_ui it would leave the
+# widget tests and benchmarks, which link no MainWindow, with undefined ones.
+file(GLOB _katana_window_terrain_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/terrain/main_window_*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/bim/main_window_*.cpp")
+if(_katana_window_terrain_ui)
+    list(REMOVE_ITEM _katana_terrain_ui ${_katana_window_terrain_ui})
+    list(REMOVE_ITEM _katana_bim_ui ${_katana_window_terrain_ui})
+endif()
+target_sources(katana_qt_ui PRIVATE ${_katana_terrain_ui} ${_katana_bim_ui})
 # Help > Check for Updates' dialog (docs/update.md): named, not listed, because
 # the task that writes it adds the files without editing this list. It builds
 # UPDATE verb lines and hands them to the window's executor, like every dialog,
@@ -202,6 +222,7 @@ add_executable(katana WIN32
     gis_online.cpp
     gis_online.hpp
     ${_katana_window_survey_ui}
+    ${_katana_window_terrain_ui}
 )
 katana_target_defaults(katana)
 target_link_libraries(katana PRIVATE katana_qt_ui)
@@ -238,6 +259,10 @@ endif()
 add_executable(katana_make_icons EXCLUDE_FROM_ALL make_icons.cpp icons.cpp theme.cpp)
 katana_target_defaults(katana_make_icons)
 target_link_libraries(katana_make_icons PRIVATE Qt6::Widgets)
+# The road objects' icons are painted in their own file (docs/road_objects.md),
+# which icons.cpp calls and which includes from this directory.
+target_sources(katana_make_icons PRIVATE bim/road_object_icons.cpp)
+target_include_directories(katana_make_icons PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # A developer tool, like katana_make_icons: every catalogue tool's icon at two
 # sizes with its name and id, so a tool's author can see the icon without

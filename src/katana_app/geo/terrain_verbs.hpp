@@ -11,8 +11,10 @@
 //   CONTOUR, RASTER SHADE, RASTER SLOPE, RASTER ASPECT (contour_verbs.cpp,
 //   shade_verbs.cpp, slope_verbs.cpp)
 //
-// Surfaces are session data, as reference rasters are: not entities, not
-// undoable, not saved in the project (terrain/surface_store.hpp).
+// The surfaces are the drawing's (Document::surfaces), staged for each phase
+// in Context::surfaces and committed by the executor as one undo step
+// (geo_verbs.hpp); they are saved with the project (docs/terrain.md,
+// "Surfaces in the drawing").
 
 #include <cstddef>
 #include <cstdint>
@@ -43,9 +45,8 @@ namespace katana::app::geo {
 // points of information. SURFACE FROM ... max= changes it.
 inline constexpr std::size_t kSurfacePointCap = 400'000;
 
-// surface name=ground triangles=2 points=4 bounds=0.000,0.000,10.000,10.000
-//         zmin=100.000 zmax=101.000 source="drawing (4 entities)"
-[[nodiscard]] std::string surfaceRecord(const katana::terrain::NamedSurface& surface);
+// One surface's record is cad::surfaceRecord (cad/terrain/surface_verbs.hpp),
+// written the same by every verb that names a surface.
 
 // A surface triangulated and not yet kept: made by a job's work, kept by its
 // apply. `records` say how it was made - how a raster was sampled, how many
@@ -68,9 +69,10 @@ triangulate(katana::terrain::TinInput input, const katana::terrain::TinBuildOpti
 surfaceFromRasterFile(const std::filesystem::path& path, std::size_t maxPoints,
                       const std::optional<katana::geometry::Box2>& area);
 
-// `build` kept in the context's store as `name`, the front end told. When
-// `unique` the name is made unique ("name (2)"), else a name in use is
-// AlreadyExists. The records of the build, then the surface's.
+// `build` kept in the phase's staging store as `name`, which the executor
+// commits to the drawing as one undo step. When `unique` the name is made
+// unique ("name (2)"), else a name in use is AlreadyExists. The records of
+// the build, then the surface's.
 [[nodiscard]] katana::core::Result<std::string> keepSurface(Context& context, std::string name,
                                                             std::string source, bool unique,
                                                             SurfaceBuild&& build);

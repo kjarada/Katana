@@ -15,6 +15,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -188,6 +189,30 @@ TEST(SceneKernels, EveryStyleAndColouringOfASurfaceBuildsTheSameAtEveryLevel)
             expectSameTerrain(surfaces, {}, options);
             options.lightDirection = {0.0, 0.0, 0.0}; // unlit: no normals at all
             expectSameTerrain(surfaces, {}, options);
+        }
+    }
+}
+
+// Surface display (docs/surface_display.md): the kernels' ramp table is
+// filled from the ramp a style names, so a surface on any ramp of the table
+// builds the same at both levels - smooth on the kernel path, banded on the
+// scalar one, which must not reach the kernels at all.
+TEST(SceneKernels, ASurfaceInADisplayStyleOnEveryRampBuildsTheSameAtEveryLevel)
+{
+    KATANA_REQUIRE_SIMD_KERNELS();
+    const TinSurface a = rollingTin(11);
+    for (const std::string_view ramp : katana::cad::surfaceRampNames()) {
+        for (const bool banded : {false, true}) {
+            SCOPED_TRACE(std::string(ramp) + (banded ? " banded" : " smooth"));
+            katana::cad::SurfaceDisplayStyle style;
+            style.name = "test";
+            style.ramp = std::string(ramp);
+            style.banded = banded;
+            style.shading = SurfaceStyle::ShadedWithEdges;
+            std::vector<SceneSurface> surfaces(1);
+            surfaces[0].surface = &a;
+            katana::cad::applySurfaceDisplay(surfaces[0], style);
+            expectSameTerrain(surfaces, {}, SceneOptions{});
         }
     }
 }

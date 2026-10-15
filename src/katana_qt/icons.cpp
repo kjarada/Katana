@@ -11,6 +11,8 @@
 #include <cmath>
 
 #include "theme.hpp"
+// Road objects (docs/road_objects.md): their icons are painted there.
+#include "bim/road_object_icons.hpp"
 
 namespace katana::qt {
 
@@ -385,6 +387,25 @@ const std::vector<Icon>& allIcons()
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
         Icon::Settings,     Icon::SurveyLinework,
+        // volumes
+        Icon::Volumes,      Icon::CutFillMap,
+        // ---- road objects (docs/road_objects.md) ----
+        Icon::RoadBarrier,  Icon::RoadGuidePosts,
+        Icon::RoadSign,     Icon::RoadLightPole,
+        Icon::RoadCulvert,  Icon::RoadWall,
+        Icon::RoadFence,    Icon::RoadLineMarking,
+        Icon::RoadObjects,
+        // ---- end road objects ----
+        // Surface editing (docs/surface_editing.md).
+        Icon::SurfaceEdit,  Icon::SurfaceLevels,
+        Icon::SurfaceSmooth, Icon::SurfaceThin,
+        Icon::SurfaceDeleteLong, Icon::SurfaceCombine,
+        // The drawing's surfaces (docs/terrain.md).
+        Icon::SurfacesPanel,
+        // road model
+        Icon::RoadTemplate, Icon::Corridor, Icon::RoadModel,
+        // Surface display
+        Icon::SurfaceStyles,
         Icon::Download,
     };
     return icons;
@@ -1334,6 +1355,156 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 11.5, 6.5, false);
         drawMark(ink, 19.5, 14.5, false);
         break;
+    // ---- volumes (docs/volumes.md) ----
+    case Icon::Volumes: {
+        // A block seen from above one corner: the top face filled, so at
+        // 16 px it reads as a solid, not a wire box.
+        const QPainterPath top = polyline({{12, 3}, {21, 7.5}, {12, 12}, {3, 7.5}}, true);
+        ink.fill(top, true, 90);
+        ink.stroke(top, true);
+        ink.stroke(polyline({{3, 7.5}, {3, 16.5}, {12, 21}, {21, 16.5}, {21, 7.5}}));
+        ink.line(12, 12, 12, 21);
+        break;
+    }
+    case Icon::CutFillMap: {
+        // The map's frame, the fill side shaded in the accent, the cut side
+        // faintly in the neutral, and the line where they meet.
+        QPainterPath fillSide(QPointF(3.5, 3.5));
+        fillSide.lineTo(11, 3.5);
+        fillSide.cubicTo(14, 10, 9, 14, 13, 20.5);
+        fillSide.lineTo(3.5, 20.5);
+        fillSide.closeSubpath();
+        QPainterPath cutSide(QPointF(11, 3.5));
+        cutSide.lineTo(20.5, 3.5);
+        cutSide.lineTo(20.5, 20.5);
+        cutSide.lineTo(13, 20.5);
+        cutSide.cubicTo(9, 14, 14, 10, 11, 3.5);
+        ink.fill(fillSide, true, 110);
+        ink.fill(cutSide, false, 45);
+        QPainterPath meet(QPointF(11, 3.5));
+        meet.cubicTo(14, 10, 9, 14, 13, 20.5);
+        ink.stroke(meet, true);
+        ink.stroke(polyline({{3.5, 3.5}, {20.5, 3.5}, {20.5, 20.5}, {3.5, 20.5}}, true));
+        break;
+    }
+    // ---- end of volumes ----
+    // ---- road objects (docs/road_objects.md): bim/road_object_icons.cpp ----
+    case Icon::RoadBarrier:
+    case Icon::RoadGuidePosts:
+    case Icon::RoadSign:
+    case Icon::RoadLightPole:
+    case Icon::RoadCulvert:
+    case Icon::RoadWall:
+    case Icon::RoadFence:
+    case Icon::RoadLineMarking:
+    case Icon::RoadObjects:
+        (void)paintRoadObjectIcon(which, painter, neutral, accent);
+        break;
+    // ---- end road objects ----
+    // ---- surface editing (docs/surface_editing.md) ----
+    case Icon::SurfaceEdit: {
+        // Four triangles round a centre vertex; the vertex in the accent.
+        const QPainterPath rim = polyline({{3, 19}, {6, 5}, {19, 4}, {21, 18}}, true);
+        ink.stroke(rim);
+        for (const QPointF& corner : {QPointF(3, 19), QPointF(6, 5), QPointF(19, 4),
+                                      QPointF(21, 18)}) {
+            ink.line(corner.x(), corner.y(), 12, 12);
+        }
+        ink.dot(12, 12, 2.6, true);
+        break;
+    }
+    case Icon::SurfaceLevels:
+        ink.stroke(polyline({{2.5, 18}, {8, 15}, {14, 17}, {21.5, 13}}));
+        ink.line(12, 3, 12, 12.5, true);
+        ink.stroke(polyline({{9, 6}, {12, 3}, {15, 6}}), true);
+        ink.stroke(polyline({{9, 9.5}, {12, 12.5}, {15, 9.5}}), true);
+        break;
+    case Icon::SurfaceSmooth: {
+        ink.stroke(polyline({{2.5, 14}, {6, 8}, {9, 17}, {13, 7}, {17, 16}, {21.5, 10}}));
+        QPainterPath smooth(QPointF(2.5, 13));
+        smooth.cubicTo(8, 10, 14, 15, 21.5, 11);
+        ink.stroke(smooth, true);
+        break;
+    }
+    case Icon::SurfaceThin:
+        ink.line(3, 15, 21, 11);
+        ink.node(3, 15);
+        ink.node(21, 11);
+        for (const double x : {9.0, 15.0}) {
+            const double y = 15.0 - (x - 3.0) * 4.0 / 18.0;
+            ink.dot(x, y, 1.8, true);
+            ink.line(x - 2.5, y - 2.5, x + 2.5, y + 2.5, true, 1.2);
+        }
+        break;
+    case Icon::SurfaceDeleteLong:
+        ink.stroke(polyline({{2.5, 17}, {21.5, 17}, {12, 13.5}}, true));
+        ink.stroke(polyline({{12, 13.5}, {7, 5}, {17, 5}}, true));
+        ink.line(5, 21, 19, 10, true);
+        break;
+    case Icon::SurfaceCombine:
+        ink.stroke(rectangle(3, 4, 18, 16));
+        ink.fill(rectangle(9, 9, 8, 7), true, 160);
+        ink.stroke(rectangle(9, 9, 8, 7), true);
+        break;
+    case Icon::SurfacesPanel: {
+        // Four vertices of a TIN and the triangles between them; the middle
+        // one filled in the accent, the row picked in the panel.
+        const QPainterPath picked = polyline({{9, 7}, {16, 14}, {7, 17}}, true);
+        ink.fill(picked, true, 90);
+        ink.stroke(polyline({{3, 12}, {9, 7}, {19, 4}, {21, 15}, {16, 14}, {13, 21}, {7, 17}},
+                            true));
+        ink.stroke(polyline({{9, 7}, {16, 14}, {19, 4}}));
+        ink.stroke(polyline({{3, 12}, {7, 17}, {9, 7}}));
+        ink.stroke(polyline({{7, 17}, {16, 14}}));
+        break;
+    }
+    // ---- road model (docs/road_design.md) ----
+    case Icon::RoadTemplate: {
+        // The course under the road, then the crowned surface over it in the
+        // accent, rising to a kerb at each edge.
+        const QPainterPath course =
+            polyline({{4.5, 13}, {12, 11}, {19.5, 13}, {19.5, 16.5}, {12, 14.5}, {4.5, 16.5}}, true);
+        ink.fill(course, false, 90);
+        ink.stroke(course);
+        ink.stroke(polyline({{4.5, 13}, {12, 11}, {19.5, 13}}), true);
+        ink.stroke(polyline({{4.5, 13}, {4.5, 9.5}, {2, 9.5}}));
+        ink.stroke(polyline({{19.5, 13}, {19.5, 9.5}, {22, 9.5}}));
+        break;
+    }
+    case Icon::Corridor: {
+        QPainterPath left(QPointF(3, 21));
+        left.quadTo(4, 9, 15, 3);
+        QPainterPath right(QPointF(11, 21));
+        right.quadTo(12, 13, 21, 8);
+        ink.stroke(left);
+        ink.stroke(right);
+        QPainterPath centre(QPointF(7, 21));
+        centre.quadTo(8, 11, 18, 5.5);
+        ink.dashed(centre, true);
+        break;
+    }
+    case Icon::RoadModel: {
+        // A block seen from above one corner: its top in the accent.
+        const QPainterPath top = polyline({{12, 4}, {20, 8}, {12, 12}, {4, 8}}, true);
+        ink.fill(top, true, 110);
+        ink.stroke(top, true);
+        ink.stroke(polyline({{4, 8}, {4, 16}, {12, 20}, {20, 16}, {20, 8}}));
+        ink.line(12, 12, 12, 20);
+        break;
+    }
+    // ---- end road model ----
+    case Icon::SurfaceStyles: {
+        // The band's corners lie on the outline's sides, to a twentieth of a
+        // unit: the left side x = 3 + 6 (17 - y) / 11 is 5.51 at y = 12.4 and
+        // 7.47 at 8.8, the right x = 21 - 4 (y - 8) / 12 is 20.3 at 10.1 and
+        // 19.1 at 13.7 - so the fill stops at the outline at every size.
+        ink.fill(polyline({{5.5, 12.4}, {7.5, 8.8}, {20.3, 10.1}, {19.1, 13.7}}, true), true, 120);
+        ink.stroke(polyline({{3, 17}, {9, 6}, {21, 8}, {17, 20}}, true));
+        ink.line(9, 6, 17, 20, false, 1.1);
+        ink.line(5.5, 12.4, 19.1, 13.7, true, 1.1);
+        ink.line(7.5, 8.8, 20.3, 10.1, true, 1.1);
+        break;
+    }
     case Icon::Download: {
         // The cloud is left open underneath, where the arrow comes out of it,
         // so that at 16 px the shaft does not cross a third line at its base.

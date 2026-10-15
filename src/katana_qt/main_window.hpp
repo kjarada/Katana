@@ -25,7 +25,7 @@
 #include "theme.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/geometry/alignment.hpp"
-#include "katana/cad/corridor.hpp"
+#include "bim/road_workbench.hpp" // road model
 #include "katana/geometry/profile.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -45,6 +45,11 @@
 #include "ifc_dialogs.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
+// Terrain > Edit Surface and its toolbar: whole, as every member held by
+// unique_ptr is, since the window's destructor is the implicit one.
+#include "terrain/surface_edit_ui.hpp"
+// Road objects (docs/road_objects.md): the BIM menu's Road Objects section.
+#include "bim/road_object_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "plotting/plot_drawing_dialog.hpp"
 #include "plotting/plot_output.hpp"
@@ -87,6 +92,8 @@ class LayerManagerDialog;
 class PropertyTreePanel;
 class DatasetInfoDialog;
 class DrawingSummaryDialog;
+// Surface display (docs/surface_display.md).
+class SurfaceStyleManagerDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -397,21 +404,43 @@ class MainWindow final : public QMainWindow {
     // Data's chosen cloud or raster first. It builds a SURFACE FROM line and
     // runs it through runVerbLine.
     void showSurfaceFrom(SurfaceFromKind kind);
-    void addSurface(std::string name, katana::terrain::TinSurface surface);
-    // sceneSurfaces_ made again from surfaceStore_ when it has changed, each
-    // surface keeping how it was shown. A surface the store gained is shown
-    // in a 3D view, framed: one the user cannot see is not obviously made.
-    void syncSceneSurfaces();
+    // `surface` into the drawing's surfaces as one undo step named
+    // `stepName`, under `name` or "name (2)" when that is taken.
+    void addSurface(std::string name, katana::terrain::TinSurface surface,
+                    std::string stepName = "ADD SURFACE");
+    // sceneSurfaces_ made again from the drawing's surfaces
+    // (Document::surfaces) when they have changed, each keeping how the 3D
+    // view shows it and NamedSurface::visible saying whether it is shown at
+    // all. A surface the drawing gained is shown in a 3D view, framed - one
+    // the user cannot see is not obviously made - unless `showGained` is
+    // false (a New or an Open: the drawing was replaced, not added to).
+    void syncSceneSurfaces(bool showGained = true);
     // Session data like a surface: not an entity, not undoable, and drawn in
     // 3D with its footprint in plan.
     void addMesh(std::string name, katana::geometry::TriangleMesh mesh,
                  katana::render::Rgba color, std::vector<katana::render::Rgba> faceColors);
     // Terrain > Alignment Manager: built on first use and kept, non-modal.
     void showAlignmentManager();
+    // ---- surface display (docs/surface_display.md; terrain/main_window_surface_display.cpp)
+    // Terrain > Surface Styles... (terrainSurfaceStyles), made once and put in
+    // the Terrain menu and toolbar by the caller; it also has the 3D views
+    // follow an edit of the styles.
+    [[nodiscard]] QAction* buildSurfaceDisplay();
+    // The style manager (terrain/surface_style_manager.hpp): built on first
+    // use and kept, non-modal.
+    void showSurfaceStyleManager();
+    // Each of `items` drawn in its surface's display style
+    // (cad::applySurfaceDisplay) and shown as the drawing shows the surface.
+    void styleSceneSurfaces(std::vector<katana::cad::SceneSurface>& items) const;
+    // sceneSurfaces_ styled again, and the 3D views told: a style edited.
+    void restyleSceneSurfaces();
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
-    void corridorQuantities();
-    void corridorSurface();
+    // ---- road model (docs/road_design.md) ----
+    // The road model's meshes put among the 3D views' meshes in the place of
+    // the last ones (RoadServices::setRoadMeshes): those with planFootprint
+    // off are its own.
+    void setRoadMeshes(std::vector<katana::cad::SceneMesh> meshes);
     // File > Plot to PDF: the dialog, made the first time and kept, which
     // runs the PLOT line.
     void plotToPdf();
@@ -429,21 +458,6 @@ class MainWindow final : public QMainWindow {
     // record logged (plotting/view_image_export.hpp).
     void snapshotView(const SnapshotRequest& request);
 
-    // What both corridor commands ask for: an alignment with a design
-    // profile, a ground surface, the assembly and the interval, from one
-    // dialog. nullopt when the user cancels or nothing qualifies, which has
-    // already been logged.
-    struct CorridorRequest {
-        katana::geometry::SolvedAlignment alignment;
-        katana::geometry::SolvedProfile profile;
-        const katana::terrain::TinSurface* ground = nullptr;
-        QString alignmentName;
-        QString surfaceName;
-        katana::cad::Assembly assembly;
-        double crossfallPercent = 0.0;
-        double interval = 10.0;
-    };
-    std::optional<CorridorRequest> askCorridor(const QString& title);
     // The part both section commands share: gather the visible surfaces, cut
     // along `alignment`, show the result. `along` names the source for the
     // log line.
@@ -671,6 +685,10 @@ class MainWindow final : public QMainWindow {
     katana::cad::Document::ListenerHandle documentListener_;
     // suggestPlotFiles, on a new, opened or saved drawing.
     katana::cad::Document::ListenerHandle fileListener_;
+    // syncSceneSurfaces, AT ONCE when the drawing's surfaces or their styles
+    // change: sceneSurfaces_ points at surfaces, and a deferred refresh would
+    // leave it pointing at a store a step had replaced until then.
+    katana::cad::Document::ListenerHandle surfacesListener_;
     katana::cad::CommandInterpreter interpreter_{document_};
 
     ViewWorkspace* views_ = nullptr;
@@ -691,6 +709,17 @@ class MainWindow final : public QMainWindow {
     // DRAW (survey/utility_workbench.hpp). After the Document for the reason
     // online_ is.
     std::unique_ptr<UtilityWorkbench> utilities_;
+    // BIM > Road Objects and their dialogs (bim/road_object_workbench.hpp,
+    // docs/road_objects.md). After the Document for the reason online_ is.
+    std::unique_ptr<RoadObjectWorkbench> roadObjects_;
+    // Terrain > Edit Surface, its dialogs and the Surface Edit toolbar
+    // (docs/surface_editing.md). After the Document for the reason online_ is.
+    std::unique_ptr<SurfaceEditUi> surfaceEdit_;
+    // ---- road model (docs/road_design.md) ----
+    // The BIM menu's road templates, corridors and quantities, and the road
+    // model in the views (bim/road_workbench.hpp). After the Document for the
+    // reason online_ is.
+    std::unique_ptr<RoadWorkbench> road_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's
@@ -712,19 +741,26 @@ class MainWindow final : public QMainWindow {
     // with its other children.
     QPointer<IfcImportDialog> ifcImport_;
     QPointer<IfcExportDialog> ifcExport_;
+    // Surface display (docs/surface_display.md): Terrain > Surface Styles,
+    // kept between uses; it holds the Document through a DocumentWatcher,
+    // which is safe should the Document go first. The listener that restyles
+    // the 3D views, and whether its queued restyle is waiting.
+    QPointer<SurfaceStyleManagerDialog> surfaceStyleManager_;
+    katana::cad::Document::ListenerHandle surfaceStylesListener_;
+    bool surfaceRestylePending_ = false;
 
-    // Surfaces shown in the 3D and section views. Built on demand from
-    // imported point clouds, rasters and drawing geometry, and owned here for
-    // the same reason reference data is: katana_cad must stay free of GDAL and
-    // PDAL so it still builds with -DKATANA_BUILD_IO=OFF.
-    // The one store of named surfaces (terrain/surface_store.hpp) that the
-    // geoprocessing verbs' SURFACE <name> reads too; each surface is shared
-    // and immutable, so sceneSurfaces_ may point into it and a background
-    // job may read one while the views draw it. sceneSurfaces_ is rebuilt
-    // from the store whenever its revision moves (syncSceneSurfaces).
-    katana::terrain::SurfaceStore surfaceStore_;
+    // The drawing's surfaces as the 3D, section and sheet views draw them:
+    // made from Document::surfaces - the one store, which the geoprocessing
+    // verbs, the surface verbs and the panels change - whenever its
+    // generation moves (syncSceneSurfaces). A SceneSurface points at a
+    // surface, so the surfaces it points at are held here as well: an undo
+    // that drops the last step holding one cannot free it under a view.
     std::vector<katana::cad::SceneSurface> sceneSurfaces_;
-    std::uint64_t sceneSurfacesRevision_ = 0;
+    std::vector<std::shared_ptr<const katana::terrain::TinSurface>> sceneSurfacesHeld_;
+    std::uint64_t sceneSurfacesGeneration_ = 0;
+    std::uint64_t sceneSurfaceStylesGeneration_ = 0;
+    // The Surfaces panel's dock (terrain/surfaces_panel.hpp).
+    QDockWidget* surfacesDock_ = nullptr;
     // Meshes (12d trimeshes), held the same way and for the same reasons.
     std::vector<std::unique_ptr<katana::geometry::TriangleMesh>> meshStore_;
     std::vector<katana::cad::SceneMesh> sceneMeshes_;

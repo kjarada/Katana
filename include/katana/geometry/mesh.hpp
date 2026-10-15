@@ -32,6 +32,11 @@ struct TriangleMesh {
     [[nodiscard]] std::size_t triangleCount() const { return faces.size(); }
     [[nodiscard]] bool empty() const { return faces.empty(); }
 
+    // Vertex for vertex, face for face: what makes the road model's objects
+    // (cad/bim/bim_object.hpp) comparable, so a model made again that equals
+    // the last is known to.
+    friend bool operator==(const TriangleMesh&, const TriangleMesh&) = default;
+
     // nullopt for an index past the end or a face naming a vertex that does
     // not exist, so a caller that iterates cannot read out of bounds even if
     // the mesh was never validated.
@@ -59,5 +64,13 @@ struct TriangleMesh {
 // the first non-finite vertex. A mesh that fails this may still be drawn
 // through triangle(), which refuses such a face one at a time.
 [[nodiscard]] katana::core::Status validate(const TriangleMesh& mesh);
+
+// The volume a closed, outward-turned mesh encloses (the divergence theorem),
+// summed about its first vertex so that projected coordinates of a million
+// metres do not swamp a solid a metre across, and compensated. Negative for
+// an inward-turned one; meaningless for an open one. A face naming a vertex
+// that does not exist is skipped. The one home of it: the road model's
+// solids (cad/road/) are measured by it.
+[[nodiscard]] double meshVolume(const TriangleMesh& mesh);
 
 } // namespace katana::geometry

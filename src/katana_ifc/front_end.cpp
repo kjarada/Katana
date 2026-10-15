@@ -130,7 +130,7 @@ namespace {
 
 constexpr std::string_view kExportOptions =
     "UTILITIES <schedule.csv>, SCHEMA <schema.csv>, RULES <rules.csv>, SPACING <m>, NODRAWING, "
-    "NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW";
+    "NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, NOROADMODEL, PREVIEW";
 constexpr std::string_view kImportOptions =
     "LOCAL, NOALIGNMENTS, NOELEMENTS, NOSURFACES, TOLERANCE <m>, TAKECRS, KEEPCRS";
 
@@ -188,7 +188,7 @@ std::optional<Result<ExportArguments>> parseExportArguments(std::string_view arg
                            keyword == "SPACING" || keyword == "NODRAWING" ||
                            keyword == "NOENTITIES" || keyword == "SELECTED" ||
                            keyword == "NOALIGNMENTS" || keyword == "NOSURFACES" ||
-                           keyword == "PREVIEW";
+                           keyword == "NOROADMODEL" || keyword == "PREVIEW";
         const bool takesValue = keyword == "UTILITIES" || keyword == "SCHEMA" ||
                                 keyword == "RULES" || keyword == "SPACING";
         if (!known || (takesValue && !hasValue)) {
@@ -213,7 +213,7 @@ std::optional<Result<ExportArguments>> parseExportArguments(std::string_view arg
             out.spacing = *spacing;
         } else if (keyword == "NODRAWING") {
             noDrawing = true;
-            out.entities = out.alignments = out.surfaces = false;
+            out.entities = out.alignments = out.surfaces = out.roadModel = false;
         } else if (keyword == "NOENTITIES") {
             out.entities = false;
         } else if (keyword == "SELECTED") {
@@ -222,6 +222,8 @@ std::optional<Result<ExportArguments>> parseExportArguments(std::string_view arg
             out.alignments = false;
         } else if (keyword == "NOSURFACES") {
             out.surfaces = false;
+        } else if (keyword == "NOROADMODEL") {
+            out.roadModel = false;
         } else {
             out.preview = true;
         }
@@ -335,12 +337,14 @@ Result<std::string> formatExportLine(const ExportArguments& arguments)
     if (arguments.spacing) {
         line += " SPACING " + core::formatExactReal(*arguments.spacing);
     }
-    if (!arguments.entities && !arguments.alignments && !arguments.surfaces) {
+    if (!arguments.entities && !arguments.alignments && !arguments.surfaces &&
+        !arguments.roadModel) {
         line += " NODRAWING";
     } else {
         line += arguments.entities ? "" : " NOENTITIES";
         line += arguments.alignments ? "" : " NOALIGNMENTS";
         line += arguments.surfaces ? "" : " NOSURFACES";
+        line += arguments.roadModel ? "" : " NOROADMODEL";
     }
     line += arguments.selected ? " SELECTED" : "";
     line += arguments.preview ? " PREVIEW" : "";
@@ -536,6 +540,12 @@ std::string formatExportReply(const IfcExport& report, std::string_view fileName
                        report.alignments, report.services, report.serviceSegments,
                        report.segmentsIn3d, report.locatedPoints, report.entitiesWritten,
                        report.entitiesSkipped, report.surfaces);
+    // Only when a road model was given, so that the reply of an export
+    // without one is the record it always was.
+    if (report.roadElements + report.roadElementsSkipped > 0) {
+        out += std::format("\nroad elements={} skipped={} roads={} parts={}", report.roadElements,
+                           report.roadElementsSkipped, report.roads, report.roadParts);
+    }
     out += classRecords(report.classes);
     for (const ClassTally& row : report.tally) {
         out += std::format("\nobject from={} count={} class={} predefined={} object_type={} "

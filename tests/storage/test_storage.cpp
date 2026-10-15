@@ -385,6 +385,11 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 [[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
 {
     // Newest first: a migration is undone before the one it was built on.
+    if (version < 13) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS surfaces;"); !status) {
+            return status;
+        }
+    }
     if (version < 11) {
         if (auto status = database.execute("DROP TABLE IF EXISTS label_rules;"
                                            "DROP TABLE IF EXISTS label_styles;"
@@ -513,7 +518,7 @@ TEST_F(ProjectStoreMigration, RefusesProjectsFromANewerKatana)
 // Schema 12 (docs/model.md): the drawing system's geometry kinds - curve
 // polyline 9, ellipse 10, spline 11 - with no table change of their own.
 
-TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTwelve)
+TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTheCurrentSchema)
 {
     Model model;
     Entity line;
@@ -526,15 +531,17 @@ TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTwelv
         ASSERT_TRUE(store->save(captureModel(model, {})).ok());
     }
     {
-        // Schema 11 as the build before this one left it: 12 changed no
-        // table, so the version is the only difference.
+        // Schema 11 as the build before 12 left it: 12 changed no table, so
+        // the version is the only difference - and 13's surfaces table goes
+        // too, which a schema-11 file never had.
         auto raw = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(raw.ok());
-        ASSERT_TRUE(raw->setUserVersion(11).ok());
+        ASSERT_TRUE(rewindSchemaTo(*raw, 11).ok());
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 12);
+    // Raised through 12 and 13, every migration after the file's.
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
     const auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();
     Model loaded;
@@ -569,7 +576,11 @@ TEST_F(ProjectStoreMigration, AProjectHoldingTheDrawingKindsIsWrittenAsSchemaTwe
         ASSERT_TRUE(raw.ok());
         const auto version = raw->userVersion();
         ASSERT_TRUE(version.ok());
-        EXPECT_EQ(*version, 12);
+        // 12 is the first schema with the kinds, which a schema-11 build
+        // refuses; a file is written at the current one, 13 since the
+        // surfaces (docs/model.md).
+        EXPECT_GE(*version, 12);
+        EXPECT_EQ(*version, 13);
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
@@ -588,19 +599,20 @@ TEST_F(ProjectStoreMigration, ABuildThatCannotReadTheProjectSaysItIsNewerAndWhic
 {
     // What a schema-11 build does with a schema-12 project, by the same check
     // one schema up: refused before any row is read, as version skew, naming
-    // both numbers - not "unknown geometry kind in blob" per entity.
+    // both numbers - not "unknown geometry kind in blob" per entity. One up
+    // from 13, the current schema since the surfaces (docs/model.md).
     { ASSERT_TRUE(ProjectStore::create(projectDir(), {}).ok()); }
     {
         auto raw = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(raw.ok());
-        ASSERT_TRUE(raw->setUserVersion(13).ok());
+        ASSERT_TRUE(raw->setUserVersion(14).ok());
     }
     const auto opened = ProjectStore::open(projectDir());
     ASSERT_FALSE(opened.ok());
     EXPECT_EQ(opened.error().code, ErrorCode::Unsupported);
     EXPECT_NE(opened.error().message.find("newer version of Katana"), std::string::npos)
         << opened.error().describe();
-    EXPECT_EQ(opened.error().context, "schema=13 supported=12");
+    EXPECT_EQ(opened.error().context, "schema=14 supported=13");
 }
 
 // ---- backup & recovery --------------------------------------------------------------------
@@ -1673,6 +1685,35 @@ TEST_F(ProjectStoreRoundTrip, AMetadataKeyANewerBuildWroteSurvivesOpenSaveSave)
     EXPECT_EQ(again->metadata.name, "Forward");
     // 10 keys this build writes (reference_layers the tenth) + the 1 it does
     // not know = 11 rows, each once.
+    EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 11u);
+}
+
+// The regression: a sheet set emptied (the drawing stops writing `sheets`)
+// came back from the previous save when the project was opened again,
+// because a save only REPLACEd rows into the table. A key of the drawing's
+// own that it no longer writes is deleted; a newer build's is still kept.
+TEST_F(ProjectStoreRoundTrip, AKeyOfTheDrawingsOwnThatItStopsWritingIsGoneAfterTheNextSave)
+{
+    const Model model = sampleModel();
+    ProjectMetadata metadata;
+    metadata.name = "Removed";
+    metadata.unknownKeys = {{"sheets", "{\"version\":1,\"sheets\":[]}"},
+                            {"road_objects", "{\"version\":1}"},
+                            {"symbol_rotation_mode", "north"}};
+    auto store = ProjectStore::create(projectDir(), metadata);
+    ASSERT_TRUE(store.ok());
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+
+    metadata.unknownKeys.erase("sheets");
+    metadata.unknownKeys.erase("road_objects");
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+
+    const auto again = store->load();
+    ASSERT_TRUE(again.ok());
+    EXPECT_EQ(again->metadata.unknownKeys,
+              (std::map<std::string, std::string>{{"symbol_rotation_mode", "north"}}))
+        << "sheets and road_objects were removed; the newer build's key was not";
+    // The 10 keys this build writes + the newer build's 1.
     EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 11u);
 }
 

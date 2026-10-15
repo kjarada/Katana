@@ -11,9 +11,9 @@ switches that run the window headlessly are `docs/headless.md`.
 
 The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with dockable Layers, Properties, Command Line and
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
-File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
-(`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
-`helpMenu`). File is the drawing as a file, what comes into it and goes out
+File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, BIM, GIS,
+Help (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
+`helpMenu`; BIM, `bimMenu`, is the road model's - `docs/road_design.md`). File is the drawing as a file, what comes into it and goes out
 of it - every import and every export, under two submenus - and the
 program's Settings ("The File menu", below); the managers of what a
 customisation brings are in Format and in Survey > Survey Coding ("The Format
@@ -568,8 +568,8 @@ makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
 the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain and GIS have a second row of their
-own (`addToolBarBreak`), because in one row they were squeezed to a button
+Format run along the top; Survey, Terrain, BIM and GIS have a second row of
+their own (`addToolBarBreak`), because in one row they were squeezed to a button
 each behind overflow arrows. Draw and Annotate run down the LEFT edge, where
 every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a
@@ -3703,14 +3703,18 @@ letter shared in one menu:
   The pick buttons are not: a pick waits for a click in a plan view, which
   a headless drive does not make, so the points are typed.
 
-**One store of surfaces.** The window's surfaces are a
-`terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
-store the headless session has too, so `SURFACE <name>` finds the same
-surface on every front end. `MainWindow::syncSceneSurfaces` rebuilds the
-views' list from it whenever its revision moves, keeping how each was shown.
-Surfaces are shared and immutable, so a job may read one while the views
-draw it. The store keeps names unique: a second surface of a name is
-"name (2)".
+**One store of surfaces, the drawing's.** The surfaces are the Document's
+(`Document::surfaces`; `docs/terrain.md`, "Surfaces in the drawing"), saved
+with the project and changed one undo step at a time, so `SURFACE <name>`
+finds the same surface on every front end and the window keeps none of its
+own. `MainWindow::syncSceneSurfaces` rebuilds the views' list from the
+Document whenever its generation moves - at once, inside the notification,
+because the list points at surfaces a step may have replaced - keeping how
+each was shown and taking whether it is shown from the drawing. Surfaces
+are shared and immutable, so a job may read one while the views draw it.
+The store keeps names unique: a second surface of a name is "name (2)".
+Terrain > Surfaces Panel (View > Panels > Surfaces) lists them
+(`src/katana_qt/terrain/surfaces_panel.hpp`).
 
 **The GIS menu's option dialogs are one file each** - `gis_import_dialogs`,
 `gis_export_dialog`, `surface_raster_dialog`, `dataset_info_dialog`, with
@@ -3736,7 +3740,7 @@ Browse, headless, says to type the path instead of opening a box.
 **The dialogs write lines, and do nothing else** - the pattern of the
 Subsurface Utilities dialog below. Every choice either offers is a word of the
 verb: `EXPORT <file.ifc> ... [NOENTITIES] [SELECTED] [NOALIGNMENTS]
-[NOSURFACES] [PREVIEW]` and `IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS]
+[NOSURFACES] [NOROADMODEL] [PREVIEW]` and `IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS]
 [NOELEMENTS] [NOSURFACES] [TOLERANCE <m>] [TAKECRS | KEEPCRS]`, with `INFO`
 and `IFC RULES` (`docs/ifc.md`, "Using it"). A dialog writes the line its
 fields mean (`ifc::formatExportLine`, `ifc::formatImportLine`), shows it as it
@@ -3789,7 +3793,7 @@ own verbs after the interpreter's.
 
 An import asks what the DXF import asks - a file far from the drawing is
 shifted alongside or kept - weighing everything it brings against everything
-the drawing holds, alignments and the session's surfaces too. When the file
+the drawing holds, alignments and its surfaces too. When the file
 names an EPSG code and the project has none, `TAKECRS` takes it and `KEEPCRS`
 does not; the import dialog always says one (its "Take the file's coordinate
 system"), File > Import and a path given to the window, which say neither,
@@ -3798,10 +3802,10 @@ and says how (`CRS SET`) - `MainWindow::IfcLineFrom` names who ran the line.
 The change is its own undoable step, after the import's. Declining the
 far-apart question cancels the import (`CommandRejected`), which the dialog
 says as a cancel, not a failure. Data shifted or moved to the origin is in no
-system, and takes none. Terrain comes in as surfaces of the session
-(`MainWindow::addSurface`), which the export also writes out - the one
-exchange that carries the 3D view's surfaces both ways besides the .12da
-archive.
+system, and takes none. Terrain comes in as surfaces of the drawing, in the
+import's one undo step (`cad::importSurfaces`), which the export also writes
+out - the one exchange that carries the drawing's surfaces both ways besides
+the .12da archive.
 
 `qt_widgets.IfcExportDialog.TheLineCarriesEveryChoiceAsTheVerbReadsIt`,
 `qt_widgets.IfcExportDialog.PreviewShowsTheWritersAccountClassByClass` and the
@@ -3999,6 +4003,30 @@ non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
 `runVerbLine`, the PI and PVI grids buffers applied by one line each. The
 decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
 opens with it, in an Alignments section, and the toolbar with its button.
+
+## Terrain > Volumes
+
+Earthwork volumes between the drawing's surfaces in one non-modal dialog the
+window keeps (`volumesDialog`, `src/katana_qt/terrain/volumes_dialog.hpp`,
+`showVolumesDialog`): a page per method, the boundary from the shared scope
+and filter controls or typed corners, factors, the results table, the mass
+haul diagram, Copy, Save CSV and Make Cut/Fill Map. Every one of them is a
+`VOLUME` or `SURFACE DIFFERENCE` line through `runVerbLine`; the methods and
+the decisions are in `docs/volumes.md`. The Terrain menu has it in a Volumes
+section after Corridors (`terrainVolumes`), and the Terrain toolbar its
+button.
+
+## Terrain > Surface Styles
+
+The drawing's surface display styles in a non-modal dialog the window keeps
+(`MainWindow::showSurfaceStyleManager`,
+`src/katana_qt/terrain/surface_style_manager.hpp`): every field of a style in
+four tabs with a live preview drawn through the plan view's own painter, and
+every button a `SURFACESTYLE` or `SURFACE STYLE` line through `runVerbLine`,
+the form a buffer applied by one line naming only what changed. It is in the
+Terrain menu's Surfaces section (letter Y) with the toolbar button beside the
+Surface From items, icon `SurfaceStyles`. The record is
+`docs/surface_display.md`, "In the window".
 
 ## Settings
 

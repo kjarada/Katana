@@ -1,15 +1,22 @@
 #include "ifc_verbs.hpp"
 
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <initializer_list>
 #include <iostream>
+#include <memory>
+#include <string_view>
 #include <utility>
 
 #include "katana/cad/project_crs.hpp"
+#include "katana/core/text.hpp"
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/ifc/front_end.hpp"
 #include "katana/ifc/import.hpp"
+#include "katana/terrain/surface_store.hpp"
 
 #ifndef KATANA_VERSION
 #define KATANA_VERSION ""
@@ -34,6 +41,30 @@ bool fail(const std::string& message)
     return false;
 }
 
+// The value of the first of `object`'s properties called any of `names`, in
+// any letter case; empty when it has none.
+std::string propertyOf(const katana::cad::bim::BimObject& object,
+                       std::initializer_list<std::string_view> names)
+{
+    for (const auto& [name, value] : object.properties) {
+        for (const std::string_view wanted : names) {
+            if (katana::core::equalsIgnoringCase(name, wanted)) {
+                return value;
+            }
+        }
+    }
+    return {};
+}
+
+std::string capitals(std::string_view text)
+{
+    std::string out(text);
+    for (char& c : out) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
 bool exportIfc(const katana::cad::Document& document, const katana::ifc::ExportArguments& arguments)
 {
     // The grammar, the files it names and the GlobalId namespace are the
@@ -46,7 +77,31 @@ bool exportIfc(const katana::cad::Document& document, const katana::ifc::ExportA
     if (arguments.entities || arguments.alignments) {
         input.model = &document.model();
     }
+    // ---- the drawing's surfaces (docs/terrain.md), hidden ones too: hiding
+    // is a matter of the picture, and the window's export takes them all ----
+    if (arguments.surfaces) {
+        for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
+            input.surfaces.push_back({named.name, named.surface.get()});
+        }
+    }
     input.utilities = std::move(files->utilities);
+    if (arguments.surfaces) {
+        // The drawing's surfaces (Document::surfaces), as the window writes
+        // its own: what a road model's cut voids, when it names one.
+        for (const katana::terrain::NamedSurface& named : document.surfaces().all()) {
+            if (named.surface != nullptr) {
+                input.surfaces.push_back({named.name, named.surface.get()});
+            }
+        }
+    }
+    // The model is made once per change of what it is made from and shared
+    // (bim_object.hpp), so asking for it here costs nothing the views have
+    // not already paid.
+    const std::shared_ptr<const katana::cad::bim::BimModel> roadModel =
+        arguments.roadModel ? katana::cad::bim::bimModel(document) : nullptr;
+    if (roadModel != nullptr) {
+        input.road = roadModelInput(*roadModel);
+    }
 
     const auto& metadata = document.metadata();
     katana::ifc::ExportOptions options;
@@ -112,22 +167,35 @@ bool importIfc(katana::cad::Document& document, const katana::ifc::ImportArgumen
     // The count before the command, which takes the entities; the reply
     // after it, which adds its renames to the warnings.
     const std::size_t entities = imported->entities.size();
-    if (auto command = katana::ifc::importCommand(*imported, document.model())) {
-        if (const auto status = document.execute(std::move(command)); !status) {
-            return fail(status.error().describe());
-        }
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // A terrain the file carries is the drawing's, in the import's one step,
+    // as the window keeps it.
+    std::vector<katana::terrain::NamedSurface> surfaces;
+    for (auto& surface : imported->surfaces) {
+        katana::terrain::NamedSurface named;
+        named.name = surface.name;
+        named.surface =
+            std::make_shared<const katana::terrain::TinSurface>(std::move(surface.surface));
+        named.source = "IFC " + path.filename().string();
+        surfaces.push_back(std::move(named));
+    }
+    auto kept = katana::cad::importSurfaces(
+        document, katana::ifc::importCommand(*imported, document.model()), std::move(surfaces),
+        "IMPORT " + path.filename().string());
+    if (!kept) {
+        return fail(kept.error().describe());
     }
     std::string reply =
         katana::ifc::formatImportReply(*imported, path.filename().string(), entities);
+    for (const std::string& record : *kept) {
+        reply += "\n" + record;
+    }
     const auto note = [&](const std::string& text) {
         reply += "\n" + katana::ifc::noteRecord(text);
     };
     if (arguments.local && options.originShift) {
         note(std::format("shifted by {:.3f},{:.3f} to sit at the origin", options.originShift->x,
                          options.originShift->y));
-    }
-    if (!imported->surfaces.empty()) {
-        note("the command line holds no surfaces: the file's are counted, not kept");
     }
     const std::string& project = document.metadata().coordinateSystem;
     const std::string& file = imported->coordinateSystem;
@@ -175,6 +243,50 @@ bool describeIfc(std::string_view argument)
 }
 
 } // namespace
+
+katana::ifc::RoadModelInput roadModelInput(const katana::cad::bim::BimModel& model)
+{
+    katana::ifc::RoadModelInput out;
+    out.elements.reserve(model.objects.size());
+    for (const katana::cad::bim::BimObject& object : model.objects) {
+        katana::ifc::RoadElement element;
+        element.id = object.id;
+        element.name = object.name;
+        element.kind = object.kind;
+        element.ifcClass.entity = object.ifcClass;
+        element.ifcClass.predefinedType = object.predefinedType;
+        if (object.predefinedType == "USERDEFINED") {
+            // What a USERDEFINED one is, which the schema requires (each
+            // class's CorrectPredefinedType rule): the object's own word for
+            // it, else its kind.
+            element.ifcClass.objectType = propertyOf(object, {"ObjectType"});
+            if (element.ifcClass.objectType.empty()) {
+                element.ifcClass.objectType = capitals(object.kind);
+            }
+        }
+        element.facility = object.facility;
+        element.part = object.part;
+        element.material = object.material;
+        element.colour = object.colour;
+        element.mesh = object.mesh;
+        element.plan = object.plan;
+        element.quantities.reserve(object.quantities.size());
+        for (const katana::cad::bim::Quantity& quantity : object.quantities) {
+            element.quantities.push_back({quantity.name, quantity.value, quantity.unit});
+        }
+        element.properties = object.properties;
+        element.layer = object.layer;
+        element.host = propertyOf(object, {"Host"});
+        element.ground = propertyOf(object, {"Ground", "Surface", "Target Surface"});
+        out.elements.push_back(std::move(element));
+    }
+    out.problems.reserve(model.problems.size());
+    for (const katana::cad::bim::BimProblem& problem : model.problems) {
+        out.problems.push_back(problem.source.empty() ? problem.message
+                                                      : problem.source + ": " + problem.message);
+    }
+    return out;
+}
 
 std::optional<bool> runIfcVerb(katana::cad::Document& document, std::string_view verb,
                                std::string_view argument)
@@ -224,9 +336,10 @@ const char* ifcHelpText()
            "          elements and annotations with their property sets, one undo step\n"
            "          EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]\n"
            "          [RULES <rules.csv>] [SPACING <m>] [NODRAWING] [NOENTITIES] [SELECTED]\n"
-           "          [NOALIGNMENTS] [NOSURFACES] [PREVIEW]  IFC 4.3: alignments, the\n"
-           "          drawing by class, an AS 5488 investigation graded, typed and with\n"
-           "          its delivery schema; PREVIEW writes nothing\n"
+           "          [NOALIGNMENTS] [NOSURFACES] [NOROADMODEL] [PREVIEW]  IFC 4.3:\n"
+           "          alignments, the drawing by class, the road model as IfcRoad and its\n"
+           "          parts, an AS 5488 investigation graded, typed and with its delivery\n"
+           "          schema; PREVIEW writes nothing\n"
            "          INFO <file.ifc>  what the file holds, without importing it\n"
            "          IFC RULES <file.csv>  the default classification rules, to edit\n"
            "          (replies are key=value records, docs/ifc.md)\n";

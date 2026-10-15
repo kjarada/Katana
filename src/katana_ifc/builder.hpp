@@ -43,6 +43,20 @@ struct Property {
     Id enumeration = 0;
 };
 
+// A spatial element that holds products as the site holds the rest - an
+// IfcRoad or IfcRoadPart (road.cpp) - with the placement its products hang
+// off: relative to the element's own. IFC 4.3.2 (8.7.3.14, IfcLocalPlacement)
+// places an element "to the local placement of its container, either
+// IfcSite, IfcFacility, or IfcFacilityPart", a facility relative to the
+// site, a facility part relative to its facility, and a feature relative to
+// the element it is tied to.
+struct Container {
+    Id element = 0;
+    Id placement = 0;        // the spatial element's own ObjectPlacement
+    Id elementPlacement = 0; // what its products are placed by, unmoved
+    std::string key;         // names its containment relationship's GlobalId
+};
+
 // Properties in the order they are added. A value that is absent - an empty
 // text, nullopt - adds nothing: a property with no value says less than no
 // property, and IFC's own property sets are read that way.
@@ -143,6 +157,27 @@ class Builder {
     // IfcIdentifier) is cut there, and the cut said in the warnings.
     Id product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
                std::string_view description, Id representation, std::string_view tag = {});
+    // The same, contained in `container` and placed by its elementPlacement.
+    Id product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+               std::string_view description, Id representation, std::string_view tag,
+               const Container& container);
+    // A feature element (ProductLayout::feature): placed by `placement` -
+    // relative to its host's - and contained nowhere; the caller writes its
+    // IfcRelVoidsElement or IfcRelAdheresToElement.
+    Id feature(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+               std::string_view description, Id representation, std::string_view tag,
+               Id placement);
+    // An IfcLocalPlacement relative to `relativeTo`, unmoved.
+    Id placementIn(Id relativeTo);
+    // The site as a Container, for what is placed relative to it.
+    [[nodiscard]] Container siteContainer() const;
+    // An IfcRelAggregates from `whole` to `parts`, written now (nothing when
+    // `parts` is empty). `key` names it, so its GlobalId survives a re-export.
+    void aggregate(Id whole, std::string_view key, const std::vector<Id>& parts);
+    // The unit a weight is given in: IfcSIUnit KILO GRAM, written once. The
+    // project's units (writeProjectFrame) have no mass unit, so a weight names
+    // its own rather than leave a reader to guess.
+    Id kilogram();
     // `text` as an IfcLabel: at most 255 characters, a cut said in the
     // warnings naming `what` - for the names written outside product().
     [[nodiscard]] std::string label(std::string_view text, std::string_view what);
@@ -189,6 +224,9 @@ class Builder {
 
   private:
     void writeProjectFrame();
+    Id writeProduct(const IfcClass& ifcClass, std::string_view key, std::string_view name,
+                    std::string_view description, Id representation, std::string_view tag,
+                    Id placement);
 
     const ExportOptions& options_;
     Frame frame_;
@@ -208,8 +246,13 @@ class Builder {
     Id footPrintContext_ = 0;
     Id annotationContext_ = 0;
     Id metre_ = 0;
+    Id kilogram_ = 0;
 
     std::vector<Id> contained_;
+    // Products of the containers other than the site, by container, in the
+    // order the containers were written; and each container's key.
+    std::map<Id, std::vector<Id>> containedIn_;
+    std::map<Id, std::string> containerKeys_;
     std::vector<Id> referenced_;
     std::vector<Id> aggregatedInProject_;
     std::map<std::string, std::vector<Id>> layers_;

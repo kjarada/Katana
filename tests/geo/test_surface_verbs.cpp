@@ -1,8 +1,9 @@
 // The SURFACE verbs (src/katana_app/geo/surface_verbs.cpp, docs/terrain.md
-// "Surfaces on every front end"): the session's named surfaces made from a
+// "Surfaces on every front end"): the drawing's named surfaces made from a
 // raster, a point cloud or the drawing, listed, described, removed and
 // written out as a DEM, and TO SURFACE, through the one executor as katana_cli,
-// katana_mcp and the window run it.
+// katana_mcp and the window run it - each change of the surfaces one undo step
+// on the drawing (docs/terrain.md, "Surfaces in the drawing").
 
 #include <algorithm>
 #include <cfloat>
@@ -84,8 +85,9 @@ class SurfaceVerbs : public ::testing::Test {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
-    geo::Context context{document, interpreter, reference, surfaces, scratch.path(), {}, {}};
+    // The drawing's surfaces, which the verbs change (Document::surfaces).
+    const katana::terrain::SurfaceStore& surfaces = document.surfaces();
+    geo::Context context{document, interpreter, reference, scratch.path(), {}, {}};
 
     katana::core::Result<std::string> run(const std::string& line)
     {
@@ -510,6 +512,86 @@ TEST_F(SurfaceVerbs, ARasterResultToASurfaceIsTriangulatedAndKept)
                   .error()
                   .code,
               ErrorCode::AlreadyExists);
+}
+
+// ---- the drawing's surfaces, undone and taken by the right front end ----------------------------
+
+TEST_F(SurfaceVerbs, SurfaceFromIsOneUndoStepAndUndoLeavesNone)
+{
+    const std::size_t steps = document.history().undoCount();
+    (void)ran("SURFACE FROM FILE \"" + kPlane + "\" NAME ground");
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    EXPECT_EQ(document.history().undoName(), "SURFACE FROM");
+    ASSERT_TRUE(document.undo().ok());
+    const std::string listed = ran("SURFACE LIST");
+    EXPECT_NE(listed.find("listed surfaces=0"), std::string::npos) << listed;
+    ASSERT_TRUE(document.redo().ok());
+    EXPECT_NE(surfaces.find("ground"), nullptr);
+}
+
+TEST_F(SurfaceVerbs, RemoveIsOneUndoStepAndUndoPutsTheSameSurfaceBack)
+{
+    (void)ran("SURFACE FROM FILE \"" + kPlane + "\" NAME ground");
+    const auto ground = surfaces.find("ground")->surface;
+    const std::string removed = ran("SURFACE REMOVE GROUND");
+    EXPECT_NE(removed.find("removed surface=ground surfaces=0"), std::string::npos) << removed;
+    EXPECT_TRUE(surfaces.empty());
+    EXPECT_EQ(document.history().undoName(), "SURFACE REMOVE");
+    ASSERT_TRUE(document.undo().ok());
+    ASSERT_NE(surfaces.find("ground"), nullptr);
+    EXPECT_EQ(surfaces.find("ground")->surface, ground) << "the very surface, not a rebuilt one";
+}
+
+TEST_F(SurfaceVerbs, ARefusedLineChangesNoSurfaceAndMakesNoStep)
+{
+    (void)ran("SURFACE FROM FILE \"" + kPlane + "\" NAME ground");
+    const std::size_t steps = document.history().undoCount();
+    EXPECT_FALSE(run("SURFACE FROM FILE \"" + kPlane + "\" NAME ground").ok());
+    EXPECT_FALSE(run("SURFACE REMOVE nothing").ok());
+    EXPECT_EQ(document.history().undoCount(), steps);
+    EXPECT_EQ(surfaces.all().size(), 1u);
+}
+
+TEST_F(SurfaceVerbs, TheListSaysEachSurfacesStyleAndWhetherItIsShown)
+{
+    (void)ran("SURFACE FROM FILE \"" + kPlane + "\" NAME ground");
+    std::string listed = ran("SURFACE LIST");
+    EXPECT_NE(listed.find("style=Standard visible=yes"), std::string::npos) << listed;
+    // The interpreter's words change them; the executor's LIST says so.
+    ASSERT_TRUE(interpreter.run("SURFACE STYLE ground Contours").ok());
+    ASSERT_TRUE(interpreter.run("SURFACE HIDE ground").ok());
+    listed = ran("SURFACE LIST");
+    EXPECT_NE(listed.find("style=Contours visible=no"), std::string::npos) << listed;
+    const auto json = nlohmann::json::parse(ran("SURFACE LIST JSON"));
+    ASSERT_EQ(json["surfaces"].size(), 1u);
+    EXPECT_EQ(json["surfaces"][0]["style"], "Contours");
+    EXPECT_EQ(json["surfaces"][0]["visible"], false);
+}
+
+TEST_F(SurfaceVerbs, TheExecutorTakesOnlyItsOwnSurfaceWords)
+{
+    for (const char* line : {"SURFACE LIST", "SURFACE INFO ground", "SURFACE REMOVE ground",
+                             "SURFACE FROM DRAWING", "SURFACE EXPORT ground x.tif", "SURFACE"}) {
+        EXPECT_TRUE(geo::handles(line)) << line;
+    }
+    // The drawing's own words, the edits' and the volumes' are the
+    // interpreter's (cad/terrain/surface_verbs.hpp).
+    for (const char* line : {"SURFACE RENAME a b", "SURFACE STYLE a Contours", "SURFACE SHOW ALL",
+                             "SURFACE HIDE a", "SURFACE COPY a b", "SURFACE EDIT a RAISE 1",
+                             "SURFACE DIFFERENCE a b", "SURFACESTYLE LIST"}) {
+        EXPECT_FALSE(geo::handles(line)) << line;
+    }
+}
+
+TEST(SurfaceSession, ANewDrawingHasNoneOfTheLastOnesSurfaces)
+{
+    katana::app::Session session(nullptr);
+    testing::internal::CaptureStdout();
+    EXPECT_TRUE(session.run("SURFACE FROM FILE \"" + kPlane + "\" NAME ground"));
+    EXPECT_TRUE(session.run("NEW"));
+    EXPECT_TRUE(session.run("SURFACE LIST"));
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("listed surfaces=0"), std::string::npos) << out;
 }
 
 // ---- through a Session, as katana_cli and katana_mcp run it -----------------------------------

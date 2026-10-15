@@ -20,7 +20,10 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/interactive_tool.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
+#include "katana/cad/road/road_object_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
+// volumes: HELP VOLUME (docs/volumes.md).
+#include "katana/cad/terrain/volume_verbs.hpp"
 #include "geo/geo_verbs.hpp"
 #include "survey_verbs.hpp"
 #include "katana/interop/online_verbs.hpp"
@@ -160,7 +163,7 @@ Info      INFO <file>   describe a data file through GDAL or PDAL (INFO id: an e
 IFC       IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]
           [TOLERANCE <m>] [TAKECRS | KEEPCRS] | EXPORT <file.ifc> [UTILITIES <schedule.csv>]
           [SCHEMA <schema.csv>] [RULES <rules.csv>] [SPACING <m>] [NODRAWING] [NOENTITIES]
-          [SELECTED] [NOALIGNMENTS] [NOSURFACES] [PREVIEW] | INFO <file.ifc> |
+          [SELECTED] [NOALIGNMENTS] [NOSURFACES] [NOROADMODEL] [PREVIEW] | INFO <file.ifc> |
           IFC RULES <file.csv>   IFC 4.3 (File > Import IFC, Export IFC; docs/ifc.md)
 Refs      REFS   the reference layers: rasters and point clouds
 COPC      COPC <source> <destination.copc.laz>   convert a point cloud to COPC
@@ -201,6 +204,11 @@ std::vector<ReferenceSection> commandReferenceSections()
     sections.push_back({"Sheets", referenceEntries(qs(katana::cad::plotting::sheetVerbHelp()))});
     sections.push_back({"Subsurface utilities",
                         referenceEntries(qs(katana::cad::utilities::utilityVerbHelp()))});
+    // volumes: the VOLUME verbs and SURFACE DIFFERENCE and ENVELOPE (HELP VOLUME).
+    sections.push_back({"Volumes", referenceEntries(qs(katana::cad::volumeVerbHelp()))});
+    // ---- road objects (docs/road_objects.md): HELP ROADOBJECT ----
+    sections.push_back(
+        {"Road objects", referenceEntries(qs(katana::cad::road::roadObjectVerbHelp()))});
     sections.push_back({"Online data", referenceEntries(qs(katana::interop::onlineUsage()))});
     // GDAL and the geoprocessing verbs, from the executor's own table, so the
     // window and katana_help cannot list them differently.

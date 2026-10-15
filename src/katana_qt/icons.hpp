@@ -238,6 +238,65 @@ enum class Icon {
     // Survey > Process Linework: three surveyed marks, and in the accent the
     // line the run strings through them.
     SurveyLinework,
+    // ---- volumes (docs/volumes.md) ----
+    // Terrain > Volumes: a block of ground, its top face in the accent - the
+    // quantity between two surfaces.
+    Volumes,
+    // The Volumes dialog's Make Cut/Fill Map: a map split along the line
+    // where cut meets fill, the fill side in the accent.
+    CutFillMap,
+    // ---- end of volumes ----
+    // ---- road objects (docs/road_objects.md) ----
+    // BIM > Road Objects: each object as it stands beside a road, the rail,
+    // the reflector, the plate, the lantern, the pipe, the wall's section,
+    // the wires and the marks in the accent; and the manager's list. Painted
+    // in bim/road_object_icons.cpp.
+    RoadBarrier,
+    RoadGuidePosts,
+    RoadSign,
+    RoadLightPole,
+    RoadCulvert,
+    RoadWall,
+    RoadFence,
+    RoadLineMarking,
+    RoadObjects,
+    // ---- end road objects ----
+    // ---- surface editing (docs/surface_editing.md) ----
+    // Terrain > Edit Surface: a small TIN, one vertex in the accent - the
+    // surface as a thing to work on.
+    SurfaceEdit,
+    // Raise, Lower or Set Level: a ground line and, in the accent, the
+    // up-and-down arrow of a change of level.
+    SurfaceLevels,
+    // Smooth: a jagged line, and in the accent the smooth curve through it.
+    SurfaceSmooth,
+    // Thin: a row of vertices, the middle ones in the accent struck out.
+    SurfaceThin,
+    // Delete Long Triangles: a long thin triangle on the rim, struck through
+    // in the accent.
+    SurfaceDeleteLong,
+    // Combine Surfaces: a ground outline, and in the accent a pad laid into it.
+    SurfaceCombine,
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // The Surfaces panel: a patch of triangulated ground, one triangle in the
+    // accent - a surface picked out of the drawing's.
+    SurfacesPanel,
+    // ---- road model (docs/road_design.md) ----
+    // BIM > Road Template Manager: a road's cross-section - the crowned
+    // finished surface in the accent over a course, a kerb at each edge.
+    RoadTemplate,
+    // BIM > Corridors: two kerb lines curving away together, the centreline
+    // dashed in the accent between them.
+    Corridor,
+    // BIM > Show Road Model: a block seen from above a corner, its top face
+    // in the accent - a solid, which is what the road model is made of.
+    RoadModel,
+    // ---- end road model ----
+    // ---- surface display (docs/surface_display.md) ----
+    // Terrain > Surface Styles: a patch of ground cut into bands of height,
+    // the middle band filled in the accent - what a style does to a
+    // surface's faces - under its outline and one triangle's edge.
+    SurfaceStyles,
     // Help > Check for Updates: a cloud, and in the accent the arrow that
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.

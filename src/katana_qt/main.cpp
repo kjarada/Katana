@@ -318,6 +318,21 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
                    .arg(plan->lastDrawnEntityCount())
                    .arg(plan->lastGhostCount())
                    .arg(plan->gripCount());
+        // Surface display (docs/surface_display.md): what it drew of the
+        // surfaces, only when it drew one, so a report of a drawing without
+        // them reads as it always did.
+        if (const katana::qt::PlanPaintStats& stats = plan->lastPaintStats(); stats.surfacesDrawn > 0) {
+            text += QString(" surfaces=%1 triangles=%2 edges=%3 tinted=%4 contours=%5 labels=%6 "
+                            "covered=%7 legends=%8")
+                        .arg(stats.surfacesDrawn)
+                        .arg(stats.surfaceTrianglesInView)
+                        .arg(stats.surfaceEdgesStroked)
+                        .arg(stats.surfaceTrianglesTinted)
+                        .arg(stats.surfaceContourRuns)
+                        .arg(stats.surfaceLabels)
+                        .arg(stats.surfacePixelsCovered)
+                        .arg(stats.surfaceLegends);
+        }
     } else {
         std::fprintf(stderr,
                      "--report: there is no label, field, text, list, button, view, action or menu %s\n",

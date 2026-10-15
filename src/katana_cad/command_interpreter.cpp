@@ -2,6 +2,7 @@
 
 #include "katana/cad/alignment_report.hpp"
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
+#include "katana/cad/annotation/leader_presets.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/cad/linework_verbs.hpp"
@@ -11,11 +12,22 @@
 #include "katana/cad/project_crs.hpp"
 #include "katana/cad/property_outline.hpp"
 #include "katana/cad/purge.hpp"
+#include "katana/cad/road/road_verbs.hpp" // road model (docs/road_design.md)
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_code_verbs.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
+// The surface edits (docs/surface_editing.md).
+#include "katana/cad/terrain/surface_edit_verbs.hpp"
+// The drawing's surfaces and their display styles (docs/terrain.md).
+#include "katana/cad/terrain/surface_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
+// volumes: VOLUME, SURFACE DIFFERENCE and ENVELOPE (docs/volumes.md).
+#include "katana/cad/terrain/volume_verbs.hpp"
+// Road objects (docs/road_objects.md): the ROADOBJECT family.
+#include "katana/cad/road/road_object_verbs.hpp"
+// Surface display (docs/surface_display.md): SURFACE LEGEND and SURFACE PLAN.
+#include "katana/cad/terrain/surface_display_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -248,7 +260,10 @@ std::string canonicalVerb(std::string_view word)
     return apostrophe && !isViewVerb(bare) ? verb : bare;
 }
 
-std::string describe(const katana::entity::Model& model, const Entity& entity)
+// `leaders`: the drawing's surfaces and alignments, which a leader's note
+// may read (annotation/leader_presets.hpp).
+std::string describe(const katana::entity::Model& model, const Entity& entity,
+                     const katana::entity::LeaderContext& leaders)
 {
     std::ostringstream out;
     out.precision(12);
@@ -256,6 +271,7 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
     struct Detail {
         std::ostream& out;
         const katana::entity::Model& model;
+        const katana::entity::LeaderContext& leaders;
         void operator()(const katana::entity::PointGeometry& g) const
         {
             out << "  at " << g.position.x << "," << g.position.y;
@@ -344,7 +360,8 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
                 << g.vertices.front().y;
             // What the leader says as it is drawn: a smart leader's note is
             // read off its target now (docs/annotation.md, "Smart leaders").
-            const std::string note = katana::entity::leaderNote(model, g, codePropertyCandidates());
+            const std::string note =
+                katana::entity::leaderNote(model, g, codePropertyCandidates(), leaders);
             if (!note.empty()) {
                 out << "  \"" << oneLine(note) << "\"";
             }
@@ -397,7 +414,7 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
             out << "  length=" << g.length();
         }
     };
-    std::visit(Detail{out, model}, entity.geometry);
+    std::visit(Detail{out, model, leaders}, entity.geometry);
     if (!entity.visible) {
         out << "  hidden";
     }
@@ -575,6 +592,19 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
+Volumes   VOLUME SURFACES|DATUM|STOCKPILE|SECTIONS|GRID ...   cut and fill between the
+          drawing's surfaces, to a level, of a stockpile, along an alignment or on a grid,
+          inside polygons; SURFACE DIFFERENCE|ENVELOPE ... a cut/fill map or envelope as a
+          new surface (HELP VOLUME)
+RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=value ...]
+          | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
+          barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
+          along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
+Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE ...  road
+          templates: lanes, shoulders, kerbs, footpaths, verges, medians, drains, batters and
+          their pavement courses; CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] | REGION |
+          SUPERELEVATION | BUILD | SECTION | STRINGS | SURFACE | QUANTITIES [csv=]; ROADMODEL
+          [LIST] | JSON | PROBLEMS | INFO id   the 3D road model (HELP CORRIDOR)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
           [CHORD length] [PREVIEW]   joins coded survey points into lines by the survey
           codes and their control codes, one undo step; no scope word: the selection, else
@@ -597,7 +627,8 @@ Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTEN
           ZOOM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
           [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
-)" + annotationHelpText() + drawingHelpText();
+)" + annotationHelpText() + drawingHelpText() + surfaceEditHelpSummary() +
+           surfaceVerbSummary() + surfaceDisplayVerbHelp();
 }
 
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
@@ -834,8 +865,27 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && plotting::isSheetVerb(args.front())) {
             return plotting::sheetVerbHelp();
         }
+        // HELP SURFACE EDIT (MERGE, PASTE, CLIP, OFFSET): the surface edits'.
+        if (isSurfaceEditVerb(args)) {
+            return surfaceEditVerbHelp();
+        }
+        // The drawing's surfaces and their styles (docs/terrain.md).
+        if (!args.empty() && katana::core::equalsIgnoringCase(args.front(), "SURFACESTYLE")) {
+            return surfaceVerbHelp();
+        }
         if (!args.empty() && utilities::isUtilityVerb(args.front())) {
             return utilities::utilityVerbHelp();
+        }
+        // volumes: HELP VOLUME.
+        if (!args.empty() && katana::core::equalsIgnoringCase(args.front(), "VOLUME")) {
+            return volumeVerbHelp();
+        }
+        if (!args.empty() && road::isRoadObjectVerb(args.front())) {
+            return road::roadObjectVerbHelp();
+        }
+        // ---- road model (docs/road_design.md) ----
+        if (!args.empty() && road::isRoadVerb(args.front())) {
+            return road::roadVerbHelp();
         }
         // Asked by either spelling, as the verb is run by either.
         if (!args.empty() && isCustomisationVerb(canonicalVerb(args.front()))) {
@@ -852,11 +902,37 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (plotting::isSheetVerb(verb)) {
         return plotting::runSheetVerb(document_, *tokens, sheetContext_);
     }
+    // SURFACE EDIT, MERGE, PASTE, CLIP and OFFSET (docs/surface_editing.md);
+    // the other SURFACE words are other modules'.
+    if (isSurfaceEditVerb(*tokens)) {
+        return runSurfaceEditVerb(document_, *tokens, scopeViews_);
+    }
+    // The drawing's surfaces and their styles (docs/terrain.md): SURFACESTYLE,
+    // and the SURFACE words that are the drawing's - the geoprocessing
+    // executor takes LIST, INFO, REMOVE, FROM and EXPORT before a line gets here.
+    if (isSurfaceVerb(*tokens)) {
+        return runSurfaceVerb(document_, *tokens);
+    }
     if (isLineworkVerb(verb)) {
         return runLineworkVerb(document_, *tokens, scopeViews_);
     }
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens, scopeViews_);
+    }
+    // volumes: VOLUME ..., SURFACE DIFFERENCE and SURFACE ENVELOPE.
+    if (isVolumeVerb(verb, args)) {
+        return runVolumeVerb(document_, *tokens, scopeViews_);
+    }
+    if (road::isRoadObjectVerb(verb)) {
+        return road::runRoadObjectVerb(document_, *tokens, scopeViews_);
+    }
+    // ---- road model (docs/road_design.md) ----
+    if (road::isRoadVerb(verb)) {
+        return road::runRoadVerb(document_, *tokens);
+    }
+    // Surface display (docs/surface_display.md): SURFACE LEGEND | PLAN.
+    if (isSurfaceDisplayVerb(verb, args)) {
+        return runSurfaceDisplayVerb(document_, args, scopeViews_);
     }
     // Both families are handed the words AFTER the verb, which was read as
     // every verb is (canonicalVerb): handed the line's own first word they
@@ -3044,7 +3120,7 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         if (entity == nullptr) {
             return makeError(ErrorCode::NotFound, "entity does not exist", args[0]);
         }
-        std::string text = describe(model, *entity);
+        std::string text = describe(model, *entity, annotation::leaderContext(document_));
         for (const auto& [key, value] : entity->properties) {
             text += "\n    " + key + " = ";
             std::visit(
@@ -3063,7 +3139,9 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         return usage("LIST (every entity; INFO id describes one)");
     }
     std::string text = std::to_string(model.entities.size()) + " entities";
-    model.entities.forEach([&](const Entity& entity) { text += "\n" + describe(model, entity); });
+    const katana::entity::LeaderContext leaders = annotation::leaderContext(document_);
+    model.entities.forEach(
+        [&](const Entity& entity) { text += "\n" + describe(model, entity, leaders); });
     return text;
 }
 

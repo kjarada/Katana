@@ -34,7 +34,13 @@
 #include "property_panel.hpp"
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
+// Terrain > Edit Surface (docs/surface_editing.md).
+#include "terrain/surface_edit_ui.hpp"
 #include "tools/flyout_button.hpp"
+// volumes: Terrain > Volumes (docs/volumes.md).
+#include "terrain/volumes_dialog.hpp"
+// The drawing's surfaces (docs/terrain.md).
+#include "terrain/surfaces_panel.hpp"
 
 #include <chrono>
 #include <QAction>
@@ -103,7 +109,6 @@
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
-#include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
@@ -397,6 +402,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             syncSnapActions();
         }
     });
+    // The drawing's surfaces as the views draw them (main_window.hpp,
+    // surfacesListener_): at once, and a replaced drawing's shown without
+    // opening a 3D view for them.
+    surfacesListener_ = document_.addListener([this](const cad::DocumentChange& change) {
+        if (change.has(cad::DocumentChange::Surfaces | cad::DocumentChange::SurfaceStyles)) {
+            syncSceneSurfaces(!change.has(cad::DocumentChange::Replaced));
+        }
+    });
     refreshAll();
     views_->stopTool();
     selectAction_->setChecked(true);
@@ -626,6 +639,7 @@ void MainWindow::buildActions()
     QMenu* formatMenu = topMenu("F&ormat", "formatMenu");
     QMenu* surveyMenu = topMenu("&Survey", "surveyMenu");
     QMenu* terrainMenu = topMenu("&Terrain", "terrainMenu");
+    QMenu* bimMenu = topMenu("&BIM", "bimMenu");
     QMenu* gisMenu = topMenu("&GIS", "gisMenu");
     QMenu* helpMenu = topMenu("&Help", "helpMenu");
 
@@ -971,6 +985,26 @@ void MainWindow::buildActions()
     viewBar->addSeparator();
     viewBar->addActions({gridAction_, snapAction_});
 
+    // ---- Terrain > Edit Surface (docs/surface_editing.md) ----------------------------
+    // Made before the tool catalogue fills the menus, which puts the Terrain
+    // tools in its submenu and toolbar (buildToolActions); placed in the
+    // Terrain menu below.
+    {
+        SurfaceEditServices services;
+        services.window = this;
+        services.document = &document_;
+        services.run = commandRunner();
+        services.views = [views = views_] { return scopeFilterViews(views->viewSet()); };
+        services.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                     const QKeySequence& shortcut, const QString& name) {
+            return makeAction(icon, text, tip, shortcut, name);
+        };
+        services.makeToolBar = [this](const QString& title) {
+            return makeToolBar(title, Qt::TopToolBarArea);
+        };
+        surfaceEdit_ = std::make_unique<SurfaceEditUi>(std::move(services));
+    }
+
     // ---- Draw, Modify, Annotate ----------------------------------------------------
     buildToolActions(*drawMenu, *modifyMenu, *annotateMenu);
 
@@ -1008,13 +1042,6 @@ void MainWindow::buildActions()
     for (QAction* surfaceFrom : {cloudSurface, rasterSurface, drawingSurface}) {
         surfaceFrom->setData(QString("surfaceFromDialog"));
     }
-    QAction* quantities = makeAction(Icon::CorridorQuantities, "Corridor &Quantities...",
-                                     "Cut and fill along an alignment, by average end area",
-                                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q),
-                                     "terrainCorridorQuantities");
-    QAction* corridor = makeAction(Icon::CorridorSurface, "Corridor &Surface...",
-                                   "Build the finished design along an alignment as a surface",
-                                   {}, "terrainCorridorSurface");
     QAction* alignmentSection = makeAction(Icon::SectionAlignment, "Cut Section Along &Alignment...",
                                            "Long section down a named alignment, with its design profile",
                                            QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K),
@@ -1039,8 +1066,6 @@ void MainWindow::buildActions()
             [this] { showSurfaceFrom(SurfaceFromKind::Raster); });
     connect(drawingSurface, &QAction::triggered, this,
             [this] { showSurfaceFrom(SurfaceFromKind::Drawing); });
-    connect(quantities, &QAction::triggered, this, &MainWindow::corridorQuantities);
-    connect(corridor, &QAction::triggered, this, &MainWindow::corridorSurface);
     connect(alignmentSection, &QAction::triggered, this, &MainWindow::cutSectionAlongAlignment);
     connect(selectionSection, &QAction::triggered, this, [this] { cutSectionAlongSelection(); });
 
@@ -1050,19 +1075,87 @@ void MainWindow::buildActions()
     terrainMenu->addAction(alignmentManager);
     terrainMenu->addSection("Surfaces");
     terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
+    // Edit Surface and Combine Surfaces (docs/surface_editing.md).
+    surfaceEdit_->finish(*terrainMenu);
+    // Surface display (docs/surface_display.md): Terrain > Surface Styles...
+    QAction* surfaceStyles = buildSurfaceDisplay();
+    terrainMenu->addAction(surfaceStyles);
     terrainMenu->addSection("Sections");
     terrainMenu->addActions({selectionSection, alignmentSection});
+    // ---- road model (docs/road_design.md) ----
+    // The BIM menu's road templates, corridors and quantities. Terrain's
+    // Corridors section shows the same two actions, where its old corridor
+    // commands were.
+    RoadServices road;
+    road.document = &document_;
+    road.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                             const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    road.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    road.run = commandRunner();
+    road.headless = [this] { return headless_; };
+    road.showAlignmentManager = [this] { showAlignmentManager(); };
+    road.setRoadMeshes = [this](std::vector<cad::SceneMesh> meshes) {
+        setRoadMeshes(std::move(meshes));
+    };
+    road.refreshViews = [this] { views_->refreshAll(); };
+    road_ = std::make_unique<RoadWorkbench>(*this, std::move(road), *bimMenu);
     terrainMenu->addSection("Corridors");
-    terrainMenu->addActions({quantities, corridor});
+    terrainMenu->addActions({road_->corridorsAction(), road_->quantitiesAction()});
+    // ---- end road model ----
 
     QToolBar* terrainBar = makeToolBar("Terrain", Qt::TopToolBarArea);
     terrainBar->addAction(alignmentManager);
     terrainBar->addSeparator();
     terrainBar->addActions({cloudSurface, rasterSurface, drawingSurface});
+    terrainBar->addAction(surfaceStyles); // surface display
     terrainBar->addSeparator();
     terrainBar->addActions({selectionSection, alignmentSection});
+    // The Surface Edit toolbar, made before the tools filled it, goes after
+    // Terrain on the second row (docs/surface_editing.md).
+    addToolBar(Qt::TopToolBarArea, surfaceEdit_->toolBar());
+
+    // ---- volumes (docs/volumes.md): Terrain > Volumes and its toolbar button ----
+    QAction* volumes =
+        makeAction(Icon::Volumes, "&Volumes...",
+                   "Cut and fill between surfaces, to a level, of a stockpile, along an "
+                   "alignment or on a grid, inside polygons; and the cut/fill map",
+                   {}, "terrainVolumes");
+    // The dialog it shows, by object name: how --dialog finds it. It builds
+    // VOLUME and SURFACE DIFFERENCE lines and runs them through runVerbLine.
+    volumes->setData(QString("volumesDialog"));
+    connect(volumes, &QAction::triggered, this, [this] {
+        VolumesDialogContext context;
+        context.run = commandRunner();
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
+        }
+        (void)showVolumesDialog(*this, std::move(context));
+    });
+    terrainMenu->addSection("Volumes");
+    terrainMenu->addAction(volumes);
     terrainBar->addSeparator();
-    terrainBar->addActions({quantities, corridor});
+    terrainBar->addAction(volumes);
+    // ---- end of volumes ----
+    // ---- road model: beside Terrain, on the second row ----
+    QToolBar* bimBar = makeToolBar("BIM", Qt::TopToolBarArea);
+    road_->fillToolBar(*bimBar);
+
+    // ---- road objects (docs/road_objects.md): BIM > Road Objects, from its workbench --------
+    RoadObjectServices roadObjectServices;
+    roadObjectServices.document = &document_;
+    roadObjectServices.views = views_;
+    roadObjectServices.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                           const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    roadObjectServices.run = commandRunner();
+    roadObjects_ = std::make_unique<RoadObjectWorkbench>(*this, std::move(roadObjectServices),
+                                                         *bimMenu, *bimBar);
+    // ---- end road objects ----
 
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(*gisMenu, exportAction);
@@ -1273,13 +1366,12 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
     // The geoprocessing verbs: the executor's context is this window's
-    // drawing, interpreter (VIEW is its plan view), reference rasters and
-    // surfaces.
+    // drawing (its surfaces with it), interpreter (VIEW is its plan view)
+    // and reference rasters.
     GeoServices geo;
     geo.document = &document_;
     geo.interpreter = &interpreter_;
     geo.reference = &reference_;
-    geo.surfaces = &surfaceStore_;
     geo.scratch = katana::app::geo::ownScratch();
     geo.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
     geo.headless = [this] { return headless_; };
@@ -1461,6 +1553,10 @@ void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& ann
     tools::ToolMenuTargets targets;
     targets.menus = {{"Draw", &drawMenu}, {"Modify", &modifyMenu}, {"Annotate", &annotateMenu}};
     targets.toolBars = {{"Draw", drawBar}, {"Modify", modifyBar}, {"Annotate", annotateBar}};
+    // The Terrain tools go in Terrain > Edit Surface and the Surface Edit
+    // toolbar (docs/surface_editing.md), not in a menu of their own.
+    targets.menus["Terrain"] = surfaceEdit_->menu();
+    targets.toolBars["Terrain"] = surfaceEdit_->toolBar();
     toolActions_ = tools::fillToolMenus(katana::cad::toolCatalog(), targets, this,
                                         [this](const std::string& id) { startTool(id); });
 }
@@ -1918,6 +2014,28 @@ void MainWindow::buildDocks()
                         commandDock->toggleViewAction(), referenceDock_->toggleViewAction()});
     drawingUi_ = drawing::installDrawingUi(*this, document_, panels,
                                            findChild<QMenu*>("drawMenu"));
+    // ---- the drawing's surfaces (docs/terrain.md, "Surfaces in the drawing") ----
+    // The Surfaces panel, tabbed with Reference Data when it is shown; its
+    // lines run through the one executor, as a typed line does.
+    {
+        SurfacesPanel::Services services;
+        services.run = commandRunner();
+        services.zoomTo = [this](const katana::geometry::Box2& box) { views_->zoomTo(box); };
+        services.editStyles = [this] {
+            // The style manager's own item, Terrain > Surface Styles.
+            if (QAction* styles = findChild<QAction*>("terrainSurfaceStyles")) {
+                styles->trigger();
+            } else {
+                logMessage("No style manager in this build: SURFACESTYLE makes and changes the "
+                           "styles on the command line (HELP SURFACESTYLE).",
+                           true);
+            }
+        };
+        surfacesDock_ = installSurfacesPanel(*this, document_, std::move(services), panels,
+                                             findChild<QMenu*>("terrainMenu"), referenceDock_)
+                            .dock;
+        chrome_->install(surfacesDock_, Icon::SurfacesPanel, DockRole::Panel);
+    }
 
     // Opening sizes. Left to itself Qt gives each dock its size hint, which
     // for a text log is a third of the window - so the drawing, which is the
@@ -4087,7 +4205,7 @@ void MainWindow::importFile()
 void MainWindow::exportVectorFile()
 {
     if (document_.model().entities.empty() && document_.model().alignments.empty() &&
-        sceneSurfaces_.empty()) {
+        document_.surfaces().empty()) {
         if (headless_) {
             logMessage("Export: the drawing is empty.", true);
         } else {
@@ -4349,12 +4467,12 @@ void MainWindow::clearReferenceData()
 
 void MainWindow::clearSceneData()
 {
-    // The scene lists first: they point into the stores. The views keep their
-    // pointers to the (now empty) lists, which stay where they are.
-    sceneSurfaces_.clear();
+    // The scene list first: it points into the store. The views keep their
+    // pointer to the (now empty) list, which stays where it is. The surfaces
+    // are not the window's to clear: they are the drawing's, which New
+    // emptied and Open read from the project, and syncSceneSurfaces has
+    // already shown them.
     sceneMeshes_.clear();
-    surfaceStore_.clear();
-    sceneSurfacesRevision_ = surfaceStore_.revision();
     meshStore_.clear();
     views_->drawingReplaced();
 }
@@ -5059,40 +5177,52 @@ void MainWindow::addMesh(std::string name, katana::geometry::TriangleMesh mesh,
     views_->setMeshes(&sceneMeshes_);
 }
 
-void MainWindow::syncSceneSurfaces()
+void MainWindow::syncSceneSurfaces(bool showGained)
 {
-    if (sceneSurfacesRevision_ == surfaceStore_.revision()) {
+    if (sceneSurfacesGeneration_ == document_.surfacesGeneration() &&
+        sceneSurfaceStylesGeneration_ == document_.surfaceStylesGeneration()) {
         return;
     }
-    // Whether the store gained a surface the scene has not drawn: SURFACE
-    // FROM, TO SURFACE and an import alike.
-    const bool gained = std::ranges::any_of(surfaceStore_.all(), [&](const auto& named) {
-        return std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
+    const katana::terrain::SurfaceStore& store = document_.surfaces();
+    // Whether the drawing gained a shown surface the scene has not drawn:
+    // SURFACE FROM, TO SURFACE, an import and an undone removal alike.
+    const bool gained = std::ranges::any_of(store.all(), [&](const auto& named) {
+        return named.visible && std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
             return shown.surface == named.surface.get();
         });
     });
     std::vector<cad::SceneSurface> next;
-    next.reserve(surfaceStore_.all().size());
-    for (const katana::terrain::NamedSurface& named : surfaceStore_.all()) {
+    std::vector<std::shared_ptr<const katana::terrain::TinSurface>> held;
+    next.reserve(store.all().size());
+    held.reserve(store.all().size());
+    for (const katana::terrain::NamedSurface& named : store.all()) {
         cad::SceneSurface item;
         const auto kept = std::ranges::find_if(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
             return shown.surface == named.surface.get();
         });
         if (kept != sceneSurfaces_.end()) {
-            item = *kept; // its style, colouring and visibility
+            item = *kept; // its shading and colouring
         }
         item.name = named.name;
         item.surface = named.surface.get();
+        // Shown or hidden is the drawing's to say (SURFACE SHOW and HIDE, the
+        // Surfaces panel's check boxes).
+        item.visible = named.visible;
         next.push_back(std::move(item));
+        held.push_back(named.surface);
     }
+    styleSceneSurfaces(next); // surface display: each in its style
     sceneSurfaces_ = std::move(next);
-    sceneSurfacesRevision_ = surfaceStore_.revision();
+    // Only now may the surfaces the old list pointed at go.
+    sceneSurfacesHeld_ = std::move(held);
+    sceneSurfacesGeneration_ = document_.surfacesGeneration();
+    sceneSurfaceStylesGeneration_ = document_.surfaceStylesGeneration();
     // The views hold a pointer to the VECTOR, not to its elements, so this is a
     // refresh rather than a repair; the surfaces themselves are shared and
     // never move.
     views_->setSurfaces(&sceneSurfaces_);
     views_->refreshAll();
-    if (!gained) {
+    if (!gained || !showGained) {
         return;
     }
     // Show it. A surface the user cannot see is not obviously a success.
@@ -5104,26 +5234,30 @@ void MainWindow::syncSceneSurfaces()
     }
 }
 
-void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface)
+void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface,
+                            std::string stepName)
 {
     // A second surface of a name is "name (2)", as the session names a
     // second alignment: the store keeps names unique, so SURFACE <name>
-    // finds one.
-    const std::string unique = surfaceStore_.uniqueName(name);
-    if (auto added = surfaceStore_.add(
-            {unique, std::make_shared<const katana::terrain::TinSurface>(std::move(surface)), {}});
-        !added) {
+    // finds one. Into the drawing's surfaces as one undo step; the listener
+    // shows it (syncSceneSurfaces).
+    katana::terrain::SurfaceStore next = document_.surfaces();
+    const std::string unique = next.uniqueName(name);
+    auto shared = std::make_shared<const katana::terrain::TinSurface>(std::move(surface));
+    if (auto added = next.add({unique, shared, {}}); !added) {
         logMessage(QString::fromStdString(added.error().describe()), true);
         return;
     }
-    syncSceneSurfaces();
-    const cad::SceneSurface& item = sceneSurfaces_.back();
+    if (auto status = document_.setSurfaces(std::move(next), std::move(stepName)); !status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
+    }
     logMessage(QString("Surface '%1': %2 vertices, %3 triangles, elevation %4 to %5.")
-                   .arg(QString::fromStdString(sceneSurfaces_.back().name))
-                   .arg(item.surface->vertexCount())
-                   .arg(item.surface->triangleCount())
-                   .arg(item.surface->minElevation(), 0, 'f', 3)
-                   .arg(item.surface->maxElevation(), 0, 'f', 3));
+                   .arg(QString::fromStdString(unique))
+                   .arg(shared->vertexCount())
+                   .arg(shared->triangleCount())
+                   .arg(shared->minElevation(), 0, 'f', 3)
+                   .arg(shared->maxElevation(), 0, 'f', 3));
 }
 
 void MainWindow::showSurfaceFrom(SurfaceFromKind kind)
@@ -5190,16 +5324,21 @@ void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QS
                                  const katana::geometry::SolvedProfile* profile,
                                  const std::string& profileName)
 {
-    if (sceneSurfaces_.empty()) {
-        logMessage("Build a surface first (Terrain > Surface From ...).", true);
-        return;
-    }
+    // The drawing's shown surfaces: a section is a picture, and hiding a
+    // surface takes it out of every picture.
     std::vector<cad::SectionSurfaceInput> inputs;
-    inputs.reserve(sceneSurfaces_.size());
-    for (const auto& item : sceneSurfaces_) {
-        if (item.visible && item.surface != nullptr) {
-            inputs.push_back(cad::SectionSurfaceInput{item.name, item.surface});
+    for (const katana::terrain::NamedSurface& named : document_.surfaces().all()) {
+        if (named.visible && named.surface) {
+            inputs.push_back(cad::SectionSurfaceInput{named.name, named.surface.get()});
         }
+    }
+    if (inputs.empty()) {
+        logMessage(document_.surfaces().empty()
+                       ? "Build a surface first (Terrain > Surface From ...)."
+                       : "Every surface is hidden: show one first (Terrain > Surfaces Panel, or "
+                         "SURFACE SHOW <name>).",
+                   true);
+        return;
     }
 
     cad::SectionOptions options;
@@ -5287,206 +5426,15 @@ void MainWindow::cutSectionAlongAlignment()
                     profile ? &*profile : nullptr, "design " + chosen.toStdString());
 }
 
-std::optional<MainWindow::CorridorRequest> MainWindow::askCorridor(const QString& title)
+// ---- road model (docs/road_design.md) ----
+void MainWindow::setRoadMeshes(std::vector<cad::SceneMesh> meshes)
 {
-    // Only an alignment with a design profile has a finished level to measure
-    // against or build; the message says what is missing rather than hiding
-    // the command.
-    QStringList names;
-    for (const katana::entity::Alignment& alignment : document_.model().alignments.all()) {
-        if (alignment.vertical.has_value()) {
-            names << QString::fromStdString(alignment.name);
-        }
-    }
-    if (names.isEmpty()) {
-        logMessage("No alignment has a design profile. Define one in Terrain > Alignment "
-                   "Manager (Vertical), or with ALIGN DESIGN name s,z ...",
-                   true);
-        if (!headless_) {
-            showAlignmentManager();
-        }
-        return std::nullopt;
-    }
-    QStringList surfaceNames;
-    std::vector<const katana::terrain::TinSurface*> surfaces;
-    for (const auto& item : sceneSurfaces_) {
-        if (item.visible && item.surface != nullptr) {
-            surfaceNames << QString::fromStdString(item.name);
-            surfaces.push_back(item.surface);
-        }
-    }
-    if (surfaces.empty()) {
-        logMessage("Build a surface first (Terrain > Surface From ...).", true);
-        return std::nullopt;
-    }
-
-    QDialog dialog(this);
-    dialog.setWindowTitle(title);
-    auto* form = new QFormLayout(&dialog);
-    auto* alignmentBox = new QComboBox(&dialog);
-    alignmentBox->addItems(names);
-    auto* surfaceBox = new QComboBox(&dialog);
-    surfaceBox->addItems(surfaceNames);
-    const auto spin = [&](double minimum, double maximum, double value, const QString& suffix) {
-        auto* box = new QDoubleSpinBox(&dialog);
-        box->setRange(minimum, maximum);
-        box->setDecimals(3);
-        box->setValue(value);
-        box->setSuffix(suffix);
-        return box;
-    };
-    // Defaults are a two-lane rural road: 3.5 m lanes at 2.5% crossfall,
-    // 1.5:1 in cut and 2:1 in fill, sectioned every 10 m.
-    auto* halfWidth = spin(0.5, 50.0, 3.5, " m");
-    auto* crossfall = spin(-20.0, 20.0, 2.5, " %");
-    auto* cutBatter = spin(0.1, 10.0, 1.5, " : 1");
-    auto* fillBatter = spin(0.1, 10.0, 2.0, " : 1");
-    auto* interval = spin(0.1, 1000.0, 10.0, " m");
-    form->addRow("Alignment", alignmentBox);
-    form->addRow("Ground surface", surfaceBox);
-    form->addRow("Half width", halfWidth);
-    form->addRow("Crossfall", crossfall);
-    form->addRow("Cut batter (run per rise)", cutBatter);
-    form->addRow("Fill batter (run per rise)", fillBatter);
-    form->addRow("Section interval", interval);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    form->addRow(buttons);
-    if (dialog.exec() != QDialog::Accepted) {
-        return std::nullopt;
-    }
-
-    const katana::entity::Alignment* alignment =
-        document_.model().alignments.find(alignmentBox->currentText().toStdString());
-    if (alignment == nullptr || !alignment->vertical.has_value()) {
-        logMessage("The alignment no longer exists or lost its profile.", true);
-        return std::nullopt;
-    }
-    auto solved = katana::geometry::solveAlignment(alignment->horizontal);
-    auto profile = katana::geometry::solveProfile(*alignment->vertical);
-    if (!solved || !profile) {
-        logMessage(QString::fromStdString((solved ? profile.error() : solved.error()).describe()),
-                   true);
-        return std::nullopt;
-    }
-
-    CorridorRequest request;
-    request.alignment = std::move(*solved);
-    request.profile = std::move(*profile);
-    request.ground = surfaces[static_cast<std::size_t>(surfaceBox->currentIndex())];
-    request.alignmentName = alignmentBox->currentText();
-    request.surfaceName = surfaceBox->currentText();
-    request.assembly.halfWidth = halfWidth->value();
-    request.assembly.crossfall = crossfall->value() / 100.0;
-    request.assembly.cutBatter = cutBatter->value();
-    request.assembly.fillBatter = fillBatter->value();
-    request.crossfallPercent = crossfall->value();
-    request.interval = interval->value();
-    return request;
-}
-
-void MainWindow::corridorQuantities()
-{
-    const auto request = askCorridor("Corridor Quantities");
-    if (!request) {
-        return;
-    }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto quantities = cad::corridorQuantities(request->alignment, request->profile,
-                                              request->assembly, *request->ground,
-                                              request->interval);
-    QApplication::restoreOverrideCursor();
-    if (!quantities) {
-        logMessage(QString::fromStdString(quantities.error().describe()), true);
-        return;
-    }
-
-    // The report: one line per section, then the totals - the shape an
-    // earthworks schedule takes, so it can be read against one. QString::number
-    // is not locale-aware, which here is what is wanted: a decimal point.
-    QString report;
-    report += QString("Corridor quantities: %1 on %2\n").arg(request->alignmentName,
-                                                            request->surfaceName);
-    report += QString("Half width %1 m, crossfall %2 %, batters %3:1 cut / %4:1 fill, interval %5 m\n")
-                  .arg(request->assembly.halfWidth, 0, 'f', 2)
-                  .arg(request->crossfallPercent, 0, 'f', 2)
-                  .arg(request->assembly.cutBatter, 0, 'f', 2)
-                  .arg(request->assembly.fillBatter, 0, 'f', 2)
-                  .arg(request->interval, 0, 'f', 2);
-    report += "\n    station     design z     cut area    fill area\n";
-    for (const cad::CorridorSection& section : quantities->sections) {
-        report += QString("%1  %2  %3  %4%5\n")
-                      .arg(section.station, 11, 'f', 3)
-                      .arg(section.designElevation, 11, 'f', 3)
-                      .arg(section.cutArea, 11, 'f', 3)
-                      .arg(section.fillArea, 11, 'f', 3)
-                      .arg(section.complete ? "" : "   (no daylight - excluded)");
-    }
-    report += QString("\nCut %1 m3   Fill %2 m3   Net %3 m3 (%4)\n")
-                  .arg(quantities->cut, 0, 'f', 1)
-                  .arg(quantities->fill, 0, 'f', 1)
-                  .arg(quantities->net, 0, 'f', 1)
-                  .arg(quantities->net >= 0.0 ? "import" : "surplus");
-    if (quantities->incompleteSections > 0) {
-        report += QString("%1 of %2 sections could not reach the ground and contribute NOTHING:"
-                          " these totals are not the whole job.\n")
-                      .arg(quantities->incompleteSections)
-                      .arg(quantities->sections.size());
-    }
-
-    QDialog table(this);
-    table.setWindowTitle("Corridor Quantities");
-    auto* layout = new QVBoxLayout(&table);
-    auto* text = new QPlainTextEdit(&table);
-    text->setReadOnly(true);
-    text->setFont(katana::qt::theme::monospaceFont());
-    text->setPlainText(report);
-    layout->addWidget(text);
-    auto* close = new QDialogButtonBox(QDialogButtonBox::Close, &table);
-    connect(close, &QDialogButtonBox::rejected, &table, &QDialog::reject);
-    connect(close, &QDialogButtonBox::accepted, &table, &QDialog::accept);
-    layout->addWidget(close);
-    table.resize(720, 520);
-    table.exec();
-
-    logMessage(QString("Corridor %1: cut %2 m3, fill %3 m3, net %4 m3 over %5 sections%6")
-                   .arg(request->alignmentName)
-                   .arg(quantities->cut, 0, 'f', 1)
-                   .arg(quantities->fill, 0, 'f', 1)
-                   .arg(quantities->net, 0, 'f', 1)
-                   .arg(quantities->sections.size())
-                   .arg(quantities->incompleteSections > 0
-                            ? QString(" (%1 incomplete)").arg(quantities->incompleteSections)
-                            : QString()));
-}
-
-void MainWindow::corridorSurface()
-{
-    const auto request = askCorridor("Corridor Surface");
-    if (!request) {
-        return;
-    }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto corridor = cad::corridorSurface(request->alignment, request->profile, request->assembly,
-                                         *request->ground, request->interval);
-    QApplication::restoreOverrideCursor();
-    if (!corridor) {
-        logMessage(QString::fromStdString(corridor.error().describe()), true);
-        return;
-    }
-    const std::size_t triangles = corridor->surface.triangleCount();
-    const std::size_t sections = corridor->sections;
-    const std::size_t incomplete = corridor->incompleteSections;
-    addSurface("corridor " + request->alignmentName.toStdString(), std::move(corridor->surface));
-    logMessage(QString("Corridor surface for %1 added: %2 triangles from %3 sections%4. It is a "
-                       "surface like any other - visible in 3D and in sections.")
-                   .arg(request->alignmentName)
-                   .arg(triangles)
-                   .arg(sections)
-                   .arg(incomplete > 0 ? QString(", %1 left out for missing daylight (hull-bounded)")
-                                             .arg(incomplete)
-                                       : QString()));
+    std::erase_if(sceneMeshes_, [](const cad::SceneMesh& mesh) { return !mesh.planFootprint; });
+    sceneMeshes_.insert(sceneMeshes_.end(), std::make_move_iterator(meshes.begin()),
+                        std::make_move_iterator(meshes.end()));
+    // The views hold a pointer to the vector, which stays where it is.
+    views_->setMeshes(&sceneMeshes_);
+    views_->refreshAll();
 }
 
 void MainWindow::plotToPdf()

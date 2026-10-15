@@ -474,7 +474,11 @@ TEST(ToolMenus, ACategoryTheWindowGaveNoMenuGetsOneBesideTheToolMenusOnItsBar)
     targets.menus["Draw"] = bar->addMenu("&Draw");
     targets.menus["Modify"] = bar->addMenu("&Modify");
     targets.menus["Annotate"] = bar->addMenu("&Annotate");
-    (void)bar->addMenu("&Terrain");
+    // The surface edit tools' category, given a submenu as the window gives
+    // it Terrain > Edit Surface (docs/surface_editing.md): Tools stays the one
+    // category with no menu of the window's, and a submenu is not on the bar,
+    // so Tools still goes after Annotate.
+    targets.menus["Terrain"] = bar->addMenu("&Terrain")->addMenu("Edi&t Surface");
     (void)bar->addMenu("F&ormat");
     const ToolActions actions = fillToolMenus(toolCatalog(), targets, &window, {});
     EXPECT_TRUE(actions.unplaced().empty());

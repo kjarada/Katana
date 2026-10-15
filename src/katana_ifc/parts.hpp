@@ -3,6 +3,8 @@
 // The parts of an IFC export, each adding its objects through the Builder.
 // Internal to katana_ifc; export.cpp calls them in this order.
 
+#include <map>
+#include <string>
 #include <vector>
 
 #include "builder.hpp"
@@ -34,7 +36,13 @@ std::string serviceLongName(const survey::subsurface::UtilityAttributes& service
 void exportEntities(Builder& builder, const entity::Model& model,
                     const std::vector<ClassificationRule>& rules);
 
-// Surfaces, as terrain: surfaces.cpp.
-void exportSurfaces(Builder& builder, const std::vector<SurfaceInput>& surfaces);
+// Surfaces, as terrain: surfaces.cpp. The element each surface was written
+// as, by its name (the first of a name), for the road model's cuts to void.
+std::map<std::string, Id> exportSurfaces(Builder& builder,
+                                         const std::vector<SurfaceInput>& surfaces);
+
+// The road model: road.cpp. `terrain` is what exportSurfaces wrote.
+void exportRoad(Builder& builder, const RoadModelInput& road,
+                const std::map<std::string, Id>& terrain);
 
 } // namespace katana::ifc::detail

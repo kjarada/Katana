@@ -72,20 +72,46 @@ Field parseField(std::string_view inside)
     return field;
 }
 
-// ".3f" -> 3; nullopt when it is not a number format.
-std::optional<int> fixedDecimals(std::string_view step)
+// A number format step: ".3f" is 3 decimals; "+.3f" the same with the sign
+// always written, so a height ABOVE something reads "+0.250" beside one
+// below it reading "-0.250" (a leader's {dsurface.NAME:+.3f}).
+struct FixedFormat {
+    int decimals = 0;
+    bool plus = false;
+};
+
+// nullopt when `step` is not a number format.
+std::optional<FixedFormat> fixedFormat(std::string_view step)
 {
+    FixedFormat format;
+    if (!step.empty() && step.front() == '+') {
+        format.plus = true;
+        step.remove_prefix(1);
+    }
     if (step.size() < 3 || step.front() != '.' || step.back() != 'f') {
         return std::nullopt;
     }
-    int decimals = 0;
     const std::string_view digits = step.substr(1, step.size() - 2);
-    const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), decimals);
-    if (error != std::errc{} || end != digits.data() + digits.size() || decimals < 0 ||
-        decimals > 12) {
+    const auto [end, error] =
+        std::from_chars(digits.data(), digits.data() + digits.size(), format.decimals);
+    if (error != std::errc{} || end != digits.data() + digits.size() || format.decimals < 0 ||
+        format.decimals > 12) {
         return std::nullopt;
     }
-    return decimals;
+    return format;
+}
+
+// `number` to the format's decimals; with "+", a value that is more than
+// nothing at those decimals gets its plus. Nothing gets no sign at all:
+// "0.000", neither above nor below (formatFixed never writes "-0.000").
+std::string formatFixedStep(double number, const FixedFormat& format)
+{
+    std::string text = formatFixed(number, format.decimals);
+    if (format.plus && !text.empty() && text.front() != '-' &&
+        text.find_first_not_of("0.") != std::string::npos) {
+        text.insert(0, "+");
+    }
+    return text;
 }
 
 // "dms" -> 0, "dms.2" -> 2; nullopt when it is not a DMS step.
@@ -150,17 +176,14 @@ std::optional<std::string> apply(const LabelValue& value, const std::vector<std:
     for (std::size_t i = 0; i < steps.size(); ++i) {
         const std::string_view step = steps[i];
         const bool last = i + 1 == steps.size();
-        if (const auto decimals = fixedDecimals(step)) {
+        if (const auto format = fixedFormat(step)) {
             if (!last) {
                 return fail("a number format must be the last step");
             }
             if (isAngular(quantity) && !angleAsNumber) {
                 return fail("an angle needs deg, rad or gon before a number format");
             }
-            if (quantity == LabelQuantity::Chainage) {
-                return formatFixed(number, *decimals);
-            }
-            return formatFixed(number, *decimals);
+            return formatFixedStep(number, *format);
         }
         if (isAngular(quantity) && !angleAsNumber) {
             if (const auto d = dmsDecimals(step, "dms")) {

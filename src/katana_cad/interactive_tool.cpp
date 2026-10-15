@@ -434,6 +434,7 @@ const BuiltCatalog& builtCatalog()
         tools::addSelectTools(out.catalog, report);
         tools::addModifyVertexTools(out.catalog, report);
         tools::addDrawProfessionalTools(out.catalog, report);
+        tools::addTerrainEditTools(out.catalog, report); // docs/surface_editing.md
         return out;
     }();
     return built;

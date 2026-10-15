@@ -10,7 +10,8 @@
 //
 // A field is a VALUE name and then any number of ':'-separated steps applied
 // left to right: unit conversions (m, mm, km, ft; m2, ha, km2, ac; deg, rad,
-// gon), a number format (.Nf, N decimals), an angle format (dms, dms.N for N
+// gon), a number format (.Nf, N decimals; +.Nf the same with a plus before a
+// value above nothing, as a height difference is written), an angle format (dms, dms.N for N
 // decimals of a second, dm, qb for a quadrant bearing), the chainage format
 // (ch: 1+234.500) and the text cases (upper, lower). "{{" and "}}" are
 // literal braces. A value with no format step is printed in its quantity's

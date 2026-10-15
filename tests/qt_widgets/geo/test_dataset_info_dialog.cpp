@@ -45,11 +45,9 @@ struct Executor {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
     katana::interop::ReferenceData reference;
-    katana::terrain::SurfaceStore surfaces;
     katana::app::geo::Context context{document,
                                       interpreter,
                                       reference,
-                                      surfaces,
                                       std::filesystem::temp_directory_path() / "katana-info-dialog",
                                       {},
                                       {}};

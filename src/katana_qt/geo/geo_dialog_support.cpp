@@ -32,7 +32,9 @@ GeoDialogContext geoDialogContext(GeoWorkbench& workbench)
     context.headless = services.headless;
     context.document = services.document;
     context.reference = services.reference;
-    context.surfaces = services.surfaces;
+    // The drawing's surfaces: the Document's store stays where it is for as
+    // long as the Document does.
+    context.surfaces = services.document != nullptr ? &services.document->surfaces() : nullptr;
     if (services.views != nullptr) {
         ViewWorkspace* views = services.views;
         context.views = [views] { return scopeFilterViews(views->viewSet()); };

@@ -13,6 +13,10 @@ file(GLOB _cad_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/a
 file(GLOB _cad_utility_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/utilities/*.cpp")
 # The drawing system's tests (docs/drawing.md), globbed as its sources are.
 file(GLOB _cad_drawing_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
+# The drawing's surfaces - styles, edits, volumes - and the road model
+# (docs/terrain.md, docs/road_design.md), globbed as their sources are.
+file(GLOB _cad_terrain_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/terrain/*.cpp")
+file(GLOB _cad_road_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/road/*.cpp")
 
 katana_add_test_suite(cad
     LIBS katana_cad
@@ -27,6 +31,8 @@ katana_add_test_suite(cad
         ${_cad_annotation_tests}
         ${_cad_utility_tests}
         ${_cad_drawing_tests}
+        ${_cad_terrain_tests}
+        ${_cad_road_tests}
         test_alignment_report.cpp
         # Zooming a 3D view towards what it draws (cad/scene_zoom.hpp).
         test_scene_zoom.cpp

@@ -1024,12 +1024,14 @@ if(TARGET katana)
     # The Terrain menu's section and corridor items by the object names
     # --trigger reaches them by, in a drawing with no alignment: each says
     # where one is defined - the Alignment Manager, which a headless run does
-    # not open - and the menu starts with it.
+    # not open - and the menu starts with it. The corridor items are the BIM
+    # menu's Corridors... and Corridor Quantities..., which Terrain's
+    # Corridors section shows too (docs/road_design.md).
     add_test(NAME qt_terrain_commands_point_to_the_alignment_manager_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=*terrainSectionAlongAlignment|*terrainCorridorQuantities|*terrainCorridorSurface|*terrainSectionAlongSelection|?terrainMenu"
+            "-DDRIVE=*terrainSectionAlongAlignment|*bimCorridorQuantities|*bimCorridors|*terrainSectionAlongSelection|?terrainMenu"
             "-DEXPECT=Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW.*No alignment has a design profile[.] Define one in Terrain > Alignment Manager [(]Vertical[)].*No alignment has a design profile.*Select exactly one line or polyline to cut along.*terrainMenu: Terrain: Alignment Manager[.][.][.] [[]Define and edit alignments"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/terrain_commands_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1060,8 +1062,26 @@ if(TARGET katana)
             "-DEXPECT=hatchPatternTable: brick [|] 1 family [|] used by 1 layer[^;]* ; none [|] draws nothing [|] used by 1 layer, e[.]g[.] +layer=0.*hatchPatternFamilies: 45 [|] 0[.]25.*hatchPatternStatus: style brick paving created.*hatchPatternStatus: [^\r\n]*used by 1 layer and 1 style.*hatchPatternStatus: purged 0 styles, 0 linetypes and 1 hatch pattern.*hatchPatternTable: brick [|] 2 families [|] used by 1 layer and 1 style.*commandLog: .*> STYLE NEW \"brick paving\" HATCH brick style brick paving created"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hatch_patterns_tab_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ---- road model (docs/road_design.md) ----
+    # BIM > Road Template Manager and Corridors through the real window: the
+    # standard templates added from the manager (ROADTEMPLATE DEFAULTS, one
+    # line), a corridor made from the dialog's fields (CORRIDOR NEW, echoed
+    # in the log as typed), the dialog listing it and saying what it could
+    # not build - no target surface, so no batters - and the BIM menu in its
+    # sections. By hand, the rural template's left side is a lane of three
+    # courses, a shoulder of two, a drain and a batter: 4 components a side,
+    # 10 courses in all.
+    add_test(NAME qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>ALIGN NEW road 0,0 100,0|>ALIGN DESIGN road 0,10 100,10|@bimRoadTemplates|!roadTemplateDefaults|?roadTemplateList|@bimCorridors|corridorName=Main|corridorAlignment=road|corridorTemplate=urban street|!corridorNew|?corridorList|?corridorProblems|>ROADMODEL|?bimMenu|?commandLog"
+            "-DEXPECT=--dialog bimRoadTemplates opened roadTemplateManagerDialog \"Road Template Manager\".*roadTemplateList: rural two-lane [|] 4 [|] 4 [|] 10 [|].*urban street.*divided road.*--dialog bimCorridors opened corridorDialog \"Corridors\".*corridorList: Main [|] road [|] urban street.*corridorProblems: no target surface.*object id=corridor/Main/left/kerb/1 kind=kerb.*bimMenu: BIM: Road Template Manager[.][.][.] [[]Road templates.*Corridors[.][.][.] [[]Corridors.*Show Road Model [[].*Corridor Quantities[.][.][.] [[].*commandLog: .*> ROADTEMPLATE DEFAULTS added=3.*> CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" interval=10 corridor name=Main"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bim_corridor_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
+        qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
         qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
         qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
@@ -1292,6 +1312,43 @@ if(TARGET katana)
             "-DEXPECT=listed surfaces=0 rasters=0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/new_drops_reference_data_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ---- surface display (docs/surface_display.md) ----
+    # A surface drawn in the plan view in its style: the sample terrain in
+    # Standard (its boundary alone), Triangles, then Elevation Bands, each
+    # paint of PlanView1 saying what it drew of the surface - triangles in
+    # view, edges stroked or tinted, the pixels its faces cover, the legends.
+    # The ink is read against the Standard paint, whose faces cover nothing:
+    # banded faces cover pixels and bring a legend, whose ten bands SURFACE
+    # LEGEND then lists. The grab is the plan view in bands.
+    add_test(NAME qt_a_surface_is_drawn_in_plan_in_its_style_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>ZOOM EXTENTS view=1|?PlanView1|>SURFACE STYLE ground Triangles|?PlanView1|>SURFACE STYLE ground \"Elevation Bands\"|?PlanView1|>SURFACE LEGEND ground|%View1"
+            "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=0 labels=0 covered=0 legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=[0-9]+ tinted=[0-9]+ contours=0 labels=0 covered=[0-9]+ legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=[0-9]+ labels=[0-9]+ covered=[1-9][0-9]* legends=1.*kind=bands entries=10"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_in_plan_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_surface_is_drawn_in_plan_in_its_style_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # Terrain > Surface Styles, by its object names: a style's contour
+    # interval edited and applied, then a copy of it made under a new name -
+    # each the SURFACESTYLE line the dialog shows and runs through the
+    # window's executor, and the list then holding the copy.
+    add_test(NAME qt_the_surface_style_manager_runs_its_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=@terrainSurfaceStyles|surfaceStyleList=Contours|surfaceStyleInterval=0.5|?surfaceStyleLine|!surfaceStyleApply|?surfaceStyleStatus|surfaceStyleName=Fine Contours|!surfaceStyleCopy|?surfaceStyleList"
+            "-DEXPECT=surfaceStyleLine: SURFACESTYLE SET Contours interval=0[.]5.*surfaceStyleList: [^\r\n]*Fine Contours"
+            "-DFORBID=InvalidArgument|ParseFailure|NotFound"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_style_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_surface_style_manager_runs_its_lines_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # GIS > Dataset Information and the import dialog, described by GDAL and
     # PDAL from the file and painted. The dialog runs its INFO lines through
     # the window's one executor, so what they said is in the log.
@@ -3090,6 +3147,23 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Terrain > Edit Surface > Raise, Lower or Set Level through the window
+    # (docs/surface_editing.md): the dialog opened by its action, its line run
+    # through the window's one executor. samples/gis/terrain.asc as a surface
+    # has 10 800 vertices (cli.surface_from_the_sample_terrain_then_list), and
+    # RAISE 2 moves every one by exactly 2.
+    add_test(NAME qt_the_surface_heights_dialog_raises_the_surface_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|@terrainSurfaceHeights|surfaceHeightsValue=2|!surfaceHeightsRun|?surfaceHeightsReply"
+            "-DEXPECT=surface name=ground operation=raise .*moved=10800 .*largest_change=2 changed=yes"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_heights_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_surface_heights_dialog_raises_the_surface_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Every icon-only button with a menu on a toolbar or in a dock's title
     # bar draws the sign of its menu clear of its icon (--check-toolbars,
     # tools::menuSignClashes), each measured from its own rendering against
@@ -3328,6 +3402,22 @@ if(TARGET katana)
             "-DEXPECT=--dialog fileExportIfc opened fileExportIfcDialog \"Export IFC\"[\r\n].*> EXPORT \"preview\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\".*ifcExportClasses: [^\r\n]*layer Survey/Kerb \\| 1 \\| IfcKerb NOTDEFINED \\| \\| rule kerb[^\r\n]*service E1 \\| 3 \\| IfcCableCarrierSegment CONDUITSEGMENT \\| ELECTRICAL.*> EXPORT \"[^\"]*qt_ifc_dialog\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\"[\r\n]+ifc exported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+[\r\n]+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_dialog\\.ifc: [0-9]+ instances"
             "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ifc: File > Export IFC's "Road model" box (docs/ifc.md, "Road model"),
+    # unticked: the line says NOROADMODEL, and the window runs it. The
+    # scenario has no corridor, so the box counts no objects.
+    add_test(NAME qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=${_ifc_scenario}@fileExportIfc|?ifcExportRoadModel|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless_headless.png"
+            "-DEXPECT=ifcExportRoadModel: Road model \\(0 objects\\).*ifcExportCommand: EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n].*> EXPORT \"[^\"]*qt_ifc_roadless\\.ifc\" NOROADMODEL[\r\n]+ifc exported file=\"qt_ifc_roadless\\.ifc\" schema=IFC4X3_ADD2 .*ifcExportCheck: Wrote [^\r\n]*qt_ifc_roadless\\.ifc: [0-9]+ instances"
+            "-DFORBID=IfcBuildingElementProxy|road elements="
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # File > Import IFC on that file, into a drawing with no coordinate
     # system: described, imported, and the project takes the file's EPSG:7856
     # (the dialog's default), as its own undoable step.
@@ -3339,10 +3429,13 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_import_dialog_headless.png"
             "-DEXPECT=--dialog fileImportIfc opened fileImportIfcDialog \"Import IFC\"[\r\n].*> INFO \"[^\"]*qt_ifc_dialog\\.ifc\".*ifcImportSummary: ifc described file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\".*alignment name=\"MC01\" pis=4 pvis=4.*> IMPORT \"[^\"]*qt_ifc_dialog\\.ifc\" TAKECRS[\r\n]+ifc imported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*note text=\"the project is now in EPSG:7856.*MC01  4 PIs  1000\\.000 to 1339\\.016"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # The session's surfaces go out as IFC terrain and come back as surfaces
-    # of the session: the four TINs of a .12da archive, there and back. Each
-    # is added to the session (its "Surface" line) before the import's reply
-    # is logged.
+    # The drawing's surfaces go out as IFC terrain and come back as surfaces
+    # of the drawing: the four TINs of a .12da archive, there and back. The
+    # import keeps them through cad::importSurfaces, in its one undo step,
+    # each listed after the reply by the surface record (docs/terrain.md,
+    # "Surfaces in the drawing") - named "(2)" beside the original - where the
+    # window's own import once logged a "Surface 'name': ..." line. 8
+    # triangles and 9 points: TIN SOUTH WEST in the archive, unchanged.
     add_test(NAME qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -3350,7 +3443,7 @@ if(TARGET katana)
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_headless.png"
-            "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4"
+            "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4.*surface name=\"TIN SOUTH WEST \\(2\\)\" triangles=8 points=9"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The File menu offers both - each in its submenu, File > Import and File
     # > Export, since every import and export went under those two (a menu's
@@ -3364,7 +3457,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=%fileMenu|?fileImportMenu|?fileExportMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_menu_headless.png"
-            "-DEXPECT=fileImportMenu: Import: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*[\r\n]+fileExportMenu: Export: [^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
+            "-DEXPECT=fileImportMenu: Import: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*[\r\n]+fileExportMenu: Export: [^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, NOROADMODEL, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # --import-options on a .ifc builds File > Import IFC's dialog for it.
     add_test(NAME qt_ifc_import_options_are_the_import_dialog_headless

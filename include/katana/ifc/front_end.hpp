@@ -33,7 +33,8 @@ namespace katana::ifc {
 
 // EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]
 //                   [RULES <rules.csv>] [SPACING <m>] [NODRAWING]
-//                   [NOENTITIES] [SELECTED] [NOALIGNMENTS] [NOSURFACES] [PREVIEW]
+//                   [NOENTITIES] [SELECTED] [NOALIGNMENTS] [NOSURFACES]
+//                   [NOROADMODEL] [PREVIEW]
 //
 // Every choice File > Export IFC offers is a word here, so that the dialog
 // only writes the line (formatExportLine) and a person, a script and an agent
@@ -44,10 +45,13 @@ struct ExportArguments {
     std::optional<std::string> schema;   // SCHEMA: the delivery schema it was written to
     std::optional<std::string> rules;    // RULES: a project's classification rules
     std::optional<double> spacing;       // SPACING: longest detected spacing keeping QL-B, m
-    // NODRAWING is all three false: the investigation alone.
+    // NODRAWING is all four false: the investigation alone.
     bool entities = true;   // false: NOENTITIES
     bool alignments = true; // false: NOALIGNMENTS
-    bool surfaces = true;   // false: NOSURFACES; the window's surfaces (katana_cli holds none)
+    bool surfaces = true;   // false: NOSURFACES; the drawing's surfaces (Document::surfaces)
+    // false: NOROADMODEL - the road model's 3D objects (corridors, road
+    // objects), made from the drawing's definitions, as IfcRoad and its parts
+    bool roadModel = true;
     bool selected = false;  // SELECTED: of the entities, the selected ones
     bool preview = false;   // PREVIEW: the reply the file would give, no file written
 
@@ -146,6 +150,7 @@ struct ExportFiles {
 //     (PREVIEW: "ifc previewed", and no bytes)
 //   counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14
 //          entities_written=5 entities_skipped=0 surfaces=0
+//   road elements=12 skipped=0 roads=1 parts=3      when a road model was given
 //   class name=IfcKerb count=1                      one a class written
 //   object from="layer Survey/Kerb" count=1 class=IfcKerb predefined=NOTDEFINED
 //          object_type="" system="" why="rule kerb" one a ClassTally

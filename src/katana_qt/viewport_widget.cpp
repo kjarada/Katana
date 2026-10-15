@@ -1408,6 +1408,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
         layer.end();
         lastDrawnEntities_ = stats.entitiesDrawn;
         lastGhosts_ = stats.ghostsDrawn;
+        lastStats_ = stats;
         drawingKey_ = std::move(key);
         ++drawingPaints_;
         lastDrawingMs_ = static_cast<double>(drawingTimer.nsecsElapsed()) / 1.0e6;

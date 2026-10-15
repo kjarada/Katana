@@ -15,6 +15,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "katana/core/text.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/geometry_blob.hpp"
 #include "katana/entity/serialization.hpp"
@@ -341,6 +342,32 @@ constexpr Migration kMigrations[] = {
     {12, R"sql(
         -- The geometry kinds 9 to 11 need no schema change of their own.
     )sql"},
+    // The drawing's TIN surfaces (SurfaceRecord; docs/terrain.md, "Surfaces
+    // in the drawing"). One new table and nothing else changed, so a project
+    // written before this opens exactly as it was, with no surfaces.
+    //
+    // A surface is one row, its triangulation one BLOB in the terrain
+    // layer's own versioned form (terrain/tin_codec.hpp), which this layer
+    // keeps without reading: storage may not see terrain, and a later
+    // surface layout is then a new codec version, not a migration. An
+    // ordinary rowid table, for the reason the survey jobs' is one: a
+    // WITHOUT ROWID table keeps a whole row in its b-tree, which suits small
+    // rows, not a surface of tens of megabytes.
+    //
+    // Rejected: the surfaces as files in the project's terrain/ folder. A
+    // save is ONE SQLite transaction (project_store.hpp, "Atomic save"), and
+    // files beside it would be written outside it - a crash between the two
+    // leaves a database naming surfaces whose files are older, newer or gone.
+    {13, R"sql(
+        CREATE TABLE surfaces (
+            position INTEGER PRIMARY KEY,
+            name     TEXT NOT NULL,
+            source   TEXT NOT NULL,
+            style    TEXT NOT NULL,
+            visible  INTEGER NOT NULL,
+            data     BLOB NOT NULL
+        );
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -405,6 +432,17 @@ constexpr std::string_view kMetadataKeys[] = {
     "name",        "description",  "linear_unit",         "coordinate_system", "created_utc",
     "modified_utc", "application_version", "next_entity_id", "customisation",
     "reference_layers",
+};
+
+// The keys the drawing above storage keeps in unknownKeys as text storage
+// does not read - each the sheet-set pattern (cad/plotting/sheet_store.cpp):
+// a document's data with no schema change. They are this build's, so one
+// absent at a save was removed and its row is deleted (writeMetadata); a key
+// in neither list is a newer build's and is never deleted. A module that
+// adds such a key adds it here (docs/model.md, "Metadata a newer build
+// wrote").
+constexpr std::string_view kDrawingMetadataKeys[] = {
+    "annotation_scale", "sheets", "surface_styles", "road_templates", "corridors", "road_objects",
 };
 
 [[nodiscard]] bool isMetadataKey(std::string_view key)
@@ -1077,6 +1115,27 @@ Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
             return status;
         }
     }
+    // A key of the drawing's own that it no longer writes was REMOVED by this
+    // build - a sheet set emptied, the annotation scale reset, the road model
+    // deleted - so its row goes too: REPLACE alone left the last save's value
+    // standing, and it came back when the project was opened again. A key
+    // this build does not know is still never deleted (above).
+    auto remove = database.prepare("DELETE FROM metadata WHERE key = ?1");
+    if (!remove) {
+        return remove.error();
+    }
+    for (const std::string_view key : kDrawingMetadataKeys) {
+        if (m.unknownKeys.contains(std::string(key))) {
+            continue;
+        }
+        Status status = remove->bind(1, key);
+        if (status) {
+            status = remove->run();
+        }
+        if (!status) {
+            return status;
+        }
+    }
     return {};
 }
 
@@ -1514,6 +1573,100 @@ Result<std::vector<SurveyJob>> readSurveyJobs(SqliteDatabase& database)
     return jobs;
 }
 
+// ---- surfaces ----------------------------------------------------------------------
+//
+// Opaque records (SurfaceRecord): the bytes are the terrain layer's, written
+// and read whole.
+
+// What save() refuses before it writes anything: a surface it could not load
+// back as the same surface - no name, no bytes, a name another has (the
+// drawing's store compares names without case, so "Ground" and "ground"
+// could not both be loaded) - and one too large for the database.
+Status validateSurfaces(const std::vector<SurfaceRecord>& surfaces, std::uint64_t sizeLimit)
+{
+    for (std::size_t i = 0; i < surfaces.size(); ++i) {
+        const SurfaceRecord& surface = surfaces[i];
+        if (surface.name.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a surface has no name",
+                             "position=" + std::to_string(i));
+        }
+        if (surface.data.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a surface has nothing to keep",
+                             "surface=" + surface.name);
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (katana::core::equalsIgnoringCase(surfaces[j].name, surface.name)) {
+                return makeError(ErrorCode::InvalidArgument, "two surfaces have the same name",
+                                 "surface=" + surface.name);
+            }
+        }
+        if (auto status = ProjectStore::checkSurfaceSize(surface, sizeLimit); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+Status writeSurfaces(SqliteDatabase& database, const std::vector<SurfaceRecord>& surfaces)
+{
+    if (surfaces.empty()) {
+        return {};
+    }
+    auto insert = database.prepare(
+        "INSERT INTO surfaces (position, name, source, style, visible, data)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6)");
+    if (!insert) {
+        return insert.error();
+    }
+    for (std::size_t position = 0; position < surfaces.size(); ++position) {
+        const SurfaceRecord& surface = surfaces[position];
+        if (auto status = Binder(*insert)(1, static_cast<std::int64_t>(position))(
+                              2, std::string_view(surface.name))(
+                              3, std::string_view(surface.source))(
+                              4, std::string_view(surface.style))(
+                              5, static_cast<std::int64_t>(surface.visible ? 1 : 0))(
+                              6, asBytes(surface.data))
+                              .run();
+            !status) {
+            return makeError(status.error().code,
+                             "surface " + surface.name + " could not be saved: " +
+                                 status.error().message,
+                             "bytes=" + std::to_string(surface.data.size()) + " " +
+                                 status.error().context);
+        }
+    }
+    return {};
+}
+
+Result<std::vector<SurfaceRecord>> readSurfaces(SqliteDatabase& database)
+{
+    std::vector<SurfaceRecord> surfaces;
+    auto select = database.prepare(
+        "SELECT name, source, style, visible, data FROM surfaces ORDER BY position");
+    if (!select) {
+        return select.error();
+    }
+    while (true) {
+        const auto row = select->step();
+        if (!row) {
+            return row.error();
+        }
+        if (!*row) {
+            break;
+        }
+        SurfaceRecord surface;
+        surface.name = select->columnText(0);
+        surface.source = select->columnText(1);
+        surface.style = select->columnText(2);
+        surface.visible = select->columnInt64(3) != 0;
+        // Straight from SQLite's buffer: one copy of a blob that may be tens
+        // of megabytes, as a survey job's field file is read.
+        surface.data = blobText(*select, 4);
+        surfaces.push_back(std::move(surface));
+    }
+    return surfaces;
+}
+
 } // namespace
 
 std::uint64_t ProjectStore::surveyJobRowBytes(const SurveyJob& job)
@@ -1568,6 +1721,30 @@ Status ProjectStore::checkSurveyJobSize(const SurveyJob& job, std::uint64_t limi
     return {};
 }
 
+std::uint64_t ProjectStore::surfaceRowBytes(const SurfaceRecord& surface)
+{
+    return std::uint64_t{surface.name.size()} + surface.source.size() + surface.style.size() +
+           surface.data.size() + 8;
+}
+
+Status ProjectStore::checkSurfaceSize(const SurfaceRecord& surface, std::uint64_t limit)
+{
+    const std::uint64_t row = surfaceRowBytes(surface);
+    if (row <= limit) {
+        return {};
+    }
+    const auto megabytes = [](std::uint64_t bytes) {
+        return std::format("{:.1f} MB", static_cast<double>(bytes) / 1e6);
+    };
+    return makeError(ErrorCode::InvalidArgument,
+                     "surface " + surface.name + " is too large to keep in a project: it comes to " +
+                         megabytes(row) + ", and a project keeps at most " + megabytes(limit) +
+                         " for one surface. Make it from fewer points (SURFACE FROM ... max=), "
+                         "or clip it into parts.",
+                     "surface=" + surface.name + " bytes=" + std::to_string(row) +
+                         " limit=" + std::to_string(limit));
+}
+
 Status ProjectStore::save(const ProjectContents& contents)
 {
     if (auto status = validateContents(contents); !status) {
@@ -1579,6 +1756,12 @@ Status ProjectStore::save(const ProjectContents& contents)
     const std::uint64_t jobLimit =
         library <= 0 ? 0 : std::min(kMaxSurveyJobBytes, static_cast<std::uint64_t>(library));
     if (auto status = validateSurveyJobs(contents.surveyJobs, jobLimit); !status) {
+        return status;
+    }
+    // The surfaces' limit likewise.
+    const std::uint64_t surfaceLimit =
+        library <= 0 ? 0 : std::min(kMaxSurfaceBytes, static_cast<std::uint64_t>(library));
+    if (auto status = validateSurfaces(contents.surfaces, surfaceLimit); !status) {
         return status;
     }
     SqliteDatabase& database = impl_->database;
@@ -1598,7 +1781,8 @@ Status ProjectStore::save(const ProjectContents& contents)
     // linetype_elements is deleted explicitly rather than left to the ON DELETE
     // CASCADE: foreign keys are only enforced when the pragma is on, so relying
     // on the cascade would make correctness depend on a connection setting.
-    if (auto status = database.execute("DELETE FROM survey_job_files; DELETE FROM survey_jobs;"
+    if (auto status = database.execute("DELETE FROM surfaces;"
+                                       "DELETE FROM survey_job_files; DELETE FROM survey_jobs;"
                                        "DELETE FROM relationships; DELETE FROM entities;"
                                        "DELETE FROM property_definitions; DELETE FROM styles;"
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
@@ -1956,6 +2140,9 @@ Status ProjectStore::save(const ProjectContents& contents)
         }
     }
     if (auto status = writeSurveyJobs(database, contents.surveyJobs); !status) {
+        return status;
+    }
+    if (auto status = writeSurfaces(database, contents.surfaces); !status) {
         return status;
     }
     return transaction->commit();
@@ -2463,6 +2650,11 @@ Result<ProjectContents> ProjectStore::load()
         return jobs.error();
     } else {
         contents.surveyJobs = std::move(*jobs);
+    }
+    if (auto surfaces = readSurfaces(database); !surfaces) {
+        return surfaces.error();
+    } else {
+        contents.surfaces = std::move(*surfaces);
     }
     return contents;
 }
