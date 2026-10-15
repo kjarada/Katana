@@ -334,6 +334,22 @@ TEST(SurfaceStyleSets, AFormatThatIsNotAStringIsAParseFailureNotAnException)
     EXPECT_TRUE(surfaceStylesFromJson(surfaceStylesToJson(builtInSurfaceStyles())).ok());
 }
 
+TEST(SurfaceStyleSets, TextWithABadByteInItsJsonIsAParseFailureNotAnException)
+{
+    // A project whose style text holds Windows-1252 (0xE9) is no JSON: the parser
+    // refuses the string, so the set never reaches the Document and its save.
+    const std::string bad = std::string(R"({"format":"katana-surface-styles","version":1,)"
+                                        R"("default":"A","styles":[{"name":"A","description":"caf)") +
+                            "\xE9" + R"("}]})";
+    try {
+        const auto read = surfaceStylesFromJson(bad);
+        ASSERT_FALSE(read.ok());
+        EXPECT_EQ(read.error().code, ErrorCode::ParseFailure);
+    } catch (const std::exception& thrown) {
+        ADD_FAILURE() << "threw " << thrown.what();
+    }
+}
+
 TEST(SurfaceStyleSets, ASetNeedsAStyleNoTwoOfOneNameAndADefaultAmongThem)
 {
     EXPECT_FALSE(checkSurfaceStyleSet(SurfaceStyleSet{}).ok());
