@@ -408,8 +408,9 @@ that, `unmade=4`. `LAYERS` and `DRAWING` do not ask for an extent and take it.
   `material`, `facility`, `placement`, `alignment`, `station`, `to`, `offset`,
   `spacing`, `heights`, `surface`, `crossfall`, `dz`, `points` and `source`, then
   the kind's own keys with the value the object is made with, given or default
-  (`type`, `height`, `side` ...). A key the object was not given is absent, not
-  zero: `PROP=spacing` takes the objects that were given a spacing. The key is in
+  (`type`, `height`, `side` ...). One of the others that the object was not given
+  - `to`, `spacing`, `surface`, `name`, `facility`, `source` - is absent, not zero:
+  `PROP=spacing` takes the objects that were given a spacing. The key is in
   any case, the value a pattern, a number as a reply prints it
   (`PROP=offset:-4`). So the kind of an object is `PROP=kind:barrier`, a barrier
   of one type `PROP=type:thriebeam` (a W-beam, `PROP=type:wbeam`, though no one
