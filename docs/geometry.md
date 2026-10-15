@@ -96,12 +96,34 @@ nearly parallel lines at the `kAngular` boundary.
 (ear clipping).
 
 `triangulate` returns counter-clockwise index triples regardless of input
-winding, skips vertices collinear with their neighbours, and fails with
-`TriangulationFailure` — naming the number of remaining vertices — when no ear
-can be found, which means the polygon is not simple. It is O(n²); that is
+winding, and fails with `TriangulationFailure` — naming the number of remaining
+vertices — when no ear can be found, which usually means the polygon is not
+simple (a polygon that crosses itself can still be cut, one triangle of it wound
+clockwise: `isSimple` is the check for a caller that cannot rule it out). It
+also fails, in either mode, for a polygon that is open, has fewer than three
+vertices, has no area, or has a vertex that is not finite — a NaN made every
+comparison false, which read as "convex and unblocked". It is O(n²); that is
 adequate for drafting polygons and is documented rather than hidden. Polygons
 with holes and boolean set operations are **not** implemented; `clipPolygon`
 requires a convex clip region and says so.
+
+A vertex whose two edges run straight on (a turn within `kAngular`, the one test
+of collinearity here) is handled by a mode, `CollinearVertices`. The default,
+`Skip`, drops it when the ear search meets it before any ear is cut round it —
+all a flat fill needs; the triangles still cover the polygon, and a vertex that
+was in a triangle already stays in it, so `Skip` does not promise the vertex is
+absent. `Keep` uses every vertex and makes every edge of the polygon an edge of
+a triangle: strictly convex ears are cut first, exactly as in `Skip`, and a
+straight corner is cut as a triangle of no area only when none is left (and the
+last triangle is given whatever its area). It is for a cap that has to meet the
+quads of a swept or extruded side at every corner they use — the solids of the
+road objects, `docs/road_objects.md` — where a corner dropped from the cap is a
+T-junction and the solid is open. Where no corner is straight the two modes cut
+the same ears in the same order. *Rejected: a second ear clipper beside this
+one* in `cad::road`, which the road objects first had: it decided a straight
+corner by an exact zero where this one uses the angular tolerance, answered a
+polygon it could not fill with an empty list where this one says why, and the
+two would have drifted.
 
 ### Editing
 

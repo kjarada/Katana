@@ -237,14 +237,27 @@ Several closed shells may make one object (a barrier's posts and its rail;
 the cells of a box culvert side by side, with no gap): the mesh is still
 closed, and the IFC export judges closure on the mesh's own indices
 (`docs/ifc.md`, "The body"), so shells that touch at a shared position stay one
-closed face set. The triangulation of a section is ear clipping
-(`cad::road::triangulatePolygon`), which keeps a corner with no turn in it, so
-a cap always meets the sides that use that corner. *Rejected:
-`geometry::triangulate`*, which drops such a corner: a cap would then no longer
-meet its sides and the solid would not close. Extending it with a mode that
-keeps them, and deleting this second ear clipper (which also decides a
-straight corner by an exact zero where the shared one uses
-`math::tolerance`'s angular tolerance), is open ("Not done").
+closed face set.
+
+**One ear clipper.** A cap, and a sign's plate, is cut by the shared
+`geometry::triangulate` (`geometry/polygon.hpp`) in its `CollinearVertices::Keep`
+mode, which uses every corner and makes every edge of the polygon an edge of a
+triangle, so a cap meets the quads of the sides at each corner they use, even a
+corner of no turn, and the solid closes. The default mode drops such a corner
+when it meets it; a cap cut that way would leave a T-junction where the side
+quads still use the corner, which is why this code first had an ear clipper of
+its own (`triangulatePolygon` in `road_object_mesh.cpp`). The review called that a second
+clipper that would drift from the first, and it is gone: the mode was added to
+the shared one. *Rejected: the default mode as it was*, which leaves the solid
+open, and *rejected: keeping the private clipper with a note*, which decided a
+straight corner by an exact zero where the shared one uses the angular
+tolerance of `math::tolerance`, and answered a polygon it could not fill with an
+empty list where the shared one says why. The road code still adds nothing for
+such a polygon, and the object is listed as one that could not be made into a
+solid (above). A corner of no turn is cut as a triangle of no area only when no
+ear with area is left, so the triangles that carry area are the ones the default
+would cut; `counterClockwise` takes the orientation from `Polyline2::signedArea`
+rather than from a copy of it.
 
 **Which way.** A barrier's rail is on the face towards its traffic:
 `side=left|right`, or by default towards the centreline along an alignment
@@ -466,11 +479,19 @@ Document, so asking leaves no line in the history.
 
 - `tests/cad/road/test_road_object_mesh.cpp` - every solid closed, at the
   volume worked out by hand: a box, a mitred corner, a sheared hollow sweep,
-  an inverted T's triangulation; a turn past the mitre limit keeping its full
+  an inverted T capped (28 triangles, 1.96 m3), a straight run and a repeated
+  corner keeping the cap closed, a polygon that cannot be capped adding nothing
+  (a bow-tie, two corners, none, one line, one point, a NaN, an infinity); a turn past the mitre limit keeping its full
   width (1 x 1 x 20) and just inside it staying one ring; a path doubling back;
   a hollow sweep round a hairpin; a closed square swept as a loop (80 m3,
   off-centre 36) and closed midway along a side, a triangle, and a path that
   returns at another level not a loop.
+- `tests/geometry/test_polygon.cpp` - the shared ear clipper's `Keep` mode
+  (`PolygonTriangulate.KeepingCollinearVertices*`): every corner and every edge
+  used, n - 2 triangles for a run of straight corners, a clockwise polygon, a
+  repeated vertex, the same ears as the default where no corner is straight, and
+  a property over random polygons with straight corners; both modes refusing an
+  open polygon, a bow-tie, a NaN and an infinity.
 - `tests/cad/road/test_road_objects.cpp` - each kind at its hand-worked place
   and size: the sign at station 50 offset 4
   (`RoadObjects.ASignAtStation50Offset4StandsOnTheProfileFacingTheTraffic`),
@@ -525,10 +546,6 @@ Document, so asking leaves no line in the history.
   resolver beside `cad::matchEntities` - not a second implementation of the
   grammar - would give the verbs and the manager the shared controls. A scope
   word is refused meanwhile.
-- **A second ear clipper.** `cad::road::triangulatePolygon` beside
-  `geometry::triangulate` (see "How an object is made" for why it was not
-  called); the fix is a keep-collinear mode on the shared one, with the
-  tolerance policy of `math::tolerance`.
 - **The placed half of the model is looked at after every command**, though it
   reads only the `road_objects` key, the alignments and the surfaces
   (`bim_object.cpp`); the cache keeps the model it had when the result is

@@ -101,12 +101,42 @@ void clipPolyline(const std::vector<Point2>& vertices, bool closed, const Box2& 
 
 using TriangleIndices = std::array<std::size_t, 3>;
 
+// What triangulate does with a vertex whose two edges run straight on (the
+// turn is within `math::tolerance::kAngular` of none, the one test of
+// collinearity here): Skip drops it when the search meets it, which is all a
+// flat fill needs; Keep keeps it, so that every edge of the polygon is an edge
+// of some triangle - what a CAP wants, which must meet the quads of a swept or
+// extruded side at every corner those quads use (docs/road_objects.md, "How
+// an object is made"), or the solid is left open at a T-junction.
+enum class CollinearVertices { Skip, Keep };
+
 // Ear-clipping triangulation of a simple polygon without holes. Indices refer
-// to `polygon.vertices`; triangles are counter-clockwise. Vertices collinear
-// with their neighbours are not referenced by any triangle. O(n^2).
-// Fails with TriangulationFailure for non-simple or degenerate input.
+// to `polygon.vertices`; triangles are counter-clockwise. O(n^2).
+//
+// Skip (the default): a vertex collinear with its neighbours is dropped when
+// the ear search reaches it - one an ear was cut round first is still used, so
+// this does not promise the vertex is absent - and a last triangle with no area
+// is not given.
+//
+// Keep: every vertex is used and every edge of the polygon is an edge of a
+// triangle. A strictly convex ear is cut whenever there is one; a straight
+// corner is cut as a triangle of no area only when none is left, so the
+// triangles that carry area are the ones a fill would have made. Such a
+// triangle is counter-clockwise only to within the tolerance that called it
+// straight, and its area is zero to the same; the area of the triangles still
+// sums to the polygon's. A corner where the boundary doubles back along itself
+// (a spike) is not a run to join: Keep does not cut it, and a spike still there
+// when nothing else can be cut is a failure; Skip drops it as it drops any
+// vertex with no turn.
+//
+// Fails with TriangulationFailure for a polygon that is open, has fewer than
+// three vertices, has no area (`orientation` is Degenerate) or has a vertex that
+// is not finite, and when the ear search finds no ear - which is how a polygon
+// that is not simple is usually found out. It is not always: a polygon that
+// crosses itself can still be cut into triangles, one of them wound clockwise,
+// and a caller that cannot rule a crossing out checks isSimple first.
 [[nodiscard]] katana::core::Result<std::vector<TriangleIndices>>
-triangulate(const Polyline2& polygon);
+triangulate(const Polyline2& polygon, CollinearVertices collinear = CollinearVertices::Skip);
 
 // ---- hatching ---------------------------------------------------------------------
 
