@@ -1121,3 +1121,159 @@ TEST(CorridorDialog, TheCurveToleranceIsInTheLineOnlyWhenItIsNotWhatTheCorridorH
     EXPECT_EQ(document.corridors().find("Second")->curveTolerance, 0.0);
     EXPECT_EQ(textOf(dialog, "corridorCurveTolerance").toStdString(), "0.5");
 }
+
+// ---- templates in a file, and a kerb's facing (docs/road_design.md, "Template files") -----
+
+TEST(RoadTemplateManager, ExportAndImportBuildTheirLinesFromTheFileFieldAndTheReplaceBox)
+{
+    QTemporaryDir folder;
+    ASSERT_TRUE(folder.isValid());
+    // A blank in the path: the line must quote it, as a person would have to.
+    const QString path = folder.filePath("road templates.json");
+    const std::string quotedPath = "\"" + path.toStdString() + "\"";
+
+    Document document;
+    Executor executor(document);
+    katana::qt::RoadTemplateManagerDialog dialog({&document, executor.runner(), [] { return true; }});
+    click(dialog, "roadTemplateDefaults");
+    ASSERT_TRUE(dialog.selectTemplate("urban street"));
+
+    // No file named: nothing runs, and it says what to do.
+    const std::size_t lines = executor.lines.size();
+    click(dialog, "roadTemplateExport");
+    click(dialog, "roadTemplateImport");
+    EXPECT_EQ(executor.lines.size(), lines);
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("Type the file"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+
+    // Export writes the chosen template; a second export of the file is
+    // refused by the verb, and says OVERWRITE.
+    fill(dialog, "roadTemplateFile", path);
+    click(dialog, "roadTemplateExport");
+    EXPECT_EQ(executor.last(), "ROADTEMPLATE EXPORT \"urban street\" " + quotedPath);
+    EXPECT_TRUE(QFile::exists(path));
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").startsWith("exported file="))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    click(dialog, "roadTemplateExport");
+    EXPECT_EQ(executor.last(), "ROADTEMPLATE EXPORT \"urban street\" " + quotedPath);
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("OVERWRITE"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    // Replace ticked: the line says so, and Export All writes every template.
+    child<QCheckBox>(dialog, "roadTemplateOverwrite")->setChecked(true);
+    click(dialog, "roadTemplateExportAll");
+    EXPECT_EQ(executor.last(), "ROADTEMPLATE EXPORT ALL " + quotedPath + " OVERWRITE");
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("templates=3"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+
+    // Another drawing imports it: one line, one undo step, three templates.
+    Document other;
+    Executor otherExecutor(other);
+    katana::qt::RoadTemplateManagerDialog importer(
+        {&other, otherExecutor.runner(), [] { return true; }});
+    fill(importer, "roadTemplateFile", path);
+    click(importer, "roadTemplateImport");
+    EXPECT_EQ(otherExecutor.last(), "ROADTEMPLATE IMPORT " + quotedPath);
+    EXPECT_EQ(other.roadTemplates().templates.size(), 3u);
+    EXPECT_EQ(other.history().undoCount(), 1u);
+    EXPECT_EQ(child<QTableWidget>(importer, "roadTemplateList")->rowCount(), 3);
+    // Again: the drawing has those names; refused, nothing imported, and the
+    // box is the way out.
+    click(importer, "roadTemplateImport");
+    EXPECT_EQ(otherExecutor.last(), "ROADTEMPLATE IMPORT " + quotedPath);
+    EXPECT_TRUE(label(importer, "roadTemplateStatus").contains("OVERWRITE"))
+        << label(importer, "roadTemplateStatus").toStdString();
+    EXPECT_EQ(other.history().undoCount(), 1u);
+    child<QCheckBox>(importer, "roadTemplateOverwrite")->setChecked(true);
+    click(importer, "roadTemplateImport");
+    EXPECT_EQ(otherExecutor.last(), "ROADTEMPLATE IMPORT " + quotedPath + " OVERWRITE");
+    EXPECT_TRUE(label(importer, "roadTemplateStatus").contains("replaced=3"))
+        << label(importer, "roadTemplateStatus").toStdString();
+}
+
+TEST(RoadTemplateManager, ABrowseInAHeadlessRunOpensNoFileDialogAndATemplateCalledAllIsNotExportedAlone)
+{
+    Document document;
+    Executor executor(document);
+    katana::qt::RoadTemplateManagerDialog dialog({&document, executor.runner(), [] { return true; }});
+    fill(dialog, "roadTemplateFile", "keep.json");
+    click(dialog, "roadTemplateBrowse");
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("headless session opens no file dialog"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    EXPECT_EQ(textOf(dialog, "roadTemplateFile").toStdString(), "keep.json");
+
+    // The verb reads ALL as every template, so Export of a template called All
+    // would write them all: the dialog says why not, and runs nothing.
+    fill(dialog, "roadTemplateName", "All");
+    click(dialog, "roadTemplateNew");
+    ASSERT_EQ(dialog.currentTemplate().toStdString(), "All");
+    const std::size_t lines = executor.lines.size();
+    click(dialog, "roadTemplateExport");
+    EXPECT_EQ(executor.lines.size(), lines);
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("called ALL"))
+        << label(dialog, "roadTemplateStatus").toStdString();
+}
+
+TEST(RoadTemplateManager, AKerbsFacingIsAGridColumnAnApplySendsAndNothingElseHasOne)
+{
+    using katana::cad::road::KerbFacing;
+    using katana::cad::road::Side;
+    Document document;
+    Executor executor(document);
+    katana::qt::RoadTemplateManagerDialog dialog({&document, executor.runner()});
+    click(dialog, "roadTemplateDefaults");
+    executor.ok("ROADTEMPLATE NEW strips");
+    executor.ok("ROADTEMPLATE ADD strips left kerb shape=edgestrip");
+    QApplication::processEvents();
+    QApplication::processEvents();
+
+    ASSERT_TRUE(dialog.selectTemplate("divided road"));
+    auto* components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    ASSERT_EQ(components->columnCount(), 8);
+    EXPECT_EQ(components->horizontalHeaderItem(6)->text().toStdString(), "Faces");
+    const int kerb = componentRow(*components, "left", "kerb");
+    const int lane = componentRow(*components, "left", "lane1");
+    ASSERT_GE(kerb, 0);
+    ASSERT_GE(lane, 0);
+    // The median's kerb falls going outward; it is edited in place. A lane has no
+    // face to turn: an empty cell that cannot be edited.
+    EXPECT_EQ(components->item(kerb, 6)->text().toStdString(), "outward");
+    EXPECT_TRUE(components->item(kerb, 6)->flags() & Qt::ItemIsEditable);
+    EXPECT_TRUE(components->item(lane, 6)->text().isEmpty());
+    EXPECT_FALSE(components->item(lane, 6)->flags() & Qt::ItemIsEditable);
+
+    const std::size_t steps = document.history().undoCount();
+    components->item(kerb, 6)->setText("inward");
+    QApplication::processEvents();
+    click(dialog, "roadTemplateApplyComponents");
+    const std::string line = executor.last();
+    EXPECT_TRUE(line.starts_with("ROADTEMPLATE SET \"divided road\" left:kerb ")) << line;
+    EXPECT_NE(line.find(" faces=inward "), std::string::npos) << line;
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    const auto* edited = document.roadTemplates().find("divided road");
+    ASSERT_NE(edited, nullptr);
+    EXPECT_EQ(edited->components[*edited->find(Side::Left, "kerb")].faces, KerbFacing::Inward);
+    EXPECT_EQ(edited->components[*edited->find(Side::Right, "kerb")].faces, KerbFacing::Outward)
+        << "only the row that was edited";
+
+    // A word that is neither is the verb's refusal, said, with nothing changed
+    // and the edit kept to correct.
+    components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    const int again = componentRow(*components, "left", "kerb");
+    components->item(again, 6)->setText("sideways");
+    QApplication::processEvents();
+    click(dialog, "roadTemplateApplyComponents");
+    EXPECT_TRUE(label(dialog, "roadTemplateStatus").contains("faces="))
+        << label(dialog, "roadTemplateStatus").toStdString();
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    EXPECT_EQ(components->item(componentRow(*components, "left", "kerb"), 6)->text().toStdString(),
+              "sideways");
+
+    // A flush edge strip has no face, so no cell to edit it in.
+    ASSERT_TRUE(dialog.selectTemplate("strips"));
+    components = child<QTableWidget>(dialog, "roadTemplateComponents");
+    const int strip = componentRow(*components, "left", "kerb");
+    ASSERT_GE(strip, 0);
+    EXPECT_TRUE(components->item(strip, 6)->text().isEmpty());
+    EXPECT_FALSE(components->item(strip, 6)->flags() & Qt::ItemIsEditable);
+}

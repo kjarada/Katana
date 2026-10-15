@@ -1401,3 +1401,232 @@ TEST(RoadVerbs, EachDefinitionMakesOnlyTheHalfItIsPartOfAndAnAlignmentBoth)
     counts = katana::cad::bim::bimBuildCounts(s.document);
     EXPECT_EQ(madeSince(s, counts), (katana::cad::bim::BimBuildCounts{0, 0}));
 }
+
+// ---- template files: ROADTEMPLATE EXPORT and IMPORT -------------------------------------------
+
+namespace {
+
+// A path as a verb takes it: forward slashes, in quotes.
+std::string quoted(const std::filesystem::path& path)
+{
+    return "\"" + path.generic_string() + "\"";
+}
+
+std::filesystem::path scratchFile(const char* name)
+{
+    return std::filesystem::temp_directory_path() / (std::string("katana_road_") + name);
+}
+
+void writeBytes(const std::filesystem::path& file, const std::string& bytes)
+{
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << bytes;
+}
+
+std::string readBytes(const std::filesystem::path& file)
+{
+    std::ifstream in(file, std::ios::binary);
+    std::stringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+} // namespace
+
+TEST(RoadVerbs, TemplatesAreExportedToAFileTheFormROADTEMPLATEJSONPrintsAndImportedBackAsOneStep)
+{
+    const auto one = scratchFile("export_one.json");
+    const auto all = scratchFile("export_all.json");
+    std::filesystem::remove(one);
+    std::filesystem::remove(all);
+
+    Session source;
+    source.ok("ROADTEMPLATE DEFAULTS");
+    source.ok("ROADTEMPLATE SET \"urban street\" lane width=3.6");
+    const std::string exportedOne = source.ok("ROADTEMPLATE EXPORT \"urban street\" " + quoted(one));
+    EXPECT_TRUE(contains(exportedOne, "exported file=")) << exportedOne;
+    EXPECT_TRUE(contains(exportedOne, " templates=1\ntemplate name=\"urban street\" left=")) << exportedOne;
+    const std::string exportedAll = source.ok("ROADTEMPLATE EXPORT all " + quoted(all));
+    EXPECT_TRUE(contains(exportedAll, " templates=3\n")) << exportedAll;
+    EXPECT_EQ(source.steps(), 2u) << "writing a file changes nothing in the drawing";
+
+    // The file is the plain-data, versioned JSON ROADTEMPLATE JSON prints,
+    // and a newline.
+    EXPECT_EQ(readBytes(all), source.ok("ROADTEMPLATE JSON") + "\n");
+    EXPECT_TRUE(readBytes(one).starts_with(R"({"format":"katana-road-templates",)"));
+    EXPECT_TRUE(contains(readBytes(one), R"("version":1)"));
+
+    // One template into another drawing: one step, exactly as it was (every
+    // double written back as it was read), and an undo takes it away.
+    Session target;
+    const std::string imported = target.ok("ROADTEMPLATE IMPORT " + quoted(one));
+    EXPECT_TRUE(contains(imported, " templates=1 added=1 replaced=0\ntemplate name=\"urban street\""))
+        << imported;
+    EXPECT_EQ(target.steps(), 1u);
+    ASSERT_EQ(target.document.roadTemplates().templates.size(), 1u);
+    EXPECT_EQ(target.document.roadTemplates().templates.front(),
+              *source.document.roadTemplates().find("urban street"));
+    target.ok("UNDO");
+    EXPECT_TRUE(target.document.roadTemplates().templates.empty());
+    EXPECT_FALSE(target.document.metadata().unknownKeys.contains("road_templates"))
+        << "the first template's undo leaves the metadata as it was";
+
+    // All three, in the file's order, into a third.
+    Session third;
+    const std::string everything = third.ok("ROADTEMPLATE IMPORT " + quoted(all));
+    EXPECT_TRUE(contains(everything, " templates=3 added=3 replaced=0\n")) << everything;
+    EXPECT_EQ(third.document.roadTemplates(), source.document.roadTemplates());
+    EXPECT_EQ(third.steps(), 1u);
+
+    // And into a drawing that has the standard ones, as an update of them.
+    third.ok("ROADTEMPLATE SET \"urban street\" lane width=3.0");
+    EXPECT_EQ(third.refused("ROADTEMPLATE IMPORT " + quoted(all)).code, ErrorCode::AlreadyExists);
+    std::filesystem::remove(one);
+    std::filesystem::remove(all);
+}
+
+TEST(RoadVerbs, AnImportRefusesANameTheDrawingHasUnlessOverwriteReplacesItWhereItStands)
+{
+    const auto file = scratchFile("overwrite.json");
+    std::filesystem::remove(file);
+    Session session;
+    session.ok("ROADTEMPLATE DEFAULTS");
+    // A second drawing with a new template and the urban street spelt in
+    // capitals - the same name, as every verb finds a template ignoring case.
+    Session other;
+    other.ok("ROADTEMPLATE DEFAULTS");
+    other.ok("ROADTEMPLATE RENAME \"urban street\" \"URBAN STREET\"");
+    other.ok("ROADTEMPLATE SET \"URBAN STREET\" lane width=3.0");
+    other.ok("ROADTEMPLATE NEW extra");
+    other.ok("ROADTEMPLATE EXPORT ALL " + quoted(file));
+
+    const std::size_t steps = session.steps();
+    const auto before = session.document.roadTemplates();
+    const auto refused = session.refused("ROADTEMPLATE IMPORT " + quoted(file));
+    EXPECT_EQ(refused.code, ErrorCode::AlreadyExists);
+    // All three names the file shares are said, and "extra", which does not
+    // clash, is not imported either: nothing is.
+    for (const char* name : {"rural two-lane", "URBAN STREET", "divided road"}) {
+        EXPECT_TRUE(contains(refused.message, name)) << refused.message;
+    }
+    EXPECT_TRUE(contains(refused.message, "OVERWRITE")) << refused.message;
+    EXPECT_EQ(session.steps(), steps);
+    EXPECT_EQ(session.document.roadTemplates(), before);
+
+    const std::string replaced = session.ok("ROADTEMPLATE IMPORT " + quoted(file) + " overwrite");
+    EXPECT_TRUE(contains(replaced, " templates=4 added=1 replaced=3\n")) << replaced;
+    EXPECT_TRUE(contains(replaced, "template name=extra left=0 right=0 courses=0 description=\"\" added"))
+        << replaced;
+    EXPECT_TRUE(contains(replaced, "template name=\"URBAN STREET\"")) << replaced;
+    EXPECT_EQ(session.steps(), steps + 1) << "one step for the whole file";
+    // The three stand where they were, the new one last, and the replaced one
+    // has the file's spelling and the file's lane.
+    const auto& set = session.document.roadTemplates().templates;
+    ASSERT_EQ(set.size(), 4u);
+    EXPECT_EQ(set[0].name, "rural two-lane");
+    EXPECT_EQ(set[1].name, "URBAN STREET");
+    EXPECT_EQ(set[2].name, "divided road");
+    EXPECT_EQ(set[3].name, "extra");
+    const auto& lane = set[1].components[*set[1].find(katana::cad::road::Side::Left, "lane")];
+    EXPECT_EQ(lane.width, 3.0);
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.roadTemplates(), before) << "an undo puts all four back as they were";
+    std::filesystem::remove(file);
+}
+
+TEST(RoadVerbs, ATemplateFileIsReadAndCheckedAsTheProjectReadsItsOwnAndAnythingElseIsRefused)
+{
+    const auto file = scratchFile("read.json");
+    std::filesystem::remove(file);
+    Session session;
+    const std::size_t steps = session.steps();
+    const auto refuse = [&](const std::string& bytes, ErrorCode code, const char* word) {
+        writeBytes(file, bytes);
+        const auto error = session.refused("ROADTEMPLATE IMPORT " + quoted(file));
+        EXPECT_EQ(error.code, code) << bytes;
+        EXPECT_TRUE(contains(error.message, word)) << bytes << "\n  -> " << error.message;
+        EXPECT_EQ(session.steps(), steps) << bytes;
+        EXPECT_TRUE(session.document.roadTemplates().templates.empty()) << bytes;
+    };
+    const std::string head = R"({"format":"katana-road-templates","version":1,"templates":[)";
+    const std::string lane =
+        R"({"name":"lane","kind":"lane","side":"left","layer":"road/pavement","colour":"#808080","width":)";
+    // A file that is not there, a folder, nothing, text, another sort of JSON.
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT " + quoted(scratchFile("nothing.json"))).code,
+              ErrorCode::NotFound);
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT " + quoted(std::filesystem::temp_directory_path())).code,
+              ErrorCode::NotFound);
+    refuse("", ErrorCode::ParseFailure, "road template file");
+    refuse("not json at all", ErrorCode::ParseFailure, "road template file");
+    refuse(R"({"format":"katana-corridors","version":1,"corridors":[]})", ErrorCode::ParseFailure,
+           "not a set of road templates");
+    // A newer Katana's file is not read by guesswork; a set of nothing says so.
+    refuse(R"({"format":"katana-road-templates","version":9,"templates":[]})",
+           ErrorCode::Unsupported, "newer version");
+    refuse(head + "]}", ErrorCode::InvalidArgument, "holds no road templates");
+    // The checks of ROADTEMPLATE SET, on every template: a lane of no width,
+    // a name twice (ignoring case).
+    refuse(head + R"({"name":"bad","description":"","components":[)" + lane + R"(0}]}]})",
+           ErrorCode::InvalidArgument, "left:lane");
+    const std::string good = R"({"name":"a","description":"","components":[)" + lane + R"(3.5}]})";
+    const std::string again = R"({"name":"A","description":"","components":[)" + lane + R"(3.5}]})";
+    refuse(head + good + "," + again + "]}", ErrorCode::ParseFailure, "two road templates have one name");
+
+    // A good one is read, with a byte order mark in front as an editor writes
+    // it; and a template of the same shape written by hand is the same as the
+    // one a verb makes.
+    writeBytes(file, "\xEF\xBB\xBF" + head + good + "]}");
+    const std::string read = session.ok("ROADTEMPLATE IMPORT " + quoted(file));
+    EXPECT_TRUE(contains(read, " templates=1 added=1 replaced=0\ntemplate name=a left=1 right=0 "))
+        << read;
+    EXPECT_EQ(session.steps(), steps + 1);
+    std::filesystem::remove(file);
+}
+
+TEST(RoadVerbs, AnExportWritesAFileOnlyWhereThereIsNoneOrOverwriteSaysSoAndRefusesWhatItCannotWrite)
+{
+    const auto file = scratchFile("write.json");
+    std::filesystem::remove(file);
+    Session session;
+    // Nothing to export from a drawing with no templates; nothing of a name it lacks.
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file)).code,
+              ErrorCode::InvalidState);
+    session.ok("ROADTEMPLATE DEFAULTS");
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT nowhere " + quoted(file)).code,
+              ErrorCode::NotFound);
+    EXPECT_FALSE(std::filesystem::exists(file)) << "a refusal writes nothing";
+    // The words: a template and a file, then OVERWRITE and nothing else.
+    for (const char* line : {"ROADTEMPLATE EXPORT", "ROADTEMPLATE EXPORT ALL"}) {
+        EXPECT_EQ(session.refused(line).code, ErrorCode::ParseFailure) << line;
+    }
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file) + " REPLACE").code,
+              ErrorCode::ParseFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file) + " OVERWRITE now").code,
+              ErrorCode::ParseFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT").code, ErrorCode::ParseFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE IMPORT " + quoted(file) + " REPLACE").code,
+              ErrorCode::ParseFailure);
+
+    session.ok("ROADTEMPLATE EXPORT \"divided road\" " + quoted(file));
+    const std::string first = readBytes(file);
+    // A file already there is not replaced without OVERWRITE, and is untouched.
+    const auto refused = session.refused("ROADTEMPLATE EXPORT ALL " + quoted(file));
+    EXPECT_EQ(refused.code, ErrorCode::AlreadyExists);
+    EXPECT_TRUE(contains(refused.message, "OVERWRITE")) << refused.message;
+    EXPECT_EQ(readBytes(file), first);
+    session.ok("ROADTEMPLATE EXPORT ALL " + quoted(file) + " OVERWRITE");
+    EXPECT_NE(readBytes(file), first);
+    EXPECT_EQ(readBytes(file), session.ok("ROADTEMPLATE JSON") + "\n");
+    // A place that cannot be written is a failure to export, not a crash.
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " +
+                              quoted(std::filesystem::temp_directory_path() / "katana_no_folder" /
+                                     "templates.json"))
+                  .code,
+              ErrorCode::FileExportFailure);
+    EXPECT_EQ(session.refused("ROADTEMPLATE EXPORT ALL " +
+                              quoted(std::filesystem::temp_directory_path()) + " OVERWRITE")
+                  .code,
+              ErrorCode::FileExportFailure);
+    EXPECT_TRUE(contains(session.ok("HELP CORRIDOR"), "ROADTEMPLATE IMPORT <file.json> [OVERWRITE]"));
+    std::filesystem::remove(file);
+}

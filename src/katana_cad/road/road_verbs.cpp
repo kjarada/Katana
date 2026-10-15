@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -26,6 +27,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/entity/colour_names.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/geometry/alignment.hpp"
@@ -509,6 +511,139 @@ Result<std::string> commitTemplates(Document& document, const RoadTemplateSet& s
     return reply;
 }
 
+// ---- template files ---------------------------------------------------------------------
+
+// The most a road template file may be, in bytes: a template with all its
+// courses is a few kilobytes of JSON, so this holds thousands. A sanity bound
+// with no standard behind it, so that a path typed to another sort of file (a
+// drawing, a point cloud) is refused at once and not read into memory.
+constexpr std::uintmax_t kMaximumTemplateFileBytes = 16u * 1024u * 1024u;
+
+// ROADTEMPLATE EXPORT <template>|ALL <file.json> [OVERWRITE]: the templates as
+// the plain-data, versioned JSON ROADTEMPLATE JSON prints, in a file. A file
+// already there is only replaced with OVERWRITE, as every verb that writes one.
+Result<std::string> exportTemplates(Document& document, const Tokens& args)
+{
+    const bool overwrite = args.size() == 4 && is(args[3], "OVERWRITE");
+    if (args.size() < 3 || args.size() > 4 || (args.size() == 4 && !overwrite)) {
+        return usage("ROADTEMPLATE EXPORT <template>|ALL <file.json> [OVERWRITE]");
+    }
+    const RoadTemplateSet& current = document.roadTemplates();
+    RoadTemplateSet chosen;
+    if (is(args[1], "ALL")) {
+        chosen = current;
+    } else if (const RoadTemplate* found = current.find(args[1])) {
+        chosen.templates.push_back(*found);
+    } else {
+        return noTemplate(args[1]);
+    }
+    if (chosen.templates.empty()) {
+        return makeError(ErrorCode::InvalidState,
+                         "the drawing has no road templates to export: ROADTEMPLATE DEFAULTS adds "
+                         "the standard ones");
+    }
+    auto json = roadTemplatesToJson(chosen);
+    if (!json) {
+        return json.error();
+    }
+    const std::filesystem::path file = katana::core::pathFromUtf8(args[2]);
+    std::error_code error;
+    if (std::filesystem::exists(file, error) && !overwrite) {
+        return makeError(ErrorCode::AlreadyExists,
+                         "the file is already there; OVERWRITE replaces it", args[2]);
+    }
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return makeError(ErrorCode::FileExportFailure, "the file cannot be written", args[2]);
+    }
+    out << *json << '\n';
+    out.close();
+    if (!out) {
+        return makeError(ErrorCode::FileExportFailure, "the file could not be finished", args[2]);
+    }
+    std::string reply = "exported file=" + text(args[2]) +
+                        " templates=" + std::to_string(chosen.templates.size());
+    for (const RoadTemplate& each : chosen.templates) {
+        reply += "\n" + templateRecord(each);
+    }
+    return reply;
+}
+
+// ROADTEMPLATE IMPORT <file.json> [OVERWRITE]: the templates in a file added to
+// the drawing's as ONE undo step, read and checked as the project reads its own
+// (roadTemplatesFromJson: the format and version, and checkTemplate of each). A
+// name the drawing has already (found ignoring case) is refused, with nothing
+// imported, unless OVERWRITE replaces that template where it stands.
+Result<std::string> importTemplates(Document& document, const Tokens& args)
+{
+    const bool overwrite = args.size() == 3 && is(args[2], "OVERWRITE");
+    if (args.size() < 2 || args.size() > 3 || (args.size() == 3 && !overwrite)) {
+        return usage("ROADTEMPLATE IMPORT <file.json> [OVERWRITE]");
+    }
+    const std::filesystem::path file = katana::core::pathFromUtf8(args[1]);
+    std::error_code error;
+    const std::uintmax_t size = std::filesystem::file_size(file, error);
+    if (error) {
+        return makeError(ErrorCode::NotFound, "the file cannot be read: it is not there, or is not a file",
+                         args[1]);
+    }
+    if (size > kMaximumTemplateFileBytes) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the file is over 16 MiB: it is not a road template file", args[1]);
+    }
+    auto bytes = katana::core::readFileBytes(file);
+    if (!bytes) {
+        return bytes.error();
+    }
+    auto decoded = katana::core::decodeText(*bytes);
+    if (!decoded) {
+        return decoded.error();
+    }
+    auto read = roadTemplatesFromJson(decoded->text);
+    if (!read) {
+        return makeError(read.error().code,
+                         "road template file " + args[1] + ": " + read.error().message,
+                         read.error().context);
+    }
+    if (read->templates.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the file holds no road templates", args[1]);
+    }
+    RoadTemplateSet set = document.roadTemplates();
+    std::vector<std::string> taken;
+    std::size_t added = 0;
+    std::size_t replaced = 0;
+    std::string records;
+    for (RoadTemplate& each : read->templates) {
+        RoadTemplate* existing = set.find(each.name);
+        if (existing != nullptr && !overwrite) {
+            taken.push_back(each.name);
+            continue;
+        }
+        records += "\n" + templateRecord(each) + (existing != nullptr ? " replaced" : " added");
+        if (existing != nullptr) {
+            *existing = std::move(each);
+            ++replaced;
+        } else {
+            set.templates.push_back(std::move(each));
+            ++added;
+        }
+    }
+    if (!taken.empty()) {
+        std::string names;
+        for (const std::string& name : taken) {
+            names += (names.empty() ? "" : ", ") + name;
+        }
+        return makeError(ErrorCode::AlreadyExists,
+                         "the drawing has road templates called " + names +
+                             ": OVERWRITE replaces them; nothing was imported",
+                         args[1]);
+    }
+    return commitTemplates(document, set, "ROADTEMPLATE_IMPORT",
+                           "imported file=" + text(args[1]) + " templates=" +
+                               std::to_string(added + replaced) + " added=" + std::to_string(added) +
+                               " replaced=" + std::to_string(replaced) + records);
+}
+
 Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
 {
     const std::string sub = args.empty() ? std::string("LIST") : upper(args[0]);
@@ -550,6 +685,12 @@ Result<std::string> roadTemplateVerb(Document& document, const Tokens& args)
         return commitTemplates(document, set, "ROADTEMPLATE_DEFAULTS",
                                "added=" + std::to_string(count) +
                                    " skipped=" + std::to_string(skipped) + added);
+    }
+    if (sub == "EXPORT") {
+        return exportTemplates(document, args);
+    }
+    if (sub == "IMPORT") {
+        return importTemplates(document, args);
     }
     if (args.size() < 2) {
         return usage("ROADTEMPLATE " + sub + " needs a template's name (HELP ROADTEMPLATE)");
@@ -1989,6 +2130,11 @@ ROADTEMPLATE COURSE <t> <component> ADD <course> thickness=<m> [material=] [ifc=
   [at=<n>]  |  SET <course> key=value ... [<course> key=value ...]  |  REMOVE <course>
   courses are top down; SET of several courses is one undo step
   ifc=: ARMOUR BALLASTBED CORE FILTER PAVEMENT PROTECTION USERDEFINED NOTDEFINED
+ROADTEMPLATE EXPORT <t>|ALL <file.json> [OVERWRITE]   the template, or every one, as a JSON
+  file (the form ROADTEMPLATE JSON prints); a file already there is only replaced with OVERWRITE
+ROADTEMPLATE IMPORT <file.json> [OVERWRITE]   the file's templates into the drawing, one undo
+  step, each checked as ROADTEMPLATE SET checks; a name the drawing has is refused (nothing is
+  imported) unless OVERWRITE replaces that template where it stands
 
 CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
 CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=<s>] [interval=<m>] [from=<s>] [to=<s>]

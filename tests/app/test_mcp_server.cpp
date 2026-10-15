@@ -2732,6 +2732,43 @@ TEST_F(McpServer, AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord)
     EXPECT_FALSE(std::filesystem::exists(file));
 }
 
+// Road templates move between drawings through a file by their own lines
+// (docs/road_design.md, "Template files"): ROADTEMPLATE EXPORT writes the JSON
+// ROADTEMPLATE JSON prints, IMPORT reads it back as one step, refusing a name
+// the drawing has unless OVERWRITE replaces it. An agent has no other door to
+// the file than these lines.
+TEST_F(McpServer, AnAgentMovesRoadTemplatesThroughAFileByTheirLines)
+{
+    initialize();
+    const TempDir dir("road-templates");
+    const std::string file = dir.file("templates.json");
+    const Json written = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"ROADTEMPLATE DEFAULTS", "ROADTEMPLATE SET \"urban street\" lane width=3.6",
+               "ROADTEMPLATE EXPORT ALL \"" + file + "\""}}});
+    ASSERT_FALSE(written["isError"].get<bool>()) << textOf(written);
+    EXPECT_NE(textOf(written).find(" templates=3"), std::string::npos) << textOf(written);
+    ASSERT_TRUE(std::filesystem::exists(file));
+
+    // The drawing has all three: refused whole, and said how to replace.
+    const Json refused =
+        call("katana_run_commands", Json{{"commands", {"ROADTEMPLATE IMPORT \"" + file + "\""}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("OVERWRITE replaces them"), std::string::npos)
+        << textOf(refused);
+    // A second export is refused too, until OVERWRITE says so.
+    const Json again = call(
+        "katana_run_commands", Json{{"commands", {"ROADTEMPLATE EXPORT ALL \"" + file + "\""}}});
+    EXPECT_TRUE(again["isError"].get<bool>());
+    const Json replaced = call(
+        "katana_run_commands",
+        Json{{"commands", {"ROADTEMPLATE IMPORT \"" + file + "\" OVERWRITE"}}});
+    ASSERT_FALSE(replaced["isError"].get<bool>()) << textOf(replaced);
+    EXPECT_NE(textOf(replaced).find("templates=3 added=0 replaced=3"), std::string::npos)
+        << textOf(replaced);
+}
+
 #if defined(KATANA_TEST_WITH_INTEROP)
 // katana_export of an .ifc hands its records as objects under their whole
 // kind: "ifc exported", with a file field - read as the kind "ifc" and a

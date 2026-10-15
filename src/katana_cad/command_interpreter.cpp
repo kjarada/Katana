@@ -600,9 +600,10 @@ RoadObj   ROADOBJECT KINDS | LIST [JSON] | INFO id | ADD kind <placement> [key=v
           | SET id key=value ... | COPY id | DELETE id ...|ALL | QUANTITIES | PROBLEMS
           barriers, guide posts, signs, light poles, culverts, walls, fences, line markings
           along an alignment, along lines or at points, one undo step (HELP ROADOBJECT)
-Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE ...  road
-          templates: lanes, shoulders, kerbs, footpaths, verges, medians, drains, batters and
-          their pavement courses; CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] | REGION |
+Road      ROADTEMPLATE [LIST] | INFO | DEFAULTS | NEW | ADD | SET | REMOVE | COURSE | EXPORT |
+          IMPORT ...  road templates: lanes, shoulders, kerbs, footpaths, verges, medians,
+          drains, batters and their pavement courses, kept in a file by EXPORT and IMPORT;
+          CORRIDOR NEW c ALIGNMENT a TEMPLATE t [surface=s] [curvetol=e] | REGION |
           SUPERELEVATION | BUILD | SECTION | STRINGS | SURFACE | QUANTITIES [csv=]; ROADMODEL
           [LIST] | JSON | PROBLEMS | INFO id   the 3D road model (HELP CORRIDOR)
 Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]

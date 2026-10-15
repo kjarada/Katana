@@ -11,9 +11,11 @@
 //   ROADTEMPLATE SET <t> <component> key=value ... | REMOVE <t> <component>
 //   ROADTEMPLATE COURSE <t> <component> ADD <course> thickness=<m> [key=value ...]
 //   ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... | REMOVE <course>
+//   ROADTEMPLATE EXPORT <t>|ALL <file.json> [OVERWRITE] | IMPORT <file.json> [OVERWRITE]
 //
 //   CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
 //   CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=<s>] [interval=<m>] [from=] [to=]
+//     [curvetol=<e>]
 //   CORRIDOR SET <c> key=value ... | DELETE <c> | RENAME <c> <new>
 //   CORRIDOR REGION <c> ADD <from> <to> <t> | REMOVE <from> | CLEAR
 //   CORRIDOR SUPERELEVATION <c> ADD <station> <left%> <right%> | REMOVE <station> | CLEAR
@@ -32,9 +34,9 @@
 // (core::formatExactReal), so a value a reply prints can be typed back; a
 // quantity to three places, the precision a schedule is read to.
 //
-// The corridor verbs act on named definitions, not on drawing entities, so
-// they take no scope (CLAUDE.md 1.1): what a corridor is made from is named
-// in it. What they make that IS drawing data - STRINGS - goes on a layer of
+// The template and corridor verbs act on named definitions (and, for EXPORT and
+// IMPORT, on a file), not on drawing entities, so they take no scope (CLAUDE.md
+// 1.1): what a corridor is made from is named in it. What they make that IS drawing data - STRINGS - goes on a layer of
 // its own and replaces only the strings the same corridor made before, found
 // by the corridor's name ignoring case; RENAME carries them to the new name in
 // its own step, and DELETE leaves them in the drawing.

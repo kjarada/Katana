@@ -233,3 +233,50 @@ set_tests_properties(cli.a_corridor_round_a_curve_has_sections_inside_it_until_c
     PASS_REGULAR_EXPRESSION
     "built corridor=Bend from=0[.]000 to=178[.]540 runs=1 sections=36 .*object id=corridor/Bend/left/kerb/1 kind=kerb name=\"Bend left kerb\" Length=169[.]731 .*curvetol=0 updated.*built corridor=Bend from=0[.]000 to=178[.]540 runs=1 sections=20 .*object id=corridor/Bend/left/kerb/1 kind=kerb name=\"Bend left kerb\" Length=169[.]631 "
     FAIL_REGULAR_EXPRESSION "error")
+
+# Road template files (docs/road_design.md, "Template files"): ROADTEMPLATE EXPORT
+# writes the form ROADTEMPLATE JSON prints, a file already there is replaced only
+# with OVERWRITE (the second export is refused, and the script stops there), and
+# ROADTEMPLATE IMPORT reads it in another process as one step: the standard
+# urban street with its lane set to 3.6 m comes back with 3.6, all three, and a
+# second import of the same names is refused unless OVERWRITE replaces them.
+set(_road_templates "${CMAKE_CURRENT_BINARY_DIR}/cli-road-templates.json")
+add_test(NAME cli.road_templates_cleanup COMMAND ${CMAKE_COMMAND} -E rm -f "${_road_templates}")
+add_test(NAME cli.road_templates_are_exported_to_a_file_and_a_second_export_needs_overwrite
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE SET \"urban street\" lane width=3.6"
+            -c "ROADTEMPLATE EXPORT ALL \"${_road_templates}\""
+            -c "ROADTEMPLATE EXPORT ALL \"${_road_templates}\"")
+add_test(NAME cli.road_templates_exported_by_one_process_are_imported_by_another
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE IMPORT \"${_road_templates}\""
+            -c "ROADTEMPLATE INFO \"urban street\"")
+add_test(NAME cli.road_templates_imported_twice_are_refused_unless_overwrite_replaces_them
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE IMPORT \"${_road_templates}\""
+            -c "ROADTEMPLATE IMPORT \"${_road_templates}\"")
+add_test(NAME cli.road_templates_imported_over_the_standard_ones_replace_them_with_overwrite
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "ROADTEMPLATE DEFAULTS"
+            -c "ROADTEMPLATE IMPORT \"${_road_templates}\" OVERWRITE"
+            -c "ROADTEMPLATE INFO \"urban street\"" -c "UNDO"
+            -c "ROADTEMPLATE INFO \"urban street\"")
+set_tests_properties(cli.road_templates_cleanup PROPERTIES FIXTURES_SETUP cli_road_templates_clean)
+set_tests_properties(cli.road_templates_are_exported_to_a_file_and_a_second_export_needs_overwrite
+    PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_clean FIXTURES_SETUP cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "exported file=[^\r\n]*cli-road-templates[.]json\"? templates=3.*AlreadyExists: the file is already there")
+set_tests_properties(cli.road_templates_exported_by_one_process_are_imported_by_another PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "imported file=[^\r\n]*cli-road-templates[.]json\"? templates=3 added=3 replaced=0.*side=left name=lane kind=lane width=3[.]6 "
+    FAIL_REGULAR_EXPRESSION "error")
+set_tests_properties(cli.road_templates_imported_twice_are_refused_unless_overwrite_replaces_them
+    PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "templates=3 added=3 replaced=0.*AlreadyExists: the drawing has road templates called [^\r\n]*OVERWRITE replaces them")
+set_tests_properties(cli.road_templates_imported_over_the_standard_ones_replace_them_with_overwrite
+    PROPERTIES
+    FIXTURES_REQUIRED cli_road_templates_written
+    PASS_REGULAR_EXPRESSION "templates=3 added=0 replaced=3.*side=left name=lane kind=lane width=3[.]6 .*1 undone.*side=left name=lane kind=lane width=3[.]3 "
+    FAIL_REGULAR_EXPRESSION "error")

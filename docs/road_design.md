@@ -563,6 +563,7 @@ The interpreter's (`road::runRoadVerb`), so the window's command line,
     ROADTEMPLATE SET <t> <component> key=value ... [<component> key=value ...] | REMOVE <t> <component>
     ROADTEMPLATE COURSE <t> <component> ADD <course> thickness= [material=] [ifc=] [colour=] [at=]
     ROADTEMPLATE COURSE <t> <component> SET <course> key=value ... [<course> key=value ...] | REMOVE <course>
+    ROADTEMPLATE EXPORT <t>|ALL <file.json> [OVERWRITE] | IMPORT <file.json> [OVERWRITE]
     CORRIDOR [LIST] [JSON] | INFO <c> | PROBLEMS [<c>]
     CORRIDOR NEW <c> ALIGNMENT <a> TEMPLATE <t> [surface=] [interval=] [from=] [to=] [curvetol=]
     CORRIDOR SET <c> key=value ... | DELETE <c> | RENAME <c> <new>
@@ -631,6 +632,36 @@ object's ("object <id>") are in `ROADMODEL PROBLEMS` with them. **`ROADTEMPLATE
 DELETE` and `CORRIDOR BUILD ALL` refuse when the corridors cannot be read**,
 as `RENAME` and `LIST` do: an empty set would say that none uses the template.
 
+**Template files.** `ROADTEMPLATE EXPORT <t>|ALL <file.json>` writes the
+template (or every one: the word ALL, in any case, is always every template, so
+a template of that name is exported by renaming it first) in the plain-data,
+versioned JSON that `ROADTEMPLATE JSON` prints and the project keeps
+(`road::roadTemplatesToJson`: format `katana-road-templates`, version 1, every
+number exact), and a newline. A file already there is only replaced with
+`OVERWRITE`, as every verb that writes one; a drawing with no templates has none
+to export. `ROADTEMPLATE IMPORT <file.json>` reads such a file back through the
+code the project reads its own with (`road::roadTemplatesFromJson`: the format,
+the version - a newer Katana's file is `Unsupported`, never read by guesswork -
+and `road::checkTemplate` of every template, the check `ROADTEMPLATE SET`
+makes, so a lane of no width or a name used twice is refused naming the
+component), after a byte order mark or UTF-16 an editor wrote has been read as
+text (`core::decodeText`). A file over 16 MiB (`kMaximumTemplateFileBytes`, a
+sanity bound with no standard behind it) is refused unread, and a file of no
+templates is refused as a mistake and not imported as nothing. The templates go
+in as ONE undo step, in the file's order after the drawing's own. A name the
+drawing already has - found ignoring case, as every verb finds one - refuses the
+whole file with nothing imported and names them; `OVERWRITE` replaces each
+where it stands (its place in the list kept, the file's spelling of its name)
+and the corridors that name it follow it, being made from it again. *Rejected:*
+importing the names that do not clash and refusing the rest - a file half
+imported is a file the person must work out the other half of; *rejected:*
+renaming a clash to `name (2)` - every corridor would still name the old one,
+and the person asked for that template. Both verbs act on named definitions and
+a file, not on drawing entities, so they take no scope or filter. `katana_mcp`
+reaches them through `katana_run_commands`, and an agent has no other door to
+the file (`AnAgentMovesRoadTemplatesThroughAFileByTheirLines`); a drawing's
+templates are copied between projects this way and no longer by hand.
+
 **`QUANTITIES csv=`** writes through the one CSV writer of the report verbs
 (`cad::writeCsvTable`, shared with VOLUME): RFC 4180, records ending in CRLF,
 and a file already there is only replaced with the word `OVERWRITE` (the
@@ -679,7 +710,13 @@ objects document, docs/road_objects.md). The dialogs' widgets and what each runs
 in their headers: `src/katana_qt/bim/road_template_manager.hpp` (the templates;
 the components and courses in two grids that are buffers, each applied by ONE
 line - a group of `key=value` for every edited row - so an Apply is one undo
-step and a refused value leaves the template as it was; a drawing of the
+step and a refused value leaves the template as it was; the components' grid
+has a Faces column, a kerb's facing, inward or outward, edited in place - empty
+and fixed on anything that has no face, a flush edge strip included; a row of
+the dialog for a template file, a text box with a Browse button (no file dialog
+in a headless run, where the path is typed), Export, Export All and Import that
+build the `ROADTEMPLATE EXPORT` and `IMPORT` lines, and a Replace box that adds
+OVERWRITE to them; a drawing of the
 template across a level road - `road::templateSection` - its courses
 coloured and its vertical exaggerated so a 50 mm course can be seen),
 `src/katana_qt/bim/corridor_dialog.hpp` (the corridors, their regions and
@@ -809,13 +846,16 @@ class, layer, quantities and properties, and every problem
   corridors' ground the corridors, the object's the placed objects, an
   alignment both), the RoadModel change, the JSON the project keeps; several
   components or courses set by one line, one step, and a refused value in any
-  group changing none.
+  group changing none; the template files (written and read back exactly, a
+  file's names against the drawing's, the refusals, OVERWRITE for a file and
+  for a name).
 - `tests/cad/test_corridor.cpp`: the old functions, unchanged, on the new engine.
 - `tests/qt_widgets/bim/test_road_dialogs.cpp`: each dialog's lines and the
   workbench's menu and meshes; the dialogs' state across New, Rename, an
   unrelated command, an undo and a changed drawing (the Corridors dialog's
   fields and combos, the Template Manager's two grids, the listing of the
-  Quantities dialog); an Apply of several rows as one line; the 3D view's own
+  Quantities dialog); the template file row's lines, quoting and Replace box,
+  and the Faces column; an Apply of several rows as one line; the 3D view's own
   hidden layers.
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
@@ -827,8 +867,13 @@ class, layer, quantities and properties, and every problem
   refused value stopping the script; and the refusals and replies the review
   found wrong (a name removed from both sides, a bench too small, a renamed
   corridor's strings, a section outside the corridor, a CSV replaced only with
-  OVERWRITE).
-- `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`.
+  OVERWRITE); a corridor round a curve with its sections and a kerb's length at
+  `curvetol=` and off (`cli.a_corridor_round_a_curve_has_sections_inside_it_until_curvetol_is_met`);
+  templates exported by one process and imported by another, a second export and
+  a second import refused, and OVERWRITE
+  (`cli.road_templates_exported_by_one_process_are_imported_by_another`).
+- `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt` and
+  `McpServer.AnAgentMovesRoadTemplatesThroughAFileByTheirLines`.
 
 ## Not done
 
@@ -853,10 +898,6 @@ class, layer, quantities and properties, and every problem
   in a window verb): an agent hides the objects by their layers.
 - The 3D view draws every object in one colour per object, shaded; no
   material textures, no transparency for the cut.
-- The Road Template Manager's grid has no column for a kerb's facing; the
-  keys field takes `faces=inward|outward`.
-- `ROADTEMPLATE` has no import or export to a file of its own; a project's
-  templates are copied by its JSON (`ROADTEMPLATE JSON`) only by hand.
 - The window's Command Reference shows the road verbs in its Commands
   section from the general help, not a section of their own.
 - Corridor Quantities clears its listing when the road model changes and does

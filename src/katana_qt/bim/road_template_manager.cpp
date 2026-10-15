@@ -1,6 +1,8 @@
 #include "road_template_manager.hpp"
 
+#include <QCheckBox>
 #include <QComboBox>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <optional>
 #include <set>
 #include <string>
@@ -192,7 +195,7 @@ class TemplatePreview final : public QWidget {
     std::optional<road::RoadSection> section_;
 };
 
-enum ComponentColumn { CSide, CName, CKind, CWidth, CCrossfall, CLayer, CDetail };
+enum ComponentColumn { CSide, CName, CKind, CWidth, CCrossfall, CLayer, CFaces, CDetail };
 enum CourseColumn { KName, KThickness, KMaterial, KIfc };
 
 // The height a grid needs to show `rows` rows under its header, and half a
@@ -226,6 +229,8 @@ struct RoadTemplateManagerDialog::Impl {
 
     QTableWidget* list = nullptr;
     QLineEdit* name = nullptr;
+    QLineEdit* file = nullptr;
+    QCheckBox* overwrite = nullptr;
     QTableWidget* components = nullptr;
     QComboBox* addSide = nullptr;
     QComboBox* addKind = nullptr;
@@ -321,6 +326,27 @@ struct RoadTemplateManagerDialog::Impl {
         return ok;
     }
 
+    // The file field as the line takes it; nullopt, said on the status line,
+    // when it is empty or cannot be written in a line.
+    std::optional<QString> fileWord()
+    {
+        const QString text = file->text().trimmed();
+        if (text.isEmpty()) {
+            road_ui::setStatus(status, "Type the file, or Browse for it.", true);
+            return std::nullopt;
+        }
+        return road_ui::word(status, text, "the file");
+    }
+
+    // ROADTEMPLATE EXPORT <what> "file" [OVERWRITE].
+    void exportTo(const QString& what)
+    {
+        if (const auto path = fileWord()) {
+            run("ROADTEMPLATE EXPORT " + what + " " + *path +
+                (overwrite->isChecked() ? " OVERWRITE" : ""));
+        }
+    }
+
     void build();
     void reload();
     void fillComponents(bool force);
@@ -363,6 +389,34 @@ void RoadTemplateManagerDialog::Impl::build()
     }
     layout->addLayout(templateRow);
 
+    // ---- templates in a file -------------------------------------------------------------
+    auto* fileRow = new QHBoxLayout;
+    file = road_ui::field("roadTemplateFile", "templates.json",
+                          "The file Export writes and Import reads", dialog);
+    auto* browseButton =
+        road_ui::button("Browse...", "roadTemplateBrowse",
+                        "Choose the file (no file dialog in a headless run)", dialog);
+    auto* exportButton = road_ui::button(
+        "Export", "roadTemplateExport", "ROADTEMPLATE EXPORT: the chosen template, as JSON", dialog);
+    auto* exportAllButton = road_ui::button(
+        "Export All", "roadTemplateExportAll", "ROADTEMPLATE EXPORT ALL: every template", dialog);
+    auto* importButton = road_ui::button(
+        "Import", "roadTemplateImport",
+        "ROADTEMPLATE IMPORT: the file's templates, as one undo step; a name the drawing has is "
+        "refused unless Replace is ticked",
+        dialog);
+    overwrite = new QCheckBox("Replace (OVERWRITE)", dialog);
+    overwrite->setObjectName("roadTemplateOverwrite");
+    overwrite->setToolTip("Export: replace a file already there. Import: replace the templates "
+                          "of the same name where they stand");
+    fileRow->addWidget(file, 1);
+    for (QWidget* each : std::initializer_list<QWidget*>{browseButton, exportButton,
+                                                         exportAllButton, importButton,
+                                                         overwrite}) {
+        fileRow->addWidget(each);
+    }
+    layout->addLayout(fileRow);
+
     // ---- components and courses beside the preview ---------------------------------------
     auto* splitter = new QSplitter(Qt::Vertical, dialog);
     auto* upper = new QWidget(splitter);
@@ -370,11 +424,13 @@ void RoadTemplateManagerDialog::Impl::build()
     upperLayout->setContentsMargins(0, 0, 0, 0);
     upperLayout->addWidget(road_ui::muted(
         "Components out from the centreline, each side in order. Width, crossfall (percent, "
-        "outward: -3 falls) and layer are edited in place and applied together.",
+        "outward: -3 falls), layer and a kerb's faces (inward, or outward for a median's "
+        "or island's) are edited in place and applied together.",
         upper));
     components = road_ui::table(
         "roadTemplateComponents",
-        {"Side", "Name", "Kind", "Width (m)", "Crossfall (%)", "Layer", "What else"}, upper);
+        {"Side", "Name", "Kind", "Width (m)", "Crossfall (%)", "Layer", "Faces", "What else"},
+        upper);
     components->setEditTriggers(QAbstractItemView::DoubleClicked |
                                 QAbstractItemView::EditKeyPressed |
                                 QAbstractItemView::AnyKeyPressed);
@@ -527,6 +583,46 @@ void RoadTemplateManagerDialog::Impl::build()
         }
     });
     connect(defaultsButton, &QPushButton::clicked, [this] { run("ROADTEMPLATE DEFAULTS"); });
+    connect(browseButton, &QPushButton::clicked, [this] {
+        if (context.headless && context.headless()) {
+            road_ui::setStatus(status,
+                               "A headless session opens no file dialog: type the path in the "
+                               "field",
+                               true);
+            return;
+        }
+        // A save dialog that does not ask before it takes a file that is there:
+        // the same box chooses a file to read.
+        const QString chosen =
+            QFileDialog::getSaveFileName(dialog, "Road Template File", file->text(),
+                                         "Road templates (*.json)", nullptr,
+                                         QFileDialog::DontConfirmOverwrite);
+        if (!chosen.isEmpty()) {
+            file->setText(chosen);
+        }
+    });
+    connect(exportButton, &QPushButton::clicked, [this] {
+        const auto word = templateWord();
+        if (!word) {
+            return;
+        }
+        // The word ALL is every template to the verb, in any case: a template
+        // of that name cannot be exported by name from here.
+        if (dialog->currentTemplate().compare("ALL", Qt::CaseInsensitive) == 0) {
+            road_ui::setStatus(status,
+                               "A template called ALL cannot be exported alone: Export All "
+                               "exports every template. Rename it first.",
+                               true);
+            return;
+        }
+        exportTo(*word);
+    });
+    connect(exportAllButton, &QPushButton::clicked, [this] { exportTo("ALL"); });
+    connect(importButton, &QPushButton::clicked, [this] {
+        if (const auto path = fileWord()) {
+            run("ROADTEMPLATE IMPORT " + *path + (overwrite->isChecked() ? " OVERWRITE" : ""));
+        }
+    });
     connect(applyComponentsButton, &QPushButton::clicked, [this] { applyComponents(); });
     connect(revertComponentsButton, &QPushButton::clicked, [this] {
         editedComponents.clear();
@@ -646,6 +742,16 @@ void RoadTemplateManagerDialog::Impl::applyComponents()
                 return;
             }
             group += " " + key + "=" + item->text().trimmed();
+        }
+        // A kerb's facing, where it has one (a flush edge strip has no face):
+        // inward or outward, which the verb checks and names if it is neither.
+        if (const QTableWidgetItem* facing = components->item(row, CFaces);
+            facing != nullptr && (facing->flags() & Qt::ItemIsEditable)) {
+            const auto faces = road_ui::option(status, "faces", facing->text().trimmed());
+            if (!faces) {
+                return;
+            }
+            group += " " + *faces;
         }
         const auto layer =
             road_ui::option(status, "layer", components->item(row, CLayer)->text().trimmed());
@@ -788,6 +894,13 @@ void RoadTemplateManagerDialog::Impl::fillComponents(bool force)
                     road_ui::cell(hasCrossfall ? exactNumber(each->crossfall) : QString(),
                                   hasCrossfall));
                 components->setItem(row, CLayer, road_ui::cell(qs(each->layer), true));
+                const bool hasFaces = each->kind == road::ComponentKind::Kerb &&
+                                      each->shape != road::KerbShape::EdgeStrip;
+                components->setItem(
+                    row, CFaces,
+                    road_ui::cell(hasFaces ? qs(std::string(road::toString(each->faces)))
+                                           : QString(),
+                                  hasFaces));
                 components->setItem(row, CDetail, road_ui::cell(detailOf(*each)));
                 components->item(row, CSide)
                     ->setForeground(QBrush(colourOf(each->colour).lighter(150)));

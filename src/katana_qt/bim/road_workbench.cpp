@@ -65,6 +65,7 @@ RoadWorkbench::RoadWorkbench(QMainWindow& window, RoadServices services, QMenu& 
             RoadTemplateManagerContext context;
             context.document = services_.document;
             context.run = services_.run;
+            context.headless = services_.headless;
             return new RoadTemplateManagerDialog(std::move(context), &window_);
         });
     });
