@@ -44,6 +44,7 @@
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/geometry/spatial_index.hpp"
 
 namespace katana::cad::plotting {
 
@@ -119,6 +120,16 @@ struct RotationFit {
 // planDrawnBounds counts it. What a plan of the drawing shows.
 [[nodiscard]] std::vector<Point2> drawnOutline(const entity::Model& model,
                                                const LayerOverrides& view);
+
+// Whether a plan of `model` with `view`'s layers hidden draws anything in
+// `box`: an entity the rule draws (construction lines aside, as drawnExtent
+// leaves them) by its geometry as a crossing box takes it (cad::touchesBox),
+// a hatched closed boundary by its fill as well, and every alignment. What
+// GENERATE asks of each tile headless (GridRequest::drawn); the window adds
+// its imagery, surfaces, meshes and road model (planDrawsIn). `index`, when
+// given, narrows the search and gives the same answer (forEachCandidate).
+[[nodiscard]] bool drawsIn(const entity::Model& model, const LayerOverrides& view, const Box2& box,
+                           const geometry::SpatialIndex* index = nullptr);
 
 // What a plan or key plan viewport shows of `model`, as the convex hull of
 // world points: its stretch of the alignment its source names (the whole
@@ -345,9 +356,10 @@ matchScale(SheetSet& set, std::span<const std::string> ids, std::string_view fro
 //     does not fit.
 // InvalidArgument for a request with no plan area or with an alignment's
 // plan or sections (a strip already follows its alignment); and errors as
-// smartLayout. Content with no size is not turned.
+// smartLayout. Content with no size is not turned. `skipped` is smartLayout's,
+// for the layout returned.
 [[nodiscard]] core::Result<std::vector<Sheet>>
 smartLayoutRotated(const entity::Model& model, const LayoutRequest& request,
-                   std::span<const Point2> content);
+                   std::span<const Point2> content, std::vector<std::string>* skipped = nullptr);
 
 } // namespace katana::cad::plotting

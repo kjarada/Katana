@@ -168,7 +168,8 @@ TEST(GenerateDialog, EveryControlHasAnObjectName)
          {"sheetGenerateLayout", "sheetGeneratePaper", "sheetGenerateOrientation", "sheetGenerateFrame",
           "sheetGenerateArea", "sheetGenerateAreaX0", "sheetGenerateAreaY0", "sheetGenerateAreaX1",
           "sheetGenerateAreaY1", "sheetGenerateScale", "sheetGenerateAlignment", "sheetGenerateFrom",
-          "sheetGenerateTo", "sheetGenerateOverlap", "sheetGenerateKeyPlan", "sheetGenerateNoSections",
+          "sheetGenerateTo", "sheetGenerateOverlap", "sheetGenerateKeyPlan", "sheetGenerateDrawnOnly",
+          "sheetGenerateNoSections",
           "sheetGenerateEvery", "sheetGenerateInterval", "sheetGenerateAtStations",
           "sheetGenerateStations", "sheetGenerateHalfWidth", "sheetGenerateRows",
           "sheetGenerateColumns", "sheetGenerateVe", "sheetGenerateModel3d", "sheetGenerateLegend",
@@ -243,11 +244,66 @@ TEST(GenerateDialog, TheCurrentPlanViewIsOfferedOnlyWhenThereIsOne)
     shown.tick("sheetGenerateKeyPlan", false);
     const std::string expected =
         "GENERATE grid paper=A3 landscape frame=on area=-50,-25,450,275.5 scale=500 overlap=20 "
-        "keyplan=off";
+        "keyplan=off empty=off";
     EXPECT_EQ(shown.line().toStdString(), expected);
     shown.generate();
     EXPECT_EQ(shown.errors, 0);
     EXPECT_EQ(document.sheetSet(), typed(roadAndSite, expected));
+}
+
+TEST(GenerateDialog, TilesWithNothingDrawnInThemAreLeftOutUnlessTheBoxIsCleared)
+{
+    // The road and site tiled over -50,-25 .. 450,275.5 at 1:500 with 20 m
+    // of overlap: tiles 192.5 x 125 m stepping 172.5 and 105, 3 x 3 of them
+    // centred on (200, 125.25). Columns x -68.75..123.75, 103.75..296.25 and
+    // 276.25..468.75; rows y 167.75..292.75, 62.75..187.75 and -42.25..82.75.
+    // The road (y 0) crosses the bottom row, and the line y = 20 + x / 2
+    // every other tile but the top-left, where it is no higher than 81.9.
+    Document document;
+    roadAndSite(document);
+    Shown shown(document);
+    const auto chooseTiles = [&shown] {
+        shown.choose("sheetGenerateLayout", QStringLiteral("Tiles over the drawing, with a key plan"));
+        shown.choose("sheetGenerateArea", QStringLiteral("A window"));
+        shown.field<QDoubleSpinBox>("sheetGenerateAreaX0")->setValue(-50.0);
+        shown.field<QDoubleSpinBox>("sheetGenerateAreaY0")->setValue(-25.0);
+        shown.field<QDoubleSpinBox>("sheetGenerateAreaX1")->setValue(450.0);
+        shown.field<QDoubleSpinBox>("sheetGenerateAreaY1")->setValue(275.5);
+        shown.choose("sheetGenerateScale", QStringLiteral("1:500"));
+        shown.field<QDoubleSpinBox>("sheetGenerateOverlap")->setValue(20.0);
+    };
+    shown.open();
+    // On by default, and only where there are tiles: a fit at an automatic
+    // scale is one sheet; at a fixed one it may be tiles.
+    auto* drawnOnly = shown.field<QCheckBox>("sheetGenerateDrawnOnly");
+    EXPECT_TRUE(drawnOnly->isChecked());
+    EXPECT_FALSE(drawnOnly->isEnabled());
+    shown.choose("sheetGenerateScale", QStringLiteral("1:500"));
+    EXPECT_TRUE(drawnOnly->isEnabled());
+    chooseTiles();
+    EXPECT_TRUE(drawnOnly->isEnabled());
+    const std::string leftOut = "GENERATE grid paper=A3 landscape frame=on area=-50,-25,450,275.5 "
+                                "scale=500 overlap=20 keyplan=on empty=off";
+    EXPECT_EQ(shown.line().toStdString(), leftOut);
+    shown.generate();
+    EXPECT_EQ(shown.errors, 0);
+    // The key plan and eight tiles; the top-left is left out.
+    ASSERT_EQ(document.sheetSet().sheets.size(), 9u);
+    EXPECT_EQ(document.sheetSet(), typed(roadAndSite, leftOut));
+    EXPECT_NEAR(document.sheetSet().sheets[1].viewports.front().centre.x, 200.0, 1e-9);
+    EXPECT_NEAR(document.sheetSet().sheets[1].viewports.front().centre.y, 230.25, 1e-9);
+
+    // Cleared, every tile is laid out.
+    shown.open();
+    chooseTiles();
+    shown.tick("sheetGenerateDrawnOnly", false);
+    shown.tick("sheetGenerateReplace", true);
+    EXPECT_EQ(shown.line().toStdString(),
+              "GENERATE grid paper=A3 landscape frame=on area=-50,-25,450,275.5 scale=500 "
+              "overlap=20 keyplan=on empty=on replace=on");
+    shown.generate();
+    EXPECT_EQ(shown.errors, 0);
+    EXPECT_EQ(document.sheetSet().sheets.size(), 10u);
 }
 
 TEST(GenerateDialog, CrossSectionsAtChainagesWithAnExaggerationAreTheTypedLines)
@@ -378,7 +434,8 @@ TEST(GenerateDialog, TheLineIsHandedToTheWindowsExecutor)
     shown.generate();
     ASSERT_EQ(lines.size(), 1u);
     EXPECT_EQ(lines.front(),
-              QStringLiteral("GENERATE fit paper=A3 landscape frame=on scale=1000 model3d=off legend=on"));
+              QStringLiteral("GENERATE fit paper=A3 landscape frame=on scale=1000 empty=off model3d=off "
+                             "legend=on"));
     EXPECT_TRUE(document.sheetSet().sheets.empty()) << "the runner did the work, and here did none";
     EXPECT_TRUE(shown.messages.empty()) << "the window logs the line itself";
 }

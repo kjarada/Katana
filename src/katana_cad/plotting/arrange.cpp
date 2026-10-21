@@ -10,7 +10,10 @@
 #include <utility>
 #include <variant>
 
+#include "katana/cad/drawing/construction.hpp"
+#include "katana/cad/hatching.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/cad/spatial_query.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/polygon.hpp"
@@ -35,9 +38,10 @@ constexpr double kScaleTie = 1e-9;
 constexpr double kPaperEpsilon = 1e-9;
 // How far apart, at most, the points an arc or circle is traced by are.
 constexpr double kArcStep = 2.0 * kPi / 32.0;
-// How far an alignment's chords may stray from it in the drawing's outline,
-// and how far apart a view's stretch of one is sampled, metres; a stretch is
-// never sampled at more points than this.
+// How far an alignment's chords may stray from it in the drawing's outline
+// (and a curved hatch boundary's in drawsIn), and how far apart a view's
+// stretch of one is sampled, metres; a stretch is never sampled at more
+// points than this.
 constexpr double kAlignmentChordM = 0.05;
 constexpr double kAlignmentStepM = 0.5;
 constexpr double kMostAlignmentSteps = 20000.0;
@@ -725,6 +729,54 @@ std::vector<Point2> drawnOutline(const entity::Model& model, const LayerOverride
     });
     std::erase_if(points, [](const Point2& point) { return !point.isFinite(); });
     return geometry::convexHull(std::move(points));
+}
+
+namespace {
+
+// Whether `entity` is a hatched closed boundary whose fill covers `point`.
+// A box wholly inside a fill touches none of its edges and is still drawn
+// on, and a box no edge meets is wholly in or wholly out, so its centre is
+// the point to ask about.
+bool fillCovers(const entity::Model& model, const entity::Entity& entity, const Point2& point)
+{
+    const auto* polyline = std::get_if<geometry::Polyline2>(&entity.geometry);
+    const auto* curve = std::get_if<geometry::CurvePolyline2>(&entity.geometry);
+    if (!(polyline != nullptr && polyline->closed) && !(curve != nullptr && curve->closed)) {
+        return false;
+    }
+    const entity::HatchPattern* pattern = resolveHatchPattern(model, entity);
+    if (pattern == nullptr || pattern->drawsNothing()) {
+        return false;
+    }
+    return polyline != nullptr ? polyline->contains(point)
+                               : curve->toPolyline(kAlignmentChordM).contains(point);
+}
+
+} // namespace
+
+bool drawsIn(const entity::Model& model, const LayerOverrides& view, const Box2& box,
+             const geometry::SpatialIndex* index)
+{
+    if (box.empty()) {
+        return false;
+    }
+    bool found = false;
+    std::vector<geometry::SpatialId> scratch;
+    detail::forEachCandidate(model, index, box, scratch, [&](const entity::Entity& entity) {
+        if (found || !isDrawn(model, entity, view) || isConstructionLayer(entity.layer)) {
+            return;
+        }
+        found = touchesBox(entity.geometry, box) || fillCovers(model, entity, box.center());
+    });
+    model.alignments.forEach([&](const entity::Alignment& alignment) {
+        if (found) {
+            return;
+        }
+        if (const auto solved = geometry::solveAlignment(alignment.horizontal)) {
+            found = touchesBox(entity::Geometry{solved->toPolyline(kAlignmentChordM)}, box);
+        }
+    });
+    return found;
 }
 
 std::vector<Point2> viewportContent(const entity::Model& model, const Viewport& viewport)
@@ -1417,7 +1469,8 @@ Result<RotationFit> rotateToBestFit(Viewport& viewport, std::span<const Point2> 
 
 Result<std::vector<Sheet>> smartLayoutRotated(const entity::Model& model,
                                               const LayoutRequest& request,
-                                              std::span<const Point2> content)
+                                              std::span<const Point2> content,
+                                              std::vector<std::string>* skipped)
 {
     if (!request.planArea) {
         return makeError(ErrorCode::InvalidArgument,
@@ -1428,7 +1481,9 @@ Result<std::vector<Sheet>> smartLayoutRotated(const entity::Model& model,
                          "only a plan of an area is turned to fill the sheet; a strip already "
                          "follows its alignment");
     }
-    auto sheets = smartLayout(model, request);
+    // What the square layout left out, taken back if the turned one is kept.
+    const std::size_t said = skipped != nullptr ? skipped->size() : 0;
+    auto sheets = smartLayout(model, request, skipped);
     if (!sheets) {
         return sheets.error();
     }
@@ -1478,6 +1533,9 @@ Result<std::vector<Sheet>> smartLayoutRotated(const entity::Model& model,
     plan->rotation = fit->rotation;
     plan->centre = fit->centre;
     plan->scale = request.scale;
+    if (skipped != nullptr) {
+        skipped->resize(said);
+    }
     return compact;
 }
 

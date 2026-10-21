@@ -472,6 +472,16 @@ void paintPlanGeometry(QPainter& painter, const PlanFrame& frame, const PlanPain
 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides& layers,
             const std::set<std::uint64_t>& hiddenReferences);
 
+// Whether such a view draws anything in `box`: the drawing as a plan of it
+// draws it (plotting::drawsIn: the entities, hatch fills and alignments), the
+// road model's outlines as drawRoadModel draws them, a visible surface by its
+// triangles, and - by their extents, as planDrawnBounds counts them - the
+// imagery, point clouds and meshes. What GENERATE asks of each tile in the
+// window, so that a tile over empty ground is left out.
+[[nodiscard]] bool planDrawsIn(const PlanSource& source, const katana::cad::LayerOverrides& layers,
+                               const std::set<std::uint64_t>& hiddenReferences,
+                               const katana::geometry::Box2& box);
+
 // The whole-number resolution a QPdfWriter is given for `dpi` (the nearest,
 // at least 1), and the painter scale that makes a sheet laid out at exactly
 // `dpi` land exactly on it: the writer's resolution is an int, and a sheet at

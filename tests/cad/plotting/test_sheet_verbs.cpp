@@ -18,6 +18,7 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/generators.hpp"
+#include "katana/cad/plotting/key_plan.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/cad/plotting/sheet_json.hpp"
@@ -558,8 +559,9 @@ TEST(SheetVerbs, GenerateGridStripsProfileAndSectionsMatchTheirGenerators)
     Session s;
     s.ok("ALIGN NEW ROAD 0,0 1000,0");
 
-    // Tiles: 400 x 200 m at 1:500 with 10 m of overlap is six tiles and a key plan.
-    EXPECT_EQ(lines(s.ok("GENERATE grid area=0,0,400,200 scale=500 overlap=10")).front(),
+    // Tiles: 400 x 200 m at 1:500 with 10 m of overlap is six tiles and a key
+    // plan, the three the road does not reach kept too (empty=on).
+    EXPECT_EQ(lines(s.ok("GENERATE grid area=0,0,400,200 scale=500 overlap=10 empty=on")).front(),
               "generated 7 sheets: 1 to 7");
     GridRequest grid;
     grid.area = Box2(Point2(0.0, 0.0), Point2(400.0, 200.0));
@@ -609,6 +611,75 @@ TEST(SheetVerbs, GenerateGridStripsProfileAndSectionsMatchTheirGenerators)
     EXPECT_EQ(s.set().sheets[10].viewports.size(), 3u);
 }
 
+TEST(SheetVerbs, GenerateGridLeavesOutTilesWithNothingDrawnInThemAndSaysHowMany)
+{
+    // The six tiles of 400 x 200 m at 1:500 with 10 m of overlap: columns
+    // x -78.75..113.75, 103.75..296.25 and 286.25..478.75; rows y 95..220
+    // and -20..105. A short line in the top-left, top-middle, bottom-middle
+    // and bottom-right tiles, each clear of every overlap; the top-right and
+    // bottom-left tiles have nothing drawn in them.
+    Session s;
+    for (const char* line : {"LINE -1,200 1,200", "LINE 199,200 201,200", "LINE 199,0 201,0",
+                             "LINE 399,0 401,0"}) {
+        s.ok(line);
+    }
+    const std::size_t steps = s.steps();
+    const std::vector<std::string> reply =
+        lines(s.ok("GENERATE grid area=0,0,400,200 scale=500 overlap=10"));
+    EXPECT_EQ(reply.front(), "generated 5 sheets: 1 to 5");
+    EXPECT_EQ(reply.back(), "skipped 2 of 6 tiles, with nothing drawn in them");
+    EXPECT_EQ(s.steps(), steps + 1);
+    ASSERT_EQ(s.set().sheets.size(), 5u);
+    EXPECT_EQ(s.set().sheets[0].name, "KEY PLAN");
+    // The tiles kept, in reading order, where they were on the grid: centres
+    // (17.5, 157.5), (200, 157.5), (200, 42.5) and (382.5, 42.5).
+    const std::vector<Point2> centres{Point2(17.5, 157.5), Point2(200.0, 157.5),
+                                      Point2(200.0, 42.5), Point2(382.5, 42.5)};
+    for (std::size_t i = 0; i < centres.size(); ++i) {
+        const Sheet& tile = s.set().sheets[i + 1];
+        EXPECT_EQ(tile.name, "PLAN TILE " + std::to_string(i + 1));
+        EXPECT_NEAR(tile.viewports.front().centre.x, centres[i].x, 1e-9) << i;
+        EXPECT_NEAR(tile.viewports.front().centre.y, centres[i].y, 1e-9) << i;
+    }
+    // The live key plan outlines the four sheets there are.
+    EXPECT_EQ(keyPlanOutlines(s.set(), 0).size(), 4u);
+
+    // empty=on keeps every tile.
+    EXPECT_EQ(lines(s.ok("GENERATE grid area=0,0,400,200 scale=500 overlap=10 empty=on "
+                         "replace=on"))
+                  .front(),
+              "generated 7 sheets: 1 to 7 (the set was replaced)");
+
+    // A fit at a fixed scale too large for one sheet tiles the same way:
+    // without overlap, columns from x -88.75 and rows down from y 225, the
+    // lines again in four of the six.
+    const std::vector<std::string> fitted =
+        lines(s.ok("GENERATE fit area=0,0,400,200 scale=500 replace=on"));
+    EXPECT_EQ(fitted.front(), "generated 5 sheets: 1 to 5 (the set was replaced)");
+    EXPECT_EQ(fitted.back(), "skipped 2 of 6 tiles, with nothing drawn in them");
+}
+
+TEST(SheetVerbs, GenerateRefusesTilesOfWhichNoneHasAnythingDrawnInIt)
+{
+    Session s;
+    s.ok("LINE 0,0 10,10");
+    const std::size_t steps = s.steps();
+    const auto error = s.refused("GENERATE grid area=1000,1000,1400,1200 scale=500");
+    EXPECT_EQ(error.code, ErrorCode::NotFound);
+    EXPECT_EQ(error.message, "nothing is drawn in any tile over the area; empty=on keeps every tile");
+    EXPECT_EQ(s.refused("GENERATE fit area=1000,1000,1400,1200 scale=500").code,
+              ErrorCode::NotFound);
+    EXPECT_TRUE(s.set().sheets.empty());
+    EXPECT_EQ(s.steps(), steps);
+    // Kept on request: 400 x 200 m at 1:500 is six tiles and a key plan.
+    EXPECT_EQ(lines(s.ok("GENERATE grid area=1000,1000,1400,1200 scale=500 empty=on")).front(),
+              "generated 7 sheets: 1 to 7");
+    // A plan along an alignment is never tiled, so it takes no empty=.
+    s.ok("ALIGN NEW ROAD 0,0 1000,0");
+    EXPECT_EQ(s.refused("GENERATE fit alignment=ROAD empty=on").message,
+              "empty= is for the tiles of an area; a plan along alignment= is never tiled");
+}
+
 TEST(SheetVerbs, GenerateSaysWhatItCannotDo)
 {
     Session s;
@@ -624,7 +695,7 @@ TEST(SheetVerbs, GenerateSaysWhatItCannotDo)
               "GENERATE makes fit, grid, strips, profile, sections, frames or register");
     EXPECT_EQ(s.refused("GENERATE grid interval=20").message,
               "GENERATE GRID takes no option interval=; it takes paper orientation frame area "
-              "scale overlap keyplan replace");
+              "scale overlap keyplan empty replace");
     EXPECT_TRUE(contains(s.refused("GENERATE grid area=0,0,10,10 scale=auto").message,
                          "GENERATE GRID needs a scale"));
     EXPECT_TRUE(contains(s.refused("GENERATE strips alignment=ROAD overlap=10").message,

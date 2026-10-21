@@ -247,6 +247,12 @@ struct TouchesBox {
 
 } // namespace
 
+bool touchesBox(const katana::entity::Geometry& geometry, const Box2& box)
+{
+    return !box.empty() && katana::entity::boundingBox(geometry).intersects(box) &&
+           std::visit(TouchesBox{box}, geometry);
+}
+
 std::vector<EntityId> pickInBox(const Model& model, const Box2& box, BoxSelectionMode mode,
                                 const SelectionFilter& filter,
                                 const katana::geometry::SpatialIndex* index)

@@ -130,4 +130,11 @@ pickInBox(const katana::entity::Model& model, const katana::geometry::Box2& box,
           BoxSelectionMode mode, const SelectionFilter& filter = {},
           const katana::geometry::SpatialIndex* index = nullptr);
 
+// Whether `geometry`, as drawn, has at least one point inside or on `box`:
+// the test a crossing box selects by (pickInBox), and what a sheet generator
+// asks of a tile (plotting::drawsIn). Text, dimensions and labels count by
+// their boxes; an ellipse and a spline by their chords.
+[[nodiscard]] bool touchesBox(const katana::entity::Geometry& geometry,
+                              const katana::geometry::Box2& box);
+
 } // namespace katana::cad

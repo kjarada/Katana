@@ -53,6 +53,11 @@ struct SheetVerbContext {
     // the sheet editor's Generate Sheets covers. Not given: the drawing's
     // entities (drawnExtent).
     std::optional<Box2> drawingExtent;
+    // Whether anything is drawn in a world box, asked of each tile GRID (and
+    // FIT at a fixed scale) cuts, so that a tile over empty ground is left
+    // out: in the window, everything its plan view draws (planDrawsIn). Not
+    // given: what a plan of the drawing draws (drawsIn).
+    std::function<bool(const Box2&)> drawsIn;
     // What SHEETS CHECK runs on the sheets at the indices given (every sheet
     // when empty): in the window, the checks with what the painter knows -
     // its imagery and meshes, its rule for an automatic plan

@@ -6,7 +6,8 @@
 //
 //   fitToSheet          an extent on one sheet at the largest scale that fits
 //   gridSheets          an area in tiles at a chosen scale, with overlap,
-//                       match lines and a key plan
+//                       match lines and a key plan, leaving out the tiles
+//                       with nothing drawn in them
 //   stripSheets         an alignment in strips rotated to its bearing, with
 //                       match lines at chainages
 //   crossSectionSheets  cross sections in rows and columns at one scale and
@@ -19,6 +20,7 @@
 // them in one undoable step (sheet_commands.hpp).
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -49,20 +51,32 @@ struct SheetTemplate {
 [[nodiscard]] core::Result<std::vector<Sheet>> fitToSheet(const Box2& extent,
                                                           const SheetTemplate& paper = {});
 
+// Whether anything is drawn in a world box. What the tiling asks of each tile,
+// so that a tile over empty ground is left out: plotting::drawsIn over the
+// drawing headless; in the window, everything its plan view draws.
+using DrawnTest = std::function<bool(const Box2&)>;
+
 struct GridRequest {
     Box2 area;             // world
     double scale = 500.0;  // 1 : scale
     double overlapM = 0.0; // how much neighbouring tiles share, in metres
     bool keyPlan = true;   // a first sheet showing every tile, numbered
     SheetTemplate paper;
+    // Given: only the tiles it says something is drawn in are kept. Not
+    // given: every tile over the area.
+    DrawnTest drawn;
 };
 
 // Tiles covering `area` at the scale, centred on it, numbered in reading
-// order (rows from the top, left to right). Each tile's plan carries a match
-// line in the middle of each overlap it shares, labelled with the sheet
-// across it. InvalidArgument for an empty area, a non-positive scale, or an
-// overlap as large as a tile.
-[[nodiscard]] core::Result<std::vector<Sheet>> gridSheets(const GridRequest& request);
+// order (rows from the top, left to right). With `drawn`, a tile with nothing
+// drawn in it is left out - the others keep their places on the grid - and
+// `skipped`, when given, says how many were. Each tile's plan carries a match
+// line in the middle of each overlap it shares with a tile kept, labelled
+// with the sheet across it; the key plan outlines the tiles kept.
+// InvalidArgument for an empty area, a non-positive scale, or an overlap as
+// large as a tile; NotFound when `drawn` finds nothing in any tile.
+[[nodiscard]] core::Result<std::vector<Sheet>>
+gridSheets(const GridRequest& request, std::vector<std::string>* skipped = nullptr);
 
 struct StripRequest {
     double scale = 500.0;
@@ -134,6 +148,10 @@ struct LayoutRequest {
     bool legend = false;
     double scale = 0.0; // 0: auto
     SheetTemplate paper;
+    // Where a plan of an area spills onto tiles at a fixed scale, only the
+    // tiles this says something is drawn in are kept (GridRequest::drawn).
+    // Not given: every tile.
+    DrawnTest drawn;
 };
 
 // Composes sheets for `request` using the presets:
@@ -141,7 +159,9 @@ struct LayoutRequest {
 //     sheets, the plan above (MainBelow) and the long section of the same
 //     chainages below at the same horizontal scale;
 //   - a plan of an area: one sheet at the fitted scale ("auto"), or at a
-//     fixed scale, tiles when the area does not fit one sheet at it;
+//     fixed scale, tiles when the area does not fit one sheet at it (those
+//     with nothing drawn in them left out when `drawn` is given, and counted
+//     in `skipped`);
 //   - the 3D snapshot and legend beside the plan (MainRight, MainTwoRight)
 //     when a plan of an area or one strip along the alignment is the only
 //     plan and, made for that narrower cell, still shows all of it - an
@@ -151,8 +171,9 @@ struct LayoutRequest {
 // "auto" fits everything on as few sheets as it can: an area or an alignment
 // on one sheet. NotFound for an alignment the model does not have;
 // InvalidArgument for a request that shows nothing.
-[[nodiscard]] core::Result<std::vector<Sheet>> smartLayout(const entity::Model& model,
-                                                           const LayoutRequest& request);
+[[nodiscard]] core::Result<std::vector<Sheet>>
+smartLayout(const entity::Model& model, const LayoutRequest& request,
+            std::vector<std::string>* skipped = nullptr);
 
 // Gives every sheet and viewport of `sheets` a new id (newSheetIds,
 // newViewportIds - never one `set` uses or one of its marks still names), and

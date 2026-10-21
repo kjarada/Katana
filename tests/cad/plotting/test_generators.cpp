@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
@@ -212,6 +213,127 @@ TEST(SheetGenerators, TheGridsKeyPlanOutlinesEveryTileAtAScaleThatHoldsThemAll)
     ASSERT_EQ(bare->size(), 6u);
     EXPECT_EQ(markLabel(setOf(*bare), bare->front().viewports.front().marks[0]),
               "MATCH LINE - SEE SHEET 2");
+}
+
+namespace {
+
+// Something drawn at each of `points`, and nowhere else: a tile is drawn in
+// when its closed box holds one of them.
+DrawnTest drawnAt(std::vector<Point2> points)
+{
+    return [points = std::move(points)](const Box2& box) {
+        return std::ranges::any_of(points, [&box](const Point2& p) { return box.contains(p); });
+    };
+}
+
+} // namespace
+
+TEST(SheetGenerators, GridTilesWithNothingDrawnInThemAreLeftOutAndTheRestKeepTheirPlaces)
+{
+    // The six tiles of the grid above: columns x -78.75..113.75,
+    // 103.75..296.25 and 286.25..478.75; rows y 95..220 and -20..105. Drawn
+    // at one point in the top-left, top-middle, bottom-middle and
+    // bottom-right tiles, each in no overlap: the top-right and bottom-left
+    // tiles have nothing drawn in them.
+    GridRequest request;
+    request.area = Box2(Point2(0.0, 0.0), Point2(400.0, 200.0));
+    request.scale = 500.0;
+    request.overlapM = 10.0;
+    request.drawn = drawnAt({{0.0, 200.0}, {200.0, 200.0}, {200.0, 0.0}, {400.0, 0.0}});
+    std::vector<std::string> skipped;
+    const auto sheets = gridSheets(request, &skipped);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 5u); // the key plan and four tiles
+    EXPECT_EQ(skipped, std::vector<std::string>{"2 of 6 tiles, with nothing drawn in them"});
+    for (std::size_t i = 0; i < sheets->size(); ++i) {
+        EXPECT_EQ((*sheets)[i].id, "s" + std::to_string(i + 1));
+    }
+    // Numbered in reading order among those kept, each where it was on the
+    // grid.
+    EXPECT_EQ((*sheets)[1].name, "PLAN TILE 1");
+    EXPECT_EQ((*sheets)[4].name, "PLAN TILE 4");
+    expectPoint((*sheets)[1].viewports.front().centre, 17.5, 157.5);
+    expectPoint((*sheets)[2].viewports.front().centre, 200.0, 157.5);
+    expectPoint((*sheets)[3].viewports.front().centre, 200.0, 42.5);
+    expectPoint((*sheets)[4].viewports.front().centre, 382.5, 42.5);
+
+    // Match lines lead only to tiles kept. Top-left: to the top-middle
+    // (sheet 3) at x 108.75, and none down to the bottom-left, left out.
+    const SheetSet set = setOf(*sheets);
+    const auto& topLeft = (*sheets)[1].viewports.front().marks;
+    ASSERT_EQ(topLeft.size(), 1u);
+    EXPECT_NEAR(topLeft[0].points[0].x, 108.75, 1e-9);
+    EXPECT_EQ(markLabel(set, topLeft[0]), "MATCH LINE - SEE SHEET 3");
+    // Top-middle: none right to the top-right, left out; left to sheet 2 at
+    // x 103.75 + 5 = 108.75 and down to the bottom-middle (sheet 4) at y 100.
+    const auto& topMiddle = (*sheets)[2].viewports.front().marks;
+    ASSERT_EQ(topMiddle.size(), 2u);
+    EXPECT_NEAR(topMiddle[0].points[0].x, 108.75, 1e-9);
+    EXPECT_EQ(markLabel(set, topMiddle[0]), "MATCH LINE - SEE SHEET 2");
+    EXPECT_NEAR(topMiddle[1].points[0].y, 100.0, 1e-9);
+    EXPECT_EQ(markLabel(set, topMiddle[1]), "MATCH LINE - SEE SHEET 4");
+    // Bottom-middle: right to sheet 5 at x 296.25 - 5 = 291.25 and up to
+    // sheet 3; none left. Bottom-right: left to sheet 4; none up.
+    const auto& bottomMiddle = (*sheets)[3].viewports.front().marks;
+    ASSERT_EQ(bottomMiddle.size(), 2u);
+    EXPECT_NEAR(bottomMiddle[0].points[0].x, 291.25, 1e-9);
+    EXPECT_EQ(markLabel(set, bottomMiddle[0]), "MATCH LINE - SEE SHEET 5");
+    EXPECT_EQ(markLabel(set, bottomMiddle[1]), "MATCH LINE - SEE SHEET 3");
+    const auto& bottomRight = (*sheets)[4].viewports.front().marks;
+    ASSERT_EQ(bottomRight.size(), 1u);
+    EXPECT_EQ(markLabel(set, bottomRight[0]), "MATCH LINE - SEE SHEET 4");
+
+    // The key plan outlines the four kept, numbered 2 to 5.
+    const Viewport& key = sheets->front().viewports.front();
+    ASSERT_EQ(key.marks.size(), 4u);
+    for (std::size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(markLabel(set, key.marks[i]), std::to_string(i + 2));
+    }
+}
+
+TEST(SheetGenerators, TheGridsKeyPlanFramesOnlyTheTilesKept)
+{
+    // Drawn in the top-left and top-middle tiles alone: they span x -78.75
+    // to 296.25 and y 95 to 220, 375 x 125 m around (108.75, 157.5), which
+    // needs 1 : max(375000 / 385 = 974, 125000 / 250 = 500) - 1 : 1000, where
+    // all six tiles needed 1 : 2000.
+    GridRequest request;
+    request.area = Box2(Point2(0.0, 0.0), Point2(400.0, 200.0));
+    request.scale = 500.0;
+    request.overlapM = 10.0;
+    request.drawn = drawnAt({{0.0, 200.0}, {200.0, 200.0}});
+    const auto sheets = gridSheets(request);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 3u);
+    const Viewport& key = sheets->front().viewports.front();
+    EXPECT_EQ(key.scale, 1000.0);
+    expectPoint(key.centre, 108.75, 157.5);
+    EXPECT_EQ(key.marks.size(), 2u);
+}
+
+TEST(SheetGenerators, AGridWithNothingDrawnInAnyTileIsRefusedAndOneWithEverythingDrawnIsWhole)
+{
+    GridRequest request;
+    request.area = Box2(Point2(0.0, 0.0), Point2(400.0, 200.0));
+    request.scale = 500.0;
+    request.overlapM = 10.0;
+    request.drawn = [](const Box2&) { return false; };
+    std::vector<std::string> skipped;
+    const auto none = gridSheets(request, &skipped);
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::NotFound);
+    EXPECT_EQ(none.error().message, "nothing is drawn in any tile over the area");
+    EXPECT_EQ(none.error().context, "6 tiles of 192.5 x 125 m");
+    EXPECT_TRUE(skipped.empty());
+
+    // Drawn everywhere: the same sheets as with no test at all, and nothing
+    // said to be left out.
+    request.drawn = [](const Box2&) { return true; };
+    const auto every = gridSheets(request, &skipped);
+    request.drawn = nullptr;
+    ASSERT_TRUE(every.ok());
+    EXPECT_EQ(*every, gridSheets(request).value());
+    EXPECT_TRUE(skipped.empty());
 }
 
 TEST(SheetGenerators, AGridRefusesAnOverlapAsLargeAsATileOrNoScale)
@@ -736,6 +858,32 @@ TEST(SheetGenerators, ASmartPlanAtAFixedScaleTooLargeForOneSheetIsTiled)
     ASSERT_TRUE(one.ok());
     ASSERT_EQ(one->size(), 1u);
     EXPECT_EQ(one->front().viewports.front().scale, 500.0);
+}
+
+TEST(SheetGenerators, ASmartPlansTilesWithNothingDrawnInThemAreLeftOutAsTheGridsAre)
+{
+    // The 3 x 2 tiles above, from x -88.75 (200 - 3 x 192.5 / 2) and down
+    // from y 225 (100 + 125): the top-left is x -88.75..103.75, y 100..225,
+    // centre (7.5, 162.5). Drawn there alone, it is the one tile kept.
+    LayoutRequest request;
+    request.planArea = Box2(Point2(0.0, 0.0), Point2(400.0, 200.0));
+    request.scale = 500.0;
+    request.drawn = drawnAt({{0.0, 200.0}});
+    std::vector<std::string> skipped;
+    const auto sheets = smartLayout(katana::entity::Model{}, request, &skipped);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 2u);
+    EXPECT_EQ(sheets->front().viewports.front().kind, ViewportKind::KeyPlan);
+    EXPECT_EQ((*sheets)[1].name, "PLAN TILE 1");
+    expectPoint((*sheets)[1].viewports.front().centre, 7.5, 162.5);
+    EXPECT_EQ(skipped, std::vector<std::string>{"5 of 6 tiles, with nothing drawn in them"});
+    // An area that fits one sheet is never tiled, so nothing is left out.
+    request.planArea = Box2(Point2(1000.0, 1000.0), Point2(1190.0, 1120.0));
+    skipped.clear();
+    const auto one = smartLayout(katana::entity::Model{}, request, &skipped);
+    ASSERT_TRUE(one.ok());
+    EXPECT_EQ(one->size(), 1u);
+    EXPECT_TRUE(skipped.empty());
 }
 
 namespace {

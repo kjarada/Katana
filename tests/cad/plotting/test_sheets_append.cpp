@@ -73,11 +73,12 @@ std::string quoted(const fs::path& path)
 
 // A set of tiles with their key plan, as GENERATE grid lays them: 400 x 200
 // m at 1:500 with 10 m of overlap is six tiles and a key plan (the verb
-// tests count them), saved to `file`.
+// tests count them), saved to `file`. The drawing is empty, so empty=on
+// keeps the tiles.
 void saveTiles(const fs::path& file)
 {
     Session tiles;
-    tiles.ok("GENERATE grid area=0,0,400,200 scale=500 overlap=10");
+    tiles.ok("GENERATE grid area=0,0,400,200 scale=500 overlap=10 empty=on");
     tiles.ok("TITLEBLOCK organisation \"Tile Office\"");
     tiles.ok("SHEETS SAVE " + quoted(file));
 }

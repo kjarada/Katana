@@ -783,6 +783,18 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
     set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+    # GENERATE grid leaves out a tile with nothing drawn in it (docs/plotting.md,
+    # "The generators"): two short lines 800 m apart are 800 x 100 m, at 1:500
+    # five tiles of 192.5 x 125 m from x -81.25 (400 - 5 x 192.5 / 2). The
+    # lines are in the first (to x 111.25) and the last (from x 688.75), so
+    # the key plan and two tiles are laid out and three tiles left out.
+    add_test(NAME cli.generate_grid_leaves_out_tiles_with_nothing_drawn_in_them
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LINE 0,0 10,10" -c "LINE 790,90 800,100"
+                -c "GENERATE grid scale=500")
+    set_tests_properties(cli.generate_grid_leaves_out_tiles_with_nothing_drawn_in_them PROPERTIES
+        PASS_REGULAR_EXPRESSION "generated 3 sheets: 1 to 3.*skipped 3 of 5 tiles, with nothing drawn in them"
+        FAIL_REGULAR_EXPRESSION "error")
     # GENERATE fit rotate=on, what the Sheets editor's "Rotate the drawing to
     # fill the sheet" writes: a 450 x 20 m strip along 45 degrees (its
     # corners by hand, to a millimetre) is 1:2000 square and 1:1250 turned

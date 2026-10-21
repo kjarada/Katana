@@ -34,6 +34,8 @@
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/hatching.hpp"
+#include "katana/cad/plotting/arrange.hpp"
+#include "katana/cad/selection.hpp"
 #include "katana/cad/selection_style.hpp"
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/style_drawing.hpp"
@@ -2610,6 +2612,96 @@ Box2 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides
         }
     }
     return bounds;
+}
+
+namespace {
+
+// Whether a plan triangle has a point inside or on `box`: an edge that meets
+// the box, or else the box wholly inside the triangle, which its centre tells.
+bool triangleTouches(const katana::geometry::Triangle2& triangle, const Box2& box)
+{
+    if (std::max({triangle.a.x, triangle.b.x, triangle.c.x}) < box.min.x ||
+        std::min({triangle.a.x, triangle.b.x, triangle.c.x}) > box.max.x ||
+        std::max({triangle.a.y, triangle.b.y, triangle.c.y}) < box.min.y ||
+        std::min({triangle.a.y, triangle.b.y, triangle.c.y}) > box.max.y) {
+        return false;
+    }
+    for (const Segment2& edge : {Segment2{triangle.a, triangle.b}, Segment2{triangle.b, triangle.c},
+                                 Segment2{triangle.c, triangle.a}}) {
+        if (katana::geometry::clip(edge, box)) {
+            return true;
+        }
+    }
+    return triangle.contains(box.center());
+}
+
+} // namespace
+
+bool planDrawsIn(const PlanSource& source, const katana::cad::LayerOverrides& layers,
+                 const std::set<std::uint64_t>& hiddenReferences, const Box2& box)
+{
+    if (source.model == nullptr || box.empty()) {
+        return false;
+    }
+    if (cad::plotting::drawsIn(*source.model, layers, box, source.index)) {
+        return true;
+    }
+    if (source.reference != nullptr) {
+        for (const katana::interop::RasterOverlay& raster : source.reference->rasters()) {
+            if (raster.visible && !hiddenReferences.contains(raster.id) &&
+                raster.worldBounds().intersects(box)) {
+                return true;
+            }
+        }
+        for (const katana::interop::PointCloudLayer& cloud : source.reference->pointClouds()) {
+            if (cloud.visible && !hiddenReferences.contains(cloud.id) &&
+                cloud.worldBounds().intersects(box)) {
+                return true;
+            }
+        }
+    }
+    // The road model as drawRoadModel draws it: each outline along its line,
+    // and a closed one filled, but for the earthworks, which are dashed and
+    // left empty.
+    if (source.roadModel != nullptr) {
+        for (const katana::cad::bim::BimObject& object : source.roadModel->objects) {
+            if (object.plan.empty() || !katana::cad::bim::isShown(object, *source.model, layers)) {
+                continue;
+            }
+            for (const Polyline2& line : object.plan) {
+                if (cad::touchesBox(line, box) ||
+                    (line.closed && object.kind != "earthworks" && line.contains(box.center()))) {
+                    return true;
+                }
+            }
+        }
+    }
+    if (source.meshes != nullptr) {
+        for (const katana::cad::SceneMesh& item : *source.meshes) {
+            if (isShown(item)) {
+                const katana::math::AABB space = item.mesh->bounds();
+                if (!space.empty() && Box2(Point2(space.min.x, space.min.y),
+                                           Point2(space.max.x, space.max.y))
+                                          .intersects(box)) {
+                    return true;
+                }
+            }
+        }
+    }
+    if (source.surfaces != nullptr) {
+        for (const katana::terrain::NamedSurface& named : source.surfaces->all()) {
+            if (!named.visible || named.surface == nullptr || named.surface->empty() ||
+                !named.surface->bounds().intersects(box)) {
+                continue;
+            }
+            for (std::size_t i = 0; i < named.surface->triangleCount(); ++i) {
+                if (triangleTouches(named.surface->planTriangle(i), box)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 PdfResolution pdfResolutionFor(double dpi)

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/drawing/construction.hpp"
 #include "katana/cad/plotting/arrange.hpp"
 #include "katana/cad/plotting/layout.hpp"
 
@@ -297,6 +298,73 @@ TEST(SheetArrange, TheDrawnOutlineIsTheHullOfWhatTheViewDraws)
     }
     EXPECT_EQ(allBox.max, Point2(2000.0, 1000.0));
     EXPECT_TRUE(drawnOutline(katana::entity::Model{}, view).empty());
+}
+
+TEST(SheetArrange, ABoxIsDrawnInWhereAPlanDrawsSomethingInItNotWhereABoundingBoxReaches)
+{
+    katana::entity::Model model;
+    ASSERT_TRUE(model.layers.add(katana::entity::Layer{.name = "far"}).ok());
+    ASSERT_TRUE(model.layers
+                    .add(katana::entity::Layer{.name = std::string(katana::cad::kConstructionLayer)})
+                    .ok());
+    katana::entity::HatchPattern rock;
+    rock.name = "rock";
+    rock.families.push_back(katana::entity::HatchLineFamily{0.0, 1.0, 0.0});
+    ASSERT_TRUE(model.hatchPatterns.add(rock).ok());
+    katana::entity::Layer ground;
+    ground.name = "ground";
+    ground.hatchPattern = "rock";
+    ASSERT_TRUE(model.layers.add(ground).ok());
+    const auto add = [&model](katana::entity::Geometry geometry, std::string layer) {
+        katana::entity::Entity entity;
+        entity.geometry = std::move(geometry);
+        entity.layer = std::move(layer);
+        ASSERT_TRUE(model.entities.add(entity).ok());
+    };
+    const auto square = [](double x0, double y0, double size) {
+        katana::geometry::Polyline2 ring;
+        ring.vertices = {Point2(x0, y0), Point2(x0 + size, y0), Point2(x0 + size, y0 + size),
+                         Point2(x0, y0 + size)};
+        ring.closed = true;
+        return ring;
+    };
+    const katana::cad::LayerOverrides all;
+
+    // A diagonal: a box it crosses is drawn in; one inside its bounding box
+    // but below the line is not, and neither is one beyond it, or no box.
+    add(katana::geometry::Segment2{Point2(0.0, 0.0), Point2(100.0, 100.0)}, "0");
+    EXPECT_TRUE(drawsIn(model, all, Box2(Point2(40.0, 40.0), Point2(60.0, 60.0))));
+    EXPECT_FALSE(drawsIn(model, all, Box2(Point2(60.0, 0.0), Point2(100.0, 30.0))));
+    EXPECT_FALSE(drawsIn(model, all, Box2(Point2(200.0, 200.0), Point2(300.0, 300.0))));
+    EXPECT_FALSE(drawsIn(model, all, Box2{}));
+
+    // A hatched square is drawn on inside, where a box meets none of its
+    // edges; an unhatched one is drawn along its edges alone.
+    add(square(1000.0, 0.0, 1000.0), "ground");
+    add(square(3000.0, 0.0, 1000.0), "0");
+    EXPECT_TRUE(drawsIn(model, all, Box2(Point2(1400.0, 400.0), Point2(1600.0, 600.0))));
+    EXPECT_FALSE(drawsIn(model, all, Box2(Point2(3400.0, 400.0), Point2(3600.0, 600.0))));
+    EXPECT_TRUE(drawsIn(model, all, Box2(Point2(3900.0, 400.0), Point2(4100.0, 600.0))));
+
+    // A layer the view hides draws nothing there, and a construction line,
+    // an aid to drawing, is no part of what a sheet is laid out over.
+    add(katana::geometry::Segment2{Point2(5000.0, 0.0), Point2(6000.0, 0.0)}, "far");
+    add(katana::geometry::Segment2{Point2(5000.0, 500.0), Point2(6000.0, 500.0)},
+        std::string(katana::cad::kConstructionLayer));
+    katana::cad::LayerOverrides farHidden;
+    EXPECT_TRUE(farHidden.hide("far"));
+    const Box2 onFar(Point2(5400.0, -10.0), Point2(5600.0, 10.0));
+    EXPECT_TRUE(drawsIn(model, all, onFar));
+    EXPECT_FALSE(drawsIn(model, farHidden, onFar));
+    EXPECT_FALSE(drawsIn(model, all, Box2(Point2(5400.0, 490.0), Point2(5600.0, 510.0))));
+
+    // An alignment is drawn, though it is no entity.
+    katana::entity::Alignment road;
+    road.name = "ROAD";
+    road.horizontal.pis = {{Point2(7000.0, 0.0)}, {Point2(8000.0, 0.0)}};
+    ASSERT_TRUE(model.alignments.add(road).ok());
+    EXPECT_TRUE(drawsIn(model, all, Box2(Point2(7400.0, -10.0), Point2(7600.0, 10.0))));
+    EXPECT_FALSE(drawsIn(model, all, Box2(Point2(7400.0, 50.0), Point2(7600.0, 100.0))));
 }
 
 TEST(SheetArrange, TheDrawnOutlineHoldsTheWholeOfACurve)

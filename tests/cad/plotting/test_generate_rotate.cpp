@@ -225,7 +225,7 @@ TEST(GenerateRotate, WhatCannotBeTurnedIsRefusedAndChangesNothing)
     EXPECT_EQ(s.refused("GENERATE fit rotate=sideways").message, "rotate= is on or off");
     EXPECT_EQ(s.refused("GENERATE grid scale=500 rotate=on").message,
               "GENERATE GRID takes no option rotate=; it takes paper orientation frame area "
-              "scale overlap keyplan replace");
+              "scale overlap keyplan empty replace");
     EXPECT_TRUE(s.set().sheets.empty());
     EXPECT_EQ(s.steps(), steps);
     // An empty drawing has nothing to turn, or to lay out.

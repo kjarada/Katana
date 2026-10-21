@@ -341,19 +341,55 @@ it. A 300 x 100 m extent in 385 x 250 mm needs 1 : max(300000 / 385 = 779,
 100000 / 250 = 400), so the sheet is at 1:1000. A line along an axis fits by
 its length. A single point has nothing to scale to and is refused.
 
-**Tiles: `gridSheets({area, scale, overlapM, keyPlan})`.**
+**Tiles: `gridSheets({area, scale, overlapM, keyPlan, drawn}, &skipped)`.**
 - Tiles cover the area at the chosen scale and are centred on it.
-- They are numbered in reading order: rows from the top, left to right.
+- With `drawn`, a tile with nothing drawn in it is left out, and `skipped`
+  says how many were ("2 of 6 tiles, with nothing drawn in them"). The
+  others keep their places on the grid.
+- They are numbered in reading order, among those kept: rows from the top,
+  left to right.
 - Each tile's plan carries a match line down the middle of every overlap it
-  shares, leading to the sheet across it.
-- With `keyPlan`, sheet 1 shows every tile's outline, numbered, at the scale
-  that holds them all.
+  shares with a tile kept, leading to the sheet across it. There is none
+  towards a tile left out, which has no sheet to lead to.
+- With `keyPlan`, sheet 1 shows every kept tile's outline, numbered, at the
+  scale that holds them all.
+- Not one tile with anything drawn in it is refused (`NotFound`). Without
+  `drawn`, every tile is kept.
 
 Example: 400 x 200 m at 1:500 with 10 m of overlap.
 - A tile is 192.5 x 125 m, stepping 182.5 m across and 115 m down. That gives
   3 columns and 2 rows: six tiles and a key plan at 1:2000.
 - The top-left tile's match lines are at x = 108.75, leading to sheet 3, and
   at y = 100, leading to sheet 5.
+- With something drawn only in the top-left and top-middle tiles, they are
+  sheets 2 and 3. Nothing leads down to the bottom row. The key plan frames
+  375 x 125 m and is at 1:1000.
+
+**What counts as drawn in a tile.** The tile's whole ground counts, overlaps
+included, since its plan shows them.
+- Headless, it is `drawsIn(model, view, box)` (`arrange.hpp`), what a plan of
+  the drawing draws:
+  - an entity by its geometry as a crossing box takes it
+    (`cad::touchesBox`, the rule `pickInBox` selects by);
+  - a hatched closed boundary by its fill as well;
+  - every alignment;
+  - construction lines left out, as `drawnExtent` leaves them.
+- In the window, it is `planDrawsIn` (`plan_painter.hpp`), which adds what
+  only the window holds:
+  - the road model's outlines, as `drawRoadModel` draws them;
+  - a visible surface, by its triangles;
+  - imagery, point clouds and meshes, by their extents, as `planDrawnBounds`
+    counts them.
+
+Why the geometry and not the bounding boxes: one diagonal road's box covers
+every tile of the grid, so a box test would leave none out. Why not every
+pixel: a hatch's interior is drawn, so a tile inside a large fill is kept.
+That is the one place the interior counts. An unfilled closed outline - a
+lot, a site boundary - draws only its edges.
+
+Why tiles left out keep their places, and the grid is not re-cut around the
+data: the tiles kept still meet their neighbours on the same match lines,
+and the numbers follow reading order over one regular grid.
 
 **Strips along an alignment: `stripSheets(alignment, name, {scale, overlapM,
 from/to chainage, keyPlan})`.**
@@ -765,7 +801,10 @@ Generate (`sheetGenerateOk`) and says why there. The fields:
   of the area or, for a layout along an alignment, the drawing's only one
   (a layout along an alignment starts on the first); `sheetGenerateFrom`
   and `sheetGenerateTo` for strips at a fixed scale; `sheetGenerateOverlap`
-  and `sheetGenerateKeyPlan` for tiles and fixed-scale strips.
+  and `sheetGenerateKeyPlan` for tiles and fixed-scale strips;
+  `sheetGenerateDrawnOnly` ("Only tiles with something drawn in them", on
+  by default; `empty=off`, or `empty=on` when cleared) for tiles and for a
+  fit of an area at a fixed scale, which may spill onto tiles.
 - Cross sections: `sheetGenerateNoSections`, or `sheetGenerateEvery` with
   `sheetGenerateInterval` (after a fit's or a profile's plan, or a sections
   layout), or `sheetGenerateAtStations` with `sheetGenerateStations` (a
@@ -906,8 +945,8 @@ is fixed: remove it and add another.
 
 | Kind | Generator | Options |
 |---|---|---|
-| `fit` | `smartLayout` of the drawing, `area=` or `alignment=`; with `rotate=on`, `smartLayoutRotated` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=`, `rotate=on\|off` |
-| `grid` | `gridSheets` over the drawing or `area=` | `scale=500`, `overlap=m`, `keyplan=on\|off` |
+| `fit` | `smartLayout` of the drawing, `area=` or `alignment=`; with `rotate=on`, `smartLayoutRotated` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=`, `rotate=on\|off`, `empty=on\|off` |
+| `grid` | `gridSheets` over the drawing or `area=`, tiles with nothing drawn in them left out | `scale=500`, `overlap=m`, `keyplan=on\|off`, `empty=on\|off` |
 | `strips` | `stripSheets` at a fixed scale; on `auto`, the whole alignment fitted on one sheet (`smartLayout`) | `alignment=`, `scale=`, `overlap=`, `from=`, `to=`, `keyplan=` |
 | `profile` | `smartLayout`, plan and profile | `alignment=`, `scale=`, `interval=`, `halfwidth=`, `model3d=`, `legend=` |
 | `sections` | `crossSectionSheets` | `alignment=`, `interval=` or `stations=`, `halfwidth=`, `rows=`, `columns=`, `scale=`, `ve=auto\|n` |
@@ -927,6 +966,21 @@ along `alignment=` or with sections after it (`interval=`) is refused, as
 The option was added so the dialog's choice has a verb; before, it was the
 one Generate choice an agent could not make.
 
+`GENERATE grid` leaves out every tile with nothing drawn in it, and so does
+`GENERATE fit` of an area at a fixed scale when the area spills onto tiles
+(`GridRequest::drawn`, "What counts as drawn in a tile" under "The
+generators"):
+- The reply ends `skipped 2 of 6 tiles, with nothing drawn in them`.
+- Tiles of which none has anything drawn in it are refused: `nothing is drawn
+  in any tile over the area; empty=on keeps every tile`.
+- `empty=on` keeps every tile, as before. `empty=` on a fit along
+  `alignment=` is refused, since such a plan is never tiled.
+
+Why leaving tiles out is the default: the owner asked for it (2026-10-21),
+because a sheet of empty ground is paper wasted and its number on the key
+plan leads nowhere. Why the option is kept: a fixed sheet grid, the same
+over every issue of a drawing, needs its empty tiles too.
+
 All kinds but `frames` also take `paper=`, `portrait` or `landscape`, and
 `frame=`. `alignment=` may be left out when the drawing has only one. An
 option the kind does not take is refused, and the reply lists the ones it
@@ -934,9 +988,13 @@ does. The document holds neither the surfaces a section samples nor
 the imagery a plan draws, so the front end supplies them
 (`SheetVerbContext`):
 - The window passes everything its plan view draws, as the extent `fit` and
-  `grid` cover, and its visible surfaces for `sections`.
-- Headless, the extent is the drawing's entities, and each section is
-  centred when drawn at an exaggeration of 1.
+  `grid` cover and as what a tile must have in it to be kept (`drawsIn`,
+  `planDrawsIn`), and its visible surfaces for `sections`.
+- Headless, the extent is the drawing's entities, a tile is kept for what a
+  plan of the drawing draws in it (`plotting::drawsIn`, through the
+  document's spatial index), and each section is centred when drawn at an
+  exaggeration of 1.
+- `GENERATE` asks for the context once, however many of its choices need it.
 - The window also gives `SHEETS CHECK` its checker (`checkSheetsFor`: the
   imagery and meshes, the painter's rule for an automatic plan), and
   `ARRANGE MATCHSCALE`, `VIEW FIT`, `VIEW BESTROTATE` and
@@ -2407,12 +2465,14 @@ The tests are `tests/cad/plotting/test_viewport_edits.cpp` and
   like any model change, so it still rebuilds the 3D view's scene.
 - **Frames and furniture.** More frames, such as a plan-sheet frame with a
   north-arrow zone, and a reader for title-block files.
-- **Background plotting.** A large set is plotted on the GUI thread with a
-  wait cursor; the painter is reentrant, so moving it to a job is the next
-  step.
-
-  north-arrow zone, and a reader for title-block files. The revision table
-  is stored and edited but not yet drawn by any frame.
 - **Background plotting.** A large set is plotted on the GUI thread, a
   sheet at a time behind a progress dialog; the painter is reentrant, so
   moving it to a job is the next step.
+- **Empty tiles of imagery.** A tile is kept for imagery, a point cloud or a
+  mesh by its extent, so a tile over a raster's no-data corner or the gap
+  in a sparse cloud is kept. Looking at the pixels and points is the next
+  step, if such tiles turn up in practice.
+- **Scope and filter for GENERATE.** `GENERATE fit` and `grid` lay out the
+  drawing or `area=`, and do not yet take the shared
+  `[SELECTION|VIEW|LAYERS ...] [WHERE ...]` grammar (CLAUDE.md 1.1). A tile
+  is kept for anything drawn, not only what a filter matches.

@@ -253,6 +253,10 @@ plotting::SheetVerbContext sheetVerbContextFor(const katana::cad::Document& docu
     // plan view draws. (The sections' surfaces are the drawing's own shown
     // ones, which the verb reads from the Document.)
     context.drawingExtent = planDrawnBounds(drawn.plan, {}, {});
+    // And each tile it cuts is kept only where that view draws something.
+    // The drawing, unlike the set, does not change while a verb runs, so the
+    // source gathered here serves every tile.
+    context.drawsIn = [plan = drawn.plan](const Box2& box) { return planDrawsIn(plan, {}, {}, box); };
     // The rest ask for the source again when they are called: a verb may
     // change the set between being given the context and using it.
     context.check = [&document, source](std::span<const std::size_t> sheets) {
@@ -2324,7 +2328,7 @@ QDialog* SheetEditor::openGenerateDialog()
 // drawing, the current plan view, a window) and the window's
 // sheetGenerateAreaX0, Y0, X1 and Y1; sheetGenerateScale,
 // sheetGenerateAlignment, sheetGenerateFrom, sheetGenerateTo,
-// sheetGenerateOverlap, sheetGenerateKeyPlan; the cross sections
+// sheetGenerateOverlap, sheetGenerateKeyPlan, sheetGenerateDrawnOnly; the cross sections
 // sheetGenerateNoSections, sheetGenerateEvery with sheetGenerateInterval,
 // sheetGenerateAtStations with sheetGenerateStations, sheetGenerateHalfWidth,
 // sheetGenerateRows, sheetGenerateColumns and sheetGenerateVe;
@@ -2438,6 +2442,12 @@ QDialog* SheetEditor::buildGenerateDialog()
     keyPlan->setChecked(true);
     named(keyPlan, "sheetGenerateKeyPlan");
     form->addRow(QString(), keyPlan);
+    auto* drawnOnly = new QCheckBox(QStringLiteral("Only tiles with something drawn in them"), dialog);
+    drawnOnly->setChecked(true);
+    drawnOnly->setToolTip(QStringLiteral("A tile over empty ground is left out, and the key plan "
+                                         "shows the tiles kept"));
+    named(drawnOnly, "sheetGenerateDrawnOnly");
+    form->addRow(QString(), drawnOnly);
 
     // Cross sections: after a fit's or a profile's plan, or the whole of a
     // sections layout; every so many metres or at the chainages listed.
@@ -2577,6 +2587,11 @@ QDialog* SheetEditor::buildGenerateDialog()
             words << "overlap=" + verbNumber(overlap->value());
             words << QString("keyplan=%1").arg(keyPlan->isChecked() ? "on" : "off");
         }
+        // Tiles, which an area's plan at a fixed scale may spill onto too:
+        // those with nothing drawn in them left out, or kept.
+        if (k == QLatin1String("grid") || (fit && aligned.isEmpty() && fixed)) {
+            words << QString("empty=%1").arg(drawnOnly->isChecked() ? "off" : "on");
+        }
         if (fixedStrips) {
             for (const auto& [edit, key] : {std::pair{from, "from"}, std::pair{to, "to"}}) {
                 auto chainage = typedChainage(*edit, key);
@@ -2646,6 +2661,7 @@ QDialog* SheetEditor::buildGenerateDialog()
         to->setEnabled(fixedStrips);
         overlap->setEnabled(grid || fixedStrips);
         keyPlan->setEnabled(grid || fixedStrips);
+        drawnOnly->setEnabled(grid || (fit && !aligned && fixedScale().has_value()));
         // None for a plan's sections, At chainages for a sections layout:
         // a choice the layout does not take is moved off.
         noSections->setEnabled(fit || profile);
@@ -2693,7 +2709,7 @@ QDialog* SheetEditor::buildGenerateDialog()
         connect(edit, &QLineEdit::textChanged, dialog, enable);
     }
     for (QAbstractButton* button : std::initializer_list<QAbstractButton*>{
-             frame, keyPlan, noSections, every, atStations, snapshot, legend, rotate, replace}) {
+             frame, keyPlan, drawnOnly, noSections, every, atStations, snapshot, legend, rotate, replace}) {
         connect(button, &QAbstractButton::toggled, dialog, enable);
     }
     for (QDoubleSpinBox* number : {overlap, interval, halfWidth, corners[0], corners[1], corners[2], corners[3]}) {

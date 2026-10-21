@@ -1805,6 +1805,7 @@ struct GenerateOptions {
     std::optional<bool> model3d;
     std::optional<bool> legend;
     std::optional<bool> rotate;
+    std::optional<bool> empty; // on: tiles with nothing drawn in them are kept
     bool replace = false;
 };
 
@@ -1813,10 +1814,10 @@ std::string_view generateKeys(std::string_view kind)
 {
     if (kind == "fit") {
         return "paper orientation frame area alignment scale model3d legend interval halfwidth "
-               "rotate";
+               "rotate empty";
     }
     if (kind == "grid") {
-        return "paper orientation frame area scale overlap keyplan";
+        return "paper orientation frame area scale overlap keyplan empty";
     }
     if (kind == "strips") {
         return "paper orientation frame alignment scale overlap from to keyplan";
@@ -1940,6 +1941,8 @@ Result<GenerateOptions> generateOptions(std::string_view kind, const Words& args
             status = store(o.legend, onOff(value, key));
         } else if (key == "rotate") {
             status = store(o.rotate, onOff(value, key));
+        } else if (key == "empty") {
+            status = store(o.empty, onOff(value, key));
         }
         if (!status) {
             return status.error();
@@ -2000,13 +2003,53 @@ std::vector<Point2> rotateContent(const GenerateOptions& o, const Document& docu
     return contentOf(document, context ? context() : SheetVerbContext{}, plan);
 }
 
+// What a tile of GRID, or of FIT at a fixed scale, must have drawn in it to
+// be kept: what the front end's plan view draws there (with its imagery),
+// else what a plan of the drawing draws (drawsIn, through the document's
+// index). Nothing - every tile kept - for empty=on.
+DrawnTest tileTest(const GenerateOptions& o, const Document& document,
+                   const SheetVerbContextProvider& context)
+{
+    if (o.empty.value_or(false)) {
+        return {};
+    }
+    if (context) {
+        if (DrawnTest given = context().drawsIn) {
+            return given;
+        }
+    }
+    return [&document](const Box2& box) {
+        return drawsIn(document.model(), LayerOverrides{}, box, &document.spatialIndex());
+    };
+}
+
+// Tiles of which not one has anything drawn in it are refused by the
+// generator (NotFound); the refusal says how to have them all the same.
+Result<std::vector<Sheet>> sayHowToKeepEmptyTiles(Result<std::vector<Sheet>> sheets)
+{
+    if (!sheets && sheets.error().code == ErrorCode::NotFound) {
+        return makeError(ErrorCode::NotFound, sheets.error().message + "; empty=on keeps every tile",
+                         sheets.error().context);
+    }
+    return sheets;
+}
+
 Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateOptions& o,
                                           const Document& document,
-                                          const SheetVerbContextProvider& context,
+                                          const SheetVerbContextProvider& asked,
                                           std::vector<std::string>& skipped)
 {
     const entity::Model& model = document.model();
     const double automatic = 0.0;
+    // The front end's context, built once however many choices ask for it:
+    // the window's gathers everything its plan view draws.
+    std::optional<SheetVerbContext> built;
+    const SheetVerbContextProvider context = [&built, &asked] {
+        if (!built) {
+            built = asked ? asked() : SheetVerbContext{};
+        }
+        return *built;
+    };
     if (kind == "fit") {
         LayoutRequest request;
         request.paper = o.paper;
@@ -2017,6 +2060,11 @@ Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateO
             if (o.area) {
                 return makeError(ErrorCode::InvalidArgument,
                                  "GENERATE FIT lays out area= or alignment=, not both");
+            }
+            if (o.empty) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "empty= is for the tiles of an area; a plan along alignment= is "
+                                 "never tiled");
             }
             auto name = alignmentNamed(model, o.alignment);
             if (!name) {
@@ -2030,6 +2078,7 @@ Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateO
                 return area.error();
             }
             request.planArea = *area;
+            request.drawn = tileTest(o, document, context);
         }
         if (o.interval) {
             auto name = alignmentFor(model, o.alignment);
@@ -2043,9 +2092,10 @@ Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateO
         if (o.rotate.value_or(false)) {
             // smartLayoutRotated refuses a plan along an alignment and
             // sections after the plan itself, saying why.
-            return smartLayoutRotated(model, request, rotateContent(o, document, context));
+            return sayHowToKeepEmptyTiles(smartLayoutRotated(
+                model, request, rotateContent(o, document, context), &skipped));
         }
-        return smartLayout(model, request);
+        return sayHowToKeepEmptyTiles(smartLayout(model, request, &skipped));
     }
     if (kind == "grid") {
         if (o.scale && !o.scale->has_value()) {
@@ -2063,7 +2113,8 @@ Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateO
         request.scale = o.scale ? **o.scale : request.scale;
         request.overlapM = o.overlap.value_or(request.overlapM);
         request.keyPlan = o.keyPlan.value_or(request.keyPlan);
-        return gridSheets(request);
+        request.drawn = tileTest(o, document, context);
+        return sayHowToKeepEmptyTiles(gridSheets(request, &skipped));
     }
     if (kind == "strips" || kind == "profile") {
         auto name = alignmentFor(model, o.alignment);
@@ -2477,8 +2528,9 @@ ARRANGE MATCHSCALE from id id ...   the views take the scale view `from` is draw
 GENERATE kind [option=value ...] [replace=on]   adds the sheets, or replaces every sheet
   fit       the drawing, area=x0,y0,x1,y1 or alignment=name on as few sheets as it takes:
             scale=auto|n model3d=on legend=on interval=m halfwidth=m; rotate=on turns the plan
-            of the drawing or area= to fill the sheet
-  grid      tiles over the drawing or area=: scale=500 overlap=m keyplan=on|off
+            of the drawing or area= to fill the sheet; tiles at a fixed scale as grid's, empty=
+  grid      tiles over the drawing or area=: scale=500 overlap=m keyplan=on|off; a tile with
+            nothing drawn in it is left out, and empty=on keeps it
   strips    plans along alignment=: scale=auto|n; at a fixed scale overlap=m from=ch to=ch
             keyplan=on|off
   profile   plan and profile along alignment=: scale=auto|n interval=m halfwidth=m

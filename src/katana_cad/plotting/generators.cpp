@@ -200,7 +200,8 @@ Result<std::vector<Sheet>> fitToSheet(const Box2& extent, const SheetTemplate& p
     return sheets;
 }
 
-Result<std::vector<Sheet>> gridSheets(const GridRequest& request)
+Result<std::vector<Sheet>> gridSheets(const GridRequest& request,
+                                      std::vector<std::string>* skipped)
 {
     const Box2& area = request.area;
     if (area.empty() || !(area.width() > 0.0) || !(area.height() > 0.0)) {
@@ -233,26 +234,59 @@ Result<std::vector<Sheet>> gridSheets(const GridRequest& request)
     const double left0 = area.center().x - (static_cast<double>(columns) * stepX + overlap) / 2.0;
     const double top0 = area.center().y + (static_cast<double>(rows) * stepY + overlap) / 2.0;
 
+    // The ground each tile's plan shows, overlaps and all.
+    const auto tileAt = [&](std::size_t row, std::size_t column) {
+        const double left = left0 + static_cast<double>(column) * stepX;
+        const double top = top0 - static_cast<double>(row) * stepY;
+        return Box2(Point2(left, top - tileH), Point2(left + tileW, top));
+    };
+    // Each tile's number among those kept, in reading order; 0 for one left
+    // out. A tile left out keeps its place, so the tiles either side of it
+    // still meet their other neighbours on the same lines.
+    std::vector<std::size_t> number(rows * columns, 0);
+    std::size_t kept = 0;
+    for (std::size_t row = 0; row < rows; ++row) {
+        for (std::size_t column = 0; column < columns; ++column) {
+            if (!request.drawn || request.drawn(tileAt(row, column))) {
+                number[row * columns + column] = ++kept;
+            }
+        }
+    }
+    if (kept == 0) {
+        return makeError(ErrorCode::NotFound, "nothing is drawn in any tile over the area",
+                         std::format("{} tiles of {} x {} m", rows * columns, tileW, tileH));
+    }
+    if (skipped != nullptr && kept < rows * columns) {
+        skipped->push_back(std::format("{} of {} tiles, with nothing drawn in them",
+                                       rows * columns - kept, rows * columns));
+    }
+
     std::vector<Sheet> tiles;
     std::vector<std::vector<Point2>> outlines;
     const std::size_t first = request.keyPlan ? 2 : 1; // the key plan is sheet 1
-    const auto idOf = [first, columns](std::size_t row, std::size_t column) {
-        return "s" + std::to_string(first + row * columns + column);
+    // The sheet tile (row, column) is; empty for one left out.
+    const auto idOf = [&number, first, columns](std::size_t row, std::size_t column) {
+        const std::size_t n = number[row * columns + column];
+        return n == 0 ? std::string{} : "s" + std::to_string(first + n - 1);
     };
     for (std::size_t row = 0; row < rows; ++row) {
         for (std::size_t column = 0; column < columns; ++column) {
-            const double left = left0 + static_cast<double>(column) * stepX;
-            const double top = top0 - static_cast<double>(row) * stepY;
-            const Box2 tile(Point2(left, top - tileH), Point2(left + tileW, top));
-            Sheet sheet = blankSheet(request.paper,
-                                     std::format("PLAN TILE {}", row * columns + column + 1));
+            const std::size_t n = number[row * columns + column];
+            if (n == 0) {
+                continue;
+            }
+            const Box2 tile = tileAt(row, column);
+            Sheet sheet = blankSheet(request.paper, std::format("PLAN TILE {}", n));
             sheet.id = idOf(row, column);
             Viewport plan = planViewport(rect, request.scale, tile.center());
             // A match line in the middle of each shared strip, facing the
-            // neighbour across it.
+            // neighbour across it; none towards a tile left out, which has no
+            // sheet to lead to.
             const auto match = [&plan](Point2 a, Point2 b, std::string neighbour) {
-                plan.marks.push_back(
-                    {WorldMark::Kind::MatchLine, {a, b}, "MATCH LINE", std::move(neighbour)});
+                if (!neighbour.empty()) {
+                    plan.marks.push_back(
+                        {WorldMark::Kind::MatchLine, {a, b}, "MATCH LINE", std::move(neighbour)});
+                }
             };
             if (column + 1 < columns) {
                 const double x = tile.max.x - overlap / 2.0;
@@ -668,7 +702,8 @@ Result<std::vector<Sheet>> sheetsFromPlotFrames(const entity::Model& model,
     return sheets;
 }
 
-Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutRequest& request)
+Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutRequest& request,
+                                       std::vector<std::string>* skipped)
 {
     const bool alongAlignment = request.planAlongAlignment || request.longSection ||
                                 request.crossSectionInterval > 0.0;
@@ -870,7 +905,8 @@ Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutR
                 grid.area = wanted;
                 grid.scale = request.scale;
                 grid.paper = request.paper;
-                auto tiles = gridSheets(grid);
+                grid.drawn = request.drawn;
+                auto tiles = gridSheets(grid, skipped);
                 if (!tiles) {
                     return tiles.error();
                 }
