@@ -699,7 +699,13 @@ Not done: a window narrower
 than about 1,290 px (a 1280-px laptop) still overflows the second row, and
 larger icons or text widen every toolbar (a button is 41 px at Large Icons
 against 33); no setting chooses a density from the screen; a floating dock is
-not fitted.
+not fitted. After the window is first shown maximised, Qt keeps its copy of a
+restored layout until the layout fits, and at most 150 ms more
+(`discardRestoredStateTimer`): a `removeToolBar` or `removeDockWidget` in that
+time would meet the same deleted item the start crashed on ("The order of a
+restore", above). Nothing does one then today; one that is added must come
+after the first event loop turn, or apply the layout first as Qt's own
+`tabifyDockWidget` does.
 
 ## Failure modes
 
