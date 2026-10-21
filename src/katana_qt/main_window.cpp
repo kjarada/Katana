@@ -211,6 +211,11 @@ constexpr const char* kMinimisedKey = "window/minimised";
 constexpr const char* kTextSizeKey = "appearance/textSize";
 constexpr const char* kToolBarIconsKey = "appearance/toolBarIcons";
 constexpr const char* kToolBarNamesKey = "appearance/toolBarNames";
+// The start screen (start_dialog.hpp): whether an interactive start shows
+// it, and the coordinate system it chose last. The customisation it chose
+// is kept by CUSTOMISE KEEP, in the kept file, as Settings keeps one.
+constexpr const char* kStartShowKey = "start/showAtStart";
+constexpr const char* kStartCrsKey = "start/coordinateSystem";
 
 // View > Text Size's items by size: viewTextSizeSmall ... ExtraLarge.
 QString textSizeActionName(katana::qt::theme::TextSize size)
@@ -722,6 +727,17 @@ void MainWindow::buildActions()
     fileMenu->addSection("Plot");
     fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
     fileMenu->addSection("Project");
+    // What a session starts with, asked again (start_dialog.hpp): the
+    // customisation and the coordinate system. No letter: every one of
+    // "Start Screen" is another File item's already (--check-shortcuts).
+    QAction* startAction =
+        makeAction(Icon::Properties, "Start Screen...",
+                   "Choose the customisation and the coordinate system this session works "
+                   "with, as a new session does",
+                   QKeySequence(), "fileStartScreen");
+    startAction->setData(QStringLiteral("startDialog")); // for --dialog
+    connect(startAction, &QAction::triggered, this, [this] { showStartScreen(); });
+    fileMenu->addAction(startAction);
     // The project's coordinate system: what online data, reprojection and the
     // title block need, set in one place (project_crs_dialog.hpp; CRS verb).
     QAction* crsAction = makeAction(Icon::Properties, "Project &Coordinate System...",
@@ -2807,6 +2823,47 @@ void MainWindow::showProjectCrs(std::optional<std::pair<double, double>> place)
     projectCrs_->activateWindow();
 }
 
+void MainWindow::showStartScreen()
+{
+    if (startScreen_ && startScreen_->isVisible()) {
+        startScreen_->raise();
+        startScreen_->activateWindow();
+        return;
+    }
+    StartChoices last;
+    if (!headless_) {
+        const QSettings settings;
+        last.coordinateSystem = settings.value(kStartCrsKey).toString();
+        last.showAtStart = settings.value(kStartShowKey, true).toBool();
+    }
+    if (!keptCustomisationFile_.empty()) {
+        last.keptFile = QString::fromStdU16String(keptCustomisationFile_.generic_u16string());
+    }
+    startScreen_ = std::make_unique<StartDialog>(document_, last, commandRunner(), this);
+    StartDialog* const screen = startScreen_.get();
+    connect(screen, &QDialog::finished, this, [this, screen](int result) {
+        if (headless_ || startScreen_.get() != screen) {
+            return;
+        }
+        QSettings settings;
+        settings.setValue(kStartShowKey, screen->showAtStart());
+        if (result == QDialog::Accepted) {
+            settings.setValue(kStartCrsKey, screen->coordinateSystem());
+        }
+    });
+    screen->show();
+    screen->raise();
+    screen->activateWindow();
+}
+
+void MainWindow::showStartScreenIfWanted()
+{
+    if (headless_ || !QSettings().value(kStartShowKey, true).toBool()) {
+        return;
+    }
+    showStartScreen();
+}
+
 void MainWindow::showSelectById()
 {
     if (!selectById_) {
@@ -3166,15 +3223,40 @@ void MainWindow::restoreSession()
         setToolBarIconSize(pixels);
     }
     setToolBarNamesShown(settings.value(kToolBarNamesKey, toolBarNamesShown_).toBool());
+    restoreWindow(settings.value(kGeometryKey).toByteArray(),
+                  settings.value(kLayoutKey).toByteArray(),
+                  settings.value(kMinimisedKey).toStringList());
+}
 
+void MainWindow::restoreWindow(const QByteArray& geometry, const QByteArray& layout,
+                               const QStringList& minimised)
+{
+    // The layout before the geometry, and again after it. Into a window not
+    // yet shown that is to be maximised or full screen, and that the layout
+    // does not fit as it is, Qt keeps a copy of the layout restored, to lay
+    // out again once the window has its size (QMainWindowLayout's
+    // restoredState); and restoreLayout moves toolbars after restoring. A
+    // toolbar moved is taken out of the layout and its item deleted, while
+    // the copy still holds it, so the first layout after the window was
+    // shown called through a deleted item: every start from a version 1
+    // layout saved maximised crashed (2026-10-15 to 2026-10-21; the
+    // --check-session-restore test). So the layout is restored, and moved,
+    // while the window is as built - not maximised, where Qt keeps no copy -
+    // and what that made is restored again once the geometry is, with
+    // nothing moved after it. Rejected: restoring again after the moves with
+    // the window already maximised, since Qt replaces its copy only when the
+    // layout again does not fit and otherwise keeps the stale one; and
+    // restoring after the window is shown, which shows it jump.
+    // A layout saved by another version, or none, leaves the window as built.
+    const bool restored = restoreLayout(layout);
+    const QByteArray arranged = restored ? saveState(kLayoutVersion) : QByteArray();
     // Qt puts a window that was on a screen no longer there back onto one.
-    if (!restoreGeometry(settings.value(kGeometryKey).toByteArray())) {
+    if (!restoreGeometry(geometry)) {
         fitToScreen();
     }
-    // A layout saved by another version, or none, leaves the window as built.
-    if (restoreLayout(settings.value(kLayoutKey).toByteArray())) {
-        const QStringList unknown =
-            chrome_->minimiseNamed(settings.value(kMinimisedKey).toStringList());
+    if (restored) {
+        (void)restoreState(arranged, kLayoutVersion);
+        const QStringList unknown = chrome_->minimiseNamed(minimised);
         (void)unknown; // a view of the last session: views are not kept
     }
 }

@@ -6,6 +6,7 @@
 
 #include <QColor>
 #include <QComboBox>
+#include <QDir>
 #include <QCompleter>
 #include <QLineEdit>
 #include <QPainter>
@@ -184,6 +185,26 @@ katana::core::Result<QString> customisationFileWord(const QString& path)
 katana::core::Result<QString> customisationFileWord(const std::filesystem::path& path)
 {
     return customisationFileWord(QString::fromStdU16String(path.generic_u16string()));
+}
+
+QString typedFilePath(const QString& typed)
+{
+    QString path = typed.trimmed();
+    if (path.size() >= 2 && path.startsWith(QLatin1Char('"')) && path.endsWith(QLatin1Char('"'))) {
+        path = path.mid(1, path.size() - 2).trimmed();
+    }
+    return QDir::fromNativeSeparators(path);
+}
+
+katana::core::Result<QString> typedCustomisationFileWord(const QString& typed)
+{
+    const QString path = typedFilePath(typed);
+    if (path.isEmpty()) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidArgument,
+                                       "no file is named: type its path, or choose it with "
+                                       "Browse");
+    }
+    return customisationFileWord(path);
 }
 
 katana::core::Status writeFileBytes(const std::filesystem::path& path, std::string_view bytes)

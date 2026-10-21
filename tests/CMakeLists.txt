@@ -3313,6 +3313,27 @@ if(TARGET katana)
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # A layout an older build saved (version 1, Surface Edit and BIM beside
+    # GIS) in a window left maximised, restored before the window is first
+    # shown, as a session starts (--check-session-restore,
+    # MainWindow::restoreWindow; docs/desktop.md, "Fitting the screen"). Every
+    # such start crashed from 2026-10-15 to 2026-10-21: Qt kept a copy of the
+    # restored layout for the maximised window and the carry-over deleted
+    # toolbar items the copy held. A crash fails the run as surely as a lost
+    # toolbar does.
+    add_test(NAME qt_a_layout_saved_maximised_by_an_older_build_restores_before_the_window_is_shown_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCHECK_SESSION_RESTORE=ON"
+            "-DEXPECT=session restore: an older build's layout restored into a maximised window before it was shown; [0-9]+ toolbars, none lost"
+            "-DFORBID=session restore: (the|in no|Surface)"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/session_restore_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_layout_saved_maximised_by_an_older_build_restores_before_the_window_is_shown_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # Terrain > Edit Surface > Raise, Lower or Set Level through the window
     # (docs/surface_editing.md): the dialog opened by its action, its line run
     # through the window's one executor. samples/gis/terrain.asc as a surface
@@ -4300,7 +4321,7 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/gis_file_items_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The menus as the window says them (docs/desktop.md, "The File menu"):
-    # File's fifteen items, with every import under File > Import and every
+    # File's sixteen items, with every import under File > Import and every
     # export under File > Export - File's own, then Survey's, then GIS's -
     # Settings above Quit, and Survey > Survey Coding ending with the code
     # manager, Apply Survey Codes and Process Linework before the utilities.
@@ -4317,7 +4338,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=?commandLog|?fileMenu|?fileImportMenu|?fileExportMenu|?surveyMenu|?editMenu|?viewMenu|?drawMenu|?modifyMenu|?annotateMenu|?formatMenu|?terrainMenu|?gisMenu|?helpMenu"
-            "-DEXPECT=fileMenu: File: New ${_tip} ; Open Project\\.\\.\\. ${_tip} ; Save ${_tip} ; Save As\\.\\.\\. ${_tip} ; Import ${_tip} ; Export ${_tip} ; Run Script\\.\\.\\. ${_tip} ; Recent Scripts ${_tip} ; Plot to PDF\\.\\.\\. ${_tip} ; Sheets\\.\\.\\. ${_tip} ; Plot Sheets to PDF\\.\\.\\. ${_tip} ; Project Coordinate System\\.\\.\\. ${_tip} ; Drawing Summary\\.\\.\\. ${_tip} ; Settings\\.\\.\\. ${_tip} ; Quit ${_tip}[\r\n]+fileImportMenu: Import: Import Any File\\.\\.\\. ${_tip} ; Import IFC\\.\\.\\. ${_tip} ; Import Survey Points\\.\\.\\. ${_tip} ; Import Vector Data\\.\\.\\. ${_tip} ; Import Raster\\.\\.\\. ${_tip} ; Import Point Cloud\\.\\.\\. ${_tip} ; Online Data\\.\\.\\. ${_tip}[\r\n]+fileExportMenu: Export: Export Drawing\\.\\.\\. ${_tip} ; Export IFC\\.\\.\\. ${_tip} ; Export View as Image\\.\\.\\. ${_tip} ; Export Survey Points\\.\\.\\. ${_tip} ; Export Surface as DEM\\.\\.\\. ${_tip} ; Export Point Cloud\\.\\.\\. ${_tip}[\r\n]+surveyMenu: Survey: [^\r\n]*Coordinate Converter\\.\\.\\. ${_tip} ; Survey Code Manager\\.\\.\\. ${_tip} ; Apply Survey Codes ${_tip} ; Process Linework ${_tip} ; Draw Utility Schedule\\.\\.\\. [^\r\n]*[\r\n].*helpMenu: Help: "
+            "-DEXPECT=fileMenu: File: New ${_tip} ; Open Project\\.\\.\\. ${_tip} ; Save ${_tip} ; Save As\\.\\.\\. ${_tip} ; Import ${_tip} ; Export ${_tip} ; Run Script\\.\\.\\. ${_tip} ; Recent Scripts ${_tip} ; Plot to PDF\\.\\.\\. ${_tip} ; Sheets\\.\\.\\. ${_tip} ; Plot Sheets to PDF\\.\\.\\. ${_tip} ; Start Screen\\.\\.\\. ${_tip} ; Project Coordinate System\\.\\.\\. ${_tip} ; Drawing Summary\\.\\.\\. ${_tip} ; Settings\\.\\.\\. ${_tip} ; Quit ${_tip}[\r\n]+fileImportMenu: Import: Import Any File\\.\\.\\. ${_tip} ; Import IFC\\.\\.\\. ${_tip} ; Import Survey Points\\.\\.\\. ${_tip} ; Import Vector Data\\.\\.\\. ${_tip} ; Import Raster\\.\\.\\. ${_tip} ; Import Point Cloud\\.\\.\\. ${_tip} ; Online Data\\.\\.\\. ${_tip}[\r\n]+fileExportMenu: Export: Export Drawing\\.\\.\\. ${_tip} ; Export IFC\\.\\.\\. ${_tip} ; Export View as Image\\.\\.\\. ${_tip} ; Export Survey Points\\.\\.\\. ${_tip} ; Export Surface as DEM\\.\\.\\. ${_tip} ; Export Point Cloud\\.\\.\\. ${_tip}[\r\n]+surveyMenu: Survey: [^\r\n]*Coordinate Converter\\.\\.\\. ${_tip} ; Survey Code Manager\\.\\.\\. ${_tip} ; Apply Survey Codes ${_tip} ; Process Linework ${_tip} ; Draw Utility Schedule\\.\\.\\. [^\r\n]*[\r\n].*helpMenu: Help: "
             "-DFORBID=12[dD]|no menu item is named"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -4722,6 +4743,28 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/project_crs_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# File > Start Screen through the real window (docs/desktop.md, "The start
+# screen"): it opens on the session as it is, which is no line; a coordinate
+# system typed makes CRS SET, which Start hands to the window's executor, so
+# it is logged and is one step that UNDO takes back. Non-modal, as the CRS
+# dialog is, so the run fills it by its object names. A headless run reads
+# and writes no settings, so the screen's own memory is not touched.
+if(TARGET katana)
+    add_test(NAME qt_the_start_screen_sets_the_coordinate_system_through_the_executor_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileStartScreen|?startLine|startCrs=EPSG:7856|?startCrsCheck|?startLine|!startOk|>CRS|>UNDO|>CRS"
+            "-DEXPECT=--dialog fileStartScreen opened startDialog \"Start\"[\r\n]+startLine: Nothing to change: the session starts as it is\\.[\r\n]+startCrsCheck: EPSG:7856 GDA2020 / MGA zone 56 - projected, metre[^\r\n]*[\r\n]+startLine: CRS SET EPSG:7856[\r\n]+.*crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\"[^\r\n]*[\r\n]+crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\"[^\r\n]*[\r\n]+1 undone[\r\n]+crs id=none"
+            "-DFORBID=\\(modal\\)"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/start_screen_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_start_screen_sets_the_coordinate_system_through_the_executor_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

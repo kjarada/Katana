@@ -55,6 +55,9 @@ add_executable(katana_qt_widget_tests
     test_gis_online.cpp
     # File > Project Coordinate System (test_project_crs_dialog).
     test_project_crs_dialog.cpp
+    # The start screen: the customisation and coordinate system a session
+    # starts with (test_start_dialog).
+    test_start_dialog.cpp
     # File > Run Script and the SCRIPT verb's reading and running (test_script_runner).
     test_script_runner.cpp
     # Help > Command Reference and Keyboard Shortcuts (test_command_reference).

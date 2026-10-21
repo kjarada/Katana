@@ -76,6 +76,8 @@ add_library(katana_qt_ui OBJECT
     layer_manager.hpp
     project_crs_dialog.cpp
     project_crs_dialog.hpp
+    start_dialog.cpp
+    start_dialog.hpp
     property_panel.cpp
     property_panel.hpp
     script_runner.cpp

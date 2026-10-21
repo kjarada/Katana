@@ -55,6 +55,7 @@
 #include "plotting/plot_output.hpp"
 #include "plotting/view_image_export.hpp"
 #include "project_crs_dialog.hpp"
+#include "start_dialog.hpp"
 // Whole, not declared: selectById_ is destroyed wherever the window is.
 #include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
@@ -135,6 +136,13 @@ class MainWindow final : public QMainWindow {
     // always the default 1360 x 860 window, so a screenshot is the same on
     // every machine. main() calls restoreSession before the window is shown.
     void restoreSession();
+    // What restoreSession does with what it read: the window's geometry
+    // (saveGeometry's), its layout (saveState's, through restoreLayout) and
+    // the names of the panels to minimise. Called before the window is
+    // first shown, as a session starts; --check-session-restore calls it so,
+    // with what an older build saved, and no settings read.
+    void restoreWindow(const QByteArray& geometry, const QByteArray& layout,
+                       const QStringList& minimised);
     // saveState's version of the layout this window saves, and of the one
     // before it (main_window.cpp, at the top, says what each changed). Public
     // so that --check-toolbar-fit can save a layout as the older build did.
@@ -298,6 +306,15 @@ class MainWindow final : public QMainWindow {
     // object names instead of hanging on it; made afresh when it is opened
     // from closed, or for a place, so it starts from the project as it is now.
     void showProjectCrs(std::optional<std::pair<double, double>> place = std::nullopt);
+    // File > Start Screen (start_dialog.hpp): the customisation and the
+    // coordinate system the session starts with. Made afresh when opened
+    // from closed, from the session as it is now and what was chosen last;
+    // non-modal, so a headless run fills it by its object names. What it
+    // chose is kept for the next start, but by a headless run.
+    void showStartScreen();
+    // What an interactive start with no project to open does: the start
+    // screen, unless its "Show this at start" was cleared.
+    void showStartScreenIfWanted();
     // Runs `line` as if it were typed on the command line and Enter pressed.
     // For the headless --command switch, so a test can set up a drawing -
     // styles, entities, a selection - through the verbs a person types. An
@@ -780,6 +797,8 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<AlignmentManagerDialog> alignments_;
     // File > Project Coordinate System, owned here for the reason layers_ is.
     std::unique_ptr<ProjectCrsDialog> projectCrs_;
+    // File > Start Screen, owned here for the reason layers_ is.
+    std::unique_ptr<StartDialog> startScreen_;
     // File > Import IFC and Export IFC, kept between uses. They hold no
     // Document - only callbacks into this window - so Qt may delete them
     // with its other children.

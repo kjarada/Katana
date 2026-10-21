@@ -99,6 +99,19 @@ void setColourField(QComboBox* box, const std::string& name);
 [[nodiscard]] katana::core::Result<QString>
 customisationFileWord(const std::filesystem::path& path);
 
+// A path as a person typed it into a dialog's file box: with '/', as every
+// dialog here writes one, and without the blanks round it. ONE pair of double
+// quotes round the WHOLE of it is taken off too, with the blanks just inside
+// them. That is how a file manager hands a path over (Explorer's "Copy as
+// path": "C:\data\site codes.json", quotes and all), and the quotes are no
+// part of the file's name; left on, the path was refused for holding a double
+// quote. A quote anywhere else is still customisationFileWord's to refuse.
+[[nodiscard]] QString typedFilePath(const QString& typed);
+// The file a person typed, as one word of a CUSTOMISE line: as typedFilePath
+// reads it, then customisationFileWord. InvalidArgument when nothing is typed.
+// Settings and the start screen name a file by it.
+[[nodiscard]] katana::core::Result<QString> typedCustomisationFileWord(const QString& typed);
+
 // `bytes` as the whole of the file at `path`, for a file that is NOT a
 // customisation (the code list's CSV): a customisation file is written by
 // CUSTOMISE EXPORT, which writes beside the file and renames, so that a write

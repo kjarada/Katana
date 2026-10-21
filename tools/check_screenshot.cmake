@@ -228,6 +228,12 @@ endif()
 if(DEFINED CHECK_TOOLBAR_FIT)
     list(APPEND extra --check-toolbar-fit "${CHECK_TOOLBAR_FIT}")
 endif()
+# -DCHECK_SESSION_RESTORE=ON restores an older build's layout into the
+# window, maximised, before it is first shown, as a session starts, and
+# fails the run when a toolbar is lost or it crashes (--check-session-restore).
+if(CHECK_SESSION_RESTORE)
+    list(APPEND extra --check-session-restore)
+endif()
 # -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
 # hold exactly the reference's text, line ends aside (git may check the
 # reference out with either). The written files are removed first, so one

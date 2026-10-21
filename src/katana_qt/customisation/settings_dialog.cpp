@@ -317,36 +317,6 @@ QString keepTip(const CustomisationState& state, const QString& keptFile)
                           "start reads (CUSTOMISE KEEP)");
 }
 
-// A path as a person gave it: with '/', as every dialog here writes one, and
-// without the blanks round it. ONE pair of double quotes round the WHOLE of
-// it is taken off too, with the blanks just inside them. That is how a file
-// manager hands a path over (Explorer's "Copy as path":
-// "C:\data\site codes.json", quotes and all), and the quotes are no part of
-// the file's name; left on, the path was refused for holding a double quote.
-// A quote anywhere else is still fileWord's rule to refuse.
-QString typedPath(const QString& typed)
-{
-    QString path = typed.trimmed();
-    if (path.size() >= 2 && path.startsWith(QLatin1Char('"')) && path.endsWith(QLatin1Char('"'))) {
-        path = path.mid(1, path.size() - 2).trimmed();
-    }
-    return QDir::fromNativeSeparators(path);
-}
-
-// The file a person named, as one word of a CUSTOMISE line: as typedPath
-// reads it, then as every dialog that names a file in a line writes it
-// (customisationFileWord).
-katana::core::Result<QString> fileWord(const QString& typed)
-{
-    const QString path = typedPath(typed);
-    if (path.isEmpty()) {
-        return katana::core::makeError(katana::core::ErrorCode::InvalidArgument,
-                                       "no file is named: type its path, or choose it with "
-                                       "Browse");
-    }
-    return customisationFileWord(path);
-}
-
 // A load's reply with the names the program's own built-in leaves undefined
 // said once, as a count: a load reports every name the rules ask for that
 // nothing defines, and the built-in's own few (`in_built_in=yes`) would be
@@ -1164,7 +1134,7 @@ void SettingsDialog::importFile()
     if (!mayReplaceRules(QStringLiteral("Import"))) {
         return;
     }
-    const auto file = fileWord(importPath_->text());
+    const auto file = typedCustomisationFileWord(importPath_->text());
     if (!file) {
         refuse(QStringLiteral("Import: ") + text(file.error().message));
         return;
@@ -1177,7 +1147,7 @@ void SettingsDialog::importFile()
 
 void SettingsDialog::exportFile()
 {
-    const auto file = fileWord(exportPath_->text());
+    const auto file = typedCustomisationFileWord(exportPath_->text());
     if (!file) {
         refuse(QStringLiteral("Export: ") + text(file.error().message));
         return;
@@ -1195,7 +1165,7 @@ void SettingsDialog::browseImport()
     }
     // Opened where the field already points, read as Import reads it.
     const QString chosen = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Import a Katana Customisation"), typedPath(importPath_->text()),
+        this, QStringLiteral("Import a Katana Customisation"), typedFilePath(importPath_->text()),
         customisationFileFilter() + QStringLiteral(";;All files (*)"));
     if (!chosen.isEmpty()) {
         importPath_->setText(QDir::fromNativeSeparators(chosen));
@@ -1210,7 +1180,7 @@ void SettingsDialog::browseExport()
         return;
     }
     QString chosen = QFileDialog::getSaveFileName(
-        this, QStringLiteral("Export the Customisation"), typedPath(exportPath_->text()),
+        this, QStringLiteral("Export the Customisation"), typedFilePath(exportPath_->text()),
         customisationFileFilter());
     if (chosen.isEmpty()) {
         return;

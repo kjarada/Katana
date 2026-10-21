@@ -22,7 +22,9 @@ document is the reasons.
    program runs, with nothing to load. Another is built in beside it, the NSW
    customisation, and is one choice away: File > Settings > Built-in library,
    then Use (the line is `CUSTOMISE BUILTIN NSW`), which a session that was kept
-   keeps for the next start. The two answer the same survey codes: Katana
+   keeps for the next start. The start screen a new session opens on offers the same
+   choice, and the coordinate system beside it (`docs/desktop.md`, "The start
+   screen"). The two answer the same survey codes: Katana
    Standard's code keys are the NSW customisation's, with what each key stands
    for and the kinds of rule it has, kept on the owner's decision so that the
    same field data works with either, and everything it names, draws and words

@@ -93,4 +93,13 @@ bool chooseProjectCrs(QWidget* parent, katana::cad::Document& document,
 // status bar and the online data dialog show.
 [[nodiscard]] QString projectCrsLabel(const katana::cad::Document& document);
 
+// What `typed` is as a coordinate system, for a check line under a box it is
+// typed in: its code, name, kind, units and area of use; "Not a coordinate
+// system: ..." with the reason when it names none; local coordinates when it
+// is empty. With `place` (a longitude and latitude) an area of use that does
+// not hold it is said too. What projectCrsCheck and the start screen's
+// startCrsCheck say, in the same words.
+[[nodiscard]] QString crsCheckText(const QString& typed,
+                                   std::optional<std::pair<double, double>> place = std::nullopt);
+
 } // namespace katana::qt

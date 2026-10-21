@@ -765,6 +765,78 @@ bool checkToolBarFit(katana::qt::MainWindow& window, const QString& sizes)
     return ok;
 }
 
+// --check-session-restore: what an older build saved - Surface Edit and BIM
+// beside GIS on the second row, a layout of version 1, in a window left
+// maximised - restored into this window as a session restores it
+// (MainWindow::restoreWindow), before the window is first shown, and then
+// shown. Every start from such a session crashed from 2026-10-15 to
+// 2026-10-21: Qt keeps a layout restored into a window not yet shown that is
+// to be maximised, to lay out once the window has its size, and the
+// carry-over then moved toolbars out of the layout that copy still held. Only
+// a window never shown takes that path, so the check must run before the
+// first show. Whether every toolbar was along the top afterwards; a crash
+// fails the run by itself.
+bool checkSessionRestore(katana::qt::MainWindow& window)
+{
+    using katana::qt::MainWindow;
+    if (window.isVisible()) {
+        std::fprintf(stderr, "session restore: the window was shown before the check\n");
+        return false;
+    }
+    QToolBar* const surfaceEdit = window.findChild<QToolBar*>("SurfaceEditToolBar");
+    QToolBar* const bim = window.findChild<QToolBar*>("BIMToolBar");
+    QToolBar* const gis = window.findChild<QToolBar*>("GISToolBar");
+    if (surfaceEdit == nullptr || bim == nullptr || gis == nullptr) {
+        std::fprintf(stderr, "session restore: the Surface Edit, BIM and GIS toolbars are not all "
+                             "there\n");
+        return false;
+    }
+    const int toolbars = static_cast<int>(window.findChildren<QToolBar*>().size());
+    // The older build's layout, and its maximised window, made from this one.
+    window.removeToolBar(surfaceEdit);
+    window.removeToolBar(bim);
+    window.insertToolBar(gis, surfaceEdit);
+    window.insertToolBar(gis, bim);
+    surfaceEdit->show();
+    bim->show();
+    const QByteArray older = window.saveState(MainWindow::kLayoutVersionBeforeThirdRow);
+    window.setWindowState(window.windowState() | Qt::WindowMaximized);
+    const QByteArray maximised = window.saveGeometry();
+    window.setWindowState(window.windowState() & ~Qt::WindowMaximized);
+
+    window.restoreWindow(maximised, older, {});
+    window.show();
+    QApplication::processEvents();
+    QApplication::processEvents();
+    if (!window.isMaximized()) {
+        std::fprintf(stderr, "session restore: the window was saved maximised and is not\n");
+        return false;
+    }
+    // Every toolbar in an area, and Surface Edit and BIM shown on a row of
+    // their own below GIS's.
+    QStringList lost;
+    for (QToolBar* bar : window.findChildren<QToolBar*>()) {
+        if (window.toolBarArea(bar) == Qt::NoToolBarArea) {
+            lost << bar->objectName();
+        }
+    }
+    if (!lost.isEmpty()) {
+        std::fprintf(stderr, "session restore: in no area: %s\n", qPrintable(lost.join(", ")));
+        return false;
+    }
+    if (!surfaceEdit->isVisible() || !bim->isVisible() ||
+        !window.toolBarBreak(surfaceEdit) || surfaceEdit->y() <= gis->y()) {
+        std::fprintf(stderr, "session restore: Surface Edit and BIM are not on a row of their own "
+                             "below GIS\n");
+        return false;
+    }
+    std::fprintf(stderr,
+                 "session restore: an older build's layout restored into a maximised window "
+                 "before it was shown; %d toolbars, none lost\n",
+                 toolbars);
+    return true;
+}
+
 } // namespace
 
 // Usage:
@@ -799,6 +871,7 @@ bool checkToolBarFit(katana::qt::MainWindow& window, const QString& sizes)
 //   katana --check-menus --screenshot out.png
 //   katana --check-toolbars --screenshot out.png
 //   katana --check-toolbar-fit 1366x768,1920x1080 --screenshot out.png
+//   katana --check-session-restore --screenshot out.png
 //   katana --update-health TX
 //
 // The first argument that names a directory is opened as a project; other
@@ -953,6 +1026,12 @@ bool checkToolBarFit(katana::qt::MainWindow& window, const QString& sizes)
 // with the width each row of toolbars needs beside the width it has
 // (MainWindow::toolBarFit, checkToolBarFit above).
 //
+// --check-session-restore restores into the window, before it is first
+// shown, what an older build saved - its layout of version 1 and the window
+// maximised - as a session starts (MainWindow::restoreWindow), then shows it,
+// and fails the run when a toolbar is lost; a crash fails it too
+// (checkSessionRestore above).
+//
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
 // --survey-dock ACTION shows the dock that action shows (the Point Manager,
@@ -1049,6 +1128,7 @@ int main(int argc, char* argv[])
     bool checkToolBars = false;
     // --check-toolbar-fit's sizes, as given.
     QString toolBarFitSizes;
+    bool sessionRestoreCheck = false;
     // --update-health's transaction id, as the update helper gave it.
     std::optional<QString> updateHealth;
     long long attributeEntity = 0;
@@ -1144,6 +1224,8 @@ int main(int argc, char* argv[])
             checkToolBars = true;
         } else if (argument == "--check-toolbar-fit") {
             toolBarFitSizes = value();
+        } else if (argument == "--check-session-restore") {
+            sessionRestoreCheck = true;
         } else if (argument == "--update-health") {
             updateHealth = value();
         } else if (argument == "--attributes") {
@@ -1251,6 +1333,12 @@ int main(int argc, char* argv[])
         // checks nothing by itself and reads no per-user state, so this is
         // not called there.
         window.startUpdates();
+        // What the session starts with - its customisation, its coordinate
+        // system - asked as it starts, unless a project or a file was given
+        // to open, which brings its own (start_dialog.hpp).
+        if (inputs.isEmpty()) {
+            window.showStartScreenIfWanted();
+        }
     }
     for (const QString& input : inputs) {
         if (QFileInfo(input).isDir()) {
@@ -1285,6 +1373,11 @@ int main(int argc, char* argv[])
         if (screenshotPath->isEmpty()) {
             std::fprintf(stderr, "--screenshot needs an output path\n");
             return 2;
+        }
+        // Before anything shows the window: what it checks happens only to a
+        // window never shown.
+        if (sessionRestoreCheck && !checkSessionRestore(window)) {
+            return 1;
         }
         // Shown so that the layout is real - docks sized, toolbars wrapped -
         // and events pumped twice, because the first pass lays out and the

@@ -35,7 +35,8 @@ customisation a session starts with", below). Then an
 interactive run - one with no `--screenshot`, `--plot`, `--plot-sheets`,
 `--sheets-json` or batch `--script` - puts the window where the last session
 left it (`MainWindow::restoreSession`) and shows it, and the project and files
-on the command line are opened.
+on the command line are opened. With neither, it shows the start screen too
+("The start screen", below), unless that was told not to show.
 
 **The customisation a session starts with.** `MainWindow::loadDefaultCustomisation`
 builds a `cad::CustomisationHost` - the built-in customisation of this run
@@ -453,6 +454,65 @@ A rename or delete of the current style clears it rather than following it
 (`docs/cad.md`, "Document"), so the toolbar then shows ByLayer.
 `qt_current_style_and_the_style_row_headless` drives both.
 
+## The start screen
+
+What a session starts with, chosen as it starts (`StartDialog`, `startDialog`,
+`src/katana_qt/start_dialog.hpp`):
+
+- **The customisation** (`startCustomisation`). It lists:
+  - the session as it is, first, when that is no built-in as installed (a kept
+    copy, a file loaded, or nothing at all, as in a run whose seam says
+    `none`), and choosing it makes no line;
+  - every built-in, from `cad::builtInChoices`, the one answer
+    `CUSTOMISE BUILTIN` and Settings' chooser read, with the session's own
+    chosen to begin with;
+  - "From a customisation file...", with `startCustomisationFile`,
+    `startCustomisationBrowse` and `startCustomisationReplace`.
+
+  `startCustomisationKeep` ("Use it at every start") adds `CUSTOMISE KEEP`. It
+  is ticked when the session was the kept one, as Settings' Use keeps what was
+  kept, and offered only for a choice that changes the session, in a window
+  that keeps a customisation.
+- **The coordinate system** (`startCrs`): local coordinates, the common
+  systems (`cad::commonCoordinateSystems`), found by any part of their code or
+  name as they are typed, or any EPSG code, WKT or PROJ string typed. It is
+  checked as it is typed (`startCrsCheck`), in the Project Coordinate System
+  dialog's words: both call `crsCheckText`. The drawing's own system is
+  offered first; with none, the one chosen last.
+- **Start** (`startOk`) runs the lines `startLine` shows, one by one, through
+  the window's executor, so each is logged and is an undo step as typed:
+  `CUSTOMISE BUILTIN <name>` or `CUSTOMISE [REPLACE] "<file>"`, then
+  `CUSTOMISE KEEP`, then `CRS SET <text>` or `CRS CLEAR`. A choice that is what
+  the session has already makes no line, so Start on the screen as it opens
+  changes nothing. It stops at the first line refused and says why in
+  `startStatus`, and stays open. **Skip** (`startSkip`) closes it.
+- **When it shows.** An interactive start with no project or file to open shows
+  it (`MainWindow::showStartScreenIfWanted`), until `startShowAtStart` ("Show
+  this at start") is cleared. File > Start Screen (`fileStartScreen`) opens it
+  at any time, on the drawing as it is then. A project opened brings its own
+  system, and its record of what it was drawn with, so a start that opens one
+  does not ask.
+- **What it remembers.** The window keeps whether to show it
+  (`start/showAtStart`) and the system chosen last (`start/coordinateSystem`),
+  in its settings, unless the run is headless. The customisation is kept the
+  one way a customisation is kept, by `CUSTOMISE KEEP`. The dialog reads and
+  writes no settings itself, so it is tested without the registry
+  (`tests/qt_widgets/test_start_dialog.cpp`). The real window is driven by
+  `qt_the_start_screen_sets_the_coordinate_system_through_the_executor_headless`.
+
+Non-modal, as the Project Coordinate System dialog is: a headless run fills it
+by its object names (`--dialog fileStartScreen`), and the window behind it can
+be used. *Rejected:* a modal dialog before the window shows, which would hold
+up a start that only wants to open a file, and which `--dialog` could not
+fill. *Rejected:* a second home for the remembered customisation beside the
+kept file, which would let the two disagree about what the next start gives.
+
+katana_cli and katana_mcp make the same choices with the same lines: the
+customisation with `CUSTOMISE BUILTIN`, `CUSTOMISE "<file>"` and the variables
+`KATANA_BUILTIN_CUSTOMISATION` and `KATANA_CUSTOMISATION` (`docs/customisation.md`),
+and the system with `CRS SET`. They read no per-user settings, so neither has
+a start screen or remembers the system.
+
 ## Fitting the screen
 
 A menu or a dialog taller than the screen it is on has its bottom off it: the
@@ -607,6 +667,33 @@ widget tests cannot build it (`docs/headless.md`); it is the same run as
   fail), one saved before they existed, one of this version with BIM hidden,
   and an older one with Surface Edit hidden. A layout saved by a build of
   2026-10-15, with the bars on the second row, is repaired the same way.
+* **The order of a restore** (`MainWindow::restoreWindow`, what
+  `restoreSession` does with what it read). From 2026-10-15 to 2026-10-21
+  every start from a version 1 layout saved with the window maximised
+  crashed, before the window drew. The cause was in this order of events:
+  - `restoreGeometry` made the hidden window maximised.
+  - `restoreState` then kept a copy of the restored layout, as Qt does for a
+    window not yet shown that is to be maximised or full screen and that the
+    layout does not fit yet (`QMainWindowLayout`'s `restoredState`), to lay
+    out again once the window has its size.
+  - `seatThirdToolBarRow` moved the two toolbars: `removeToolBar` deletes a
+    toolbar's layout item, which the copy still held.
+  - At the first layout after the window was shown, Qt took the copy and
+    called through the deleted item.
+
+  Qt's own `tabifyDockWidget` and `splitDockWidget` apply that copy before
+  they change the layout; `removeToolBar` and `addToolBar` do not. So now the
+  layout is restored, and moved, while the window is as built - not
+  maximised, where Qt keeps no copy - and what that made is restored once
+  more after the geometry, with nothing moved after it. *Rejected:* restoring
+  again after the moves in a window already maximised, since Qt replaces its
+  copy only when the layout again does not fit and otherwise keeps the stale
+  one; and restoring after the window is shown, which shows it jump. The
+  in-process check above never saw it: it restores into a window already
+  shown. `--check-session-restore` (the
+  `qt_a_layout_saved_maximised_by_an_older_build_restores_before_the_window_is_shown_headless`
+  test) restores one before the first show. Without the fix it crashed, as the
+  owner's window did; with it, it passes.
 
 Not done: a window narrower
 than about 1,290 px (a 1280-px laptop) still overflows the second row, and

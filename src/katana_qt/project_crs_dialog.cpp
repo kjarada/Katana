@@ -253,17 +253,19 @@ void ProjectCrsDialog::fill(const QString& filter)
 
 void ProjectCrsDialog::recheck()
 {
-    const QString typed = text_->text().trimmed();
+    check_->setText(crsCheckText(text_->text(), place_));
+}
+
+QString crsCheckText(const QString& typedText, std::optional<std::pair<double, double>> place)
+{
+    const QString typed = typedText.trimmed();
     if (typed.isEmpty()) {
-        check_->setText(QStringLiteral("Local coordinates: no coordinate system. Online data and "
-                                       "reprojection need one."));
-        return;
+        return QStringLiteral("Local coordinates: no coordinate system. Online data and "
+                              "reprojection need one.");
     }
     auto description = katana::cad::describeCoordinateSystem(typed.toStdString());
     if (!description) {
-        check_->setText(QStringLiteral("Not a coordinate system: ") +
-                        qs(description.error().message));
-        return;
+        return QStringLiteral("Not a coordinate system: ") + qs(description.error().message);
     }
     QString line = qs(description->id) + QStringLiteral("  ") + qs(description->name) +
                    QStringLiteral(" - ") + qs(description->kind) + QStringLiteral(", ") +
@@ -275,11 +277,11 @@ void ProjectCrsDialog::recheck()
                     .arg(area.east, 0, 'f', 1)
                     .arg(area.south, 0, 'f', 1)
                     .arg(area.north, 0, 'f', 1);
-        if (place_ && !area.contains(place_->second, place_->first)) {
+        if (place && !area.contains(place->second, place->first)) {
             line += QStringLiteral(" - NOT where this place is");
         }
     }
-    check_->setText(line);
+    return line;
 }
 
 bool ProjectCrsDialog::suggest()
