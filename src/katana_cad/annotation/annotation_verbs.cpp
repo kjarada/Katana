@@ -567,7 +567,7 @@ Dim       DIM LINEAR|HORIZONTAL|VERTICAL p p at=p [angle=deg] | DIM ALIGNED p p 
           DIM RADIUS|DIAMETER circle-id [at=p] | DIM ORDINATE p at=p [datum=p axis=x|y]
           DIM BASELINE dim-id p [p...] [spacing=] | DIM CONTINUE dim-id p [p...]
 Leader    LEADER p p [p...] [text= | template= | labelstyle=] [arrow=closed|open|tick|dot|none
-          callout=none|box|circle style= paper=mm arrowsize=mm landing=mm]
+          callout=none|box|circle style= paper=mm arrowsize=mm landing=mm landingangle=auto|deg]
           a SMART leader's tip is on an entity (#id...) and its note is read off it every
           time it is drawn: template="IL {prop.invert:.3f}\n{length:.2f} m" (the label
           template language), or labelstyle=name (that style's template); a line naming a
@@ -581,7 +581,8 @@ Leader    LEADER p p [p...] [text= | template= | labelstyle=] [arrow=closed|open
           surface or the first alignment, said as chosen= in the reply
           LEADER VALUES id | #id[.point|@x,y] | <scope>   every value a note there can name
           LEADER LIST [id...] [target=id] [JSON] | PRESETS | SET id...|<scope> [text= template=
-          labelstyle= preset= arrow= callout= style= paper= arrowsize= landing= tip=p at=p]
+          labelstyle= preset= arrow= callout= style= paper= arrowsize= landing= landingangle=auto|deg
+          tip=p at=p [vertex=N]]  vertex is zero-based (0 is the tip); at alone moves the note end
           LEADER ATTACH id #id[.point|@x,y] | DETACH id...|<scope> | FREEZE id...|<scope>
           LEADER PROP id|<scope> SET key value [type] | PROP id|<scope> DELETE key   the tip
           entity's attribute
@@ -1736,6 +1737,13 @@ Result<ann::LeaderChange> leaderChangeOf(const Arguments& args)
             *target = *number;
         }
     }
+    if (const auto* value = args.find("landingangle")) {
+        const auto angle = ann::parseLeaderLandingAngle(*value);
+        if (!angle) {
+            return angle.error();
+        }
+        change.landingAngle.emplace(*angle);
+    }
     return change;
 }
 
@@ -2211,7 +2219,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         auto subject = subjectOf(args, 1, args.size(),
                                  {"text", "template", "labelstyle", "preset", "surface",
                                   "alignment", "arrow", "callout", "style", "paper",
-                                  "arrowsize", "landing", "tip", "at"});
+                                  "arrowsize", "landing", "landingangle", "tip", "at", "vertex"});
         if (!subject) {
             return subject.error();
         }
@@ -2219,7 +2227,8 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         if ((parsed.positional.empty() && !subject->scope) || parsed.options.empty()) {
             return usageOf("LEADER SET id [id...] | <scope> [text= template= labelstyle= "
                            "preset= surface=name alignment=name arrow= callout= style= paper= "
-                           "arrowsize= landing= tip=p at=p]   (options before WHERE)");
+                           "arrowsize= landing= landingangle=auto|deg tip=p at=p [vertex=N]] "
+                           "(zero-based vertex; options before WHERE)");
         }
         auto picked = choose(document_, scopeViews_, *subject, parsed.positional, true, true);
         if (!picked) {
@@ -2246,6 +2255,20 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
                 return point.error();
             }
             change->hang = *point;
+        }
+        if (const std::string* value = parsed.find("vertex")) {
+            if (!change->hang) {
+                return makeError(ErrorCode::InvalidArgument, "vertex= needs at=x,y");
+            }
+            const auto index = integerOf(*value, "vertex");
+            if (!index) {
+                return index.error();
+            }
+            if (*index < 0) {
+                return makeError(ErrorCode::InvalidArgument, "vertex= is a zero-based index");
+            }
+            change->vertex = ann::LeaderVertexMove{static_cast<std::size_t>(*index), *change->hang};
+            change->hang.reset();
         }
         if (picked->ids.empty()) {
             // A scope that took no leader: said, not refused.
@@ -2495,7 +2518,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         auto subject = subjectOf(args, 1, args.size(),
                                  {"text", "template", "labelstyle", "n", "preset", "surface",
                                   "alignment", "arrow", "callout", "style", "paper",
-                                  "arrowsize", "landing", "angle", "length"});
+                                  "arrowsize", "landing", "landingangle", "angle", "length"});
         if (!subject) {
             return subject.error();
         }
@@ -2569,7 +2592,7 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     auto parsed = splitArguments(args, 0,
                                  {"text", "template", "labelstyle", "preset", "surface",
                                   "alignment", "arrow", "callout", "style", "paper", "arrowsize",
-                                  "landing", "n"});
+                                  "landing", "landingangle", "n"});
     if (!parsed) {
         return parsed.error();
     }

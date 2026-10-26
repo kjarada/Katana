@@ -55,6 +55,28 @@ target_link_libraries(katana_mcp PRIVATE katana_app)
 target_compile_definitions(katana_mcp PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
 
 if(KATANA_BUILD_TESTS)
+    set(_leader_json_space "[ \t\r\n]*")
+    set(_leader_points_before "\"points\":${_leader_json_space}\\[${_leader_json_space}\\[${_leader_json_space}0\\.0,${_leader_json_space}0\\.0${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}5\\.0,${_leader_json_space}5\\.0${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}10\\.0,${_leader_json_space}5\\.0${_leader_json_space}\\]${_leader_json_space}\\]")
+    set(_leader_points_after "\"points\":${_leader_json_space}\\[${_leader_json_space}\\[${_leader_json_space}0\\.0,${_leader_json_space}0\\.0${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}7\\.125,${_leader_json_space}8\\.5${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}10\\.0,${_leader_json_space}5\\.0${_leader_json_space}\\]${_leader_json_space}\\]")
+    add_test(NAME cli.leader_points_and_frames_are_edited_and_undone
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "LEADER 0,0 5,5 10,5 text=Note"
+            -c "LEADER SET 1 vertex=1 at=7.125,8.5 callout=box landingangle=180"
+            -c "LEADER LIST 1 JSON" -c UNDO -c "LEADER LIST 1 JSON")
+    set_tests_properties(cli.leader_points_and_frames_are_edited_and_undone PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "\"callout\":${_leader_json_space}\"box\".*${_leader_points_after}.*\"callout\":${_leader_json_space}\"none\".*${_leader_points_before}"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.leader_point_edits_refuse_an_out_of_range_vertex
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "LEADER 0,0 5,5 text=Note"
+            -c "LEADER SET 1 vertex=2 at=7,8 callout=box" -c "POINT 1,1")
+    set_tests_properties(cli.leader_point_edits_refuse_an_out_of_range_vertex PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: InvalidArgument: leader vertex index is out of range"
+        FAIL_REGULAR_EXPRESSION "point created")
+
     # End-to-end: draw, save, reopen in a second process, and query.
     set(_project "${CMAKE_CURRENT_BINARY_DIR}/cli-smoke.katana")
     add_test(NAME cli.save

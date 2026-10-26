@@ -29,6 +29,7 @@
 //   FitPoint          a spline's fit point moves and the spline is re-solved
 //   ControlPoint      a spline's control point moves (a spline with no fit
 //                     points)
+//   LeaderVertex      a leader's free tip, bend or note end moves
 
 #include <cstddef>
 #include <optional>
@@ -53,6 +54,7 @@ enum class GripKind {
     Insertion,
     FitPoint,
     ControlPoint,
+    LeaderVertex,
 };
 
 [[nodiscard]] const char* toString(GripKind kind);

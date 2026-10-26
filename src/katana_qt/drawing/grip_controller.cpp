@@ -331,7 +331,7 @@ bool GripController::escape()
 bool GripController::deleteHot()
 {
     const bool anyVertex = std::any_of(hot_.begin(), hot_.end(), [](const cad::Grip& grip) {
-        return grip.kind == cad::GripKind::Vertex;
+        return grip.kind == cad::GripKind::Vertex || grip.kind == cad::GripKind::LeaderVertex;
     });
     if (!anyVertex) {
         return false;

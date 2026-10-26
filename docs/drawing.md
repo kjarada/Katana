@@ -98,6 +98,15 @@ centre, squares on quadrants, line and arc ends and middles, insertion
 points, and a spline's fit (or control) points. Blue is cold, green under the
 cursor, red hot - the colours a drafter already reads.
 
+Leaders also expose point grips: their free tip, bends and note end.
+Their moves use `annotation::moveLeaderVertices`, the same operation as
+`LEADER SET id vertex=N at=x,y`, preserving the note, frame and sizes.
+An attached tip must be reattached or detached explicitly and has no free
+grip. Leader point grips do not delete bends; Delete on one is refused
+rather than falling through to erasing the leader. Their appearance and
+coordinate editor is described in `docs/annotation.md`, "Moving and framing
+existing leaders".
+
 **Everything a grip does is headless** (`include/katana/cad/drawing/grips.hpp`):
 `gripsOf` says which handles an entity offers, `applyGripDrag` what a drag
 does to it, `gripDragCommand` makes the drag ONE undoable `GRIP_EDIT`

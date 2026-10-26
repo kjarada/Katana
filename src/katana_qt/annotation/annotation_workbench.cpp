@@ -306,6 +306,15 @@ LeaderManagerDialog& AnnotationWorkbench::showLeaders(int tab)
         leaders_->setModal(false);
     }
     leaders_->showTab(static_cast<LeaderManagerDialog::Tab>(std::clamp(tab, 0, 2)));
+    if (tab == 0 && !document_.selection().contains(leaders_->currentLeader())) {
+        for (const auto id : document_.selection().ids()) {
+            const auto* entity = document_.model().entities.find(id);
+            if (entity != nullptr && entity->type() == katana::entity::EntityType::Leader) {
+                (void)leaders_->showLeader(id);
+                break;
+            }
+        }
+    }
     raise(*leaders_);
     return *leaders_;
 }
@@ -329,7 +338,7 @@ void AnnotationWorkbench::addLeaderActions(QMenu& annotateMenu)
     };
     const Entry entries[] = {
         {"annotateLeaders", "Leaders...",
-         "The drawing's leaders: a note read off the entity a leader points at - its "
+         "Edit leader positions, note frames, arrows and text sizes; a note read off its entity - "
          "attributes, level, length, chainage - the values to put in it, its look, and an "
          "attribute of that entity set through it (LEADER SET, LEADER PROP)",
          0},

@@ -435,6 +435,68 @@ direction is present; old plain and smart leaders retain their existing
 versions and byte layouts. Tests pin the new bytes and reject a truncated
 angle (`docs/model.md`, "The kinds appended since").
 
+### Moving and framing existing leaders
+
+Select a leader in the plan view to expose square grips on its free arrow
+tip, every bend and its note end. Drag a grip, or click it, type a coordinate
+and press Enter, to move that point as one undo step. The text, frame, sizes
+and landing direction stay with the leader. An attached arrow tip has no
+free-move grip: use Attach or Along to change its attachment, or Detach
+first. The same rule is enforced by the shared point-edit operation, not
+just by hiding a handle.
+
+Double-click the leader, or right-click **Edit Leader...**, to open its form
+in **Annotate > Leaders...**. The **Position** group chooses Arrow tip, a
+bend or Note end and accepts exact Easting and Northing values in model
+units. Choosing another point only shows its coordinates; it is not an edit.
+**Apply** combines changed coordinates and appearance into one `LEADER SET`
+line and one undo step. Several selected leaders may share an appearance
+edit, but an absolute point edit requires one leader so their notes cannot
+accidentally be piled onto one coordinate.
+Apply re-reads the stored leader before the coalesced change notification:
+an immediate Undo then restores the coordinate fields instead of mistaking
+the applied values for edits that were never submitted.
+
+In **Look**, **Note frame** offers none, box and circle. **Landing direction**
+accepts Auto or degrees: 0 points right, 180 left, and Auto derives the side
+from the final segment. This also edits a direction preserved from an archive.
+The existing arrow, text style, text height, arrow size and landing length
+controls remain beside it. The right-click **Leader Note Frame** submenu
+applies the same frame options to the selected leaders through the shared
+scope parser; other selected entity kinds are unchanged.
+
+```text
+LEADER SET 12 at=25,18 callout=box
+LEADER SET 12 vertex=1 at=15,20 landingangle=180
+LEADER SET 12 landingangle=auto
+LEADER SET SELECTION callout=box
+LEADER SET DRAWING callout=none WHERE LAYER=notes
+LEADER LIST 12 JSON
+```
+
+Vertex indices are zero-based: 0 is the arrow tip and the last point is the
+note end. `vertex=` requires `at=`; an out-of-range index, non-finite
+coordinates or direction, ambiguous tip assignments and degenerate results
+are refused without changing the leader. `moveLeaderVertices` is the one
+headless operation behind both the command and the grip editor. Point grips
+move existing points; they do not delete bends, and Delete on a hot leader
+point does not erase the whole leader.
+
+The manager's new controls are `leaderPositionPoint`, `leaderPositionX`,
+`leaderPositionY`, `leaderPositionHint` and `leaderLandingAngle`. Invalid
+text is an explicit form error and no command runs. Its form is scrollable
+while Apply, Freeze and Detach remain outside the scroll area. `LEADER LIST
+JSON` and MCP's `katana_leaders` expose the full `points` array, `text_style`,
+`paper_height`, `arrow_size`, `landing`, and the optional `landing_angle`
+in radians, so an agent can inspect the same positions and appearance.
+
+`tests/cad/annotation/test_leader_positions.cpp` checks point edits, scoped
+frames, refusals, atomic multi-grip moves and attached tips.
+`tests/qt_widgets/annotation/test_leader_manager_positions.cpp` drives the
+exact-coordinate fields and their errors; the plan-view grip and context-menu
+tests exercise the mouse gesture and frame commands. CLI, MCP and the
+headless window all edit the same bent leader and check its points and box.
+
 ## Smart leaders
 
 Built on 2026-09-25 at the owner's request for "more functionality for
@@ -979,7 +1041,7 @@ pure functions of plain data (`leaderOptionWords`, `leaderSetLine`,
 
 | Button | Line |
 |---|---|
-| Apply | `LEADER SET id [id...]` and only the options the form changed - `text=` / `template=` / `labelstyle=`, `arrow=`, `callout=`, `style=`, `paper=`, `arrowsize=`, `landing=`, `tip=#id.alongN:T` - the numbers written exactly (`core::formatExactReal`: a height of 2.3456 is not sent as 2.346). An untouched form runs no line |
+| Apply | `LEADER SET id [id...]` and only the options the form changed - `text=` / `template=` / `labelstyle=`, `arrow=`, `callout=`, `style=`, `paper=`, `arrowsize=`, `landing=`, `landingangle=`, `tip=#id.alongN:T`, `vertex=N at=x,y` - the numbers written exactly (`core::formatExactReal`: a height of 2.3456 is not sent as 2.346). An untouched form runs no line |
 | Freeze Note, Detach Tip | `LEADER FREEZE id...`, `LEADER DETACH id...` |
 | Attach to Selected | `LEADER ATTACH id #id.along0:0.25` (`command_words.hpp`, `anchorWord`, the place written so the verb reads it back exactly) |
 | Set, Remove (attribute) | `LEADER PROP id SET key value [type]`, `LEADER PROP id DELETE key` |

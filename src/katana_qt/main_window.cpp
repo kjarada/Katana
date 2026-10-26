@@ -2931,11 +2931,11 @@ void MainWindow::editDoubleClicked(katana::entity::EntityId id)
         document_.selection().set({id});
         document_.notifySelectionChanged();
     }
-    // A text or a label opens its own editor where the window has one
-    // (Annotate > Edit Text, Edit Label); anything else is edited in
+    // Annotation opens its own editor; anything else is edited in
     // the Properties panel.
     const char* editor = entity->type() == katana::entity::EntityType::Text    ? "annotateEditText"
                          : entity->type() == katana::entity::EntityType::Label ? "annotateEditLabel"
+                         : entity->type() == katana::entity::EntityType::Leader ? "annotateLeaders"
                                                                                : nullptr;
     if (editor != nullptr) {
         if (auto* action = findChild<QAction*>(QString::fromLatin1(editor));

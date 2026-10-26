@@ -116,9 +116,25 @@ scope and filter under the names `katana_import` uses (`scope`, `area`,
 `scope_layers`, `only`, `scope_where`) and says how many leaders the scope took
 (`McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`).
 Leader records from `katana_leaders` and `LEADER LIST JSON` may also include
-`landing_angle`, in radians, when an imported leader carries an explicit
+`landing_angle`, in radians, when a leader carries an explicit
 landing direction. Its absence retains the usual direction inferred from
 the leader geometry.
+
+The same records include `points` (the complete ordered `[x,y]` array),
+`text_style`, `paper_height`, `arrow_size` and `landing`. Inspect these before
+moving a bend or note; index 0 is the arrow tip and the final point is the
+note end. Edits use the shared command tool, with normal undo:
+
+```json
+{"commands":["LEADER SET 12 vertex=1 at=25,18 callout=box landingangle=180","LEADER LIST 12 JSON"]}
+```
+
+`at=` without `vertex=` moves the note end. `landingangle=auto` restores
+automatic direction; numeric command values are degrees, while the report's
+`landing_angle` is radians. An attached tip cannot be silently detached by a
+coordinate edit. Frame and appearance edits also take the shared scope and
+filter, for example `LEADER SET SELECTION callout=box`; an absolute point
+edit requires exactly one matched leader.
 
 An entity's attributes are read a level at a time through
 `katana_run_commands` with `PROP TREE` (`docs/cad.md`, "Properties as a tree:

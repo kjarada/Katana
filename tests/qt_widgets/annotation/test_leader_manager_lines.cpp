@@ -154,6 +154,13 @@ TEST(LeaderManagerLines, OnlyWhatChangedIsWrittenAndNumbersAreWrittenExactly)
     const auto tip = katana::qt::leaderOptionWords(moved);
     ASSERT_TRUE(tip.ok());
     EXPECT_EQ(*tip, " tip=#7.along2:0.123456");
+    moved.tip = katana::cad::annotation::AnchoredPoint{katana::geometry::Point2(3.25, 4.5), {}};
+    EXPECT_EQ(*katana::qt::leaderOptionWords(moved), " tip=3.25,4.5");
+    LeaderChange point;
+    point.vertex = katana::cad::annotation::LeaderVertexMove{1, {7.125, 9.5}};
+    point.landingAngle.emplace(std::nullopt);
+    EXPECT_EQ(*katana::qt::leaderOptionWords(point),
+              " landingangle=auto vertex=1 at=7.125,9.5");
 
     // The ids, then the options; a change that sets nothing is no line.
     const auto line = katana::qt::leaderSetLine({3, 5}, change);

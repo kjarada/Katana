@@ -246,7 +246,8 @@ TEST(LeaderManager, AnUntouchedFormIsNoStepAndWhatItsWidgetsCannotHoldIsKept)
     const LeaderGeometry drawn = d.leader(leader);
     LeaderManagerDialog dialog(d.document, d.context());
     ASSERT_TRUE(dialog.showLeader(leader));
-    EXPECT_TRUE(dialog.formChange().empty());
+    ASSERT_TRUE(dialog.formChange().ok());
+    EXPECT_TRUE(dialog.formChange()->empty());
     const std::size_t before = d.steps();
     ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
     EXPECT_EQ(d.steps(), before) << "an untouched form applied is no step";
@@ -255,9 +256,11 @@ TEST(LeaderManager, AnUntouchedFormIsNoStepAndWhatItsWidgetsCannotHoldIsKept)
     // One field changed is the one sent; everything else stays exactly.
     chooseData(child<QComboBox>(dialog, "leaderCallout"), kBox);
     const auto change = dialog.formChange();
-    EXPECT_TRUE(change.callout);
-    EXPECT_FALSE(change.note || change.arrow || change.textStyle || change.paperHeight ||
-                 change.arrowSize || change.landing || change.tip || change.hang);
+    ASSERT_TRUE(change.ok());
+    EXPECT_TRUE(change->callout);
+    EXPECT_FALSE(change->note || change->arrow || change->textStyle || change->paperHeight ||
+                 change->arrowSize || change->landing || change->tip || change->hang ||
+                 change->vertex || change->landingAngle);
     ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
     EXPECT_EQ(d.steps(), before + 1);
     LeaderGeometry expected = drawn;
@@ -303,10 +306,11 @@ TEST(LeaderManager, ANoteMadeAStylesAndBackKeepsTheUsersWordsAndLook)
     EXPECT_EQ(textStyle->currentData().toString(), QString()) << "and the look before";
     EXPECT_EQ(paper->value(), 2.0);
     const auto change = dialog.formChange();
-    ASSERT_TRUE(change.note);
-    EXPECT_EQ(*change.note, (katana::cad::annotation::LeaderNote{
+    ASSERT_TRUE(change.ok());
+    ASSERT_TRUE(change->note);
+    EXPECT_EQ(*change->note, (katana::cad::annotation::LeaderNote{
                                 katana::cad::annotation::LeaderNote::Kind::Text, "MY WORDS"}));
-    EXPECT_FALSE(change.textStyle || change.paperHeight) << "the look is as it was";
+    EXPECT_FALSE(change->textStyle || change->paperHeight) << "the look is as it was";
     ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
     EXPECT_EQ(d.leader(leader).text, "MY WORDS");
     EXPECT_EQ(d.leader(leader).style, "");
@@ -411,7 +415,8 @@ TEST(LeaderManager, ALookTypedAfterALendIsKeptAndAStylesHeightIsLentExactly)
     ASSERT_TRUE(dialog.showLeader(fine));
     chooseStyle(dialog, "Fine");
     EXPECT_EQ(paper->value(), 2.346);
-    EXPECT_FALSE(dialog.formChange().paperHeight) << "the style's own: left to the style";
+    ASSERT_TRUE(dialog.formChange().ok());
+    EXPECT_FALSE(dialog.formChange()->paperHeight) << "the style's own: left to the style";
     ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
     EXPECT_EQ(d.leader(fine).paperHeight, 2.3456);
 }
@@ -547,7 +552,8 @@ TEST(LeaderManager, AStylesNoteIsReadAfreshWhenTheStyleChanges)
     processEvents();
     EXPECT_EQ(note->toPlainText(), QStringLiteral("IL {prop.invert:.3f}"));
     EXPECT_EQ(dialog.preview(), QStringLiteral("IL 10.500"));
-    EXPECT_TRUE(dialog.formChange().empty()) << "nothing of the leader's changed";
+    ASSERT_TRUE(dialog.formChange().ok());
+    EXPECT_TRUE(dialog.formChange()->empty()) << "nothing of the leader's changed";
 }
 
 TEST(LeaderManager, TheListChoosesAndFreezeWaitsForTheFormToBeApplied)
@@ -665,7 +671,8 @@ TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
     EXPECT_EQ(d.steps(), before);
     EXPECT_FALSE(d.leader(leader).tipRef.associated());
     note->setPlainText(QStringLiteral("X"));
-    EXPECT_TRUE(dialog.formChange().empty()) << "back to what it showed";
+    ASSERT_TRUE(dialog.formChange().ok());
+    EXPECT_TRUE(dialog.formChange()->empty()) << "back to what it showed";
     EXPECT_TRUE(attach->isEnabled());
 
     ASSERT_TRUE(dialog.attachToSelected()) << dialog.problem().toStdString();
@@ -1104,7 +1111,8 @@ TEST(LeaderManager, ADrawingReplacedStartsTheFormAfresh)
         processEvents();
         EXPECT_EQ(dialog.currentLeader(), leader);
         EXPECT_EQ(note->toPlainText(), QStringLiteral("ONE"));
-        EXPECT_TRUE(dialog.formChange().empty());
+        ASSERT_TRUE(dialog.formChange().ok());
+        EXPECT_TRUE(dialog.formChange()->empty());
 
         d.document.newDocument();
         processEvents();

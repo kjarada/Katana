@@ -620,6 +620,30 @@ TEST_F(McpServer, DescribeEntityNamesTheEntityWhateverFilesTheWorkingDirectoryHo
 // katana_leaders: what each leader says now, and the presets, read from the
 // Document as katana_status is - LEADER LIST JSON's object. A point at RL 25
 // with a level leader on it says "RL 25.000".
+TEST_F(McpServer, LeaderPointsAndFramesAreEditableAndTheirFullGeometryIsReported)
+{
+    initialize();
+    const auto result = call("katana_run_commands", Json{{"commands", {
+        "LEADER 0,0 5,5 10,5 text=Note",
+        "LEADER SET 1 vertex=1 at=7,8 callout=box landingangle=180 paper=3"
+    }}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const auto report = call("katana_leaders", Json{{"scope", "drawing"}});
+    ASSERT_FALSE(report["isError"].get<bool>()) << textOf(report);
+    const auto& leaders = report["structuredContent"]["leaders"];
+    ASSERT_EQ(leaders.size(), 1u);
+    EXPECT_EQ(leaders[0]["points"], (Json{{0.0, 0.0}, {7.0, 8.0}, {10.0, 5.0}}));
+    EXPECT_EQ(leaders[0]["callout"], "box");
+    EXPECT_EQ(leaders[0]["paper_height"], 3);
+    EXPECT_TRUE(leaders[0]["landing_angle"].is_number());
+    const auto undone = call("katana_undo");
+    ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    const auto original = call("katana_leaders", Json{{"scope", "drawing"}});
+    EXPECT_EQ(original["structuredContent"]["leaders"][0]["points"],
+              (Json{{0.0, 0.0}, {5.0, 5.0}, {10.0, 5.0}}));
+    EXPECT_EQ(original["structuredContent"]["leaders"][0]["callout"], "none");
+}
+
 TEST_F(McpServer, TheLeadersToolGivesWhatEachLeaderSaysAndThePresets)
 {
     initialize();

@@ -4803,6 +4803,20 @@ if(TARGET katana)
     # makes a baseline dimension measuring 20; Enter makes it, Enter again
     # ends the tool. BALLOON from 30,0 to 35,5 is balloon 1, the drawing's
     # first. LEADER's Callout option boxes the next leader's note.
+    add_test(NAME qt_existing_leader_positions_and_box_are_edited_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LEADER 0,0 5,5 10,5 text=NOTE|>SELECT 1|>ZOOM WINDOW -5,-5,30,20|@annotateLeaders|leaderPositionPoint=Bend 1|leaderPositionX=7.125|leaderPositionY=8.5|leaderCallout=box|leaderLandingAngle=180|!leaderApply|?leaderLine|>LEADER LIST 1 JSON|>UNDO|>LEADER LIST 1 JSON|>REDO"
+            "-DEXPECT=leaderLine: LEADER SET 1 callout=box landingangle=180 vertex=1 at=7.125,8.5.*\"callout\":[ \t\r\n]*\"box\".*\"points\":[ \t\r\n]*\\[[ \t\r\n]*\\[[ \t\r\n]*0\\.0,[ \t\r\n]*0\\.0[ \t\r\n]*\\],[ \t\r\n]*\\[[ \t\r\n]*7\\.125,[ \t\r\n]*8\\.5[ \t\r\n]*\\],[ \t\r\n]*\\[[ \t\r\n]*10\\.0,[ \t\r\n]*5\\.0[ \t\r\n]*\\][ \t\r\n]*\\].*\"callout\":[ \t\r\n]*\"none\""
+            "-DFORBID=unknown option|error:|--press: .* is hidden"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/leader_positions_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_existing_leader_positions_and_box_are_edited_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
     add_test(NAME qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"

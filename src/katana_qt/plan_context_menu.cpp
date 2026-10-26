@@ -20,12 +20,13 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 
 // The one value every selected entity shares, or "" when they differ.
 template <class Read>
-std::string sharedBy(const katana::cad::Document& document, Read read)
+std::string sharedBy(const katana::cad::Document& document, Read read,
+                     std::optional<katana::entity::EntityType> type = std::nullopt)
 {
     std::optional<std::string> shared;
     for (const katana::entity::EntityId id : document.selection().ids()) {
         const katana::entity::Entity* entity = document.model().entities.find(id);
-        if (entity == nullptr) {
+        if (entity == nullptr || (type && entity->type() != *type)) {
             continue;
         }
         const std::string value = read(*entity);
@@ -173,6 +174,30 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
     }
     if (selectionHas(document, katana::entity::EntityType::Label)) {
         addExisting(*this, "annotateEditLabel");
+    }
+    if (selectionHas(document, katana::entity::EntityType::Leader)) {
+        if (context_.actions != nullptr) {
+            if (auto* editor = context_.actions->findChild<QAction*>("annotateLeaders")) {
+                auto* edit = addAction("Edit Leader...");
+                edit->setObjectName("planContextEditLeader");
+                edit->setEnabled(editor->isEnabled());
+                connect(edit, &QAction::triggered, editor, &QAction::trigger);
+            }
+        }
+        QMenu* frames = addMenu("Leader Note Frame");
+        frames->setObjectName("planContextLeaderFrame");
+        const std::string shared = sharedBy(document, [](const katana::entity::Entity& entity) {
+            const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+            return leader != nullptr ? std::string(katana::entity::toString(leader->callout))
+                                     : std::string();
+        }, katana::entity::EntityType::Leader);
+        for (const auto& [label, word] : {std::pair{"None", "none"}, std::pair{"Box", "box"},
+                                         std::pair{"Circle", "circle"}}) {
+            QAction* action = addLine(*frames, label, QString("planContextLeaderFrame.") + word,
+                                       QString("LEADER SET SELECTION callout=") + word);
+            action->setCheckable(true);
+            action->setChecked(shared == word);
+        }
     }
     addSeparator();
     addExisting(*this, "editDeselect");

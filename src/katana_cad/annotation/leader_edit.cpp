@@ -6,6 +6,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <set>
 #include <utility>
 
 #include "katana/cad/survey_coding.hpp"
@@ -13,6 +14,7 @@
 #include "katana/core/text.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/annotation.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/leader_values.hpp"
 
 namespace katana::cad::annotation {
@@ -183,6 +185,14 @@ Status checkLeaderChange(const Model& model, const LeaderChange& change)
         !model.textStyles.contains(*change.textStyle)) {
         return makeError(ErrorCode::NotFound, "text style does not exist", *change.textStyle);
     }
+    if ((change.vertex && change.hang) ||
+        (change.vertex && change.vertex->index == 0 && change.tip)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a leader point cannot be assigned twice in one edit");
+    }
+    if (change.landingAngle && *change.landingAngle && !std::isfinite(**change.landingAngle)) {
+        return makeError(ErrorCode::InvalidArgument, "landingangle= must be finite or auto");
+    }
     // Millimetres on paper, where 0 already means something (the text
     // style's height, no landing): below it there is nothing to draw, and a
     // negative landing would hang the note back over its own line.
@@ -196,6 +206,52 @@ Status checkLeaderChange(const Model& model, const LeaderChange& change)
         }
     }
     return {};
+}
+
+Result<LeaderGeometry> moveLeaderVertices(const LeaderGeometry& leader,
+                                         const std::vector<LeaderVertexMove>& moves)
+{
+    LeaderGeometry moved = leader;
+    std::set<std::size_t> changed;
+    for (const LeaderVertexMove& move : moves) {
+        if (move.index >= moved.vertices.size()) {
+            return makeError(ErrorCode::InvalidArgument, "leader vertex index is out of range",
+                             std::to_string(move.index));
+        }
+        if (!move.position.isFinite()) {
+            return makeError(ErrorCode::InvalidArgument, "leader point coordinates must be finite");
+        }
+        if (!changed.insert(move.index).second) {
+            return makeError(ErrorCode::InvalidArgument, "a leader vertex is moved more than once",
+                             std::to_string(move.index));
+        }
+        if (move.index == 0 && leader.tipRef.associated() &&
+            move.position != leader.vertices.front()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the leader tip is attached; use LEADER ATTACH or DETACH before moving it");
+        }
+        moved.vertices[move.index] = move.position;
+    }
+    if (!std::isfinite(katana::geometry::Polyline2{moved.vertices, false}.length())) {
+        return makeError(ErrorCode::InvalidArgument, "the edited leader is too large");
+    }
+    if (const auto status = katana::entity::validate(moved); !status) {
+        return status.error();
+    }
+    return moved;
+}
+
+Result<std::optional<double>> parseLeaderLandingAngle(std::string_view degrees)
+{
+    if (katana::core::equalsIgnoringCase(degrees, "auto")) {
+        return std::optional<double>{};
+    }
+    const auto value = katana::core::parseFiniteDouble(degrees);
+    if (!value) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "landingangle= takes auto or a finite angle in degrees", std::string(degrees));
+    }
+    return std::optional<double>(std::remainder(*value, 360.0) * katana::math::kDegToRad);
 }
 
 Status applyLeaderChange(const Model& model, const LeaderChange& change, LeaderGeometry& leader,
@@ -251,6 +307,9 @@ Status applyLeaderChange(const Model& model, const LeaderChange& change, LeaderG
     if (change.landing) {
         leader.landing = *change.landing;
     }
+    if (change.landingAngle) {
+        leader.landingAngle = *change.landingAngle;
+    }
     if (change.tip) {
         if (id != 0 && change.tip->ref.entity == id) {
             return makeError(ErrorCode::InvalidArgument,
@@ -264,8 +323,18 @@ Status applyLeaderChange(const Model& model, const LeaderChange& change, LeaderG
         }
         leader.tipRef = change.tip->ref;
     }
-    if (change.hang && !leader.vertices.empty()) {
-        leader.vertices.back() = *change.hang;
+    if (change.hang || change.vertex) {
+        if (leader.vertices.empty()) {
+            return makeError(ErrorCode::InvalidGeometry, "the leader has no point to move");
+        }
+        const LeaderVertexMove move = change.vertex
+                                          ? *change.vertex
+                                          : LeaderVertexMove{leader.vertices.size() - 1, *change.hang};
+        auto moved = moveLeaderVertices(leader, {move});
+        if (!moved) {
+            return moved.error();
+        }
+        leader = std::move(*moved);
     }
     return katana::entity::checkLeaderSaysSomething(model, leader, codePropertyCandidates(),
                                                     context);
@@ -347,6 +416,10 @@ Result<CommandPtr> changeLeaders(const Model& model, std::vector<EntityId> ids,
     if (change.hang && ids.size() != 1) {
         return makeError(ErrorCode::InvalidArgument,
                          "at= moves one leader's note; name one leader");
+    }
+    if (change.vertex && ids.size() != 1) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "vertex= moves one leader's point; name one leader");
     }
     ChangeSet changes;
     for (const EntityId id : ids) {

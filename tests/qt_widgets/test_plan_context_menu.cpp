@@ -129,6 +129,39 @@ QAction* item(const QMenu& menu, const QString& name)
 
 } // namespace
 
+TEST(PlanContextMenu, LeaderEditingAndFramesUseTheExistingManagerAndSharedScopedCommand)
+{
+    MenuFixture f;
+    f.action("annotateLeaders");
+    f.run("LEADER 0,0 5,5 text=A");
+    f.run("LEADER 0,10 5,15 text=B");
+    f.run("LINE 0,0 10,0");
+    f.run("SELECT ALL");
+    PlanContextMenu menu(f.context());
+    auto* editor = menu.findChild<QAction*>("planContextEditLeader");
+    auto* box = menu.findChild<QAction*>("planContextLeaderFrame.box");
+    ASSERT_NE(editor, nullptr);
+    ASSERT_NE(box, nullptr);
+    editor->trigger();
+    EXPECT_EQ(f.triggered, (std::vector<QString>{"annotateLeaders"}));
+    const auto before = f.document.history().undoCount();
+    box->trigger();
+    ASSERT_EQ(f.lines.size(), 1u);
+    EXPECT_EQ(f.lines.front(), "LEADER SET SELECTION callout=box");
+    EXPECT_EQ(f.document.history().undoCount(), before + 1);
+    for (const EntityId id : {1, 2}) {
+        EXPECT_EQ(std::get<katana::entity::LeaderGeometry>(f.entity(id).geometry).callout,
+                  katana::entity::CalloutShape::Box);
+    }
+    EXPECT_TRUE(std::holds_alternative<katana::geometry::Segment2>(f.entity(3).geometry));
+    PlanContextMenu refreshed(f.context());
+    ASSERT_NE(refreshed.findChild<QAction*>("planContextLeaderFrame.box"), nullptr);
+    EXPECT_TRUE(refreshed.findChild<QAction*>("planContextLeaderFrame.box")->isChecked());
+    ASSERT_TRUE(f.document.undo().ok());
+    EXPECT_EQ(std::get<katana::entity::LeaderGeometry>(f.entity(1).geometry).callout,
+              katana::entity::CalloutShape::None);
+}
+
 TEST(PlanContextMenu, WithASelectionItOffersTheWindowsActionsAndTheSelectionsVerbs)
 {
     MenuFixture f;

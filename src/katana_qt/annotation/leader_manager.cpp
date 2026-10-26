@@ -468,6 +468,10 @@ std::vector<EntityId> leadersTaken(const katana::cad::Document& document,
 
 Result<std::string> leaderOptionWords(const ann::LeaderChange& change)
 {
+    const auto pointWord = [](const katana::geometry::Point2& point) {
+        return katana::core::formatExactReal(point.x) + "," +
+               katana::core::formatExactReal(point.y);
+    };
     std::string words;
     const auto add = [&words](const char* key, const std::string& value) {
         words += std::string(" ") + key + "=" + value;
@@ -506,12 +510,22 @@ Result<std::string> leaderOptionWords(const ann::LeaderChange& change)
     if (change.landing) {
         add("landing", katana::core::formatExactReal(*change.landing));
     }
+    if (change.landingAngle) {
+        add("landingangle", *change.landingAngle
+                               ? katana::core::formatExactReal(**change.landingAngle *
+                                                              katana::math::kRadToDeg)
+                               : "auto");
+    }
     if (change.tip) {
-        add("tip", ann::anchorWord(change.tip->ref));
+        add("tip", change.tip->ref.associated() ? ann::anchorWord(change.tip->ref)
+                                             : pointWord(change.tip->point));
     }
     if (change.hang) {
-        add("at", katana::core::formatExactReal(change.hang->x) + "," +
-                      katana::core::formatExactReal(change.hang->y));
+        add("at", pointWord(*change.hang));
+    }
+    if (change.vertex) {
+        add("vertex", std::to_string(change.vertex->index));
+        add("at", pointWord(change.vertex->position));
     }
     return words;
 }
@@ -537,7 +551,7 @@ Result<QString> leadersForLine(bool balloon, const QString& scope, const ann::Le
     if (scope.trimmed().isEmpty()) {
         return makeError(ErrorCode::InvalidArgument, "say which entities to make leaders for");
     }
-    if (change.tip || change.hang) {
+    if (change.tip || change.hang || change.vertex) {
         return makeError(ErrorCode::InvalidArgument,
                          "a leader made for an entity has its tip on it: tip and at do not apply");
     }
@@ -629,6 +643,19 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document,
     landing_ = spin(leaderTab, "leaderLanding", 0.0, kLargestSize, 0.5, kSizeDecimals,
                     QStringLiteral(" mm"));
     landing_->setSpecialValueText(QStringLiteral("none"));
+    landingAngle_ = new QComboBox(leaderTab);
+    landingAngle_->setObjectName(QStringLiteral("leaderLandingAngle"));
+    landingAngle_->setEditable(true);
+    landingAngle_->addItems({"Auto", "0", "90", "180", "270"});
+    landingAngle_->setToolTip("Landing direction in degrees: 0 right, 180 left; "
+                             "Auto follows the last leader segment.");
+    positionPoint_ = new QComboBox(leaderTab);
+    positionPoint_->setObjectName(QStringLiteral("leaderPositionPoint"));
+    positionX_ = edit(leaderTab, "leaderPositionX");
+    positionY_ = edit(leaderTab, "leaderPositionY");
+    positionHint_ = new QLabel(leaderTab);
+    positionHint_->setObjectName(QStringLiteral("leaderPositionHint"));
+    positionHint_->setWordWrap(true);
     attributeName_ = edit(leaderTab, "leaderAttributeName", QStringLiteral("invert"));
     attributeName_->setMinimumWidth(110);
     attributeValue_ = edit(leaderTab, "leaderAttributeValue", QStringLiteral("10.25"));
@@ -659,13 +686,38 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document,
     noteForm->addRow(QStringLiteral("Says"), preview_);
     auto* lookForm = new QFormLayout;
     lookForm->addRow(QStringLiteral("Arrow"), arrow_);
-    lookForm->addRow(QStringLiteral("Callout"), callout_);
+    lookForm->addRow(QStringLiteral("Note frame"), callout_);
     lookForm->addRow(QStringLiteral("Text style"), textStyle_);
     lookForm->addRow(QStringLiteral("Text height"), paperHeight_);
     lookForm->addRow(QStringLiteral("Arrow size"), arrowSize_);
     lookForm->addRow(QStringLiteral("Landing"), landing_);
+    auto* angleLabel = new QLabel("Landing direction", leaderTab);
+    angleLabel->setObjectName("leaderLandingAngleLabel");
+    angleLabel->setBuddy(landingAngle_);
+    lookForm->addRow(angleLabel, landingAngle_);
     auto* look = new QGroupBox(QStringLiteral("Look"), leaderTab);
     look->setLayout(lookForm);
+
+    auto* position = new QGroupBox("Position", leaderTab);
+    position->setObjectName("leaderPositionGroup");
+    auto* positionForm = new QFormLayout(position);
+    auto* pointLabel = new QLabel("Point", position);
+    pointLabel->setObjectName("leaderPositionPointLabel");
+    pointLabel->setBuddy(positionPoint_);
+    positionForm->addRow(pointLabel, positionPoint_);
+    auto* coordinates = new QHBoxLayout;
+    auto* eastLabel = new QLabel("Easting", position);
+    eastLabel->setObjectName("leaderPositionXLabel");
+    eastLabel->setBuddy(positionX_);
+    auto* northLabel = new QLabel("Northing", position);
+    northLabel->setObjectName("leaderPositionYLabel");
+    northLabel->setBuddy(positionY_);
+    coordinates->addWidget(eastLabel);
+    coordinates->addWidget(positionX_, 1);
+    coordinates->addWidget(northLabel);
+    coordinates->addWidget(positionY_, 1);
+    positionForm->addRow(coordinates);
+    positionForm->addRow(positionHint_);
 
     attributeSet_ = button(leaderTab, "leaderAttributeSet", QStringLiteral("Set"));
     attributeSet_->setToolTip(
@@ -694,10 +746,19 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document,
     auto* middle = new QHBoxLayout;
     middle->addWidget(values_, 3);
     middle->addWidget(look, 2);
+    auto* formBody = new QWidget(leaderTab);
+    formBody->setObjectName("leaderFormBody");
+    auto* formLayout = new QVBoxLayout(formBody);
+    formLayout->addWidget(position);
+    formLayout->addLayout(noteForm);
+    formLayout->addLayout(middle, 1);
+    formLayout->addWidget(attribute);
+    auto* formScroll = new QScrollArea(leaderTab);
+    formScroll->setObjectName("leaderFormScroll");
+    formScroll->setWidgetResizable(true);
+    formScroll->setWidget(formBody);
     auto* leaderRight = new QVBoxLayout;
-    leaderRight->addLayout(noteForm);
-    leaderRight->addLayout(middle, 1);
-    leaderRight->addWidget(attribute);
+    leaderRight->addWidget(formScroll, 1);
     leaderRight->addLayout(leaderButtons);
     auto* listColumn = new QVBoxLayout;
     listColumn->addWidget(listScopeToggle_, 0, Qt::AlignLeft);
@@ -953,6 +1014,14 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document,
     for (QComboBox* box : {arrow_, callout_, textStyle_}) {
         connect(box, &QComboBox::currentIndexChanged, this, [this] { updatePreview(); });
     }
+    connect(landingAngle_, &QComboBox::currentTextChanged, this, [this] { updatePreview(); });
+    connect(positionPoint_, &QComboBox::currentIndexChanged, this, [this] {
+        showPosition();
+        updatePreview();
+    });
+    for (QLineEdit* coordinate : {positionX_, positionY_}) {
+        connect(coordinate, &QLineEdit::textChanged, this, [this] { updatePreview(); });
+    }
     for (QDoubleSpinBox* box : {along_, paperHeight_, arrowSize_, landing_}) {
         connect(box, &QDoubleSpinBox::valueChanged, this, [this] { updatePreview(); });
     }
@@ -1184,6 +1253,10 @@ bool LeaderManagerDialog::showLeader(EntityId id)
     if (shape == nullptr) {
         return false;
     }
+    if (shown_ != id) {
+        const QSignalBlocker blocker(positionPoint_);
+        positionPoint_->setCurrentIndex(-1);
+    }
     shown_ = id;
     {
         const QSignalBlocker blocker(list_);
@@ -1206,7 +1279,8 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
     lender_.forget();
     for (QWidget* field : std::initializer_list<QWidget*>{
              noteKind_, preset_, note_, values_, arrow_, callout_, textStyle_, paperHeight_,
-             arrowSize_, landing_, attributeName_, attributeValue_, attributeType_}) {
+             arrowSize_, landing_, landingAngle_, positionPoint_, attributeName_, attributeValue_,
+             attributeType_}) {
         field->setEnabled(any);
     }
     const ann::LeaderNote note = ann::noteOf(shape);
@@ -1219,7 +1293,8 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
                                            QSignalBlocker(labelStyle_),  QSignalBlocker(arrow_),
                                            QSignalBlocker(callout_),     QSignalBlocker(textStyle_),
                                            QSignalBlocker(paperHeight_), QSignalBlocker(arrowSize_),
-                                           QSignalBlocker(landing_),     QSignalBlocker(along_)};
+                                           QSignalBlocker(landing_),     QSignalBlocker(along_),
+                                           QSignalBlocker(landingAngle_), QSignalBlocker(positionPoint_)};
         noteKind_->setCurrentIndex(noteKind_->findData(static_cast<int>(note.kind)));
         if (note.kind == Kind::LabelStyle) {
             labelStyle_->setCurrentIndex(
@@ -1234,6 +1309,19 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
         paperHeight_->setValue(shape.paperHeight);
         arrowSize_->setValue(shape.arrowSize);
         landing_->setValue(shape.landing);
+        landingAngle_->setCurrentText(shape.landingAngle
+            ? QString::fromStdString(katana::core::formatExactReal(
+                  *shape.landingAngle * katana::math::kRadToDeg))
+            : QStringLiteral("Auto"));
+        const int chosenPoint = positionPoint_->currentIndex();
+        positionPoint_->clear();
+        for (std::size_t i = 0; i < shape.vertices.size(); ++i) {
+            positionPoint_->addItem(i == 0 ? QStringLiteral("Arrow tip")
+                : i + 1 == shape.vertices.size() ? QStringLiteral("Note end")
+                                                 : QString("Bend %1").arg(i));
+        }
+        positionPoint_->setCurrentIndex(chosenPoint >= 0 && chosenPoint < positionPoint_->count()
+                                           ? chosenPoint : positionPoint_->count() - 1);
         const bool along = shape.tipRef.point == katana::entity::AnchorPoint::Along;
         along_->setValue(along ? shape.tipRef.parameter * 100.0 : 0.0);
     }
@@ -1255,6 +1343,7 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
                          QStringLiteral(", ") + placeText(shape.tipRef, polyline));
     }
     updateNoteKind();
+    showPosition();
     loaded_ = readForm();
     showValues();
     updatePreview();
@@ -1273,7 +1362,29 @@ LeaderManagerDialog::FormValues LeaderManagerDialog::readForm() const
     values.arrowSize = arrowSize_->value();
     values.landing = landing_->value();
     values.along = along_->value();
+    values.landingAngle = landingAngle_->currentText();
     return values;
+}
+
+void LeaderManagerDialog::showPosition()
+{
+    const LeaderGeometry* current = leader();
+    const int index = positionPoint_->currentIndex();
+    const bool present = current != nullptr && index >= 0 &&
+                         static_cast<std::size_t>(index) < current->vertices.size();
+    const bool attached = present && index == 0 && current->tipRef.associated();
+    const QSignalBlocker quietX(positionX_);
+    const QSignalBlocker quietY(positionY_);
+    positionX_->setEnabled(present && !attached);
+    positionY_->setEnabled(present && !attached);
+    positionX_->setText(present ? QString::fromStdString(katana::core::formatExactReal(
+                                     current->vertices[static_cast<std::size_t>(index)].x)) : QString());
+    positionY_->setText(present ? QString::fromStdString(katana::core::formatExactReal(
+                                     current->vertices[static_cast<std::size_t>(index)].y)) : QString());
+    positionHint_->setText(attached
+        ? "The tip is attached. Use Along, Attach or Detach to change its position."
+        : "Coordinates are in model units. Select one leader to move a point, then Apply. "
+          "You can also drag its point grips in the plan view.");
 }
 
 void LeaderManagerDialog::showValues()
@@ -1394,7 +1505,7 @@ void LeaderManagerDialog::updateForNoteKind()
     forNote_->setEnabled(!styled);
 }
 
-ann::LeaderChange LeaderManagerDialog::formChange() const
+Result<ann::LeaderChange> LeaderManagerDialog::formChange() const
 {
     ann::LeaderChange change;
     const LeaderGeometry* current = leader();
@@ -1449,6 +1560,28 @@ ann::LeaderChange LeaderManagerDialog::formChange() const
     if (now.landing != was.landing) {
         change.landing = now.landing;
     }
+    if (now.landingAngle != was.landingAngle) {
+        const auto angle = ann::parseLeaderLandingAngle(now.landingAngle.trimmed().toStdString());
+        if (!angle) {
+            return angle.error();
+        }
+        change.landingAngle.emplace(*angle);
+    }
+    const int pointIndex = positionPoint_->currentIndex();
+    if (pointIndex < 0 || static_cast<std::size_t>(pointIndex) >= current->vertices.size()) {
+        return makeError(ErrorCode::InvalidArgument, "choose a leader point to edit");
+    }
+    const auto east = katana::core::parseFiniteDouble(positionX_->text().trimmed().toStdString());
+    const auto north = katana::core::parseFiniteDouble(positionY_->text().trimmed().toStdString());
+    if (!east || !north) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "leader point easting and northing must be finite numbers");
+    }
+    const auto index = static_cast<std::size_t>(pointIndex);
+    const katana::geometry::Point2 editedPoint(*east, *north);
+    if (editedPoint != current->vertices[index]) {
+        change.vertex = ann::LeaderVertexMove{index, editedPoint};
+    }
     if (now.along != was.along && current->tipRef.point == katana::entity::AnchorPoint::Along) {
         katana::entity::AnchorRef ref = current->tipRef;
         ref.parameter = std::clamp(now.along / 100.0, 0.0, 1.0);
@@ -1483,8 +1616,10 @@ void LeaderManagerDialog::updatePreview()
     }
     LeaderGeometry would = *current;
     const katana::entity::LeaderContext context = readContext();
-    const Status status =
-        ann::applyLeaderChange(document_.model(), formChange(), would, shown_, context);
+    const auto change = formChange();
+    const Status status = change
+        ? ann::applyLeaderChange(document_.model(), *change, would, shown_, context)
+        : Status(change.error());
     if (!status) {
         check_->setStyleSheet(QStringLiteral("color: #d9534f"));
         check_->setText(describe(status));
@@ -1503,7 +1638,8 @@ void LeaderManagerDialog::updatePreview()
 void LeaderManagerDialog::updateButtons()
 {
     const bool any = shown_ != 0;
-    const bool dirty = !formChange().empty();
+    const auto change = formChange();
+    const bool dirty = !change || !change->empty();
     const auto ids = targets();
     bool anySmart = false;
     bool anyAttached = false;
@@ -1711,8 +1847,12 @@ bool LeaderManagerDialog::apply()
         return false;
     }
     const auto ids = targets();
-    const ann::LeaderChange change = formChange();
-    if (change.tip && ids.size() > 1) {
+    const auto change = formChange();
+    if (!change) {
+        report(change.error());
+        return false;
+    }
+    if (change->tip && ids.size() > 1) {
         // Along is where THIS leader's tip is on THIS leader's entity: sent
         // to the others too, it would move every tip onto that one place.
         report(makeError(ErrorCode::InvalidArgument,
@@ -1723,7 +1863,13 @@ bool LeaderManagerDialog::apply()
         return false;
     }
     // LEADER SET with only what changed; an untouched form is no line.
-    return submit(leaderSetLine(ids, change));
+    if (!submit(leaderSetLine(ids, *change))) {
+        return false;
+    }
+    // The watcher coalesces notifications: an immediate undo must compare
+    // against the applied form, not mistake it for edits never submitted.
+    (void)showLeader(shown_);
+    return true;
 }
 
 bool LeaderManagerDialog::freeze()
@@ -1732,7 +1878,8 @@ bool LeaderManagerDialog::freeze()
         report(makeError(ErrorCode::InvalidState, "no leader is shown"));
         return false;
     }
-    if (!formChange().empty()) {
+    const auto change = formChange();
+    if (!change || !change->empty()) {
         // Freezing keeps what the leader says now - not the form's unapplied
         // note, which a re-read form would then throw away.
         report(makeError(ErrorCode::InvalidState,
@@ -1749,7 +1896,8 @@ bool LeaderManagerDialog::detach()
         report(makeError(ErrorCode::InvalidState, "no leader is shown"));
         return false;
     }
-    if (!formChange().empty()) {
+    const auto change = formChange();
+    if (!change || !change->empty()) {
         report(makeError(ErrorCode::InvalidState,
                          "the form has changes not applied: Apply them first, or show the leader "
                          "again"));
@@ -1765,7 +1913,8 @@ bool LeaderManagerDialog::attachToSelected()
         report(makeError(ErrorCode::InvalidState, "no leader is shown"));
         return false;
     }
-    if (!formChange().empty()) {
+    const auto change = formChange();
+    if (!change || !change->empty()) {
         report(makeError(ErrorCode::InvalidState,
                          "the form has changes not applied: Apply them first, or show the leader "
                          "again"));

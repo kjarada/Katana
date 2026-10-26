@@ -128,6 +128,39 @@ TEST(PlanViewGrips, DraggingAVertexGripMovesItAsOneUndoStep)
     EXPECT_EQ(f.geometry().vertices[1], Point2(10, 0));
 }
 
+TEST(PlanViewGrips, ALeaderNoteAndBendCanBeDraggedWithoutMovingItsTipOrLosingItsFrame)
+{
+    Fixture f;
+    katana::entity::Entity entity;
+    entity.geometry = katana::entity::LeaderGeometry{
+        .vertices = {{0, 0}, {10, 0}, {20, 0}}, .text = "Note",
+        .callout = katana::entity::CalloutShape::Box};
+    ASSERT_TRUE(f.document.execute(katana::commands::createEntities({entity})).ok());
+    const auto id = f.document.lastCreatedEntities().front();
+    f.document.selection().set({id});
+    f.document.notifySelectionChanged();
+    paint(*f.view);
+    const auto before = f.document.history().undoCount();
+    f.drag(Point2(20, 0), Point2(20, 6));
+    const auto& moved = std::get<katana::entity::LeaderGeometry>(
+        f.document.model().entities.find(id)->geometry);
+    EXPECT_EQ(moved.vertices.back(), Point2(20, 6));
+    EXPECT_EQ(moved.vertices.front(), Point2(0, 0));
+    EXPECT_EQ(moved.callout, katana::entity::CalloutShape::Box);
+    EXPECT_EQ(f.document.history().undoCount(), before + 1);
+    ASSERT_TRUE(f.document.undo().ok());
+    paint(*f.view);
+    f.drag(Point2(10, 0), Point2(10, 4));
+    EXPECT_EQ(std::get<katana::entity::LeaderGeometry>(
+                  f.document.model().entities.find(id)->geometry).vertices[1], Point2(10, 4));
+    paint(*f.view);
+    f.mouse(QEvent::MouseButtonPress, Point2(10, 4), Qt::LeftButton, Qt::ShiftModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(10, 4), Qt::LeftButton, Qt::ShiftModifier);
+    f.key(Qt::Key_Delete);
+    EXPECT_NE(f.document.model().entities.find(id), nullptr)
+        << "Delete on a leader point must not fall through to erasing the entire leader";
+}
+
 TEST(PlanViewGrips, AClickPicksAGripUpAndTheNextClickPutsItDown)
 {
     Fixture f;

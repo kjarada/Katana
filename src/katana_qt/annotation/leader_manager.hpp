@@ -28,7 +28,8 @@
 //                  alignment it reads; the values the entity its tip is on
 //                  offers, the drawing's surfaces' and alignments' among them,
 //                  a double-click putting {name} into the note; its arrow,
-//                  callout, text style and sizes; an attribute of that
+//                  callout, text style, sizes and landing direction; the exact
+//                  coordinates of its tip, bends and note end; an attribute of that
 //                  entity set through it; the tip attached to a selected
 //                  entity; Freeze, Detach and Apply. With several leaders
 //                  selected, Apply, Freeze and Detach change them all.
@@ -121,7 +122,8 @@ struct DocumentChanges;
 
 // The options of LEADER SET and LEADER FOR that make `change`, one leading
 // blank each, in the order text=|template=|labelstyle=, arrow=, callout=,
-// style=, paper=, arrowsize=, landing=, tip=: only what the change sets, the
+// style=, paper=, arrowsize=, landing=, landingangle=, tip=, vertex= and at=:
+// only what the change sets, the
 // numbers exact. Empty for a change that sets nothing.
 [[nodiscard]] katana::core::Result<std::string>
 leaderOptionWords(const katana::cad::annotation::LeaderChange& change);
@@ -170,8 +172,8 @@ class LeaderManagerDialog final : public QDialog {
     // the shown leader is one of several selected, else the shown one.
     [[nodiscard]] std::vector<katana::entity::EntityId> targets() const;
     // What the user changed in the form: what Apply sends. Empty for an
-    // untouched form.
-    [[nodiscard]] katana::cad::annotation::LeaderChange formChange() const;
+    // untouched form; an error for invalid coordinates or landing direction.
+    [[nodiscard]] katana::core::Result<katana::cad::annotation::LeaderChange> formChange() const;
     // What the note would say with the form as it is, or why it cannot be.
     [[nodiscard]] QString preview() const;
     // What the last refused action said; empty after one that worked.
@@ -236,6 +238,7 @@ class LeaderManagerDialog final : public QDialog {
         double arrowSize = 0.0;
         double landing = 0.0;
         double along = 0.0;
+        QString landingAngle;
     };
     // A label style's look lent to a text style box and a height box, as
     // labelstyle= lends a leader it: what each showed before, and what the
@@ -273,6 +276,7 @@ class LeaderManagerDialog final : public QDialog {
     void fillList();
     void fillStyles();
     void showForm(const katana::entity::LeaderGeometry& leader);
+    void showPosition();
     void showValues();
     void updatePreview();
     void updateButtons();
@@ -339,6 +343,11 @@ class LeaderManagerDialog final : public QDialog {
     QDoubleSpinBox* paperHeight_ = nullptr;
     QDoubleSpinBox* arrowSize_ = nullptr;
     QDoubleSpinBox* landing_ = nullptr;
+    QComboBox* landingAngle_ = nullptr;
+    QComboBox* positionPoint_ = nullptr;
+    QLineEdit* positionX_ = nullptr;
+    QLineEdit* positionY_ = nullptr;
+    QLabel* positionHint_ = nullptr;
     QLineEdit* attributeName_ = nullptr;
     QLineEdit* attributeValue_ = nullptr;
     QComboBox* attributeType_ = nullptr;

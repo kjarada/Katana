@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "katana/cad/drawing/vertex_editing.hpp"
+#include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/entity/entity_geometry.hpp"
@@ -54,6 +55,8 @@ const char* toString(GripKind kind)
         return "fit point";
     case GripKind::ControlPoint:
         return "control point";
+    case GripKind::LeaderVertex:
+        return "leader point";
     }
     return "grip";
 }
@@ -121,8 +124,12 @@ std::vector<Grip> gripsOf(const Entity& entity)
                         add(GripKind::ControlPoint, i, shape.controlPoints[i]);
                     }
                 }
+            } else if constexpr (std::is_same_v<Shape, katana::entity::LeaderGeometry>) {
+                for (std::size_t i = shape.tipRef.associated() ? 1 : 0; i < shape.vertices.size(); ++i) {
+                    add(GripKind::LeaderVertex, i, shape.vertices[i]);
+                }
             } else {
-                // Dimensions, labels and leaders are the annotation system's
+                // Dimensions and labels are the annotation system's
                 // to give handles to (docs/tools.md); they offer none here.
             }
         },
@@ -386,6 +393,19 @@ Result<Entity> applyGripDrag(const Entity& entity, const GripDrag& drag)
                 katana::entity::TextGeometry moved = shape;
                 moved.position += moves.of(GripKind::Insertion);
                 return katana::entity::Geometry{moved};
+            } else if constexpr (std::is_same_v<Shape, katana::entity::LeaderGeometry>) {
+                std::vector<annotation::LeaderVertexMove> points;
+                for (const auto& [grip, delta] : moves.grips) {
+                    if (grip.kind != GripKind::LeaderVertex || grip.index >= shape.vertices.size()) {
+                        return refused("this is not a leader point grip");
+                    }
+                    points.push_back({grip.index, shape.vertices[grip.index] + delta});
+                }
+                auto moved = annotation::moveLeaderVertices(shape, points);
+                if (!moved) {
+                    return moved.error();
+                }
+                return katana::entity::Geometry{std::move(*moved)};
             } else if constexpr (std::is_same_v<Shape, Ellipse2>) {
                 return dragEllipse(shape, moves);
             } else if constexpr (std::is_same_v<Shape, Spline2>) {

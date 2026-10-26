@@ -365,9 +365,17 @@ started with the grip, and what is offered disabled
 **Double click to edit.** A double click on an entity with no tool running
 (`ViewportWidget::onEntityDoubleClicked`, after its first click selected it)
 makes it the whole selection and opens what edits it: Edit Text for a text
-and Edit Label for a label where the window has those actions, and the
+and Edit Label for a label, or the Leaders manager for a leader, where the
+window has those actions, and the
 Properties panel for anything else (`MainWindow::editDoubleClicked`). On empty
 space it does nothing; while a tool runs it is two clicks for the tool.
+
+With leaders selected, the shortcut menu also offers **Edit Leader...** and
+**Leader Note Frame > None / Box / Circle**. The latter runs
+`LEADER SET SELECTION callout=...`, so it takes only the leaders among the
+selection and is one undo step. The existing manager now exposes exact
+point coordinates and landing direction beside its note and appearance
+controls (`docs/annotation.md`, "Moving and framing existing leaders").
 
 **Select by ID** (Edit > Select by ID..., `editSelectById`;
 `src/katana_qt/select_by_id_dialog.hpp`) turns the ids that `LIST`, `INFO`,

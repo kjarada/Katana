@@ -160,6 +160,11 @@ struct LeaderReport {
     std::string text{};
     std::vector<std::string> lines{};
     std::optional<double> landingAngle{};
+    std::vector<katana::geometry::Point2> points{};
+    std::string textStyle{};
+    double paperHeight = 0.0;
+    double arrowSize = 0.0;
+    double landing = 0.0;
 };
 
 // The scope the leaders were chosen by: its record (cad::scopeRecord, as the

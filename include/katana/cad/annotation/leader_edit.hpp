@@ -48,6 +48,19 @@ struct LeaderNote {
 // The note `leader` has now.
 [[nodiscard]] LeaderNote noteOf(const katana::entity::LeaderGeometry& leader);
 
+struct LeaderVertexMove {
+    std::size_t index = 0;
+    katana::geometry::Point2 position;
+};
+
+// The point editor and grips share this operation. An attached tip must be
+// reattached or detached explicitly, never silently freed by a drag.
+[[nodiscard]] katana::core::Result<katana::entity::LeaderGeometry>
+moveLeaderVertices(const katana::entity::LeaderGeometry& leader,
+                   const std::vector<LeaderVertexMove>& moves);
+[[nodiscard]] katana::core::Result<std::optional<double>>
+parseLeaderLandingAngle(std::string_view degrees);
+
 // A change to leaders: each member that is set is applied, each unset one
 // left as it is.
 struct LeaderChange {
@@ -64,11 +77,14 @@ struct LeaderChange {
     std::optional<AnchoredPoint> tip{};
     // Moves the last vertex: where the note hangs.
     std::optional<katana::geometry::Point2> hang{};
+    std::optional<LeaderVertexMove> vertex{};
+    // An edit whose inner value is absent restores automatic direction.
+    std::optional<std::optional<double>> landingAngle{};
 
     [[nodiscard]] bool empty() const
     {
         return !note && !arrow && !callout && !textStyle && !paperHeight && !arrowSize &&
-               !landing && !tip && !hang;
+               !landing && !tip && !hang && !vertex && !landingAngle;
     }
 };
 
@@ -111,7 +127,7 @@ newLeader(const katana::entity::Model& model, const std::vector<AnchoredPoint>& 
           const katana::entity::LeaderContext& context = {});
 
 // ONE command changing each of `ids` by `change` ("SET_LEADER"); nullptr
-// when nothing would change. `hang` is refused for more than one leader,
+// when nothing would change. `hang` and `vertex` are refused for more than one leader,
 // since it would put every note on one place.
 [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
 changeLeaders(const katana::entity::Model& model, std::vector<katana::entity::EntityId> ids,
