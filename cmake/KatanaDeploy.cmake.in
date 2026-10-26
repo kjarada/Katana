@@ -9,12 +9,14 @@
 #   by `cmake --install` (install(SCRIPT), and so by the `bundle` target and
 #   CPack) - into the install prefix, a fresh tree, every time;
 #
-#   by the build itself (the katana_runtime target, KatanaPackaging.cmake),
+#   by each program after linking, and by the katana_runtime target,
 #   with -DKATANA_DEPLOY_PREFIX=<build dir> - so that <build>/bin/katana.exe
 #   runs on its own, with no MSYS2 on PATH. That run is INCREMENTAL: a full
 #   deploy of the Release tree took 36 s on an idle machine and 62-85 s beside
 #   another build (measured 2026-09-23; the dependency scan is most of it),
 #   which no build can pay every time. The check that skips it took 0-1 s.
+
+cmake_minimum_required(VERSION 3.24)
 
 # CMake 4.1 made file(GET_RUNTIME_DEPENDENCIES) normalise paths before matching
 # them (CMP0207). NEW is what the exclusion regexes below are written for -
@@ -25,15 +27,52 @@ if(POLICY CMP0207)
 endif()
 
 if(DEFINED KATANA_DEPLOY_PREFIX)
-    set(_prefix "${KATANA_DEPLOY_PREFIX}")
+    get_filename_component(_prefix "${KATANA_DEPLOY_PREFIX}" ABSOLUTE)
     set(_build_tree TRUE)
 else()
     set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
     set(_build_tree FALSE)
 endif()
 set(_bin "${_prefix}/bin")
+if(DEFINED KATANA_DEPLOY_BIN)
+    get_filename_component(_bin "${KATANA_DEPLOY_BIN}" ABSOLUTE)
+endif()
 set(_toolchain_bin "@KATANA_RUNTIME_BIN@")
 set(_qt_plugins "@KATANA_QT_PLUGIN_DIR@")
+
+# A POST_BUILD invocation reads only its just-linked executable: another
+# program may still be linking. The lock also protects the shared DLLs and stamp.
+if(_build_tree)
+    file(MAKE_DIRECTORY "${_prefix}/CMakeFiles")
+    file(LOCK "${_prefix}/CMakeFiles/katana_runtime.lock"
+         GUARD PROCESS TIMEOUT 300 RESULT_VARIABLE _lock_result)
+    if(NOT "${_lock_result}" STREQUAL "0")
+        message(FATAL_ERROR "Katana runtime: could not lock ${_bin}: ${_lock_result}")
+    endif()
+endif()
+set(_executables "")
+if(DEFINED KATANA_DEPLOY_EXECUTABLE)
+    list(APPEND _executables "${KATANA_DEPLOY_EXECUTABLE}")
+else()
+    foreach(_program IN ITEMS @_katana_bundle_targets@)
+        list(APPEND _executables "${_bin}/${_program}.exe")
+    endforeach()
+endif()
+if(NOT _executables)
+    message(FATAL_ERROR "Katana deploy: no programs were configured for deployment")
+endif()
+set(_program_names "")
+set(_program_records "")
+foreach(_executable IN LISTS _executables)
+    if(NOT EXISTS "${_executable}")
+        message(FATAL_ERROR "Katana deploy: ${_executable} does not exist; build the program before deploying it")
+    endif()
+    get_filename_component(_name "${_executable}" NAME)
+    list(APPEND _program_names "${_name}")
+    file(TIMESTAMP "${_executable}" _time "%s.%f" UTC)
+    file(SIZE "${_executable}" _size)
+    list(APPEND _program_records "program=${_name}|${_time}|${_size}")
+endforeach()
 
 # DLLs under bin/ that the deploy owns. The build tree's bin/ also holds the
 # test and benchmark programs in subdirectories; they are run with the
@@ -61,14 +100,15 @@ function(_katana_source_of relative out)
 endfunction()
 
 # --- 0. The build tree: is the last deploy still right? ------------------------------
-# It is when three things hold, and checking them is ~200 file stats:
+# It is when the inputs, the programs and the deployed files are unchanged:
 #
 #  - the key is unchanged. It is a hash of every module's link libraries,
 #    computed at configure time (KatanaPackaging.cmake): which third-party
-#    DLLs are needed changes only when a link line does, and a link line
-#    changes only through CMake. The programs' own import tables would be the
-#    direct answer, but reading them costs 2.6 s for the 143 MB Debug
-#    katana.exe alone - on every build.
+#    DLLs are needed can change when a link line does.
+#  - each requested program has been scanned since it was linked. A target
+#    built later must not trust the earlier target's smaller dependency set;
+#    new code can also use a previously unused import library without a
+#    change to the link line.
 #  - every DLL that deploy recorded is still there.
 #  - every one of them is the toolchain's CURRENT copy. MSYS2 is a rolling
 #    toolchain (GCC moved 15.2 -> 16.2 on 2026-09-21): an update replaces
@@ -80,19 +120,46 @@ endfunction()
 # Anything else is a full deploy, which re-copies what changed (file(COPY)
 # skips a file whose timestamp already matches) and rescans for what is new.
 set(_stamp "${_prefix}/CMakeFiles/katana_runtime.stamp")
-set(_key "@KATANA_DEPLOY_KEY@")
-if(_build_tree AND EXISTS "${_stamp}" AND IS_DIRECTORY "${_prefix}/share/proj"
-   AND IS_DIRECTORY "${_prefix}/share/gdal" AND EXISTS "${_prefix}/etc/ssl/certs/ca-bundle.crt")
+set(_key "@KATANA_DEPLOY_KEY@|${_bin}")
+set(_previous_programs "")
+if(_build_tree AND EXISTS "${_stamp}")
     file(STRINGS "${_stamp}" _recorded)
-    list(POP_FRONT _recorded _recorded_key)
+    set(_recorded_key "")
+    if(_recorded)
+        list(POP_FRONT _recorded _recorded_key)
+    endif()
     set(_current TRUE)
     if(NOT _recorded_key STREQUAL _key)
         set(_current FALSE)
         set(_reason "the link libraries or the deploy script changed")
+    else()
+        foreach(_record IN LISTS _recorded)
+            if(_record MATCHES "^program=([^|]+)[|]")
+                set(_name "${CMAKE_MATCH_1}")
+                if(NOT _name IN_LIST _program_names AND EXISTS "${_bin}/${_name}")
+                    list(APPEND _previous_programs "${_record}")
+                endif()
+            endif()
+        endforeach()
     endif()
+    if(_current AND (NOT IS_DIRECTORY "${_prefix}/share/proj"
+       OR NOT IS_DIRECTORY "${_prefix}/share/gdal"
+       OR NOT EXISTS "${_prefix}/etc/ssl/certs/ca-bundle.crt"))
+        set(_current FALSE)
+        set(_reason "runtime data is missing")
+    endif()
+    foreach(_record IN LISTS _program_records)
+        if(_current AND NOT _record IN_LIST _recorded)
+            set(_current FALSE)
+            set(_reason "a program was linked or has not been deployed yet")
+        endif()
+    endforeach()
     foreach(_relative IN LISTS _recorded)
         if(NOT _current)
             break()
+        endif()
+        if(_relative MATCHES "^program=")
+            continue()
         endif()
         if(NOT EXISTS "${_bin}/${_relative}")
             set(_current FALSE)
@@ -114,6 +181,9 @@ if(_build_tree AND EXISTS "${_stamp}" AND IS_DIRECTORY "${_prefix}/share/proj"
     endif()
     message(STATUS "Katana runtime: ${_reason}; redeploying into ${_bin}")
 endif()
+if(_build_tree)
+    file(REMOVE "${_stamp}")
+endif()
 
 # A full build-tree deploy first brings every DLL already there up to date with
 # the toolchain. The scan below cannot do it: it resolves a dependency BESIDE
@@ -134,14 +204,16 @@ endif()
 # not link qwindows.dll - Qt loads it at start-up by name - so an objdump of
 # the executable never mentions it, and without it the application dies with
 # "no Qt platform plugin could be initialized".
-if(EXISTS "${_bin}/katana.exe" AND NOT "@KATANA_WINDEPLOYQT@" STREQUAL ""
-   AND NOT "@KATANA_WINDEPLOYQT@" MATCHES "NOTFOUND")
+if("katana.exe" IN_LIST _program_names)
+    if(NOT EXISTS "@KATANA_WINDEPLOYQT@")
+        message(FATAL_ERROR "Katana deploy: windeployqt was not found; Qt's runtime and plugins cannot be bundled")
+    endif()
     execute_process(
         COMMAND "@KATANA_WINDEPLOYQT@"
                 --no-translations --no-system-d3d-compiler --no-opengl-sw
                 --no-compiler-runtime --dir "${_bin}" "${_bin}/katana.exe"
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
-    if(NOT _rc EQUAL 0)
+    if(NOT "${_rc}" STREQUAL "0")
         message(FATAL_ERROR "windeployqt failed (${_rc}):\n${_out}\n${_err}")
     endif()
 endif()
@@ -153,8 +225,14 @@ endif()
 # initialized" box and waits for a click that never comes. Found by this
 # bundle's own smoke test hanging for ten minutes. Copied BEFORE the scan below
 # so that its dependencies are gathered with everyone else's.
-if(EXISTS "${_bin}/katana.exe" AND EXISTS "${_qt_plugins}/platforms/qoffscreen.dll")
+if("katana.exe" IN_LIST _program_names)
+    if(NOT EXISTS "${_qt_plugins}/platforms/qoffscreen.dll")
+        message(FATAL_ERROR "Katana deploy: ${_qt_plugins}/platforms/qoffscreen.dll was not found")
+    endif()
     file(COPY "${_qt_plugins}/platforms/qoffscreen.dll" DESTINATION "${_bin}/platforms")
+    if(NOT EXISTS "${_bin}/platforms/qwindows.dll")
+        message(FATAL_ERROR "Katana deploy: windeployqt did not deploy platforms/qwindows.dll")
+    endif()
 endif()
 
 # --- 2. Everything else that is loaded --------------------------------------------
@@ -162,7 +240,6 @@ endif()
 # dependencies of its own that nothing else pulls in - qjpeg.dll needs
 # libjpeg, and only qjpeg.dll does. The programs are the top-level ones: in
 # the build tree, bin/tests and bin/benchmarks are not part of the product.
-file(GLOB _executables "${_bin}/*.exe")
 _katana_deployed_dlls(_library_names)
 set(_libraries "")
 foreach(_relative IN LISTS _library_names)
@@ -187,11 +264,17 @@ file(GET_RUNTIME_DEPENDENCIES
     RESOLVED_DEPENDENCIES_VAR _resolved
     UNRESOLVED_DEPENDENCIES_VAR _unresolved
     CONFLICTING_DEPENDENCIES_PREFIX _conflict
-    DIRECTORIES "${_toolchain_bin}"
+    DIRECTORIES "${_bin}" "${_toolchain_bin}"
     # The operating system's own DLLs are not ours to ship: the API sets by
     # name, and anything that resolves into the Windows directory.
     PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-" "^hvsifiletrust" "^pdmutilities" "^wpaxholder"
     POST_EXCLUDE_REGEXES ".*[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\].*")
+
+if(_unresolved)
+    list(JOIN _unresolved "\n  " _text)
+    message(FATAL_ERROR "Katana deploy: required DLLs were NOT found and cannot be bundled:\n  ${_text}\n"
+                        "Install the matching runtime libraries in ${_toolchain_bin} and build again.")
+endif()
 
 set(_copied 0)
 foreach(_dependency IN LISTS _resolved)
@@ -203,7 +286,7 @@ foreach(_dependency IN LISTS _resolved)
 endforeach()
 # A conflicting name is one the bundle may or may not already hold. Where it
 # does not, take the toolchain's copy - the only other place it can have come
-# from, given the single DIRECTORIES entry above.
+# from, apart from the deployed directory itself.
 foreach(_name IN LISTS _conflict_FILENAMES)
     if(NOT EXISTS "${_bin}/${_name}")
         foreach(_candidate IN LISTS _conflict_${_name})
@@ -215,14 +298,6 @@ foreach(_name IN LISTS _conflict_FILENAMES)
     endif()
 endforeach()
 message(STATUS "Katana deploy: ${_copied} runtime libraries copied into ${_bin}")
-
-# An unresolved dependency is a bundle that starts here and fails elsewhere.
-# Say so now, by name, rather than let it be found on a customer's machine
-# (PLAN.MD section 36).
-if(_unresolved)
-    list(JOIN _unresolved "\n  " _text)
-    message(WARNING "Katana deploy: these dependencies were NOT found and are not bundled:\n  ${_text}")
-endif()
 
 # --- 3. Data that GDAL and PROJ read at run time ------------------------------------
 # proj.db is a DATA file, so no dependency scan finds it, and without it every
@@ -268,6 +343,7 @@ endif()
 # build tries again rather than trusting a half-made bin/.
 if(_build_tree)
     _katana_deployed_dlls(_now)
+    list(APPEND _now ${_previous_programs} ${_program_records})
     list(JOIN _now "\n" _lines)
     file(WRITE "${_stamp}" "${_key}\n${_lines}\n")
 endif()

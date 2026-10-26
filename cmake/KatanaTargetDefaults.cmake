@@ -45,6 +45,20 @@ function(katana_target_defaults target)
     katana_apply_static_analysis(${target})
 endfunction()
 
+# ALL is not built when an IDE or --target names just one executable.
+function(katana_deploy_runtime target)
+    if(WIN32 AND KATANA_DEPLOY_RUNTIME)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DKATANA_DEPLOY_PREFIX=$<TARGET_FILE_DIR:${target}>/.."
+                "-DKATANA_DEPLOY_BIN=$<TARGET_FILE_DIR:${target}>"
+                "-DKATANA_DEPLOY_EXECUTABLE=$<TARGET_FILE:${target}>"
+                -P "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake"
+            COMMENT "Deploying the Windows runtime for ${target}"
+            VERBATIM)
+    endif()
+endfunction()
+
 # Registers every GoogleTest case of <target> with CTest, one test per case,
 # each starting the executable directly:
 #

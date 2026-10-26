@@ -44,11 +44,13 @@ endif()
 # Headless command-line front end. Proves the engine is complete without a GUI.
 add_executable(katana_cli main.cpp)
 katana_target_defaults(katana_cli)
+katana_deploy_runtime(katana_cli)
 target_link_libraries(katana_cli PRIVATE katana_app)
 
 # The same session served to Claude over the Model Context Protocol (docs/mcp.md).
 add_executable(katana_mcp mcp_main.cpp)
 katana_target_defaults(katana_mcp)
+katana_deploy_runtime(katana_mcp)
 target_link_libraries(katana_mcp PRIVATE katana_app)
 target_compile_definitions(katana_mcp PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
 

@@ -69,6 +69,21 @@ add_test(NAME packaging_installs_only_present_first_party_files
 # licence points to (tests/packaging_licence.cmake, tools/check_installer_licence.cmake).
 include(${CMAKE_CURRENT_LIST_DIR}/packaging_licence.cmake)
 
+if(WIN32 AND NOT MSVC)
+    function(katana_runtime_deployment_test name case)
+        add_test(NAME runtime_deployment_${name}
+            COMMAND ${CMAKE_COMMAND} "-DKATANA_ROOT=${PROJECT_SOURCE_DIR}"
+                "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/windows runtime/${case}"
+                "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DGENERATOR=${CMAKE_GENERATOR}"
+                "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DCASE=${case}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_runtime_deployment.cmake")
+        set_tests_properties(runtime_deployment_${name} PROPERTIES TIMEOUT 240)
+    endfunction()
+    katana_runtime_deployment_test(individual_targets_deploy_transitive_dlls individual_targets)
+    katana_runtime_deployment_test(missing_dlls_fail_without_a_success_stamp missing_dll)
+    katana_runtime_deployment_test(missing_qt_tools_fail_without_a_success_stamp missing_qt)
+endif()
+
 # The cache entry KATANA_BUILTIN_CUSTOMISATION, which keeps what an earlier
 # configure gave it: a build directory made when NSW was the default would offer
 # Katana Standard nowhere, and the suite would stay green while testing none of

@@ -678,13 +678,20 @@ build:
 
 ## Bundling
 
-`cmake --build <build> --target bundle` installs into `<build>/dist/Katana`;
+`cmake --build <build> --parallel --target bundle` installs into `<build>/dist/Katana`;
 `--target package` makes `Katana-<version>-win64.zip` (and an NSIS installer
 when `makensis` is on the machine), on Linux a `.tar.gz`, and on macOS a
 `.dmg` holding `Katana.app`. The
 result runs with no MSYS2, Qt, GDAL or toolchain prefix installed. It holds
 `katana`, `katana_cli`, `katana_mcp` and, except on macOS, the update helper
 `katana_updater` ("The update layer").
+
+On Windows, copy **the whole `dist/Katana` directory**, then start
+`Katana/bin/katana.exe`. Copying only the executable is not a portable
+installation: its DLLs and Qt plugins are beside it, and the geospatial data
+and certificates are in the neighbouring `share` and `etc` directories.
+The bundle target builds all four programs first, including `katana_mcp`;
+it does not rely on a previous build of `ALL`.
 
 On Linux and macOS `cmake/KatanaDeployUnix.cmake.in` does the copying, when
 the build uses a toolchain prefix: the prefix's libraries into `lib/`, Qt's
@@ -712,6 +719,13 @@ failing:
   offscreen plugin Qt does not exit with an error: it opens a modal "no Qt
   platform plugin" box and waits for a click, which is how the bundle's own
   smoke test came to hang for ten minutes.
+
+An unresolved non-system DLL is now a **build or install error**, naming the
+missing file and the runtime directory searched. A warning was not enough:
+it allowed a successful-looking build whose executable could not start on
+another machine. Missing Qt deployment tools or platform plugins likewise
+fail rather than leaving a partial runtime. Windows' own DLLs and API sets
+remain the operating system's responsibility; they are not redistributed.
 
 `bin/` sits beside `share/` because that is where both data-hungry libraries
 look: PROJ finds `proj.db` at `<its DLL>/../share/proj` by itself, and
@@ -755,24 +769,32 @@ Until 2026-09-23 only the bundle was self-contained: `<build>/bin/katana.exe`
 found GDAL, PDAL, PROJ, Qt and the C++ runtime through `PATH`, so it ran only
 where MSYS2 was installed and on `PATH` - the libraries were borrowed from the
 toolchain at run time rather than being part of the program. Now the build
-deploys them itself. The `katana_runtime` target (in `ALL`, after `katana` and
-`katana_cli`) runs **the same `KatanaDeploy.cmake`** the bundle runs, with
-`-DKATANA_DEPLOY_PREFIX=<build>`, so `<build>/bin` holds every DLL the programs
-load and `<build>/share` holds `proj` and `gdal`. One script for both, so the
-bundle and the build cannot disagree about what a self-contained Katana needs.
-Switch it off with `-DKATANA_DEPLOY_RUNTIME=OFF`.
+deploys them itself. Each shipped executable runs **the same
+`KatanaDeploy.cmake`** as the bundle after linking. This includes an IDE build
+of just `katana`, or `cmake --build <build> --parallel --target katana_cli`:
+neither builds `ALL`, which was the gap in the earlier arrangement. The
+`katana_runtime` target still runs in `ALL`, after all four programs, to repair
+missing or outdated runtime files even when nothing needed linking.
+`<build>/bin` holds the DLLs and Qt plugins, and the adjacent `share` and `etc`
+directories hold the data and certificates. The actual target directory is
+used for multi-configuration generators too. One script serves all these
+paths. Switch off build-tree deployment with `-DKATANA_DEPLOY_RUNTIME=OFF`;
+installation and bundling still deploy their own runtime.
 
 A full deploy is too slow for every build - measured on the Release tree, 36 s
 on an idle machine and 62-85 s beside another build, most of it
 `file(GET_RUNTIME_DEPENDENCIES)` running objdump over ~200 DLLs - so the build
-run is incremental. It is skipped (0-1 s, measured) while three things hold:
+run is incremental. A no-op check previously measured 0-1 s. A scan is skipped
+only while the runtime data is present and these things hold:
 
 * **A key is unchanged**: an MD5, taken at configure time, of every module's
   `LINK_LIBRARIES`, the toolchain and Qt plugin locations, and the deploy
-  script's own text. Which DLLs are needed changes only when a link line does,
-  and a link line changes only through CMake. The programs' import tables
-  would be the direct answer, but `objdump -p` on the 143 MB Debug `katana.exe`
-  takes 2.6 s - on every build.
+  script's own text.
+* **Every requested executable has been scanned since linking**, recorded by
+  name, modification time and size. A CLI-only deployment cannot satisfy a
+  later first build of the desktop or MCP server. A relink is rescanned even
+  if the CMake link libraries did not change: new code can start using an
+  import library already named on the link line.
 * **Every DLL the last deploy recorded is still there.**
 * **Every one is the toolchain's current copy**, by timestamp (`file(COPY)`
   keeps the source's). MSYS2 is a rolling toolchain; an update replaces
@@ -783,6 +805,7 @@ Anything else is a full deploy, which first re-copies every DLL already in
 `bin/` from the toolchain - the scan cannot, because it resolves a dependency
 BESIDE the program first and so finds, and keeps, a stale copy - and writes its
 record last, so a deploy that fails part-way is retried rather than trusted.
+The old stamp is removed before a full deployment starts.
 Verified on the Release tree: a back-dated `libgdal-39.dll` was noticed and
 replaced with the toolchain's, a deleted `libproj-25.dll` was restored, and the
 next run took 0 s. With `PATH` reduced to `C:\Windows\System32;C:\Windows`,
@@ -790,9 +813,20 @@ next run took 0 s. With `PATH` reduced to `C:\Windows\System32;C:\Windows`,
 and GeoJSON (GDAL) and exported a DXF (GDAL's `header.dxf`, from
 `build/release/share/gdal`), and `katana.exe --screenshot` built the window.
 
-It is `katana_runtime` and not a POST_BUILD step on each program because
-`katana` and `katana_cli` link in parallel under Ninja, and two deploys writing
-one `bin/` at once would race.
+Post-link deployments take a process-scoped file lock on the destination
+before inspecting or copying anything. They scan only their own completed
+executable, not another program that Ninja may still be linking. This
+replaces the earlier choice to deploy only through an `ALL` target: that
+avoided concurrent copies, but missed individual-target builds.
+
+The `runtime_deployment_*` tests build small DLL chains in a path containing
+spaces, build the CLI and MCP targets separately and together, relink with a
+newly used import, restore a deleted transitive DLL, and require missing DLLs
+and Qt tools to fail without a success stamp.
+`runtime_programs_start_without_the_toolchain_on_path`
+starts the real CLI and MCP server and takes a desktop screenshot with only
+Windows on `PATH` and no inherited Qt, GDAL or PROJ search paths. These checks
+cannot pass by borrowing the developer's installed libraries.
 
 **PDAL needs a home directory.** Run with an EMPTY environment (`env -i`),
 PDAL refused every file: "No home directory found" - it reads `USERPROFILE`

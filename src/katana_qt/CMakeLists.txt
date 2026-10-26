@@ -229,6 +229,7 @@ add_executable(katana WIN32
     ${_katana_window_terrain_ui}
 )
 katana_target_defaults(katana)
+katana_deploy_runtime(katana)
 target_link_libraries(katana PRIVATE katana_qt_ui)
 # The update workbench: the jobs and the close-and-apply flow of Help > Check for
 # Updates (update_workbench.*, docs/update.md). It needs MainWindow, so it is the

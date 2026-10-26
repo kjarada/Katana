@@ -15,6 +15,7 @@
 # them (they are the engine's API too); only main.cpp is the program.
 add_executable(katana_updater main.cpp)
 katana_target_defaults(katana_updater)
+katana_deploy_runtime(katana_updater)
 target_link_libraries(katana_updater PRIVATE katana_update katana_core)
 
 # MinGW (GCC, and clang on ARM64): -static takes libstdc++, libgcc and libwinpthread

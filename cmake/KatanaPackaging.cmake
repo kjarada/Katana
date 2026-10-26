@@ -8,9 +8,8 @@
 #   cmake --install build/release --prefix <dir>    -> the same tree, anywhere
 #
 # The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2, no
-# Qt and no GDAL installed. That is the whole point of it, and it is what the
-# build tree cannot do - build/<config>/bin/katana.exe finds its DLLs only
-# because the toolchain's bin directory is on PATH.
+# Qt and no GDAL installed. The same deployment script makes the Windows
+# build tree self-contained unless KATANA_DEPLOY_RUNTIME is switched off.
 #
 #   Katana/
 #     bin/katana.exe, katana_cli.exe,    the programs
@@ -141,23 +140,40 @@ endforeach()
 #
 # Windows only, and only for a toolchain whose DLLs live beside its compiler
 # (MSYS2 / MinGW). Linux and macOS are below.
+set(_katana_bundle_targets "")
+foreach(_target katana katana_cli katana_mcp katana_updater)
+    if(TARGET ${_target})
+        list(APPEND _katana_bundle_targets ${_target})
+    endif()
+endforeach()
+
 if(WIN32)
     find_program(KATANA_WINDEPLOYQT NAMES windeployqt6 windeployqt
         HINTS "${KATANA_RUNTIME_BIN}")
-    if(TARGET katana AND NOT KATANA_WINDEPLOYQT)
-        message(WARNING
-            "windeployqt was not found: `cmake --install` will copy katana.exe but not Qt, "
-            "and the installed application will not start on a machine without Qt.")
+    if(TARGET katana AND KATANA_DEPLOY_RUNTIME AND NOT KATANA_WINDEPLOYQT)
+        message(FATAL_ERROR
+            "windeployqt was not found. Install the matching Qt tools or set "
+            "KATANA_WINDEPLOYQT; katana.exe cannot be deployed without its Qt plugins.")
     endif()
     # Where Qt keeps its plugins, for the one windeployqt leaves behind (see
     # the offscreen note in KatanaDeploy.cmake.in). Asked of Qt itself rather
     # than guessed from the toolchain layout.
     set(KATANA_QT_PLUGIN_DIR "")
     find_program(KATANA_QTPATHS NAMES qtpaths6 qtpaths HINTS "${KATANA_RUNTIME_BIN}")
-    if(KATANA_QTPATHS)
-        execute_process(COMMAND "${KATANA_QTPATHS}" --query QT_INSTALL_PLUGINS
+    if(TARGET katana AND KATANA_QTPATHS)
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E env
+            "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "${KATANA_QTPATHS}" --query QT_INSTALL_PLUGINS
             OUTPUT_VARIABLE KATANA_QT_PLUGIN_DIR OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET)
+            RESULT_VARIABLE _qtpaths_result ERROR_VARIABLE _qtpaths_error)
+        if(NOT "${_qtpaths_result}" STREQUAL "0" OR NOT IS_DIRECTORY "${KATANA_QT_PLUGIN_DIR}")
+            message(FATAL_ERROR "qtpaths could not locate Qt's plugins (${_qtpaths_result}): "
+                                "${KATANA_QT_PLUGIN_DIR}\n${_qtpaths_error}")
+        endif()
+    elseif(TARGET katana AND KATANA_DEPLOY_RUNTIME)
+        message(FATAL_ERROR "qtpaths was not found. Install the matching Qt tools or set KATANA_QTPATHS.")
+    endif()
+    if(_katana_bundle_targets AND KATANA_DEPLOY_RUNTIME AND NOT EXISTS "${CMAKE_OBJDUMP}")
+        message(FATAL_ERROR "The Windows runtime dependency scan needs objdump; set CMAKE_OBJDUMP to the toolchain's objdump.")
     endif()
     # What decides WHICH DLLs a deploy needs, hashed: every module's link
     # libraries, the toolchain and Qt locations, and the deploy script itself.
@@ -165,7 +181,7 @@ if(WIN32)
     # unchanged - see step 0 of KatanaDeploy.cmake.in for why this is the key
     # and not the programs' import tables.
     set(_katana_deploy_inputs "${KATANA_RUNTIME_BIN}|${KATANA_QT_PLUGIN_DIR}|${KATANA_WINDEPLOYQT}")
-    foreach(_target IN LISTS KATANA_MODULES ITEMS katana katana_cli)
+    foreach(_target IN LISTS KATANA_MODULES _katana_bundle_targets ITEMS katana_qt_ui)
         if(TARGET ${_target})
             foreach(_property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
                 get_target_property(_links ${_target} ${_property})
@@ -220,9 +236,9 @@ endif()
 # per configuration or toolchain update, and a check of timestamps (well under
 # a second) on every other build.
 #
-# A target of its own that FOLLOWS katana and katana_cli, rather than a
-# POST_BUILD step on each: the two link in parallel under Ninja, and two
-# deploys writing one bin/ at once would race.
+# Each program deploys after linking, including an explicit --target build.
+# The ALL target also checks a no-op build for deleted or outdated DLLs.
+# The shared script locks its destination while checking and copying.
 #
 # Why DLLs beside the program and not static linking: MSYS2 ships PDAL and
 # PROJ as DLLs only, and libpdalcpp links the GDAL DLL itself, so a Katana
@@ -230,29 +246,23 @@ endif()
 # driver registries and two error states in one process. A static build means
 # building GDAL, PROJ, PDAL and their dependencies from source; see
 # docs/architecture.md, "Why DLLs beside the program, and not static linking".
-option(KATANA_DEPLOY_RUNTIME
-       "Copy the runtime DLLs and the GDAL/PROJ data into <build>/bin and <build>/share" ON)
-
 # `bundle` is `cmake --install` into the build tree, under a name a person can
 # find, cleared first so that a file removed from the install rules does not
 # linger in an old bundle.
-set(_katana_bundle_targets "")
-foreach(_target katana katana_cli katana_updater)
-    if(TARGET ${_target})
-        list(APPEND _katana_bundle_targets ${_target})
-    endif()
-endforeach()
 add_custom_target(bundle
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/dist/Katana"
-    COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}"
+    COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}" --config "$<CONFIG>"
             --prefix "${CMAKE_BINARY_DIR}/dist/Katana"
     DEPENDS ${_katana_bundle_targets}
     COMMENT "Bundling a self-contained Katana into ${CMAKE_BINARY_DIR}/dist/Katana"
     USES_TERMINAL)
 
 if(WIN32 AND KATANA_DEPLOY_RUNTIME AND _katana_bundle_targets)
+    list(GET _katana_bundle_targets 0 _katana_runtime_anchor)
     add_custom_target(katana_runtime ALL
-        COMMAND ${CMAKE_COMMAND} "-DKATANA_DEPLOY_PREFIX=${CMAKE_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND}
+                "-DKATANA_DEPLOY_PREFIX=$<TARGET_FILE_DIR:${_katana_runtime_anchor}>/.."
+                "-DKATANA_DEPLOY_BIN=$<TARGET_FILE_DIR:${_katana_runtime_anchor}>"
                 -P "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake"
         COMMENT "Katana runtime: GDAL, PDAL, PROJ and Qt beside the programs in ${CMAKE_BINARY_DIR}/bin"
         VERBATIM)
@@ -264,9 +274,27 @@ if(WIN32 AND KATANA_DEPLOY_RUNTIME AND _katana_bundle_targets)
         # deploy left them out, and no other test saw it: the tests load
         # libcurl from the toolchain, whose bundle is in place.
         add_test(NAME runtime_has_the_certificates_https_is_checked_against
-            COMMAND ${CMAKE_COMMAND} -E cat "${CMAKE_BINARY_DIR}/etc/ssl/certs/ca-bundle.crt")
+            COMMAND ${CMAKE_COMMAND} -E cat
+                "$<TARGET_FILE_DIR:${_katana_runtime_anchor}>/../etc/ssl/certs/ca-bundle.crt")
         set_tests_properties(runtime_has_the_certificates_https_is_checked_against PROPERTIES
             PASS_REGULAR_EXPRESSION "-----BEGIN CERTIFICATE-----")
+        set(_katana_runtime_checks "")
+        foreach(_pair "APP|katana" "CLI|katana_cli" "MCP|katana_mcp")
+            string(REPLACE "|" ";" _parts "${_pair}")
+            list(GET _parts 0 _argument)
+            list(GET _parts 1 _program)
+            if(TARGET ${_program})
+                list(APPEND _katana_runtime_checks "-D${_argument}=$<TARGET_FILE:${_program}>")
+            endif()
+        endforeach()
+        add_test(NAME runtime_programs_start_without_the_toolchain_on_path
+            COMMAND "${CMAKE_COMMAND}" "-DKATANA_ROOT=${PROJECT_SOURCE_DIR}"
+                "-DWORK=${CMAKE_BINARY_DIR}/tests/windows runtime/smoke"
+                ${_katana_runtime_checks}
+                -P "${PROJECT_SOURCE_DIR}/tests/check_windows_runtime.cmake")
+        set_tests_properties(runtime_programs_start_without_the_toolchain_on_path PROPERTIES
+            TIMEOUT 240 ENVIRONMENT_MODIFICATION
+                "KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:")
     endif()
 endif()
 

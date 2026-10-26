@@ -816,6 +816,27 @@ The toolchains, presets and options are in `docs/building.md`; in short:
 ships. The tests run with `ctest --preset <preset>`; `docs/testing.md` covers
 them.
 
+### Windows runtime and portable copy
+
+The normal Windows build copies the required DLLs, Qt plugins, geospatial
+data and certificates automatically. After building, run
+`build\release\bin\katana.exe`; no manual DLL search or toolchain `PATH` is
+needed. Building an individual program target also deploys its runtime after
+linking. An unresolved DLL or missing Qt deployment tool fails the build
+instead of leaving an executable that cannot start.
+
+For a copy to take to another Windows machine:
+
+```powershell
+cmake --preset release
+cmake --build build\release --parallel --target bundle
+```
+
+Copy the **entire `build\release\dist\Katana` folder**, not just the `.exe`,
+and run `Katana\bin\katana.exe` there. Keep its `bin`, `share` and `etc`
+folders together. `docs/building.md`, "Bundling", explains the layout and
+the clean-`PATH` tests.
+
 ## Make a release
 
 Releases are built by the **Release** workflow, which runs only when started

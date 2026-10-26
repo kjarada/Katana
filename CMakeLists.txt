@@ -35,6 +35,8 @@ option(KATANA_BUILD_TESTS "Build unit and integration tests" ON)
 option(KATANA_BUILD_BENCHMARKS "Build the benchmark executable" ON)
 option(KATANA_BUILD_QT_APP "Build the Qt 6 desktop application" ON)
 option(KATANA_BUILD_IO "Build the GDAL/PDAL interoperability module" ON)
+option(KATANA_DEPLOY_RUNTIME
+       "Copy the runtime DLLs and the GDAL/PROJ data beside the built programs" ON)
 option(KATANA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(KATANA_ENABLE_SANITIZERS "Instrument with ASan/UBSan where the toolchain supports it" OFF)
 option(KATANA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation (requires clang-tidy)" OFF)
